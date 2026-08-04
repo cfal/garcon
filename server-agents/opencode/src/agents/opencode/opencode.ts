@@ -7,6 +7,13 @@ import { isRecord } from '@garcon/common/json';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
 import { extractSessionId, extractTextParts, isOpenCodeAbortError, openCodeSessionError, streamGlobalEvents, type SSEEvent } from './sse-events.js';
+import {
+  acceptSequencedOpenCodeTurnEvent,
+  createOpenCodeTurnContext,
+  openCodeEventBelongsToTurn,
+  type OpenCodeSession,
+  type OpenCodeTurnContext,
+} from './turn-events.js';
 import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -15,7 +22,7 @@ import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type { OpenCodeConfig } from '../../config.js';
-import { normalizeThinkingMode, type PermissionMode } from '@garcon/common/chat-modes';
+import { normalizeThinkingMode } from '@garcon/common/chat-modes';
 import {
   assertOpenCodeExecutionOpen,
   markOpenCodeExecutionStarted,
@@ -136,33 +143,6 @@ export function extractPermissionRequest(event: SSEEvent): {
     },
     sessionID: props.sessionID || null,
   };
-}
-
-interface OpenCodeTurnContext {
-  eventMetadata: RuntimeEventMetadata;
-  // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
-  providerMessageId: string | null;
-  providerPromptPartId: string;
-  providerObservedEventId: string | null;
-  assistantMessageIds: Set<string>;
-  messageRoles: Map<string, string>;
-  assistantPartTypes: Map<string, string>;
-}
-
-interface OpenCodeSession {
-  status: 'running' | 'completed' | 'aborted';
-  // Set while a provider abort is in flight so the abort unwind's idle cannot claim the
-  // turn finished before the abort is acknowledged; a rejected abort replays the skip.
-  aborting?: boolean;
-  skippedIdleEventId?: string | null;
-  chatId: string;
-  model?: string;
-  permissionMode: PermissionMode;
-  directory?: string;
-  startedAt: string;
-  lastActivityAt: number;
-  lastEventId: string | null;
-  turn: OpenCodeTurnContext;
 }
 
 interface PendingTurnWaiter {
@@ -536,18 +516,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#sseListenerStarted = false;
   }
 
-  #createTurnContext(eventMetadata: RuntimeEventMetadata): OpenCodeTurnContext {
-    return {
-      eventMetadata,
-      providerMessageId: null,
-      providerPromptPartId: `prt_${crypto.randomUUID().replaceAll('-', '')}`,
-      providerObservedEventId: null,
-      assistantMessageIds: new Set(),
-      messageRoles: new Map(),
-      assistantPartTypes: new Map(),
-    };
-  }
-
   #createTurnWaiter(agentSessionId: string): PendingTurnWaiter {
     if (this.#pendingTurnWaiters.has(agentSessionId)) {
       throw new Error(`Turn already in progress for session ${agentSessionId}`);
@@ -773,75 +741,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return extractPermissionRequest(event);
   }
 
-  #acceptSequencedTurnEvent(session: OpenCodeSession, event: SSEEvent): boolean {
-    if (
-      event.type !== 'message.updated'
-      && event.type !== 'message.part.updated'
-      && event.type !== 'message.part.delta'
-      && event.type !== 'permission.asked'
-      && event.type !== 'session.status'
-      && event.type !== 'session.error'
-    ) {
-      return true;
-    }
-    if (typeof event.id !== 'string' || !event.id) {
-      this.#logger.warn('Ignoring OpenCode event without an event ID', { eventType: event.type });
-      return false;
-    }
-    if (session.lastEventId && event.id <= session.lastEventId) {
-      this.#logger.debug('Ignoring replayed or out-of-order OpenCode event', {
-        eventType: event.type,
-        eventId: event.id,
-      });
-      return false;
-    }
-    session.lastEventId = event.id;
-    return true;
-  }
-
-  #eventBelongsToTurn(session: OpenCodeSession, event: SSEEvent): boolean {
-    const turn = session.turn;
-    if (event.type === 'message.updated') {
-      const info = event.properties?.info;
-      const messageId = typeof info?.id === 'string' ? info.id : '';
-      if (info?.role === 'user') {
-        if (turn.providerMessageId && messageId === turn.providerMessageId) {
-          turn.providerObservedEventId = event.id ?? null;
-        }
-        return false;
-      }
-      if (
-        info?.role !== 'assistant'
-        || !turn.providerMessageId
-        || info.parentID !== turn.providerMessageId
-        || !messageId
-      ) {
-        return false;
-      }
-      turn.providerObservedEventId = event.id ?? null;
-      turn.assistantMessageIds.add(messageId);
-      return true;
-    }
-    if (event.type === 'message.part.updated') {
-      const part = event.properties?.part;
-      const messageId = typeof part?.messageID === 'string' ? part.messageID : '';
-      if (turn.providerMessageId === null) {
-        // OpenCode preserves caller-owned part IDs while assigning the ordered message ID.
-        // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/prompt.ts#L693-L697
-        if (!messageId || part?.id !== turn.providerPromptPartId) return false;
-        turn.providerMessageId = messageId;
-        turn.providerObservedEventId = event.id ?? null;
-        return false;
-      }
-      return Boolean(messageId) && turn.assistantMessageIds.has(messageId);
-    }
-    if (event.type === 'message.part.delta') {
-      const messageId = event.properties?.messageID;
-      return typeof messageId === 'string' && turn.assistantMessageIds.has(messageId);
-    }
-    return true;
-  }
-
   async #startGlobalSSEListener(): Promise<void> {
     if (this.#sseRetryTimer) {
       clearTimeout(this.#sseRetryTimer);
@@ -919,7 +818,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
             continue;
           }
 
-          if (!this.#acceptSequencedTurnEvent(session, event)) continue;
+          if (!acceptSequencedOpenCodeTurnEvent(session, event, this.#logger)) continue;
 
           const chatId = session.chatId;
           if (!chatId) {
@@ -998,7 +897,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
             continue;
           }
 
-          if (!this.#eventBelongsToTurn(session, event)) continue;
+          if (!openCodeEventBelongsToTurn(session, event)) continue;
           this.#dispatchOpenCodeEvent(event, session);
 
           if (event.type === 'session.status') {
@@ -1230,7 +1129,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       { clientRequestId, turnId },
       'chat-start',
     );
-    const turn = this.#createTurnContext(eventMetadata);
+    const turn = createOpenCodeTurnContext(eventMetadata);
     this.#sessions.set(agentSessionId, {
       status: 'running',
       chatId,
@@ -1325,7 +1224,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
     const session = this.#sessions.get(agentSessionId);
     const eventMetadata = openCodeEventMetadata({ clientRequestId, turnId });
-    const turn = this.#createTurnContext(eventMetadata);
+    const turn = createOpenCodeTurnContext(eventMetadata);
     const requestScope = createOpenCodeRequestScope(projectPath);
     const scope = requestScope.directory ? requestScope : { directory: session?.directory };
     const client = await this.getClient();

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { ServerWsMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   messagesOfType,
@@ -68,7 +69,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
       const transcript = await fixture.client.getMessages(chatId);
-      expect(messagesOfType(transcript.messages, 'error').length).toBeGreaterThanOrEqual(1);
+      expect(messagesOfType(transcript.messages, 'error')).toHaveLength(1);
       expect(assistantContents(transcript.messages)).toEqual([]);
       // A non-retryable 401 produced exactly one provider request.
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
@@ -86,6 +87,15 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         marker: recoveryReply,
         afterIndex: recoveryCursor,
       });
+      expectSingleFailedTerminal(
+        fixture.client.eventsSince(cursor),
+        chatId,
+        turn.turnId,
+      );
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId)).messages,
+        'error',
+      )).toHaveLength(1);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
@@ -97,6 +107,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
   test('reports an errored model stream as agent-run-failed and recovers', async () => {
     const testEnvironment = requireEnvironment();
     const recoveryReply = marker('STREAM_ERROR_RECOVERY_REPLY');
+    const requestCursor = testEnvironment.model.markRequests();
     testEnvironment.model.scriptFault({
       kind: 'stream-error-frame',
       message: marker('STREAM_ERROR_FAULT'),
@@ -120,8 +131,9 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
       const transcript = await fixture.client.getMessages(chatId);
-      expect(messagesOfType(transcript.messages, 'error').length).toBeGreaterThanOrEqual(1);
+      expect(messagesOfType(transcript.messages, 'error')).toHaveLength(1);
       expect(assistantContents(transcript.messages)).toEqual([]);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
 
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
       const recoveryCursor = fixture.client.markEvents();
@@ -136,6 +148,15 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         marker: recoveryReply,
         afterIndex: recoveryCursor,
       });
+      expectSingleFailedTerminal(
+        fixture.client.eventsSince(cursor),
+        chatId,
+        turn.turnId,
+      );
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId)).messages,
+        'error',
+      )).toHaveLength(1);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
@@ -214,6 +235,10 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expect(failedTerminal.type).toBe('agent-run-failed');
+      await fixture.client.waitForProcessing(failedChatId, false, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
 
       held.release();
       await waitForVisibleResponse({
@@ -228,8 +253,12 @@ describeOnLinux('scripted OpenCode provider failures', () => {
       expect(messagesOfType(healthyTranscript.messages, 'error')).toEqual([]);
       expect(assistantContents(healthyTranscript.messages)).toEqual([healthyReply]);
       const failedTranscript = await fixture.client.getMessages(failedChatId);
-      expect(messagesOfType(failedTranscript.messages, 'error').length)
-        .toBeGreaterThanOrEqual(1);
+      expect(messagesOfType(failedTranscript.messages, 'error')).toHaveLength(1);
+      expectSingleFailedTerminal(
+        fixture.client.eventsSince(cursor),
+        failedChatId,
+        failed.turnId,
+      );
       expectFinished((await fixture.client.waitForTurnTerminal(
         healthyChatId,
         healthy.turnId,
@@ -257,4 +286,17 @@ function withScriptedOpenCode(): IntegrationFixtureOptions {
 
 function marker(label: string): string {
   return `SCRIPTED_OPENCODE_FAILURE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
+function expectSingleFailedTerminal(
+  events: readonly ServerWsMessage[],
+  chatId: string,
+  turnId: string,
+): void {
+  const terminals = events.filter((event) =>
+    (event.type === 'agent-run-failed' || event.type === 'agent-run-finished')
+    && event.chatId === chatId
+    && event.turnId === turnId);
+  expect(terminals).toHaveLength(1);
+  expect(terminals[0]).toMatchObject({ type: 'agent-run-failed', chatId, turnId });
 }
