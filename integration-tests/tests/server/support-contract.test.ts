@@ -87,7 +87,7 @@ function anthropicStreamText(body: string): string {
 }
 
 describe('integration support contracts', () => {
-  test('exposes Node to scripted Pi without exposing sibling ambient agent binaries', async () => {
+  test('adds only the fixture Node shim to scripted Pi system paths', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-scripted-pi-path-'));
     const environment = startScriptedPiTestEnvironment();
     const directories = {
@@ -108,8 +108,15 @@ describe('integration support contracts', () => {
       const fixtureBin = join(directories.home, '.garcon-test-bin');
       const runnerNode = Bun.which('node');
       expect(runnerNode).not.toBeNull();
-      expect(pathEntries[0]).toBe(fixtureBin);
-      expect(pathEntries).not.toContain(dirname(runnerNode!));
+      expect(pathEntries).toEqual([
+        fixtureBin,
+        '/usr/local/sbin',
+        '/usr/local/bin',
+        '/usr/sbin',
+        '/usr/bin',
+        '/sbin',
+        '/bin',
+      ]);
       expect(await realpath(join(fixtureBin, 'node'))).toBe(await realpath(runnerNode!));
     } finally {
       environment.dispose();
