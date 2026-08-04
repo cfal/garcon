@@ -6,6 +6,10 @@ import type {
   StartChatCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import type { ChatListResponse } from '@garcon/common/chat-list';
+import type {
+  UpdateChatTitleRequest,
+  UpdateChatTitleResponse,
+} from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import { normalizeRemoteSettingsSnapshot } from '@garcon/common/settings';
@@ -39,7 +43,7 @@ export class GarconHttpError extends CliError {
         || errorCode === 'UNSUPPORTED_AGENT'
         || errorCode === 'EXPECTED_AGENT_MISMATCH'
         || errorCode === 'EXPLICIT_BYPASS_REQUIRED'
-        || (phase === 'catalog resolution' && status === 400)
+        || ((phase === 'catalog resolution' || phase === 'title update') && status === 400)
         ? 2
         : 3,
     );
@@ -143,8 +147,18 @@ export class GarconClient {
     this.#submissionDelay = options.submissionDelay ?? abortableDelay;
   }
 
-  async getModelCatalog(agentId: string, signal?: AbortSignal): Promise<ModelCatalogResponse> {
-    const value = await this.#request('catalog resolution', 'GET', `/api/v1/models?agent=${encodeURIComponent(agentId)}`, undefined, signal);
+  async getModelCatalog(
+    agentId?: string,
+    signal?: AbortSignal,
+  ): Promise<ModelCatalogResponse> {
+    const query = agentId === undefined ? '' : `?agent=${encodeURIComponent(agentId)}`;
+    const value = await this.#request(
+      'catalog resolution',
+      'GET',
+      `/api/v1/models${query}`,
+      undefined,
+      signal,
+    );
     const raw = record(value);
     const catalog = record(raw?.catalog);
     if (!Array.isArray(catalog?.agents) || !Array.isArray(catalog.apiProviders)) {
@@ -175,6 +189,20 @@ export class GarconClient {
 
   runChat(request: AgentRunCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
     return this.#submit('/api/v1/chats/run', 'agent-run', request, signal);
+  }
+
+  async updateChatTitle(request: UpdateChatTitleRequest, signal?: AbortSignal): Promise<void> {
+    const value = await this.#request(
+      'title update',
+      'PUT',
+      '/api/v1/app/session-name',
+      request,
+      signal,
+    );
+    const response = record(value) as Partial<UpdateChatTitleResponse> | null;
+    if (response?.success !== true) {
+      throw new CliError('title update', 'server returned an invalid title update response', 3);
+    }
   }
 
   async getTurnReceipt(chatId: string, turnId: string, signal?: AbortSignal): Promise<AgentTurnReceipt> {
@@ -262,7 +290,7 @@ export class GarconClient {
 
   async #request(
     phase: CliErrorPhase,
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     route: string,
     body: unknown,
     signal?: AbortSignal,

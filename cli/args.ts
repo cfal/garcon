@@ -10,31 +10,45 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
+import { normalizeTags, normalizeTagSlug } from '@garcon/common/tags';
 import { argumentError } from './errors.js';
 
 export const CLI_HELP = `Usage:
   garcon-cli [options] <prompt>
   garcon-cli [options] --resume <chat-id> <prompt>
+  garcon-cli [options] list <resource>
 
 Starts or resumes a visible chat through an already-running Garcon server.
 The selected permission mode may allow the agent to edit files and run tools.
+
+List resources:
+  agents
+  providers                 Optionally filter with --agent or --provider
+  endpoints                 Requires --provider; optionally filter with --agent or --endpoint
+  models                    Requires --agent; optionally filter with --provider and --endpoint
+  permissions               Requires --agent
+  reasoning-efforts         Requires --agent
 
 Options:
   --workspace <name>           Named Garcon data workspace (default: default)
   --config-dir <path>          Garcon config root (default: ~/.garcon)
   --server <url>               Assert the workspace descriptor's exact URL
   --cwd <path>                 Project directory for a new chat (default: current directory)
-  --agent <id>                 Agent ID; required for a new chat
+  --agent <id>                 Agent ID; required for a new chat and agent-scoped lists
   --provider <id>              Configured API provider ID
   --endpoint <id>              Endpoint ID within --provider
   --model <id>                 Model value or raw model; required for a new chat
   --permissions <mode>         Permission mode: ${PERMISSION_MODE_VALUES.join(', ')}
   --reasoning-effort <mode>    Reasoning effort: ${THINKING_MODE_VALUES.join(', ')}
+  --title <title>              Set the chat title after the turn is accepted
+  --tag <name>                 Add a tag in addition to cli; repeatable
   --resume <chat-id>           Resume an existing chat
+  --json                       Print list results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
-Use a single - as the prompt to read UTF-8 text from stdin.`;
+Use a single - as the prompt to read UTF-8 text from stdin.
+Use -- before a positional prompt whose first word is list.`;
 
 export interface CliEnvironment {
   GARCON_CONFIG_DIR?: string;
@@ -51,11 +65,16 @@ interface CliSelectionOptions {
   thinkingMode?: ThinkingMode;
 }
 
-interface CliInvocationBase extends CliSelectionOptions {
-  kind: 'start' | 'resume';
+interface CliConnectionOptions {
   workspace: string;
   configDir: string;
   serverUrl?: string;
+}
+
+interface CliInvocationBase extends CliSelectionOptions, CliConnectionOptions {
+  kind: 'start' | 'resume';
+  title?: string;
+  additionalTags?: string[];
   prompt: string | null;
   readsPromptFromStdin: boolean;
 }
@@ -74,12 +93,33 @@ export interface ResumeCliInvocation extends CliInvocationBase {
 
 export type CliInvocation = StartCliInvocation | ResumeCliInvocation;
 
+export const LIST_RESOURCE_VALUES = [
+  'agents',
+  'providers',
+  'endpoints',
+  'models',
+  'permissions',
+  'reasoning-efforts',
+] as const;
+
+export type ListResource = (typeof LIST_RESOURCE_VALUES)[number];
+
+export interface ListCliCommand extends CliConnectionOptions {
+  kind: 'list';
+  resource: ListResource;
+  json: boolean;
+  agentId?: string;
+  providerId?: string;
+  endpointId?: string;
+}
+
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
+  | ListCliCommand
   | CliInvocation;
 
-const STRING_OPTIONS = [
+const SINGLE_STRING_OPTIONS = [
   'workspace',
   'config-dir',
   'server',
@@ -90,8 +130,11 @@ const STRING_OPTIONS = [
   'model',
   'permissions',
   'reasoning-effort',
+  'title',
   'resume',
 ] as const;
+
+type ParsedOptionValue = boolean | string | string[] | undefined;
 
 function nonEmptyOption(value: string | undefined, flag: string): string | undefined {
   if (value === undefined) return undefined;
@@ -111,15 +154,15 @@ function validateWorkspace(value: string): string {
   return value;
 }
 
-function parseModeOptions(values: Record<string, boolean | string | undefined>): {
+function parseModeOptions(values: Record<string, ParsedOptionValue>): {
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
 } {
-  const permission = values.permissions;
+  const permission = values.permissions as string | undefined;
   if (permission !== undefined && !isPermissionMode(permission)) {
     throw argumentError(`--permissions must be one of: ${PERMISSION_MODE_VALUES.join(', ')}`);
   }
-  const thinking = values['reasoning-effort'];
+  const thinking = values['reasoning-effort'] as string | undefined;
   if (thinking !== undefined && !isThinkingMode(thinking)) {
     throw argumentError(`--reasoning-effort must be one of: ${THINKING_MODE_VALUES.join(', ')}`);
   }
@@ -127,6 +170,24 @@ function parseModeOptions(values: Record<string, boolean | string | undefined>):
     ...(permission === undefined ? {} : { permissionMode: permission }),
     ...(thinking === undefined ? {} : { thinkingMode: thinking }),
   };
+}
+
+function parseAdditionalTags(value: ParsedOptionValue): string[] | undefined {
+  if (value === undefined) return undefined;
+  const rawTags = value as string[];
+  for (const tag of rawTags) {
+    if (!normalizeTagSlug(tag)) throw argumentError('--tag must contain letters or numbers');
+  }
+  const tags = normalizeTags(rawTags).filter((tag) => tag !== 'cli');
+  return tags.length > 0 ? tags : undefined;
+}
+
+function isListResource(value: string): value is ListResource {
+  return (LIST_RESOURCE_VALUES as readonly string[]).includes(value);
+}
+
+function rejectListOption(value: unknown, flag: string): void {
+  if (value !== undefined) throw argumentError(`${flag} cannot be used with list`);
 }
 
 export function parseCliArgs(
@@ -151,7 +212,10 @@ export function parseCliArgs(
         model: { type: 'string' },
         permissions: { type: 'string' },
         'reasoning-effort': { type: 'string' },
+        title: { type: 'string' },
+        tag: { type: 'string', multiple: true },
         resume: { type: 'string' },
+        json: { type: 'boolean' },
         help: { type: 'boolean' },
         version: { type: 'boolean' },
       },
@@ -165,7 +229,10 @@ export function parseCliArgs(
   const repeated = new Set<string>();
   const observed = new Set<string>();
   for (const token of parsed.tokens ?? []) {
-    if (token.kind !== 'option' || !STRING_OPTIONS.includes(token.name as typeof STRING_OPTIONS[number])) {
+    if (
+      token.kind !== 'option'
+      || !SINGLE_STRING_OPTIONS.includes(token.name as typeof SINGLE_STRING_OPTIONS[number])
+    ) {
       continue;
     }
     if (observed.has(token.name)) repeated.add(token.name);
@@ -175,7 +242,7 @@ export function parseCliArgs(
     throw argumentError(`option may be specified only once: --${[...repeated][0]}`);
   }
 
-  const values = parsed.values as Record<string, boolean | string | undefined>;
+  const values = parsed.values as Record<string, ParsedOptionValue>;
   if (values.help === true) return { kind: 'help' };
   if (values.version === true) return { kind: 'version' };
 
@@ -197,6 +264,60 @@ export function parseCliArgs(
   const model = nonEmptyOption(values.model as string | undefined, '--model');
   const cwd = nonEmptyOption(values.cwd as string | undefined, '--cwd');
   const resume = nonEmptyOption(values.resume as string | undefined, '--resume');
+  const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
+  const additionalTags = parseAdditionalTags(values.tag);
+  const explicitPromptBoundary = parsed.tokens?.some(
+    (token) => token.kind === 'option-terminator',
+  ) ?? false;
+
+  if (parsed.positionals[0] === 'list' && !explicitPromptBoundary) {
+    const resource = parsed.positionals[1] ?? '';
+    if (parsed.positionals.length !== 2 || !isListResource(resource)) {
+      throw argumentError(`list requires one resource: ${LIST_RESOURCE_VALUES.join(', ')}`);
+    }
+    rejectListOption(cwd, '--cwd');
+    rejectListOption(values.model, '--model');
+    rejectListOption(values.permissions, '--permissions');
+    rejectListOption(values['reasoning-effort'], '--reasoning-effort');
+    rejectListOption(values.title, '--title');
+    rejectListOption(values.tag, '--tag');
+    rejectListOption(resume, '--resume');
+    if (endpointId !== undefined && providerId === undefined) {
+      throw argumentError('--endpoint requires --provider');
+    }
+    if (resource === 'agents') {
+      rejectListOption(agentId, '--agent');
+      rejectListOption(providerId, '--provider');
+      rejectListOption(endpointId, '--endpoint');
+    }
+    if (resource === 'providers') rejectListOption(endpointId, '--endpoint');
+    if (resource === 'endpoints' && providerId === undefined) {
+      throw argumentError('list endpoints requires --provider');
+    }
+    if (
+      (resource === 'models' || resource === 'permissions' || resource === 'reasoning-efforts')
+      && agentId === undefined
+    ) {
+      throw argumentError(`list ${resource} requires --agent`);
+    }
+    if (resource === 'permissions' || resource === 'reasoning-efforts') {
+      rejectListOption(providerId, '--provider');
+      rejectListOption(endpointId, '--endpoint');
+    }
+    return {
+      kind: 'list',
+      resource,
+      workspace,
+      configDir,
+      json: values.json === true,
+      ...(serverUrl === undefined ? {} : { serverUrl }),
+      ...(agentId === undefined ? {} : { agentId }),
+      ...(providerId === undefined ? {} : { providerId }),
+      ...(endpointId === undefined ? {} : { endpointId }),
+    };
+  }
+
+  if (values.json !== undefined) throw argumentError('--json can only be used with list');
   const modes = parseModeOptions(values);
 
   if (endpointId !== undefined && providerId === undefined) {
@@ -222,6 +343,8 @@ export function parseCliArgs(
     ...(providerId === undefined ? {} : { providerId }),
     ...(endpointId === undefined ? {} : { endpointId }),
     ...(model === undefined ? {} : { model }),
+    ...(title === undefined ? {} : { title }),
+    ...(additionalTags === undefined ? {} : { additionalTags }),
     ...modes,
     prompt,
     readsPromptFromStdin,

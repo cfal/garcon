@@ -10,12 +10,8 @@ import { GarconProcess } from '../../support/garcon-process.js';
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WORKSPACE = 'cli-integration';
 
-function startCli(arguments_: string[]): Promise<{
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}> {
-  const child = Bun.spawn({
+function spawnCli(arguments_: string[]) {
+  return Bun.spawn({
     cmd: [process.execPath, 'cli/main.ts', ...arguments_],
     cwd: REPO_ROOT,
     env: {
@@ -26,11 +22,57 @@ function startCli(arguments_: string[]): Promise<{
     stdout: 'pipe',
     stderr: 'pipe',
   });
+}
+
+function startCli(arguments_: string[]): Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}> {
+  const child = spawnCli(arguments_);
   return Promise.all([
     child.exited,
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
   ]).then(([exitCode, stdout, stderr]) => ({ exitCode, stdout, stderr }));
+}
+
+function startObservedCli(arguments_: string[]): {
+  acceptedChatId: Promise<string>;
+  result: ReturnType<typeof startCli>;
+} {
+  const child = spawnCli(arguments_);
+  let resolveChatId!: (chatId: string) => void;
+  let rejectChatId!: (error: Error) => void;
+  const acceptedChatId = new Promise<string>((resolve, reject) => {
+    resolveChatId = resolve;
+    rejectChatId = reject;
+  });
+  const stdout = (async () => {
+    const reader = new Response(child.stdout).body!.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    let foundChatId = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      const match = text.match(/^chat id: (\d{16})$/m);
+      if (!foundChatId && match?.[1]) {
+        foundChatId = true;
+        resolveChatId(match[1]);
+      }
+    }
+    text += decoder.decode();
+    if (!foundChatId) rejectChatId(new Error('CLI exited before reporting an accepted chat ID'));
+    return text;
+  })();
+  const result = Promise.all([
+    child.exited,
+    stdout,
+    new Response(child.stderr).text(),
+  ]).then(([exitCode, stdoutText, stderr]) => ({ exitCode, stdout: stdoutText, stderr }));
+  return { acceptedChatId, result };
 }
 
 function runCli(arguments_: string[]): Promise<{
@@ -62,6 +104,36 @@ describe('garcon-cli', () => {
   test('starts and resumes a visible tagged chat through a named workspace', async () => {
     await withIntegrationFixture('garcon-cli-start-resume', async (fixture) => {
       const agent = fixture.directAgents.openAi;
+      const listedAgents = await runCli([
+        '--config-dir', fixture.dirs.config,
+        '--workspace', WORKSPACE,
+        'list', 'agents', '--json',
+      ]);
+      expect(listedAgents.exitCode).toBe(0);
+      expect(listedAgents.stderr).toBe('');
+      expect(JSON.parse(listedAgents.stdout).agents).toContainEqual(
+        expect.objectContaining({ id: agent.agentId }),
+      );
+
+      const listedModels = await runCli([
+        '--config-dir', fixture.dirs.config,
+        '--workspace', WORKSPACE,
+        'list', 'models',
+        '--agent', agent.agentId,
+        '--provider', agent.provider.providerId,
+        '--endpoint', agent.provider.endpointId,
+        '--json',
+      ]);
+      expect(listedModels.exitCode).toBe(0);
+      expect(listedModels.stderr).toBe('');
+      expect(JSON.parse(listedModels.stdout).models).toContainEqual(
+        expect.objectContaining({
+          rawModel: agent.provider.model,
+          providerId: agent.provider.providerId,
+          endpointId: agent.provider.endpointId,
+        }),
+      );
+
       const started = await runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
@@ -70,6 +142,9 @@ describe('garcon-cli', () => {
         '--provider', agent.provider.providerId,
         '--endpoint', agent.provider.endpointId,
         '--model', agent.provider.model,
+        '--title', 'CLI delegated review',
+        '--tag', 'Review Needed',
+        '--tag', 'delegated',
         'cli-first-turn',
       ]);
       expect(started.exitCode).toBe(0);
@@ -81,13 +156,16 @@ describe('garcon-cli', () => {
       const chatsAfterStart = await fixture.client.listChats();
       expect(chatsAfterStart.sessions.find((chat) => chat.id === chatId)).toMatchObject({
         projectPath: fixture.dirs.project,
-        tags: ['cli'],
+        title: 'CLI delegated review',
+        tags: ['cli', 'delegated', 'review-needed'],
       });
 
       const resumed = await runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
         '--resume', chatId!,
+        '--title', 'CLI follow-up review',
+        '--tag', 'Follow Up',
         'cli-second-turn',
       ]);
       expect(resumed).toEqual({
@@ -97,7 +175,13 @@ describe('garcon-cli', () => {
       });
       const chatsAfterResume = await fixture.client.listChats();
       expect(chatsAfterResume.sessions).toHaveLength(1);
-      expect(chatsAfterResume.sessions[0]?.tags).toEqual(['cli']);
+      expect(chatsAfterResume.sessions[0]?.tags).toEqual([
+        'cli',
+        'delegated',
+        'follow-up',
+        'review-needed',
+      ]);
+      expect(chatsAfterResume.sessions[0]?.title).toBe('CLI follow-up review');
     }, { namedWorkspace: WORKSPACE });
   });
 
@@ -169,19 +253,20 @@ describe('garcon-cli', () => {
     await withIntegrationFixture('garcon-cli-restart', async (fixture) => {
       const before = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-restart' });
-      const cli = startCli(startArguments(fixture, 'cli-restart'));
+      const cli = startObservedCli(startArguments(fixture, 'cli-restart'));
       await held.received;
       const acceptedChat = (await fixture.client.listChats()).sessions.find(
         (chat) => !before.has(chat.id),
       );
       expect(acceptedChat).toBeDefined();
+      expect(await cli.acceptedChatId).toBe(acceptedChat!.id);
       const aborted = held.expectAbort();
 
       await fixture.crashAndRestartGarcon({ reusePort: true });
       await aborted;
       held.releaseEcho();
 
-      const result = await cli;
+      const result = await cli.result;
       expect(result.exitCode).toBe(3);
       expect(result.stdout).toBe(`chat id: ${acceptedChat!.id}\n`);
       expect(result.stderr).toContain('transport recovery:');

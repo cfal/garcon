@@ -149,16 +149,34 @@ garcon-cli \
   --model gpt-5.4 \
   --permissions acceptEdits \
   --reasoning-effort high \
+  --title "Implement validation" \
   "Implement the validation and run its focused tests."
 ```
 
 Resume the same agent session without repeating its persisted selection:
 
 ```bash
-garcon-cli --workspace default --resume 1785337200123456 "Now address the review findings."
+garcon-cli --workspace default --resume 1785337200123456 \
+  --title "Address review findings" \
+  "Now address the review findings."
 ```
 
-The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+Query the running server for exact selection values before starting a chat:
+
+```bash
+garcon-cli list agents
+garcon-cli list providers --agent codex
+garcon-cli list endpoints --provider local-openai --agent codex
+garcon-cli list models --agent codex --provider local-openai
+garcon-cli list permissions --agent codex
+garcon-cli list reasoning-efforts --agent codex
+```
+
+List commands print compact tables by default and accept `--json` for scripts and agents. Add
+repeatable tags with `--tag review --tag delegated`; every started or resumed chat still receives
+the `cli` tag automatically. `--title` sets an explicit title on either a new or resumed chat.
+
+The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
 
 Discovery requires the server to use a named `--workspace`; servers launched with `--workspace-dir` are intentionally not discoverable. `--server` may assert the descriptor's exact URL but cannot redirect credentials to another listener. Run `garcon-cli --help` for provider, endpoint, and complete mode options.
 

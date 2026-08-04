@@ -1,6 +1,7 @@
 import packageJson from '../package.json' with { type: 'json' };
 import fs from 'node:fs/promises';
 import { CLI_HELP, parseCliArgs } from './args.js';
+import { runCatalogQuery } from './catalog-query.js';
 import { runConsultation } from './consultation.js';
 import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
@@ -80,6 +81,17 @@ export async function main(
     }
     if (command.kind === 'version') {
       process.stdout.write(`${packageJson.version}\n`);
+      return 0;
+    }
+    if (command.kind === 'list') {
+      const connection = await discoverRuntime({
+        configDir: command.configDir,
+        workspace: command.workspace,
+        serverUrl: command.serverUrl,
+        signal: options.signal,
+      }, { fetch: options.fetch });
+      const client = new GarconClient({ ...connection, fetch: options.fetch });
+      await runCatalogQuery(command, client, output, options.signal);
       return 0;
     }
     const prompt = command.readsPromptFromStdin

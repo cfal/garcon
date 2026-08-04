@@ -5,6 +5,7 @@ export interface CliWritable {
 export interface CliOutput {
   accepted(chatId: string): void;
   completed(messages: readonly string[]): void;
+  listing(content: string): void;
   diagnostic(message: string): void;
 }
 
@@ -18,7 +19,11 @@ export function createCliOutput(
     },
     completed(messages) {
       const nonEmpty = messages.filter((message) => message.trim().length > 0);
+      if (nonEmpty.length === 0) return;
       stdout.write(`${nonEmpty.join('\n\n')}\n`);
+    },
+    listing(content) {
+      stdout.write(`${content.replace(/\n+$/, '')}\n`);
     },
     diagnostic(message) {
       stderr.write(`${message}\n`);

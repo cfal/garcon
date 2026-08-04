@@ -48,7 +48,10 @@ function isApiProtocol(value: unknown): value is ApiProtocol {
   return value === 'anthropic-messages' || value === 'openai-compatible';
 }
 
-function normalizedAgent(catalog: ModelCatalogResponse, agentId: string): AgentCatalogEntry {
+export function requireCatalogAgent(
+  catalog: ModelCatalogResponse,
+  agentId: string,
+): AgentCatalogEntry {
   const raw = catalog.catalog.agents.find((entry) => entry?.id === agentId);
   if (!raw) {
     throw catalogError(
@@ -74,7 +77,7 @@ function normalizedAgent(catalog: ModelCatalogResponse, agentId: string): AgentC
   return { ...raw, defaultSettings };
 }
 
-function normalizedModels(agent: AgentCatalogEntry): AgentModelOption[] {
+export function requireCatalogModels(agent: AgentCatalogEntry): AgentModelOption[] {
   const valid = agent.models.every((model) => (
     model
     && typeof model.value === 'string'
@@ -93,7 +96,7 @@ function normalizedModels(agent: AgentCatalogEntry): AgentModelOption[] {
   return agent.models;
 }
 
-function selectedRouting(
+export function resolveCatalogModelSelection(
   catalog: ModelCatalogResponse,
   agent: AgentCatalogEntry,
   model: AgentModelOption,
@@ -190,9 +193,9 @@ export function resolveModelSelection(
   agentId: string,
   requested: RequestedModelSelection,
 ): ResolvedModelSelection {
-  const agent = normalizedAgent(catalog, agentId);
+  const agent = requireCatalogAgent(catalog, agentId);
   assertProviderAndEndpoint(catalog, agent, requested);
-  const matches = matchingModels(normalizedModels(agent), requested);
+  const matches = matchingModels(requireCatalogModels(agent), requested);
   if (matches.length > 1) {
     const routes = matches.map(describeRouting).join(', ');
     throw catalogError(`model ${requested.model} is ambiguous across: ${routes}; specify --provider and --endpoint`);
@@ -209,7 +212,7 @@ export function resolveModelSelection(
       modelProtocol: null,
     };
   }
-  return selectedRouting(catalog, agent, selected);
+  return resolveCatalogModelSelection(catalog, agent, selected);
 }
 
 function strictPermissionMode(
@@ -241,7 +244,7 @@ export function validateExplicitModes(
   agentId: string,
   requested: { permissionMode?: PermissionMode; thinkingMode?: ThinkingMode },
 ): void {
-  const agent = normalizedAgent(catalog, agentId);
+  const agent = requireCatalogAgent(catalog, agentId);
   if (requested.permissionMode !== undefined) {
     strictPermissionMode(requested.permissionMode, agent, 'default');
   }
@@ -259,7 +262,7 @@ export function resolveStartSelection(
     thinkingMode?: ThinkingMode;
   },
 ): ResolvedStartSelection {
-  const agent = normalizedAgent(catalog, requested.agentId);
+  const agent = requireCatalogAgent(catalog, requested.agentId);
   const executionDefaults = executionDefaultsForAgent(settings.executionDefaults, requested.agentId);
   const permissionMode = strictPermissionMode(
     requested.permissionMode,

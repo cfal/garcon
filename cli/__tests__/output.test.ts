@@ -32,4 +32,27 @@ describe('createCliOutput', () => {
     expect(stdout.chunks).toEqual([]);
     expect(stderr.chunks.join('')).toBe('submission: unavailable\n');
   });
+
+  test('prints nothing after the chat line for an empty assistant result', () => {
+    const stdout = writer();
+    const stderr = writer();
+    const output = createCliOutput(stdout, stderr);
+
+    output.accepted('1785337200123456');
+    output.completed(['', '   ']);
+
+    expect(stdout.chunks.join('')).toBe('chat id: 1785337200123456\n');
+    expect(stderr.chunks).toEqual([]);
+  });
+
+  test('terminates catalog listings with exactly one newline', () => {
+    const stdout = writer();
+    const stderr = writer();
+    const output = createCliOutput(stdout, stderr);
+
+    output.listing('AGENT\n------\n');
+
+    expect(stdout.chunks).toEqual(['AGENT\n------\n']);
+    expect(stderr.chunks).toEqual([]);
+  });
 });

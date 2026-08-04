@@ -8,8 +8,10 @@ import type {
 import { createClientChatId } from '@garcon/common/client-chat-id';
 import type { ChatListEntry } from '@garcon/common/chat-list';
 import type { ChatListResponse } from '@garcon/common/chat-list';
+import type { UpdateChatTitleRequest } from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
+import { normalizeTags } from '@garcon/common/tags';
 import type { CliInvocation } from './args.js';
 import {
   resolveModelSelection,
@@ -31,6 +33,7 @@ export interface ConsultationClient extends ReceiptClient {
   listChats(signal?: AbortSignal): Promise<ChatListResponse>;
   startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse>;
   runChat(request: AgentRunCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse>;
+  updateChatTitle(request: UpdateChatTitleRequest, signal?: AbortSignal): Promise<void>;
 }
 
 export interface ConsultationDependencies {
@@ -40,6 +43,10 @@ export interface ConsultationDependencies {
 }
 
 const START_CHAT_ID_ATTEMPTS = 3;
+
+function consultationTags(invocation: CliInvocation): string[] {
+  return normalizeTags(['cli', ...(invocation.additionalTags ?? [])]);
+}
 
 function terminalResult(receipt: AgentTurnReceipt, output: CliOutput): void {
   if (receipt.state === 'completed') {
@@ -106,7 +113,7 @@ async function submitStart(
       projectPath: invocation.cwd,
       ...selection,
       command: prompt,
-      tags: ['cli'],
+      tags: consultationTags(invocation),
     };
     try {
       return await client.startChat(request, signal);
@@ -138,7 +145,7 @@ async function submitResume(
     chatId: invocation.chatId,
     command: prompt,
     ...(invocation.agentId === undefined ? {} : { expectedAgentId: invocation.agentId }),
-    tagsToAdd: ['cli'],
+    tagsToAdd: consultationTags(invocation),
     permissionFallbackPolicy: 'require-explicit-bypass',
   };
   const needsCatalog = invocation.model !== undefined
@@ -183,6 +190,14 @@ export async function runConsultation(
     ? await submitStart(invocation, prompt, client, signal, createId, createChatId)
     : await submitResume(invocation, prompt, client, signal, createId);
   output.accepted(accepted.chatId);
+  let titleError: unknown | undefined;
+  if (invocation.title !== undefined) {
+    try {
+      await client.updateChatTitle({ chatId: accepted.chatId, title: invocation.title }, signal);
+    } catch (error) {
+      titleError = error;
+    }
+  }
   const receipt = await pollTurnReceipt(
     client,
     accepted.chatId,
@@ -192,4 +207,5 @@ export async function runConsultation(
     dependencies.poller,
   );
   terminalResult(receipt, output);
+  if (titleError !== undefined) throw titleError;
 }

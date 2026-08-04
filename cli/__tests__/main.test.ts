@@ -12,6 +12,7 @@ function capturedOutput(): { output: CliOutput; diagnostics: string[] } {
     output: {
       accepted() {},
       completed() {},
+      listing() {},
       diagnostic(message) { diagnostics.push(message); },
     },
   };

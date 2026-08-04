@@ -14,6 +14,7 @@ describe('parseCliArgs', () => {
       '--model', 'gpt-5.4',
       '--permissions', 'acceptEdits',
       '--reasoning-effort', 'high',
+      '--title', '  Implement auth validation  ',
       'Implement', 'the', 'change',
     ], ENV, '/repo')).toEqual({
       kind: 'start',
@@ -24,6 +25,7 @@ describe('parseCliArgs', () => {
       model: 'gpt-5.4',
       permissionMode: 'acceptEdits',
       thinkingMode: 'high',
+      title: 'Implement auth validation',
       prompt: 'Implement the change',
       readsPromptFromStdin: false,
     });
@@ -37,6 +39,47 @@ describe('parseCliArgs', () => {
       chatId: CHAT_ID,
       prompt: null,
       readsPromptFromStdin: true,
+    });
+  });
+
+  test('parses live catalog queries without submission arguments', () => {
+    expect(parseCliArgs([
+      'list', 'models',
+      '--workspace', 'work',
+      '--agent', 'codex',
+      '--provider', 'acme',
+      '--endpoint', 'east',
+      '--json',
+    ], ENV)).toEqual({
+      kind: 'list',
+      resource: 'models',
+      workspace: 'work',
+      configDir: '/home/test/.garcon',
+      agentId: 'codex',
+      providerId: 'acme',
+      endpointId: 'east',
+      json: true,
+    });
+    expect(parseCliArgs(['list', 'agents'], ENV)).toEqual({
+      kind: 'list',
+      resource: 'agents',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      json: false,
+    });
+  });
+
+  test('normalizes and deduplicates repeatable additional tags', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--tag', 'Review Needed',
+      '--tag', 'cli',
+      '--tag', 'Priority',
+      'Review',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      additionalTags: ['priority', 'review-needed'],
     });
   });
 
@@ -68,6 +111,17 @@ describe('parseCliArgs', () => {
     expect(result).toMatchObject({ prompt: '  preserve this spacing  ' });
   });
 
+  test('accepts a positional prompt beginning with list after the option terminator', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--', 'list', 'the', 'open', 'issues',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      prompt: 'list the open issues',
+    });
+  });
+
   test.each([
     { args: ['--agent', 'codex', 'prompt'], message: '--model is required' },
     { args: ['--model', 'gpt', 'prompt'], message: '--agent is required' },
@@ -79,6 +133,14 @@ describe('parseCliArgs', () => {
     { args: ['--resume', '123', 'prompt'], message: 'valid Garcon chat ID' },
     { args: ['--agent', 'codex', '--agent', 'claude', '--model', 'gpt', 'prompt'], message: 'only once' },
     { args: ['--agent', 'codex', '--model', 'gpt', 'prompt', '-'], message: 'must be the only prompt argument' },
+    { args: ['list', 'models'], message: 'requires --agent' },
+    { args: ['list', 'endpoints'], message: 'requires --provider' },
+    { args: ['list', 'models', '--agent', 'codex', '--endpoint', 'east'], message: 'requires --provider' },
+    { args: ['list', 'agents', '--agent', 'codex'], message: '--agent cannot be used' },
+    { args: ['--json', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'only be used with list' },
+    { args: ['list', 'agents', '--title', 'Review'], message: '--title cannot be used' },
+    { args: ['--title', '  ', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--title must not be empty' },
+    { args: ['--tag', '!!!', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'letters or numbers' },
   ])('rejects invalid arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
     try {

@@ -57,6 +57,29 @@ describe('GarconClient', () => {
     expect(redirect).toBe('error');
   });
 
+  test('updates a chat title through the existing workspace API', async () => {
+    let request: { url: string; method: string | undefined; body: string } | undefined;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        request = {
+          url: String(input),
+          method: init?.method,
+          body: String(init?.body),
+        };
+        return Response.json({ success: true });
+      },
+    });
+
+    await client.updateChatTitle({ chatId: runRequest.chatId, title: 'Delegated review' });
+
+    expect(request).toEqual({
+      url: `${connection.baseUrl}/api/v1/app/session-name`,
+      method: 'PUT',
+      body: JSON.stringify({ chatId: runRequest.chatId, title: 'Delegated review' }),
+    });
+  });
+
   test('retries an ambiguous submission with the identical request body', async () => {
     const bodies: string[] = [];
     let attempts = 0;

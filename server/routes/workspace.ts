@@ -23,6 +23,10 @@ import {
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
 import { isGenerationTestTarget } from '../../common/generation-test-contracts.js';
+import type {
+  UpdateChatTitleRequest,
+  UpdateChatTitleResponse,
+} from '../../common/chat-title-contracts.js';
 import { testGenerationModel } from '../settings/generation-model-test.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
@@ -179,7 +183,7 @@ export default function createWorkspaceRoutes(
 
   async function putSessionNameHandler(body: JsonBody): Promise<Response> {
     try {
-      const { chatId, title } = asJsonBody(body);
+      const { chatId, title } = asJsonBody(body) as Partial<UpdateChatTitleRequest>;
       if (!chatId || typeof chatId !== 'string') {
         return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
       }
@@ -192,7 +196,7 @@ export default function createWorkspaceRoutes(
       }
       // setSessionName emits 'session-name-changed' for broadcast wiring.
       await settings.setSessionName(chatId, trimmed);
-      return Response.json({ success: true });
+      return Response.json({ success: true } satisfies UpdateChatTitleResponse);
     } catch (error) {
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }

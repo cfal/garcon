@@ -6,6 +6,7 @@ import type {
   StartChatCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import type { ChatListResponse } from '@garcon/common/chat-list';
+import type { UpdateChatTitleRequest } from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import type { CliInvocation } from '../args.js';
@@ -66,6 +67,7 @@ function output(): CliOutput & { acceptedIds: string[]; messages: string[][] } {
     acceptedIds: [], messages: [],
     accepted(chatId) { this.acceptedIds.push(chatId); },
     completed(messages) { this.messages.push([...messages]); },
+    listing() {},
     diagnostic() {},
   };
 }
@@ -73,14 +75,16 @@ function output(): CliOutput & { acceptedIds: string[]; messages: string[][] } {
 function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient & {
   starts: StartChatCommandRequest[];
   runs: AgentRunCommandRequest[];
+  titles: UpdateChatTitleRequest[];
 } {
   return {
-    starts: [], runs: [],
+    starts: [], runs: [], titles: [],
     async getModelCatalog() { return catalog(); },
     async getSettings() { return settings; },
     async listChats() { throw new Error('chat list should not be loaded'); },
     async startChat(request) { this.starts.push(request); return accepted; },
     async runChat(request) { this.runs.push(request); return { ...accepted, commandType: 'agent-run' }; },
+    async updateChatTitle(request) { this.titles.push(request); },
     async getTurnReceipt() { return receipt; },
     async verifyRuntime() { return true; },
     ...overrides,
@@ -92,6 +96,8 @@ describe('runConsultation', () => {
     const invocation: CliInvocation = {
       kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
+      title: 'Implementation review',
+      additionalTags: ['review-needed'],
     };
     const testClient = client();
     const testOutput = output();
@@ -100,9 +106,10 @@ describe('runConsultation', () => {
     });
     expect(testClient.starts[0]).toMatchObject({
       chatId: CHAT_ID, agentId: 'codex', projectPath: '/repo', command: 'Implement it',
-      permissionMode: 'acceptEdits', thinkingMode: 'high', tags: ['cli'],
+      permissionMode: 'acceptEdits', thinkingMode: 'high', tags: ['cli', 'review-needed'],
     });
     expect(testOutput.acceptedIds).toEqual([CHAT_ID]);
+    expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Implementation review' }]);
     expect(testOutput.messages).toEqual([['Done']]);
   });
 
@@ -161,6 +168,8 @@ describe('runConsultation', () => {
     const invocation: CliInvocation = {
       kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
       prompt: 'Continue', readsPromptFromStdin: false,
+      title: 'Follow-up review',
+      additionalTags: ['follow-up'],
     };
     const testClient = client();
     await runConsultation(invocation, 'Continue', testClient, output(), undefined, {
@@ -168,9 +177,35 @@ describe('runConsultation', () => {
     });
     expect(testClient.runs[0]).toEqual({
       clientRequestId: 'request', clientMessageId: 'request', chatId: CHAT_ID,
-      command: 'Continue', tagsToAdd: ['cli'],
+      command: 'Continue', tagsToAdd: ['cli', 'follow-up'],
       permissionFallbackPolicy: 'require-explicit-bypass',
     });
+    expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Follow-up review' }]);
+  });
+
+  test('returns the agent result before surfacing a title update failure', async () => {
+    const testOutput = output();
+    let receiptRead = false;
+    const testClient = client({
+      async updateChatTitle() {
+        throw new CliError('title update', 'rename failed', 3);
+      },
+      async getTurnReceipt() {
+        receiptRead = true;
+        return receipt;
+      },
+    });
+
+    await expect(runConsultation({
+      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      prompt: 'Continue', readsPromptFromStdin: false, title: 'Follow-up review',
+    }, 'Continue', testClient, testOutput, undefined, {
+      createId: () => 'request',
+    })).rejects.toThrow('rename failed');
+
+    expect(receiptRead).toBe(true);
+    expect(testOutput.acceptedIds).toEqual([CHAT_ID]);
+    expect(testOutput.messages).toEqual([['Done']]);
   });
 
   test('validates resume overrides against the persisted agent catalog', async () => {
