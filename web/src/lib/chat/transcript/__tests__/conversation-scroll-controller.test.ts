@@ -647,6 +647,43 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
 	});
 
+	it('cancels a queued hidden-position restore when explicit navigation starts', async () => {
+		const { controller, viewport } = controllerFixture({ state: { isUserScrolledUp: true } });
+		controller.setPinnedToBottom(false);
+		controller.setViewportVisible(false);
+		controller.setViewportVisible(true);
+
+		await expect(
+			controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: 'generation-1',
+				rowId: 'generation-1:7',
+			}),
+		).resolves.toBe('completed');
+		await tick();
+
+		expect(viewport.scrollToTarget).toHaveBeenCalledOnce();
+		expect(viewport.restoreHiddenReadingPosition).not.toHaveBeenCalled();
+	});
+
+	it('cancels a hidden-position restore scheduled during explicit navigation', async () => {
+		const { controller, viewport } = controllerFixture({ state: { isUserScrolledUp: true } });
+		controller.setPinnedToBottom(false);
+		controller.setViewportVisible(false);
+		const navigation = controller.jumpToMessageRow({
+			chatId: 'chat-1',
+			generationId: 'generation-1',
+			rowId: 'generation-1:7',
+		});
+		controller.setViewportVisible(true);
+
+		await expect(navigation).resolves.toBe('completed');
+		await tick();
+
+		expect(viewport.scrollToTarget).toHaveBeenCalledOnce();
+		expect(viewport.restoreHiddenReadingPosition).not.toHaveBeenCalled();
+	});
+
 	it('tracks and completes initial end restoration', () => {
 		const { controller } = controllerFixture();
 		controller.prepareInitialBottomRestore('chat-1');

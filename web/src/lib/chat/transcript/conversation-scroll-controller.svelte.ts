@@ -650,8 +650,15 @@ export class ConversationScrollController {
 	}
 
 	async #restoreVisibleViewport(): Promise<void> {
+		const operationEpoch = this.#viewportOperationEpoch;
 		await tick();
-		if (!this.#isViewportVisible) return;
+		if (
+			!this.#isViewportVisible ||
+			operationEpoch !== this.#viewportOperationEpoch ||
+			this.#activeTargetNavigations > 0
+		) {
+			return;
+		}
 		const viewport = this.deps.getViewport();
 		if (!viewport?.isReady()) return;
 		if (this.isPinnedToBottom) {
