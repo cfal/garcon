@@ -177,7 +177,7 @@ describe('runConsultation', () => {
     });
     expect(testClient.runs[0]).toEqual({
       clientRequestId: 'request', clientMessageId: 'request', chatId: CHAT_ID,
-      command: 'Continue', tagsToAdd: ['cli', 'follow-up'],
+      command: 'Continue', tagsToAdd: ['follow-up'],
       permissionFallbackPolicy: 'require-explicit-bypass',
     });
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Follow-up review' }]);
@@ -223,8 +223,9 @@ describe('runConsultation', () => {
     });
     expect(testClient.runs[0]).toMatchObject({
       model: 'gpt-5.4', apiProviderId: null, modelEndpointId: null,
-      modelProtocol: null, permissionMode: 'plan', thinkingMode: 'high', tagsToAdd: ['cli'],
+      modelProtocol: null, permissionMode: 'plan', thinkingMode: 'high',
     });
+    expect(testClient.runs[0]).not.toHaveProperty('tagsToAdd');
   });
 
   test('never prints partial text from a failed turn', async () => {
