@@ -278,6 +278,18 @@ function stopOpenCodeProcess(proc: ChildProcess): void {
   proc.once('exit', () => clearTimeout(killTimer));
 }
 
+function closeOpenCodeInstance(instance: OpenCodeInstance): void {
+  try {
+    if (typeof instance.server?.close === 'function') {
+      instance.server.close();
+    } else if (typeof instance.close === 'function') {
+      instance.close();
+    }
+  } catch {
+    // Best-effort cleanup.
+  }
+}
+
 async function createOpenCodeInstance(input: {
   port: number;
   signal: AbortSignal;
@@ -364,6 +376,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   readonly #logger: AgentLogger;
   #instance: OpenCodeInstance | null = null;
   #initPromise: Promise<OpenCodeInstance> | null = null;
+  #startupAbortController: AbortController | null = null;
+  #shutdownPromise: Promise<void> | null = null;
+  #shuttingDown = false;
   #sseListenerStarted = false;
   #sseListenerGeneration = 0;
   #sseReadyPromise: Promise<void> | null = null;
@@ -406,14 +421,25 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
   // Shuts down the spawned opencode server process (if any).
   // Called during garcon graceful shutdown to prevent orphaned processes.
-  shutdown(): void {
+  shutdown(): Promise<void> {
+    if (this.#shutdownPromise) return this.#shutdownPromise;
+    this.#shuttingDown = true;
     this.#idlePurger.stop();
     for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
       this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode runtime shutting down'));
     }
     this.#sessions.clear();
     this.#pendingPermissions.clear();
+    const startup = this.#initPromise;
+    this.#startupAbortController?.abort(new Error('OpenCode runtime shutting down'));
     this.#closeInstance();
+    const shutdown = (async () => {
+      await startup?.catch(() => undefined);
+      // A custom instance factory may resolve after ignoring its abort signal.
+      this.#closeInstance();
+    })();
+    this.#shutdownPromise = shutdown;
+    return shutdown;
   }
 
   // Returns whether an OpenCode instance can be created without starting one.
@@ -459,6 +485,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   #assertCanUseOpenCode(): void {
+    if (this.#shuttingDown) throw new Error('OpenCode runtime is shutting down');
     if (!this.isAvailable()) throw new Error('opencode is not installed');
     if (this.isTemporarilyUnavailable()) throw this.#temporaryUnavailableError();
   }
@@ -501,18 +528,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     }
     const instance = this.#instance;
     if (instance) {
-      try {
-        if (typeof instance.server?.close === 'function') {
-          instance.server.close();
-        } else if (typeof instance.close === 'function') {
-          instance.close();
-        }
-      } catch {
-        // Best-effort cleanup.
-      }
+      closeOpenCodeInstance(instance);
     }
     this.#instance = null;
-    this.#initPromise = null;
     this.#sseListenerStarted = false;
   }
 
@@ -574,6 +592,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#assertCanUseOpenCode();
 
     let startup: Promise<OpenCodeInstance> | null = null;
+    const startupAbortController = new AbortController();
+    this.#startupAbortController = startupAbortController;
     startup = (async () => {
       try {
         if (this.#options.requiresExecutable
@@ -587,7 +607,13 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
           (signal) => this.#options.createInstance({ port, signal }),
           this.#options.startupTimeoutMs,
           'OpenCode startup',
+          startupAbortController.signal,
         );
+
+        if (this.#shuttingDown || startupAbortController.signal.aborted) {
+          closeOpenCodeInstance(result);
+          throw startupAbortController.signal.reason ?? new Error('OpenCode runtime is shutting down');
+        }
 
         if (!result?.client?.permission?.reply) {
           throw new Error('OpenCode v2 client missing permission.reply; aborting startup');
@@ -604,6 +630,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         throw err;
       } finally {
         if (this.#initPromise === startup) this.#initPromise = null;
+        if (this.#startupAbortController === startupAbortController) {
+          this.#startupAbortController = null;
+        }
       }
     })();
 
