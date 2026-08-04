@@ -55,4 +55,34 @@ describe('createCliOutput', () => {
     expect(stdout.chunks).toEqual(['AGENT\n------\n']);
     expect(stderr.chunks).toEqual([]);
   });
+
+  test('prints the stable async delivery block for new-turn and steer', () => {
+    const stdout = writer();
+    const stderr = writer();
+    const output = createCliOutput(stdout, stderr);
+
+    output.sent('1785337200123456', 'new-turn', 'turn-1');
+    output.sent('1785337200123456', 'steer', 'turn-active');
+
+    expect(stdout.chunks.join('')).toBe(
+      'chat id: 1785337200123456\ndelivery: new-turn\nturn id: turn-1\n'
+      + 'chat id: 1785337200123456\ndelivery: steer\nturn id: turn-active\n',
+    );
+    expect(stderr.chunks).toEqual([]);
+  });
+
+  test('prints the stable stop outcome block', () => {
+    const stdout = writer();
+    const stderr = writer();
+    const output = createCliOutput(stdout, stderr);
+
+    output.stopped('1785337200123456', 'interrupt-requested');
+    output.stopped('1785337200123456', 'already-idle');
+
+    expect(stdout.chunks.join('')).toBe(
+      'chat id: 1785337200123456\nstop: interrupt-requested\n'
+      + 'chat id: 1785337200123456\nstop: already-idle\n',
+    );
+    expect(stderr.chunks).toEqual([]);
+  });
 });
