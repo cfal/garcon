@@ -46,6 +46,16 @@ export function piSessionPathFromHeader(header: SessionHeader, sessionDir?: stri
   return path.join(sessionDir ?? piDefaultSessionDir(header.cwd), fileName);
 }
 
+export async function canonicalExistingPiSessionPath(value: string): Promise<string | null> {
+  if (!path.isAbsolute(value)) return null;
+  try {
+    if (!(await fs.stat(value)).isFile()) return null;
+    return path.normalize(await fs.realpath(value));
+  } catch {
+    return null;
+  }
+}
+
 export async function findPiSessionFileBySessionId(
   sessionId: string,
   projectPath: string,

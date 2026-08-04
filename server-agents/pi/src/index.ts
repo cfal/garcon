@@ -70,7 +70,7 @@ export default class PiAgentIntegration implements AgentIntegration {
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly forking: NonNullable<AgentIntegration['forking']>;
-  readonly steering = null;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
@@ -81,8 +81,8 @@ export default class PiAgentIntegration implements AgentIntegration {
     const models = createLazyPiModels(config);
     const nativeSessions = createPathNativeSessionCodec('pi');
     const runtime = new LazyPiRuntime(async () => {
-      const { PiCliRuntime } = await import('./agents/pi/pi-cli.js');
-      return new PiCliRuntime({ config, logger, models });
+      const { PiRpcRuntime } = await import('./agents/pi/pi-rpc-runtime.js');
+      return new PiRpcRuntime({ config, logger, models });
     });
 
     this.settings = createVersionedSettings({
@@ -166,10 +166,14 @@ export default class PiAgentIntegration implements AgentIntegration {
         }
       },
     };
+    this.steering = {
+      captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
+      steer: (request) => runtime.steer(request),
+    };
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
-        runtime.shutdown();
+        await runtime.shutdown();
       },
     });
   }

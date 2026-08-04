@@ -1,97 +1,36 @@
-import { promises as fs } from 'fs';
-import crypto from 'crypto';
-import os from 'os';
-import path from 'path';
-import type { PiConfig } from '../../config.js';
-import {
-  ErrorMessage,
-  ToolResultMessage,
-} from '@garcon/common/chat-types';
-import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
-import { convertPiMessage } from "./message-converter.js";
-import { convertPiToolUse } from "./tool-use-converter.js";
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
-import { createArtificialNativePath, isArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
-import {
-  findPiSessionFileBySessionId,
-  piSessionPathFromHeader,
-  resolvePiConfiguredSessionDir,
-} from './pi-session-paths.js';
-import { normalizeThinkingMode } from '@garcon/common/chat-modes';
-import {
-  assertPiExecutionOpen,
-  markPiExecutionStarted,
-  piEventMetadata,
-  type PiResumeRequest,
-  type PiStartedSession,
-  type PiStartRequest,
-} from './runtime-types.js';
-import type { AgentAttachment } from '@garcon/common/agent-execution';
-import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import type { PiConfig } from '../../config.js';
 
-export interface PiModelReader {
-  getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
-}
-
-interface PiSessionHeader {
-  type: 'session';
-  version?: number;
-  id: string;
-  timestamp: string;
-  cwd: string;
-  parentSession?: string;
-}
-
-interface PiSession {
-  aborted: boolean;
-  chatId: string;
-  cleanup?: (() => Promise<void>) | undefined;
-  configuredSessionDir?: string | undefined;
-  finalized: boolean;
-  id: string;
-  isRunning: boolean;
-  nativePath: string | null;
-  process: ReturnType<typeof Bun.spawn> | null;
-  resultSeen: boolean;
-  sessionCreatedEmitted: boolean;
-  startTime: number;
-  lastActivityAt: number;
-  startedSession: {
-    promise: Promise<PiStartedSession>;
-    reject: (error: unknown) => void;
-    resolve: (value: PiStartedSession) => void;
-    resolved: boolean;
-  } | null;
-  turnResolve: (() => void) | null;
-  eventMetadata: RuntimeEventMetadata;
-}
-
-interface BuildPiPromptResult {
-  args: string[];
-  cleanup?: () => Promise<void>;
-  configuredSessionDir?: string;
-  prompt: string;
-}
-
-type PiCliEvent = Record<string, unknown> & { type?: string };
-
-const PI_READ_ONLY_TOOLS = ['read', 'grep', 'find', 'ls'] as const;
-const GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV = 'GARCON_EMBEDDED_PI_PACKAGE_DIR';
 const PI_OFFLINE_ENV = 'PI_OFFLINE';
 const PI_SKIP_VERSION_CHECK_ENV = 'PI_SKIP_VERSION_CHECK';
 const PI_TELEMETRY_ENV = 'PI_TELEMETRY';
-const PI_PLAN_PREFIX = [
+const GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV = 'GARCON_EMBEDDED_PI_PACKAGE_DIR';
+export const PI_READ_ONLY_TOOLS = ['read', 'grep', 'find', 'ls'] as const;
+
+export const PI_PLAN_PREFIX = [
   'You are operating in Garcon plan mode.',
   'Do not modify files, run mutating commands, or carry out implementation.',
   'Analyze the task, inspect the codebase, and respond with a concrete implementation plan only.',
 ].join('\n');
 
-// Pi --thinking tops out at xhigh, so 'max' clamps down.
-function mapThinkingMode(mode: ThinkingMode): string | undefined {
+// Nested Pi session environment (PI_SESSION_FILE and friends) belongs to the outer session's
+// bash-tool context. Inheriting it destabilizes the child (observed: silent no-op startups,
+// dropped session persistence) and PI_CODING_AGENT_SESSION_DIR outright redirects session
+// storage, so the whole set is scrubbed at spawn.
+const PI_NESTED_SESSION_ENV = [
+  'PI_CODING_AGENT',
+  'PI_SESSION_ID',
+  'PI_SESSION_FILE',
+  'PI_PROVIDER',
+  'PI_MODEL',
+  'PI_REASONING_LEVEL',
+  'PI_CODING_AGENT_SESSION_DIR',
+  'PI_MODELS_DEV_OVERRIDE_PROVIDERS',
+] as const;
+
+// Pi --thinking tops out at xhigh, so Garcon's larger modes clamp down.
+export function mapThinkingMode(mode: ThinkingMode): string | undefined {
   switch (mode) {
     case 'none':
       return 'off';
@@ -103,66 +42,14 @@ function mapThinkingMode(mode: ThinkingMode): string | undefined {
       return 'high';
     case 'xhigh':
     case 'max':
+    case 'ultra':
       return 'xhigh';
     default:
       return undefined;
   }
 }
 
-function extensionForMimeType(mimeType: string): string {
-  if (mimeType === 'image/jpeg') return '.jpg';
-  if (mimeType === 'image/gif') return '.gif';
-  if (mimeType === 'image/webp') return '.webp';
-  return '.png';
-}
-
-function parseImageData(data: string): { buffer: Buffer; extension: string } | null {
-  const match = data.match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) return null;
-  return {
-    buffer: Buffer.from(match[2], 'base64'),
-    extension: extensionForMimeType(match[1]),
-  };
-}
-
-async function writeImagesToTempFiles(images: readonly AgentAttachment[] | undefined): Promise<{
-  cleanup?: () => Promise<void>;
-  fileArgs: string[];
-}> {
-  if (!images?.length) return { fileArgs: [] };
-
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-pi-images-'));
-  const fileArgs: string[] = [];
-
-  for (let index = 0; index < images.length; index += 1) {
-    const image = images[index];
-    if (!image) continue;
-    const parsed = parseImageData(image.data);
-    if (!parsed) continue;
-    const safeStem = (image.name || `image-${index + 1}`)
-      .replace(/\.[^.]+$/, '')
-      .replace(/[^a-zA-Z0-9._-]/g, '-')
-      .slice(0, 80) || `image-${index + 1}`;
-    const filePath = path.join(tempDir, `${safeStem}${parsed.extension}`);
-    await fs.writeFile(filePath, parsed.buffer);
-    fileArgs.push(`@${filePath}`);
-  }
-
-  return {
-    cleanup: async () => {
-      await fs.rm(tempDir, { force: true, recursive: true }).catch(() => { });
-    },
-    fileArgs,
-  };
-}
-
-function buildPrompt(command: string, permissionMode: PermissionMode, hasImages: boolean): string {
-  const basePrompt = command.trim() || (hasImages ? 'Please inspect the attached image.' : '');
-  if (permissionMode !== 'plan') return basePrompt;
-  return `${PI_PLAN_PREFIX}\n\n${basePrompt}`;
-}
-
-function requireExplicitPiModel(model: unknown): string {
+export function requireExplicitPiModel(model: unknown): string {
   const normalized = typeof model === 'string' ? model.trim() : '';
   if (!normalized || normalized === 'default') {
     throw new Error('Pi requires an explicit model selection.');
@@ -170,10 +57,21 @@ function requireExplicitPiModel(model: unknown): string {
   return normalized;
 }
 
-function buildPiCliEnv(
+export function buildPiPrompt(
+  command: string,
+  permissionMode: PermissionMode,
+  hasImages: boolean,
+): string {
+  const basePrompt = command.trim() || (hasImages ? 'Please inspect the attached image.' : '');
+  if (permissionMode !== 'plan') return basePrompt;
+  return `${PI_PLAN_PREFIX}\n\n${basePrompt}`;
+}
+
+export function buildPiCliEnv(
   envOverrides?: Readonly<Record<string, string>>,
 ): Record<string, string | undefined> {
   const env = { ...process.env, ...envOverrides };
+  for (const name of PI_NESTED_SESSION_ENV) delete env[name];
   // Disables Pi startup network operations, including package update work.
   env[PI_OFFLINE_ENV] = '1';
   env[PI_SKIP_VERSION_CHECK_ENV] = '1';
@@ -185,56 +83,6 @@ function buildPiCliEnv(
   }
   delete env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV];
   return env;
-}
-
-async function resolveSessionArgument(
-  request: PiResumeRequest,
-  config: PiConfig,
-): Promise<string> {
-  if (request.nativePath && !isArtificialNativePath(request.nativePath)) {
-    try {
-      await fs.access(request.nativePath);
-      return request.nativePath;
-    } catch {
-      // Falls through to session id lookup.
-    }
-  }
-
-  const sessionPath = await findPiSessionFileBySessionId(
-    request.agentSessionId,
-    request.projectPath,
-    config,
-  );
-  return sessionPath || request.agentSessionId;
-}
-
-async function buildPiRun(
-  request: PiStartRequest | PiResumeRequest,
-  config: PiConfig,
-): Promise<BuildPiPromptResult> {
-  const args = ['--mode', 'json'];
-  const configuredSessionDir = resolvePiConfiguredSessionDir(request.projectPath, config);
-  const thinking = mapThinkingMode(request.thinkingMode);
-  const model = requireExplicitPiModel(request.model);
-  const { cleanup, fileArgs } = await writeImagesToTempFiles(request.images);
-  const prompt = buildPrompt(request.command, request.permissionMode, fileArgs.length > 0);
-
-  args.push('--model', model);
-  if (thinking) {
-    args.push('--thinking', thinking);
-  }
-  if (request.permissionMode === 'plan') {
-    args.push('--tools', PI_READ_ONLY_TOOLS.join(','));
-  }
-  if (configuredSessionDir) {
-    args.push('--session-dir', configuredSessionDir);
-  }
-  if ('agentSessionId' in request) {
-    args.push('--session', await resolveSessionArgument(request, config));
-  }
-  args.push(...fileArgs);
-
-  return { args, cleanup, configuredSessionDir, prompt };
 }
 
 async function runPiCommand(
@@ -285,463 +133,9 @@ export async function runSingleQuery(
       : process.cwd();
   const args = ['--mode', 'text', '--no-session', '--no-tools'];
   args.push('--model', model);
-  const thinkingMode = normalizeThinkingMode(options.thinkingMode);
-  if (thinkingMode !== 'none') args.push('--thinking', thinkingMode);
+  const thinking = mapThinkingMode(normalizeThinkingMode(options.thinkingMode));
+  if (thinking) args.push('--thinking', thinking);
   return withSingleQueryControl(options, async (signal) => (
     await runPiCommand(args, config, { cwd, input: prompt, signal })
   ).trim());
-}
-
-function createSession(
-  chatId: string,
-  startedSession: PiSession['startedSession'] = null,
-  eventMetadata: RuntimeEventMetadata = {},
-): PiSession {
-  const now = Date.now();
-  return {
-    aborted: false,
-    chatId,
-    finalized: false,
-    id: `pending-${crypto.randomUUID()}`,
-    isRunning: true,
-    nativePath: null,
-    process: null,
-    resultSeen: false,
-    sessionCreatedEmitted: false,
-    startTime: now,
-    lastActivityAt: now,
-    startedSession,
-    turnResolve: null,
-    eventMetadata,
-  };
-}
-
-function createStartTracker(): PiSession['startedSession'] & { promise: Promise<PiStartedSession> } {
-  let resolveRef: ((value: PiStartedSession) => void) | null = null;
-  let rejectRef: ((error: unknown) => void) | null = null;
-  const promise = new Promise<PiStartedSession>((resolve, reject) => {
-    resolveRef = resolve;
-    rejectRef = reject;
-  });
-  return {
-    promise,
-    reject(error) {
-      rejectRef?.(error);
-    },
-    resolve(value) {
-      resolveRef?.(value);
-    },
-    resolved: false,
-  };
-}
-
-export class PiCliRuntime extends AgentEventEmitterRuntime {
-  readonly #config: PiConfig;
-  readonly #logger: AgentLogger;
-  readonly #models: PiModelReader;
-  #runningSessions = new Map<string, PiSession>();
-  #idlePurger = new IdleSessionPurger<PiSession>({
-    sessions: () => this.#runningSessions.entries(),
-    isRunning: (session) => session.isRunning,
-    lastActivityAt: (session) => session.lastActivityAt,
-    purge: (id, session) => {
-      if (session.process && !session.process.killed) session.process.kill();
-      this.#runningSessions.delete(id);
-    },
-  });
-
-  constructor(options: {
-    readonly config: PiConfig;
-    readonly logger: AgentLogger;
-    readonly models: PiModelReader;
-  }) {
-    super();
-    this.#config = options.config;
-    this.#logger = options.logger;
-    this.#models = options.models;
-  }
-
-  async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
-    return this.#models.getModels();
-  }
-
-  #emitSessionCreated(session: PiSession): void {
-    if (session.sessionCreatedEmitted) return;
-    session.sessionCreatedEmitted = true;
-    this.emitSessionCreated(session.chatId);
-  }
-
-  #activateSession(session: PiSession, header: PiSessionHeader): void {
-    const previousId = session.id;
-    session.id = header.id;
-    session.nativePath = header.timestamp && header.cwd
-      ? piSessionPathFromHeader(header, session.configuredSessionDir)
-      : createArtificialNativePath('pi', header.id);
-
-    if (previousId !== header.id) {
-      this.#runningSessions.delete(previousId);
-      this.#runningSessions.set(header.id, session);
-    }
-
-    this.#emitSessionCreated(session);
-
-    const tracker = session.startedSession;
-    if (tracker && !tracker.resolved) {
-      tracker.resolved = true;
-      tracker.resolve({
-        agentSessionId: header.id,
-        nativePath: session.nativePath,
-      });
-    }
-  }
-
-  #routeEvent(session: PiSession, event: PiCliEvent): void {
-    if (session.finalized) return;
-    const timestamp = new Date().toISOString();
-
-    if (event.type === 'session' && typeof event.id === 'string') {
-      this.#activateSession(session, {
-        type: 'session',
-        id: event.id,
-        timestamp: typeof event.timestamp === 'string' ? event.timestamp : '',
-        cwd: typeof event.cwd === 'string' ? event.cwd : '',
-        ...(typeof event.version === 'number' ? { version: event.version } : {}),
-        ...(typeof event.parentSession === 'string' ? { parentSession: event.parentSession } : {}),
-      });
-      return;
-    }
-
-    if (event.type === 'message_end') {
-      const message = event.message as unknown;
-      const messages = convertPiMessage(message, {
-        includeToolCalls: false,
-        includeToolResults: false,
-        includeUser: false,
-      });
-      if (messages.length > 0) this.emitMessages(session.chatId, messages, session.eventMetadata);
-
-      const stopReason = message && typeof message === 'object'
-        ? (message as Record<string, unknown>).stopReason
-        : null;
-      if (stopReason === 'error') {
-        const errorMessage = message && typeof message === 'object'
-          ? (message as Record<string, unknown>).errorMessage
-          : null;
-        this.emitMessages(session.chatId, [
-          new ErrorMessage(timestamp, typeof errorMessage === 'string' ? errorMessage : 'Pi turn failed.'),
-        ], session.eventMetadata);
-      }
-      return;
-    }
-
-    if (event.type === 'tool_execution_start') {
-      this.emitMessages(session.chatId, [
-        convertPiToolUse(
-          timestamp,
-          typeof event.toolCallId === 'string' ? event.toolCallId : '',
-          typeof event.toolName === 'string' ? event.toolName : 'Unknown',
-          event.args,
-        ),
-      ], session.eventMetadata);
-      return;
-    }
-
-    if (event.type === 'tool_execution_end') {
-      const result = event.result && typeof event.result === 'object'
-        ? event.result as Record<string, unknown>
-        : event.result;
-      this.emitMessages(session.chatId, [
-        new ToolResultMessage(
-          timestamp,
-          typeof event.toolCallId === 'string' ? event.toolCallId : '',
-          normalizeToolResultContent(
-            result && typeof result === 'object' && 'content' in result
-              ? (result as Record<string, unknown>).content
-              : result,
-          ),
-          Boolean(event.isError),
-        ),
-      ], session.eventMetadata);
-      return;
-    }
-
-    if (event.type === 'agent_end') {
-      session.resultSeen = true;
-      if (session.isRunning) {
-        session.isRunning = false;
-        this.emitProcessing(session.chatId, false);
-      }
-      this.emitFinished(session.chatId, 0, session.eventMetadata);
-      this.#finalizeTurn(session, 0);
-    }
-  }
-
-  #parseStdoutLine(session: PiSession, line: string): void {
-    if (!line.trim()) return;
-    try {
-      this.#routeEvent(session, JSON.parse(line) as PiCliEvent);
-    } catch {
-      this.#logger.warn('Pi emitted malformed JSON', {
-        sessionId: session.id,
-        line: line.slice(0, 120),
-      });
-    }
-  }
-
-  async #readStdout(session: PiSession, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
-    if (!proc.stdout) return;
-    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          this.#parseStdoutLine(session, line);
-        }
-      }
-      buffer += decoder.decode();
-      this.#parseStdoutLine(session, buffer);
-    } catch (error) {
-      if (!proc.killed) {
-        this.#logger.error('Pi stdout read failed', {
-          sessionId: session.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    } finally {
-      const exitCode = await proc.exited;
-      if (session.process === proc) session.process = null;
-      this.#finalizeTurn(session, exitCode);
-    }
-  }
-
-  async #pipeStderr(session: PiSession, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
-    if (!proc.stderr) return;
-    const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        for (const line of text.split('\n')) {
-          if (line.trim()) {
-            this.#logger.info('Pi stderr output', {
-              sessionId: session.id,
-              line,
-            });
-          }
-        }
-      }
-    } catch {
-      // Stream closed.
-    }
-  }
-
-  #finalizeTurn(session: PiSession, exitCode?: number): void {
-    if (session.finalized) return;
-    session.finalized = true;
-    session.lastActivityAt = Date.now();
-
-    const wasRunning = session.isRunning;
-    session.isRunning = false;
-    if (wasRunning) this.emitProcessing(session.chatId, false);
-
-    if (session.startedSession && !session.startedSession.resolved) {
-      session.startedSession.resolved = true;
-      session.startedSession.reject(
-        new Error(`Pi process exited before session header${exitCode != null ? ` (code ${exitCode})` : ''}`),
-      );
-    } else if (!session.resultSeen && !session.aborted) {
-      this.emitFailed(
-        session.chatId,
-        `Pi process exited before completion${exitCode != null ? ` (code ${exitCode})` : ''}`,
-        session.eventMetadata,
-      );
-    }
-
-    if (session.cleanup) {
-      void session.cleanup().catch(() => { });
-      session.cleanup = undefined;
-    }
-
-    if (session.id && !session.isRunning) {
-      this.#runningSessions.delete(session.id);
-    }
-
-    const resolve = session.turnResolve;
-    session.turnResolve = null;
-    resolve?.();
-  }
-
-  #spawnPi(
-    session: PiSession,
-    request: PiStartRequest | PiResumeRequest,
-    run: BuildPiPromptResult,
-  ): ReturnType<typeof Bun.spawn> {
-    const spawnOptions: Parameters<typeof Bun.spawn>[1] = {
-      cwd: request.projectPath,
-      env: buildPiCliEnv(request.envOverrides),
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    };
-
-    const proc = Bun.spawn([this.#config.binary(), ...run.args], spawnOptions);
-    session.process = proc;
-    session.cleanup = run.cleanup;
-    session.configuredSessionDir = run.configuredSessionDir;
-    const stdin = proc.stdin;
-    if (!stdin || typeof stdin === 'number') throw new Error('Pi process stdin is unavailable');
-    stdin.write(run.prompt);
-    stdin.end();
-
-    void this.#readStdout(session, proc);
-    void this.#pipeStderr(session, proc);
-
-    return proc;
-  }
-
-  async #rollbackTurnLaunch(session: PiSession): Promise<void> {
-    const wasRunning = session.isRunning;
-    session.aborted = true;
-    session.finalized = true;
-    session.isRunning = false;
-    session.lastActivityAt = Date.now();
-    const proc = session.process;
-    session.process = null;
-    if (proc && !proc.killed) proc.kill();
-    session.turnResolve = null;
-    if (this.#runningSessions.get(session.id) === session) {
-      this.#runningSessions.delete(session.id);
-    }
-    if (wasRunning) this.emitProcessing(session.chatId, false);
-    if (session.cleanup) {
-      await session.cleanup().catch(() => { });
-      session.cleanup = undefined;
-    }
-  }
-
-  #waitForTurnComplete(session: PiSession): Promise<void> {
-    if (!session.isRunning) return Promise.resolve();
-    return new Promise((resolve) => {
-      session.turnResolve = resolve;
-    });
-  }
-
-  #resetSessionForTurn(session: PiSession, chatId: string): void {
-    session.aborted = false;
-    session.chatId = chatId;
-    session.cleanup = undefined;
-    session.configuredSessionDir = undefined;
-    session.finalized = false;
-    session.isRunning = true;
-    session.process = null;
-    session.resultSeen = false;
-    session.startTime = Date.now();
-    session.lastActivityAt = Date.now();
-    session.startedSession = null;
-    session.turnResolve = null;
-  }
-
-  async startSession(request: PiStartRequest): Promise<PiStartedSession> {
-    assertPiExecutionOpen(request);
-    const startedSession = createStartTracker();
-    const session = createSession(
-      request.chatId,
-      startedSession,
-      piEventMetadata(request, 'chat-start'),
-    );
-    this.#runningSessions.set(session.id, session);
-
-    try {
-      const run = await buildPiRun(request, this.#config);
-      markPiExecutionStarted(request);
-      this.emitProcessing(request.chatId, true);
-      this.#spawnPi(session, request, run);
-      request.onAbortable?.();
-      return await startedSession.promise;
-    } catch (error) {
-      await this.#rollbackTurnLaunch(session);
-      throw error;
-    }
-  }
-
-  async runTurn(request: PiResumeRequest): Promise<void> {
-    assertPiExecutionOpen(request);
-    const existingSession = this.#runningSessions.get(request.agentSessionId);
-    if (existingSession?.isRunning) {
-      throw new Error(`Session ${request.agentSessionId} is already running`);
-    }
-
-    const session = existingSession ?? {
-      ...createSession(request.chatId),
-      id: request.agentSessionId,
-      nativePath: request.nativePath ?? null,
-      sessionCreatedEmitted: true,
-    };
-    this.#resetSessionForTurn(session, request.chatId);
-    session.eventMetadata = piEventMetadata(request);
-    session.id = request.agentSessionId;
-    session.nativePath = request.nativePath ?? session.nativePath;
-    session.sessionCreatedEmitted = true;
-    this.#runningSessions.set(session.id, session);
-
-    try {
-      const run = await buildPiRun(request, this.#config);
-      markPiExecutionStarted(request);
-      this.emitProcessing(request.chatId, true);
-      this.#spawnPi(session, request, run);
-      request.onAbortable?.();
-      await this.#waitForTurnComplete(session);
-    } catch (error) {
-      await this.#rollbackTurnLaunch(session);
-      throw error;
-    }
-  }
-
-  abort(agentSessionId: string): boolean {
-    const session = this.#runningSessions.get(agentSessionId);
-    if (!session?.process) return false;
-    session.aborted = true;
-    session.process.kill();
-    this.#finalizeTurn(session, 143);
-    return true;
-  }
-
-  isRunning(agentSessionId: string): boolean {
-    return this.#runningSessions.get(agentSessionId)?.isRunning === true;
-  }
-
-  getRunningSessions(): Array<{ id: string; startedAt: string; status: string }> {
-    return Array.from(this.#runningSessions.values())
-      .filter((session) => session.isRunning && Boolean(session.id))
-      .map((session) => ({
-        id: session.id,
-        startedAt: new Date(session.startTime).toISOString(),
-        status: 'running',
-      }));
-  }
-
-  startPurgeTimer(): void {
-    this.#idlePurger.start();
-  }
-
-  shutdown(): void {
-    this.#idlePurger.stop();
-    for (const session of this.#runningSessions.values()) {
-      session.aborted = true;
-      if (session.process && !session.process.killed) {
-        session.process.kill();
-      }
-      this.#finalizeTurn(session, 143);
-    }
-    this.#runningSessions.clear();
-  }
 }

@@ -1,5 +1,10 @@
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
+  AgentSteerRequest,
+  AgentSteerResult,
+  AgentSteerTarget,
+} from '@garcon/server-agent-interface';
+import type {
   PiResumeRequest,
   PiStartedSession,
   PiStartRequest,
@@ -11,8 +16,10 @@ export interface PiRuntime {
   abort(agentSessionId: string): boolean | Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
+  captureSteerTarget(agentSessionId: string): AgentSteerTarget | null;
+  steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
   startPurgeTimer(): void;
-  shutdown(): void;
+  shutdown(): Promise<void>;
   onMessages(callback: Parameters<AgentEventEmitterRuntime['onMessages']>[0]): void;
   onProcessing(callback: Parameters<AgentEventEmitterRuntime['onProcessing']>[0]): void;
   onSessionCreated(callback: Parameters<AgentEventEmitterRuntime['onSessionCreated']>[0]): void;
@@ -34,6 +41,7 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
   readonly #pendingOperations = new Set<PendingRuntimeOperation>();
   #purgeTimerRequested = false;
   #shutdownRequested = false;
+  #shutdownPromise: Promise<void> | null = null;
 
   constructor(loadRuntime: PiRuntimeLoader) {
     super();
@@ -60,6 +68,15 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
     return this.#runtime?.isRunning(agentSessionId) ?? false;
   }
 
+  // Avoids loading Pi when no live process can exist yet.
+  captureSteerTarget(agentSessionId: string): AgentSteerTarget | null {
+    return this.#runtime?.captureSteerTarget(agentSessionId) ?? null;
+  }
+
+  steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
+    return this.#runAfterLoad(request.agentSessionId, (runtime) => runtime.steer(request));
+  }
+
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
     return this.#runtime?.getRunningSessions() ?? [];
   }
@@ -69,10 +86,21 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
     this.#runtime?.startPurgeTimer();
   }
 
-  shutdown(): void {
+  shutdown(): Promise<void> {
+    this.#shutdownPromise ??= this.#shutdown();
+    return this.#shutdownPromise;
+  }
+
+  async #shutdown(): Promise<void> {
     this.#shutdownRequested = true;
     this.#cancelPendingOperations();
-    this.#runtime?.shutdown();
+    if (this.#runtime) {
+      await this.#runtime.shutdown();
+      return;
+    }
+    if (!this.#runtimePromise) return;
+    const runtime = await this.#runtimePromise.catch(() => null);
+    await runtime?.shutdown();
   }
 
   async #runAfterLoad<T>(
@@ -129,7 +157,6 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
       );
       runtime.onFailed((chatId, message, metadata) => this.emitFailed(chatId, message, metadata));
       if (this.#purgeTimerRequested) runtime.startPurgeTimer();
-      if (this.#shutdownRequested) runtime.shutdown();
       return runtime;
     });
 
