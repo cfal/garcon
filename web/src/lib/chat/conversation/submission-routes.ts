@@ -32,7 +32,8 @@ export interface SubmissionContext {
 	images: ChatImage[];
 	previousText: string;
 	previousImages: File[];
-	restoreComposerOnFailure: boolean;
+	ownsComposer: boolean;
+	composerRevisionAfterClear: number | null;
 }
 
 interface ExecutionModelSelection {
@@ -50,7 +51,7 @@ export async function submitQueueRoute(
 ): Promise<ConversationSubmissionOutcome> {
 	const sequence = queue.beginSubmission(context.chatId);
 	// Clears before awaiting the network so typing during the request survives.
-	if (context.restoreComposerOnFailure) deps.composerState.clearAfterSubmit(context.chatId);
+	clearOwnedComposer(deps, context);
 	const submission = acceptedInputs.enqueue({ chatId: context.chatId, content: context.content });
 	try {
 		const result = await submission.submit();
@@ -61,7 +62,7 @@ export async function submitQueueRoute(
 			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_queue_message({
 				detail: errorDetail(failure),
-				content: context.restoreComposerOnFailure ? context.previousText : context.text,
+				content: context.ownsComposer ? context.previousText : context.text,
 			}),
 			restoreRejected: () => queue.recordSubmissionFailure(context.chatId, {
 				sequence,
@@ -82,7 +83,7 @@ export async function submitGoalControlRoute(
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
 	const sequence = queue.beginSubmission(context.chatId);
-	if (context.restoreComposerOnFailure) deps.composerState.clearAfterSubmit(context.chatId);
+	clearOwnedComposer(deps, context);
 	const submission = acceptedInputs.goalControl({
 		chatId: context.chatId,
 		content: context.content,
@@ -96,7 +97,7 @@ export async function submitGoalControlRoute(
 			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_queue_message({
 				detail: errorDetail(failure),
-				content: context.restoreComposerOnFailure ? context.previousText : context.text,
+				content: context.ownsComposer ? context.previousText : context.text,
 			}),
 			restoreRejected: () => queue.recordSubmissionFailure(context.chatId, {
 				sequence,
@@ -129,11 +130,7 @@ export async function submitSteerRoute(
 		),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
-	let clearedComposerRevision: number | null = null;
-	if (context.restoreComposerOnFailure) {
-		deps.composerState.clearAfterSubmit(context.chatId);
-		clearedComposerRevision = deps.composerState.contentRevision;
-	}
+	const clearedComposerRevision = clearOwnedComposer(deps, context);
 	try {
 		await submission.submit();
 		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
@@ -178,7 +175,12 @@ export async function submitDraftRoute(
 		images: context.images.length > 0 ? context.images : undefined,
 		tags: startup?.tags,
 	}));
-	beginOptimisticInput(deps, context, submission.clientRequestId, submission.clientMessageId);
+	const composerRevisionAfterClear = beginOptimisticInput(
+		deps,
+		context,
+		submission.clientRequestId,
+		submission.clientMessageId,
+	);
 	deps.startupCoordinator.beginLocalStartup(chatId);
 	try {
 		const response = await submission.submit();
@@ -192,6 +194,7 @@ export async function submitDraftRoute(
 		deps.startupCoordinator.completeStartup(chatId);
 		return settleSubmissionFailure(deps, context, error, {
 			clientRequestId: submission.clientRequestId,
+			composerRevisionAfterClear,
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
 			onRejected: () => {
@@ -220,7 +223,12 @@ export async function submitRunRoute(
 		agentSettings: deps.agentState.agentSettings,
 		...selection,
 	});
-	beginOptimisticInput(deps, context, submission.clientRequestId, submission.clientMessageId);
+	const composerRevisionAfterClear = beginOptimisticInput(
+		deps,
+		context,
+		submission.clientRequestId,
+		submission.clientMessageId,
+	);
 	try {
 		await submission.submit();
 		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
@@ -229,6 +237,7 @@ export async function submitRunRoute(
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {
 			clientRequestId: submission.clientRequestId,
+			composerRevisionAfterClear,
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_send_message({ detail: errorDetail(failure) }),
 			clearPendingOnAdmissionConflict: true,
@@ -244,13 +253,21 @@ function beginOptimisticInput(
 	context: SubmissionContext,
 	clientRequestId: string,
 	clientMessageId: string,
-): void {
+): number | null {
 	deps.chatState.upsertPendingUserInput(
 		pendingUserInput(context.chatId, context.text, context.images, clientRequestId, clientMessageId),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
-	if (context.restoreComposerOnFailure) deps.composerState.clearAfterSubmit(context.chatId);
+	const composerRevisionAfterClear = clearOwnedComposer(deps, context);
 	deps.composerState.isSubmitting = true;
+	return composerRevisionAfterClear;
+}
+
+function clearOwnedComposer(deps: RouteDeps, context: SubmissionContext): number | null {
+	if (!context.ownsComposer) return null;
+	if (context.composerRevisionAfterClear !== null) return context.composerRevisionAfterClear;
+	deps.composerState.clearAfterSubmit(context.chatId);
+	return deps.composerState.contentRevision;
 }
 
 function restoreSteerComposer(
@@ -259,7 +276,7 @@ function restoreSteerComposer(
 	clearedComposerRevision: number | null,
 ): void {
 	if (
-		!context.restoreComposerOnFailure
+		!context.ownsComposer
 		|| deps.sessions.selectedChatId !== context.chatId
 		|| deps.composerState.contentRevision !== clearedComposerRevision
 		|| deps.composerState.inputText !== ''

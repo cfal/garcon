@@ -362,13 +362,16 @@
 			},
 		},
 		reloadTranscript: (chatId) => reloadChatFromNative(ws, chatState, chatId),
-		requestProcessingSnapshot: () => ws.requestProcessingSnapshot(),
+		requestProcessingSnapshot: (source) => ws.requestProcessingSnapshot(source),
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.setPinnedToBottom(v);
 		},
 		setInitialBottomRestorePending: (chatId) => scroll.prepareInitialBottomRestore(chatId),
 		scrollToBottom: scrollToBottomAndFill,
 	});
+	const directAdmissionPending = $derived(
+		controller.isDirectAdmissionPending(sessions.selectedChatId),
+	);
 	const userMessageNavigator = new UserMessageNavigatorController({
 		transcript: chatState,
 		getSelectedChatId: () => sessions.selectedChatId,
@@ -718,6 +721,7 @@
 
 	<PromptComposer
 		{isVisible}
+		{directAdmissionPending}
 		onsubmit={onSubmit}
 		onModelChange={(next) => controller.handleModelSelectionChange(next)}
 		onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}

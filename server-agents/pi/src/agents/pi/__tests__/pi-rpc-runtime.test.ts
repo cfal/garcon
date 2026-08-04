@@ -40,6 +40,8 @@ function createFakePiProcess(options = {}) {
       ?? path.join(tempRoot, 'sessions', 'pi-session-1.jsonl'),
     modelProvider: options.modelProvider ?? 'github-copilot',
     modelId: options.modelId ?? 'gpt-5.4',
+    modelReasoning: options.modelReasoning ?? true,
+    thinkingLevelMap: options.thinkingLevelMap ?? { xhigh: 'xhigh' },
     thinkingLevel: options.thinkingLevel ?? 'off',
     steering: [],
   };
@@ -136,7 +138,12 @@ function createFakePiProcess(options = {}) {
             sessionFile: state.sessionFile,
             steeringMode: 'all',
             thinkingLevel: state.thinkingLevel,
-            model: { provider: state.modelProvider, id: state.modelId },
+            model: {
+              provider: state.modelProvider,
+              id: state.modelId,
+              reasoning: state.modelReasoning,
+              thinkingLevelMap: state.thinkingLevelMap,
+            },
           },
         });
         return;
@@ -322,10 +329,11 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('scrubs nested Pi session environment and keeps the offline flags', async () => {
+  it('scrubs nested Pi session environment and preserves extension configuration', async () => {
     process.env.PI_SESSION_FILE = '/home/someone/session.jsonl';
     process.env.PI_SESSION_ID = 'outer-session';
     process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, 'sessions');
+    process.env.PI_MODELS_DEV_OVERRIDE_PROVIDERS = 'all';
     process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = '/tmp/embedded-pi';
     process.env.PI_PACKAGE_DIR = '/tmp/embedded-pi';
     const runtime = createRuntime();
@@ -340,6 +348,7 @@ describe('PiRpcRuntime', () => {
     expect(env.PI_OFFLINE).toBe('1');
     expect(env.PI_SKIP_VERSION_CHECK).toBe('1');
     expect(env.PI_TELEMETRY).toBe('0');
+    expect(env.PI_MODELS_DEV_OVERRIDE_PROVIDERS).toBe('all');
     await runtime.shutdown();
   });
 
@@ -349,6 +358,25 @@ describe('PiRpcRuntime', () => {
     await expect(runtime.startSession(baseStartRequest())).rejects.toThrow(
       /resolved model/,
     );
+    await runtime.shutdown();
+  });
+
+  it('accepts a requested thinking level that Pi clamps for the resolved model', async () => {
+    spawnOptions.push({
+      modelProvider: 'fireworks',
+      modelId: 'accounts/fireworks/models/kimi-k3',
+      thinkingLevel: 'minimal',
+      thinkingLevelMap: { off: null, minimal: 'low' },
+    });
+    const runtime = createRuntime();
+    const started = await runtime.startSession(baseStartRequest({
+      model: 'fireworks/accounts/fireworks/models/kimi-k3',
+      thinkingMode: 'none',
+    }));
+
+    expect(started.agentSessionId).toBe('pi-session-1');
+    fakes[0].pushEvent({ type: 'agent_settled' });
+    await settleIo();
     await runtime.shutdown();
   });
 

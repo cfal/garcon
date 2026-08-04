@@ -221,7 +221,12 @@ describe('ChatProcessingReconciler', () => {
 		}
 	});
 
-	it.each(['heartbeat', 'visibility', 'stop-probe'] satisfies ChatProcessingSnapshotSource[])(
+	it.each([
+		'heartbeat',
+		'visibility',
+		'stop-probe',
+		'admission',
+	] satisfies ChatProcessingSnapshotSource[])(
 		'attributes %s snapshot repairs without logging chat IDs',
 		(source) => {
 			const socket = makeConnection();

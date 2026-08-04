@@ -95,6 +95,7 @@
 		quickCommitError?: string | null;
 		quickCommitBranchSelector?: GitQuickBranchSelectorControls | null;
 		onQuickCommit?: (() => void) | null;
+		directAdmissionPending?: boolean;
 		// False when the composer is mounted but hidden (e.g. the Git tab is
 		// active). Focus requests must not be consumed while hidden, since
 		// focusing a display:none textarea is a silent no-op.
@@ -114,6 +115,7 @@
 		quickCommitError = null,
 		quickCommitBranchSelector = null,
 		onQuickCommit = null,
+		directAdmissionPending = false,
 		isVisible = true,
 	}: Props = $props();
 
@@ -614,7 +616,7 @@
 	const isDisabled = $derived(isDraftStartupSubmitting);
 	const canSubmit = $derived(
 		canSubmitComposer(
-			isDisabled || snippetExpansion.pending,
+			isDisabled || directAdmissionPending || snippetExpansion.pending,
 			composerState.inputText,
 			composerState.images.length,
 		),

@@ -51,6 +51,7 @@
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
+		directAdmissionPending?: boolean;
 		onsubmit?: () => void;
 		onAbort?: () => void;
 		onQuickCommit?: () => void;
@@ -74,6 +75,7 @@
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
+		directAdmissionPending = false,
 		onsubmit = () => {},
 		onAbort = () => {},
 		onQuickCommit = () => {},
@@ -325,6 +327,7 @@
 	{quickCommitTrayVisible}
 	{quickCommitRefreshing}
 	{quickCommitSummary}
+	{directAdmissionPending}
 	{onAbort}
 	{onQuickCommit}
 />

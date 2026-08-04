@@ -478,6 +478,32 @@ export class SpaDriver {
   }
 
   async clickResponsiveAction(name: string): Promise<void> {
+    try {
+      await this.#page.waitForFunction(
+        (expected) => [...document.querySelectorAll<HTMLElement>(
+          '[data-responsive-surface-actions]',
+        )].some((root) => {
+          const hasMeasuredAction = [...root.querySelectorAll<HTMLButtonElement>(
+            '[data-surface-action-measure]',
+          )].some((button) =>
+            (button.getAttribute('aria-label') || button.textContent?.trim()) === expected);
+          if (!hasMeasuredAction) return false;
+
+          const hasVisibleAction = [...root.querySelectorAll<HTMLButtonElement>(
+            '[data-surface-action-id]',
+          )].some((button) =>
+            (button.getAttribute('aria-label') || button.textContent?.trim()) === expected);
+          return hasVisibleAction
+            || root.querySelector('[data-responsive-surface-menu-trigger]') !== null;
+        }),
+        { timeout: 20_000 },
+        name,
+      );
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
+      throw new Error(`Missing responsive action: ${name}`, { cause: error });
+    }
+
     const result = await this.#page.evaluate((expected) => {
       const roots = [...document.querySelectorAll<HTMLElement>('[data-responsive-surface-actions]')];
       const root = roots.find((element) =>
@@ -741,6 +767,7 @@ export class SpaDriver {
       if (button.disabled || button.getAttribute('aria-disabled') === 'true') {
         throw new Error(`Move ${direction} is disabled for queued message: ${content}`);
       }
+      button.focus();
       button.click();
     }, { content, direction });
   }

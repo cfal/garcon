@@ -58,7 +58,8 @@ export interface DrainCursor {
 	current: number;
 }
 
-export type ChatProcessingSnapshotSource = 'heartbeat' | 'visibility' | 'stop-probe' | 'reconnect';
+export type ChatProcessingSnapshotSource =
+	'heartbeat' | 'visibility' | 'stop-probe' | 'admission' | 'reconnect';
 
 export interface WsMessageContext {
 	readonly processingSnapshotSource?: ChatProcessingSnapshotSource;

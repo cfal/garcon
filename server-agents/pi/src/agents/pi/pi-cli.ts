@@ -1,5 +1,6 @@
 import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 import type { PiConfig } from '../../config.js';
 
 const PI_OFFLINE_ENV = 'PI_OFFLINE';
@@ -26,11 +27,10 @@ const PI_NESTED_SESSION_ENV = [
   'PI_MODEL',
   'PI_REASONING_LEVEL',
   'PI_CODING_AGENT_SESSION_DIR',
-  'PI_MODELS_DEV_OVERRIDE_PROVIDERS',
 ] as const;
 
 // Pi --thinking tops out at xhigh, so Garcon's larger modes clamp down.
-export function mapThinkingMode(mode: ThinkingMode): string | undefined {
+export function mapThinkingMode(mode: ThinkingMode): ModelThinkingLevel | undefined {
   switch (mode) {
     case 'none':
       return 'off';

@@ -19,6 +19,9 @@ import type { IntegrationDirectories } from './integration-fixture.js';
 export const PI_TEST_PROVIDER = 'garcon-fake';
 export const PI_TEST_MODEL_ID = 'fake-model';
 export const PI_TEST_MODEL = `${PI_TEST_PROVIDER}/${PI_TEST_MODEL_ID}`;
+export const PI_TEST_CLAMPED_THINKING_MODEL_ID = 'fake-model-without-off';
+export const PI_TEST_CLAMPED_THINKING_MODEL =
+  `${PI_TEST_PROVIDER}/${PI_TEST_CLAMPED_THINKING_MODEL_ID}`;
 export const PI_TEST_THINKING_MODE = 'none';
 
 const SYSTEM_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
@@ -65,6 +68,15 @@ export function startScriptedPiTestEnvironment(): ScriptedPiTestEnvironment {
               id: PI_TEST_MODEL_ID,
               name: 'Garcon Fake Model',
               reasoning: false,
+              input: ['text'],
+              contextWindow: 128000,
+              maxTokens: 8192,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            }, {
+              id: PI_TEST_CLAMPED_THINKING_MODEL_ID,
+              name: 'Garcon Fake Model Without Off',
+              reasoning: true,
+              thinkingLevelMap: { off: null, minimal: 'low' },
               input: ['text'],
               contextWindow: 128000,
               maxTokens: 8192,

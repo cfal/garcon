@@ -162,6 +162,34 @@ describe('PromptComposer focus', () => {
 		}
 	});
 
+	it('keeps the next draft editable but blocks sending during direct admission', async () => {
+		const onsubmit = vi.fn();
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-admitting',
+			selectedStatus: 'running',
+			directAdmissionPending: true,
+			onsubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'queue this next' } });
+
+		expect(textarea.disabled).toBe(false);
+		expect(
+			(screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onsubmit).not.toHaveBeenCalled();
+
+		await rerender({
+			directAdmissionPending: false,
+			selectedIsProcessing: true,
+		});
+		const queueButton = screen.getByRole('button', { name: 'Queue message' }) as HTMLButtonElement;
+		expect(queueButton.disabled).toBe(false);
+		await fireEvent.click(queueButton);
+		expect(onsubmit).toHaveBeenCalledOnce();
+	});
+
 	it('retries app-shell focus requests after the selected chat becomes enabled', async () => {
 		const outsideButton = document.createElement('button');
 		outsideButton.dataset.testid = 'outside-focus';
