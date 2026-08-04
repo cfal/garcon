@@ -216,6 +216,96 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
 	});
 
+	it('prefetches earlier history one viewport before the top edge', async () => {
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const { controller } = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 350 },
+		});
+
+		controller.noteUserScrollIntent('earlier');
+		controller.handleScroll();
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+	});
+
+	it('does not prefetch earlier history outside the viewport-ahead zone', () => {
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const { controller } = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 401 },
+		});
+
+		controller.noteUserScrollIntent('earlier');
+		controller.handleScroll();
+
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
+	it('prefetches later history without widening the live-end repin zone', async () => {
+		const loadLaterPage = vi.fn(async () => 'exhausted' as const);
+		const viewport = fakeViewport({
+			isAtEnd: vi.fn((threshold = 0) => threshold >= 400),
+		});
+		const { controller, state } = controllerFixture({
+			viewport,
+			state: {
+				canLoadLater: true,
+				hasLaterMessages: true,
+				isUserScrolledUp: true,
+				loadLaterPage,
+			},
+			scroller: { clientHeight: 400, scrollTop: 1_000 },
+		});
+		controller.setPinnedToBottom(false);
+
+		controller.noteUserScrollIntent('later');
+		controller.handleScroll();
+
+		await vi.waitFor(() => expect(loadLaterPage).toHaveBeenCalledOnce());
+		expect(viewport.isAtEnd).toHaveBeenCalledWith(50);
+		expect(viewport.isAtEnd).toHaveBeenCalledWith(400);
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+		expect(controller.isPinnedToBottom).toBe(false);
+		expect(state.isUserScrolledUp).toBe(true);
+	});
+
+	it('requires fresh directional intent for viewport-ahead prefetching', () => {
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const { controller } = controllerFixture({
+			state: { canLoadEarlier: true, isUserScrolledUp: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 350 },
+		});
+		controller.setPinnedToBottom(false);
+
+		controller.handleScroll();
+
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
+	it('rearms a completed page boundary only after leaving the prefetch zone', async () => {
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 350 },
+		});
+
+		await expect(fixture.controller.requestPage('earlier', 'button')).resolves.toBe('exhausted');
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.controller.handleScroll();
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+
+		fixture.scroller.scrollTop = 500;
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+		fixture.scroller.scrollTop = 350;
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.controller.handleScroll();
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
+	});
+
 	it('detaches on fresh upward intent inside the later threshold', () => {
 		const viewport = fakeViewport({ isAtEnd: vi.fn(() => true) });
 		const { controller, state } = controllerFixture({ viewport });
@@ -710,7 +800,29 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPreparingInitialScroll).toBe(false);
 	});
 
-	it('completes restoration after the first settled end even when older rows remain', () => {
+	it('reveals the first settled end while restoring each staged chat-switch batch', () => {
+		let hasInitialMessagesToReveal = true;
+		const { controller, viewport, state } = controllerFixture();
+		Object.defineProperty(state, 'hasInitialMessagesToReveal', {
+			configurable: true,
+			get: () => hasInitialMessagesToReveal,
+		});
+		controller.prepareInitialBottomRestore('chat-1');
+		controller.reconcileInitialBottomRestore(true);
+		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
+		controller.completeInitialBottomRestore();
+		expect(controller.isPreparingInitialScroll).toBe(false);
+
+		controller.reconcileInitialBottomRestore(true);
+		expect(viewport.restoreInitialEnd).toHaveBeenCalledTimes(2);
+
+		hasInitialMessagesToReveal = false;
+		controller.completeInitialBottomRestore();
+		controller.reconcileInitialBottomRestore(true);
+		expect(viewport.restoreInitialEnd).toHaveBeenCalledTimes(2);
+	});
+
+	it('cancels staged chat-switch restoration when the user scrolls', () => {
 		const { controller, viewport, state } = controllerFixture();
 		Object.defineProperty(state, 'hasInitialMessagesToReveal', {
 			configurable: true,
@@ -718,10 +830,11 @@ describe('ConversationScrollController', () => {
 		});
 		controller.prepareInitialBottomRestore('chat-1');
 		controller.reconcileInitialBottomRestore(true);
-		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
 		controller.completeInitialBottomRestore();
-		expect(controller.isPreparingInitialScroll).toBe(false);
+
+		controller.noteUserScrollIntent('earlier');
 		controller.reconcileInitialBottomRestore(true);
+
 		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
 	});
 

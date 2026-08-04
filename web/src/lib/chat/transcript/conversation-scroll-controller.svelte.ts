@@ -12,8 +12,13 @@ import type {
 } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
 const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
-const PAGE_BOUNDARY_THRESHOLD_PX = 100;
-const LATER_BOUNDARY_THRESHOLD_PX = 50;
+const MIN_PAGE_PREFETCH_DISTANCE_PX = 100;
+const LIVE_END_REPIN_THRESHOLD_PX = 50;
+
+// Keeps one viewport buffered while preserving the prior boundary distance on short surfaces.
+function pagePrefetchDistance(viewportHeight: number): number {
+	return Math.max(MIN_PAGE_PREFETCH_DISTANCE_PX, viewportHeight);
+}
 
 type PageRequestReason = 'scroll' | 'button';
 type WindowNavigationResult = 'settled' | 'committed-unsettled' | 'invalidated';
@@ -63,6 +68,7 @@ export class ConversationScrollController {
 	#refillViewportAfterCurrentFill = false;
 	#isViewportVisible = true;
 	#initialBottomRestoreChatId = $state<string | null>(null);
+	#initialBottomPaintChatId = $state<string | null>(null);
 	#userScrollIntent: UserScrollIntent = { epoch: 0, direction: null, receivedAt: 0 };
 	#consumedIntentEpoch: Record<TranscriptPageDirection, number> = { earlier: 0, later: 0 };
 	#boundaryArmed: Record<TranscriptPageDirection, boolean> = { earlier: true, later: true };
@@ -76,12 +82,12 @@ export class ConversationScrollController {
 	constructor(private deps: ScrollControllerDeps) {}
 
 	isNearBottom(): boolean {
-		return this.deps.getViewport()?.isAtEnd(LATER_BOUNDARY_THRESHOLD_PX) ?? false;
+		return this.deps.getViewport()?.isAtEnd(LIVE_END_REPIN_THRESHOLD_PX) ?? false;
 	}
 
 	get isPreparingInitialScroll(): boolean {
 		return (
-			this.#initialBottomRestoreChatId === this.deps.sessions.selectedChatId &&
+			this.#initialBottomPaintChatId === this.deps.sessions.selectedChatId &&
 			this.deps.chatState.displayMessageCount > 0 &&
 			!this.deps.chatState.isUserScrolledUp
 		);
@@ -131,6 +137,7 @@ export class ConversationScrollController {
 	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
 		this.deps.getViewport()?.cancelForUserIntent();
 		this.#cancelViewportOperations();
+		this.#clearInitialBottomRestore();
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
 		this.#userScrollIntent = {
 			epoch: this.#userScrollIntent.epoch + 1,
@@ -143,11 +150,14 @@ export class ConversationScrollController {
 		this.#cancelViewportOperations();
 		this.#resetPagingContext();
 		this.#initialBottomRestoreChatId = chatId;
+		this.#initialBottomPaintChatId = chatId;
 	}
 
 	completeInitialBottomRestore(): void {
 		if (this.#initialBottomRestoreChatId !== this.deps.sessions.selectedChatId) return;
 		if (this.deps.chatState.displayMessageCount === 0) return;
+		this.#initialBottomPaintChatId = null;
+		if (this.deps.chatState.hasInitialMessagesToReveal) return;
 		this.#initialBottomRestoreChatId = null;
 	}
 
@@ -160,10 +170,15 @@ export class ConversationScrollController {
 			this.deps.chatState.loadStatus === 'error' ||
 			(!this.deps.chatState.isLoadingMessages && this.deps.chatState.displayMessageCount === 0)
 		) {
-			this.#initialBottomRestoreChatId = null;
+			this.#clearInitialBottomRestore();
 			return;
 		}
 		this.deps.getViewport()?.restoreInitialEnd();
+	}
+
+	#clearInitialBottomRestore(): void {
+		this.#initialBottomRestoreChatId = null;
+		this.#initialBottomPaintChatId = null;
 	}
 
 	async scrollToTop(): Promise<void> {
@@ -215,8 +230,8 @@ export class ConversationScrollController {
 			return;
 		}
 
-		this.#handleBoundaryProximity('earlier', node.scrollTop < PAGE_BOUNDARY_THRESHOLD_PX);
-		this.#handleBoundaryProximity('later', nearBottom);
+		this.#handleBoundaryProximity('earlier', this.#isNearPageBoundary('earlier'));
+		this.#handleBoundaryProximity('later', this.#isNearPageBoundary('later'));
 	}
 
 	async requestPage(
@@ -558,15 +573,16 @@ export class ConversationScrollController {
 	}
 
 	#syncBoundaryLatch(direction: TranscriptPageDirection): void {
-		if (!this.#isNearBoundary(direction)) this.#boundaryArmed[direction] = true;
+		if (!this.#isNearPageBoundary(direction)) this.#boundaryArmed[direction] = true;
 	}
 
-	#isNearBoundary(direction: TranscriptPageDirection): boolean {
+	#isNearPageBoundary(direction: TranscriptPageDirection): boolean {
 		const scroller = this.deps.getScrollContainer();
-		if (!scroller) return false;
+		if (!scroller || scroller.clientHeight <= 0) return false;
+		const distance = pagePrefetchDistance(scroller.clientHeight);
 		return direction === 'earlier'
-			? scroller.scrollTop < PAGE_BOUNDARY_THRESHOLD_PX
-			: this.isNearBottom();
+			? scroller.scrollTop <= distance
+			: (this.deps.getViewport()?.isAtEnd(distance) ?? false);
 	}
 
 	#isCurrentViewportOperation(chatId: string, operationEpoch: number): boolean {

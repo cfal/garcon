@@ -38,13 +38,11 @@ const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
 const HIDDEN_ANCHOR_FALLBACK_RADIUS = 8;
-
 interface ConversationVirtualAnchor {
 	key: string;
 	offsetWithinItem: number;
 	fallbackKeys: readonly string[];
 }
-
 interface ConversationFeedVirtualControllerOptions {
 	get model(): ConversationVirtualFeedModel;
 	get geometry(): ConversationVirtualGeometrySnapshot;
@@ -56,7 +54,6 @@ interface ConversationFeedVirtualControllerOptions {
 	get retention(): ConversationFeedRetentionState;
 	onInitialEndRestored?(): void;
 }
-
 function nextAnimationFrame(): Promise<void> {
 	return new Promise((resolve) => {
 		if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
@@ -67,7 +64,6 @@ function nextAnimationFrame(): Promise<void> {
 function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
 	return left.length === right.length && left.every((value, index) => value === right[index]);
 }
-
 export class ConversationFeedVirtualController implements ConversationViewportPort {
 	readonly virtualizer: Readable<SvelteVirtualizer<HTMLElement, HTMLDivElement>>;
 
@@ -87,9 +83,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	// Structural publications and visibility changes advance the layout token, invalidating deferred
 	// anchor, measurement, and end restores. Explicit targets advance the target token; user intent,
 	// replacement, teardown, and newer targets cancel it. Programmatic epochs supersede TanStack scroll
-	// work, while user-intent epochs guard hidden-offset fallbacks. The active-target count suppresses
-	// passive geometry writes. Pending end, reading-anchor, hidden-anchor, and measure-on-show state is
-	// consumed by its matching restore and cleared by replacement, user intent, or teardown.
+	// work, while the initial-end epoch cancels queued post-commit restores and user-intent epochs guard
+	// hidden-offset fallbacks. The active-target count suppresses passive geometry writes. Pending end,
+	// reading-anchor, hidden-anchor, and measure-on-show state is consumed by its matching restore and
+	// cleared by replacement, visibility changes, user intent, or teardown.
 	#layoutMutationToken = 0;
 	#targetToken = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
@@ -99,6 +96,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#pendingEndScroll = false;
 	#programmaticScrollActive = false;
 	#programmaticScrollEpoch = 0;
+	#initialEndRestoreEpoch = 0;
 	#activeTargetScrolls = 0;
 	#userIntentEpoch = 0;
 	#scrollMargin = 0;
@@ -167,6 +165,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#virtualScrollElement = null;
@@ -179,6 +178,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	prepareForHide(): void {
 		if (this.#destroyed || !this.#configuredVisible) return;
+		this.#initialEndRestoreEpoch += 1;
 		if (!this.options.pinned) {
 			this.#hiddenAnchor = this.#captureVirtualAnchor(true);
 			this.#hiddenScrollOffset = this.options.viewport?.scrollTop ?? null;
@@ -208,6 +208,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	scrollToStart(): void {
 		if (!this.isReady()) return;
+		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
@@ -220,6 +221,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#pendingEndScroll = true;
 			return;
 		}
+		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		if (this.#measureOnShow) {
@@ -229,7 +231,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#hiddenAnchor = null;
 		this.#pendingEndScroll = false;
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
-		this.#instance().scrollToEnd({ behavior: options.behavior ?? 'auto' });
+		this.#scrollToPhysicalEnd(options.behavior ?? 'auto');
 		void this.#completeEndRestore(this.#layoutMutationToken, operationEpoch);
 	}
 
@@ -239,12 +241,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return;
 		}
 		this.#cancelTargetScroll();
-		const operationEpoch = this.#beginProgrammaticScrollOperation();
-		void this.#restoreInitialEndAfterCommit(operationEpoch);
+		const restoreEpoch = ++this.#initialEndRestoreEpoch;
+		const surfaceIdentity = this.options.geometry.surfaceIdentity;
+		void this.#restoreInitialEndAfterCommit(restoreEpoch, surfaceIdentity);
 	}
 
 	scrollBy(delta: number): void {
 		if (!this.isReady()) return;
+		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
@@ -307,7 +311,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					viewportHeight: viewport.clientHeight,
 				});
 				if (classification) {
-					if (restoreEnd) instance.scrollToEnd({ behavior: 'auto' });
+					if (restoreEnd) this.#scrollToPhysicalEnd('auto');
 					else if (
 						readingAnchor &&
 						!(await this.#restoreVirtualAnchor(readingAnchor, false, false))
@@ -325,7 +329,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				this.#isCurrentProgrammaticScrollOperation(operationEpoch) &&
 				this.isReady()
 			) {
-				this.#instance().scrollToEnd({ behavior: 'auto' });
+				this.#scrollToPhysicalEnd('auto');
 			} else if (readingAnchor) await this.#restoreVirtualAnchor(readingAnchor, false, false);
 			return 'unsettled';
 		} finally {
@@ -367,6 +371,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	cancelForUserIntent(): void {
 		this.#userIntentEpoch += 1;
+		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		const shouldSupersedeCore = this.#programmaticScrollActive;
 		const viewport = this.options.viewport;
@@ -382,6 +387,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		options: { align?: 'center' | 'start' | 'end' } = {},
 	): Promise<ConversationViewportTargetResult> {
 		if (!this.isReady()) return 'not-ready';
+		this.#initialEndRestoreEpoch += 1;
 		this.#activeTargetScrolls += 1;
 		try {
 			this.#cancelTargetScroll();
@@ -484,6 +490,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		});
 		const restorePolicyEnd =
 			snapshot.endBehavior === 'restore-if-pinned' && untrack(() => this.options.pinned);
+		const resetUserIntentEpoch = this.#userIntentEpoch;
 		// Core 3.17.7 can accept a connected stale row after count shrink. Measurement resets remain
 		// required until https://github.com/TanStack/virtual/commit/d2cf98beea1696c7187c06b57c9e724d1957963c ships in the pinned release.
 		const resetMeasurements =
@@ -557,15 +564,19 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 		if (this.#activeTargetScrolls > 0) {
 			if (resetMeasurements) {
-				void this.#resetMeasurementsAfterCommit(layoutToken, snapshot, false);
+				void this.#resetMeasurementsAfterCommit(snapshot, false, resetUserIntentEpoch);
 			}
 			return;
 		}
 
-		if (resetMeasurements && preservationAnchor) {
+		// A concurrent viewport resize can request the same pinned-end restore before the scale reset
+		// commits. The required cache reset therefore validates semantic ownership, not the layout token.
+		if (resetMeasurements && restorePolicyEnd) {
+			void this.#resetMeasurementsAfterCommit(snapshot, true, resetUserIntentEpoch);
+		} else if (resetMeasurements && preservationAnchor) {
 			this.#scheduleReadingRestore(preservationAnchor, true, restorePolicyEnd);
 		} else if (resetMeasurements) {
-			void this.#resetMeasurementsAfterCommit(layoutToken, snapshot, restorePolicyEnd);
+			void this.#resetMeasurementsAfterCommit(snapshot, false, resetUserIntentEpoch);
 		} else if (restorePolicyEnd) {
 			void this.#restorePolicyEndAfterCommit(layoutToken, snapshot);
 		} else if (preservationAnchor) {
@@ -598,6 +609,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (!force && visible === this.#configuredVisible && viewport === this.#virtualScrollElement) {
 			return;
 		}
+		this.#initialEndRestoreEpoch += 1;
 		if (!visible && this.#configuredVisible && !this.options.pinned) {
 			this.#hiddenAnchor = this.#captureVirtualAnchor(true);
 			this.#hiddenScrollOffset = this.options.viewport?.scrollTop ?? null;
@@ -640,6 +652,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#detachAndResetOldSurface(): void {
+		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#virtualScrollElement = null;
@@ -705,7 +718,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				) {
 					return false;
 				}
-				this.#instance().scrollToEnd({ behavior: 'auto' });
+				this.#scrollToPhysicalEnd('auto');
 				await this.#completeEndRestore(token, operationEpoch);
 				return (
 					token === this.#layoutMutationToken &&
@@ -790,21 +803,30 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	async #resetMeasurementsAfterCommit(
-		token: number,
 		snapshot: ConversationVirtualGeometrySnapshot,
 		restorePolicyEnd: boolean,
+		userIntentEpoch: number,
 	): Promise<void> {
 		await tick();
 		await nextAnimationFrame();
-		if (!this.isReady() || this.options.geometry.geometryRevision !== snapshot.geometryRevision) {
+		if (this.options.geometry.geometryRevision !== snapshot.geometryRevision) {
 			return;
 		}
+		if (!this.options.visible) {
+			this.#measureOnShow = true;
+			return;
+		}
+		if (!this.isReady()) return;
 		this.#instance().measure();
+		await tick();
+		await nextAnimationFrame();
 		if (
 			restorePolicyEnd &&
 			this.#activeTargetScrolls === 0 &&
-			token === this.#layoutMutationToken &&
+			userIntentEpoch === this.#userIntentEpoch &&
+			this.isReady() &&
 			this.options.pinned &&
+			this.options.geometry.geometryRevision === snapshot.geometryRevision &&
 			this.options.geometry.endBehavior === 'restore-if-pinned'
 		) {
 			this.scrollToEnd();
@@ -827,7 +849,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					this.options.onInitialEndRestored?.();
 					return;
 				}
-				this.#instance().scrollToEnd({ behavior: 'auto' });
+				this.#scrollToPhysicalEnd('auto');
 			}
 			if (
 				token !== this.#layoutMutationToken ||
@@ -836,22 +858,40 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			) {
 				return;
 			}
-			this.#instance().scrollToEnd({ behavior: 'auto' });
+			this.#scrollToPhysicalEnd('auto');
 			this.options.onInitialEndRestored?.();
 		} finally {
 			this.#finishProgrammaticScrollOperation(operationEpoch);
 		}
 	}
 
-	async #restoreInitialEndAfterCommit(operationEpoch: number): Promise<void> {
+	async #restoreInitialEndAfterCommit(
+		restoreEpoch: number,
+		surfaceIdentity: string,
+	): Promise<void> {
 		await tick();
 		await nextAnimationFrame();
-		if (operationEpoch !== this.#programmaticScrollEpoch || !this.isReady()) {
-			this.#finishProgrammaticScrollOperation(operationEpoch);
+		if (
+			restoreEpoch !== this.#initialEndRestoreEpoch ||
+			surfaceIdentity !== this.#configuredSurfaceIdentity ||
+			this.#activeTargetScrolls > 0 ||
+			!this.isReady()
+		) {
 			return;
 		}
-		this.#instance().scrollToEnd({ behavior: 'auto' });
+		const operationEpoch = this.#beginProgrammaticScrollOperation();
+		this.#scrollToPhysicalEnd('auto');
 		await this.#completeEndRestore(this.#layoutMutationToken, operationEpoch);
+	}
+
+	#scrollToPhysicalEnd(behavior: 'auto' | 'instant'): void {
+		const viewport = this.options.viewport;
+		if (!viewport) return;
+		// Count growth can turn TanStack's retained last-index target into an interior target.
+		// The product end is the browser's current maximum after the Svelte sizer commit.
+		this.#instance().scrollToOffset(Math.max(viewport.scrollHeight - viewport.clientHeight, 0), {
+			behavior,
+		});
 	}
 
 	async #completeSimpleScroll(operationEpoch: number, token: number): Promise<void> {
