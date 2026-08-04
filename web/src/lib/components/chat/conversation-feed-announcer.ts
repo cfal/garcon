@@ -394,7 +394,7 @@ export class ConversationFeedAnnouncerState {
 
 export function plainAnnouncementText(source: string): string {
 	return source
-		.replace(/```[\s\S]*?```/g, ' code block ')
+		.replace(/```[\s\S]*?```/g, ` ${m.chat_feed_announcement_code_block()} `)
 		.replace(/`([^`]+)`/g, '$1')
 		.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
 		.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')

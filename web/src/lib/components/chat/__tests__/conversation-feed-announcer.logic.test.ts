@@ -485,6 +485,9 @@ describe('ConversationFeedAnnouncerState', () => {
 		expect(plainAnnouncementText('## See [the file](/tmp/file) and `value`')).toBe(
 			'See the file and value',
 		);
+		expect(plainAnnouncementText('Before\n```ts\nconst value = 1;\n```\nafter')).toBe(
+			'Before Code block after',
+		);
 	});
 
 	it('announces user text, local notices, known tools, and permission requests', () => {
