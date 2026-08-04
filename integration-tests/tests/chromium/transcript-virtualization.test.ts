@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
-import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
+import {
+  closeChromiumBrowser,
+  launchChromiumBrowser,
+  withChromiumFixture,
+  type ChromiumFixture,
+} from '../../support/chromium-fixture.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { liveClaudeRunRequest, liveClaudeStartRequest } from '../../support/live-claude.js';
 import {
@@ -33,6 +38,29 @@ interface TranscriptGeometry {
   modelCount: number;
   overlaps: Array<{ previous: string; next: string; amount: number }>;
   horizontalOverflow: Array<{ key: string; left: number; right: number }>;
+}
+
+interface TranscriptLayoutSnapshot {
+  anchor: ReadingAnchor;
+  anchorTransform: string;
+  feed: {
+    top: number;
+    height: number;
+    scrollTop: number;
+    scrollHeight: number;
+  };
+  sizer: {
+    top: number;
+    height: number;
+    declaredHeight: string;
+    scale: string | undefined;
+  };
+  workspace: {
+    top: number;
+    height: number;
+    styleTop: string;
+    styleHeight: string;
+  } | null;
 }
 
 async function withDiagnosticTimeout<T>(
@@ -411,6 +439,52 @@ async function anchorByKey(page: Page, key: string): Promise<ReadingAnchor> {
   );
 }
 
+async function transcriptLayoutSnapshot(
+  page: Page,
+  key: string,
+): Promise<TranscriptLayoutSnapshot> {
+  return page.locator(FEED_SELECTOR).evaluate(
+    (feedElement, input) => {
+      const feed = feedElement as HTMLElement;
+      const anchor = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].find(
+        (candidate) => candidate.dataset.chatVirtualItem === input.key,
+      );
+      const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
+      if (!anchor || !sizer) throw new Error('Transcript layout snapshot is incomplete.');
+      const feedRect = feed.getBoundingClientRect();
+      const anchorRect = anchor.getBoundingClientRect();
+      const sizerRect = sizer.getBoundingClientRect();
+      const workspace = feed.closest<HTMLElement>('[data-conversation-workspace-layer]');
+      const workspaceRect = workspace?.getBoundingClientRect();
+      return {
+        anchor: { key: input.key, offset: anchorRect.top - feedRect.top },
+        anchorTransform: anchor.style.transform,
+        feed: {
+          top: feedRect.top,
+          height: feedRect.height,
+          scrollTop: feed.scrollTop,
+          scrollHeight: feed.scrollHeight,
+        },
+        sizer: {
+          top: sizerRect.top,
+          height: sizerRect.height,
+          declaredHeight: sizer.style.height,
+          scale: sizer.dataset.chatTranscriptScale,
+        },
+        workspace: workspaceRect
+          ? {
+              top: workspaceRect.top,
+              height: workspaceRect.height,
+              styleTop: workspace?.style.top ?? '',
+              styleHeight: workspace?.style.height ?? '',
+            }
+          : null,
+      };
+    },
+    { itemSelector: ITEM_SELECTOR, key, sizerSelector: SIZER_SELECTOR },
+  );
+}
+
 async function waitForRowCentered(page: Page, rowId: string, tolerance = 2): Promise<void> {
   try {
     await page.waitForFunction(
@@ -528,6 +602,54 @@ async function selectMainWorkspaceSurface(page: Page, name: string): Promise<voi
     .locator('[data-floating-workspace-toolbar] [data-workspace-taskbar]')
     .getByRole('tab', { name, exact: true })
     .click();
+}
+
+async function selectMainWorkspaceSurfaceProgrammatically(page: Page, name: string): Promise<void> {
+  await page
+    .locator('[data-floating-workspace-toolbar] [data-workspace-taskbar]')
+    .getByRole('tab', { name, exact: true })
+    .evaluate((tab) => (tab as HTMLElement).click());
+}
+
+async function waitForTranscriptScale(page: Page, scale: number): Promise<void> {
+  await page
+    .locator(`${SIZER_SELECTOR}[data-chat-transcript-scale="${scale}"]`)
+    .waitFor({ state: 'visible' });
+  await page.locator(FEED_SELECTOR).evaluate(async () => {
+    for (let frame = 0; frame < 4; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  });
+}
+
+async function addSidebarChatToSplit(page: Page, chatId: string): Promise<void> {
+  const source = page.locator(`[data-sidebar-virtual-row="${chatId}"]`);
+  await source.waitFor({ state: 'visible' });
+  const previousPaneCount = await page.locator('[data-pane-id]').count();
+  const targetPane = page.locator('[data-pane-id]').first();
+  const targetRect = await targetPane.boundingBox();
+  if (!targetRect) throw new Error('The split target pane has no browser geometry.');
+
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  try {
+    await source.dispatchEvent('dragstart', { dataTransfer });
+    const dropLayer = page.locator('[data-split-drag-layer]');
+    await dropLayer.waitFor({ state: 'visible' });
+    const point = {
+      clientX: targetRect.x + targetRect.width - 8,
+      clientY: targetRect.y + targetRect.height / 2,
+      dataTransfer,
+    };
+    await dropLayer.dispatchEvent('dragover', point);
+    await dropLayer.dispatchEvent('drop', point);
+    await source.dispatchEvent('dragend', { dataTransfer });
+    await page.waitForFunction(
+      (expected) => document.querySelectorAll('[data-pane-id]').length === expected,
+      previousPaneCount + 1,
+    );
+  } finally {
+    await dataTransfer.dispose();
+  }
 }
 
 async function userMessageNavigatorRowIdContaining(page: Page, text: string): Promise<string> {
@@ -1080,6 +1202,13 @@ async function verifySelectionRetention(fixture: ChromiumFixture, chatId: string
     outsideViewport: true,
   });
   await releaseBrowserSelection(fixture.page);
+  await fixture.page.waitForFunction(
+    ({ itemSelector, key }) =>
+      ![...document.querySelectorAll<HTMLElement>(itemSelector)].some(
+        (item) => item.dataset.chatVirtualItem === key,
+      ),
+    { itemSelector: ITEM_SELECTOR, key: selected.key },
+  );
   fixture.assertNoBrowserErrors();
 }
 
@@ -1108,6 +1237,19 @@ async function verifyLaterPageReadingPosition(
     Math.abs(restored.offset - anchor.offset),
     JSON.stringify({ anchor, restored }),
   ).toBeLessThanOrEqual(1);
+
+  const returnToLatest = fixture.page.locator('button[title="Scroll to bottom"]');
+  await returnToLatest.waitFor({ state: 'visible' });
+  const latestWindowRevision = await virtualDataRevision(fixture.page);
+  await returnToLatest.click();
+  await waitForVirtualDataRevisionAfter(fixture.page, latestWindowRevision);
+  await waitForDistanceFromEnd(fixture.page, 1);
+  await appendTurn(fixture.integration, chatId, 'chromium-later-window-live-append');
+  await fixture.page
+    .locator(FEED_SELECTOR)
+    .getByText('echo:chromium-later-window-live-append', { exact: true })
+    .waitFor();
+  await waitForDistanceFromEnd(fixture.page, 1);
   fixture.assertNoBrowserErrors();
 }
 
@@ -1192,6 +1334,155 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     .waitFor();
   await waitForDistanceFromEnd(fixture.page, 1);
   expect((await transcriptGeometry(fixture.page)).distanceFromEnd).toBeLessThanOrEqual(1);
+  fixture.assertNoBrowserErrors();
+}
+
+async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  await prepareTranscript(fixture, chatId);
+  await scrollToPosition(fixture.page, 'middle');
+  const chatSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'New Terminal');
+  await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
+  const terminalSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
+  await selectMainWorkspaceSurface(fixture.page, chatSurfaceLabel);
+  await waitForTranscriptReady(fixture.page);
+  await scrollToPosition(fixture.page, 'middle');
+
+  const openVisibleMessageMenu = async (): Promise<void> => {
+    await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) => {
+      const feed = feedElement as HTMLElement;
+      const viewport = feed.getBoundingClientRect();
+      const row = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(
+        (candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return rect.height > 1 && rect.top >= viewport.top && rect.bottom <= viewport.bottom;
+        },
+      );
+      const trigger = row?.querySelector<HTMLElement>('[data-slot="context-menu-trigger"]');
+      if (!trigger) throw new Error('No visible message menu trigger was available.');
+      const rect = trigger.getBoundingClientRect();
+      trigger.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+        }),
+      );
+    });
+  };
+  await openVisibleMessageMenu();
+  const menu = fixture.page.locator('[data-slot="context-menu-content"]');
+  await menu.waitFor({ state: 'visible' });
+  await menu.getByRole('menuitem', { name: 'Copy text' }).focus();
+
+  await selectMainWorkspaceSurfaceProgrammatically(fixture.page, terminalSurfaceLabel);
+  await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
+  await menu.waitFor({ state: 'detached' });
+  const hiddenState = await fixture.page.evaluate(() => {
+    const layer = document.querySelector<HTMLElement>('[data-conversation-workspace-layer]');
+    return {
+      portalCount: document.querySelectorAll('[data-slot="context-menu-content"]').length,
+      focusInsideHiddenConversation: Boolean(
+        layer?.getAttribute('aria-hidden') === 'true' &&
+        document.activeElement &&
+        layer.contains(document.activeElement),
+      ),
+    };
+  });
+  expect(hiddenState).toEqual({
+    portalCount: 0,
+    focusInsideHiddenConversation: false,
+  });
+
+  await selectMainWorkspaceSurface(fixture.page, chatSurfaceLabel);
+  await waitForTranscriptReady(fixture.page);
+  await openVisibleMessageMenu();
+  await menu.waitFor({ state: 'visible' });
+  await fixture.page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached' });
+  fixture.assertNoBrowserErrors();
+}
+
+async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  const { initialModelCount } = await prepareTranscript(fixture, chatId);
+  await revealEarlierTranscript(fixture.page, initialModelCount);
+  await scrollToPosition(fixture.page, 'middle');
+  await seedTranscript(fixture.integration, 1);
+
+  const detachedAnchor = await readingAnchor(fixture.page);
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'Split view');
+  await waitForTranscriptScale(fixture.page, 0.85);
+  const splitAnchor = await anchorByKey(fixture.page, detachedAnchor.key);
+  expect(
+    Math.abs(splitAnchor.offset - detachedAnchor.offset),
+    JSON.stringify({ detachedAnchor, splitAnchor }),
+  ).toBeLessThanOrEqual(1);
+  const splitGeometry = await transcriptGeometry(fixture.page);
+  expect(splitGeometry.overlaps).toEqual([]);
+  expect(splitGeometry.horizontalOverflow).toEqual([]);
+
+  const originalSurfaceIdentity = await surfaceIdentity(fixture.page);
+  const originalPaneId = await fixture.page
+    .locator('[data-pane-id]')
+    .first()
+    .getAttribute('data-pane-id');
+  if (!originalPaneId) throw new Error('The original split pane is missing its identity.');
+  const thirdChatId = await seedTranscript(fixture.integration, 1);
+  await addSidebarChatToSplit(fixture.page, thirdChatId);
+  const fourthChatId = await seedTranscript(fixture.integration, 1);
+  await addSidebarChatToSplit(fixture.page, fourthChatId);
+  await fixture.page
+    .locator(`[data-pane-id="${originalPaneId}"]`)
+    .locator(':scope > [role="button"]')
+    .first()
+    .click();
+  await fixture.page.waitForFunction(
+    ({ itemSelector, expectedIdentity }) =>
+      [...document.querySelectorAll<HTMLElement>(itemSelector)].some((item) => {
+        const value = item.dataset.chatVirtualItem;
+        if (!value) return false;
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) && parsed[0] === expectedIdentity;
+        } catch {
+          return false;
+        }
+      }),
+    { itemSelector: ITEM_SELECTOR, expectedIdentity: originalSurfaceIdentity },
+  );
+  await waitForTranscriptReady(fixture.page);
+  await waitForTranscriptScale(fixture.page, 0.7);
+  await scrollToPosition(fixture.page, 'middle');
+  const fourPaneAnchor = await readingAnchor(fixture.page);
+  const fourPaneLayout = await transcriptLayoutSnapshot(fixture.page, fourPaneAnchor.key);
+  const fourPaneGeometry = await transcriptGeometry(fixture.page);
+  expect(fourPaneGeometry.overlaps).toEqual([]);
+  expect(fourPaneGeometry.horizontalOverflow).toEqual([]);
+
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'Exit split view');
+  await waitForTranscriptScale(fixture.page, 1);
+  const restoredAnchor = await anchorByKey(fixture.page, fourPaneAnchor.key);
+  const restoredLayout = await transcriptLayoutSnapshot(fixture.page, fourPaneAnchor.key);
+  expect(
+    Math.abs(restoredAnchor.offset - fourPaneAnchor.offset),
+    JSON.stringify({ fourPaneAnchor, restoredAnchor, fourPaneLayout, restoredLayout }, null, 2),
+  ).toBeLessThanOrEqual(1);
+  const restoredGeometry = await transcriptGeometry(fixture.page);
+  expect(restoredGeometry.overlaps).toEqual([]);
+  expect(restoredGeometry.horizontalOverflow).toEqual([]);
+
+  await scrollToPosition(fixture.page, 'end');
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'Split view');
+  await waitForTranscriptScale(fixture.page, 0.85);
+  await waitForDistanceFromEnd(fixture.page, 1);
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'Exit split view');
+  await waitForTranscriptScale(fixture.page, 1);
+  await waitForDistanceFromEnd(fixture.page, 1);
   fixture.assertNoBrowserErrors();
 }
 
@@ -1301,44 +1592,91 @@ async function verifyPermissionDraftPersistence(
 
 describe('Chromium transcript virtualization', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;
+  let browser: Browser | undefined;
 
   beforeAll(async () => {
     environment = await startScriptedClaudeTestEnvironment();
+    try {
+      browser = await launchChromiumBrowser();
+    } catch (error) {
+      environment.dispose();
+      environment = undefined;
+      throw error;
+    }
   });
 
-  afterAll(() => {
-    environment?.dispose();
+  afterAll(async () => {
+    try {
+      if (browser) await closeChromiumBrowser(browser);
+    } finally {
+      environment?.dispose();
+    }
   });
 
-  test('stabilizes virtual transcript geometry and navigation', async () => {
+  test('preserves virtual transcript geometry across paging, appends, and scale', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     await withChromiumFixture(
-      'transcript-virtualization',
+      'transcript-virtualization-geometry',
       async (fixture, markPhase) => {
-        markPhase('creating the shared transcript');
+        markPhase('creating the geometry transcript');
         const chatId = await createTranscript(fixture);
         markPhase('verifying bounded prepend geometry');
         await verifyBoundedPrepend(fixture, chatId);
-        markPhase('verifying stable and growing target navigation');
-        await verifyGrowingNavigation(fixture, chatId);
-        markPhase('verifying selection retention outside overscan');
-        await verifySelectionRetention(fixture, chatId);
         markPhase('verifying later-page reading position');
         await verifyLaterPageReadingPosition(fixture, chatId);
+        markPhase('verifying detached, hidden, and pinned append geometry');
+        await verifyAppendGeometry(fixture, chatId);
+        markPhase('verifying detached and pinned text-scale transitions');
+        await verifyTextScaleTransitions(fixture, chatId);
+      },
+      diagnostics,
+      { serverEnvironment: testEnvironment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('navigates unmounted transcript rows and respects user cancellation', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    await withChromiumFixture(
+      'transcript-virtualization-navigation',
+      async (fixture, markPhase) => {
+        markPhase('creating the navigation transcript');
+        const chatId = await createTranscript(fixture);
+        markPhase('verifying stable and growing target navigation');
+        await verifyGrowingNavigation(fixture, chatId);
         markPhase('verifying navigation during a concurrent append');
         await verifyConcurrentAppendNavigation(fixture, chatId);
         markPhase('verifying fresh start- and end-edge navigation');
         await verifyEdgeNavigation(fixture, chatId);
         markPhase('verifying user cancellation during target growth');
         await verifyTargetCancellation(fixture, chatId);
-        markPhase('verifying detached, hidden, and pinned append geometry');
-        await verifyAppendGeometry(fixture, chatId);
+      },
+      diagnostics,
+      { serverEnvironment: testEnvironment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('retains transcript interactions and closes hidden transients', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    await withChromiumFixture(
+      'transcript-virtualization-retention',
+      async (fixture, markPhase) => {
+        markPhase('creating the retention transcript');
+        const chatId = await createTranscript(fixture);
+        markPhase('verifying selection retention outside overscan');
+        await verifySelectionRetention(fixture, chatId);
+        markPhase('verifying portal cleanup before the Chat surface hides');
+        await verifyHiddenPortalCleanup(fixture, chatId);
         markPhase('verifying permission draft persistence outside overscan');
         await verifyPermissionDraftPersistence(fixture, testEnvironment);
       },
       diagnostics,
       { serverEnvironment: testEnvironment.serverEnvironment },
+      browser,
     );
   }, 180_000);
 });

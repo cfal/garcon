@@ -29,8 +29,23 @@ export interface ChromiumFixture {
   assertNoBrowserErrors(): void;
 }
 
+const fixturesOwningBrowsers = new WeakSet<ChromiumFixture>();
+
+export async function launchChromiumBrowser(): Promise<Browser> {
+  return chromium.launch({ headless: true });
+}
+
+export async function closeChromiumBrowser(browser: Browser): Promise<void> {
+  await withTimeout(
+    browser.close(),
+    BROWSER_DISPOSE_TIMEOUT_MS,
+    () => 'Timed out closing the shared Chromium browser.',
+  );
+}
+
 export async function createChromiumFixture(
   integrationOptions: IntegrationFixtureOptions = {},
+  sharedBrowser?: Browser,
 ): Promise<ChromiumFixture> {
   await access(WEB_BUILD_INDEX);
   const integration = await createIntegrationFixture(integrationOptions);
@@ -38,7 +53,7 @@ export async function createChromiumFixture(
   let context: BrowserContext | null = null;
 
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = sharedBrowser ?? (await launchChromiumBrowser());
     context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
     });
@@ -65,7 +80,7 @@ export async function createChromiumFixture(
     page.on('console', (message) => {
       if (message.type() === 'error') browserErrors.push(`console.error: ${message.text()}`);
     });
-    return {
+    const fixture: ChromiumFixture = {
       integration,
       browser,
       context,
@@ -77,9 +92,11 @@ export async function createChromiumFixture(
         }
       },
     };
+    if (sharedBrowser === undefined) fixturesOwningBrowsers.add(fixture);
+    return fixture;
   } catch (error) {
     await context?.close().catch(() => undefined);
-    await browser?.close().catch(() => undefined);
+    if (sharedBrowser === undefined) await browser?.close().catch(() => undefined);
     await integration.dispose().catch(() => undefined);
     throw error;
   }
@@ -140,14 +157,16 @@ async function disposeChromiumFixture(fixture: ChromiumFixture): Promise<void> {
       } catch (error) {
         errors.push(error);
       }
-      try {
-        await withTimeout(
-          fixture.browser.close(),
-          BROWSER_DISPOSE_TIMEOUT_MS / 2,
-          () => 'Timed out closing the Chromium browser.',
-        );
-      } catch (error) {
-        errors.push(error);
+      if (fixturesOwningBrowsers.delete(fixture)) {
+        try {
+          await withTimeout(
+            fixture.browser.close(),
+            BROWSER_DISPOSE_TIMEOUT_MS / 2,
+            () => 'Timed out closing the Chromium browser.',
+          );
+        } catch (error) {
+          errors.push(error);
+        }
       }
       if (errors.length > 0) {
         throw new AggregateError(errors, 'Chromium browser cleanup failed.');
@@ -170,9 +189,10 @@ export async function withChromiumFixture<T>(
   run: (fixture: ChromiumFixture, markPhase: MarkPhase) => Promise<T>,
   diagnostics?: (fixture: ChromiumFixture) => Promise<unknown>,
   integrationOptions: IntegrationFixtureOptions = {},
+  sharedBrowser?: Browser,
 ): Promise<T> {
   const fixture = await withTimeout(
-    createChromiumFixture(integrationOptions),
+    createChromiumFixture(integrationOptions, sharedBrowser),
     FIXTURE_SETUP_TIMEOUT_MS,
     () => `Chromium fixture setup timed out for ${testName}.`,
   );
