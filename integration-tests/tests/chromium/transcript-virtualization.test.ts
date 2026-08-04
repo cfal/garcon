@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser, Page } from 'playwright';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import type { ChatGenerationResetMessage, ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
   closeChromiumBrowser,
@@ -93,11 +93,15 @@ async function appendTurn(
   expect(terminal.type).toBe('agent-run-finished');
 }
 
-async function seedTranscript(integration: IntegrationFixture, turnCount: number): Promise<string> {
+async function seedTranscript(
+  integration: IntegrationFixture,
+  turnCount: number,
+  promptPrefix = 'chromium-virtual-turn',
+): Promise<string> {
   const chatId = integration.newChatId();
   const started = await integration.client.startDirectChat({
     chatId,
-    content: 'chromium-virtual-turn-0',
+    content: `${promptPrefix}-0`,
     projectPath: integration.dirs.project,
     agent: integration.directAgents.openAi,
   });
@@ -105,9 +109,39 @@ async function seedTranscript(integration: IntegrationFixture, turnCount: number
     'agent-run-finished',
   );
   for (let index = 1; index < turnCount; index += 1) {
-    await appendTurn(integration, chatId, `chromium-virtual-turn-${index}`);
+    await appendTurn(integration, chatId, `${promptPrefix}-${index}`);
   }
   return chatId;
+}
+
+async function selectSidebarChat(page: Page, chatId: string, marker: string): Promise<void> {
+  await page.evaluate((expected) => {
+    const summary = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]'),
+    ].find((candidate) => candidate.innerText.includes(expected));
+    const button = summary?.closest('button');
+    if (!button) throw new Error(`Missing sidebar chat containing: ${expected}`);
+    button.click();
+  }, marker);
+  await page.waitForURL((url) => url.pathname === `/chat/${encodeURIComponent(chatId)}`);
+  await waitForTranscriptReady(page);
+}
+
+async function settledDistanceFromEnd(page: Page): Promise<number> {
+  return page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    let previous = Number.POSITIVE_INFINITY;
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await frame();
+      const distance = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
+      stableFrames = Math.abs(distance - previous) <= 0.5 ? stableFrames + 1 : 0;
+      previous = distance;
+      if (stableFrames >= 8) return distance;
+    }
+    throw new Error('Chat-switch end distance did not settle.');
+  });
 }
 
 async function waitForModelCount(page: Page, minimum: number): Promise<number> {
@@ -122,6 +156,24 @@ async function waitForModelCount(page: Page, minimum: number): Promise<number> {
   return page
     .locator(SIZER_SELECTOR)
     .evaluate((sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0));
+}
+
+async function waitForStableModelCount(page: Page, minimum: number): Promise<number> {
+  await waitForModelCount(page, minimum);
+  return page.locator(SIZER_SELECTOR).evaluate(async (sizerElement, minimumCount) => {
+    const sizer = sizerElement as HTMLElement;
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    let previous = -1;
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      await frame();
+      const current = Number(sizer.dataset.chatVirtualModelCount ?? 0);
+      stableFrames = current >= minimumCount && current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 12) return current;
+    }
+    throw new Error('The staged transcript model did not settle.');
+  }, minimum);
 }
 
 async function virtualDataRevision(page: Page): Promise<number> {
@@ -1079,6 +1131,7 @@ async function createTranscript(fixture: ChromiumFixture): Promise<string> {
 async function prepareTranscript(
   fixture: ChromiumFixture,
   chatId: string,
+  minimumModelCount = 50,
 ): Promise<{
   chatId: string;
   initialModelCount: number;
@@ -1095,7 +1148,7 @@ async function prepareTranscript(
       await waitForTranscriptReady(fixture.page);
       return {
         chatId,
-        initialModelCount: await waitForModelCount(fixture.page, 50),
+        initialModelCount: await waitForStableModelCount(fixture.page, minimumModelCount),
       };
     })(),
     45_000,
@@ -1111,12 +1164,28 @@ async function revealEarlierTranscript(
     (async () => {
       await scrollToPosition(page, 'middle');
       await signalScrollIntent(page, 'later');
-      await scrollToPosition(page, 'start', false);
-      const loadEarlier = page.locator('[data-transcript-page-boundary="earlier"] button');
-      await loadEarlier.waitFor({ state: 'visible' });
+      const prefetchPosition = await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+        const feed = feedElement as HTMLElement;
+        const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+        const target = Math.min(maximum, Math.max(101, feed.clientHeight * 0.75));
+        feed.scrollTop = target;
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+        await settle();
+        await settle();
+        return {
+          scrollTop: feed.scrollTop,
+          viewportHeight: feed.clientHeight,
+        };
+      });
+      expect(prefetchPosition.scrollTop).toBeGreaterThan(100);
+      expect(prefetchPosition.scrollTop).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
       const anchor = await readingAnchor(page);
-      await loadEarlier.click();
-      await waitForModelCount(page, initialModelCount + 50);
+      const previousRevision = await virtualDataRevision(page);
+      await signalScrollIntent(page, 'earlier');
+      await page.locator(FEED_SELECTOR).dispatchEvent('scroll');
+      await waitForVirtualDataRevisionAfter(page, previousRevision);
+      await waitForModelCount(page, initialModelCount + 1);
       return anchor;
     })(),
   );
@@ -1225,18 +1294,45 @@ async function verifyLaterPageReadingPosition(
   await waitForVirtualDataRevisionAfter(fixture.page, initialWindowRevision);
   await waitForTranscriptReady(fixture.page);
 
-  await scrollToPosition(fixture.page, 'end', false);
-  const laterBoundary = fixture.page.locator('[data-transcript-page-boundary="later"]');
-  await laterBoundary.waitFor({ state: 'visible' });
+  await signalScrollIntent(fixture.page, 'earlier');
+  const prefetchPosition = await fixture.page
+    .locator(FEED_SELECTOR)
+    .evaluate(async (feedElement) => {
+      const feed = feedElement as HTMLElement;
+      const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const targetDistance = Math.max(51, feed.clientHeight * 0.75);
+      let stableFrames = 0;
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+        if (maximum > targetDistance) {
+          feed.scrollTop = maximum - targetDistance;
+          feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }
+        await settle();
+        const distanceFromEnd = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
+        stableFrames = Math.abs(distanceFromEnd - targetDistance) <= 1 ? stableFrames + 1 : 0;
+        if (stableFrames >= 4) {
+          return { distanceFromEnd, viewportHeight: feed.clientHeight };
+        }
+      }
+      throw new Error('The later-page prefetch position did not settle.');
+    });
+  expect(prefetchPosition.distanceFromEnd).toBeGreaterThan(50);
+  expect(prefetchPosition.distanceFromEnd).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
   const anchor = await readingAnchor(fixture.page);
   const previousRevision = await virtualDataRevision(fixture.page);
-  await laterBoundary.getByRole('button').click();
+  await signalScrollIntent(fixture.page, 'later');
+  await fixture.page.locator(FEED_SELECTOR).dispatchEvent('scroll');
   await waitForVirtualDataRevisionAfter(fixture.page, previousRevision);
   const restored = await anchorByKey(fixture.page, anchor.key);
   expect(
     Math.abs(restored.offset - anchor.offset),
     JSON.stringify({ anchor, restored }),
   ).toBeLessThanOrEqual(1);
+  expect(await viewportPolicy(fixture.page)).toEqual({
+    pinned: false,
+    userScrolledUp: true,
+  });
 
   const returnToLatest = fixture.page.locator('button[title="Scroll to bottom"]');
   await returnToLatest.waitFor({ state: 'visible' });
@@ -1268,7 +1364,7 @@ async function verifyEdgeNavigation(fixture: ChromiumFixture, chatId: string): P
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await withDiagnosticTimeout(
     'the start-edge navigator target',
-    selectAndVerifyEdgeNavigatorTarget(fixture.page, 'chromium-virtual-turn-11', 'start'),
+    selectAndVerifyEdgeNavigatorTarget(fixture.page, 'chromium-virtual-turn-0', 'start'),
     30_000,
   );
   await withDiagnosticTimeout(
@@ -1334,6 +1430,96 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     .waitFor();
   await waitForDistanceFromEnd(fixture.page, 1);
   expect((await transcriptGeometry(fixture.page)).distanceFromEnd).toBeLessThanOrEqual(1);
+  fixture.assertNoBrowserErrors();
+}
+
+async function verifyChatSwitchBottomRestore(
+  fixture: ChromiumFixture,
+  primaryChatId: string,
+): Promise<void> {
+  await prepareTranscript(fixture, primaryChatId);
+  await scrollToPosition(fixture.page, 'end');
+  await waitForDistanceFromEnd(fixture.page, 1);
+
+  const secondaryMarker = 'chromium-switch-secondary';
+  const secondaryChatId = await seedTranscript(fixture.integration, 12, secondaryMarker);
+  await selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker);
+  expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
+
+  await selectSidebarChat(fixture.page, primaryChatId, 'chromium-virtual-turn-0');
+  expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
+  expect(await viewportPolicy(fixture.page)).toEqual({
+    pinned: true,
+    userScrolledUp: false,
+  });
+  fixture.assertNoBrowserErrors();
+}
+
+async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture): Promise<void> {
+  const chatId = await seedTranscript(fixture.integration, 1, 'chromium-native-reload-base');
+  await prepareTranscript(fixture, chatId, 1);
+  await scrollToPosition(fixture.page, 'end');
+  await waitForDistanceFromEnd(fixture.page, 1);
+
+  const prompt = 'chromium-native-reload-stream';
+  const accepted = await fixture.integration.client.runDirectChat({
+    chatId,
+    content: prompt,
+    agent: fixture.integration.directAgents.openAi,
+  });
+  expect((await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId)).type).toBe(
+    'agent-run-finished',
+  );
+  await fixture.page.locator(FEED_SELECTOR).getByText(`echo:${prompt}`, { exact: true }).waitFor();
+  await waitForDistanceFromEnd(fixture.page, 1);
+
+  const beforeReload = await fixture.integration.client.getMessages(chatId);
+  const eventCursor = fixture.integration.client.markEvents();
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'Reload from native history');
+  const reset = await fixture.integration.client.waitForEvent(
+    (event): event is ChatGenerationResetMessage =>
+      event.type === 'chat-generation-reset' &&
+      event.chatId === chatId &&
+      event.reason === 'manual-reload',
+    'the native-history generation reset',
+    { afterIndex: eventCursor },
+  );
+
+  await fixture.page.waitForFunction(
+    ({ feedSelector, oldGenerationId, nextGenerationId, expectedRowCount }) => {
+      const rows = [
+        ...document.querySelectorAll<HTMLElement>(`${feedSelector} [data-chat-row-id]`),
+      ];
+      const rowIds = rows.flatMap((row) => row.dataset.chatRowId ?? []);
+      return (
+        rowIds.length === expectedRowCount &&
+        rowIds.every((rowId) => rowId.startsWith(`${nextGenerationId}:`)) &&
+        rowIds.every((rowId) => !rowId.startsWith(`${oldGenerationId}:`))
+      );
+    },
+    {
+      feedSelector: FEED_SELECTOR,
+      oldGenerationId: beforeReload.generationId,
+      nextGenerationId: reset.generationId,
+      expectedRowCount: beforeReload.messages.length,
+    },
+  );
+  const exactTextCounts = await fixture.page.locator(FEED_SELECTOR).evaluate(
+    (feed, expected) => {
+      const leafTexts = [...feed.querySelectorAll<HTMLElement>('*')].flatMap((element) =>
+        element.children.length === 0 ? [element.textContent?.trim() ?? ''] : [],
+      );
+      return expected.map((text) => leafTexts.filter((candidate) => candidate === text).length);
+    },
+    [prompt, `echo:${prompt}`],
+  );
+  expect(exactTextCounts).toEqual([1, 1]);
+  expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
+  expect(await viewportPolicy(fixture.page)).toEqual({
+    pinned: true,
+    userScrolledUp: false,
+  });
   fixture.assertNoBrowserErrors();
 }
 
@@ -1627,6 +1813,8 @@ describe('Chromium transcript virtualization', () => {
         await verifyLaterPageReadingPosition(fixture, chatId);
         markPhase('verifying detached, hidden, and pinned append geometry');
         await verifyAppendGeometry(fixture, chatId);
+        markPhase('verifying chat-switch end restoration');
+        await verifyChatSwitchBottomRestore(fixture, chatId);
         markPhase('verifying detached and pinned text-scale transitions');
         await verifyTextScaleTransitions(fixture, chatId);
       },
@@ -1679,4 +1867,18 @@ describe('Chromium transcript virtualization', () => {
       browser,
     );
   }, 180_000);
+
+  test('rebuilds a completed streamed turn from native history', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-native-history-reload',
+      async (fixture, markPhase) => {
+        markPhase('streaming and reloading the native transcript');
+        await verifyNativeHistoryReloadAfterStreaming(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 120_000);
 });
