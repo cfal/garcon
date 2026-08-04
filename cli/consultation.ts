@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type {
   AgentRunCommandRequest,
   AgentTurnCommandResponse,
@@ -26,6 +25,7 @@ import {
   type ReceiptClient,
   type ReceiptPollerDependencies,
 } from './receipt-poller.js';
+import { writeTerminalResult } from './terminal-receipt.js';
 
 export interface ConsultationClient extends ReceiptClient {
   getModelCatalog(agentId: string, signal?: AbortSignal): Promise<ModelCatalogResponse>;
@@ -53,33 +53,6 @@ function startTags(additionalTags: readonly string[] | undefined): string[] {
 function resumeTags(additionalTags: readonly string[] | undefined): string[] | undefined {
   const tags = normalizeTags(additionalTags ?? []).filter((tag) => tag !== 'cli');
   return tags.length === 0 ? undefined : tags;
-}
-
-function terminalResult(receipt: AgentTurnReceipt, output: CliOutput): void {
-  if (receipt.state === 'completed') {
-    if (receipt.output.availability === 'unavailable') {
-      const reason = receipt.output.reason === 'too-large'
-        ? 'its result is too large for the CLI receipt'
-        : receipt.output.reason === 'retention-pressure'
-          ? 'server retention pressure prevented the CLI from retaining its result'
-          : 'server recovery rebuilt the transcript outside this turn receipt';
-      throw new CliError(
-        'receipt polling',
-        `the turn completed, but ${reason}; view the complete transcript in Garcon`,
-        3,
-      );
-    }
-    output.completed(receipt.output.assistantMessages);
-    return;
-  }
-  if (receipt.state === 'failed') {
-    throw new CliError('receipt polling', `agent turn failed: ${receipt.error}`, 1);
-  }
-  if (receipt.state === 'interrupted') {
-    const reason = receipt.reason === 'chat-deleted' ? 'the chat was deleted' : 'the turn was stopped';
-    throw new CliError('receipt polling', `agent turn interrupted: ${reason}`, 4);
-  }
-  throw new CliError('receipt polling', 'turn receipt unexpectedly remained pending', 3);
 }
 
 function requireResumeChat(sessions: readonly ChatListEntry[], chatId: string): ChatListEntry {
@@ -197,7 +170,7 @@ export async function runConsultation(
   const accepted = invocation.kind === 'start'
     ? await submitStart(invocation, prompt, client, signal, createId, createChatId)
     : await submitResume(invocation, prompt, client, signal, createId);
-  output.accepted(accepted.chatId);
+  output.accepted(accepted);
   let titleError: unknown | undefined;
   if (invocation.title !== undefined) {
     try {
@@ -214,6 +187,6 @@ export async function runConsultation(
     signal,
     dependencies.poller,
   );
-  terminalResult(receipt, output);
+  writeTerminalResult(receipt, output);
   if (titleError !== undefined) throw titleError;
 }

@@ -22,7 +22,7 @@ function capturedOutput(): { output: CliOutput; diagnostics: string[] } {
     output: {
       accepted() {},
       completed() {},
-      listing() {},
+      result() {},
       sent() {},
       stopped() {},
       diagnostic(message) { diagnostics.push(message); },
@@ -44,6 +44,39 @@ function acceptedControlResponse(_input: string | URL | Request, init?: RequestI
 }
 
 describe('main', () => {
+  test('wait reads an existing receipt without reading stdin or resolving a project path', async () => {
+    const capture = capturedOutput();
+    let requestedUrl = '';
+    const exitCode = await main([
+      'wait', CHAT_ID, '--turn', 'turn-1', '--json',
+    ], {
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json({
+          state: 'completed',
+          chatId: CHAT_ID,
+          turnId: 'turn-1',
+          clientRequestId: 'request-1',
+          acceptedAt: '2026-08-04T12:00:00.000Z',
+          updatedAt: '2026-08-04T12:00:00.000Z',
+          settledAt: '2026-08-04T12:00:00.000Z',
+          output: {
+            availability: 'available',
+            completeness: 'complete',
+            assistantMessages: ['Done'],
+          },
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      readStdin: async () => { throw new Error('stdin must not be read'); },
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(requestedUrl).toContain('/api/v1/chats/turn-receipt?');
+    expect(capture.diagnostics).toEqual([]);
+  });
+
   test('interrupts a pending stdin read before runtime discovery', async () => {
     const controller = new AbortController();
     const capture = capturedOutput();

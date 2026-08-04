@@ -155,6 +155,54 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['--help'], ENV)).toEqual({ kind: 'help' });
   });
 
+  test('parses an exact turn wait with connection options and JSON output', () => {
+    expect(parseCliArgs([
+      '--workspace', 'work',
+      '--config-dir', '/conf',
+      '--server', 'http://127.0.0.1:8080',
+      'wait', CHAT_ID,
+      '--turn', 'turn-1',
+      '--json',
+    ], ENV)).toEqual({
+      kind: 'wait',
+      workspace: 'work',
+      configDir: '/conf',
+      serverUrl: 'http://127.0.0.1:8080',
+      chatId: CHAT_ID,
+      turnId: 'turn-1',
+      json: true,
+    });
+  });
+
+  test('treats -- wait as a new-chat prompt', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--', 'wait', 'for', 'the', 'review',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      prompt: 'wait for the review',
+    });
+  });
+
+  test.each([
+    { args: ['wait', CHAT_ID], message: 'valid --turn ID' },
+    { args: ['wait', CHAT_ID, '--turn', ''], message: 'valid --turn ID' },
+    { args: ['wait', CHAT_ID, '--turn', ' padded '], message: 'valid --turn ID' },
+    { args: ['wait', CHAT_ID, '--turn', 'a'.repeat(257)], message: 'valid --turn ID' },
+    { args: ['wait', '123', '--turn', 'turn-1'], message: 'valid Garcon chat ID' },
+    { args: ['wait', CHAT_ID, 'extra', '--turn', 'turn-1'], message: 'exactly one chat ID' },
+    { args: ['wait', CHAT_ID, '--turn', 'one', '--turn', 'two'], message: 'only once' },
+    { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--cwd', '.'], message: '--cwd cannot be used with wait' },
+    { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--allow-steer'], message: '--allow-steer cannot be used with wait' },
+    { args: ['list', 'agents', '--turn', 'turn-1'], message: '--turn cannot be used with list' },
+    { args: ['stop', CHAT_ID, '--turn', 'turn-1'], message: '--turn cannot be used with stop' },
+    { args: ['send-async', CHAT_ID, '--turn', 'turn-1', 'message'], message: '--turn cannot be used with send-async' },
+    { args: ['--agent', 'codex', '--model', 'gpt', '--turn', 'turn-1', 'prompt'], message: '--turn can only be used with wait' },
+  ])('rejects invalid wait arguments: $message', ({ args, message }) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
   test('parses a minimal send-async command', () => {
     expect(parseCliArgs(['send-async', CHAT_ID, 'Implement the review'], ENV)).toEqual({
       kind: 'send-async',

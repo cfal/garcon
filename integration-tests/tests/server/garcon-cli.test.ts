@@ -41,32 +41,35 @@ function startCli(arguments_: string[]): Promise<{
 
 function startObservedCli(arguments_: string[]): {
   acceptedChatId: Promise<string>;
+  acceptedHandle: Promise<{ chatId: string; turnId: string }>;
+  interrupt(): void;
   result: ReturnType<typeof startCli>;
 } {
   const child = spawnCli(arguments_);
-  let resolveChatId!: (chatId: string) => void;
-  let rejectChatId!: (error: Error) => void;
-  const acceptedChatId = new Promise<string>((resolve, reject) => {
-    resolveChatId = resolve;
-    rejectChatId = reject;
+  let resolveHandle!: (handle: { chatId: string; turnId: string }) => void;
+  let rejectHandle!: (error: Error) => void;
+  const acceptedHandle = new Promise<{ chatId: string; turnId: string }>((resolve, reject) => {
+    resolveHandle = resolve;
+    rejectHandle = reject;
   });
+  const acceptedChatId = acceptedHandle.then(({ chatId }) => chatId);
   const stdout = (async () => {
     const reader = new Response(child.stdout).body!.getReader();
     const decoder = new TextDecoder();
     let text = '';
-    let foundChatId = false;
+    let foundHandle = false;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       text += decoder.decode(value, { stream: true });
-      const match = text.match(/^chat id: (\d{16})$/m);
-      if (!foundChatId && match?.[1]) {
-        foundChatId = true;
-        resolveChatId(match[1]);
+      const match = text.match(/^chat id: (\d{16})\nturn id: ([^\n]+)$/m);
+      if (!foundHandle && match?.[1] && match[2]) {
+        foundHandle = true;
+        resolveHandle({ chatId: match[1], turnId: match[2] });
       }
     }
     text += decoder.decode();
-    if (!foundChatId) rejectChatId(new Error('CLI exited before reporting an accepted chat ID'));
+    if (!foundHandle) rejectHandle(new Error('CLI exited before reporting an accepted turn handle'));
     return text;
   })();
   const result = Promise.all([
@@ -74,7 +77,12 @@ function startObservedCli(arguments_: string[]): {
     stdout,
     new Response(child.stderr).text(),
   ]).then(([exitCode, stdoutText, stderr]) => ({ exitCode, stdout: stdoutText, stderr }));
-  return { acceptedChatId, result };
+  return {
+    acceptedChatId,
+    acceptedHandle,
+    interrupt() { child.kill('SIGINT'); },
+    result,
+  };
 }
 
 function runCli(arguments_: string[]): Promise<{
@@ -159,7 +167,9 @@ describe('garcon-cli', () => {
       ]);
       expect(started.exitCode).toBe(0);
       expect(started.stderr).toBe('');
-      expect(started.stdout).toMatch(/^chat id: \d{16}\necho:cli-first-turn\n$/);
+      expect(started.stdout).toMatch(
+        /^chat id: \d{16}\nturn id: [^\n]+\necho:cli-first-turn\n$/,
+      );
       const chatId = started.stdout.match(/^chat id: (\d{16})$/m)?.[1];
       expect(chatId).toBeString();
 
@@ -178,11 +188,11 @@ describe('garcon-cli', () => {
         '--tag', 'Follow Up',
         'cli-second-turn',
       ]);
-      expect(resumed).toEqual({
-        exitCode: 0,
-        stdout: `chat id: ${chatId}\necho:cli-second-turn\n`,
-        stderr: '',
-      });
+      expect(resumed.exitCode).toBe(0);
+      expect(resumed.stderr).toBe('');
+      expect(resumed.stdout).toMatch(
+        new RegExp(`^chat id: ${chatId}\\nturn id: [^\\n]+\\necho:cli-second-turn\\n$`),
+      );
       const chatsAfterResume = await fixture.client.listChats();
       expect(chatsAfterResume.sessions).toHaveLength(1);
       expect(chatsAfterResume.sessions[0]?.tags).toEqual([
@@ -206,7 +216,7 @@ describe('garcon-cli', () => {
       const failed = await runCli(startArguments(fixture, 'cli-provider-failure'));
 
       expect(failed.exitCode).toBe(1);
-      expect(failed.stdout).toMatch(/^chat id: \d{16}\n$/);
+      expect(failed.stdout).toMatch(/^chat id: \d{16}\nturn id: [^\n]+\n$/);
       expect(failed.stderr).toContain('receipt polling: agent turn failed:');
       expect(failed.stdout).not.toContain('provider rejected');
     }, { namedWorkspace: WORKSPACE });
@@ -231,11 +241,13 @@ describe('garcon-cli', () => {
       stoppedHold.releaseEcho();
 
       const stopped = await stoppedCli;
-      expect(stopped).toEqual({
-        exitCode: 4,
-        stdout: `chat id: ${stoppedChat!.id}\n`,
-        stderr: 'receipt polling: agent turn interrupted: the turn was stopped\n',
-      });
+      expect(stopped.exitCode).toBe(4);
+      expect(stopped.stdout).toMatch(
+        new RegExp(`^chat id: ${stoppedChat!.id}\\nturn id: [^\\n]+\\n$`),
+      );
+      expect(stopped.stderr).toBe(
+        'receipt polling: agent turn interrupted: the turn was stopped\n',
+      );
 
       const beforeDelete = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
       const deletedHold = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-delete' });
@@ -251,11 +263,44 @@ describe('garcon-cli', () => {
       deletedHold.releaseEcho();
 
       const deleted = await deletedCli;
-      expect(deleted).toEqual({
-        exitCode: 4,
-        stdout: `chat id: ${deletedChat!.id}\n`,
-        stderr: 'receipt polling: agent turn interrupted: the chat was deleted\n',
+      expect(deleted.exitCode).toBe(4);
+      expect(deleted.stdout).toMatch(
+        new RegExp(`^chat id: ${deletedChat!.id}\\nturn id: [^\\n]+\\n$`),
+      );
+      expect(deleted.stderr).toBe(
+        'receipt polling: agent turn interrupted: the chat was deleted\n',
+      );
+    }, { namedWorkspace: WORKSPACE });
+  });
+
+  test('reattaches to an exact turn after the original CLI is interrupted', async () => {
+    await withIntegrationFixture('garcon-cli-wait', async (fixture) => {
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-wait' });
+      const attached = startObservedCli(startArguments(fixture, 'cli-wait'));
+      await held.received;
+      const handle = await attached.acceptedHandle;
+
+      attached.interrupt();
+      const detached = await attached.result;
+      expect(detached.exitCode).toBe(130);
+      expect(detached.stdout).toBe(
+        `chat id: ${handle.chatId}\nturn id: ${handle.turnId}\n`,
+      );
+      expect(detached.stderr).toContain('no Garcon agent was stopped');
+
+      held.releaseEcho();
+      const waited = await runCli(controlArguments(fixture, [
+        'wait', handle.chatId, '--turn', handle.turnId,
+      ]));
+
+      expect(waited).toEqual({
+        exitCode: 0,
+        stdout: `chat id: ${handle.chatId}\nturn id: ${handle.turnId}\necho:cli-wait\n`,
+        stderr: '',
       });
+      expect(fixture.fakeProviders.openAi.requests().filter(
+        (request) => request.lastUserText === 'cli-wait',
+      )).toHaveLength(1);
     }, { namedWorkspace: WORKSPACE });
   });
 
@@ -278,7 +323,10 @@ describe('garcon-cli', () => {
 
       const result = await cli.result;
       expect(result.exitCode).toBe(3);
-      expect(result.stdout).toBe(`chat id: ${acceptedChat!.id}\n`);
+      const handle = await cli.acceptedHandle;
+      expect(result.stdout).toBe(
+        `chat id: ${acceptedChat!.id}\nturn id: ${handle.turnId}\n`,
+      );
       expect(result.stderr).toContain('transport recovery:');
       expect(result.stderr).toContain('Garcon restarted while the turn was running');
     }, { namedWorkspace: WORKSPACE });
@@ -302,7 +350,9 @@ describe('garcon-cli', () => {
 
       expect(started.exitCode).toBe(0);
       expect(started.stderr).toBe('');
-      expect(started.stdout).toMatch(/^chat id: \d{16}\necho:cli-authenticated\n$/);
+      expect(started.stdout).toMatch(
+        /^chat id: \d{16}\nturn id: [^\n]+\necho:cli-authenticated\n$/,
+      );
     }, { namedWorkspace: WORKSPACE });
   });
 
@@ -473,11 +523,11 @@ describe('garcon-cli', () => {
         '--resume', chatId, 'cli-no-tag-follow-up',
       ]));
 
-      expect(resumed).toEqual({
-        exitCode: 0,
-        stdout: `chat id: ${chatId}\necho:cli-no-tag-follow-up\n`,
-        stderr: '',
-      });
+      expect(resumed.exitCode).toBe(0);
+      expect(resumed.stderr).toBe('');
+      expect(resumed.stdout).toMatch(
+        new RegExp(`^chat id: ${chatId}\\nturn id: [^\\n]+\\necho:cli-no-tag-follow-up\\n$`),
+      );
       const after = await fixture.client.listChats();
       expect(after.sessions.find((chat) => chat.id === chatId)?.tags).not.toContain('cli');
     }, { namedWorkspace: WORKSPACE });

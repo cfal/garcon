@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { CLI_HELP, parseCliArgs, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
 import { sendChatAsync, stopChat } from './chat-control.js';
+import { runChatWait } from './chat-wait.js';
 import { runConsultation } from './consultation.js';
 import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
@@ -118,6 +119,11 @@ export async function main(
     if (command.kind === 'list') {
       const client = await connectedClient(command, options);
       await runCatalogQuery(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'wait') {
+      const client = await connectedClient(command, options);
+      await runChatWait(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'stop') {

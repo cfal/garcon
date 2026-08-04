@@ -342,5 +342,5 @@ export async function runCatalogQuery(
       );
       break;
   }
-  output.listing(formatCatalogQueryResult(result, command.json));
+  output.result(formatCatalogQueryResult(result, command.json));
 }

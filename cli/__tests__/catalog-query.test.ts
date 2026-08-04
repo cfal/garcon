@@ -91,7 +91,7 @@ function output(): CliOutput & { listings: string[] } {
     listings: [],
     accepted() {},
     completed() {},
-    listing(content) { this.listings.push(content); },
+    result(content) { this.listings.push(content); },
     sent() {},
     stopped() {},
     diagnostic() {},
