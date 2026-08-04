@@ -13,6 +13,10 @@ import type {
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import type { ChatListResponse } from '@garcon/common/chat-list';
+import {
+  parseChatSnapshotResponse,
+  type ChatSnapshotResponse,
+} from '@garcon/common/chat-snapshot';
 import type {
   UpdateChatTitleRequest,
   UpdateChatTitleResponse,
@@ -234,6 +238,37 @@ export class GarconClient {
       throw new CliError('resume admission', 'server returned an invalid chat list', 3);
     }
     return value as ChatListResponse;
+  }
+
+  async getChatSnapshot(
+    chatId: string,
+    messageLimit: number,
+    signal?: AbortSignal,
+  ): Promise<ChatSnapshotResponse> {
+    const query = new URLSearchParams({ chatId, limit: String(messageLimit) });
+    const value = await this.#request(
+      'chat status',
+      'GET',
+      `/api/v1/chats/snapshot?${query.toString()}`,
+      undefined,
+      signal,
+    );
+    let snapshot: ChatSnapshotResponse;
+    try {
+      snapshot = parseChatSnapshotResponse(value);
+    } catch (error) {
+      throw new CliError('chat status', 'server returned an invalid chat snapshot', 3, {
+        cause: error,
+      });
+    }
+    if (
+      snapshot.chat.id !== chatId
+      || snapshot.messageLimit !== messageLimit
+      || snapshot.control.serverInstanceId !== this.#instanceId
+    ) {
+      throw new CliError('chat status', 'server returned an uncorrelated chat snapshot', 3);
+    }
+    return snapshot;
   }
 
   startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {

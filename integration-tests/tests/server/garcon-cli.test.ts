@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { userContents } from '../../support/chat-assertions.js';
@@ -279,6 +280,38 @@ describe('garcon-cli', () => {
       const attached = startObservedCli(startArguments(fixture, 'cli-wait'));
       await held.received;
       const handle = await attached.acceptedHandle;
+      const chatBeforeStatus = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === handle.chatId,
+      );
+      expect(chatBeforeStatus).toBeDefined();
+
+      const runningStatus = await runCli(controlArguments(fixture, [
+        'status', handle.chatId, '--json',
+      ]));
+      expect(runningStatus.exitCode).toBe(0);
+      expect(runningStatus.stderr).toBe('');
+      const runningSnapshot = JSON.parse(runningStatus.stdout);
+      expect(runningSnapshot).toMatchObject({
+        messageLimit: 10,
+        chat: {
+          id: handle.chatId,
+          projectPath: fixture.dirs.project,
+          tags: ['cli'],
+        },
+        processingPhase: 'running',
+        control: { serverInstanceId: expect.any(String) },
+        pendingUserInputs: expect.any(Array),
+        transcript: { availability: 'available' },
+      });
+      expect(userContents(runningSnapshot.transcript.messages)).toContain('cli-wait');
+
+      const coarseStatus = await runCli(controlArguments(fixture, [
+        'status', handle.chatId, '--messages', '0', '--json',
+      ]));
+      expect(JSON.parse(coarseStatus.stdout)).toMatchObject({
+        processingPhase: 'running',
+        transcript: { availability: 'not-requested' },
+      });
 
       attached.interrupt();
       const detached = await attached.result;
@@ -301,6 +334,31 @@ describe('garcon-cli', () => {
       expect(fixture.fakeProviders.openAi.requests().filter(
         (request) => request.lastUserText === 'cli-wait',
       )).toHaveLength(1);
+
+      const settledStatus = await runCli(controlArguments(fixture, [
+        'status', handle.chatId, '--json',
+      ]));
+      const settledSnapshot = JSON.parse(settledStatus.stdout);
+      expect(settledSnapshot.processingPhase).toBeNull();
+      expect(settledSnapshot.transcript.messages).toContainEqual(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            type: 'assistant-message',
+            content: 'echo:cli-wait',
+          }),
+        }),
+      );
+      const chatAfterStatus = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === handle.chatId,
+      );
+      expect(chatAfterStatus).toMatchObject({
+        title: chatBeforeStatus!.title,
+        tags: chatBeforeStatus!.tags,
+        model: chatBeforeStatus!.model,
+        permissionMode: chatBeforeStatus!.permissionMode,
+        thinkingMode: chatBeforeStatus!.thinkingMode,
+        activity: { lastReadAt: chatBeforeStatus!.activity.lastReadAt },
+      });
     }, { namedWorkspace: WORKSPACE });
   });
 
@@ -329,6 +387,24 @@ describe('garcon-cli', () => {
       );
       expect(result.stderr).toContain('transport recovery:');
       expect(result.stderr).toContain('Garcon restarted while the turn was running');
+
+      const status = await runCli(controlArguments(fixture, [
+        'status', acceptedChat!.id, '--messages', '0', '--json',
+      ]));
+      expect(status.exitCode).toBe(0);
+      expect(JSON.parse(status.stdout)).toMatchObject({
+        processingPhase: null,
+        control: { queue: { entries: [] } },
+        pendingUserInputs: [],
+        transcript: { availability: 'not-requested' },
+      });
+
+      const wait = await runCli(controlArguments(fixture, [
+        'wait', acceptedChat!.id, '--turn', handle.turnId,
+      ]));
+      expect(wait.exitCode).toBe(3);
+      expect(wait.stdout).toBe('');
+      expect(wait.stderr).toContain(`Garcon workspace "${WORKSPACE}"`);
     }, { namedWorkspace: WORKSPACE });
   }, 20_000);
 
@@ -353,6 +429,44 @@ describe('garcon-cli', () => {
       expect(started.stdout).toMatch(
         /^chat id: \d{16}\nturn id: [^\n]+\necho:cli-authenticated\n$/,
       );
+      const chatId = started.stdout.match(/^chat id: (\d{16})$/m)?.[1];
+      const status = await runCli(controlArguments(fixture, [
+        'status', chatId!, '--messages', '0', '--json',
+      ]));
+      expect(status.exitCode).toBe(0);
+      expect(status.stderr).toBe('');
+      expect(JSON.parse(status.stdout).chat.id).toBe(chatId);
+    }, { namedWorkspace: WORKSPACE });
+  });
+
+  test('reports missing chats and inspects chats whose project path disappeared', async () => {
+    await withIntegrationFixture('garcon-cli-status-paths', async (fixture) => {
+      const missing = await runCli(controlArguments(fixture, [
+        'status', fixture.newChatId(), '--messages', '0', '--json',
+      ]));
+      expect(missing.exitCode).toBe(2);
+      expect(missing.stdout).toBe('');
+      expect(missing.stderr).toContain(`Garcon workspace "${WORKSPACE}"`);
+
+      const nestedProject = `${fixture.dirs.project}/removed-project`;
+      await fs.mkdir(nestedProject);
+      const arguments_ = startArguments(fixture, 'cli-removed-project');
+      const cwdIndex = arguments_.indexOf('--cwd') + 1;
+      arguments_[cwdIndex] = nestedProject;
+      const started = await runCli(arguments_);
+      expect(started.exitCode).toBe(0);
+      const chatId = started.stdout.match(/^chat id: (\d{16})$/m)?.[1];
+      expect(chatId).toBeString();
+      await fs.rm(nestedProject, { recursive: true, force: true });
+
+      const status = await runCli(controlArguments(fixture, [
+        'status', chatId!, '--messages', '0', '--json',
+      ]));
+      expect(status.exitCode).toBe(0);
+      expect(JSON.parse(status.stdout)).toMatchObject({
+        chat: { id: chatId, projectPath: nestedProject },
+        transcript: { availability: 'not-requested' },
+      });
     }, { namedWorkspace: WORKSPACE });
   });
 

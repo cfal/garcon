@@ -195,6 +195,17 @@ garcon-cli --workspace default wait 1785337200123456 \
 
 `wait --json` prints the terminal turn receipt as one JSON document. Turn receipts belong to the running server process and may expire under retention pressure, so reattachment can fail after a server restart or receipt eviction even though the chat transcript remains available in Garcon.
 
+Inspect current chat-level progress when no retained turn handle is available:
+
+```bash
+garcon-cli --workspace default status 1785337200123456
+garcon-cli --workspace default status 1785337200123456 --messages 20 --json
+```
+
+`status` returns the current processing phase, execution control, pending inputs, and the latest 10 normalized transcript messages by default. `--messages` accepts `0` through `200`; zero skips transcript loading for a lightweight execution-state check. A temporarily unavailable transcript is reported inside an otherwise successful snapshot. JSON is the stable machine-readable interface; plain text redacts image bodies and truncates each message at 4,000 characters.
+
+Status is a one-shot, non-transactional chat observation. `status: idle` does not prove that a particular turn settled or that a just-finished message batch is already visible. Use `wait` with the exact accepted chat and turn IDs when completion identity matters, especially before retrying write-capable delegated work.
+
 ### One-Shot Chat Control From The CLI
 
 `send-async` submits one turn to an existing chat and returns immediately after Garcon accepts it, without waiting for the agent to finish. The turn runs in Garcon and stays fully visible and stoppable in the SPA. It inherits the chat's saved execution settings, so it may edit files or run tools when the chat permits them; it accepts no model, permission, or other execution overrides.

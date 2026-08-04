@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { parseChatSnapshotResponse } from '../../../common/chat-snapshot.js';
 import {
   TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
 } from '../../lib/domain-error.js';
@@ -41,6 +42,7 @@ function fixture(overrides = {}) {
           id: 'queued-1',
           content: 'Queued work',
           createdAt: TIMESTAMP,
+          updatedAt: TIMESTAMP,
           revision: 1,
           status: 'queued',
           delivery: {
@@ -130,6 +132,7 @@ describe('GET /api/v1/chats/snapshot', () => {
     });
     expect(JSON.stringify(body)).not.toContain('private-request');
     expect(JSON.stringify(body)).not.toContain('private-command');
+    expect(parseChatSnapshotResponse(body)).toMatchObject({ chat: { id: CHAT_ID } });
     expect(testFixture.chatViews.getOrCreatePage).toHaveBeenCalledWith(CHAT_ID, 10);
     expect(testFixture.calls).toEqual(['summary', 'control', 'messages', 'reconcile']);
   });

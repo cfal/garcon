@@ -11,6 +11,10 @@ import {
 } from '@garcon/common/chat-modes';
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
 import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
+import {
+  CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
+  CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT,
+} from '@garcon/common/chat-snapshot';
 import { normalizeTags, normalizeTagSlug } from '@garcon/common/tags';
 import { argumentError } from './errors.js';
 
@@ -20,6 +24,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] list <resource>
   garcon-cli [options] send-async <chat-id> [--allow-steer] <message>
   garcon-cli [options] stop <chat-id>
+  garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
 
 Starts or resumes a visible chat through an already-running Garcon server.
@@ -53,13 +58,14 @@ Options:
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
   --resume <chat-id>           Resume an existing chat
   --allow-steer                With send-async, steer the active turn when busy; never queues
+  --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
-  --json                       Print list or wait results as JSON
+  --json                       Print list, status, or wait results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list, send-async, stop, or wait.
+Use -- before a positional prompt whose first word is list, send-async, stop, status, or wait.
 The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
@@ -145,12 +151,20 @@ export interface WaitCliCommand extends CliConnectionOptions {
   json: boolean;
 }
 
+export interface StatusCliCommand extends CliConnectionOptions {
+  kind: 'status';
+  chatId: ChatId;
+  messageLimit: number;
+  json: boolean;
+}
+
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
   | ListCliCommand
   | SendAsyncCliCommand
   | StopCliCommand
+  | StatusCliCommand
   | WaitCliCommand
   | CliInvocation;
 
@@ -168,6 +182,7 @@ const SINGLE_STRING_OPTIONS = [
   'title',
   'resume',
   'turn',
+  'messages',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -253,6 +268,7 @@ const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['resume', '--resume'],
   ['json', '--json'],
   ['turn', '--turn'],
+  ['messages', '--messages'],
 ] as const;
 
 function rejectControlForbiddenOptions(
@@ -317,7 +333,9 @@ function parseStop(
   };
 }
 
-const WAIT_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
+type ObservationCommandKind = 'status' | 'wait';
+
+const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['cwd', '--cwd'],
   ['agent', '--agent'],
   ['provider', '--provider'],
@@ -331,13 +349,23 @@ const WAIT_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['allow-steer', '--allow-steer'],
 ] as const;
 
+function rejectObservationMutationOptions(
+  values: Record<string, ParsedOptionValue>,
+  command: ObservationCommandKind,
+): void {
+  for (const [key, flag] of OBSERVATION_FORBIDDEN_OPTIONS) {
+    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with ${command}`);
+  }
+}
+
 function parseWait(
   parsed: ReturnType<typeof parseArgs>,
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
 ): WaitCliCommand {
-  for (const [key, flag] of WAIT_FORBIDDEN_OPTIONS) {
-    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with wait`);
+  rejectObservationMutationOptions(values, 'wait');
+  if (values.messages !== undefined) {
+    throw argumentError('--messages cannot be used with wait');
   }
   if (parsed.positionals.length !== 2) {
     throw argumentError('wait requires exactly one chat ID');
@@ -362,6 +390,48 @@ function parseWait(
     ...connection,
     chatId,
     turnId,
+    json: values.json === true,
+  };
+}
+
+function parseStatusMessageLimit(value: ParsedOptionValue): number {
+  if (value === undefined) return CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT;
+  const raw = value as string;
+  if (!/^\d+$/.test(raw)) {
+    throw argumentError(
+      `--messages must be an integer from 0 through ${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT}`,
+    );
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed > CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT) {
+    throw argumentError(
+      `--messages must be an integer from 0 through ${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT}`,
+    );
+  }
+  return parsed;
+}
+
+function parseStatus(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): StatusCliCommand {
+  rejectObservationMutationOptions(values, 'status');
+  if (values.turn !== undefined) throw argumentError('--turn cannot be used with status');
+  if (parsed.positionals.length !== 2) {
+    throw argumentError('status requires exactly one chat ID');
+  }
+  let chatId: ChatId;
+  try {
+    chatId = parseChatId(parsed.positionals[1]!);
+  } catch (error) {
+    throw argumentError('status requires a valid Garcon chat ID', { cause: error });
+  }
+  return {
+    kind: 'status',
+    ...connection,
+    chatId,
+    messageLimit: parseStatusMessageLimit(values.messages),
     json: values.json === true,
   };
 }
@@ -392,6 +462,7 @@ export function parseCliArgs(
         tag: { type: 'string', multiple: true },
         resume: { type: 'string' },
         turn: { type: 'string' },
+        messages: { type: 'string' },
         'allow-steer': { type: 'boolean' },
         json: { type: 'boolean' },
         help: { type: 'boolean' },
@@ -460,6 +531,9 @@ export function parseCliArgs(
   if (startsReservedCommand(tokens, 'wait')) {
     return parseWait(parsed, values, connection);
   }
+  if (startsReservedCommand(tokens, 'status')) {
+    return parseStatus(parsed, values, connection);
+  }
 
   if (startsReservedCommand(tokens, 'list')) {
     const resource = parsed.positionals[1] ?? '';
@@ -475,6 +549,7 @@ export function parseCliArgs(
     rejectListOption(resume, '--resume');
     rejectListOption(values['allow-steer'], '--allow-steer');
     rejectListOption(values.turn, '--turn');
+    rejectListOption(values.messages, '--messages');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
@@ -510,8 +585,11 @@ export function parseCliArgs(
     };
   }
 
-  if (values.json !== undefined) throw argumentError('--json can only be used with list or wait');
+  if (values.json !== undefined) {
+    throw argumentError('--json can only be used with list, status, or wait');
+  }
   if (values.turn !== undefined) throw argumentError('--turn can only be used with wait');
+  if (values.messages !== undefined) throw argumentError('--messages can only be used with status');
   if (values['allow-steer'] !== undefined) {
     throw argumentError('--allow-steer can only be used with send-async');
   }

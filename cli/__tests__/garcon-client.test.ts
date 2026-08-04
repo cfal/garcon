@@ -44,7 +44,126 @@ function runtimeResponse(input: string | URL | Request, instanceId = connection.
   return Response.json({ schemaVersion: 1, instanceId, proof });
 }
 
+function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    observedAt: '2026-08-04T12:00:00.000Z',
+    messageLimit: 10,
+    chat: {
+      id: runRequest.chatId,
+      title: 'Review',
+      agentId: 'codex',
+      model: 'gpt-5.4',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      projectPath: '/project',
+      tags: ['cli'],
+      activity: { createdAt: null, lastActivityAt: null },
+    },
+    processingPhase: null,
+    control: {
+      serverInstanceId: connection.instanceId,
+      queue: {
+        entries: [],
+        dispatchingEntryId: null,
+        steeringEntryId: null,
+        recentlyDispatched: [],
+        pause: null,
+        reorderRevision: 0,
+      },
+      version: 0,
+      updatedAt: null,
+    },
+    pendingUserInputs: [],
+    transcript: {
+      availability: 'available',
+      generationId: 'generation-1',
+      messages: [],
+      lastSeq: 0,
+      pageOldestSeq: 0,
+      hasMore: false,
+    },
+    ...overrides,
+  };
+}
+
 describe('GarconClient', () => {
+  test('fetches and validates a correlated chat snapshot', async () => {
+    let request: { url: string; method: string | undefined; authorization: string | null } | undefined;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        request = {
+          url: String(input),
+          method: init?.method,
+          authorization: new Headers(init?.headers).get('authorization'),
+        };
+        return Response.json(validSnapshot());
+      },
+    });
+
+    await expect(client.getChatSnapshot(runRequest.chatId, 10)).resolves.toMatchObject({
+      chat: { id: runRequest.chatId },
+      messageLimit: 10,
+    });
+    expect(request).toEqual({
+      url: `${connection.baseUrl}/api/v1/chats/snapshot?chatId=${runRequest.chatId}&limit=10`,
+      method: 'GET',
+      authorization: `Bearer ${connection.localCapability}`,
+    });
+  });
+
+  test.each([
+    ['chat ID', () => validSnapshot({
+      chat: { ...validSnapshot().chat as object, id: '1785337200123457' },
+    })],
+    ['message limit', () => validSnapshot({ messageLimit: 9 })],
+    ['server instance', () => validSnapshot({
+      control: { ...validSnapshot().control as object, serverInstanceId: 'other-instance' },
+    })],
+  ])('rejects an uncorrelated snapshot by %s', async (_label, response) => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json(response()),
+    });
+
+    await expect(client.getChatSnapshot(runRequest.chatId, 10))
+      .rejects.toThrow('uncorrelated chat snapshot');
+  });
+
+  test('rejects a malformed chat snapshot contract', async () => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json(validSnapshot({ processingPhase: 'busy' })),
+    });
+
+    await expect(client.getChatSnapshot(runRequest.chatId, 10))
+      .rejects.toThrow('invalid chat snapshot');
+  });
+
+  test('maps a missing snapshot to an argument-level exit', async () => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: false,
+        error: 'Session not found',
+        errorCode: 'SESSION_NOT_FOUND',
+        retryable: false,
+      }, { status: 404 }),
+    });
+
+    try {
+      await client.getChatSnapshot(runRequest.chatId, 10);
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(GarconHttpError);
+      expect((error as GarconHttpError).phase).toBe('chat status');
+      expect((error as GarconHttpError).exitCode).toBe(2);
+    }
+  });
+
   test('authenticates requests with the process capability', async () => {
     let authorization: string | null = null;
     let redirect: RequestRedirect | undefined;
