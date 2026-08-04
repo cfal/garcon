@@ -964,6 +964,194 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
+  it('ignores a late MessageAbortedError unwind while a successor turn is running', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const failures = [];
+    const finishes = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime);
+    await expect(runtime.abort('session-1')).resolves.toBe(true);
+
+    const successor = runtime.runTurn({
+      command: 'successor',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      clientRequestId: 'req-b',
+      turnId: 'turn-b',
+    });
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+
+    // The first turn's abort unwind lands in the successor's running window and is ignored.
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+      },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(failures).toEqual([]);
+    expect(runtime.isRunning('session-1')).toBe(true);
+
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'user-b', role: 'user', time: { created: Date.now() } },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[1][0].parts[0].id,
+          messageID: 'user-b',
+          type: 'text',
+          text: 'successor',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-b', role: 'assistant', parentID: 'user-b' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0005',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'part-b', messageID: 'assistant-b', type: 'text', text: 'current' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0006',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+
+    await expect(successor).resolves.toBeUndefined();
+    expect(failures).toEqual([]);
+    expect(finishes).toHaveLength(1);
+
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('does not finish the turn when the abort unwind idle arrives before the abort resolves', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const acknowledged = deferred();
+    const runtime = createRuntime(
+      mock(() => acknowledged.promise),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const finishes = [];
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime);
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    await Promise.resolve();
+
+    const aborting = runtime.abort('session-1');
+    await Promise.resolve();
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(finishes).toEqual([]);
+    expect(runtime.isRunning('session-1')).toBe(true);
+
+    acknowledged.resolve({ data: true });
+    await expect(aborting).resolves.toBe(true);
+    expect(finishes).toEqual([]);
+    expect(runtime.isRunning('session-1')).toBe(false);
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('replays a skipped abort unwind idle when the provider rejects the abort', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const acknowledged = deferred();
+    const runtime = createRuntime(
+      mock(() => acknowledged.promise),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const finishes = [];
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime);
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    await Promise.resolve();
+
+    const aborting = runtime.abort('session-1');
+    await Promise.resolve();
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(finishes).toEqual([]);
+
+    acknowledged.resolve({ error: { message: 'abort rejected' } });
+    await expect(aborting).resolves.toBe(false);
+    expect(finishes).toEqual(['finished']);
+    expect(runtime.isRunning('session-1')).toBe(false);
+    eventStream.close();
+    runtime.shutdown();
+  });
+
   it('surfaces SDK stream errors instead of silently reconnecting', async () => {
     const eventStream = createEventStream();
     let subscriptionOptions;

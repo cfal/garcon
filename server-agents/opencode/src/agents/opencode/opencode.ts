@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { isRecord } from '@garcon/common/json';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
-import { extractSessionId, extractTextParts, openCodeSessionError, streamGlobalEvents, type SSEEvent } from './sse-events.js';
+import { extractSessionId, extractTextParts, isOpenCodeAbortError, openCodeSessionError, streamGlobalEvents, type SSEEvent } from './sse-events.js';
 import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -151,6 +151,10 @@ interface OpenCodeTurnContext {
 
 interface OpenCodeSession {
   status: 'running' | 'completed' | 'aborted';
+  // Set while a provider abort is in flight so the abort unwind's idle cannot claim the
+  // turn finished before the abort is acknowledged; a rejected abort replays the skip.
+  aborting?: boolean;
+  skippedIdleEventId?: string | null;
   chatId: string;
   model?: string;
   permissionMode: PermissionMode;
@@ -926,6 +930,12 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
             continue;
           }
 
+          if (isOpenCodeAbortError(event)) {
+            this.#logger.debug('Ignoring OpenCode abort unwind for a Garcon-retired turn', {
+              sessionId,
+            });
+            continue;
+          }
           const sessionError = openCodeSessionError(event);
           if (sessionError) {
             // A non-retryable provider error is terminal for the turn; retire it before a
@@ -993,6 +1003,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
           if (event.type === 'session.status') {
             const status = event.properties?.status;
+            if (status?.type === 'idle' && session.aborting) {
+              session.skippedIdleEventId = event.id ?? null;
+              continue;
+            }
             if (
               status?.type === 'idle'
               && session.status === 'running'
@@ -1318,6 +1332,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const waiter = this.#createTurnWaiter(agentSessionId);
     if (session) {
       session.status = 'running';
+      session.aborting = false;
+      session.skippedIdleEventId = null;
       session.chatId = chatId;
       session.permissionMode = permissionMode;
       session.directory = scope.directory;
@@ -1399,6 +1415,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const session = this.#sessions.get(agentSessionId);
     if (!session || session.status !== 'running') return false;
     const turn = session.turn;
+    session.aborting = true;
+    session.skippedIdleEventId = null;
 
     try {
       const client = await this.getClient();
@@ -1412,10 +1430,30 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       );
       throwOpenCodeResultError(result, 'OpenCode session abort failed');
     } catch (error) {
+      session.aborting = false;
       this.#logger.warn('OpenCode session abort failed', {
         agentSessionId,
         error: errorMessage(error),
       });
+      // The abort never happened, so an idle skipped while aborting was a genuine completion.
+      // The SSE listener may have recorded a skip concurrently; reset property narrowing.
+      const skippedIdleEventId = session.skippedIdleEventId as string | null;
+      session.skippedIdleEventId = null;
+      const providerObservedEventId = session.turn.providerObservedEventId as string | null;
+      if (
+        skippedIdleEventId
+        && session.status === 'running'
+        && providerObservedEventId
+        && skippedIdleEventId > providerObservedEventId
+      ) {
+        const eventMetadata = session.turn.eventMetadata;
+        this.#cancelPendingPermissionsForSession(agentSessionId, 'session-complete');
+        session.status = 'completed';
+        session.lastActivityAt = Date.now();
+        this.#resolveTurnWaiter(agentSessionId);
+        this.emitProcessing(session.chatId, false);
+        this.emitFinished(session.chatId, 0, eventMetadata);
+      }
       return false;
     }
 

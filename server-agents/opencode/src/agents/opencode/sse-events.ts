@@ -81,6 +81,14 @@ export function openCodeSessionError(event: SSEEvent): string | null {
   return 'OpenCode session failed';
 }
 
+// Garcon owns aborts: its abort path retires the turn before OpenCode's abort unwind
+// publishes MessageAbortedError, so a late unwind must never fail a successor turn.
+export function isOpenCodeAbortError(event: SSEEvent): boolean {
+  if (event.type !== 'session.error') return false;
+  const error = isRecord(event.properties?.error) ? event.properties.error : null;
+  return error?.name === 'MessageAbortedError';
+}
+
 export function extractSessionId(event: SSEEvent): string | undefined {
   const props = event.properties || {};
   return props.sessionID
