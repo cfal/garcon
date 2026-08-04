@@ -56,6 +56,18 @@ export interface IntegrationFixtureOptions {
   chatTitleAgent?: keyof DirectTestAgents;
   forbiddenPersistedValues?: readonly string[];
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
+  // Runs after the final Garcon child exits and before the fixture root can be removed;
+  // the only reliable place to inspect provider grandchildren. Hook failures join the
+  // fixture's cleanup errors and preserve its artifact root.
+  afterGarconStop?: (directories: IntegrationDirectories) => Promise<void>;
+  // Synchronous bounded diagnostics added under an `extensions` key in failure artifacts.
+  extraDiagnostics?: (directories: IntegrationDirectories) => Record<string, unknown>;
+  // Derives environment from the created fixture directories; resolved once before
+  // prepareWorkspace and reused for every replacement process. Resolver values win over
+  // static serverEnvironment entries with the same name.
+  resolveServerEnvironment?: (
+    directories: IntegrationDirectories,
+  ) => Record<string, string>;
   redactSensitiveDiagnostics?: boolean;
   serverEnvironment?: Record<string, string>;
   namedWorkspace?: string;
@@ -177,6 +189,8 @@ export class IntegrationFixture {
   readonly #redactSensitiveDiagnostics: boolean;
   readonly #serverEnvironment: Record<string, string>;
   readonly #workspaceName: string | undefined;
+  readonly #afterGarconStop?: (directories: IntegrationDirectories) => Promise<void>;
+  readonly #extraDiagnostics?: (directories: IntegrationDirectories) => Record<string, unknown>;
   garcon: GarconProcess;
   client: GarconTestClient;
   readonly #clients = new Map<string, GarconTestClient>();
@@ -193,6 +207,8 @@ export class IntegrationFixture {
     redactSensitiveDiagnostics?: boolean;
     serverEnvironment?: Record<string, string>;
     workspaceName?: string;
+    afterGarconStop?: (directories: IntegrationDirectories) => Promise<void>;
+    extraDiagnostics?: (directories: IntegrationDirectories) => Record<string, unknown>;
   }) {
     this.dirs = input.dirs;
     this.fakeProviders = input.fakeProviders;
@@ -204,6 +220,8 @@ export class IntegrationFixture {
     this.#redactSensitiveDiagnostics = input.redactSensitiveDiagnostics === true;
     this.#serverEnvironment = { ...(input.serverEnvironment ?? {}) };
     this.#workspaceName = input.workspaceName;
+    this.#afterGarconStop = input.afterGarconStop;
+    this.#extraDiagnostics = input.extraDiagnostics;
   }
 
   static async create(options: IntegrationFixtureOptions = {}): Promise<IntegrationFixture> {
@@ -225,6 +243,10 @@ export class IntegrationFixture {
       openAiResponses: FakeOpenAiResponsesServer.start(),
       anthropic: FakeAnthropicServer.start(),
     };
+    const serverEnvironment = {
+      ...(options.serverEnvironment ?? {}),
+      ...(options.resolveServerEnvironment?.(dirs) ?? {}),
+    };
     let garcon: GarconProcess | null = null;
     let client: GarconTestClient | null = null;
     try {
@@ -236,7 +258,7 @@ export class IntegrationFixture {
         workspaceName: options.namedWorkspace,
         projectDir: dirs.project,
         homeDir: dirs.home,
-        environment: options.serverEnvironment,
+        environment: serverEnvironment,
         redactEnvironmentValues: options.redactSensitiveDiagnostics,
       });
       client = await GarconTestClient.connect(garcon.baseUrl, {
@@ -285,8 +307,10 @@ export class IntegrationFixture {
         directAgents,
         forbiddenPersistedValues: options.forbiddenPersistedValues,
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
-        serverEnvironment: options.serverEnvironment,
+        serverEnvironment,
         workspaceName: options.namedWorkspace,
+        afterGarconStop: options.afterGarconStop,
+        extraDiagnostics: options.extraDiagnostics,
       });
     } catch (error) {
       await client?.close().catch(() => undefined);
@@ -294,7 +318,14 @@ export class IntegrationFixture {
       fakeProviders.openAi.stop();
       fakeProviders.openAiResponses.stop();
       fakeProviders.anthropic.stop();
-      await rm(root, { recursive: true, force: true });
+      const cleanupError = await options.afterGarconStop?.(dirs).then(
+        () => null,
+        (hookError: unknown) => hookError,
+      ) ?? null;
+      if (!cleanupError) await rm(root, { recursive: true, force: true });
+      if (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'Integration fixture creation failed.');
+      }
       throw error;
     }
   }
@@ -334,7 +365,10 @@ export class IntegrationFixture {
     await this.#startReplacementGarcon();
   }
 
-  async crashAndRestartGarcon(options: { reusePort?: boolean } = {}): Promise<void> {
+  async crashAndRestartGarcon(options: {
+    reusePort?: boolean;
+    beforeStart?: () => Promise<void>;
+  } = {}): Promise<void> {
     const previousPort = Number(new URL(this.garcon.baseUrl).port);
     await this.#closeClients();
     await this.garcon.crash();
@@ -346,6 +380,7 @@ export class IntegrationFixture {
     );
     this.#archiveCurrentRun();
     this.#clients.clear();
+    await options.beforeStart?.();
     await this.#startReplacementGarcon(options.reusePort ? previousPort : undefined);
   }
 
@@ -522,6 +557,14 @@ export class IntegrationFixture {
     } catch (error) {
       errors.push(error);
     }
+    // Provider grandchildren are inspected and cleaned while the fixture root still exists.
+    if (this.#afterGarconStop) {
+      try {
+        await this.#afterGarconStop(this.dirs);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
     const forbiddenPersistedValues = [
       ...sensitiveEnvironmentValues(this.#serverEnvironment),
       ...this.#forbiddenPersistedValues,
@@ -598,7 +641,10 @@ export class IntegrationFixture {
   #diagnosticsForOutput(): Record<string, unknown> {
     const diagnostics = this.diagnostics();
     if (!this.#redactSensitiveDiagnostics) {
-      return diagnostics as unknown as Record<string, unknown>;
+      return {
+        ...diagnostics as unknown as Record<string, unknown>,
+        extensions: this.#safeExtraDiagnostics(),
+      };
     }
     return {
       directories: '[REDACTED]',
@@ -616,6 +662,16 @@ export class IntegrationFixture {
         ]),
       ),
     };
+  }
+
+  // Callback failures are recorded instead of masking the original test failure.
+  #safeExtraDiagnostics(): Record<string, unknown> | null {
+    if (!this.#extraDiagnostics) return null;
+    try {
+      return this.#extraDiagnostics(this.dirs);
+    } catch (error) {
+      return { diagnosticError: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async #closeClients(): Promise<void> {

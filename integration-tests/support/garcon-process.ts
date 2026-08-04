@@ -1,3 +1,5 @@
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
 
@@ -44,12 +46,14 @@ function isolatedEnvironment(
     HOME: homeDir,
     XDG_CONFIG_HOME: `${homeDir}/.config`,
     XDG_DATA_HOME: `${homeDir}/.local/share`,
+    XDG_STATE_HOME: `${homeDir}/.local/state`,
+    XDG_CACHE_HOME: `${homeDir}/.cache`,
+    TMPDIR: `${homeDir}/tmp`,
     PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
     NO_COLOR: '1',
     ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
     ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
     ...(process.env.TZ ? { TZ: process.env.TZ } : {}),
-    ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
     ...overrides,
   };
 }
@@ -126,6 +130,8 @@ export class GarconProcess {
     const workspaceArguments = options.workspaceName
       ? ['--workspace', options.workspaceName]
       : ['--workspace-dir', options.workspaceDir];
+    // The exported temp root must exist before the child inherits it.
+    await mkdir(join(options.homeDir, 'tmp'), { recursive: true });
     const child = Bun.spawn({
       cmd: [
         process.execPath,

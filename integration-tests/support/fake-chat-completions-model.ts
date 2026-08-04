@@ -22,7 +22,10 @@ export type ChatCompletionsTurn =
 
 export type ChatCompletionsFault =
   | { readonly kind: 'http-error'; readonly status: number; readonly message: string }
-  | { readonly kind: 'stream-error'; readonly message: string };
+  // Clean close before the [DONE] sentinel; some SDKs accept this as a complete response.
+  | { readonly kind: 'stream-error'; readonly message: string }
+  // A provider error frame mid-stream, as OpenAI emits for overloaded models.
+  | { readonly kind: 'stream-error-frame'; readonly message: string };
 
 export interface HeldChatCompletionsTurn {
   readonly requested: Promise<RecordedChatCompletionsRequest>;
@@ -201,6 +204,28 @@ function sseResponse(chunks: Chunk[], options: { truncated?: boolean } = {}): Re
   });
 }
 
+// Emits the leading chunks, then a provider error frame, then closes without [DONE].
+function sseErrorFrameResponse(chunks: Chunk[], message: string): Response {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const payload of chunks.slice(0, 1)) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+      }
+      controller.enqueue(encoder.encode(
+        `data: ${JSON.stringify({ error: { message, type: 'server_error' } })}\n\n`,
+      ));
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: {
+      'cache-control': 'no-cache',
+      'content-type': 'text/event-stream; charset=utf-8',
+    },
+  });
+}
+
 export class FakeChatCompletionsModel {
   readonly #server: Bun.Server<undefined>;
   readonly #turns: Array<ChatCompletionsTurn | ChatCompletionsFault> = [];
@@ -367,6 +392,9 @@ export class FakeChatCompletionsModel {
         return Response.json({
           error: { message: turn.message, type: 'server_error' },
         }, { status: turn.status });
+      }
+      if (turn.kind === 'stream-error-frame') {
+        return sseErrorFrameResponse(turnChunks([], recorded), turn.message);
       }
       return sseResponse(turnChunks([], recorded), { truncated: true });
     }

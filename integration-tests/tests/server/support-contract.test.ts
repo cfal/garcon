@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BoundedLog } from '../../support/bounded-log.js';
@@ -21,7 +21,23 @@ import {
   stopLightpandaChild,
   type LightpandaStopChild,
 } from '../../support/lightpanda-process.js';
-import { assertSensitiveValuesNotPersisted } from '../../support/integration-fixture.js';
+import {
+  assertSensitiveValuesNotPersisted,
+  createIntegrationFixture,
+  withIntegrationFixture,
+} from '../../support/integration-fixture.js';
+import {
+  assertScriptedOpenCodePlatform,
+  OPENCODE_PLUGIN_SEED_FILES,
+  OPENCODE_VERSION,
+  writeOpenCodePluginSeed,
+} from '../../support/scripted-opencode.js';
+import {
+  readJsonFile,
+  stopChildWithEscalation,
+  verifyPinnedBinaryVersion,
+  writeJsonAtomic,
+} from '../../support/opencode-process-supervisor.js';
 
 class ControlledWebSocket extends EventTarget {
   readyState = 0;
@@ -117,6 +133,163 @@ describe('integration support contracts', () => {
         'A sensitive integration credential was persisted by the test workflow.',
       );
       expect((fileError as Error).message).not.toContain(sensitiveValue);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('resolves directory-derived environment once and lets resolver values win', async () => {
+    const resolutionRoots: string[] = [];
+    const fixture = await createIntegrationFixture({
+      serverEnvironment: {
+        GARCON_CONTRACT_MARKER: 'static',
+        GARCON_CONTRACT_SECRET_TOKEN: 'static-secret-value',
+      },
+      resolveServerEnvironment: (directories) => {
+        resolutionRoots.push(directories.root);
+        return {
+          GARCON_CONTRACT_MARKER: 'resolver',
+          GARCON_CONTRACT_SECRET_TOKEN: 'resolver-secret-value',
+        };
+      },
+    });
+    try {
+      expect(resolutionRoots).toEqual([fixture.dirs.root]);
+      await access(join(fixture.dirs.home, 'tmp'));
+      // Only the resolver value is audited on dispose, so persisting the overridden static
+      // value must not fail cleanup.
+      await writeFile(join(fixture.dirs.root, 'overridden.txt'), 'static-secret-value');
+      await fixture.restartGarcon();
+      await fixture.crashAndRestartGarcon();
+      expect(resolutionRoots).toEqual([fixture.dirs.root]);
+    } finally {
+      await fixture.dispose();
+    }
+  }, 120_000);
+
+  test('runs the post-Garcon cleanup hook before fixture-root removal', async () => {
+    const observations: Array<{ rootExisted: boolean; garconRunning: boolean }> = [];
+    const fixture = await createIntegrationFixture({
+      afterGarconStop: async (directories) => {
+        observations.push({
+          rootExisted: await access(directories.root).then(() => true, () => false),
+          garconRunning: false,
+        });
+      },
+    });
+    const root = fixture.dirs.root;
+    await fixture.dispose();
+    expect(observations).toEqual([{ rootExisted: true, garconRunning: false }]);
+    await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const hookCalls: string[] = [];
+    let creationError: unknown;
+    try {
+      await createIntegrationFixture({
+        prepareWorkspace: async (directories) => {
+          hookCalls.push(`prepare:${directories.root}`);
+          throw new Error('deliberate create failure');
+        },
+        afterGarconStop: async (directories) => {
+          hookCalls.push(`cleanup:${directories.root}`);
+        },
+      });
+    } catch (error) {
+      creationError = error;
+    }
+    expect((creationError as Error).message).toContain('deliberate create failure');
+    expect(hookCalls).toHaveLength(2);
+    expect(hookCalls[0].replace('prepare:', '')).toBe(hookCalls[1].replace('cleanup:', ''));
+  }, 120_000);
+
+  test('includes diagnostic extensions in failure artifacts', async () => {
+    let failure: unknown;
+    try {
+      await withIntegrationFixture('support-contract-extensions', async () => {
+        throw new Error('deliberate diagnostics failure');
+      }, {
+        extraDiagnostics: (directories) => ({ marker: 'extension-value', root: directories.root }),
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect((failure as Error).message).toContain('deliberate diagnostics failure');
+    const artifactMatch = /Integration diagnostics: (\S+)/.exec((failure as Error).message);
+    expect(artifactMatch).not.toBeNull();
+    const artifact = JSON.parse(await readFile(artifactMatch![1], 'utf8')) as {
+      extensions?: { marker?: string };
+    };
+    expect(artifact.extensions?.marker).toBe('extension-value');
+    await rm(artifactMatch![1], { force: true });
+  }, 120_000);
+
+  test('escalates a stuck supervised child from SIGTERM to SIGKILL', async () => {
+    const child = Bun.spawn(
+      ['sh', '-c', 'trap "" TERM; sleep 30'],
+      { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' },
+    );
+    const started = Date.now();
+    const exitCode = await stopChildWithEscalation(child, 50);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(exitCode).not.toBe(0);
+  });
+
+  test('reads only complete atomic JSON snapshots', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-atomic-json-'));
+    try {
+      const path = join(root, 'state.json');
+      expect(await readJsonFile(path)).toBeNull();
+      const writes: Promise<void>[] = [];
+      for (let index = 0; index < 50; index += 1) {
+        writes.push(writeJsonAtomic(path, { index, payload: 'x'.repeat(2_000) }));
+      }
+      await Promise.all(writes);
+      const snapshot = await readJsonFile<{ index: number; payload: string }>(path);
+      expect(snapshot?.payload).toHaveLength(2_000);
+      await writeFile(path, '{"torn":');
+      await expect(readJsonFile(path)).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('seeds consistent plugin bootstrap metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-plugin-seed-'));
+    try {
+      const globalConfig = join(root, 'xdg-config', 'opencode');
+      await mkdir(globalConfig, { recursive: true });
+      await writeOpenCodePluginSeed(globalConfig);
+      await access(join(globalConfig, 'node_modules'));
+      const pkg = JSON.parse(await readFile(join(globalConfig, 'package.json'), 'utf8'));
+      const lock = JSON.parse(await readFile(join(globalConfig, 'package-lock.json'), 'utf8'));
+      const declared = Object.keys(pkg.dependencies ?? {});
+      const locked = Object.keys(lock.packages?.['']?.dependencies ?? {});
+      expect(declared).toContain('@opencode-ai/plugin');
+      expect(locked).toEqual(expect.arrayContaining(declared));
+      expect(pkg.dependencies['@opencode-ai/plugin']).toBe(OPENCODE_VERSION);
+      for (const [name, contents] of Object.entries(OPENCODE_PLUGIN_SEED_FILES)) {
+        expect(await readFile(join(globalConfig, name), 'utf8')).toBe(contents);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses the scripted OpenCode tier off Linux and verifies pinned versions hermetically', async () => {
+    expect(() => assertScriptedOpenCodePlatform('linux')).not.toThrow();
+    expect(() => assertScriptedOpenCodePlatform('darwin')).toThrow('require Linux');
+
+    const root = await mkdtemp(join(tmpdir(), 'garcon-version-check-'));
+    try {
+      const good = join(root, 'good-opencode');
+      await writeFile(good, `#!/bin/sh\necho ${OPENCODE_VERSION}\n`, { mode: 0o755 });
+      await expect(verifyPinnedBinaryVersion({ binary: good, env: {} }))
+        .resolves.toBe(OPENCODE_VERSION);
+
+      const bad = join(root, 'bad-opencode');
+      await writeFile(bad, '#!/bin/sh\necho 0.0.0\n', { mode: 0o755 });
+      await expect(verifyPinnedBinaryVersion({ binary: bad, env: {} }))
+        .rejects.toThrow(OPENCODE_VERSION);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
