@@ -17,6 +17,10 @@ import {
 	sanitizeGlobalShortcutOverrides,
 	type GlobalShortcutOverrides,
 } from '$lib/workspace/global-shortcuts.js';
+import {
+	DEFAULT_SNIPPET_TRIGGER,
+	normalizeSnippetTrigger,
+} from '$lib/chat/composer/snippet-trigger.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
@@ -98,6 +102,7 @@ export interface LocalSettingsSnapshot {
 	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
+	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
 	hideChatListWhenGitInMain: boolean;
 	desktopLayoutOrder: DesktopLayoutOrder;
@@ -150,6 +155,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showQuickCommitTray: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
+	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
 	hideChatListWhenGitInMain: false,
 	desktopLayoutOrder: [...DEFAULT_DESKTOP_LAYOUT_ORDER],
@@ -244,6 +250,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
+		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
 		hideChatListWhenGitInMain: parseBoolean(
 			parsed.hideChatListWhenGitInMain,
@@ -326,6 +333,7 @@ export class LocalSettingsStore {
 	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
+	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
 	hideChatListWhenGitInMain = $state(DEFAULTS.hideChatListWhenGitInMain);
 	desktopLayoutOrder = $state<DesktopLayoutOrder>([...DEFAULT_DESKTOP_LAYOUT_ORDER]);
@@ -371,6 +379,7 @@ export class LocalSettingsStore {
 
 	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {
 		const next = { ...this.snapshot(), [key]: value };
+		if (key === 'snippetTrigger') next.snippetTrigger = normalizeSnippetTrigger(value);
 		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
 		if (key === 'desktopLayoutOrder') {
 			next.desktopLayoutOrder = normalizeDesktopLayoutOrder(value);
@@ -410,6 +419,7 @@ export class LocalSettingsStore {
 			showQuickCommitTray: this.showQuickCommitTray,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
+			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
 			hideChatListWhenGitInMain: this.hideChatListWhenGitInMain,
 			desktopLayoutOrder: [...this.desktopLayoutOrder],
@@ -445,6 +455,7 @@ export class LocalSettingsStore {
 		this.showQuickCommitTray = snap.showQuickCommitTray;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
+		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
 		this.hideChatListWhenGitInMain = snap.hideChatListWhenGitInMain;
 		this.desktopLayoutOrder = [...snap.desktopLayoutOrder];

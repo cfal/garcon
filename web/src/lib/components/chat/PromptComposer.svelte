@@ -3,6 +3,7 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
 	import GitQuickStatusTray from './GitQuickStatusTray.svelte';
@@ -27,6 +28,7 @@
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
+	import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import {
@@ -71,7 +73,11 @@
 		ModelSelectorChange,
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
-	import type { Snippet, SnippetExpansionContext } from '$shared/snippets';
+	import {
+		snippetTemplateUsesArguments,
+		type Snippet,
+		type SnippetExpansionContext,
+	} from '$shared/snippets';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -149,6 +155,9 @@
 			? [chat.id, chat.status, chat.projectPath, chat.effectiveProjectKey].join('\u0000')
 			: '';
 	});
+	const snippetContextHint = $derived(
+		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
+	);
 
 	function requestComposerFocusForChat(chatId: string | null): void {
 		if (!chatId) return;
@@ -289,14 +298,6 @@
 		return () => cancelAnimationFrame(frameId);
 	});
 
-	// Updates the "@" file-mention and "/" slash-command triggers. The two are
-	// mutually exclusive; an active file mention suppresses the slash menu.
-	function updateTriggers(value: string, caret: number) {
-		const fileTrigger = findFileMentionTrigger(value, caret);
-		ui.setFileMentionTrigger(fileTrigger);
-		ui.setSlashCommandTrigger(fileTrigger ? null : findSlashCommandTrigger(value, caret));
-	}
-
 	function queueCurrentDraft(text: string): void {
 		const chatId = sessions.selectedChatId;
 		if (chatId) composerState.queueDraftSave(chatId, text);
@@ -375,6 +376,7 @@
 	async function insertSnippet(
 		snippet: Snippet,
 		argumentsText: string,
+		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
 		if (snippetExpansion.pending || !textarea) return 'cancelled';
 		ui.closeSlashMenu();
@@ -389,8 +391,8 @@
 		const chatId = sessions.selectedChatId;
 		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
-		const start = textarea.selectionStart;
-		const end = textarea.selectionEnd;
+		const start = range?.start ?? textarea.selectionStart;
+		const end = range?.end ?? textarea.selectionEnd;
 		try {
 			const [result] = await Promise.all([
 				snippetExpansion.run({
@@ -417,11 +419,20 @@
 				composerState.inputText !== sourceText
 			)
 				return 'cancelled';
-			const nextText =
-				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
-			composerState.inputText = nextText;
-			queueCurrentDraft(nextText);
-			await restoreComposerFocus(start + result.response.expandedText.length);
+			const replacement = range
+				? applySnippetTriggerReplacement(
+						sourceText,
+						range,
+						result.response.expandedText,
+					)
+				: {
+						text:
+							sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
+						caret: start + result.response.expandedText.length,
+					};
+			composerState.inputText = replacement.text;
+			queueCurrentDraft(replacement.text);
+			await restoreComposerFocus(replacement.caret);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
@@ -534,7 +545,12 @@
 		const value = (event.currentTarget as HTMLTextAreaElement).value;
 		autoResize();
 		const caret = textarea?.selectionStart ?? value.length;
-		updateTriggers(value, caret);
+		ui.updateTriggers(
+			value,
+			caret,
+			localSettings.snippetTrigger,
+			(event as InputEvent).isComposing,
+		);
 		queueCurrentDraft(value);
 	}
 
@@ -749,6 +765,35 @@
 			onClose={() => ui.closeFileMenu()}
 		/>
 
+		<ComposerSnippetPalette
+			open={ui.snippetPalette.isOpen}
+			onOpenChange={(nextOpen) => {
+				// The hidden trigger remains available to the chained insertion.
+				if (!nextOpen) ui.snippetPalette.hide();
+			}}
+			initialQuery={ui.snippetPalette.initialQuery}
+			interactionKey={snippetInteractionKey}
+			contextHint={snippetContextHint}
+			onInsert={async (snippet, argumentsText) => {
+				const trigger = ui.snippetPalette.trigger;
+				const result = await insertSnippet(snippet, argumentsText, trigger);
+				if (result === 'inserted') ui.snippetPalette.complete();
+				else if (result !== 'failed' || !snippetTemplateUsesArguments(snippet.template)) {
+					ui.snippetPalette.dismiss();
+				}
+				return result;
+			}}
+			onCancelled={() => {
+				const caret = ui.snippetPalette.trigger?.end;
+				ui.snippetPalette.dismiss();
+				void restoreComposerFocus(caret);
+			}}
+			onEditSnippets={() => {
+				ui.snippetPalette.dismiss();
+				editSnippets();
+			}}
+		/>
+
 		<form
 			onsubmit={(e) => {
 				e.preventDefault();
@@ -842,12 +887,9 @@
 
 			<ComposerBottomBar
 				{canAttachImages}
-				{snippetInteractionKey}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={handleImagePick}
-				onInsertSnippet={insertSnippet}
-				onEditSnippets={editSnippets}
-				onRequestComposerFocus={() => void restoreComposerFocus()}
+				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				addMenuDisabled={isDisabled}
 				isPromptTransformPending={snippetExpansion.pending}
 				{permissionOptions}

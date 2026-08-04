@@ -6,7 +6,6 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { Snippet as SvelteSnippet } from 'svelte';
-	import type { SnippetInsertionHandler } from '$lib/chat/composer/snippet-insertion.js';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { ComposerModeOption } from '$lib/chat/composer/composer-controls.js';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
@@ -17,12 +16,9 @@
 
 	interface Props {
 		canAttachImages: boolean;
-		snippetInteractionKey?: string;
 		attachImagesTooltip: string;
 		onAddImage: () => void;
-		onInsertSnippet?: SnippetInsertionHandler;
-		onEditSnippets?: () => void;
-		onRequestComposerFocus?: () => void;
+		onOpenSnippetPalette?: () => void;
 		permissionOptions: ComposerModeOption<PermissionMode>[];
 		selectedPermission: PermissionMode;
 		onPermissionSelect: (mode: PermissionMode) => void;
@@ -45,12 +41,9 @@
 
 	let {
 		canAttachImages,
-		snippetInteractionKey = '',
 		attachImagesTooltip,
 		onAddImage,
-		onInsertSnippet = () => 'cancelled',
-		onEditSnippets = () => undefined,
-		onRequestComposerFocus = () => undefined,
+		onOpenSnippetPalette = () => undefined,
 		permissionOptions,
 		selectedPermission,
 		onPermissionSelect,
@@ -85,13 +78,10 @@
 			{#if showAddMenu}
 				<ComposerAddMenu
 					disabled={addMenuDisabled || isPromptTransformPending}
-					interactionKey={snippetInteractionKey}
 					{canAttachImages}
 					{attachImagesTooltip}
 					{onAddImage}
-					{onInsertSnippet}
-					{onEditSnippets}
-					{onRequestComposerFocus}
+					{onOpenSnippetPalette}
 				/>
 			{/if}
 

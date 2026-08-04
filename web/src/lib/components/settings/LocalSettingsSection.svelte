@@ -1,5 +1,6 @@
 <!-- Browser-stored settings. All values render immediately from persisted storage. -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import MoonIcon from '@lucide/svelte/icons/moon';
@@ -14,6 +15,10 @@
 		type FileOpenPlacementPreference,
 		type ThemeMode,
 	} from '$lib/stores/local-settings.svelte.js';
+	import {
+		SNIPPET_TRIGGER_MAX_LENGTH,
+		snippetTriggerValidationError,
+	} from '$lib/chat/composer/snippet-trigger.js';
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DesktopLayoutOrderSetting from './DesktopLayoutOrderSetting.svelte';
@@ -61,6 +66,33 @@
 
 	function setFileOpenPlacement(key: FilePlacementSettingKey, value: string): void {
 		if (isFileOpenPlacement(value)) ls.set(key, value);
+	}
+
+	let snippetTriggerDraft = $state(ls.snippetTrigger);
+	let snippetTriggerError = $state<string | null>(null);
+
+	// Keeps the draft aligned with externally applied values (other tabs).
+	$effect(() => {
+		const stored = ls.snippetTrigger;
+		untrack(() => {
+			if (stored !== snippetTriggerDraft && snippetTriggerError === null) {
+				snippetTriggerDraft = stored;
+			}
+		});
+	});
+
+	function commitSnippetTrigger(): void {
+		const error = snippetTriggerValidationError(snippetTriggerDraft);
+		if (error === null) {
+			ls.set('snippetTrigger', snippetTriggerDraft);
+			snippetTriggerDraft = ls.snippetTrigger;
+			snippetTriggerError = null;
+			return;
+		}
+		snippetTriggerError =
+			error === 'format'
+				? m.settings_snippet_trigger_error_format()
+				: m.settings_snippet_trigger_error_charset();
 	}
 </script>
 
@@ -213,6 +245,40 @@
 			{@render settingRow(m.settings_chat_send_by_shift_enter(), ls.sendByShiftEnter, () =>
 				ls.toggle('sendByShiftEnter'),
 			)}
+			<div class="flex items-center justify-between gap-4 py-2">
+				<div class="min-w-0">
+					<label class="text-sm font-medium text-foreground" for="local-snippet-trigger">
+						{m.settings_snippet_trigger_label()}
+					</label>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.settings_snippet_trigger_description()}
+					</p>
+					{#if snippetTriggerError}
+						<p id="local-snippet-trigger-error" class="mt-0.5 text-xs text-destructive">
+							{snippetTriggerError}
+						</p>
+					{/if}
+				</div>
+				<input
+					id="local-snippet-trigger"
+					type="text"
+					maxlength={SNIPPET_TRIGGER_MAX_LENGTH}
+					bind:value={snippetTriggerDraft}
+					aria-invalid={snippetTriggerError !== null}
+					aria-describedby={snippetTriggerError ? 'local-snippet-trigger-error' : undefined}
+					autocapitalize="off"
+					spellcheck="false"
+					oninput={() => (snippetTriggerError = null)}
+					onblur={commitSnippetTrigger}
+					onkeydown={(event) => {
+						if (event.key === 'Enter') {
+							event.preventDefault();
+							commitSnippetTrigger();
+						}
+					}}
+					class="w-24 shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-center font-mono text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+				/>
+			</div>
 			<div class="mt-2 border-t border-border pb-1 pt-2">
 				<h3 class="py-2 text-sm font-medium text-foreground">{m.settings_file_opening()}</h3>
 				{@render fileOpenPlacementRow(

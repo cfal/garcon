@@ -41,6 +41,13 @@ export function snippetTemplateUsesArguments(template: string): boolean {
   return false;
 }
 
+export function snippetTemplateUsesProjectPath(template: string): boolean {
+  for (const match of matchSnippetTemplateTokens(template)) {
+    if (!match.escaped && match.variable === 'project_path') return true;
+  }
+  return false;
+}
+
 export const SNIPPET_ERROR_CODES = {
   validationFailed: 'SNIPPET_VALIDATION_FAILED',
   notFound: 'SNIPPET_NOT_FOUND',

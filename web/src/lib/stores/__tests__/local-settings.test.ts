@@ -486,4 +486,43 @@ describe('LocalSettingsStore', () => {
 
 		store.destroy();
 	});
+
+	it('defaults the snippet trigger and persists valid values', () => {
+		const store = createLocalSettingsStore();
+		expect(store.snippetTrigger).toBe(';;');
+
+		store.set('snippetTrigger', '!!');
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ snippetTrigger: '!!' });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.snippetTrigger).toBe('!!');
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('coerces invalid snippet triggers on set and on parse', () => {
+		const store = createLocalSettingsStore();
+
+		store.set('snippetTrigger', ';');
+		expect(store.snippetTrigger).toBe(';;');
+		store.set('snippetTrigger', 'ab');
+		expect(store.snippetTrigger).toBe(';;');
+		store.set('snippetTrigger', ';@');
+		expect(store.snippetTrigger).toBe(';;');
+		store.set('snippetTrigger', ';;ok');
+		expect(store.snippetTrigger).toBe(';;ok');
+
+		store.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ snippetTrigger: 'way-too-long' }),
+		);
+		const restored = createLocalSettingsStore();
+		expect(restored.snippetTrigger).toBe(';;');
+		restored.destroy();
+	});
 });

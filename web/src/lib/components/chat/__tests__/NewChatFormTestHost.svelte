@@ -26,16 +26,26 @@
 
 	interface Props {
 		allowDirectChats?: boolean;
+		snippetTrigger?: string;
+		snippetTemplate?: string;
 		onStartChat?: (config: NewChatConfig) => void;
 	}
 
-	let { allowDirectChats = false, onStartChat = () => {} }: Props = $props();
+	let {
+		allowDirectChats = false,
+		snippetTrigger = ';;',
+		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
+		onStartChat = () => {},
+	}: Props = $props();
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
 
 	setLocalSettings({
 		sendByShiftEnter: false,
 		showQuickCommitTray: true,
+		get snippetTrigger() {
+			return snippetTrigger;
+		},
 		get allowDirectChats() {
 			return allowDirectChats;
 		},
@@ -91,7 +101,7 @@
 						{
 							id: 'snippet-review',
 							shortName: 'review',
-							template: 'Review {{arguments}} in {{project_path}}',
+							template: snippetTemplate,
 							createdAt: '2026-01-01T00:00:00.000Z',
 							updatedAt: '2026-01-01T00:00:00.000Z',
 						},

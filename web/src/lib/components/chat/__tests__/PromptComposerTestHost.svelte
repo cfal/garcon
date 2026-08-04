@@ -46,6 +46,8 @@
 		recentAgentSettings?: RecentAgentSetting[];
 		allowDirectChats?: boolean;
 		reduceMotion?: boolean;
+		snippetTrigger?: string;
+		snippetTemplate?: string;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
@@ -67,6 +69,8 @@
 		recentAgentSettings = [],
 		allowDirectChats = false,
 		reduceMotion = false,
+		snippetTrigger = ';;',
+		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
@@ -200,6 +204,9 @@
 		get reduceMotion() {
 			return reduceMotion;
 		},
+		get snippetTrigger() {
+			return snippetTrigger;
+		},
 		get showQuickCommitTray() {
 			return true;
 		},
@@ -298,7 +305,7 @@
 						{
 							id: 'snippet-review',
 							shortName: 'review',
-							template: 'Review {{arguments}} in {{project_path}}',
+							template: snippetTemplate,
 							createdAt: '2026-01-01T00:00:00.000Z',
 							updatedAt: '2026-01-01T00:00:00.000Z',
 						},

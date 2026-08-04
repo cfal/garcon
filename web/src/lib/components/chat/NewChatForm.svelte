@@ -12,10 +12,16 @@
 	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import {
+		applySnippetTriggerReplacement,
+		findSnippetTrigger,
+	} from '$lib/chat/composer/snippet-trigger.js';
+	import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
+	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
 	import ChatTagToggleButton from './ChatTagToggleButton.svelte';
@@ -50,7 +56,7 @@
 	} from '$lib/chat/composer/slash-commands.js';
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
-	import type { Snippet } from '$shared/snippets';
+	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -109,6 +115,8 @@
 		`${snippetInteractionGeneration}\u0000${form.trimmedPath}`,
 	);
 
+	const snippetPalette = new SnippetPaletteTriggerState();
+
 	function canFocusTextarea(): boolean {
 		return (
 			!transientLayers.makesMainInert || transientLayers.ownsTopModalTarget(textareaRef ?? null)
@@ -118,6 +126,7 @@
 	function reseed(): void {
 		snippetExpansion.cancel();
 		snippetInteractionGeneration += 1;
+		snippetPalette.reset();
 		form.reseed(prefill);
 		pendingTextareaFocus = true;
 		setTimeout(() => {
@@ -233,6 +242,15 @@
 		textareaRef.style.height = `${textareaRef.scrollHeight}px`;
 	}
 
+	function handleMessageInput(event: Event): void {
+		autoResizeTextarea();
+		if ((event as InputEvent).isComposing) return;
+		const input = event.currentTarget as HTMLTextAreaElement;
+		snippetPalette.updateDetectedTrigger(
+			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
+		);
+	}
+
 	function snippetErrorDetail(error: unknown): string {
 		if (error instanceof ApiError) return error.details || error.message;
 		return error instanceof Error ? error.message : String(error);
@@ -260,6 +278,7 @@
 	async function insertSnippet(
 		snippet: Snippet,
 		argumentsText: string,
+		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
 		if (snippetExpansion.pending || !textareaRef) return 'cancelled';
 		const context = expansionContext();
@@ -269,8 +288,8 @@
 		}
 		const sourceText = form.firstMessage;
 		const projectPath = context.projectPath;
-		const start = textareaRef.selectionStart;
-		const end = textareaRef.selectionEnd;
+		const start = range?.start ?? textareaRef.selectionStart;
+		const end = range?.end ?? textareaRef.selectionEnd;
 		try {
 			const [result] = await Promise.all([
 				snippetExpansion.run({
@@ -296,9 +315,15 @@
 				form.firstMessage !== sourceText
 			)
 				return 'cancelled';
-			form.firstMessage =
-				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
-			await restoreTextareaFocus(start + result.response.expandedText.length);
+			const replacement = range
+				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
+				: {
+						text:
+							sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
+						caret: start + result.response.expandedText.length,
+					};
+			form.firstMessage = replacement.text;
+			await restoreTextareaFocus(replacement.caret);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
@@ -573,7 +598,7 @@
 					bind:this={textareaRef}
 					bind:value={form.firstMessage}
 					onkeydown={handleKeyDown}
-					oninput={autoResizeTextarea}
+					oninput={handleMessageInput}
 					onpaste={handleMessagePaste}
 					placeholder={form.placeholder}
 					readonly={snippetExpansion.pending}
@@ -583,12 +608,9 @@
 
 				<ComposerBottomBar
 					canAttachImages={modelCatalog.supportsImages(form.agentId, form.modelValue)}
-					{snippetInteractionKey}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
-					onInsertSnippet={insertSnippet}
-					onEditSnippets={editSnippets}
-					onRequestComposerFocus={() => void restoreTextareaFocus()}
+					onOpenSnippetPalette={() => snippetPalette.openFromMenu()}
 					isPromptTransformPending={snippetExpansion.pending}
 					{permissionOptions}
 					selectedPermission={form.permissionMode}
@@ -626,6 +648,35 @@
 						/>
 					{/snippet}
 				</ComposerBottomBar>
+
+				<ComposerSnippetPalette
+					open={snippetPalette.isOpen}
+					onOpenChange={(nextOpen) => {
+						// The hidden trigger remains available to the chained insertion.
+						if (!nextOpen) snippetPalette.hide();
+					}}
+					initialQuery={snippetPalette.initialQuery}
+					interactionKey={snippetInteractionKey}
+					contextHint={form.trimmedPath ? null : m.snippets_palette_context_hint()}
+					onInsert={async (snippet, argumentsText) => {
+						const trigger = snippetPalette.trigger;
+						const result = await insertSnippet(snippet, argumentsText, trigger);
+						if (result === 'inserted') snippetPalette.complete();
+						else if (result !== 'failed' || !snippetTemplateUsesArguments(snippet.template)) {
+							snippetPalette.dismiss();
+						}
+						return result;
+					}}
+					onCancelled={() => {
+						const caret = snippetPalette.trigger?.end;
+						snippetPalette.dismiss();
+						void restoreTextareaFocus(caret);
+					}}
+					onEditSnippets={() => {
+						snippetPalette.dismiss();
+						editSnippets();
+					}}
+				/>
 			</div>
 
 			{#if form.attachedImages.length > 0}

@@ -26,6 +26,17 @@ async function expectComposerFocus(textarea: HTMLElement): Promise<void> {
 	});
 }
 
+async function inputAtCaret(
+	textarea: HTMLTextAreaElement,
+	value: string,
+	caret: number,
+	eventInit: InputEventInit = {},
+): Promise<void> {
+	textarea.value = value;
+	textarea.setSelectionRange(caret, caret);
+	await fireEvent.input(textarea, eventInit);
+}
+
 function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummaryReady {
 	return {
 		status: 'ready',
@@ -768,9 +779,8 @@ describe('PromptComposer focus', () => {
 		await fireEvent.input(textarea, { target: { value: 'Before replace after' } });
 		textarea.setSelectionRange(7, 14);
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
-		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'the API' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -786,6 +796,163 @@ describe('PromptComposer focus', () => {
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
+	});
+
+	it('opens from an inline trigger and replaces only the captured span', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'EXPANDED',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-inline-snippet',
+			selectedStatus: 'running',
+			snippetTemplate: 'Expanded review',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const source = 'Before ;;review after';
+		const triggerEnd = 'Before ;;review'.length;
+
+		await inputAtCaret(textarea, source, triggerEnd);
+		const search = (await screen.findByRole('combobox', {
+			name: 'Search snippets',
+		})) as HTMLInputElement;
+		expect(search.value).toBe('review');
+		await fireEvent.click(screen.getByRole('option', { name: /^review\b/ }));
+
+		await waitFor(() => expect(textarea.value).toBe('Before EXPANDED after'));
+		expect(textarea.selectionStart).toBe('Before EXPANDED'.length);
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: '',
+				context: { type: 'chat', chatId: 'chat-inline-snippet' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+	});
+
+	it('honors the configured trigger without interrupting IME composition', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-custom-snippet-trigger',
+			selectedStatus: 'running',
+			snippetTrigger: '!!',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await inputAtCaret(textarea, ';;', 2);
+		expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull();
+
+		await inputAtCaret(textarea, '!!', 2, { isComposing: true });
+		expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull();
+
+		await inputAtCaret(textarea, '!!', 2);
+		expect(await screen.findByRole('dialog', { name: 'Insert Snippet' })).toBeTruthy();
+	});
+
+	it('suppresses a dismissed trigger until that occurrence is removed', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-dismissed-snippet-trigger',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, ';;', 2);
+
+		await fireEvent.keyDown(await screen.findByRole('dialog', { name: 'Insert Snippet' }), {
+			key: 'Escape',
+		});
+		await waitFor(() =>
+			expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull(),
+		);
+		expect(textarea.value).toBe(';;');
+
+		await inputAtCaret(textarea, ';;r', 3);
+		expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull();
+
+		await inputAtCaret(textarea, '', 0);
+		await inputAtCaret(textarea, ';;', 2);
+		expect(await screen.findByRole('dialog', { name: 'Insert Snippet' })).toBeTruthy();
+	});
+
+	it('clears inline-trigger dismissal when the selected chat changes', async () => {
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-dismissal-one',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, ';;', 2);
+		await fireEvent.keyDown(await screen.findByRole('dialog', { name: 'Insert Snippet' }), {
+			key: 'Escape',
+		});
+		await waitFor(() =>
+			expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull(),
+		);
+
+		await rerender({
+			selectedChatId: 'chat-dismissal-two',
+			selectedStatus: 'running',
+		});
+		await inputAtCaret(textarea, ';;', 2);
+
+		expect(await screen.findByRole('dialog', { name: 'Insert Snippet' })).toBeTruthy();
+	});
+
+	it('dismisses the inline chain when argument entry is cancelled', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-inline-arguments-cancel',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, ';;review', 8);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+
+		const argumentsDialog = await screen.findByRole('dialog', {
+			name: 'Arguments for /snippet review',
+		});
+		await fireEvent.keyDown(argumentsDialog, { key: 'Escape' });
+		await waitFor(() =>
+			expect(screen.queryByRole('dialog', { name: 'Arguments for /snippet review' })).toBeNull(),
+		);
+
+		await inputAtCaret(textarea, ';;reviewx', 9);
+		expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull();
+	});
+
+	it('retries failed inline arguments against the original trigger span', async () => {
+		vi.mocked(snippetsApi.expandSnippet)
+			.mockRejectedValueOnce(new Error('server unavailable'))
+			.mockResolvedValueOnce({
+				success: true,
+				snippetId: 'snippet-review',
+				snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+				shortName: 'review',
+				contextProjectPath: '/workspace/project',
+				expandedText: 'EXPANDED',
+			});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-inline-snippet-retry',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const source = 'Before ;;review after';
+		await inputAtCaret(textarea, source, 'Before ;;review'.length);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+		await fireEvent.input(await screen.findByRole('textbox', { name: 'Arguments' }), {
+			target: { value: 'the API' },
+		});
+		await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Arguments' }), {
+			key: 'Enter',
+		});
+
+		await screen.findByText('Snippet expansion failed: server unavailable');
+		const retryInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.keyDown(retryInput, { key: 'Enter' });
+
+		await waitFor(() => expect(textarea.value).toBe('Before EXPANDED after'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2);
 	});
 
 	it('preserves the invocation and reports a failed expansion', async () => {
@@ -821,9 +988,8 @@ describe('PromptComposer focus', () => {
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
-		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'current draft' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -849,10 +1015,8 @@ describe('PromptComposer focus', () => {
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
-			pointerType: 'mouse',
-		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'current draft' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -868,10 +1032,8 @@ describe('PromptComposer focus', () => {
 			selectedStatus: 'running',
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
-			pointerType: 'mouse',
-		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		await fireEvent.input(await screen.findByRole('textbox', { name: 'Arguments' }), {
 			target: { value: 'old chat arguments' },
 		});
@@ -885,7 +1047,7 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
-	it('restores focus when menu insertion has no project path', async () => {
+	it('explains and blocks palette insertion when the chat has no project path', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-menu-missing-path',
 			selectedStatus: 'running',
@@ -894,16 +1056,13 @@ describe('PromptComposer focus', () => {
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
-			pointerType: 'mouse',
-		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
-		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
-		await fireEvent.input(argumentsInput, { target: { value: 'missing path' } });
-		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await screen.findByText('Set a project path to insert snippets');
+		const option = screen.getByRole('option', { name: /^review/ });
+		expect(option.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(option);
 
-		await screen.findByText('Project path is required.');
-		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(screen.getByRole('dialog', { name: 'Insert Snippet' })).toBeTruthy();
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 		expect(textarea.value).toBe('Keep this draft');
 	});
@@ -917,10 +1076,8 @@ describe('PromptComposer focus', () => {
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
-			pointerType: 'mouse',
-		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		const rawArguments = '  retry\nthese arguments  ';
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: rawArguments } });
@@ -951,10 +1108,8 @@ describe('PromptComposer focus', () => {
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
-			pointerType: 'mouse',
-		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'path race' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });

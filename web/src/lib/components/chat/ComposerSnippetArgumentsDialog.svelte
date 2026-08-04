@@ -23,6 +23,9 @@
 	}: Props = $props();
 	let argumentsText = $state('');
 	let restoreComposerFocus = true;
+	const uid = $props.id();
+	const argumentsId = `${uid}-arguments`;
+	const argumentsErrorId = `${uid}-arguments-error`;
 	const argumentsTooLong = $derived(argumentsText.length > SNIPPET_ARGUMENTS_MAX_LENGTH);
 
 	$effect(() => {
@@ -78,20 +81,20 @@
 
 		<form class="space-y-5" onsubmit={handleSubmit}>
 			<div class="space-y-1.5">
-				<label for="snippet-arguments" class="text-sm font-medium text-foreground">
+				<label for={argumentsId} class="text-sm font-medium text-foreground">
 					{m.snippets_arguments_label()}
 				</label>
 				<textarea
-					id="snippet-arguments"
+					id={argumentsId}
 					bind:value={argumentsText}
 					onkeydown={handleKeyDown}
 					rows="5"
 					placeholder={m.snippets_arguments_placeholder()}
 					aria-invalid={argumentsTooLong}
-					aria-describedby="snippet-arguments-error"
+					aria-describedby={argumentsErrorId}
 					class="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				></textarea>
-				<p id="snippet-arguments-error" class="min-h-4 text-xs text-destructive">
+				<p id={argumentsErrorId} class="min-h-4 text-xs text-destructive">
 					{argumentsTooLong ? m.snippets_arguments_too_long() : ''}
 				</p>
 			</div>
