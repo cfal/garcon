@@ -8,8 +8,10 @@ class FakePiRuntime extends AgentEventEmitterRuntime {
   abort = mock(() => true);
   isRunning = mock(() => true);
   getRunningSessions = mock(() => [{ id: 'pi-session' }]);
+  captureSteerTarget = mock(() => ({ provider: 'pi-target' }));
+  steer = mock(async () => ({ kind: 'accepted' }));
   startPurgeTimer = mock(() => {});
-  shutdown = mock(() => {});
+  shutdown = mock(async () => {});
 }
 
 function deferred() {
@@ -30,6 +32,7 @@ describe('LazyPiRuntime', () => {
     expect(runtime.isRunning('pi-session')).toBe(false);
     expect(runtime.getRunningSessions()).toEqual([]);
     expect(runtime.abort('pi-session')).toBe(false);
+    expect(runtime.captureSteerTarget('pi-session')).toBeNull();
     expect(loadRuntime).not.toHaveBeenCalled();
 
     await runtime.startSession({});
@@ -38,6 +41,19 @@ describe('LazyPiRuntime', () => {
     expect(loaded.startSession).toHaveBeenCalledTimes(1);
     expect(loaded.startPurgeTimer).toHaveBeenCalledTimes(1);
     expect(runtime.isRunning('pi-session')).toBe(true);
+    expect(runtime.captureSteerTarget('pi-session')).toEqual({ provider: 'pi-target' });
+  });
+
+  it('routes steering through the loaded runtime without loading during capture', async () => {
+    const loaded = new FakePiRuntime();
+    const loadRuntime = mock(async () => loaded);
+    const runtime = new LazyPiRuntime(loadRuntime);
+    expect(runtime.captureSteerTarget('pi-session')).toBeNull();
+    expect(loadRuntime).not.toHaveBeenCalled();
+
+    const request = { agentSessionId: 'pi-session', target: { provider: 'pi-target' } };
+    await expect(runtime.steer(request)).resolves.toEqual({ kind: 'accepted' });
+    expect(loaded.steer).toHaveBeenCalledWith(request);
   });
 
   it('shares an in-flight load and forwards runtime events', async () => {
@@ -106,15 +122,24 @@ describe('LazyPiRuntime', () => {
 
   it('shuts down a deferred runtime without starting queued operations', async () => {
     const loaded = new FakePiRuntime();
+    const stopped = deferred();
+    loaded.shutdown = mock(() => stopped.promise);
     const loader = deferred();
     const runtime = new LazyPiRuntime(() => loader.promise);
     const start = runtime.startSession({});
     const turn = runtime.runTurn({});
 
-    runtime.shutdown();
+    const shutdown = runtime.shutdown();
+    expect(runtime.shutdown()).toBe(shutdown);
     loader.resolve(loaded);
 
     const results = await Promise.allSettled([start, turn]);
+    let shutdownSettled = false;
+    void shutdown.then(() => { shutdownSettled = true; });
+    await Promise.resolve();
+    expect(shutdownSettled).toBe(false);
+    stopped.resolve();
+    await shutdown;
     expect(results.map(({ status }) => status)).toEqual(['rejected', 'rejected']);
     expect(loaded.shutdown).toHaveBeenCalledTimes(1);
     expect(loaded.startSession).not.toHaveBeenCalled();

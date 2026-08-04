@@ -3,73 +3,22 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { PiCliRuntime, runSingleQuery } from '../pi-cli.js';
-import { testLogger, testModels, testPiConfig } from './test-fixtures.js';
+import {
+  buildPiCliEnv,
+  buildPiPrompt,
+  PI_PLAN_PREFIX,
+  requireExplicitPiModel,
+  runSingleQuery,
+} from '../pi-cli.js';
+import { testPiConfig } from './test-fixtures.js';
+
+// Covers the one-shot surfaces that survive the RPC switch: single-query runs (chat titles
+// and other utility prompts), spawn environment hygiene, and prompt construction. The
+// long-lived turn runtime is covered by pi-rpc-runtime.test.ts.
 
 const originalSpawn = Bun.spawn;
 const originalEnv = { ...process.env };
 let tempRoot;
-
-function createRuntime() {
-  return new PiCliRuntime({
-    config: testPiConfig,
-    logger: testLogger,
-    models: testModels,
-  });
-}
-
-function createFakeProc() {
-  const encoder = new TextEncoder();
-  let stdoutController;
-  let stderrController;
-  let resolveExited;
-  let closed = false;
-  const writes = [];
-
-  const stdout = new ReadableStream({
-    start(controller) {
-      stdoutController = controller;
-    },
-  });
-  const stderr = new ReadableStream({
-    start(controller) {
-      stderrController = controller;
-    },
-  });
-
-  return {
-    stdout,
-    stderr,
-    stdin: {
-      writes,
-      write(chunk) {
-        writes.push(chunk);
-      },
-      end() { },
-    },
-    killed: false,
-    exited: new Promise((resolve) => {
-      resolveExited = resolve;
-    }),
-    pushJson(message) {
-      stdoutController.enqueue(encoder.encode(`${JSON.stringify(message)}\n`));
-    },
-    pushStderr(text) {
-      stderrController.enqueue(encoder.encode(text));
-    },
-    close(exitCode = 0) {
-      if (closed) return;
-      closed = true;
-      stdoutController.close();
-      stderrController.close();
-      resolveExited(exitCode);
-    },
-    kill() {
-      this.killed = true;
-      this.close(143);
-    },
-  };
-}
 
 function createCompletedProc(stdoutText = 'pi response') {
   const encoder = new TextEncoder();
@@ -90,38 +39,26 @@ function createCompletedProc(stdoutText = 'pi response') {
   };
 }
 
-function baseStartRequest(overrides = {}) {
+function createFailedProc(exitCode, stderrText = 'boom') {
+  const encoder = new TextEncoder();
   return {
-    command: 'hello',
-    chatId: 'chat-1',
-    projectPath: path.join(tempRoot, 'project'),
-    model: 'github-copilot/gpt-5.4',
-    permissionMode: 'default',
-    thinkingMode: 'none',
-    ...overrides,
+    stdout: new ReadableStream({
+      start(controller) {
+        controller.close();
+      },
+    }),
+    stderr: new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(stderrText));
+        controller.close();
+      },
+    }),
+    stdin: { write() {}, end() {} },
+    exited: Promise.resolve(exitCode),
   };
 }
 
-function baseResumeRequest(overrides = {}) {
-  return {
-    ...baseStartRequest({ chatId: 'chat-2', command: 'continue' }),
-    agentSessionId: 'pi-session-2',
-    nativePath: path.join(tempRoot, 'pi-session-2.jsonl'),
-    ...overrides,
-  };
-}
-
-function sessionHeader(id = 'pi-session-1') {
-  return {
-    type: 'session',
-    version: 3,
-    id,
-    timestamp: '2026-01-01T00:00:00.000Z',
-    cwd: path.join(tempRoot, 'project'),
-  };
-}
-
-describe('PiCliRuntime lifecycle', () => {
+describe('Pi single-query and spawn helpers', () => {
   let spawnMock;
 
   beforeEach(async () => {
@@ -139,11 +76,17 @@ describe('PiCliRuntime lifecycle', () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it('forwards exact effort in one-shot mode and omits Default', async () => {
+  it('forwards supported effort, clamps larger modes, and maps none to off', async () => {
     spawnMock
+      .mockReturnValueOnce(createCompletedProc())
       .mockReturnValueOnce(createCompletedProc())
       .mockReturnValueOnce(createCompletedProc());
 
+    await runSingleQuery('hello', {
+      cwd: path.join(tempRoot, 'project'),
+      model: 'github-copilot/gpt-5.4',
+      thinkingMode: 'high',
+    }, testPiConfig);
     await runSingleQuery('hello', {
       cwd: path.join(tempRoot, 'project'),
       model: 'github-copilot/gpt-5.4',
@@ -156,309 +99,81 @@ describe('PiCliRuntime lifecycle', () => {
     }, testPiConfig);
 
     expect(spawnMock.mock.calls[0][0]).toEqual(
-      expect.arrayContaining(['--thinking', 'ultra']),
+      expect.arrayContaining(['--mode', 'text', '--no-session', '--no-tools']),
     );
-    expect(spawnMock.mock.calls[1][0]).not.toContain('--thinking');
+    expect(spawnMock.mock.calls[0][0]).toEqual(
+      expect.arrayContaining(['--thinking', 'high']),
+    );
+    expect(spawnMock.mock.calls[1][0]).toEqual(
+      expect.arrayContaining(['--thinking', 'xhigh']),
+    );
+    expect(spawnMock.mock.calls[2][0]).toEqual(
+      expect.arrayContaining(['--thinking', 'off']),
+    );
   });
 
-  it('resolves startSession from the Pi JSON session header', async () => {
-    const provider = createRuntime();
-    const processing = mock();
-    const created = mock();
-    provider.onProcessing(processing);
-    provider.onSessionCreated(created);
-
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const startedPromise = provider.startSession(baseStartRequest());
-    proc.pushJson(sessionHeader('pi-session-1'));
-
-    const started = await startedPromise;
-
-    expect(started.agentSessionId).toBe('pi-session-1');
-    expect(started.nativePath).toBe(path.join(
-      process.env.PI_CODING_AGENT_SESSION_DIR,
-      '2026-01-01T00-00-00-000Z_pi-session-1.jsonl',
-    ));
-    expect(processing).toHaveBeenCalledWith('chat-1', true);
-    expect(created).toHaveBeenCalledWith('chat-1');
-    expect(proc.stdin.writes.join('')).toBe('hello');
-    expect(spawnMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['--mode', 'json', '--session-dir']));
-    expect(spawnMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['--model', 'github-copilot/gpt-5.4']));
-
-    proc.pushJson({ type: 'agent_end' });
-    proc.close(0);
-  });
-
-  it('continues an existing session using the native session path', async () => {
-    const nativePath = path.join(tempRoot, 'pi-session-2.jsonl');
-    await fs.writeFile(nativePath, '{}\n', 'utf8');
-    const provider = createRuntime();
-    const messages = mock();
-    const finished = mock();
-    let runningWhenFinished;
-    provider.onMessages(messages);
-    provider.onFinished((chatId, exitCode) => {
-      runningWhenFinished = provider.isRunning('pi-session-2');
-      finished(chatId, exitCode);
-    });
-
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const turnPromise = provider.runTurn(baseResumeRequest({ nativePath }));
-    proc.pushJson(sessionHeader('pi-session-2'));
-    proc.pushJson({
-      type: 'message_end',
-      message: {
-        role: 'assistant',
-        timestamp: '2026-01-01T00:00:01.000Z',
-        content: [{ type: 'text', text: 'Pi reply' }],
-      },
-    });
-    proc.pushJson({ type: 'agent_end' });
-    proc.close(0);
-
-    await turnPromise;
-
-    const args = spawnMock.mock.calls[0][0];
-    expect(args[args.indexOf('--session') + 1]).toBe(nativePath);
-    expect(messages).toHaveBeenCalledWith('chat-2', [
-      expect.objectContaining({ type: 'assistant-message', content: 'Pi reply' }),
-    ], expect.any(Object));
-    expect(finished).toHaveBeenCalledWith('chat-2', 0);
-    expect(runningWhenFinished).toBe(false);
-    expect(provider.isRunning('pi-session-2')).toBe(false);
-  });
-
-  it('kills and rolls back a process whose prompt write fails synchronously', async () => {
-    const provider = createRuntime();
-    const proc = createFakeProc();
-    proc.stdin.write = () => {
-      throw new Error('stdin failed');
-    };
-    const processing = [];
-    provider.onProcessing((_chatId, running) => processing.push(running));
-    spawnMock.mockReturnValueOnce(proc);
-
-    await expect(provider.runTurn(baseResumeRequest({
-      agentSessionId: 'pi-session-write-failure',
-      clientRequestId: 'req-write-failure',
-      turnId: 'turn-write-failure',
-    }))).rejects.toThrow('stdin failed');
-
-    expect(proc.killed).toBe(true);
-    expect(provider.isRunning('pi-session-write-failure')).toBe(false);
-    expect(processing).toEqual([true, false]);
-  });
-
-  it('ignores trailing output from a completed process after its successor starts', async () => {
-    const nativePath = path.join(tempRoot, 'pi-session-reused.jsonl');
-    await fs.writeFile(nativePath, '{}\n', 'utf8');
-    const provider = createRuntime();
-    const messages = [];
-    const terminals = [];
-    provider.onMessages((_chatId, batch, metadata) => messages.push({ batch, metadata }));
-    provider.onFinished((_chatId, _exitCode, metadata) => terminals.push(metadata));
-    const firstProc = createFakeProc();
-    const secondProc = createFakeProc();
-    spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc);
-
-    const firstTurn = provider.runTurn(baseResumeRequest({
-      agentSessionId: 'pi-session-reused',
-      nativePath,
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
-    }));
-    firstProc.pushJson({ type: 'agent_end' });
-    await firstTurn;
-
-    const secondTurn = provider.runTurn(baseResumeRequest({
-      agentSessionId: 'pi-session-reused',
-      nativePath,
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
-    }));
-    firstProc.pushJson({
-      type: 'message_end',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'stale reply' }],
-      },
-    });
-    await Promise.resolve();
-    expect(messages).toEqual([]);
-
-    secondProc.pushJson({
-      type: 'message_end',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'current reply' }],
-      },
-    });
-    secondProc.pushJson({ type: 'agent_end' });
-    secondProc.close(0);
-    await secondTurn;
-    firstProc.close(0);
-
-    expect(messages).toEqual([{
-      batch: [expect.objectContaining({ content: 'current reply' })],
-      metadata: { clientRequestId: 'req-b', turnId: 'turn-b' },
-    }]);
-    expect(terminals).toEqual([
-      { clientRequestId: 'req-a', turnId: 'turn-a' },
-      { clientRequestId: 'req-b', turnId: 'turn-b' },
-    ]);
-  });
-
-  it('emits tool-use and tool-result events from Pi JSON stream events', async () => {
-    const nativePath = path.join(tempRoot, 'pi-session-tools.jsonl');
-    await fs.writeFile(nativePath, '{}\n', 'utf8');
-    const provider = createRuntime();
-    const messages = mock();
-    provider.onMessages(messages);
-
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const turnPromise = provider.runTurn(baseResumeRequest({
-      agentSessionId: 'pi-session-tools',
-      nativePath,
-      permissionMode: 'plan',
-    }));
-    proc.pushJson(sessionHeader('pi-session-tools'));
-    proc.pushJson({
-      type: 'tool_execution_start',
-      toolCallId: 'tool-1',
-      toolName: 'bash',
-      args: { command: 'pwd' },
-    });
-    proc.pushJson({
-      type: 'tool_execution_end',
-      toolCallId: 'tool-1',
-      result: { content: { stdout: '/tmp/project' } },
-      isError: false,
-    });
-    proc.pushJson({ type: 'agent_end' });
-    proc.close(0);
-
-    await turnPromise;
-
-    const args = spawnMock.mock.calls[0][0];
-    expect(args[args.indexOf('--tools') + 1]).toBe('read,grep,find,ls');
-    expect(proc.stdin.writes.join('')).toContain('Garcon plan mode');
-    expect(messages.mock.calls[0][1][0]).toMatchObject({
-      type: 'bash-tool-use',
-      toolId: 'tool-1',
-      command: 'pwd',
-    });
-    expect(messages.mock.calls[1][1][0]).toMatchObject({
-      type: 'tool-result',
-      toolId: 'tool-1',
-      content: { stdout: '/tmp/project' },
-      isError: false,
-    });
-  });
-
-  it('treats manual bypass like default Pi execution mode', async () => {
-    const provider = createRuntime();
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const startedPromise = provider.startSession(baseStartRequest({ permissionMode: 'manualBypass' }));
-    proc.pushJson(sessionHeader('pi-session-manual'));
-    const started = await startedPromise;
-
-    expect(started.agentSessionId).toBe('pi-session-manual');
-    expect(spawnMock.mock.calls[0][0]).not.toContain('--tools');
-    expect(proc.stdin.writes.join('')).not.toContain('Garcon plan mode');
-
-    proc.pushJson({ type: 'agent_end' });
-    proc.close(0);
-  });
-
-  it('rejects startSession when the process exits before a session header', async () => {
-    const provider = createRuntime();
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const startedPromise = provider.startSession(baseStartRequest());
-    proc.close(7);
-
-    await expect(startedPromise).rejects.toThrow('Pi process exited before session header (code 7)');
-  });
-
-  it('rejects Pi default because Pi runs require an explicit model', async () => {
-    const provider = createRuntime();
-
-    await expect(provider.startSession(baseStartRequest({ model: 'default' })))
-      .rejects.toThrow('Pi requires an explicit model selection.');
+  it('rejects the default model because Pi requires an explicit selection', async () => {
+    await expect(runSingleQuery('hello', {
+      cwd: path.join(tempRoot, 'project'),
+      model: 'default',
+    }, testPiConfig)).rejects.toThrow('Pi requires an explicit model selection.');
+    expect(() => requireExplicitPiModel('')).toThrow();
+    expect(() => requireExplicitPiModel('default')).toThrow();
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('does not pass Garcon embedded Pi package metadata to the Pi CLI', async () => {
-    process.env.PI_PACKAGE_DIR = path.join(tempRoot, 'garcon-pi-package');
-    process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = process.env.PI_PACKAGE_DIR;
-    const provider = createRuntime();
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const startedPromise = provider.startSession(baseStartRequest());
-    proc.pushJson(sessionHeader('pi-session-env'));
-    await startedPromise;
-
-    const spawnOptions = spawnMock.mock.calls[0][1];
-    expect(spawnOptions.env.PI_PACKAGE_DIR).toBeUndefined();
-    expect(spawnOptions.env.GARCON_EMBEDDED_PI_PACKAGE_DIR).toBeUndefined();
-    expect(spawnOptions.env.PI_OFFLINE).toBe('1');
-    expect(spawnOptions.env.PI_SKIP_VERSION_CHECK).toBe('1');
-    expect(spawnOptions.env.PI_TELEMETRY).toBe('0');
-
-    proc.pushJson({ type: 'agent_end' });
-    proc.close(0);
+  it('surfaces single-query failures with the exit code and stderr details', async () => {
+    spawnMock.mockReturnValueOnce(createFailedProc(3, 'no session found'));
+    await expect(runSingleQuery('hello', {
+      cwd: path.join(tempRoot, 'project'),
+      model: 'github-copilot/gpt-5.4',
+    }, testPiConfig)).rejects.toThrow('Pi command failed with code 3: no session found');
   });
 
-  it('forces Pi startup offline mode after inherited env and request overrides', async () => {
+  it('scrubs nested Pi session environment and keeps Garcon offline flags', async () => {
+    process.env.PI_CODING_AGENT = '1';
+    process.env.PI_SESSION_FILE = '/home/someone/session.jsonl';
+    process.env.PI_SESSION_ID = 'outer-session';
+    process.env.PI_PROVIDER = 'outer-provider';
+    process.env.PI_MODEL = 'outer-model';
+    process.env.PI_REASONING_LEVEL = 'high';
+    process.env.PI_CODING_AGENT_SESSION_DIR = '/home/someone/sessions';
+    process.env.PI_MODELS_DEV_OVERRIDE_PROVIDERS = 'all';
     process.env.PI_OFFLINE = '0';
     process.env.PI_SKIP_VERSION_CHECK = '0';
     process.env.PI_TELEMETRY = '1';
-    const provider = createRuntime();
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
+    process.env.PI_PACKAGE_DIR = path.join(tempRoot, 'garcon-pi-package');
+    process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = process.env.PI_PACKAGE_DIR;
 
-    const startedPromise = provider.startSession(baseStartRequest({
-      envOverrides: {
-        PI_OFFLINE: '0',
-        PI_SKIP_VERSION_CHECK: '0',
-        PI_TELEMETRY: '1',
-      },
-    }));
-    proc.pushJson(sessionHeader('pi-session-offline'));
-    await startedPromise;
+    const env = buildPiCliEnv({
+      PI_OFFLINE: '0',
+      PI_SKIP_VERSION_CHECK: '0',
+      PI_TELEMETRY: '1',
+    });
 
-    const spawnOptions = spawnMock.mock.calls[0][1];
-    expect(spawnOptions.env.PI_OFFLINE).toBe('1');
-    expect(spawnOptions.env.PI_SKIP_VERSION_CHECK).toBe('1');
-    expect(spawnOptions.env.PI_TELEMETRY).toBe('0');
-
-    proc.pushJson({ type: 'agent_end' });
-    proc.close(0);
+    for (const name of [
+      'PI_CODING_AGENT',
+      'PI_SESSION_FILE',
+      'PI_SESSION_ID',
+      'PI_PROVIDER',
+      'PI_MODEL',
+      'PI_REASONING_LEVEL',
+      'PI_CODING_AGENT_SESSION_DIR',
+      'PI_MODELS_DEV_OVERRIDE_PROVIDERS',
+      'PI_PACKAGE_DIR',
+      'GARCON_EMBEDDED_PI_PACKAGE_DIR',
+    ]) {
+      expect(env[name]).toBeUndefined();
+    }
+    // Offline flags win over both inherited and request-level overrides.
+    expect(env.PI_OFFLINE).toBe('1');
+    expect(env.PI_SKIP_VERSION_CHECK).toBe('1');
+    expect(env.PI_TELEMETRY).toBe('0');
   });
 
-  it('aborts a running Pi process', async () => {
-    const provider = createRuntime();
-    const processing = mock();
-    provider.onProcessing(processing);
-    const proc = createFakeProc();
-    spawnMock.mockReturnValueOnce(proc);
-
-    const startedPromise = provider.startSession(baseStartRequest());
-    proc.pushJson(sessionHeader('pi-session-abort'));
-    await startedPromise;
-
-    expect(provider.abort('pi-session-abort')).toBe(true);
-    expect(proc.killed).toBe(true);
-    expect(processing).toHaveBeenLastCalledWith('chat-1', false);
+  it('prefixes plan-mode prompts and leaves other modes untouched', async () => {
+    expect(buildPiPrompt('do it', 'default', false)).toBe('do it');
+    expect(buildPiPrompt('do it', 'plan', false)).toBe(`${PI_PLAN_PREFIX}\n\ndo it`);
+    expect(buildPiPrompt('', 'default', true)).toBe('Please inspect the attached image.');
   });
 });
