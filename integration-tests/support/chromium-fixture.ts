@@ -3,10 +3,18 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { createIntegrationFixture, type IntegrationFixture } from './integration-fixture.js';
+import { withTimeout } from './deferred.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const WEB_BUILD_INDEX = join(REPO_ROOT, 'web', 'build', 'index.html');
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
+const FIXTURE_SETUP_TIMEOUT_MS = 25_000;
+const SCENARIO_TIMEOUT_MS = 120_000;
+const DIAGNOSTIC_TIMEOUT_MS = 8_000;
+const BROWSER_DISPOSE_TIMEOUT_MS = 10_000;
+const INTEGRATION_DISPOSE_TIMEOUT_MS = 30_000;
+
+type MarkPhase = (phase: string) => void;
 
 export interface ChromiumFixture {
   integration: IntegrationFixture;
@@ -44,6 +52,8 @@ export async function createChromiumFixture(): Promise<ChromiumFixture> {
     });
 
     const page = await context.newPage();
+    page.setDefaultTimeout(20_000);
+    page.setDefaultNavigationTimeout(20_000);
     const browserErrors: string[] = [];
     page.on('pageerror', (error) => browserErrors.push(`pageerror: ${error.message}`));
     page.on('console', (message) => {
@@ -81,10 +91,15 @@ async function writeDiagnostics(
     .toLowerCase();
   const prefix = join(ARTIFACT_ROOT, `${safeName || 'chromium'}-${Date.now()}`);
   await mkdir(dirname(prefix), { recursive: true });
-  await fixture.page.screenshot({ path: `${prefix}.png`, fullPage: true }).catch(() => undefined);
-  await writeFile(`${prefix}.html`, await fixture.page.content().catch(() => '')).catch(
-    () => undefined,
-  );
+  await fixture.page
+    .screenshot({ path: `${prefix}.png`, fullPage: true, timeout: 3_000 })
+    .catch(() => undefined);
+  const html = await withTimeout(
+    fixture.page.content(),
+    3_000,
+    () => 'Timed out capturing Chromium page content.',
+  ).catch(() => '');
+  await writeFile(`${prefix}.html`, html).catch(() => undefined);
   await writeFile(
     `${prefix}.json`,
     JSON.stringify(
@@ -107,35 +122,70 @@ async function writeDiagnostics(
 }
 
 async function disposeChromiumFixture(fixture: ChromiumFixture): Promise<void> {
-  const errors: unknown[] = [];
-  for (const dispose of [
-    () => fixture.context.close(),
-    () => fixture.browser.close(),
-    () => fixture.integration.dispose(),
-  ]) {
-    try {
-      await dispose();
-    } catch (error) {
-      errors.push(error);
-    }
-  }
+  const results = await Promise.allSettled([
+    (async () => {
+      const errors: unknown[] = [];
+      try {
+        await withTimeout(
+          fixture.context.close(),
+          BROWSER_DISPOSE_TIMEOUT_MS / 2,
+          () => 'Timed out closing the Chromium context.',
+        );
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        await withTimeout(
+          fixture.browser.close(),
+          BROWSER_DISPOSE_TIMEOUT_MS / 2,
+          () => 'Timed out closing the Chromium browser.',
+        );
+      } catch (error) {
+        errors.push(error);
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, 'Chromium browser cleanup failed.');
+      }
+    })(),
+    withTimeout(
+      fixture.integration.dispose(),
+      INTEGRATION_DISPOSE_TIMEOUT_MS,
+      () => 'Timed out closing the Garcon integration fixture.',
+    ),
+  ]);
+  const errors = results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) => result.reason);
   if (errors.length > 0) throw new AggregateError(errors, 'Chromium fixture cleanup failed.');
 }
 
 export async function withChromiumFixture<T>(
   testName: string,
-  run: (fixture: ChromiumFixture) => Promise<T>,
+  run: (fixture: ChromiumFixture, markPhase: MarkPhase) => Promise<T>,
   diagnostics?: (fixture: ChromiumFixture) => Promise<unknown>,
 ): Promise<T> {
-  const fixture = await createChromiumFixture();
+  const fixture = await withTimeout(
+    createChromiumFixture(),
+    FIXTURE_SETUP_TIMEOUT_MS,
+    () => `Chromium fixture setup timed out for ${testName}.`,
+  );
   let failure: unknown;
+  let phase = 'starting scenario';
   try {
-    return await run(fixture);
+    return await withTimeout(
+      run(fixture, (nextPhase) => {
+        phase = nextPhase;
+      }),
+      SCENARIO_TIMEOUT_MS,
+      () => `Chromium scenario ${testName} timed out while ${phase}.`,
+    );
   } catch (error) {
     failure = error;
-    const artifact = await writeDiagnostics(testName, fixture, error, diagnostics).catch(
-      () => null,
-    );
+    const artifact = await withTimeout(
+      writeDiagnostics(testName, fixture, error, diagnostics),
+      DIAGNOSTIC_TIMEOUT_MS,
+      () => `Chromium diagnostics timed out for ${testName}.`,
+    ).catch(() => null);
     if (artifact && error instanceof Error) {
       error.message = `${error.message}\nChromium diagnostics: ${artifact}`;
     }
