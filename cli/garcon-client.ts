@@ -2,9 +2,16 @@ import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import { parseAgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type {
   AgentRunCommandRequest,
+  AgentStopCommandRequest,
+  AgentStopResponse,
   AgentTurnCommandResponse,
+  CommandAcceptedResponse,
   StartChatCommandRequest,
+  SteerCommandRequest,
+  SteerCommandResponse,
 } from '@garcon/common/chat-command-contracts';
+import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
+import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import type { ChatListResponse } from '@garcon/common/chat-list';
 import type {
   UpdateChatTitleRequest,
@@ -109,6 +116,35 @@ function parseAcceptedResponse(value: unknown): AgentTurnCommandResponse {
   };
 }
 
+function parseStopResponse(value: unknown): AgentStopResponse {
+  const raw = record(value);
+  if (
+    raw?.success !== true
+    || typeof raw.commandType !== 'string'
+    || typeof raw.clientRequestId !== 'string'
+    || typeof raw.chatId !== 'string'
+    || (raw.status !== 'accepted' && raw.status !== 'duplicate')
+    || typeof raw.acceptedAt !== 'string'
+    || !CHAT_STOP_OUTCOMES.includes(raw.outcome as ChatStopOutcome)
+  ) {
+    throw new CliError('submission', 'server returned an invalid stop response', 3);
+  }
+  const control = parseChatExecutionControlState(raw.control);
+  if (!control) {
+    throw new CliError('submission', 'server returned an invalid stop control state', 3);
+  }
+  return {
+    success: true,
+    commandType: raw.commandType,
+    clientRequestId: raw.clientRequestId,
+    chatId: raw.chatId,
+    status: raw.status,
+    acceptedAt: raw.acceptedAt,
+    outcome: raw.outcome as ChatStopOutcome,
+    control,
+  };
+}
+
 function retryAfterMilliseconds(value: string | null): number | null {
   if (value === null) return null;
   const seconds = Number(value);
@@ -128,6 +164,23 @@ function isAmbiguousSubmissionError(error: unknown): boolean {
       || error.status === 425
       || error.status === 429
       || error.status >= 500;
+  }
+  return error instanceof CliError && error.phase === 'submission';
+}
+
+// Steer-specific recovery: an explicit Garcon error envelope always carries an
+// errorCode and is definitive even on HTTP 500/503, so exact retries cannot
+// improve a ledger-recorded outcome. Only transport failures and errorCode-less
+// intermediary 408/425/429/5xx responses remain ambiguous.
+function isAmbiguousSteerSubmissionError(error: unknown): boolean {
+  if (error instanceof GarconTransportError) return true;
+  if (error instanceof GarconHttpError) {
+    return error.errorCode === null && (
+      error.status === 408
+      || error.status === 425
+      || error.status === 429
+      || error.status >= 500
+    );
   }
   return error instanceof CliError && error.phase === 'submission';
 }
@@ -184,11 +237,30 @@ export class GarconClient {
   }
 
   startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
-    return this.#submit('/api/v1/chats/start', 'chat-start', request, signal);
+    return this.#submitTurn('/api/v1/chats/start', 'chat-start', request, signal, isAmbiguousSubmissionError);
   }
 
   runChat(request: AgentRunCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
-    return this.#submit('/api/v1/chats/run', 'agent-run', request, signal);
+    return this.#submitTurn('/api/v1/chats/run', 'agent-run', request, signal, isAmbiguousSubmissionError);
+  }
+
+  steerChat(request: SteerCommandRequest, signal?: AbortSignal): Promise<SteerCommandResponse> {
+    return this.#submitTurn('/api/v1/chats/steer', 'steer', request, signal, isAmbiguousSteerSubmissionError)
+      .then((response) => {
+        // #submitTurn rejects mismatched commandType values, so a correlated
+        // success is guaranteed to carry the steer literal.
+        return response as SteerCommandResponse;
+      });
+  }
+
+  stopChat(request: AgentStopCommandRequest, signal?: AbortSignal): Promise<AgentStopResponse> {
+    return this.#submitCorrelated({
+      route: '/api/v1/chats/stop',
+      commandType: 'agent-stop',
+      request,
+      parse: parseStopResponse,
+      ambiguityDescription: `the stop command for chat ${request.chatId}`,
+    }, signal);
   }
 
   async updateChatTitle(request: UpdateChatTitleRequest, signal?: AbortSignal): Promise<void> {
@@ -233,32 +305,57 @@ export class GarconClient {
     );
   }
 
-  async #submit(
+  async #submitTurn(
     route: string,
-    commandType: 'chat-start' | 'agent-run',
-    request: StartChatCommandRequest | AgentRunCommandRequest,
-    signal?: AbortSignal,
+    commandType: 'chat-start' | 'agent-run' | 'steer',
+    request: StartChatCommandRequest | AgentRunCommandRequest | SteerCommandRequest,
+    signal: AbortSignal | undefined,
+    ambiguous: (error: unknown) => boolean,
   ): Promise<AgentTurnCommandResponse> {
+    return this.#submitCorrelated({
+      route,
+      commandType,
+      request,
+      parse: parseAcceptedResponse,
+      ambiguityDescription: `the command for chat ${request.chatId}`,
+      ambiguous,
+    }, signal);
+  }
+
+  // Repeats one logical command identity after an ambiguous transport result,
+  // always after verifying that the server instance is unchanged. Exact request
+  // replay is safe for run and stop because the server ledger is idempotent.
+  async #submitCorrelated<TResponse extends CommandAcceptedResponse>(
+    options: {
+      route: string;
+      commandType: string;
+      request: { clientRequestId: string; chatId?: string };
+      parse: (value: unknown) => TResponse;
+      ambiguityDescription: string;
+      ambiguous?: (error: unknown) => boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<TResponse> {
+    const ambiguous = options.ambiguous ?? isAmbiguousSubmissionError;
     for (let attempt = 0; attempt < SUBMISSION_ATTEMPTS; attempt += 1) {
       try {
-        const accepted = parseAcceptedResponse(
-          await this.#request('submission', 'POST', route, request, signal),
+        const accepted = options.parse(
+          await this.#request('submission', 'POST', options.route, options.request, signal),
         );
         if (
-          accepted.commandType !== commandType
-          || accepted.clientRequestId !== request.clientRequestId
-          || accepted.chatId !== request.chatId
+          accepted.commandType !== options.commandType
+          || accepted.clientRequestId !== options.request.clientRequestId
+          || accepted.chatId !== options.request.chatId
         ) {
           throw new CliError('submission', 'server returned an uncorrelated command acceptance', 3);
         }
         return accepted;
       } catch (error) {
-        const ambiguous = isAmbiguousSubmissionError(error);
-        if (!ambiguous || signal?.aborted) throw error;
+        if (!ambiguous(error) || signal?.aborted) throw error;
         if (attempt === SUBMISSION_ATTEMPTS - 1) {
           throw new CliError(
             'transport recovery',
-            `the command for chat ${request.chatId} may still be running in Garcon; exact submission recovery was exhausted`,
+            `${options.ambiguityDescription} may still be running in Garcon; exact submission recovery was exhausted`,
             3,
             { cause: error },
           );
@@ -271,7 +368,7 @@ export class GarconClient {
         } catch (verificationError) {
           throw new CliError(
             'transport recovery',
-            `the command for chat ${request.chatId} may still be running, but Garcon could not be verified before retry`,
+            `${options.ambiguityDescription} may still be running, but Garcon could not be verified before retry`,
             3,
             { cause: verificationError },
           );
@@ -279,7 +376,7 @@ export class GarconClient {
         if (!sameRuntime) {
           throw new CliError(
             'transport recovery',
-            `the command for chat ${request.chatId} may have been accepted, but Garcon restarted after submission; the command was not retried`,
+            `${options.ambiguityDescription} may have been accepted, but Garcon restarted after submission; the command was not retried`,
             3,
           );
         }

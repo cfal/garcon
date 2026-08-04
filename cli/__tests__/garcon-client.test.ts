@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
-import type { AgentRunCommandRequest } from '@garcon/common/chat-command-contracts';
+import type {
+  AgentRunCommandRequest,
+  AgentStopCommandRequest,
+  SteerCommandRequest,
+} from '@garcon/common/chat-command-contracts';
 import { runtimeProofPayload } from '@garcon/common/server-runtime';
 import { GarconClient, GarconHttpError, GarconTransportError } from '../garcon-client.js';
 
@@ -299,5 +303,247 @@ describe('GarconClient', () => {
     });
     await expect(client.runChat(runRequest)).resolves.toMatchObject({ turnId: 'turn-1' });
     expect(attempts).toBe(2);
+  });
+
+  const steerRequest: SteerCommandRequest = {
+    clientRequestId: 'steer-request',
+    clientMessageId: 'steer-message',
+    chatId: runRequest.chatId,
+    content: 'Follow up',
+  };
+
+  function steerAccepted(request: SteerCommandRequest): Response {
+    return Response.json({
+      success: true,
+      commandType: 'steer',
+      clientRequestId: request.clientRequestId,
+      chatId: request.chatId,
+      turnId: 'turn-active',
+      status: 'accepted',
+      acceptedAt: new Date().toISOString(),
+    });
+  }
+
+  test('submits a steer to the existing endpoint with the exact body', async () => {
+    let request: { url: string; method: string | undefined; body: string } | undefined;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        request = { url: String(input), method: init?.method, body: String(init?.body) };
+        return steerAccepted(steerRequest);
+      },
+    });
+
+    await expect(client.steerChat(steerRequest)).resolves.toMatchObject({
+      commandType: 'steer',
+      turnId: 'turn-active',
+    });
+    expect(request).toEqual({
+      url: `${connection.baseUrl}/api/v1/chats/steer`,
+      method: 'POST',
+      body: JSON.stringify(steerRequest),
+    });
+  });
+
+  test('does not retry a recorded unknown steering outcome', async () => {
+    let submissions = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async () => {
+        submissions += 1;
+        return Response.json({
+          success: false,
+          error: 'Steering delivery could not be confirmed.',
+          errorCode: 'STEER_OUTCOME_UNKNOWN',
+          retryable: false,
+        }, { status: 500 });
+      },
+    });
+
+    await expect(client.steerChat(steerRequest)).rejects.toBeInstanceOf(GarconHttpError);
+    expect(submissions).toBe(1);
+  });
+
+  test('does not retry a definitively non-delivered steering outcome', async () => {
+    let submissions = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async () => {
+        submissions += 1;
+        return Response.json({
+          success: false,
+          error: 'Steering delivery failed.',
+          errorCode: 'STEER_NOT_DELIVERED',
+          retryable: false,
+        }, { status: 502 });
+      },
+    });
+
+    await expect(client.steerChat(steerRequest)).rejects.toBeInstanceOf(GarconHttpError);
+    expect(submissions).toBe(1);
+  });
+
+  test('retries an ambiguous errorCode-less steer submission with the exact body', async () => {
+    const bodies: string[] = [];
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input, init) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
+        bodies.push(String(init?.body));
+        return attempts === 1
+          ? Response.json({ error: 'try again' }, { status: 503 })
+          : steerAccepted(steerRequest);
+      },
+    });
+
+    await expect(client.steerChat(steerRequest)).resolves.toMatchObject({ turnId: 'turn-active' });
+    expect(attempts).toBe(2);
+    expect(bodies[0]).toBe(bodies[1]);
+  });
+
+  test('does not accept a steer response without a correlated turn identity', async () => {
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input) => String(input).includes('/api/v1/runtime')
+        ? runtimeResponse(input)
+        : Response.json({ success: true, status: 'accepted' }),
+    });
+    await expect(client.steerChat(steerRequest)).rejects.toThrow('may still be running');
+  });
+
+  const stopRequest: AgentStopCommandRequest = {
+    clientRequestId: 'stop-request',
+    chatId: runRequest.chatId,
+  };
+
+  const validControl = {
+    serverInstanceId: 'instance',
+    queue: {
+      entries: [],
+      dispatchingEntryId: null,
+      steeringEntryId: null,
+      recentlyDispatched: [],
+      pause: null,
+      reorderRevision: 0,
+    },
+    version: 0,
+    updatedAt: null,
+  };
+
+  function stopAccepted(overrides: Record<string, unknown> = {}): Response {
+    return Response.json({
+      success: true,
+      commandType: 'agent-stop',
+      clientRequestId: stopRequest.clientRequestId,
+      chatId: stopRequest.chatId,
+      status: 'accepted',
+      acceptedAt: new Date().toISOString(),
+      outcome: 'interrupt-requested',
+      control: validControl,
+      ...overrides,
+    });
+  }
+
+  test('parses and correlates a stop response', async () => {
+    let request: { url: string; method: string | undefined; body: string } | undefined;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        request = { url: String(input), method: init?.method, body: String(init?.body) };
+        return stopAccepted();
+      },
+    });
+
+    await expect(client.stopChat(stopRequest)).resolves.toMatchObject({
+      outcome: 'interrupt-requested',
+      control: validControl,
+    });
+    expect(request).toEqual({
+      url: `${connection.baseUrl}/api/v1/chats/stop`,
+      method: 'POST',
+      body: JSON.stringify(stopRequest),
+    });
+  });
+
+  test('retries an ambiguous stop submission with the exact request', async () => {
+    const bodies: string[] = [];
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input, init) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
+        bodies.push(String(init?.body));
+        if (attempts === 1) throw new TypeError('connection reset');
+        return stopAccepted();
+      },
+    });
+
+    await expect(client.stopChat(stopRequest)).resolves.toMatchObject({ outcome: 'interrupt-requested' });
+    expect(attempts).toBe(2);
+    expect(bodies[0]).toBe(bodies[1]);
+  });
+
+  test('never accepts a stop response with a malformed outcome', async () => {
+    let submissions = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        submissions += 1;
+        return stopAccepted({ outcome: 'stopped-somehow' });
+      },
+    });
+
+    await expect(client.stopChat(stopRequest)).rejects.toThrow(
+      `chat ${stopRequest.chatId} may still be running`,
+    );
+    expect(submissions).toBe(3);
+  });
+
+  test('never accepts a stop response with a malformed control state', async () => {
+    let submissions = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        submissions += 1;
+        return stopAccepted({ control: { serverInstanceId: 'instance' } });
+      },
+    });
+
+    await expect(client.stopChat(stopRequest)).rejects.toThrow(
+      `chat ${stopRequest.chatId} may still be running`,
+    );
+    expect(submissions).toBe(3);
+  });
+
+  test('does not retry a stop submission against a replacement runtime', async () => {
+    let submissions = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input) => {
+        if (String(input).includes('/api/v1/runtime')) {
+          return runtimeResponse(input, 'replacement-instance');
+        }
+        submissions += 1;
+        throw new TypeError('connection reset');
+      },
+    });
+
+    await expect(client.stopChat(stopRequest)).rejects.toThrow(
+      `chat ${stopRequest.chatId} may have been accepted`,
+    );
+    expect(submissions).toBe(1);
   });
 });
