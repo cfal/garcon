@@ -2,7 +2,11 @@ import { access, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import { createIntegrationFixture, type IntegrationFixture } from './integration-fixture.js';
+import {
+  createIntegrationFixture,
+  type IntegrationFixture,
+  type IntegrationFixtureOptions,
+} from './integration-fixture.js';
 import { withTimeout } from './deferred.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -25,9 +29,11 @@ export interface ChromiumFixture {
   assertNoBrowserErrors(): void;
 }
 
-export async function createChromiumFixture(): Promise<ChromiumFixture> {
+export async function createChromiumFixture(
+  integrationOptions: IntegrationFixtureOptions = {},
+): Promise<ChromiumFixture> {
   await access(WEB_BUILD_INDEX);
-  const integration = await createIntegrationFixture();
+  const integration = await createIntegrationFixture(integrationOptions);
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
 
@@ -163,9 +169,10 @@ export async function withChromiumFixture<T>(
   testName: string,
   run: (fixture: ChromiumFixture, markPhase: MarkPhase) => Promise<T>,
   diagnostics?: (fixture: ChromiumFixture) => Promise<unknown>,
+  integrationOptions: IntegrationFixtureOptions = {},
 ): Promise<T> {
   const fixture = await withTimeout(
-    createChromiumFixture(),
+    createChromiumFixture(integrationOptions),
     FIXTURE_SETUP_TIMEOUT_MS,
     () => `Chromium fixture setup timed out for ${testName}.`,
   );

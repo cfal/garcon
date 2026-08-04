@@ -1,7 +1,14 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Page } from 'playwright';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
+import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
+import { liveClaudeRunRequest, liveClaudeStartRequest } from '../../support/live-claude.js';
+import {
+  startScriptedClaudeTestEnvironment,
+  type ScriptedClaudeTestEnvironment,
+} from '../../support/scripted-claude.js';
 
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
@@ -10,6 +17,13 @@ const ITEM_SELECTOR = '[data-chat-virtual-item]';
 interface ReadingAnchor {
   key: string;
   offset: number;
+}
+
+interface SelectionSnapshot {
+  key: string;
+  rowId: string;
+  text: string;
+  scrollTarget: 'start' | 'end';
 }
 
 interface TranscriptGeometry {
@@ -212,6 +226,58 @@ async function signalScrollIntent(page: Page, direction: 'earlier' | 'later'): P
       }),
     );
   }, direction);
+}
+
+async function selectVisibleMessageText(page: Page): Promise<SelectionSnapshot> {
+  return page.locator(FEED_SELECTOR).evaluate((feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const viewport = feed.getBoundingClientRect();
+    const row = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return (
+        rect.top >= viewport.top && rect.bottom <= viewport.bottom && candidate.textContent?.trim()
+      );
+    });
+    if (!row) throw new Error('No fully visible transcript row was available for selection.');
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    let textNode: Text | null = null;
+    while (walker.nextNode()) {
+      const candidate = walker.currentNode;
+      if (candidate instanceof Text && candidate.data.trim().length >= 8) {
+        textNode = candidate;
+        break;
+      }
+    }
+    if (!textNode) throw new Error('The selected transcript row had no usable text node.');
+    const start = textNode.data.search(/\S/);
+    const end = Math.min(textNode.length, start + 12);
+    const range = document.createRange();
+    range.setStart(textNode, start);
+    range.setEnd(textNode, end);
+    const selection = document.getSelection();
+    if (!selection) throw new Error('The browser selection API is unavailable.');
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+    const wrapper = row.closest<HTMLElement>('[data-chat-virtual-item]');
+    const key = wrapper?.dataset.chatVirtualItem;
+    const rowId = row.dataset.chatRowId;
+    if (!key || !rowId) throw new Error('The selected row is missing its virtual identity.');
+    const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+    return {
+      key,
+      rowId,
+      text: selection.toString(),
+      scrollTarget: feed.scrollTop < maximum / 2 ? 'end' : 'start',
+    };
+  });
+}
+
+async function releaseBrowserSelection(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.getSelection()?.removeAllRanges();
+    document.dispatchEvent(new Event('selectionchange'));
+  });
 }
 
 async function verifyDetachedNearEndGrowth(page: Page): Promise<void> {
@@ -868,28 +934,42 @@ async function diagnostics(fixture: ChromiumFixture): Promise<unknown> {
   };
 }
 
-async function prepareTranscript(fixture: ChromiumFixture): Promise<{
+async function createTranscript(fixture: ChromiumFixture): Promise<string> {
+  const chatId = await seedTranscript(fixture.integration, 60);
+  const response = await fixture.page.goto(
+    `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
+
+  await waitForTranscriptReady(fixture.page);
+  const initialSurfaceIdentity = await surfaceIdentity(fixture.page);
+  await appendTurn(fixture.integration, chatId, 'chromium-generation-prime');
+  await fixture.page
+    .locator(FEED_SELECTOR)
+    .getByText('echo:chromium-generation-prime', { exact: true })
+    .waitFor();
+  await waitForSurfaceIdentityChange(fixture.page, initialSurfaceIdentity);
+  await waitForTranscriptReady(fixture.page);
+  return chatId;
+}
+
+async function prepareTranscript(
+  fixture: ChromiumFixture,
+  chatId: string,
+): Promise<{
   chatId: string;
   initialModelCount: number;
 }> {
   return withDiagnosticTimeout(
     'the transcript fixture to be prepared',
     (async () => {
-      const chatId = await seedTranscript(fixture.integration, 60);
       const response = await fixture.page.goto(
         `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
         { waitUntil: 'domcontentloaded' },
       );
       if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
 
-      await waitForTranscriptReady(fixture.page);
-      const initialSurfaceIdentity = await surfaceIdentity(fixture.page);
-      await appendTurn(fixture.integration, chatId, 'chromium-generation-prime');
-      await fixture.page
-        .locator(FEED_SELECTOR)
-        .getByText('echo:chromium-generation-prime', { exact: true })
-        .waitFor();
-      await waitForSurfaceIdentityChange(fixture.page, initialSurfaceIdentity);
       await waitForTranscriptReady(fixture.page);
       return {
         chatId,
@@ -920,8 +1000,8 @@ async function revealEarlierTranscript(
   );
 }
 
-async function verifyBoundedPrepend(fixture: ChromiumFixture): Promise<void> {
-  const { initialModelCount } = await prepareTranscript(fixture);
+async function verifyBoundedPrepend(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await scrollToPosition(fixture.page, 'end');
   await waitForDistanceFromEnd(fixture.page, 1);
   await verifyDetachedNearEndGrowth(fixture.page);
@@ -938,23 +1018,111 @@ async function verifyBoundedPrepend(fixture: ChromiumFixture): Promise<void> {
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyGrowingNavigation(fixture: ChromiumFixture): Promise<void> {
-  const { initialModelCount } = await prepareTranscript(fixture);
+async function verifyGrowingNavigation(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await selectAndVerifyNavigatorTarget(fixture.page, 'chromium-virtual-turn-45');
   await selectAndVerifyDelayedNavigatorTarget(fixture.page, 'chromium-virtual-turn-38');
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyConcurrentAppendNavigation(fixture: ChromiumFixture): Promise<void> {
-  const { chatId, initialModelCount } = await prepareTranscript(fixture);
+async function verifySelectionRetention(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  const { initialModelCount } = await prepareTranscript(fixture, chatId);
+  await revealEarlierTranscript(fixture.page, initialModelCount);
+  await scrollToPosition(fixture.page, 'middle');
+  const selected = await selectVisibleMessageText(fixture.page);
+  await fixture.page.waitForFunction(
+    ({ itemSelector, key, expectedText }) => {
+      const selection = document.getSelection();
+      return (
+        selection?.toString() === expectedText &&
+        [...document.querySelectorAll<HTMLElement>(itemSelector)].some(
+          (item) => item.dataset.chatVirtualItem === key,
+        )
+      );
+    },
+    {
+      itemSelector: ITEM_SELECTOR,
+      key: selected.key,
+      expectedText: selected.text,
+    },
+  );
+
+  await scrollToPosition(fixture.page, selected.scrollTarget);
+  const retained = await fixture.page.evaluate(
+    ({ feedSelector, itemSelector, key, rowId }) => {
+      const feed = document.querySelector<HTMLElement>(feedSelector);
+      const wrapper = [...document.querySelectorAll<HTMLElement>(itemSelector)].find(
+        (item) => item.dataset.chatVirtualItem === key,
+      );
+      const row = wrapper?.querySelector<HTMLElement>('[data-chat-row-id]');
+      const selection = document.getSelection();
+      if (!feed || !wrapper || !row || !selection) return null;
+      if (row.dataset.chatRowId !== rowId) return null;
+      const viewport = feed.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      return {
+        rowId: row.dataset.chatRowId,
+        text: selection.toString(),
+        outsideViewport: rowRect.bottom < viewport.top || rowRect.top > viewport.bottom,
+      };
+    },
+    {
+      feedSelector: FEED_SELECTOR,
+      itemSelector: ITEM_SELECTOR,
+      key: selected.key,
+      rowId: selected.rowId,
+    },
+  );
+  expect(retained).toEqual({
+    rowId: selected.rowId,
+    text: selected.text,
+    outsideViewport: true,
+  });
+  await releaseBrowserSelection(fixture.page);
+  fixture.assertNoBrowserErrors();
+}
+
+async function verifyLaterPageReadingPosition(
+  fixture: ChromiumFixture,
+  chatId: string,
+): Promise<void> {
+  await prepareTranscript(fixture, chatId);
+  await scrollToPosition(fixture.page, 'middle');
+  const initialPrompt = fixture.page.locator('button[title="Scroll to initial prompt"]');
+  await initialPrompt.waitFor({ state: 'visible' });
+  const initialWindowRevision = await virtualDataRevision(fixture.page);
+  await initialPrompt.click();
+  await waitForVirtualDataRevisionAfter(fixture.page, initialWindowRevision);
+  await waitForTranscriptReady(fixture.page);
+
+  await scrollToPosition(fixture.page, 'end', false);
+  const laterBoundary = fixture.page.locator('[data-transcript-page-boundary="later"]');
+  await laterBoundary.waitFor({ state: 'visible' });
+  const anchor = await readingAnchor(fixture.page);
+  const previousRevision = await virtualDataRevision(fixture.page);
+  await laterBoundary.getByRole('button').click();
+  await waitForVirtualDataRevisionAfter(fixture.page, previousRevision);
+  const restored = await anchorByKey(fixture.page, anchor.key);
+  expect(
+    Math.abs(restored.offset - anchor.offset),
+    JSON.stringify({ anchor, restored }),
+  ).toBeLessThanOrEqual(1);
+  fixture.assertNoBrowserErrors();
+}
+
+async function verifyConcurrentAppendNavigation(
+  fixture: ChromiumFixture,
+  chatId: string,
+): Promise<void> {
+  const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await selectNavigatorTargetDuringAppend(fixture, chatId, 'chromium-virtual-turn-36');
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyEdgeNavigation(fixture: ChromiumFixture): Promise<void> {
-  const { initialModelCount } = await prepareTranscript(fixture);
+async function verifyEdgeNavigation(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await withDiagnosticTimeout(
     'the start-edge navigator target',
@@ -969,8 +1137,8 @@ async function verifyEdgeNavigation(fixture: ChromiumFixture): Promise<void> {
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyTargetCancellation(fixture: ChromiumFixture): Promise<void> {
-  const { initialModelCount } = await prepareTranscript(fixture);
+async function verifyTargetCancellation(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await withDiagnosticTimeout(
     'the growing navigator target cancellation',
@@ -980,8 +1148,8 @@ async function verifyTargetCancellation(fixture: ChromiumFixture): Promise<void>
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyAppendGeometry(fixture: ChromiumFixture): Promise<void> {
-  const { chatId } = await prepareTranscript(fixture);
+async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  await prepareTranscript(fixture, chatId);
 
   await scrollToPosition(fixture.page, 'middle');
   const detachedAnchor = await readingAnchor(fixture.page);
@@ -1027,34 +1195,150 @@ async function verifyAppendGeometry(fixture: ChromiumFixture): Promise<void> {
   fixture.assertNoBrowserErrors();
 }
 
-describe('Chromium transcript virtualization', () => {
-  test('bounds geometry and stabilizes centered navigation', async () => {
-    await withChromiumFixture(
-      'transcript-virtualization-centered-navigation',
-      async (fixture, markPhase) => {
-        markPhase('verifying bounded prepend geometry');
-        await verifyBoundedPrepend(fixture);
-        markPhase('verifying stable and growing target navigation');
-        await verifyGrowingNavigation(fixture);
-        markPhase('verifying navigation during a concurrent append');
-        await verifyConcurrentAppendNavigation(fixture);
-      },
-      diagnostics,
-    );
-  }, 180_000);
+async function seedPermissionTranscript(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+): Promise<string> {
+  const chatId = fixture.integration.newChatId();
+  for (let index = 0; index < 8; index += 1) {
+    environment.model.scriptTurn([claudeText(`permission history response ${index}`)]);
+    const accepted =
+      index === 0
+        ? await fixture.integration.client.startChat(
+            liveClaudeStartRequest({
+              chatId,
+              projectPath: fixture.integration.dirs.project,
+              command: `permission history prompt ${index}`,
+            }),
+          )
+        : await fixture.integration.client.runChat(
+            liveClaudeRunRequest({
+              chatId,
+              command: `permission history prompt ${index}`,
+            }),
+          );
+    expect(
+      (await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId)).type,
+    ).toBe('agent-run-finished');
+  }
 
-  test('stabilizes edge, cancellation, and append behavior', async () => {
+  environment.model.scriptTurn([
+    claudeToolUse('toolu_chromium_ask', 'AskUserQuestion', {
+      questions: [
+        {
+          question: 'Which database?',
+          header: 'Database',
+          multiSelect: false,
+          options: [
+            { label: 'Postgres', description: 'Use the durable database.' },
+            { label: 'SQLite', description: 'Use the embedded database.' },
+          ],
+        },
+      ],
+    }),
+  ]);
+  const cursor = fixture.integration.client.markEvents();
+  await fixture.integration.client.runChat(
+    liveClaudeRunRequest({
+      chatId,
+      command: 'ask the database question',
+      permissionMode: 'bypassPermissions',
+    }),
+  );
+  const event = await fixture.integration.client.waitForEvent(
+    (candidate): candidate is ChatMessagesMessage =>
+      candidate.type === 'chat-messages' &&
+      candidate.chatId === chatId &&
+      candidate.messages.some((entry) => entry.message.type === 'permission-request'),
+    'the Chromium permission request',
+    { afterIndex: cursor, timeoutMs: 30_000 },
+  );
+  expect(event.messages.some((entry) => entry.message.type === 'permission-request')).toBe(true);
+  return chatId;
+}
+
+async function verifyPermissionDraftPersistence(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+): Promise<void> {
+  const chatId = await seedPermissionTranscript(fixture, environment);
+  await fixture.page.setViewportSize({ width: 900, height: 360 });
+  const response = await fixture.page.goto(
+    `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
+  await waitForTranscriptReady(fixture.page);
+
+  const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
+  await postgres.waitFor({ state: 'visible' });
+  await postgres.check();
+  expect(await postgres.isChecked()).toBe(true);
+  const permissionItem = fixture.page.locator(ITEM_SELECTOR).filter({ has: postgres });
+  const permissionKey = await permissionItem.getAttribute('data-chat-virtual-item');
+  if (!permissionKey) throw new Error('The permission row is missing its virtual identity.');
+
+  await fixture.page.locator(FEED_SELECTOR).focus();
+  await fixture.page.evaluate(() => new Promise<void>((resolve) => queueMicrotask(resolve)));
+  await scrollToPosition(fixture.page, 'start');
+  await fixture.page.waitForFunction(
+    ({ itemSelector, key }) =>
+      ![...document.querySelectorAll<HTMLElement>(itemSelector)].some(
+        (item) => item.dataset.chatVirtualItem === key,
+      ),
+    { itemSelector: ITEM_SELECTOR, key: permissionKey },
+  );
+
+  await scrollToPosition(fixture.page, 'end');
+  const restoredPostgres = fixture.page.getByRole('radio', {
+    name: /Postgres/,
+  });
+  await restoredPostgres.waitFor({ state: 'visible' });
+  expect(await restoredPostgres.isChecked()).toBe(true);
+  environment.model.assertSettled();
+  fixture.assertNoBrowserErrors();
+}
+
+describe('Chromium transcript virtualization', () => {
+  let environment: ScriptedClaudeTestEnvironment | undefined;
+
+  beforeAll(async () => {
+    environment = await startScriptedClaudeTestEnvironment();
+  });
+
+  afterAll(() => {
+    environment?.dispose();
+  });
+
+  test('stabilizes virtual transcript geometry and navigation', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
     await withChromiumFixture(
-      'transcript-virtualization-edge-and-append',
+      'transcript-virtualization',
       async (fixture, markPhase) => {
+        markPhase('creating the shared transcript');
+        const chatId = await createTranscript(fixture);
+        markPhase('verifying bounded prepend geometry');
+        await verifyBoundedPrepend(fixture, chatId);
+        markPhase('verifying stable and growing target navigation');
+        await verifyGrowingNavigation(fixture, chatId);
+        markPhase('verifying selection retention outside overscan');
+        await verifySelectionRetention(fixture, chatId);
+        markPhase('verifying later-page reading position');
+        await verifyLaterPageReadingPosition(fixture, chatId);
+        markPhase('verifying navigation during a concurrent append');
+        await verifyConcurrentAppendNavigation(fixture, chatId);
         markPhase('verifying fresh start- and end-edge navigation');
-        await verifyEdgeNavigation(fixture);
+        await verifyEdgeNavigation(fixture, chatId);
         markPhase('verifying user cancellation during target growth');
-        await verifyTargetCancellation(fixture);
+        await verifyTargetCancellation(fixture, chatId);
         markPhase('verifying detached, hidden, and pinned append geometry');
-        await verifyAppendGeometry(fixture);
+        await verifyAppendGeometry(fixture, chatId);
+        markPhase('verifying permission draft persistence outside overscan');
+        await verifyPermissionDraftPersistence(fixture, testEnvironment);
       },
       diagnostics,
+      { serverEnvironment: testEnvironment.serverEnvironment },
     );
   }, 180_000);
 });
