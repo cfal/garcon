@@ -81,6 +81,16 @@ export function openCodeSessionError(event: SSEEvent): string | null {
   return 'OpenCode session failed';
 }
 
+// Context overflow is provisional when OpenCode auto-compaction is enabled. OpenCode emits
+// session.compacted and continues the turn after recovery; without that event, the next idle
+// makes the saved error terminal.
+// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/processor.ts#L607-L617
+export function isOpenCodeContextOverflowError(event: SSEEvent): boolean {
+  if (event.type !== 'session.error') return false;
+  const error = isRecord(event.properties?.error) ? event.properties.error : null;
+  return error?.name === 'ContextOverflowError';
+}
+
 // Garcon owns aborts: its abort path retires the turn before OpenCode's abort unwind
 // publishes MessageAbortedError, so a late unwind must never fail a successor turn.
 export function isOpenCodeAbortError(event: SSEEvent): boolean {

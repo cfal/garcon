@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { isRecord } from '@garcon/common/json';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
-import { extractSessionId, extractTextParts, isOpenCodeAbortError, openCodeSessionError, streamGlobalEvents, type SSEEvent } from './sse-events.js';
+import { extractSessionId, extractTextParts, isOpenCodeAbortError, isOpenCodeContextOverflowError, openCodeSessionError, streamGlobalEvents, type SSEEvent } from './sse-events.js';
 import {
   acceptSequencedOpenCodeTurnEvent,
   createOpenCodeTurnContext,
@@ -578,6 +578,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     }
   }
 
+  #failTurnForProviderError(agentSessionId: string, session: OpenCodeSession, message: string): void {
+    const metadata = session.turn.eventMetadata;
+    session.status = 'completed';
+    session.lastActivityAt = Date.now();
+    this.#cancelPendingPermissionsForSession(agentSessionId, 'cancelled');
+    this.#rejectTurnWaiter(agentSessionId, new Error(message));
+    this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), message)], metadata);
+    this.emitProcessing(session.chatId, false);
+    this.emitFailed(session.chatId, message, metadata);
+  }
+
   #clearTurnWaiter(agentSessionId: string): void {
     this.#pendingTurnWaiters.delete(agentSessionId);
   }
@@ -866,16 +877,13 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
           }
           const sessionError = openCodeSessionError(event);
           if (sessionError) {
-            // A non-retryable provider error is terminal for the turn; retire it before a
-            // later idle status can claim success. The error row precedes the terminal.
-            const metadata = session.turn.eventMetadata;
-            session.status = 'completed';
-            session.lastActivityAt = Date.now();
-            this.#cancelPendingPermissionsForSession(sessionId, 'cancelled');
-            this.#rejectTurnWaiter(sessionId, new Error(sessionError));
-            this.emitMessages(chatId, [new ErrorMessage(new Date().toISOString(), sessionError)], metadata);
-            this.emitProcessing(chatId, false);
-            this.emitFailed(chatId, sessionError, metadata);
+            if (isOpenCodeContextOverflowError(event)) {
+              session.turn.pendingContextOverflowError = sessionError;
+              continue;
+            }
+            // Non-recoverable provider errors retire the turn before a later idle can claim
+            // success. The visible error row precedes the terminal.
+            this.#failTurnForProviderError(sessionId, session, sessionError);
             continue;
           }
 
@@ -942,6 +950,11 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
               && event.id
               && event.id > session.turn.providerObservedEventId
             ) {
+              const contextOverflow = session.turn.pendingContextOverflowError;
+              if (contextOverflow) {
+                this.#failTurnForProviderError(sessionId, session, contextOverflow);
+                continue;
+              }
               const eventMetadata = session.turn.eventMetadata;
               this.#cancelPendingPermissionsForSession(sessionId, 'session-complete');
               session.status = 'completed';
@@ -1158,7 +1171,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       { clientRequestId, turnId },
       'chat-start',
     );
-    const turn = createOpenCodeTurnContext(eventMetadata);
+    const turn = createOpenCodeTurnContext(eventMetadata, command);
     this.#sessions.set(agentSessionId, {
       status: 'running',
       chatId,
@@ -1253,7 +1266,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
     const session = this.#sessions.get(agentSessionId);
     const eventMetadata = openCodeEventMetadata({ clientRequestId, turnId });
-    const turn = createOpenCodeTurnContext(eventMetadata);
+    const turn = createOpenCodeTurnContext(eventMetadata, command);
     const requestScope = createOpenCodeRequestScope(projectPath);
     const scope = requestScope.directory ? requestScope : { directory: session?.directory };
     const client = await this.getClient();

@@ -745,6 +745,169 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
+  it('continues through automatic compaction after a recoverable context overflow', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const messages = [];
+    const failures = [];
+    const finishes = [];
+    runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
+    runtime.onFailed((_chatId, message) => failures.push(message));
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime);
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.updated',
+      properties: { sessionID: 'session-1', info: { id: 'user-a', role: 'user' } },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ContextOverflowError', data: { message: 'context overflow' } },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
+      type: 'message.updated',
+      properties: { sessionID: 'session-1', info: { id: 'compaction-user', role: 'user' } },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0005',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'compact-part', messageID: 'compaction-user', type: 'compaction', auto: true },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0006',
+      type: 'message.updated',
+      properties: { sessionID: 'session-1', info: { id: 'continue-user', role: 'user' } },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0007',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'continue-part',
+          messageID: 'continue-user',
+          type: 'text',
+          text: 'Continue',
+          synthetic: true,
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0008',
+      type: 'session.compacted',
+      properties: { sessionID: 'session-1' },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0009',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-b', role: 'assistant', parentID: 'continue-user' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0010',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'answer', messageID: 'assistant-b', type: 'text', text: 'recovered' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0011',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+
+    await waitFor(() => finishes.length === 1);
+    expect(messages).toEqual([
+      expect.objectContaining({ type: 'assistant-message', content: 'recovered' }),
+    ]);
+    expect(failures).toEqual([]);
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('fails a context overflow that reaches idle without successful compaction', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const failures = [];
+    const finishes = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime);
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.updated',
+      properties: { sessionID: 'session-1', info: { id: 'user-a', role: 'user' } },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ContextOverflowError', data: { message: 'cannot compact' } },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+
+    await waitFor(() => failures.length === 1);
+    expect(failures).toEqual(['cannot compact']);
+    expect(finishes).toEqual([]);
+    eventStream.close();
+    runtime.shutdown();
+  });
+
   it('settles the pending turn waiter with the session error without an unhandled rejection', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));

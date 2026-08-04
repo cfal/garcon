@@ -180,6 +180,7 @@ export interface ScriptedOpenCodeTestEnvironment {
 }
 
 export function startScriptedOpenCodeTestEnvironment(options: {
+  autoCompact?: boolean;
   proxy?: boolean;
   platform?: NodeJS.Platform;
 } = {}): ScriptedOpenCodeTestEnvironment {
@@ -205,7 +206,6 @@ export function startScriptedOpenCodeTestEnvironment(options: {
       OPENCODE_DISABLE_PROJECT_CONFIG: '1',
       OPENCODE_PURE: '1',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
-      OPENCODE_DISABLE_AUTOCOMPACT: '1',
       OPENCODE_DISABLE_MODELS_FETCH: '1',
       OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
       OPENCODE_DISABLE_EXTERNAL_SKILLS: '1',
@@ -225,6 +225,9 @@ export function startScriptedOpenCodeTestEnvironment(options: {
         SYSTEM_PATH,
       ].join(':'),
     };
+    if (!options.autoCompact) {
+      environment.OPENCODE_DISABLE_AUTOCOMPACT = '1';
+    }
     if (options.proxy) {
       environment.GARCON_TEST_OPENCODE_PROXY_DIR = paths.proxy;
     }
