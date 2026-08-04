@@ -140,6 +140,20 @@ describe('ChatListProjector', () => {
     expect(deps.processing.phase).not.toHaveBeenCalled();
   });
 
+  it('uses the default title when the first message starts with a blank line', () => {
+    const { deps } = makeDeps();
+    deps.metadata.getChatMetadata.mockReturnValue({
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastActivity: '2026-01-02T00:00:00.000Z',
+      firstMessage: '\nFirst visible line',
+      lastMessage: 'Latest line',
+    });
+
+    expect(new ChatListProjector(deps).buildSummary(CHAT_ID)?.chat.title).toBe(
+      'New Session',
+    );
+  });
+
   it('uses pinned, normal, archived precedence for corrupt overlap', async () => {
     const { deps } = makeDeps();
     deps.settings.getPinnedChatIds.mockReturnValue([CHAT_ID]);

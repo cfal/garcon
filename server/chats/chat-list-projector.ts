@@ -117,7 +117,7 @@ export class ChatListProjector {
     const overrideTitle = this.deps.settings.getChatName(chatId);
     const title = extractFirstLine(
       overrideTitle || metadata?.firstMessage || 'New Session',
-    );
+    ) || 'New Session';
     return {
       chat: {
         id: chatId,
