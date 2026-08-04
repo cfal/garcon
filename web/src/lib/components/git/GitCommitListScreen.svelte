@@ -13,8 +13,6 @@
 	import GitCommitListRow from './GitCommitListRow.svelte';
 	import { GitCommitListVirtualController } from './GitCommitListVirtualController.svelte.js';
 
-	const LOAD_THRESHOLD_PX = 96;
-
 	interface GitCommitListScreenProps {
 		commits: GitHistoryCommitListItem[];
 		isLoading: boolean;
@@ -63,13 +61,15 @@
 	let lastBoundarySignature: string | null = null;
 	let boundaryRequestRevision: number | null = null;
 
-	function isNearListBottom(): boolean {
+	function isWithinLoadAheadRange(): boolean {
 		if (!listRef || listRef.clientHeight <= 0) return false;
-		return listRef.scrollHeight - listRef.scrollTop - listRef.clientHeight < LOAD_THRESHOLD_PX;
+		const remainingDistance = listRef.scrollHeight - listRef.scrollTop - listRef.clientHeight;
+		return remainingDistance <= listRef.clientHeight;
 	}
 
 	function maybeLoadMore(): void {
-		if (isLoading || error || nextOffset === null || !isNearListBottom() || !listRef) return;
+		if (isLoading || error || nextOffset === null || !isWithinLoadAheadRange() || !listRef)
+			return;
 		const collectionSignature =
 			collectionChange.kind === 'append'
 				? collectionChange.kind

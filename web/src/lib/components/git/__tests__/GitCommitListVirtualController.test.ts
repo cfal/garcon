@@ -375,11 +375,17 @@ describe('GitCommitListVirtualController', () => {
 		});
 	});
 
-	it('loads a physical bottom boundary once until new user intent', async () => {
+	it('loads at the one-viewport boundary once until new user intent', async () => {
 		const rendered = renderList(commits(50), { nextOffset: 50 });
 		const list = mockViewportGeometry(rendered.container, 200);
 		Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1_000 });
-		list.scrollTop = 710;
+		list.scrollTop = 590;
+
+		await fireEvent.scroll(list);
+		await nextFrame();
+		expect(rendered.onLoadMore).not.toHaveBeenCalled();
+
+		list.scrollTop = 600;
 
 		await fireEvent.scroll(list);
 		await fireEvent.scroll(list);
@@ -395,7 +401,7 @@ describe('GitCommitListVirtualController', () => {
 			collectionChange: { revision: 2, kind: 'replace' },
 		});
 		await nextFrame();
-		list.scrollTop = 710;
+		list.scrollTop = 600;
 		await fireEvent.scroll(list);
 		await waitFor(() => expect(rendered.onLoadMore).toHaveBeenCalledTimes(2));
 
@@ -412,7 +418,7 @@ describe('GitCommitListVirtualController', () => {
 		const rendered = renderList(commits(50), { nextOffset: 50 });
 		const list = mockViewportGeometry(rendered.container, 200);
 		Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1_000 });
-		list.scrollTop = 710;
+		list.scrollTop = 600;
 
 		await fireEvent.scroll(list);
 		await waitFor(() => expect(rendered.onLoadMore).toHaveBeenCalledOnce());
