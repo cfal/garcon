@@ -7,6 +7,7 @@ import {
 	isConversationTargetLayoutReady,
 	retainedConversationRange,
 	resolveConversationViewportRect,
+	selectConversationReadingAnchor,
 	shouldPreserveConversationVirtualEdge,
 } from '../conversation-feed-viewport-geometry';
 
@@ -97,6 +98,18 @@ describe('ConversationFeedVirtualController helpers', () => {
 				restorePolicyEnd: false,
 			}),
 		).toBe(false);
+	});
+
+	it('anchors the first meaningfully visible transcript item instead of a subpixel sliver', () => {
+		const items = [
+			{ key: 'prefix', end: 20 },
+			{ key: 'prior', end: 100 },
+			{ key: 'visible', end: 180 },
+		];
+		const transcriptKeys = new Set(['prior', 'visible']);
+
+		expect(selectConversationReadingAnchor(items, 99.5, transcriptKeys)?.key).toBe('visible');
+		expect(selectConversationReadingAnchor(items, 98, transcriptKeys)?.key).toBe('prior');
 	});
 
 	it('reports fill only from a contiguous measured physical prefix', () => {

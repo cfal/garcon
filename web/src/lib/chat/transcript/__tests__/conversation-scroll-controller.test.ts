@@ -23,7 +23,13 @@ function mutationClock(dataRevision = 0): ConversationFeedMutationClock {
 	};
 }
 
-function scrollState(overrides: Partial<ConversationScrollState> = {}): ConversationScrollState {
+type MutableConversationScrollState = {
+	-readonly [Key in keyof ConversationScrollState]: ConversationScrollState[Key];
+};
+
+function scrollState(
+	overrides: Partial<ConversationScrollState> = {},
+): MutableConversationScrollState {
 	return {
 		compactToRecentMessages: vi.fn(() => false),
 		canAutoFillEarlier: false,
@@ -207,6 +213,18 @@ describe('ConversationScrollController', () => {
 		controller.setPinnedToBottom(false);
 		controller.handleScroll();
 		expect(state.isUserScrolledUp).toBe(true);
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+	});
+
+	it('detaches on fresh upward intent inside the later threshold', () => {
+		const viewport = fakeViewport({ isAtEnd: vi.fn(() => true) });
+		const { controller, state } = controllerFixture({ viewport });
+
+		controller.noteUserScrollIntent('earlier');
+		controller.handleScroll();
+
+		expect(state.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
 		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
 	});
 
@@ -844,6 +862,28 @@ describe('ConversationScrollController', () => {
 		expect(fixture.state.isUserScrolledUp).toBe(false);
 		expect(fixture.controller.isPinnedToBottom).toBe(true);
 		expect(fixture.viewport.scrollToEnd).toHaveBeenCalledOnce();
+	});
+
+	it('ignores intent that predates a committed latest-window end scroll', async () => {
+		const observed: { fixture: ReturnType<typeof controllerFixture> | null } = { fixture: null };
+		const navigateToWindow = vi.fn(async () => {
+			if (!observed.fixture) throw new Error('Fixture is not ready.');
+			observed.fixture.state.hasLaterMessages = false;
+			return 'loaded' as const;
+		});
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: { hasLaterMessages: true, isUserScrolledUp: true, navigateToWindow },
+		});
+		observed.fixture = fixture;
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('earlier');
+
+		await fixture.controller.scrollToLatest();
+		fixture.controller.handleScroll();
+
+		expect(fixture.state.isUserScrolledUp).toBe(false);
+		expect(fixture.controller.isPinnedToBottom).toBe(true);
 	});
 
 	it('lets user intent cancel a pending latest-window navigation', async () => {

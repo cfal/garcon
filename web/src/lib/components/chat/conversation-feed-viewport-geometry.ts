@@ -43,6 +43,18 @@ export function shouldPreserveConversationVirtualEdge(input: {
 	);
 }
 
+export function selectConversationReadingAnchor<T extends { key: unknown; end: number }>(
+	items: readonly T[],
+	scrollOffset: number,
+	eligibleKeys: ReadonlySet<string>,
+): T | undefined {
+	const eligibleItems = items.filter((item) => eligibleKeys.has(String(item.key)));
+	return (
+		eligibleItems.find((item) => item.end > scrollOffset + CHAT_GEOMETRY_END_THRESHOLD_PX) ??
+		eligibleItems.at(-1)
+	);
+}
+
 export function retainedConversationRange(
 	range: Range,
 	retainedIndexes: readonly number[],

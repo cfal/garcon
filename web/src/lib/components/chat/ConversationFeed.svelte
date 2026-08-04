@@ -38,6 +38,8 @@
 		ConversationFeedAnnouncerState,
 	} from './conversation-feed-announcer.js';
 
+	const EMPTY_PENDING_PERMISSIONS: PendingPermissionRequest[] = [];
+
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
@@ -163,7 +165,7 @@
 		floatingPermissions:
 			floatingPendingPermissionRequests.length > 0 && onPermissionDecision
 				? floatingPendingPermissionRequests
-				: [],
+				: EMPTY_PENDING_PERMISSIONS,
 	});
 	let projection = $state.raw(projectionState.reconcile(untrack(() => projectionInput)));
 	let virtualRoot: HTMLDivElement | null = $state(null);

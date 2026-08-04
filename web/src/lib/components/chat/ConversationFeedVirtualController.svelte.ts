@@ -26,6 +26,7 @@ import {
 	createRetainedConversationRangeExtractor,
 	isConversationTargetLayoutReady,
 	resolveConversationViewportRect,
+	selectConversationReadingAnchor,
 	shouldPreserveConversationVirtualEdge,
 } from './conversation-feed-viewport-geometry.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
@@ -83,9 +84,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#configuredPinned: boolean;
 	#appliedDataRevision: number;
 	#configuredVisible: boolean;
-	// Layout tokens cancel geometry settling; target tokens cancel explicit navigation. Programmatic
-	// epochs supersede core scroll work, user-intent epochs protect fallback restores, and the active
-	// target count prevents passive geometry work from competing with navigation.
+	// Structural publications and visibility changes advance the layout token, invalidating deferred
+	// anchor, measurement, and end restores. Explicit targets advance the target token; user intent,
+	// replacement, teardown, and newer targets cancel it. Programmatic epochs supersede TanStack scroll
+	// work, while user-intent epochs guard hidden-offset fallbacks. The active-target count suppresses
+	// passive geometry writes. Pending end, reading-anchor, hidden-anchor, and measure-on-show state is
+	// consumed by its matching restore and cleared by replacement, user intent, or teardown.
 	#layoutMutationToken = 0;
 	#targetToken = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
@@ -176,7 +180,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	prepareForHide(): void {
 		if (this.#destroyed || !this.#configuredVisible) return;
 		if (!this.options.pinned) {
-			this.#hiddenAnchor = this.#captureVirtualAnchor();
+			this.#hiddenAnchor = this.#captureVirtualAnchor(true);
 			this.#hiddenScrollOffset = this.options.viewport?.scrollTop ?? null;
 		}
 		this.#cancelTargetScroll();
@@ -279,7 +283,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (keys.length === 0) return 'underfilled';
 		const token = this.#layoutMutationToken;
 		const restoreEnd = this.options.pinned;
-		const readingAnchor = restoreEnd ? null : this.#captureVirtualAnchor();
+		const readingAnchor = restoreEnd ? null : this.#captureVirtualAnchor(true);
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
 
 		try {
@@ -467,7 +471,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	#publishGeometry(snapshot: ConversationVirtualGeometrySnapshot): void {
 		if (snapshot.geometryRevision === this.#configuredGeometryRevision) return;
-		const model = this.options.model;
+		const model = untrack(() => this.options.model);
 		const identityChanged = snapshot.surfaceIdentity !== this.#configuredSurfaceIdentity;
 		const keys = snapshot.keys;
 		const estimates = snapshot.estimates;
@@ -484,6 +488,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		// required until https://github.com/TanStack/virtual/commit/d2cf98beea1696c7187c06b57c9e724d1957963c ships in the pinned release.
 		const resetMeasurements =
 			snapshot.measurementReset === 'all' || keys.length < this.#configuredKeys.length;
+		// The keyed snapshot restore completes the reading position after Svelte commits the new sizer.
+		// It uses only TanStack coordinates and replaces the narrower pre-commit offset bridge.
 		const preserveEdgeReadingPosition = shouldPreserveConversationVirtualEdge({
 			structure,
 			endBehavior: snapshot.endBehavior,
@@ -496,7 +502,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			snapshot.endBehavior !== 'explicit-navigation' &&
 			!identityChanged;
 		const preservationAnchor = shouldCaptureReadingPosition
-			? (this.#pendingReadingAnchor ?? this.#captureVirtualAnchor(preserveEdgeReadingPosition))
+			? (this.#pendingReadingAnchor ??
+				this.#captureVirtualAnchor(resetMeasurements || preserveEdgeReadingPosition))
 			: null;
 		if (preservationAnchor && !restorePolicyEnd) {
 			this.#pendingReadingAnchor = preservationAnchor;
@@ -506,10 +513,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 		if (identityChanged) this.#detachAndResetOldSurface();
 		const indexByKey = new Map(keys.map((key, index) => [key, index] as const));
-		this.options.retention.prune(indexByKey.keys());
-		const retainedIndexes = this.options.retention.retainedKeys.flatMap((key) => {
-			const index = indexByKey.get(key);
-			return index === undefined ? [] : [index];
+		const retainedIndexes = untrack(() => {
+			this.options.retention.prune(indexByKey.keys());
+			return this.options.retention.retainedKeys.flatMap((key) => {
+				const index = indexByKey.get(key);
+				return index === undefined ? [] : [index];
+			});
 		});
 		this.#configuredRetainedIndexes = retainedIndexes;
 		this.#configuredTrailingStartIndex = Math.max(
@@ -590,7 +599,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return;
 		}
 		if (!visible && this.#configuredVisible && !this.options.pinned) {
-			this.#hiddenAnchor = this.#captureVirtualAnchor();
+			this.#hiddenAnchor = this.#captureVirtualAnchor(true);
 			this.#hiddenScrollOffset = this.options.viewport?.scrollTop ?? null;
 		}
 		this.#cancelTargetScroll();
@@ -652,18 +661,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const itemAtOffset = instance.getVirtualItemForOffset(offset);
 		// Prefix controls occupy offset zero, so history prepends preserve the nearest message instead.
 		const item = preferTranscript
-			? instance
-					.getVirtualItems()
-					.filter((candidate) => this.#configuredTranscriptKeys.has(String(candidate.key)))
-					.sort((left, right) => {
-						const distance = (candidate: typeof left): number =>
-							offset < candidate.start
-								? candidate.start - offset
-								: offset > candidate.end
-									? offset - candidate.end
-									: 0;
-						return distance(left) - distance(right);
-					})[0]
+			? selectConversationReadingAnchor(
+					instance.getVirtualItems(),
+					offset,
+					this.#configuredTranscriptKeys,
+				)
 			: itemAtOffset;
 		if (!item || typeof item.key !== 'string') return null;
 		const index = this.#configuredKeys.indexOf(item.key);

@@ -197,21 +197,18 @@ export class ConversationScrollController {
 		const hasRecentUserScrollIntent = this.#hasRecentUserScrollIntent();
 		if (this.deps.chatState.hasLaterMessages) {
 			this.#preserveHistoryBrowsing();
-		} else if (hasRecentUserScrollIntent) {
-			const hasFreshFollowIntent =
-				nearBottom &&
-				this.#userScrollIntent.direction === 'later' &&
-				this.#userScrollIntent.epoch > this.#followLiveRequiresIntentAfter;
+		} else if (
+			hasRecentUserScrollIntent &&
+			this.#userScrollIntent.epoch > this.#followLiveRequiresIntentAfter
+		) {
+			const hasFreshFollowIntent = nearBottom && this.#userScrollIntent.direction === 'later';
 			if (hasFreshFollowIntent) {
 				this.deps.chatState.isUserScrolledUp = false;
 				this.setPinnedToBottom(true);
 				this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
 				this.deps.getViewport()?.scrollToEnd();
 				void this.#compactAtLiveEdge(this.deps.sessions.selectedChatId);
-			} else if (
-				!nearBottom ||
-				this.#userScrollIntent.epoch <= this.#followLiveRequiresIntentAfter
-			) {
+			} else if (!nearBottom || this.#userScrollIntent.direction === 'earlier') {
 				this.#preserveHistoryBrowsing();
 			}
 		} else if (!nearBottom && (this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp)) {
