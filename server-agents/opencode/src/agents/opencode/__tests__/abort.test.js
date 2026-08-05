@@ -451,6 +451,16 @@ describe('OpenCodeRuntime abort', () => {
         info: { id: 'assistant-b', role: 'assistant', parentID: 'user-b' },
       },
     }));
+    // OpenCode allocates durable event IDs before commit, so concurrent delivery can invert
+    // two previously unseen IDs.
+    eventStream.push(envelope({
+      id: 'evt_0010',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'user-concurrent', role: 'user', time: { created: Date.now() } },
+      },
+    }));
     eventStream.push(envelope({
       id: 'evt_0009',
       type: 'message.part.updated',
@@ -460,7 +470,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0010',
+      id: 'evt_0011',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));

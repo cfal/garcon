@@ -8,7 +8,7 @@ import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
 import { extractSessionId, extractTextParts, isOpenCodeAbortError, isOpenCodeContextOverflowError, openCodeSessionError, type SSEEvent } from './sse-events.js';
 import {
-  acceptSequencedOpenCodeTurnEvent,
+  acceptUniqueOpenCodeTurnEvent,
   createOpenCodeTurnContext,
   openCodeEventBelongsToTurn,
   type OpenCodeSession,
@@ -871,7 +871,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       });
       return;
     }
-    if (!acceptSequencedOpenCodeTurnEvent(session, event, this.#logger)) return;
+    if (!acceptUniqueOpenCodeTurnEvent(session, event, this.#logger)) return;
 
     const chatId = session.chatId;
     if (!chatId) {
@@ -1194,7 +1194,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       directory: scope.directory,
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
-      lastEventId: null,
+      recentEventIds: new Set(),
       providerWorkRequiresQuiescence: false,
       terminalEventsFencedUntilPrompt: false,
       turn,
@@ -1310,7 +1310,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         directory: scope.directory,
         startedAt: new Date().toISOString(),
         lastActivityAt: Date.now(),
-        lastEventId: null,
+        recentEventIds: new Set(),
         providerWorkRequiresQuiescence: false,
         terminalEventsFencedUntilPrompt: false,
         turn,

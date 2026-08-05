@@ -32,7 +32,7 @@ export interface OpenCodeSession {
   directory?: string;
   startedAt: string;
   lastActivityAt: number;
-  lastEventId: string | null;
+  recentEventIds: Set<string>;
   // A transport or control-plane failure can retire Garcon's turn while OpenCode still owns
   // provider work. The next turn aborts that work before submitting another prompt.
   providerWorkRequiresQuiescence: boolean;
@@ -41,6 +41,12 @@ export interface OpenCodeSession {
   terminalEventsFencedUntilPrompt: boolean;
   turn: OpenCodeTurnContext;
 }
+
+// OpenCode assigns IDs before durable commits, so concurrent publishers can deliver unseen
+// events outside lexical order. The bounded window rejects actual duplicates without making
+// ordering an arrival contract; durable sequence metadata can replace it if global replay grows.
+// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/core/src/event.ts#L419-L437
+const RECENT_EVENT_ID_LIMIT = 512;
 
 export function createOpenCodeTurnContext(
   eventMetadata: RuntimeEventMetadata,
@@ -62,7 +68,7 @@ export function createOpenCodeTurnContext(
   };
 }
 
-export function acceptSequencedOpenCodeTurnEvent(
+export function acceptUniqueOpenCodeTurnEvent(
   session: OpenCodeSession,
   event: SSEEvent,
   logger: AgentLogger,
@@ -82,14 +88,18 @@ export function acceptSequencedOpenCodeTurnEvent(
     logger.warn('Ignoring OpenCode event without an event ID', { eventType: event.type });
     return false;
   }
-  if (session.lastEventId && event.id <= session.lastEventId) {
-    logger.debug('Ignoring replayed or out-of-order OpenCode event', {
+  if (session.recentEventIds.has(event.id)) {
+    logger.debug('Ignoring replayed OpenCode event', {
       eventType: event.type,
       eventId: event.id,
     });
     return false;
   }
-  session.lastEventId = event.id;
+  session.recentEventIds.add(event.id);
+  if (session.recentEventIds.size > RECENT_EVENT_ID_LIMIT) {
+    const oldestEventId = session.recentEventIds.values().next().value;
+    if (oldestEventId) session.recentEventIds.delete(oldestEventId);
+  }
   return true;
 }
 
