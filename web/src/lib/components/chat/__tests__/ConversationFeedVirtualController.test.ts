@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import type { SvelteVirtualizer } from '@tanstack/svelte-virtual';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness';
+import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
 import {
 	classifyMeasuredConversationViewportFill,
 	classifyConversationVirtualStructure,
@@ -10,6 +17,7 @@ import {
 	selectConversationReadingAnchor,
 	shouldPreserveConversationVirtualEdge,
 } from '../conversation-feed-viewport-geometry';
+import ConversationFeedVirtualControllerTestHost from './ConversationFeedVirtualControllerTestHost.svelte';
 
 describe('ConversationFeedVirtualController helpers', () => {
 	it('classifies identity, edge, estimate-only, and no-op changes', () => {
@@ -200,5 +208,120 @@ describe('ConversationFeedVirtualController helpers', () => {
 
 		Object.defineProperty(image, 'complete', { configurable: true, value: true });
 		expect(isConversationTargetLayoutReady(row)).toBe(true);
+	});
+});
+
+interface ControllerExposure {
+	controller: ConversationFeedVirtualController;
+	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
+}
+
+function nextFrame(): Promise<void> {
+	return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function renderController(): Promise<{
+	exposure: ControllerExposure;
+	unmount(): void;
+}> {
+	let exposure: ControllerExposure | undefined;
+	const rendered = render(ConversationFeedVirtualControllerTestHost, {
+		onReady(value) {
+			exposure = value;
+		},
+	});
+	await waitFor(() => expect(exposure).toBeDefined());
+	await nextFrame();
+	await nextFrame();
+	if (!exposure) throw new Error('Expected the virtual controller exposure');
+	return { exposure, unmount: rendered.unmount };
+}
+
+describe('ConversationFeedVirtualController', () => {
+	let restoreResizeObserver: () => void;
+
+	beforeEach(() => {
+		restoreResizeObserver = installResizeObserverHarness();
+	});
+
+	afterEach(() => {
+		cleanup();
+		restoreResizeObserver();
+	});
+
+	it('keeps content and retention publications separate from structural measurement', async () => {
+		const { exposure } = await renderController();
+		const measure = vi.spyOn(exposure.instance, 'measure');
+		const setOptions = vi.spyOn(exposure.instance, 'setOptions');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Publish content' }));
+		await nextFrame();
+		expect(setOptions).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Retain first' }));
+		await waitFor(() => expect(setOptions).toHaveBeenCalled());
+		expect(Object.keys(setOptions.mock.lastCall?.[0] ?? {})).toEqual(['rangeExtractor']);
+
+		setOptions.mockClear();
+		await fireEvent.click(screen.getByRole('button', { name: 'Shrink' }));
+		await waitFor(() => {
+			expect(
+				document.querySelector('[data-controller-sizer]')?.getAttribute(
+					'data-controller-model-count',
+				),
+			).toBe('4');
+		});
+		await nextFrame();
+		await nextFrame();
+		expect(setOptions).toHaveBeenCalled();
+		expect(measure).not.toHaveBeenCalled();
+	});
+
+	it('resets text-scale measurements immediately when visible and once on show when hidden', async () => {
+		const { exposure } = await renderController();
+		const measure = vi.spyOn(exposure.instance, 'measure');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle scale' }));
+		await waitFor(() => expect(measure).toHaveBeenCalledOnce());
+
+		measure.mockClear();
+		await fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+		await waitFor(() =>
+			expect(document.querySelector('[data-controller-viewport]')?.getAttribute('data-visible')).toBe(
+				'false',
+			),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle scale' }));
+		await nextFrame();
+		await nextFrame();
+		expect(measure).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show and restore' }));
+		await waitFor(() => expect(measure).toHaveBeenCalledOnce());
+	});
+
+	it('clears prior measurements when the surface identity changes', async () => {
+		const { exposure } = await renderController();
+		const measure = vi.spyOn(exposure.instance, 'measure');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Replace surface' }));
+		await waitFor(() => expect(measure).toHaveBeenCalledOnce());
+		expect(exposure.instance.options.getItemKey(0)).toBe('["surface-2",0]');
+	});
+
+	it('cleans adapter observers across repeated destroy calls', async () => {
+		const { exposure, unmount } = await renderController();
+		expect(ResizeObserverHarness.instances.some((observer) => observer.observed.size > 0)).toBe(true);
+
+		expect(() => {
+			exposure.controller.destroy();
+			exposure.controller.destroy();
+		}).not.toThrow();
+		await waitFor(() =>
+			expect(
+				ResizeObserverHarness.instances.every((observer) => observer.observed.size === 0),
+			).toBe(true),
+		);
+		expect(unmount).not.toThrow();
 	});
 });

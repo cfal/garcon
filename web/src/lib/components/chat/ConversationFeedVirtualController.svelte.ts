@@ -77,13 +77,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#configuredPinned: boolean;
 	#appliedDataRevision: number;
 	#configuredVisible: boolean;
-	// Structural publications and visibility changes advance the layout token, invalidating deferred
-	// anchor, measurement, and end restores. Explicit targets advance the target token; user intent,
-	// replacement, teardown, and newer targets cancel it. Programmatic epochs supersede TanStack scroll
-	// work, while the initial-end epoch cancels queued post-commit restores and user-intent epochs guard
-	// hidden-offset fallbacks. The active-target count suppresses passive geometry writes. Pending end,
-	// reading-anchor, hidden-anchor, and measure-on-show state is consumed by its matching restore and
-	// cleared by replacement, visibility changes, user intent, or teardown.
+	// Cancellation ownership stays field-specific. Structural publication, visibility, targets, user
+	// intent, replacement, and teardown advance the layout token to invalidate deferred anchor/end writes.
+	// New targets, user intent, replacement, and teardown advance the target token. Programmatic epochs
+	// supersede TanStack scroll operations; user intent advances both epochs and may supersede core's active
+	// target. The initial-end epoch owns only the deferred initial/latest restore. The user-intent epoch
+	// prevents older scale/end work from restoring after a genuine gesture. Active targets suppress passive
+	// writes until their balanced finally block exits. Pending and hidden anchors carry one keyed reading
+	// position; pending end and measure-on-show carry one deferred viewport operation for the current surface.
 	#layoutMutationToken = 0;
 	#targetToken = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
