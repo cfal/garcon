@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import {
   CodexAppServerClient,
@@ -6120,6 +6121,10 @@ describe('CodexAppServerRuntime', () => {
     await finished;
 
     expect(emitted.map((message) => message.content)).toEqual(['Already emitted']);
+    expect(getNativeMessageRevisionSource(emitted[0])).toEqual({
+      entryId: 'turn:turn-1:item:a1',
+      withinSourceOrdinal: 0,
+    });
   });
 
   it('uses the terminal agent summary when its item completion notification is absent', async () => {

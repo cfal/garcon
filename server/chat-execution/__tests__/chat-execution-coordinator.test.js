@@ -1161,6 +1161,7 @@ describe('orchestration', () => {
           content: 'hello',
           metadata: expect.objectContaining({
             clientRequestId: 'req-1',
+            upstreamRequestId: 'msg-1',
             turnId: 'turn-1',
             deliveryStatus: 'accepted',
           }),

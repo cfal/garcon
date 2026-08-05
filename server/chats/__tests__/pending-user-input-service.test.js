@@ -760,6 +760,7 @@ describe('PendingUserInputService', () => {
     const service = new PendingUserInputService(reader);
     await service.register('chat-1', 'persisted', {
       clientRequestId: 'req-1',
+      clientMessageId: 'upstream-1',
       turnId: 'turn-1',
       createdAt: '2026-06-01T00:00:00.000Z',
     });
@@ -770,7 +771,12 @@ describe('PendingUserInputService', () => {
         '2026-06-01T00:00:00.000Z',
         'persisted',
         undefined,
-        { clientRequestId: 'req-1', turnId: 'turn-1', deliveryStatus: 'accepted' },
+        {
+          clientRequestId: 'req-1',
+          upstreamRequestId: 'upstream-1',
+          turnId: 'turn-1',
+          deliveryStatus: 'accepted',
+        },
       )],
     );
     nativeMessages = [

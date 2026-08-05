@@ -9,6 +9,12 @@ import {
   transcriptRevision,
   transcriptRevisions,
 } from '../lib/transcript-revision.js';
+import {
+  exactMessageIdentityKeys,
+  preserveRetainedUserIdentities,
+  retainedMessageMatchesNative,
+  userDeliveryPayloadsAreCompatible,
+} from './chat-message-reconciliation.js';
 import { ChatRunningError } from './errors.js';
 
 const logger = createLogger('chat-view');
@@ -568,9 +574,16 @@ export class ChatViewStore {
       generationId: preservesGeneration ? previous?.generationId : undefined,
       nativeRevision: revisions.full,
     });
+    const nativeIdentities = new Set(
+      reconciledNativeMessages.flatMap(exactMessageIdentityKeys),
+    );
     const unpersistedLiveMessages = previous
-      ? retainedLiveEntries
-        .filter((entry) => entry.seq > reconciledNativeMessages.length)
+        ? retainedLiveEntries
+        .filter((entry) => {
+          const identities = exactMessageIdentityKeys(entry.message);
+          return entry.seq > reconciledNativeMessages.length
+            && !identities.some((identity) => nativeIdentities.has(identity));
+        })
         .map((entry) => entry.message)
       : [];
     let fullMessages = reconciledNativeMessages;
@@ -672,7 +685,7 @@ export class ChatViewStore {
       const requestId = message.metadata.clientRequestId;
       const existing = existingByRequestId.get(requestId);
       if (existing) {
-        if (!userEchoesAreCompatible(existing, message)) {
+        if (!userDeliveryPayloadsAreCompatible(existing, message)) {
           if (conflictPolicy === 'native-wins') {
             logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${requestId}`);
             continue;
@@ -914,85 +927,6 @@ function assertValidChatMessage(message: ChatMessage): void {
   if (!message || typeof message !== 'object' || typeof message.type !== 'string') {
     throw new Error('Invalid chat message');
   }
-}
-
-function wireMessagesEqual(left: ChatMessage, right: ChatMessage | undefined): boolean {
-  return right !== undefined && JSON.stringify(left) === JSON.stringify(right);
-}
-
-function preserveRetainedUserIdentities(
-  retainedMessages: ChatViewMessage[],
-  nativeMessages: ChatMessage[],
-): ChatMessage[] {
-  let reconciled = nativeMessages;
-  for (const entry of retainedMessages) {
-    const nativeIndex = entry.seq - 1;
-    if (nativeIndex >= nativeMessages.length) break;
-    const nativeMessage = nativeMessages[nativeIndex];
-    const withIdentity = preserveLiveUserIdentity(entry.message, nativeMessage);
-    if (withIdentity === nativeMessage) continue;
-    if (reconciled === nativeMessages) reconciled = [...nativeMessages];
-    reconciled[nativeIndex] = withIdentity;
-  }
-  return reconciled;
-}
-
-function preserveLiveUserIdentity(liveMessage: ChatMessage, nativeMessage: ChatMessage): ChatMessage {
-  if (
-    !(liveMessage instanceof UserMessage)
-    || !(nativeMessage instanceof UserMessage)
-    || !liveMessage.metadata?.clientRequestId
-    || !userEchoesAreCompatible(liveMessage, nativeMessage)
-  ) {
-    return nativeMessage;
-  }
-  return new UserMessage(
-    liveMessage.timestamp,
-    liveMessage.content,
-    liveMessage.images,
-    { ...nativeMessage.metadata, ...liveMessage.metadata },
-  );
-}
-
-function retainedMessageMatchesNative(
-  retainedMessage: ChatMessage,
-  nativeMessage: ChatMessage | undefined,
-): boolean {
-  return wireMessagesEqual(retainedMessage, nativeMessage)
-    || retainedMessage instanceof UserMessage
-      && nativeMessage instanceof UserMessage
-      && Boolean(retainedMessage.metadata?.clientRequestId)
-      && userEchoesAreCompatible(retainedMessage, nativeMessage);
-}
-
-function userEchoesAreCompatible(
-  liveMessage: UserMessage,
-  nativeMessage: UserMessage,
-): boolean {
-  return wireMessagesEqual(
-    withoutMetadata(liveMessage, nativeMessage.timestamp),
-    withoutMetadata(nativeMessage, nativeMessage.timestamp),
-  ) && metadataIsCompatible(liveMessage.metadata, nativeMessage.metadata);
-}
-
-function withoutMetadata(message: UserMessage, timestamp: string): UserMessage {
-  return new UserMessage(
-    timestamp,
-    message.content,
-    message.images,
-  );
-}
-
-function metadataIsCompatible(
-  liveMetadata: UserMessage['metadata'],
-  nativeMetadata: UserMessage['metadata'],
-): boolean {
-  const live = liveMetadata as Record<string, unknown> | undefined;
-  for (const [key, nativeValue] of Object.entries(nativeMetadata ?? {})) {
-    const liveValue = live?.[key];
-    if (liveValue !== undefined && liveValue !== nativeValue) return false;
-  }
-  return true;
 }
 
 function revisionsMatch(previous: string | undefined, current: string | undefined): boolean {

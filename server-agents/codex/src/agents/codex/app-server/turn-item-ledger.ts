@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { loadCodexChatMessages } from '../history-loader.js';
 import { convertCodexAppServerLiveItem } from './converter.js';
 import type { CodexThreadItem } from './protocol.js';
@@ -28,7 +29,7 @@ export class CodexTurnItemLedger {
     this.#manualCompactionPending = true;
   }
 
-  emit(item: CodexThreadItem): void {
+  emit(turnId: string, item: CodexThreadItem): void {
     if (this.#seenIds.has(item.id)) return;
     this.#seenIds.add(item.id);
     const compactionTrigger = item.type === 'contextCompaction'
@@ -36,6 +37,12 @@ export class CodexTurnItemLedger {
       : undefined;
     if (item.type === 'contextCompaction') this.#manualCompactionPending = false;
     const messages = convertCodexAppServerLiveItem(item, undefined, compactionTrigger);
+    messages.forEach((message, withinSourceOrdinal) => {
+      attachNativeMessageSource(message, {
+        entryId: `turn:${turnId}:item:${item.id}`,
+        withinSourceOrdinal,
+      });
+    });
     if (messages.length) this.#emit(messages);
   }
 

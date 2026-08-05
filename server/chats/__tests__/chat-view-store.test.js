@@ -6,6 +6,7 @@ import {
   ErrorMessage,
   UserMessage,
 } from '../../../common/chat-types.js';
+import { attachNativeMessageSource } from '../../agents/shared/native-message-source.js';
 import { transcriptRevision } from '../../lib/transcript-revision.js';
 
 const TS = '2026-06-01T00:00:00.000Z';
@@ -140,6 +141,102 @@ describe('ChatViewStore', () => {
 
     expect(messages.map((message) => message.content)).toEqual(['provider content']);
     expect(contents(store.readPage('chat-1', 20))).toEqual(['provider content']);
+  });
+
+  it('reconciles shifted native echoes by exact provider identities', async () => {
+    const store = new ChatViewStore(() => false);
+    const initialHistory = [
+      user('old user one'),
+      assistant('old assistant one'),
+      user('old user two'),
+      assistant('old assistant two'),
+    ];
+    const liveUser = user('live user content', {
+      clientRequestId: 'client-request-1',
+      turnId: 'turn-1',
+      upstreamRequestId: 'provider-request-1',
+      deliveryStatus: 'accepted',
+    });
+    const liveAssistant = attachNativeMessageSource(assistant('live assistant content'), {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    });
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => initialHistory,
+      [liveUser, liveAssistant],
+    );
+
+    const nativeUser = user('provider user content', {
+      upstreamRequestId: 'provider-request-1',
+    });
+    const nativeAssistant = attachNativeMessageSource(assistant('provider assistant content'), {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    });
+    await store.reconcileNativeSnapshot('chat-1', [
+      ...initialHistory.slice(0, 2),
+      nativeUser,
+      nativeAssistant,
+    ]);
+
+    const messages = store.readPage('chat-1', 20).messages.map((entry) => entry.message);
+    expect(messages.map((message) => message.content)).toEqual([
+      'old user one',
+      'old assistant one',
+      'provider user content',
+      'provider assistant content',
+    ]);
+    expect(messages[2].metadata).toEqual({
+      clientRequestId: 'client-request-1',
+      turnId: 'turn-1',
+      upstreamRequestId: 'provider-request-1',
+      deliveryStatus: 'accepted',
+    });
+  });
+
+  it('keeps identical native and live text without a shared identity', async () => {
+    const store = new ChatViewStore(() => false);
+    const initialHistory = [
+      user('old user one'),
+      assistant('old assistant one'),
+      user('old user two'),
+      assistant('old assistant two'),
+    ];
+    const liveUser = user('same user text', {
+      upstreamRequestId: 'live-provider-request',
+    });
+    const liveAssistant = attachNativeMessageSource(assistant('same assistant text'), {
+      entryId: 'turn:shared-turn:item:shared-item',
+      withinSourceOrdinal: 0,
+    });
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => initialHistory,
+      [liveUser, liveAssistant],
+    );
+
+    const nativeUser = user('same user text', {
+      upstreamRequestId: 'native-provider-request',
+    });
+    const nativeAssistant = attachNativeMessageSource(assistant('same assistant text'), {
+      entryId: 'turn:shared-turn:item:shared-item',
+      withinSourceOrdinal: 1,
+    });
+    await store.reconcileNativeSnapshot('chat-1', [
+      ...initialHistory.slice(0, 2),
+      nativeUser,
+      nativeAssistant,
+    ]);
+
+    expect(contents(store.readPage('chat-1', 20))).toEqual([
+      'old user one',
+      'old assistant one',
+      'same user text',
+      'same assistant text',
+      'same user text',
+      'same assistant text',
+    ]);
   });
 
   it('rejects a restored native snapshot after execution becomes active', async () => {

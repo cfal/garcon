@@ -56,6 +56,7 @@ export class AcceptedInputTranscript {
       appended = await this.chatMessages.appendMessages(chatId, [
         new UserMessage(new Date().toISOString(), content, images, {
           clientRequestId,
+          upstreamRequestId: options.clientMessageId,
           turnId: options.turnId,
           deliveryStatus,
         }),
