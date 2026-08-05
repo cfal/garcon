@@ -32,12 +32,12 @@ import {
 	classifyMeasuredConversationViewportFill,
 	classifyConversationVirtualStructure,
 	attainableConversationTargetOffset,
-	conversationVirtualGeometryChangesBeforeAnchor,
 	createRetainedConversationRangeExtractor,
 	isConversationTargetLayoutReady,
 	retainedConversationRange,
 	resolveConversationViewportRect,
 	selectConversationReadingAnchor,
+	selectConversationReadingRestoreAnchor,
 	shouldPreserveConversationVirtualEdge,
 } from '../conversation-feed-viewport-geometry';
 import {
@@ -156,33 +156,51 @@ describe('ConversationFeedVirtualController helpers', () => {
 	});
 
 	it('restores only geometry that can move the reading anchor start', () => {
+		const anchor = { key: 'anchor' };
 		expect(
-			conversationVirtualGeometryChangesBeforeAnchor({
-				previousKeys: ['start', 'before', 'anchor', 'end'],
-				previousEstimates: [16, 80, 120, 16],
-				nextKeys: ['start', 'before', 'anchor', 'appended', 'end'],
-				nextEstimates: [16, 80, 120, 180, 16],
-				anchorKey: 'anchor',
+			selectConversationReadingRestoreAnchor({
+				candidateAnchor: anchor,
+				pendingAnchor: null,
+				previous: {
+					keys: ['start', 'before', 'anchor', 'end'],
+					estimates: [16, 80, 120, 16],
+				},
+				next: {
+					keys: ['start', 'before', 'anchor', 'appended', 'end'],
+					estimates: [16, 80, 120, 180, 16],
+				},
 			}),
-		).toBe(false);
+		).toBeNull();
 		expect(
-			conversationVirtualGeometryChangesBeforeAnchor({
-				previousKeys: ['start', 'before', 'anchor', 'end'],
-				previousEstimates: [16, 80, 120, 16],
-				nextKeys: ['start', 'prepended', 'before', 'anchor', 'end'],
-				nextEstimates: [16, 180, 80, 120, 16],
-				anchorKey: 'anchor',
+			selectConversationReadingRestoreAnchor({
+				candidateAnchor: anchor,
+				pendingAnchor: null,
+				previous: {
+					keys: ['start', 'before', 'anchor', 'end'],
+					estimates: [16, 80, 120, 16],
+				},
+				next: {
+					keys: ['start', 'prepended', 'before', 'anchor', 'end'],
+					estimates: [16, 180, 80, 120, 16],
+				},
 			}),
-		).toBe(true);
+		).toBe(anchor);
 		expect(
-			conversationVirtualGeometryChangesBeforeAnchor({
-				previousKeys: ['start', 'before', 'anchor'],
-				previousEstimates: [16, 80, 120],
-				nextKeys: ['start', 'before', 'anchor'],
-				nextEstimates: [16, 96, 120],
-				anchorKey: 'anchor',
+			selectConversationReadingRestoreAnchor({
+				candidateAnchor: anchor,
+				pendingAnchor: null,
+				previous: { keys: ['start', 'before', 'anchor'], estimates: [16, 80, 120] },
+				next: { keys: ['start', 'before', 'anchor'], estimates: [16, 96, 120] },
 			}),
-		).toBe(true);
+		).toBe(anchor);
+		expect(
+			selectConversationReadingRestoreAnchor({
+				candidateAnchor: anchor,
+				pendingAnchor: anchor,
+				previous: { keys: ['start', 'before', 'anchor'], estimates: [16, 80, 120] },
+				next: { keys: ['start', 'before', 'anchor'], estimates: [16, 80, 120] },
+			}),
+		).toBe(anchor);
 	});
 
 	it('anchors the first meaningfully visible transcript item instead of a subpixel sliver', () => {

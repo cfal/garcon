@@ -15,8 +15,8 @@ import {
 	CHAT_GEOMETRY_END_THRESHOLD_PX,
 	classifyConversationVirtualStructure,
 	classifyMeasuredConversationViewportFill,
-	conversationVirtualGeometryChangesBeforeAnchor,
 	createRetainedConversationRangeExtractor,
+	selectConversationReadingRestoreAnchor,
 	shouldPreserveConversationVirtualEdge,
 } from './conversation-feed-viewport-geometry.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
@@ -521,11 +521,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		});
 		const restorePolicyEnd =
 			snapshot.endBehavior === 'restore-if-pinned' && untrack(() => this.options.pinned);
-		// The pinned core carries upstream #1246, so count shrink preserves surviving keyed
-		// measurements and ignores stale connected indexes without a Garcon reset pass.
+		// Upstream #1246 preserves keyed measurements across count shrink without a Garcon reset.
 		const resetMeasurements = snapshot.measurementReset === 'all';
-		// The pre-commit anchor records old TanStack coordinates; the keyed restore applies them
-		// after Svelte commits the new sizer.
+		// The keyed restore reapplies pre-commit TanStack coordinates after Svelte commits the sizer.
 		const preserveEdgeReadingPosition = shouldPreserveConversationVirtualEdge({
 			structure,
 			endBehavior: snapshot.endBehavior,
@@ -547,23 +545,15 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				preCommitAnchor ??
 				this.#captureVirtualAnchor(preferTranscriptAnchor))
 			: null;
-		// TanStack already anchors an unaffected trailing publication. A second keyed
-		// restore would align the row to the start for a frame before restoring its offset.
-		const shouldRestoreReadingPosition = Boolean(
-			candidateAnchor &&
-			(this.#pendingReadingAnchor !== null ||
-				conversationVirtualGeometryChangesBeforeAnchor({
-					previousKeys: this.#configuredKeys,
-					previousEstimates: this.#configuredEstimates,
-					nextKeys: keys,
-					nextEstimates: estimates,
-					anchorKey: candidateAnchor.key,
-				})),
-		);
-		const preservationAnchor = shouldRestoreReadingPosition ? candidateAnchor : null;
+		const preservationAnchor = selectConversationReadingRestoreAnchor({
+			candidateAnchor,
+			pendingAnchor: this.#pendingReadingAnchor,
+			previous: { keys: this.#configuredKeys, estimates: this.#configuredEstimates },
+			next: snapshot,
+		});
 		if (preservationAnchor && !restorePolicyEnd) {
 			this.#pendingReadingAnchor = preservationAnchor;
-		} else if (!shouldRestoreReadingPosition || restorePolicyEnd) {
+		} else {
 			this.#pendingReadingAnchor = null;
 		}
 

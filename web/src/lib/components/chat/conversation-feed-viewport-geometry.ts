@@ -43,7 +43,7 @@ export function shouldPreserveConversationVirtualEdge(input: {
 	);
 }
 
-export function conversationVirtualGeometryChangesBeforeAnchor(input: {
+function conversationVirtualGeometryChangesBeforeAnchor(input: {
 	previousKeys: readonly string[];
 	previousEstimates: readonly number[];
 	nextKeys: readonly string[];
@@ -64,6 +64,27 @@ export function conversationVirtualGeometryChangesBeforeAnchor(input: {
 			input.nextEstimates.slice(0, nextAnchorIndex),
 		)
 	);
+}
+
+export function selectConversationReadingRestoreAnchor<T extends { key: string }>(input: {
+	candidateAnchor: T | null;
+	pendingAnchor: T | null;
+	previous: Pick<ConversationVirtualGeometrySnapshot, 'keys' | 'estimates'>;
+	next: Pick<ConversationVirtualGeometrySnapshot, 'keys' | 'estimates'>;
+}): T | null {
+	const anchor = input.candidateAnchor;
+	if (!anchor) return null;
+	// Avoids a redundant keyed restore when TanStack already anchors an unaffected tail append.
+	const shouldRestore =
+		input.pendingAnchor !== null ||
+		conversationVirtualGeometryChangesBeforeAnchor({
+			previousKeys: input.previous.keys,
+			previousEstimates: input.previous.estimates,
+			nextKeys: input.next.keys,
+			nextEstimates: input.next.estimates,
+			anchorKey: anchor.key,
+		});
+	return shouldRestore ? anchor : null;
 }
 
 export function selectConversationReadingAnchor<T extends { key: unknown; end: number }>(
