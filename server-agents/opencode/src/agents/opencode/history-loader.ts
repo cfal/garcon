@@ -8,6 +8,7 @@
 import {
   UserMessage,
   AssistantMessage,
+  ErrorMessage,
   ThinkingMessage,
   ToolResultMessage,
   type ChatMessage,
@@ -45,7 +46,12 @@ interface OpenCodeSession {
 
 export interface OpenCodeMessage {
   info?: {
+    id?: string;
     role?: string;
+    mode?: string;
+    agent?: string;
+    summary?: boolean;
+    error?: unknown;
     time?: {
       created?: string | number | Date;
     };
@@ -158,13 +164,15 @@ export async function getOpenCodePreviewFromSessionId(
       });
       return null;
     }
-    const messages = Array.isArray(messageResult.data) ? messageResult.data : [];
+    const messages = visibleOpenCodeStoredMessages(
+      Array.isArray(messageResult.data) ? messageResult.data : [],
+    );
     let lastMessage = '';
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i];
       const info = message.info || {};
       if (info.role === 'user') {
-        const text = extractTextFromParts(message.parts || []);
+        const text = extractUserTextFromParts(message.parts || []);
         lastMessage = text.trim();
       } else if (info.role === 'assistant') {
         const parts = Array.isArray(message.parts) ? message.parts : [];
@@ -196,14 +204,92 @@ export async function getOpenCodePreviewFromSessionId(
   }
 }
 
-function extractTextFromParts(parts: unknown[] | string): string {
+function extractUserTextFromParts(parts: unknown[] | string): string {
   if (typeof parts === 'string') return parts;
   if (!Array.isArray(parts)) return '';
   return parts
     .map((p) => asRecord(p))
-    .filter((p) => p.type === 'text')
+    .filter((p) => p.type === 'text' && p.synthetic !== true)
     .map((p) => typeof p.text === 'string' ? p.text : '')
     .join('\n');
+}
+
+function isCompactionAssistant(info: NonNullable<OpenCodeMessage['info']>): boolean {
+  return info.summary === true || info.mode === 'compaction' || info.agent === 'compaction';
+}
+
+// OpenCode persists compaction summaries and continuation prompts as ordinary messages.
+// The overflow path also replays the original prompt after its successful summary.
+function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): OpenCodeMessage[] {
+  const visible: OpenCodeMessage[] = [];
+  let overflowCompactionPending = false;
+  let replayExpectedText: string | null = null;
+  let lastVisibleUserText: string | null = null;
+
+  for (const message of rawMessages) {
+    const info = message.info ?? {};
+    const parts = Array.isArray(message.parts) ? message.parts.map(asRecord) : [];
+
+    if (info.role === 'user') {
+      const compaction = parts.find((part) => part.type === 'compaction');
+      if (compaction) {
+        overflowCompactionPending = compaction.overflow === true;
+        replayExpectedText = null;
+        continue;
+      }
+
+      const text = extractUserTextFromParts(message.parts ?? []);
+      if (!text.trim()) {
+        if (parts.some((part) => part.type === 'text' && part.synthetic === true)) {
+          overflowCompactionPending = false;
+          replayExpectedText = null;
+        }
+        continue;
+      }
+
+      overflowCompactionPending = false;
+      if (replayExpectedText !== null) {
+        const isReplay = text === replayExpectedText;
+        replayExpectedText = null;
+        if (isReplay) continue;
+      }
+      visible.push(message);
+      lastVisibleUserText = text;
+      continue;
+    }
+
+    if (info.role === 'assistant' && isCompactionAssistant(info)) {
+      const succeeded = info.error == null;
+      replayExpectedText = overflowCompactionPending && succeeded
+        ? lastVisibleUserText
+        : null;
+      overflowCompactionPending = false;
+      // A failed summary remains internal, but its provider failure must survive reload.
+      if (!succeeded) visible.push({ ...message, parts: [] });
+      continue;
+    }
+
+    overflowCompactionPending = false;
+    replayExpectedText = null;
+    visible.push(message);
+  }
+
+  return visible;
+}
+
+function isOpenCodeStoredAbort(error: unknown): boolean {
+  return asRecord(error).name === 'MessageAbortedError';
+}
+
+function openCodeStoredErrorMessage(error: unknown): string | null {
+  if (error == null) return null;
+  if (typeof error === 'string') return error.trim() || 'OpenCode session failed';
+  const record = asRecord(error);
+  if (isOpenCodeStoredAbort(error)) return null;
+  const data = asRecord(record.data);
+  if (typeof data.message === 'string' && data.message.trim()) return data.message.trim();
+  if (typeof record.name === 'string' && record.name.trim()) return record.name.trim();
+  return 'OpenCode session failed';
 }
 
 export async function fetchOpenCodeStoredMessages(
@@ -249,59 +335,68 @@ export async function fetchOpenCodeStoredMessages(
 
 export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
-  for (const msg of rawMessages) {
-      const info = msg.info || {};
-      const ts = dateToIso(info.time?.created)
-        ?? new Date().toISOString();
+  for (const msg of visibleOpenCodeStoredMessages(rawMessages)) {
+    const info = msg.info || {};
+    const ts = dateToIso(info.time?.created)
+      ?? new Date().toISOString();
 
-      if (info.role === 'user') {
-        const text = extractTextFromParts(msg.parts || []);
-        if (text?.trim()) {
-          messages.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
-        }
-        continue;
+    if (info.role === 'user') {
+      const text = extractUserTextFromParts(msg.parts || []);
+      if (text?.trim()) {
+        messages.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
       }
+      continue;
+    }
 
-      if (info.role === 'assistant') {
-        // Emit thinking parts first
-        const parts = Array.isArray(msg.parts) ? msg.parts : [];
-        for (const rawPart of parts) {
-          const part = asRecord(rawPart);
-          if (part.type === 'reasoning') {
-            const content = typeof part.reasoning === 'string'
-              ? part.reasoning
-              : typeof part.text === 'string'
-                ? part.text
-                : '';
-            if (content.trim()) {
-              messages.push(new ThinkingMessage(ts, content));
-            }
-          }
-        }
-
-        // Emit text and tool-use parts
-        for (const rawPart of parts) {
-          const part = asRecord(rawPart);
-          if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
-            messages.push(new AssistantMessage(ts, part.text));
-          } else if (part.type === 'tool') {
-            const toolId = typeof part.callID === 'string'
-              ? part.callID
-              : typeof part.id === 'string'
-                ? part.id
-                : '';
-            messages.push(convertOpenCodeToolUse(ts, part));
-            const state = asRecord(part.state);
-
-            // Emit tool result if completed or errored
-            if (state.status === 'completed') {
-              messages.push(new ToolResultMessage(ts, toolId, normalizeToolResultContent(state.output), false));
-            } else if (state.status === 'error') {
-              messages.push(new ToolResultMessage(ts, toolId, normalizeToolResultContent(state.error || 'Error'), true));
-            }
+    if (info.role === 'assistant') {
+      const providerError = openCodeStoredErrorMessage(info.error);
+      const aborted = isOpenCodeStoredAbort(info.error);
+      // Emit thinking parts first
+      const parts = Array.isArray(msg.parts) ? msg.parts : [];
+      for (const rawPart of parts) {
+        const part = asRecord(rawPart);
+        if (part.type === 'reasoning') {
+          const content = typeof part.reasoning === 'string'
+            ? part.reasoning
+            : typeof part.text === 'string'
+              ? part.text
+              : '';
+          if (content.trim()) {
+            messages.push(new ThinkingMessage(ts, content));
           }
         }
       }
+
+      // Emit text and tool-use parts
+      for (const rawPart of parts) {
+        const part = asRecord(rawPart);
+        if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+          messages.push(new AssistantMessage(ts, part.text));
+        } else if (part.type === 'tool' && !aborted) {
+          const state = asRecord(part.state);
+          const toolUse = convertOpenCodeToolUse(ts, part);
+          messages.push(toolUse);
+
+          // Emit tool result if completed or errored
+          if (state.status === 'completed') {
+            messages.push(new ToolResultMessage(
+              ts,
+              toolUse.toolId,
+              normalizeToolResultContent(state.output),
+              false,
+            ));
+          } else if (state.status === 'error') {
+            messages.push(new ToolResultMessage(
+              ts,
+              toolUse.toolId,
+              normalizeToolResultContent(state.error || 'Error'),
+              true,
+            ));
+          }
+        }
+      }
+      if (providerError) messages.push(new ErrorMessage(ts, providerError));
+    }
   }
   return messages;
 }

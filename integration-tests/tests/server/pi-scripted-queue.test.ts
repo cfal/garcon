@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
@@ -16,12 +16,13 @@ import {
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('scripted Pi queue lifecycle', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedPiTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('drains queued turns in FIFO order after the active turn', async () => {

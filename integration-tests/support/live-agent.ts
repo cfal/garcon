@@ -76,8 +76,9 @@ function expectVisibleResponseBeforeSettlement(input: {
         input.marker === undefined
         || entry.message.content.includes(input.marker)
       )));
-  const processingStopped = input.events.findIndex((event) =>
-    event.type === 'chat-processing-updated'
+  const processingStopped = input.events.findIndex((event, index) =>
+    index > assistantResponse
+    && event.type === 'chat-processing-updated'
     && event.chatId === input.chatId
     && event.phase === null);
   const terminal = input.events.findIndex((event) =>
@@ -163,8 +164,15 @@ export async function waitForVisibleResponse(input: {
     input.turnId,
     { afterIndex: input.afterIndex, timeoutMs: LIVE_TURN_TIMEOUT_MS },
   )).type);
+  const assistantResponse = input.fixture.client.eventsSince(input.afterIndex).findIndex((event) =>
+    event.type === 'chat-messages'
+    && event.chatId === input.chatId
+    && event.turnId === input.turnId
+    && event.messages.some((entry) =>
+      entry.message.type === 'assistant-message'
+      && (input.marker === undefined || entry.message.content.includes(input.marker))));
   await input.fixture.client.waitForProcessing(input.chatId, false, {
-    afterIndex: input.afterIndex,
+    afterIndex: input.afterIndex + Math.max(assistantResponse + 1, 0),
     timeoutMs: LIVE_TURN_TIMEOUT_MS,
   });
   expectVisibleResponseBeforeSettlement({

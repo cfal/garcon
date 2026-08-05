@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import {
   assistantContents,
@@ -27,12 +27,13 @@ import {
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('scripted Pi persistence', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedPiTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('keeps transcript and session file stable across a graceful restart', async () => {

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   assistantContents,
   messagesOfType,
@@ -27,12 +27,13 @@ const PI_ATTEMPTS_PER_PROCESS = 4;
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('scripted Pi provider failures', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedPiTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('surfaces an HTTP 500 as an error message, finishes the turn, and recovers', async () => {

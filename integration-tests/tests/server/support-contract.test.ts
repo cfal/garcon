@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
@@ -21,7 +22,30 @@ import {
   stopLightpandaChild,
   type LightpandaStopChild,
 } from '../../support/lightpanda-process.js';
-import { assertSensitiveValuesNotPersisted } from '../../support/integration-fixture.js';
+import {
+  assertSensitiveValuesNotPersisted,
+  createIntegrationFixture,
+  withIntegrationFixture,
+} from '../../support/integration-fixture.js';
+import {
+  assertScriptedOpenCodePlatform,
+  OPENCODE_PLUGIN_SEED_FILES,
+  OPENCODE_VERSION,
+  startScriptedOpenCodeTestEnvironment,
+  writeOpenCodePluginSeed,
+} from '../../support/scripted-opencode.js';
+import { startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
+import {
+  linuxProcessStartTimeTicks,
+  processIdentityAlive,
+  readJsonFile,
+  stopChildWithEscalation,
+  verifyPinnedBinaryVersion,
+  waitForBackendReady,
+  writeJsonAtomic,
+  type BackendReadinessProcess,
+  type OpenCodeProcessState,
+} from '../../support/opencode-process-supervisor.js';
 
 class ControlledWebSocket extends EventTarget {
   readyState = 0;
@@ -63,6 +87,72 @@ function anthropicStreamText(body: string): string {
 }
 
 describe('integration support contracts', () => {
+  test('adds only the fixture Node shim to scripted Pi system paths', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-scripted-pi-path-'));
+    const environment = startScriptedPiTestEnvironment();
+    const directories = {
+      root,
+      config: join(root, 'config'),
+      workspace: join(root, 'workspace'),
+      project: join(root, 'project'),
+      home: join(root, 'home'),
+    };
+
+    try {
+      await Promise.all(Object.values(directories).map((directory) => (
+        mkdir(directory, { recursive: true })
+      )));
+      await environment.prepareWorkspace(directories);
+
+      const pathEntries = environment.serverEnvironment.PATH.split(':');
+      const fixtureBin = join(directories.home, '.garcon-test-bin');
+      const runnerNode = Bun.which('node');
+      expect(runnerNode).not.toBeNull();
+      expect(pathEntries).toEqual([
+        fixtureBin,
+        '/usr/local/sbin',
+        '/usr/local/bin',
+        '/usr/sbin',
+        '/usr/bin',
+        '/sbin',
+        '/bin',
+      ]);
+      expect(await realpath(join(fixtureBin, 'node'))).toBe(await realpath(runnerNode!));
+    } finally {
+      environment.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('exposes only the OpenCode shim and system commands to the provider runtime', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-scripted-opencode-path-'));
+    const environment = startScriptedOpenCodeTestEnvironment();
+    const directories = {
+      root,
+      config: join(root, 'config'),
+      workspace: join(root, 'workspace'),
+      project: join(root, 'project'),
+      home: join(root, 'home'),
+    };
+
+    try {
+      const pathEntries = environment.resolveServerEnvironment(directories).PATH.split(':');
+      expect(pathEntries[0]).toBe(join(root, 'opencode', 'bin'));
+      expect(pathEntries).not.toContain(dirname(process.execPath));
+      expect(pathEntries.slice(1)).toEqual([
+        '/usr/local/sbin',
+        '/usr/local/bin',
+        '/usr/sbin',
+        '/usr/bin',
+        '/sbin',
+        '/bin',
+      ]);
+    } finally {
+      environment.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('redacts credential environment values from process diagnostics', () => {
     const text = 'key=sk-testing-secret token=auth-testing-secret path=/tmp/test-home';
     expect(redactSensitiveEnvironmentText(text, {
@@ -120,6 +210,285 @@ describe('integration support contracts', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test('resolves directory-derived environment once and lets resolver values win', async () => {
+    const resolutionRoots: string[] = [];
+    const fixture = await createIntegrationFixture({
+      serverEnvironment: {
+        GARCON_CONTRACT_MARKER: 'static',
+        GARCON_CONTRACT_SECRET_TOKEN: 'static-secret-value',
+      },
+      resolveServerEnvironment: (directories) => {
+        resolutionRoots.push(directories.root);
+        return {
+          GARCON_CONTRACT_MARKER: 'resolver',
+          GARCON_CONTRACT_SECRET_TOKEN: 'resolver-secret-value',
+        };
+      },
+    });
+    try {
+      expect(resolutionRoots).toEqual([fixture.dirs.root]);
+      await access(join(fixture.dirs.home, 'tmp'));
+      // Only the resolver value is audited on dispose, so persisting the overridden static
+      // value must not fail cleanup.
+      await writeFile(join(fixture.dirs.root, 'overridden.txt'), 'static-secret-value');
+      await fixture.restartGarcon();
+      await fixture.crashAndRestartGarcon();
+      expect(resolutionRoots).toEqual([fixture.dirs.root]);
+    } finally {
+      await fixture.dispose();
+    }
+  }, 120_000);
+
+  test('runs the post-Garcon cleanup hook before fixture-root removal', async () => {
+    const observations: Array<{ rootExisted: boolean; garconRunning: boolean }> = [];
+    const fixture = await createIntegrationFixture({
+      afterGarconStop: async (directories) => {
+        observations.push({
+          rootExisted: await access(directories.root).then(() => true, () => false),
+          garconRunning: false,
+        });
+      },
+    });
+    const root = fixture.dirs.root;
+    await fixture.dispose();
+    expect(observations).toEqual([{ rootExisted: true, garconRunning: false }]);
+    await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const hookCalls: string[] = [];
+    let creationError: unknown;
+    try {
+      await createIntegrationFixture({
+        prepareWorkspace: async (directories) => {
+          hookCalls.push(`prepare:${directories.root}`);
+          throw new Error('deliberate create failure');
+        },
+        afterGarconStop: async (directories) => {
+          hookCalls.push(`cleanup:${directories.root}`);
+        },
+      });
+    } catch (error) {
+      creationError = error;
+    }
+    expect((creationError as Error).message).toContain('deliberate create failure');
+    expect(hookCalls).toHaveLength(2);
+    expect(hookCalls[0].replace('prepare:', '')).toBe(hookCalls[1].replace('cleanup:', ''));
+  }, 120_000);
+
+  test('cleans fixture resources when the environment resolver throws', async () => {
+    let root = '';
+    const cleanupRoots: string[] = [];
+    await expect(createIntegrationFixture({
+      resolveServerEnvironment: (directories) => {
+        root = directories.root;
+        throw new Error('deliberate resolver failure');
+      },
+      afterGarconStop: async (directories) => {
+        cleanupRoots.push(directories.root);
+      },
+    })).rejects.toThrow('deliberate resolver failure');
+
+    expect(cleanupRoots).toEqual([root]);
+    await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('includes diagnostic extensions in failure artifacts', async () => {
+    let failure: unknown;
+    try {
+      await withIntegrationFixture('support-contract-extensions', async () => {
+        throw new Error('deliberate diagnostics failure');
+      }, {
+        extraDiagnostics: (directories) => ({ marker: 'extension-value', root: directories.root }),
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect((failure as Error).message).toContain('deliberate diagnostics failure');
+    const artifactMatch = /Integration diagnostics: (\S+)/.exec((failure as Error).message);
+    expect(artifactMatch).not.toBeNull();
+    const artifact = JSON.parse(await readFile(artifactMatch![1], 'utf8')) as {
+      extensions?: { marker?: string };
+    };
+    expect(artifact.extensions?.marker).toBe('extension-value');
+    await rm(artifactMatch![1], { force: true });
+  }, 120_000);
+
+  test('escalates a stuck supervised child from SIGTERM to SIGKILL', async () => {
+    const child = Bun.spawn(
+      ['sh', '-c', 'trap "" TERM; sleep 30'],
+      { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' },
+    );
+    const started = Date.now();
+    const exitCode = await stopChildWithEscalation(child, 50);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(exitCode).not.toBe(0);
+  });
+
+  test('reads only complete atomic JSON snapshots', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-atomic-json-'));
+    try {
+      const path = join(root, 'state.json');
+      expect(await readJsonFile(path)).toBeNull();
+      const writes: Promise<void>[] = [];
+      for (let index = 0; index < 50; index += 1) {
+        writes.push(writeJsonAtomic(path, { index, payload: 'x'.repeat(2_000) }));
+      }
+      await Promise.all(writes);
+      const snapshot = await readJsonFile<{ index: number; payload: string }>(path);
+      expect(snapshot?.payload).toHaveLength(2_000);
+      await writeFile(path, '{"torn":');
+      await expect(readJsonFile(path)).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('seeds consistent plugin bootstrap metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-plugin-seed-'));
+    try {
+      const globalConfig = join(root, 'xdg-config', 'opencode');
+      await mkdir(globalConfig, { recursive: true });
+      await writeOpenCodePluginSeed(globalConfig);
+      await access(join(globalConfig, 'node_modules'));
+      const pkg = JSON.parse(await readFile(join(globalConfig, 'package.json'), 'utf8'));
+      const lock = JSON.parse(await readFile(join(globalConfig, 'package-lock.json'), 'utf8'));
+      const declared = Object.keys(pkg.dependencies ?? {});
+      const locked = Object.keys(lock.packages?.['']?.dependencies ?? {});
+      expect(declared).toContain('@opencode-ai/plugin');
+      expect(locked).toEqual(expect.arrayContaining(declared));
+      expect(pkg.dependencies['@opencode-ai/plugin']).toBe(OPENCODE_VERSION);
+      for (const [name, contents] of Object.entries(OPENCODE_PLUGIN_SEED_FILES)) {
+        expect(await readFile(join(globalConfig, name), 'utf8')).toBe(contents);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses the scripted OpenCode tier off Linux and verifies pinned versions hermetically', async () => {
+    expect(() => assertScriptedOpenCodePlatform('linux')).not.toThrow();
+    expect(() => assertScriptedOpenCodePlatform('darwin')).toThrow('require Linux');
+
+    const root = await mkdtemp(join(tmpdir(), 'garcon-version-check-'));
+    try {
+      const good = join(root, 'good-opencode');
+      await writeFile(good, `#!/bin/sh\necho ${OPENCODE_VERSION}\n`, { mode: 0o755 });
+      await expect(verifyPinnedBinaryVersion({ binary: good, env: {} }))
+        .resolves.toBe(OPENCODE_VERSION);
+
+      const bad = join(root, 'bad-opencode');
+      await writeFile(bad, '#!/bin/sh\necho 0.0.0\n', { mode: 0o755 });
+      await expect(verifyPinnedBinaryVersion({ binary: bad, env: {} }))
+        .rejects.toThrow(OPENCODE_VERSION);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('recognizes backend readiness when one line spans stream chunks', async () => {
+    const encoder = new TextEncoder();
+    const stdout = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('opencode server listen'));
+        controller.enqueue(encoder.encode('ing on http://127.0.0.1:43123\n'));
+        controller.close();
+      },
+    });
+    const backend = {
+      stdout,
+      exited: new Promise<number>(() => undefined),
+    } satisfies BackendReadinessProcess;
+
+    await expect(waitForBackendReady(backend, 43123))
+      .resolves.toBe('http://127.0.0.1:43123');
+  });
+
+  test('does not spawn a provider when shutdown lands inside startup', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-opencode-supervisor-race-'));
+    const stateDir = join(root, 'state');
+    const verification = join(root, 'verification.json');
+    const binary = join(root, 'fake-opencode');
+    const spawnMarker = join(root, 'provider-spawned');
+    const startGate = join(root, 'start-gate');
+    const supervisorModule = fileURLToPath(
+      new URL('../../support/opencode-process-supervisor.ts', import.meta.url),
+    );
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(binary, [
+      '#!/bin/sh',
+      `printf started > ${JSON.stringify(spawnMarker)}`,
+      'exit 0',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    await writeJsonAtomic(verification, { binary, version: OPENCODE_VERSION });
+
+    const supervisor = Bun.spawn([
+      process.execPath,
+      supervisorModule,
+      'serve',
+      '--hostname=127.0.0.1',
+      '--port=43124',
+    ], {
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        GARCON_TEST_OPENCODE_REAL_BINARY: binary,
+        GARCON_TEST_OPENCODE_VERIFICATION: verification,
+        GARCON_TEST_OPENCODE_PROCESS_STATE: stateDir,
+        GARCON_TEST_OPENCODE_START_GATE: startGate,
+      },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const supervisorStartTimeTicks = linuxProcessStartTimeTicks(supervisor.pid);
+    if (!supervisorStartTimeTicks) {
+      supervisor.kill('SIGKILL');
+      await supervisor.exited;
+      await rm(root, { recursive: true, force: true });
+      throw new Error('Could not establish the test supervisor process identity.');
+    }
+    try {
+      const deadline = Date.now() + 5_000;
+      let statePath = '';
+      while (Date.now() < deadline) {
+        const entries = await readdir(stateDir);
+        const stateEntry = entries.find((entry) =>
+          entry.startsWith('wrapper-') && entry.endsWith('.json'));
+        if (stateEntry) {
+          statePath = join(stateDir, stateEntry);
+          break;
+        }
+        await Bun.sleep(10);
+      }
+      expect(statePath).not.toBe('');
+
+      supervisor.kill('SIGTERM');
+      const exitCode = await Promise.race([
+        supervisor.exited,
+        Bun.sleep(5_000).then(() => -1),
+      ]);
+      expect(exitCode).toBe(0);
+      await expect(access(spawnMarker)).rejects.toMatchObject({ code: 'ENOENT' });
+      const state = await readJsonFile<OpenCodeProcessState>(statePath);
+      expect(state).toMatchObject({ status: 'stopped', providerPid: 0, reason: 'signal' });
+    } finally {
+      if (processIdentityAlive(
+        supervisor.pid,
+        supervisorStartTimeTicks,
+      )) {
+        supervisor.kill('SIGKILL');
+        await supervisor.exited;
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a live PID when its Linux start identity differs', () => {
+    const startTimeTicks = linuxProcessStartTimeTicks(process.pid);
+    expect(startTimeTicks).not.toBeNull();
+    expect(processIdentityAlive(process.pid, startTimeTicks)).toBe(true);
+    expect(processIdentityAlive(process.pid, `${startTimeTicks}-reused`)).toBe(false);
   });
 
   test('settles deferred values only once', async () => {

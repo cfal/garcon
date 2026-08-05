@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeRuntime } from '../opencode.js';
 
 async function* neverEndingStream() {
+  yield { payload: { id: 'evt_connected', type: 'server.connected', properties: {} } };
   await new Promise(() => {});
 }
 
@@ -9,8 +10,8 @@ function createRuntimeWithClient(client) {
   const createInstance = mock(() => Promise.resolve({
     client: {
       permission: { reply: mock(() => Promise.resolve({})) },
-      event: {
-        subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })),
+      global: {
+        event: mock(() => Promise.resolve({ stream: neverEndingStream() })),
       },
       ...client,
     },
@@ -137,7 +138,9 @@ describe('OpenCodeRuntime fork', () => {
       parts: [{ type: 'text', text: 'hello' }],
       directory: '/repo',
     });
-    expect(promptAsync.mock.calls[0][0].messageID).toMatch(/^msg_/);
+    // OpenCode assigns ordered message IDs while preserving Garcon's prompt part ID.
+    expect(promptAsync.mock.calls[0][0].messageID).toBeUndefined();
+    expect(promptAsync.mock.calls[0][0].parts[0].id).toMatch(/^prt_[0-9a-f]{32}$/);
   });
 
   it('fails resumed turns when OpenCode returns a missing session result', async () => {
@@ -165,7 +168,11 @@ describe('OpenCodeRuntime fork', () => {
       sessionID: 'missing-session',
       parts: [{ type: 'text', text: 'continue' }],
     });
-    expect(promptAsync.mock.calls[0][0].messageID).toMatch(/^msg_/);
-    expect(promptAsync.mock.calls[1][0].messageID).toBe(promptAsync.mock.calls[0][0].messageID);
+    expect(promptAsync.mock.calls[0][0].messageID).toBeUndefined();
+    expect(promptAsync.mock.calls[1][0].messageID).toBeUndefined();
+    expect(promptAsync.mock.calls[0][0].parts[0].id).toMatch(/^prt_[0-9a-f]{32}$/);
+    expect(promptAsync.mock.calls[1][0].parts[0].id).toBe(
+      promptAsync.mock.calls[0][0].parts[0].id,
+    );
   });
 });

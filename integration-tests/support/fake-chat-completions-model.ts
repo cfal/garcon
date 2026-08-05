@@ -1,9 +1,7 @@
-// Scripted stand-in for the model behind a real chat-completions CLI (Pi today, opencode
-// later). The CLI speaks the OpenAI Chat Completions API, so pointing it here keeps CLI
-// behavior real -- process lifecycle, local tool execution, session persistence -- while the
-// model's choices become a deterministic test script. This is the Chat Completions sibling of
-// FakeClaudeModel/FakeCodexModel; FakeOpenAiServer remains the plan-based strict double for
-// the direct-* Garcon agents.
+// Scripted stand-in for the model behind real chat-completions agents. Pi and OpenCode keep
+// their native process, tool, and persistence behavior while every model choice remains
+// deterministic. This is the Chat Completions sibling of FakeClaudeModel/FakeCodexModel;
+// FakeOpenAiServer remains the plan-based strict double for the direct-* Garcon agents.
 
 export type ChatCompletionsBlock =
   | { readonly kind: 'text'; readonly text: string }
@@ -21,8 +19,16 @@ export type ChatCompletionsTurn =
     ) => ChatCompletionsBlock[] | Promise<ChatCompletionsBlock[]>);
 
 export type ChatCompletionsFault =
-  | { readonly kind: 'http-error'; readonly status: number; readonly message: string }
-  | { readonly kind: 'stream-error'; readonly message: string };
+  | {
+      readonly kind: 'http-error';
+      readonly status: number;
+      readonly message: string;
+      readonly code?: string;
+    }
+  // Clean close before the [DONE] sentinel; some SDKs accept this as a complete response.
+  | { readonly kind: 'stream-error'; readonly message: string }
+  // A provider error frame mid-stream, as OpenAI emits for overloaded models.
+  | { readonly kind: 'stream-error-frame'; readonly message: string };
 
 export interface HeldChatCompletionsTurn {
   readonly requested: Promise<RecordedChatCompletionsRequest>;
@@ -201,6 +207,28 @@ function sseResponse(chunks: Chunk[], options: { truncated?: boolean } = {}): Re
   });
 }
 
+// Emits the leading chunks, then a provider error frame, then closes without [DONE].
+function sseErrorFrameResponse(chunks: Chunk[], message: string): Response {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const payload of chunks.slice(0, 1)) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+      }
+      controller.enqueue(encoder.encode(
+        `data: ${JSON.stringify({ error: { message, type: 'server_error' } })}\n\n`,
+      ));
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: {
+      'cache-control': 'no-cache',
+      'content-type': 'text/event-stream; charset=utf-8',
+    },
+  });
+}
+
 export class FakeChatCompletionsModel {
   readonly #server: Bun.Server<undefined>;
   readonly #turns: Array<ChatCompletionsTurn | ChatCompletionsFault> = [];
@@ -353,8 +381,8 @@ export class FakeChatCompletionsModel {
     this.#requests.push(recorded);
     const turn = this.#turns.shift();
     if (!turn) {
-      // Exhaustion is a protocol violation: Pi retries transient 5xx, so the scripted
-      // sequence must account for retry traffic; cleanup fails on unexpected requests.
+      // Exhaustion is a protocol violation: real clients can retry transient failures, so the
+      // scripted sequence must account for retry traffic; cleanup fails on unexpected requests.
       this.#violations.push(
         `Request ${recorded.id} arrived with no scripted turn (lastUserText: ${JSON.stringify(recorded.lastUserText)})`,
       );
@@ -365,8 +393,15 @@ export class FakeChatCompletionsModel {
     if (!Array.isArray(turn) && typeof turn !== 'function') {
       if (turn.kind === 'http-error') {
         return Response.json({
-          error: { message: turn.message, type: 'server_error' },
+          error: {
+            message: turn.message,
+            type: turn.code ? 'invalid_request_error' : 'server_error',
+            ...(turn.code ? { code: turn.code } : {}),
+          },
         }, { status: turn.status });
+      }
+      if (turn.kind === 'stream-error-frame') {
+        return sseErrorFrameResponse(turnChunks([], recorded), turn.message);
       }
       return sseResponse(turnChunks([], recorded), { truncated: true });
     }
