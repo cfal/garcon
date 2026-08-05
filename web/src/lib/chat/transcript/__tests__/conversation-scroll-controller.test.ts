@@ -740,12 +740,14 @@ describe('ConversationScrollController', () => {
 
 	it('restores a pinned hidden viewport through the port', async () => {
 		const { controller, viewport } = controllerFixture();
+		// The fake reaches the physical end only after the corrective recheck scroll, so
+		// the bounded recheck issues exactly one extra end scroll and then stops.
+		viewport.isAtEnd.mockImplementation(() => viewport.scrollToEnd.mock.calls.length >= 2);
 		controller.setViewportVisible(false);
 		controller.setViewportVisible(true);
-		await vi.waitFor(() => expect(viewport.scrollToEnd).toHaveBeenCalled());
-		// Late show-time measurements leave the fake short of the end, so the bounded
-		// recheck issues exactly one corrective end scroll after fill and layout settle.
 		await vi.waitFor(() => expect(viewport.scrollToEnd).toHaveBeenCalledTimes(2));
+		await tick();
+		expect(viewport.scrollToEnd).toHaveBeenCalledTimes(2);
 		expect(viewport.restoreHiddenReadingPosition).not.toHaveBeenCalled();
 	});
 

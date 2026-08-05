@@ -188,9 +188,9 @@ async function waitForDistanceFromEnd(page: Page, maximum: number): Promise<void
   );
 }
 
-async function waitForStablePinnedTranscriptLayout(page: Page): Promise<void> {
+async function waitForStablePinnedTranscriptLayout(page: Page, scenario = 'unnamed'): Promise<void> {
   await withDiagnosticTimeout(
-    'the pinned transcript geometry to settle',
+    `the pinned transcript geometry to settle (${scenario})`,
     page.locator(FEED_SELECTOR).evaluate(
       async (feedElement, input) => {
         const feed = feedElement as HTMLElement;
@@ -1461,13 +1461,13 @@ async function verifyLaterPageReadingPosition(
   const latestWindowRevision = await virtualDataRevision(fixture.page);
   await returnToLatest.click();
   await waitForVirtualDataRevisionAfter(fixture.page, latestWindowRevision);
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'return-to-latest');
   await appendTurn(fixture.integration, chatId, 'chromium-later-window-live-append');
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-later-window-live-append', { exact: true })
     .waitFor();
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'live-append-after-return');
   fixture.assertNoBrowserErrors();
 }
 
@@ -1550,7 +1550,7 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-pinned-append', { exact: true })
     .waitFor();
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'pinned-append');
 
   const pinnedSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
   await openMainWorkspaceActions(fixture.page);
@@ -1562,7 +1562,7 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-pinned-hidden-append', { exact: true })
     .waitFor();
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'pinned-hidden-append-show');
   fixture.assertNoBrowserErrors();
 }
 
@@ -1637,12 +1637,12 @@ async function verifyChatSwitchBottomRestore(
   await expectNoSwitchPaintFlicker(fixture, () =>
     selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker),
   );
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'switch-to-secondary');
 
   await expectNoSwitchPaintFlicker(fixture, () =>
     selectSidebarChat(fixture.page, primaryChatId, 'chromium-virtual-turn-0'),
   );
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'switch-back-to-primary');
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
     userScrolledUp: false,
@@ -1654,7 +1654,7 @@ async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture)
   const chatId = await seedTranscript(fixture.integration, 15, 'chromium-native-reload-base');
   await prepareTranscript(fixture, chatId, 20);
   await scrollToPosition(fixture.page, 'end');
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'native-reload-baseline');
 
   const prompt = 'chromium-native-reload-stream';
   const accepted = await fixture.integration.client.runDirectChat({
@@ -1666,7 +1666,7 @@ async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture)
     'agent-run-finished',
   );
   await fixture.page.locator(FEED_SELECTOR).getByText(`echo:${prompt}`, { exact: true }).waitFor();
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'native-reload-streamed');
 
   const beforeReload = await fixture.integration.client.getMessages(chatId);
   const eventCursor = fixture.integration.client.markEvents();
@@ -1721,7 +1721,7 @@ async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture)
     [prompt, `echo:${prompt}`],
   );
   expect(exactTextCounts).toEqual([1, 1]);
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'native-reload-applied');
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
     userScrolledUp: false,
@@ -1870,11 +1870,11 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Split view');
   await waitForTranscriptScale(fixture.page, 0.85);
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-scale-enter');
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Exit split view');
   await waitForTranscriptScale(fixture.page, 1);
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-scale-exit');
 
   // Applies the scale change while the surface is hidden so the deferred show-time
   // measurement path, not the visible reset path, restores the pinned end.
@@ -1886,11 +1886,11 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   await addSidebarChatToSplit(fixture.page, hiddenScaleChatId);
   await selectMainWorkspaceSurface(fixture.page, scaleSurfaceLabel);
   await waitForTranscriptScale(fixture.page, 0.85);
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-show');
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Exit split view');
   await waitForTranscriptScale(fixture.page, 1);
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-exit');
   fixture.assertNoBrowserErrors();
 }
 
@@ -1917,7 +1917,7 @@ async function verifyCountShrinkMeasurements(fixture: ChromiumFixture): Promise<
     { selector: SIZER_SELECTOR, previousCount: expandedModelCount },
     { timeout: 20_000 },
   );
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'post-compaction');
 
   const compactedGeometry = await transcriptGeometry(fixture.page);
   expect(compactedGeometry.modelCount).toBeLessThan(expandedModelCount);
@@ -1931,7 +1931,7 @@ async function verifyCountShrinkMeasurements(fixture: ChromiumFixture): Promise<
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-post-shrink-append', { exact: true })
     .waitFor();
-  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'post-shrink-publication');
   const postPublicationGeometry = await transcriptGeometry(fixture.page);
   expect(postPublicationGeometry.overlaps).toEqual([]);
   expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);

@@ -685,21 +685,25 @@ export class ConversationScrollController {
 		await viewport.restoreHiddenReadingPosition();
 	}
 
-	// Show-time measurements can land after the end convergence loop was superseded by a
-	// concurrent publication, leaving a pinned viewport short of the physical end; one
-	// bounded layout wait and recheck restores the exact end.
+	// Show-time measurements and deferred scale invalidation can land after the end
+	// convergence loop was superseded by a concurrent publication, leaving a pinned
+	// viewport short of the physical end; bounded layout waits and rechecks restore it.
 	async #reverifyEndAfterShow(operationEpoch: number): Promise<void> {
 		await this.fillUnderfilledViewport();
-		await this.deps.getViewport()?.waitForLayout();
-		if (
-			!this.#isViewportVisible ||
-			operationEpoch !== this.#viewportOperationEpoch ||
-			this.#activeTargetNavigations > 0 ||
-			!this.isPinnedToBottom
-		) {
-			return;
+		for (let attempt = 0; attempt < 3; attempt += 1) {
+			await this.deps.getViewport()?.waitForLayout();
+			if (
+				!this.#isViewportVisible ||
+				operationEpoch !== this.#viewportOperationEpoch ||
+				this.#activeTargetNavigations > 0 ||
+				!this.isPinnedToBottom
+			) {
+				return;
+			}
+			const viewport = this.deps.getViewport();
+			if (!viewport?.isReady()) return;
+			if (viewport.isAtEnd()) return;
+			viewport.scrollToEnd();
 		}
-		const viewport = this.deps.getViewport();
-		if (viewport?.isReady() && !viewport.isAtEnd()) viewport.scrollToEnd();
 	}
 }
