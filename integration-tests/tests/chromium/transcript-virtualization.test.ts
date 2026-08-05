@@ -2058,13 +2058,15 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   await seedTranscript(fixture.integration, 1);
 
   const detachedAnchor = await readingAnchor(fixture.page);
+  const detachedLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Split view');
   await waitForTranscriptScale(fixture.page, 0.85);
   const splitAnchor = await anchorByKey(fixture.page, detachedAnchor.key);
+  const splitLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
   expect(
     Math.abs(splitAnchor.offset - detachedAnchor.offset),
-    JSON.stringify({ detachedAnchor, splitAnchor }),
+    JSON.stringify({ detachedAnchor, splitAnchor, detachedLayout, splitLayout }, null, 2),
   ).toBeLessThanOrEqual(1);
   const splitGeometry = await transcriptGeometry(fixture.page);
   expect(splitGeometry.overlaps).toEqual([]);

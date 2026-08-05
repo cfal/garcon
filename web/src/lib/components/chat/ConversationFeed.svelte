@@ -171,21 +171,6 @@
 	let virtualRoot: HTMLDivElement | null = $state(null);
 
 	$effect.pre(() => {
-		const input = projectionInput;
-		const pendingPermissionIds = new Set(
-			activePendingPermissionRequests.map((request) => request.permissionRequestId),
-		);
-		untrack(() => {
-			projection = projectionState.reconcile(input);
-			itemState.reconcile(
-				input.surfaceIdentity,
-				new Set(input.rows.map((row) => row.id)),
-				pendingPermissionIds,
-			);
-		});
-	});
-
-	$effect.pre(() => {
 		const input = {
 			surfaceIdentity,
 			rows: chatState.visibleRows,
@@ -235,6 +220,24 @@
 	const virtualizer = virtualController.virtualizer;
 	const virtualItems = $derived($virtualizer.getVirtualItems());
 	const virtualTotalSize = $derived($virtualizer.getTotalSize());
+
+	$effect.pre(() => {
+		const input = projectionInput;
+		const pendingPermissionIds = new Set(
+			activePendingPermissionRequests.map((request) => request.permissionRequestId),
+		);
+		untrack(() => {
+			const nextProjection = projectionState.reconcile(input);
+			// Captures old coordinates before publishing the projection that changes row geometry.
+			virtualController.prepareForGeometryPublication(nextProjection.geometry.geometryRevision);
+			projection = nextProjection;
+			itemState.reconcile(
+				input.surfaceIdentity,
+				new Set(input.rows.map((row) => row.id)),
+				pendingPermissionIds,
+			);
+		});
+	});
 
 	$effect(() => {
 		onViewportPortChange?.(virtualController);

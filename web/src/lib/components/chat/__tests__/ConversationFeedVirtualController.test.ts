@@ -39,9 +39,33 @@ import {
 	selectConversationReadingAnchor,
 	shouldPreserveConversationVirtualEdge,
 } from '../conversation-feed-viewport-geometry';
+import {
+	conversationAnchorScrollOffset,
+	conversationAnchorViewportOffset,
+	ConversationPreCommitAnchorBuffer,
+} from '../conversation-feed-virtual-runtime';
 import ConversationFeedVirtualControllerTestHost from './ConversationFeedVirtualControllerTestHost.svelte';
 
 describe('ConversationFeedVirtualController helpers', () => {
+	it('consumes only the matching pre-commit anchor policy', () => {
+		const buffer = new ConversationPreCommitAnchorBuffer();
+		const nearest = { key: 'nearest', viewportOffset: 4, fallbackKeys: [] };
+		const transcript = { key: 'transcript', viewportOffset: 8, fallbackKeys: [] };
+		buffer.capture(2, (preferTranscript) => (preferTranscript ? transcript : nearest));
+
+		expect(buffer.take(2, true)).toBe(transcript);
+		expect(buffer.take(2, false)).toBeNull();
+		buffer.capture(3, (preferTranscript) => (preferTranscript ? transcript : nearest));
+		expect(buffer.take(4, false)).toBeNull();
+	});
+
+	it('preserves anchor coordinates when the virtual scroll margin changes', () => {
+		const viewportOffset = conversationAnchorViewportOffset(2_404, 0, 1_975);
+
+		expect(viewportOffset).toBe(429);
+		expect(conversationAnchorScrollOffset(1_808, 59.8, viewportOffset)).toBeCloseTo(1_319.2);
+	});
+
 	it('classifies identity, edge, estimate-only, and no-op changes', () => {
 		expect(
 			classifyConversationVirtualStructure({
@@ -337,9 +361,9 @@ describe('ConversationFeedVirtualController', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Shrink' }));
 		await waitFor(() => {
 			expect(
-				document.querySelector('[data-controller-sizer]')?.getAttribute(
-					'data-controller-model-count',
-				),
+				document
+					.querySelector('[data-controller-sizer]')
+					?.getAttribute('data-controller-model-count'),
 			).toBe('4');
 		});
 		await nextFrame();
@@ -358,9 +382,9 @@ describe('ConversationFeedVirtualController', () => {
 		measure.mockClear();
 		await fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
 		await waitFor(() =>
-			expect(document.querySelector('[data-controller-viewport]')?.getAttribute('data-visible')).toBe(
-				'false',
-			),
+			expect(
+				document.querySelector('[data-controller-viewport]')?.getAttribute('data-visible'),
+			).toBe('false'),
 		);
 		await fireEvent.click(screen.getByRole('button', { name: 'Toggle scale' }));
 		await nextFrame();
@@ -398,18 +422,17 @@ describe('ConversationFeedVirtualController', () => {
 		const { exposure } = await renderController();
 		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
 		if (!viewport) throw new Error('Expected the controller viewport');
-		const virtualItems = exposure.instance.getVirtualItems();
-		const uncommittedItem = virtualItems[0];
-		const committedItem = virtualItems[1];
-		if (!uncommittedItem || !committedItem) {
-			throw new Error('Expected adjacent virtual reading items');
-		}
-		viewport.scrollTop = uncommittedItem.start;
-		viewport.dispatchEvent(new Event('scroll'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
 		await nextFrame();
+		const virtualItems = exposure.instance.getVirtualItems();
+		const uncommittedItem =
+			exposure.instance.getVirtualItemForOffset(viewport.scrollTop) ?? virtualItems.at(-1);
+		const committedItem = virtualItems.findLast((item) => item.index !== uncommittedItem?.index);
+		if (!uncommittedItem || !committedItem) {
+			throw new Error('Expected distinct virtual reading items');
+		}
 		await exposure.withholdItem(uncommittedItem.index);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
 		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
 		await fireEvent.click(screen.getByRole('button', { name: 'Toggle scale' }));
 
@@ -432,7 +455,9 @@ describe('ConversationFeedVirtualController', () => {
 
 	it('cleans adapter observers across repeated destroy calls', async () => {
 		const { exposure, unmount } = await renderController();
-		expect(ResizeObserverHarness.instances.some((observer) => observer.observed.size > 0)).toBe(true);
+		expect(ResizeObserverHarness.instances.some((observer) => observer.observed.size > 0)).toBe(
+			true,
+		);
 
 		expect(() => {
 			exposure.controller.destroy();
@@ -491,6 +516,18 @@ describe('ConversationFeedVirtualController', () => {
 		expect(exposure.initialEndRestoredCount()).toBe(0);
 
 		await exposure.releaseWithheldEndItem();
+		await waitFor(() => expect(exposure.initialEndRestoredCount()).toBe(1));
+	});
+
+	it('keeps the initial paint gate closed through TanStack scroll settlement', async () => {
+		const { exposure } = await renderController();
+		exposure.instance.isScrolling = true;
+
+		exposure.controller.scrollToEnd();
+		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
+		expect(exposure.initialEndRestoredCount()).toBe(0);
+
+		exposure.instance.isScrolling = false;
 		await waitFor(() => expect(exposure.initialEndRestoredCount()).toBe(1));
 	});
 

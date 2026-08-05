@@ -897,7 +897,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.lastSeq = restored.lastSeq;
 		this.oldestSeq = restored.oldestSeq;
 		this.totalMessages = restored.messages.length;
-		this.hasEarlierMessages = false;
+		// Preserves the earlier boundary across cache restore so validation cannot insert it after paint.
+		this.hasEarlierMessages = restored.oldestSeq > 1;
 		this.loadStatus = restored.messages.length === 0 ? 'empty' : 'loaded';
 		return { count: restored.messages.length, stale: restored.stale };
 	}

@@ -68,17 +68,15 @@
 			transcriptEndIndex: items.length,
 		};
 	});
-	const geometry = $derived.by(
-		(): ConversationVirtualGeometrySnapshot => ({
-			surfaceIdentity,
-			geometryRevision,
-			keys,
-			estimates: keys.map(() => 40 * textScale),
-			measurementReset,
-			mutationKinds: new Set(),
-			endBehavior: 'restore-if-pinned',
-		}),
-	);
+	const geometry = $derived.by((): ConversationVirtualGeometrySnapshot => ({
+		surfaceIdentity,
+		geometryRevision,
+		keys,
+		estimates: keys.map(() => 40 * textScale),
+		measurementReset,
+		mutationKinds: new Set(),
+		endBehavior: 'restore-if-pinned',
+	}));
 	const retention = new ConversationFeedRetentionState();
 	const controller = new ConversationFeedVirtualController({
 		get model() {
@@ -144,18 +142,21 @@
 	}
 
 	function shrink(): void {
+		controller.prepareForGeometryPublication(geometryRevision + 1);
 		itemCount = 4;
 		measurementReset = 'none';
 		geometryRevision += 1;
 	}
 
 	function toggleScale(): void {
+		controller.prepareForGeometryPublication(geometryRevision + 1);
 		textScale = textScale === 1 ? 0.85 : 1;
 		measurementReset = 'all';
 		geometryRevision += 1;
 	}
 
 	function replaceSurface(): void {
+		controller.prepareForGeometryPublication(geometryRevision + 1);
 		surfaceIdentity = surfaceIdentity === 'surface-1' ? 'surface-2' : 'surface-1';
 		measurementReset = 'none';
 		geometryRevision += 1;
@@ -175,6 +176,7 @@
 		const restore = controller.restoreHiddenReadingPosition();
 		// Mimics a show-time clamp before the concurrent scale geometry publishes.
 		if (viewport) viewport.scrollTop = 0;
+		controller.prepareForGeometryPublication(geometryRevision + 1);
 		textScale = 0.85;
 		measurementReset = 'all';
 		geometryRevision += 1;

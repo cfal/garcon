@@ -979,6 +979,25 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
 	});
 
+	it('restores the earlier-page boundary with a cached tail window', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 100 });
+		const messages = Array.from({ length: 100 }, (_, index) =>
+			entry(index + 101, assistant(`message-${index + 101}`)),
+		);
+		transcriptCache.replaceFromPage('chat-1', {
+			generationId: 'generation-1',
+			messages,
+			lastSeq: 200,
+			pageOldestSeq: 101,
+			hasMore: true,
+		});
+		const chat = new ActiveTranscriptState(transcriptCache);
+
+		chat.activateChat('chat-1');
+
+		expect(chat.canLoadEarlier).toBe(true);
+	});
+
 	it('keeps a partial restored transcript visible through later growth', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 100 });
 		const messages = Array.from({ length: 30 }, (_, index) =>

@@ -1,14 +1,7 @@
 import { tick, untrack } from 'svelte';
 import type { Attachment } from 'svelte/attachments';
 import type { Readable, Unsubscriber } from 'svelte/store';
-import {
-	createVirtualizer,
-	observeElementRect,
-	type Range,
-	type Rect,
-	type SvelteVirtualizer,
-	type Virtualizer,
-} from '@tanstack/svelte-virtual';
+import { createVirtualizer, type Range, type SvelteVirtualizer } from '@tanstack/svelte-virtual';
 import type {
 	ConversationLayoutWaitResult,
 	ConversationViewportFillResult,
@@ -19,24 +12,27 @@ import type {
 } from '$lib/chat/transcript/conversation-viewport-port.js';
 import type { ConversationVirtualGeometrySnapshot } from './ConversationFeedProjectionState.svelte.js';
 import {
-	attainableConversationTargetOffset,
 	CHAT_GEOMETRY_END_THRESHOLD_PX,
 	classifyConversationVirtualStructure,
 	classifyMeasuredConversationViewportFill,
 	createRetainedConversationRangeExtractor,
-	isConversationTargetLayoutReady,
-	resolveConversationViewportRect,
 	shouldPreserveConversationVirtualEdge,
 } from './conversation-feed-viewport-geometry.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
 import {
 	captureConversationVirtualAnchor,
 	type ConversationVirtualAnchor,
-	conversationTargetAlignmentDelta,
-	findConversationTargetNode,
+	conversationAnchorScrollOffset,
+	createConversationElementRectObserver,
+	ConversationMountedVirtualItems,
+	ConversationPreCommitAnchorBuffer,
 	nextConversationAnimationFrame as nextAnimationFrame,
+	nextConversationLayoutFrame,
 	observeConversationRootOffset,
 	sameConversationNumberArrays,
+	settleConversationEndRestore,
+	settleConversationScroll,
+	settleConversationTarget,
 	scrollConversationToPhysicalEnd,
 } from './conversation-feed-virtual-runtime.js';
 import type { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
@@ -44,10 +40,7 @@ import type { ConversationFeedRetentionState } from './ConversationFeedRetention
 export const CHAT_VIRTUAL_OVERSCAN = 6;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
-const MAX_RANGE_COMMIT_ITERATIONS = 60;
-const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
-const REQUIRED_END_STABLE_FRAMES = 2;
 interface ConversationFeedVirtualControllerOptions {
 	get model(): ConversationVirtualFeedModel;
 	get geometry(): ConversationVirtualGeometrySnapshot;
@@ -88,6 +81,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
 	#hiddenScrollOffset: number | null = null;
 	#pendingReadingAnchor: ConversationVirtualAnchor | null = null;
+	#readingRestoreGeneration = 0;
+	#preCommitAnchorBuffer = new ConversationPreCommitAnchorBuffer();
 	#measureOnShow = false;
 	#pendingEndScroll = false;
 	#programmaticScrollActive = false;
@@ -96,12 +91,15 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#activeTargetScrolls = 0;
 	#userIntentEpoch = 0;
 	#scrollMargin = 0;
-	#lastViewportRect: Rect = { width: 0, height: CHAT_FALLBACK_VIEWPORT_HEIGHT };
+	#observeElementRect = createConversationElementRectObserver({
+		width: 0,
+		height: CHAT_FALLBACK_VIEWPORT_HEIGHT,
+	});
 	// Keys whose wrappers have rendered for the current surface and styling; cleared with
 	// the measurement cache on surface replacement and global invalidation.
 	#renderedKeys = new Set<string>();
 	// The live element set follows attachment cleanup while keyed wrappers may change index in place.
-	#attachedItemElements = new Set<HTMLDivElement>();
+	#mountedItems = new ConversationMountedVirtualItems();
 	#destroyed = false;
 
 	constructor(private readonly options: ConversationFeedVirtualControllerOptions) {
@@ -162,15 +160,23 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		$effect(() => this.#observeRootOffset());
 	}
 
+	// Captures the committed reading row before the caller publishes new geometry.
+	prepareForGeometryPublication(geometryRevision: number): void {
+		if (this.#destroyed || geometryRevision === this.#configuredGeometryRevision) return;
+		this.#preCommitAnchorBuffer.capture(geometryRevision, (preferTranscript) =>
+			this.#captureVirtualAnchor(preferTranscript),
+		);
+	}
+
 	measureItem: Attachment<HTMLDivElement> = (element) => {
-		this.#attachedItemElements.add(element);
+		this.#mountedItems.add(element);
 		this.#instance().measureElement(element);
 		// A rendered wrapper is measured even when TanStack omits its cache entry
 		// because the rendered size equals the estimate.
 		const key = this.#configuredKeys[Number(element.dataset.index)];
 		if (key !== undefined) this.#renderedKeys.add(key);
 		return () => {
-			this.#attachedItemElements.delete(element);
+			this.#mountedItems.delete(element);
 			this.#instance().measureElement(null);
 		};
 	};
@@ -186,7 +192,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#measureOnShow = false;
 		this.#pendingEndScroll = false;
 		this.#virtualScrollElement = null;
-		this.#attachedItemElements.clear();
+		this.#preCommitAnchorBuffer.clear();
+		this.#mountedItems.clear();
 		this.#instance().setOptions({
 			getScrollElement: this.#getScrollElement,
 			useCachedMeasurements: true,
@@ -253,11 +260,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		this.#scrollToPhysicalEnd();
 		if (resetMeasurements) {
-			void this.#completeEndRestoreAfterMeasurement(
-				layoutToken,
-				operationEpoch,
-				surfaceIdentity,
-			);
+			void this.#completeEndRestoreAfterMeasurement(layoutToken, operationEpoch, surfaceIdentity);
 		} else {
 			void this.#completeEndRestore(layoutToken, operationEpoch);
 		}
@@ -292,8 +295,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const token = this.#layoutMutationToken;
 		let previousOffset: number | null = null;
 		for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-			await tick();
-			await nextAnimationFrame();
+			await nextConversationLayoutFrame();
 			if (token !== this.#layoutMutationToken) return 'superseded';
 			const viewport = this.options.viewport;
 			if (!viewport || !this.options.visible) return 'not-ready';
@@ -320,8 +322,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 		try {
 			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-				await tick();
-				await nextAnimationFrame();
+				await nextConversationLayoutFrame();
 				if (
 					token !== this.#layoutMutationToken ||
 					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
@@ -342,10 +343,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				});
 				if (classification) {
 					if (restoreEnd) this.#scrollToPhysicalEnd();
-					else if (
-						readingAnchor &&
-						!(await this.#restoreVirtualAnchor(readingAnchor, false))
-					) {
+					else if (readingAnchor && !(await this.#restoreVirtualAnchor(readingAnchor, false))) {
 						return 'unsettled';
 					}
 					return classification;
@@ -405,16 +403,18 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		// races the show restore. The newer publication reuses this anchor instead of
 		// capturing the temporarily clamped offset under its new measurements.
 		this.#pendingReadingAnchor = anchor;
-		const restoreToken = this.#layoutMutationToken + 1;
+		const restoreGeneration = ++this.#readingRestoreGeneration;
 		if (await this.#restoreVirtualAnchor(anchor, resetMeasurements)) {
-			if (this.#pendingReadingAnchor === anchor) this.#pendingReadingAnchor = null;
+			if (
+				this.#pendingReadingAnchor === anchor &&
+				this.#readingRestoreGeneration === restoreGeneration
+			) {
+				this.#pendingReadingAnchor = null;
+			}
 			return 'restored';
 		}
 		if (this.#pendingReadingAnchor !== anchor) return 'missing-anchor';
-		const resolvable = [anchor.key, ...anchor.fallbackKeys].some((key) =>
-			this.options.model.indexByKey.has(key),
-		);
-		if (resolvable && this.#layoutMutationToken !== restoreToken) {
+		if (this.#readingRestoreGeneration !== restoreGeneration) {
 			// A newer geometry publication has already scheduled this retained anchor.
 			return 'restored';
 		}
@@ -428,6 +428,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	cancelPendingLayoutMutation(): void {
 		this.#layoutMutationToken += 1;
+		this.#readingRestoreGeneration += 1;
 		this.#pendingReadingAnchor = null;
 		this.#programmaticScrollActive = false;
 		this.#programmaticScrollEpoch += 1;
@@ -457,8 +458,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#cancelTargetScroll();
 			this.cancelPendingLayoutMutation();
 			const token = this.#targetToken;
-			await tick();
-			await nextAnimationFrame();
+			await nextConversationLayoutFrame();
 			if (token !== this.#targetToken) return 'cancelled';
 			if (!this.isReady()) return 'not-ready';
 			this.cancelPendingLayoutMutation();
@@ -481,55 +481,17 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					align: options.align ?? 'center',
 					behavior: 'auto',
 				});
-				let previousRect: { top: number; height: number } | null = null;
-				let stableFrames = 0;
-				for (let attempt = 0; attempt < MAX_TARGET_SETTLE_ITERATIONS; attempt += 1) {
-					await tick();
-					await nextAnimationFrame();
-					if (
-						token !== this.#targetToken ||
-						!this.#isCurrentProgrammaticScrollOperation(operationEpoch)
-					) {
-						return 'cancelled';
-					}
-					if (!this.isReady()) return 'not-ready';
-					const node = findConversationTargetNode(this.options.virtualRoot, resolved.innerRowId);
-					if (!node) continue;
-					if (!isConversationTargetLayoutReady(node)) {
-						previousRect = null;
-						stableFrames = 0;
-						continue;
-					}
-					const viewport = this.options.viewport;
-					if (!viewport) return 'not-ready';
-					const attainableOffset = attainableConversationTargetOffset({
-						currentOffset: viewport.scrollTop,
-						alignmentDelta: conversationTargetAlignmentDelta(
-							viewport,
-							node,
-							options.align ?? 'center',
-						),
-						maximumOffset: Math.max(viewport.scrollHeight - viewport.clientHeight, 0),
-					});
-					const offsetDelta = attainableOffset - viewport.scrollTop;
-					if (Math.abs(offsetDelta) > CHAT_GEOMETRY_END_THRESHOLD_PX) {
-						this.#instance().scrollToOffset(attainableOffset, { behavior: 'auto' });
-						previousRect = null;
-						stableFrames = 0;
-						continue;
-					}
-					const nodeRect = node.getBoundingClientRect();
-					const viewportRect = viewport.getBoundingClientRect();
-					const currentRect = { top: nodeRect.top - viewportRect.top, height: nodeRect.height };
-					const stable =
-						previousRect !== null &&
-						Math.abs(currentRect.top - previousRect.top) <= OFFSET_TOLERANCE_PX &&
-						Math.abs(currentRect.height - previousRect.height) <= OFFSET_TOLERANCE_PX;
-					stableFrames = stable ? stableFrames + 1 : 0;
-					previousRect = currentRect;
-					if (stableFrames >= 2) return 'completed';
-				}
-				return 'not-ready';
+				return await settleConversationTarget({
+					root: () => this.options.virtualRoot,
+					rowId: resolved.innerRowId,
+					viewport: () => this.options.viewport,
+					align: options.align ?? 'center',
+					isCurrent: () =>
+						token === this.#targetToken &&
+						this.#isCurrentProgrammaticScrollOperation(operationEpoch),
+					isReady: () => this.isReady(),
+					scrollToOffset: (offset) => this.#instance().scrollToOffset(offset, { behavior: 'auto' }),
+				});
 			} finally {
 				releaseTarget();
 				this.#finishProgrammaticScrollOperation(operationEpoch);
@@ -561,8 +523,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		// The pinned core carries upstream #1246, so count shrink preserves surviving keyed
 		// measurements and ignores stale connected indexes without a Garcon reset pass.
 		const resetMeasurements = snapshot.measurementReset === 'all';
-		// The keyed snapshot restore completes the reading position after Svelte commits the new sizer.
-		// It uses only TanStack coordinates and replaces the narrower pre-commit offset bridge.
+		// The pre-commit anchor records old TanStack coordinates; the keyed restore applies them
+		// after Svelte commits the new sizer.
 		const preserveEdgeReadingPosition = shouldPreserveConversationVirtualEdge({
 			structure,
 			endBehavior: snapshot.endBehavior,
@@ -574,9 +536,15 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			(structure === 'interior-only' || resetMeasurements || preserveEdgeReadingPosition) &&
 			snapshot.endBehavior !== 'explicit-navigation' &&
 			!identityChanged;
+		const preferTranscriptAnchor = resetMeasurements || preserveEdgeReadingPosition;
+		const preCommitAnchor = this.#preCommitAnchorBuffer.take(
+			snapshot.geometryRevision,
+			preferTranscriptAnchor,
+		);
 		const preservationAnchor = shouldCaptureReadingPosition
 			? (this.#pendingReadingAnchor ??
-				this.#captureVirtualAnchor(resetMeasurements || preserveEdgeReadingPosition))
+				preCommitAnchor ??
+				this.#captureVirtualAnchor(preferTranscriptAnchor))
 			: null;
 		if (preservationAnchor && !restorePolicyEnd) {
 			this.#pendingReadingAnchor = preservationAnchor;
@@ -729,27 +697,17 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#pendingEndScroll = false;
 		this.#measureOnShow = false;
 		this.#renderedKeys.clear();
-		this.#attachedItemElements.clear();
+		this.#mountedItems.clear();
 		this.#instance().measure();
 	}
 
 	#captureVirtualAnchor(preferTranscript = false): ConversationVirtualAnchor | null {
 		let transcriptKeys = this.#configuredTranscriptKeys;
 		if (preferTranscript) {
-			const attachedTranscriptKeys = new Set<string>();
-			for (const element of this.#attachedItemElements) {
-				if (!element.isConnected) continue;
-				const index = Number(element.dataset.index);
-				const key = element.dataset.chatVirtualItem;
-				if (
-					Number.isInteger(index) &&
-					key !== undefined &&
-					this.#configuredKeys[index] === key &&
-					this.#configuredTranscriptKeys.has(key)
-				) {
-					attachedTranscriptKeys.add(key);
-				}
-			}
+			const attachedTranscriptKeys = this.#mountedItems.transcriptKeys(
+				this.#configuredKeys,
+				this.#configuredTranscriptKeys,
+			);
 			// A structural update can start after core publishes its range but before Svelte
 			// commits every wrapper. The anchor follows a row the reader can actually see.
 			if (attachedTranscriptKeys.size > 0) transcriptKeys = attachedTranscriptKeys;
@@ -792,8 +750,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			if (index === undefined) return false;
 			this.#instance().scrollToIndex(index, { align: 'start', behavior: 'auto' });
 			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-				await tick();
-				await nextAnimationFrame();
+				await nextConversationLayoutFrame();
 				if (
 					token !== this.#layoutMutationToken ||
 					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
@@ -805,8 +762,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					.getVirtualItems()
 					.find((candidate) => candidate.key === key);
 				if (!item) continue;
-				const offset = key === anchor.key ? anchor.offsetWithinItem : 0;
-				this.#instance().scrollToOffset(item.start + offset, { behavior: 'auto' });
+				const viewportOffset = key === anchor.key ? anchor.viewportOffset : 0;
+				const scrollOffset = conversationAnchorScrollOffset(
+					item.start,
+					this.#instance().options.scrollMargin,
+					viewportOffset,
+				);
+				this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
 				await nextAnimationFrame();
 				if (
 					token !== this.#layoutMutationToken ||
@@ -822,7 +784,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				if (
 					settledItem &&
 					settledOffset != null &&
-					Math.abs(settledOffset - (settledItem.start + offset)) <= OFFSET_TOLERANCE_PX
+					Math.abs(
+						settledOffset -
+							conversationAnchorScrollOffset(
+								settledItem.start,
+								this.#instance().options.scrollMargin,
+								viewportOffset,
+							),
+					) <= OFFSET_TOLERANCE_PX
 				) {
 					return true;
 				}
@@ -834,16 +803,18 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 	}
 
-	#scheduleReadingRestore(
-		anchor: ConversationVirtualAnchor,
-		resetMeasurements: boolean,
-	): void {
-		void this.#restoreVirtualAnchor(anchor, resetMeasurements).then((restored) => {
-			if (this.#pendingReadingAnchor !== anchor) return;
-			const resolvable = [anchor.key, ...anchor.fallbackKeys].some((key) =>
-				this.options.model.indexByKey.has(key),
-			);
-			if (restored || !resolvable) this.#pendingReadingAnchor = null;
+	#scheduleReadingRestore(anchor: ConversationVirtualAnchor, resetMeasurements: boolean): void {
+		const restoreGeneration = ++this.#readingRestoreGeneration;
+		void this.#restoreVirtualAnchor(anchor, resetMeasurements).then(() => {
+			if (
+				this.#pendingReadingAnchor !== anchor ||
+				this.#readingRestoreGeneration !== restoreGeneration
+			) {
+				return;
+			}
+			// The latest attempt consumes its anchor even when layout never settles. Only a
+			// newer scheduled attempt may carry the same anchor across a passive supersession.
+			this.#pendingReadingAnchor = null;
 		});
 	}
 
@@ -875,8 +846,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	): Promise<void> {
 		const measured = await this.#measureAfterCommit(snapshot.surfaceIdentity);
 		if (!measured) return;
-		await tick();
-		await nextAnimationFrame();
+		await nextConversationLayoutFrame();
 		if (
 			restorePolicyEnd &&
 			this.#activeTargetScrolls === 0 &&
@@ -891,12 +861,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	async #measureAfterCommit(surfaceIdentity: string): Promise<boolean> {
-		await tick();
-		await nextAnimationFrame();
-		if (
-			this.#destroyed ||
-			this.options.geometry.surfaceIdentity !== surfaceIdentity
-		) {
+		await nextConversationLayoutFrame();
+		if (this.#destroyed || this.options.geometry.surfaceIdentity !== surfaceIdentity) {
 			return false;
 		}
 		if (!this.options.visible) {
@@ -920,66 +886,23 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	async #completeEndRestore(token: number, operationEpoch: number): Promise<void> {
-		let previousGeometry: {
-			scrollHeight: number;
-			totalSize: number;
-			virtualRange: string;
-		} | null = null;
-		let stableEndFrames = 0;
 		try {
-			for (let attempt = 0; attempt < MAX_RANGE_COMMIT_ITERATIONS; attempt += 1) {
-				await tick();
-				await nextAnimationFrame();
-				if (
-					token !== this.#layoutMutationToken ||
-					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
-					!this.isReady()
-				) {
-					return;
-				}
-				const viewport = this.options.viewport;
-				if (!viewport) return;
-				const virtualRange = this.#committedVirtualRangeSignature();
-				const geometry = {
-					scrollHeight: viewport.scrollHeight,
-					totalSize: this.#instance().getTotalSize(),
-					virtualRange: virtualRange ?? '',
-				};
-				const unchanged =
-					previousGeometry !== null &&
-					Math.abs(geometry.scrollHeight - previousGeometry.scrollHeight) <= OFFSET_TOLERANCE_PX &&
-					Math.abs(geometry.totalSize - previousGeometry.totalSize) <= OFFSET_TOLERANCE_PX &&
-					geometry.virtualRange === previousGeometry.virtualRange;
-				stableEndFrames =
-					this.isAtEnd() && virtualRange !== null && unchanged ? stableEndFrames + 1 : 0;
-				if (stableEndFrames >= REQUIRED_END_STABLE_FRAMES) {
-					this.options.onInitialEndRestored?.();
-					return;
-				}
-				// The Svelte adapter updates core before the enlarged sizer and virtual rows
-				// commit. The paint gate therefore waits for stable geometry and an attached
-				// wrapper for every item in core's current range.
-				if (!this.isAtEnd()) this.#scrollToPhysicalEnd();
-				previousGeometry = geometry;
-				if (attempt + 1 >= MAX_SETTLE_ITERATIONS && virtualRange !== null) {
-					// Active streaming may prevent equal sizes indefinitely. A committed
-					// range can reveal after one final physical-end write without exposing a gap.
-					this.#scrollToPhysicalEnd();
-					this.options.onInitialEndRestored?.();
-					return;
-				}
-			}
-			if (
-				token !== this.#layoutMutationToken ||
-				!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
-				!this.isReady()
-			) {
-				return;
-			}
-			// A broken row commit cannot conceal the conversation indefinitely. The extended
-			// bound gives Svelte a full second at 60 Hz before the final liveness fallback.
-			this.#scrollToPhysicalEnd();
-			this.options.onInitialEndRestored?.();
+			await settleConversationEndRestore({
+				isCurrent: () => this.#isCurrentLayoutOperation(token, operationEpoch),
+				readGeometry: () => {
+					const viewport = this.options.viewport;
+					return viewport
+						? {
+								scrollHeight: viewport.scrollHeight,
+								totalSize: this.#instance().getTotalSize(),
+								virtualRange: this.#committedVirtualRangeSignature(),
+							}
+						: null;
+				},
+				isAtEnd: () => this.isAtEnd(),
+				scrollToEnd: () => this.#scrollToPhysicalEnd(),
+				complete: () => this.options.onInitialEndRestored?.(),
+			});
 		} finally {
 			this.#finishProgrammaticScrollOperation(operationEpoch);
 		}
@@ -1008,47 +931,23 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#committedVirtualRangeSignature(): string | null {
-		const virtualItems = this.#instance().getVirtualItems();
-		if (virtualItems.length === 0 && this.#configuredKeys.length > 0) return null;
-		const committedByIndex = new Map<number, string>();
-		for (const element of this.#attachedItemElements) {
-			if (!element.isConnected) continue;
-			const index = Number(element.dataset.index);
-			const key = element.dataset.chatVirtualItem;
-			if (!Number.isInteger(index) || key === undefined || this.#configuredKeys[index] !== key) {
-				continue;
-			}
-			committedByIndex.set(index, key);
-		}
-		for (const item of virtualItems) {
-			if (committedByIndex.get(item.index) !== String(item.key)) return null;
-		}
-		return virtualItems.map((item) => `${item.index}:${String(item.key)}`).join('|');
+		// Delayed measurements can expand the range until TanStack closes its scroll cycle.
+		if (this.#instance().isScrolling) return null;
+		return this.#mountedItems.committedRangeSignature(
+			this.#instance().getVirtualItems(),
+			this.#configuredKeys,
+		);
 	}
 
 	async #completeSimpleScroll(operationEpoch: number, token: number): Promise<void> {
-		let previousOffset: number | null = null;
-		for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-			await tick();
-			await nextAnimationFrame();
-			if (
-				token !== this.#layoutMutationToken ||
-				!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
-				!this.isReady()
-			) {
-				break;
-			}
-			const viewport = this.options.viewport;
-			if (!viewport) break;
-			if (
-				previousOffset !== null &&
-				Math.abs(previousOffset - viewport.scrollTop) <= OFFSET_TOLERANCE_PX
-			) {
-				break;
-			}
-			previousOffset = viewport.scrollTop;
+		try {
+			await settleConversationScroll({
+				isCurrent: () => this.#isCurrentLayoutOperation(token, operationEpoch),
+				readOffset: () => this.options.viewport?.scrollTop ?? null,
+			});
+		} finally {
+			this.#finishProgrammaticScrollOperation(operationEpoch);
 		}
-		this.#finishProgrammaticScrollOperation(operationEpoch);
 	}
 
 	#beginProgrammaticScrollOperation(): number {
@@ -1087,17 +986,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			trailingStartIndex,
 		);
 	}
-
-	#observeElementRect = (
-		instance: Virtualizer<HTMLElement, HTMLDivElement>,
-		callback: (rect: Rect) => void,
-	): (() => void) => {
-		const cleanup = observeElementRect(instance, (rect) => {
-			this.#lastViewportRect = resolveConversationViewportRect(this.#lastViewportRect, rect);
-			callback(this.#lastViewportRect);
-		});
-		return cleanup ?? (() => {});
-	};
 
 	#instance(): SvelteVirtualizer<HTMLElement, HTMLDivElement> {
 		return this.#instanceValue;
