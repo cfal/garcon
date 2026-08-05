@@ -45,7 +45,7 @@ describe('SnippetsSection', () => {
 		).toBe('\nUpdated {{arguments}}\n');
 	});
 
-	it('returns focus to the action that opened the form dialog', async () => {
+	it('closes the form through every cancel path and restores focus', async () => {
 		render(SnippetsSectionTestHost);
 		const add = await screen.findByRole('button', { name: 'Add snippet' });
 		await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false));
@@ -55,9 +55,23 @@ describe('SnippetsSection', () => {
 		const dialog = await screen.findByRole('dialog', { name: 'Add Snippet' });
 		expect(dialog.className).toContain('var(--app-viewport-center-y)');
 		expect(dialog.className).toContain('var(--app-height)');
-		await fireEvent.keyDown(dialog, { key: 'Escape' });
-
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Short name' }), {
+			target: { value: 'unfinished' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
 		await waitFor(() => expect(document.activeElement).toBe(add));
+
+		await fireEvent.click(add);
+		await fireEvent.keyDown(await screen.findByRole('dialog', { name: 'Add Snippet' }), {
+			key: 'Escape',
+		});
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(add));
+
+		await fireEvent.click(add);
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
 	});
 
 	it('renders sorted rows without move controls and confirms removal', async () => {
