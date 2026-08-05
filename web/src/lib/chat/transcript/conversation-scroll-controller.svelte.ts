@@ -13,11 +13,13 @@ import type {
 
 const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 const MIN_PAGE_PREFETCH_DISTANCE_PX = 100;
+const EARLIER_PAGE_PREFETCH_VIEWPORTS = 2;
 const LIVE_END_REPIN_THRESHOLD_PX = 50;
 
-// Keeps one viewport buffered while preserving the prior boundary distance on short surfaces.
-function pagePrefetchDistance(viewportHeight: number): number {
-	return Math.max(MIN_PAGE_PREFETCH_DISTANCE_PX, viewportHeight);
+// Buffers extra earlier history while preserving one-viewport later paging.
+function pagePrefetchDistance(direction: TranscriptPageDirection, viewportHeight: number): number {
+	const viewportCount = direction === 'earlier' ? EARLIER_PAGE_PREFETCH_VIEWPORTS : 1;
+	return Math.max(MIN_PAGE_PREFETCH_DISTANCE_PX, viewportHeight * viewportCount);
 }
 
 type PageRequestReason = 'scroll' | 'button';
@@ -70,7 +72,8 @@ export class ConversationScrollController {
 	#initialBottomPaintChatId = $state<string | null>(null);
 	#userScrollIntent: UserScrollIntent = { epoch: 0, direction: null, receivedAt: 0 };
 	#consumedIntentEpoch: Record<TranscriptPageDirection, number> = { earlier: 0, later: 0 };
-	#boundaryArmed: Record<TranscriptPageDirection, boolean> = { earlier: true, later: true };
+	#laterBoundaryArmed = true;
+	#earlierBoundaryRequestSignature: string | null = null;
 	#followLiveRequiresIntentAfter = 0;
 	#previousScrollTop: number | null = null;
 	#viewportOperationEpoch = 0;
@@ -264,11 +267,15 @@ export class ConversationScrollController {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
 		const requestIntentEpoch = this.#userScrollIntent.epoch;
+		const requestBoundarySignature =
+			direction === 'earlier' ? this.#earlierBoundarySignature() : null;
 
-		// Disarms the crossed boundary before awaiting data. It re-arms after the
-		// viewport leaves the edge or a newer same-direction input survives the settle,
-		// so measurement-driven scroll events cannot chain requests by themselves.
-		this.#boundaryArmed[direction] = false;
+		// Records the crossed boundary before awaiting data. Earlier history advances
+		// its signature, while later paging re-arms only after leaving or continuing.
+		if (direction === 'later') this.#laterBoundaryArmed = false;
+		if (requestBoundarySignature) {
+			this.#earlierBoundaryRequestSignature = requestBoundarySignature;
+		}
 		// Requires a fresh post-page downward gesture before near-end geometry resumes live following.
 		this.#followLiveRequiresIntentAfter = Math.max(
 			this.#followLiveRequiresIntentAfter,
@@ -300,9 +307,7 @@ export class ConversationScrollController {
 			this.#consumedIntentEpoch = {
 				earlier: Math.max(
 					this.#consumedIntentEpoch.earlier,
-					direction === 'earlier' && continuedPageIntent
-						? requestIntentEpoch
-						: latestIntentEpoch,
+					direction === 'earlier' && continuedPageIntent ? requestIntentEpoch : latestIntentEpoch,
 				),
 				later: Math.max(
 					this.#consumedIntentEpoch.later,
@@ -314,8 +319,16 @@ export class ConversationScrollController {
 		if (this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
 		this.#syncBoundaryLatch(direction);
 		if (reason === 'button') this.#preserveHistoryBrowsing();
-		if (result === 'loaded' && continuedPageIntent && this.#isNearPageBoundary(direction)) {
-			this.#boundaryArmed[direction] = true;
+		const earlierBoundaryAdvanced =
+			direction === 'earlier' &&
+			requestBoundarySignature !== null &&
+			this.#earlierBoundarySignature() !== requestBoundarySignature;
+		if (
+			continuedPageIntent &&
+			this.#isNearPageBoundary(direction) &&
+			(result === 'loaded' || earlierBoundaryAdvanced)
+		) {
+			if (direction === 'later') this.#laterBoundaryArmed = true;
 			this.#handleBoundaryProximity(direction, true);
 		}
 		return result;
@@ -591,11 +604,17 @@ export class ConversationScrollController {
 
 	#handleBoundaryProximity(direction: TranscriptPageDirection, isNearBoundary: boolean): void {
 		if (!isNearBoundary) {
-			this.#boundaryArmed[direction] = true;
+			if (direction === 'earlier') this.#earlierBoundaryRequestSignature = null;
+			else this.#laterBoundaryArmed = true;
 			return;
 		}
-		if (!this.#boundaryArmed[direction] || !this.#canRequestPage(direction)) return;
-		// Accepts only a fresh directional gesture at a re-armed edge. Restores and
+		if (!this.#canRequestPage(direction)) return;
+		if (direction === 'earlier') {
+			if (this.#earlierBoundaryRequestSignature === this.#earlierBoundarySignature()) return;
+		} else if (!this.#laterBoundaryArmed) {
+			return;
+		}
+		// Accepts only fresh directional input for an unrequested cursor. Restores and
 		// ResizeObserver scroll events have no gesture epoch and cannot page history.
 		const intent = this.#userScrollIntent;
 		if (
@@ -605,7 +624,7 @@ export class ConversationScrollController {
 		) {
 			return;
 		}
-		this.#boundaryArmed[direction] = false;
+		if (direction === 'later') this.#laterBoundaryArmed = false;
 		this.#consumedIntentEpoch[direction] = intent.epoch;
 		void this.requestPage(direction, 'scroll');
 	}
@@ -625,16 +644,27 @@ export class ConversationScrollController {
 	}
 
 	#syncBoundaryLatch(direction: TranscriptPageDirection): void {
-		if (!this.#isNearPageBoundary(direction)) this.#boundaryArmed[direction] = true;
+		if (this.#isNearPageBoundary(direction)) return;
+		if (direction === 'earlier') this.#earlierBoundaryRequestSignature = null;
+		else this.#laterBoundaryArmed = true;
 	}
 
 	#isNearPageBoundary(direction: TranscriptPageDirection): boolean {
 		const scroller = this.deps.getScrollContainer();
 		if (!scroller || scroller.clientHeight <= 0) return false;
-		const distance = pagePrefetchDistance(scroller.clientHeight);
+		const distance = pagePrefetchDistance(direction, scroller.clientHeight);
 		return direction === 'earlier'
 			? scroller.scrollTop <= distance
 			: (this.deps.getViewport()?.isAtEnd(distance) ?? false);
+	}
+
+	#earlierBoundarySignature(): string {
+		return [
+			this.deps.sessions.selectedChatId ?? '',
+			this.deps.chatState.generationId,
+			this.deps.chatState.windowRevision,
+			this.deps.chatState.feedMutationClock.lastRevisionByKind['history-earlier'],
+		].join(':');
 	}
 
 	#isCurrentViewportOperation(chatId: string, operationEpoch: number): boolean {
@@ -697,7 +727,8 @@ export class ConversationScrollController {
 	#resetPagingContext(): void {
 		const epoch = this.#userScrollIntent.epoch;
 		this.#consumedIntentEpoch = { earlier: epoch, later: epoch };
-		this.#boundaryArmed = { earlier: true, later: true };
+		this.#laterBoundaryArmed = true;
+		this.#earlierBoundaryRequestSignature = null;
 		this.#followLiveRequiresIntentAfter = epoch;
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? null;
 	}
@@ -714,10 +745,7 @@ export class ConversationScrollController {
 		);
 	}
 
-	#hasContinuedPageIntent(
-		direction: TranscriptPageDirection,
-		requestIntentEpoch: number,
-	): boolean {
+	#hasContinuedPageIntent(direction: TranscriptPageDirection, requestIntentEpoch: number): boolean {
 		return (
 			this.#userScrollIntent.epoch > requestIntentEpoch &&
 			this.#userScrollIntent.direction === direction &&

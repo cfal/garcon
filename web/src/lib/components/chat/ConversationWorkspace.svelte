@@ -441,7 +441,7 @@
 	});
 
 	// Marks real scroll gestures on the actual viewport element. This avoids
-	// depending on wrapper component event forwarding for wheel and touch input.
+	// depending on wrapper component event forwarding for wheel, touch, and scrollbar input.
 	$effect(() => {
 		const node = scrollContainer;
 		if (!node) return;
@@ -451,6 +451,10 @@
 			scroll.noteUserScrollIntent(event.deltaY < 0 ? 'earlier' : 'later');
 		};
 		const handleTouchStart = () => scroll.noteUserScrollIntent();
+		const handlePointerDown = (event: PointerEvent) => {
+			if (event.button !== 0 || event.pointerType === 'touch') return;
+			scroll.noteUserScrollIntent();
+		};
 		const handleKeydown = (event: KeyboardEvent) => {
 			if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
 				scroll.noteUserScrollIntent('earlier');
@@ -467,11 +471,13 @@
 
 		node.addEventListener('wheel', handleWheel, { capture: true, passive: true });
 		node.addEventListener('touchstart', handleTouchStart, { capture: true, passive: true });
+		node.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
 		node.addEventListener('keydown', handleKeydown, { capture: true });
 
 		return () => {
 			node.removeEventListener('wheel', handleWheel, { capture: true });
 			node.removeEventListener('touchstart', handleTouchStart, { capture: true });
+			node.removeEventListener('pointerdown', handlePointerDown, { capture: true });
 			node.removeEventListener('keydown', handleKeydown, { capture: true });
 		};
 	});

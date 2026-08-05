@@ -8,14 +8,17 @@ import type { ConversationFeedMutationClock } from '../conversation-feed-mutatio
 import type { ConversationViewportPort } from '../conversation-viewport-port';
 import { mountInitialBottomRestoreEffect } from './conversation-scroll-controller-effect-harness.svelte';
 
-function mutationClock(dataRevision = 0): ConversationFeedMutationClock {
+function mutationClock(
+	dataRevision = 0,
+	historyEarlierRevision = 0,
+): ConversationFeedMutationClock {
 	return {
 		dataRevision,
 		lastResponseRevisionByMessageType: {},
 		lastRevisionByKind: {
 			initial: 0,
 			'live-append': 0,
-			'history-earlier': 0,
+			'history-earlier': historyEarlierRevision,
 			'history-later': 0,
 			replacement: 0,
 			'presentation-structure': 0,
@@ -215,11 +218,11 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
 	});
 
-	it('prefetches earlier history one viewport before the top edge', async () => {
+	it('prefetches earlier history two viewports before the top edge', async () => {
 		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
 		const { controller } = controllerFixture({
 			state: { canLoadEarlier: true, loadEarlierPage },
-			scroller: { clientHeight: 400, scrollTop: 350 },
+			scroller: { clientHeight: 400, scrollTop: 750 },
 		});
 
 		controller.noteUserScrollIntent('earlier');
@@ -244,13 +247,27 @@ describe('ConversationScrollController', () => {
 		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
 		const { controller } = controllerFixture({
 			state: { canLoadEarlier: true, loadEarlierPage },
-			scroller: { clientHeight: 400, scrollTop: 401 },
+			scroller: { clientHeight: 400, scrollTop: 801 },
 		});
 
 		controller.noteUserScrollIntent('earlier');
 		controller.handleScroll();
 
 		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
+	it('infers earlier intent from a pointer-originated scrollbar movement', async () => {
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 900 },
+		});
+
+		fixture.controller.noteUserScrollIntent();
+		fixture.scroller.scrollTop = 750;
+		fixture.controller.handleScroll();
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
 	});
 
 	it('prefetches later history without widening the live-end repin zone', async () => {
@@ -294,23 +311,27 @@ describe('ConversationScrollController', () => {
 		expect(loadEarlierPage).not.toHaveBeenCalled();
 	});
 
-	it('rearms a completed page boundary only after leaving the prefetch zone', async () => {
-		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+	it('rearms an advanced earlier cursor after its geometry settle is superseded', async () => {
+		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>();
 		const fixture = controllerFixture({
+			viewport: fakeViewport({
+				waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>(async () => 'superseded'),
+			}),
 			state: { canLoadEarlier: true, loadEarlierPage },
-			scroller: { clientHeight: 400, scrollTop: 350 },
+			scroller: { clientHeight: 400, scrollTop: 750 },
 		});
-
-		await expect(fixture.controller.requestPage('earlier', 'button')).resolves.toBe('exhausted');
+		loadEarlierPage
+			.mockImplementationOnce(async () => {
+				fixture.state.feedMutationClock = mutationClock(1, 1);
+				return 'loaded';
+			})
+			.mockResolvedValueOnce('exhausted');
 
 		fixture.controller.noteUserScrollIntent('earlier');
 		fixture.controller.handleScroll();
-		expect(loadEarlierPage).toHaveBeenCalledOnce();
+		await vi.waitFor(() => expect(fixture.viewport.waitForLayout).toHaveBeenCalledOnce());
+		await Promise.resolve();
 
-		fixture.scroller.scrollTop = 500;
-		fixture.controller.noteUserScrollIntent('later');
-		fixture.controller.handleScroll();
-		fixture.scroller.scrollTop = 350;
 		fixture.controller.noteUserScrollIntent('earlier');
 		fixture.controller.handleScroll();
 
@@ -338,6 +359,7 @@ describe('ConversationScrollController', () => {
 
 		fixture.controller.noteUserScrollIntent('earlier');
 		fixture.controller.handleScroll();
+		fixture.state.feedMutationClock = mutationClock(1, 1);
 		resolveFirstPage('loaded');
 
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));

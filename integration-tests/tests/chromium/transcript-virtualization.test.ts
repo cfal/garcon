@@ -424,6 +424,21 @@ async function signalScrollIntent(page: Page, direction: 'earlier' | 'later'): P
   }, direction);
 }
 
+async function transcriptBoundaryIntersectsViewport(
+  page: Page,
+  direction: 'earlier' | 'later',
+): Promise<boolean> {
+  return page.locator(FEED_SELECTOR).evaluate((feedElement, requestedDirection) => {
+    const boundary = feedElement.querySelector<HTMLElement>(
+      `[data-transcript-page-boundary="${requestedDirection}"]`,
+    );
+    if (!boundary) return false;
+    const viewportRect = feedElement.getBoundingClientRect();
+    const boundaryRect = boundary.getBoundingClientRect();
+    return boundaryRect.bottom > viewportRect.top && boundaryRect.top < viewportRect.bottom;
+  }, direction);
+}
+
 async function selectVisibleMessageText(page: Page): Promise<SelectionSnapshot> {
   return page.locator(FEED_SELECTOR).evaluate((feedElement) => {
     const feed = feedElement as HTMLElement;
@@ -1446,59 +1461,53 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     await fixture.page.locator('[data-slot="chat-processing-status"]').waitFor({ state: 'visible' });
     const modelCountBeforePrefetch = await waitForStableModelCount(fixture.page, 50);
 
+    const loadAheadDistance = await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) => {
+      const feed = feedElement as HTMLElement;
+      const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+      const start = Math.min(maximum, feed.clientHeight * 2.5);
+      if (start <= feed.clientHeight * 2) {
+        throw new Error('The transcript is too short to verify two-viewport load-ahead.');
+      }
+      feed.scrollTop = start;
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      feed.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          pointerType: 'mouse',
+        }),
+      );
+      feed.scrollTop = feed.clientHeight * 1.5;
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      return feed.scrollTop;
+    });
+    await withDiagnosticTimeout('the first held earlier-page request', firstPageRequest);
+    expect(loadAheadDistance).toBeGreaterThan(0);
+    expect(await transcriptBoundaryIntersectsViewport(fixture.page, 'earlier')).toBe(false);
+
+    releaseFirstPage();
+
+    const modelCountAfterFirstPage = await waitForStableModelCount(
+      fixture.page,
+      modelCountBeforePrefetch + 50,
+    );
+    expect(earlierRequestCount).toBe(1);
+    expect(modelCountAfterFirstPage).toBe(modelCountBeforePrefetch + 50);
+
     await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) => {
       const feed = feedElement as HTMLElement;
       feed.scrollTop = 0;
       feed.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
-    // A clamped viewport emits no further scroll event for another upward gesture.
+    // A clamped viewport emits no scroll event for the subsequent upward gesture.
     await signalScrollIntent(fixture.page, 'earlier');
-    await withDiagnosticTimeout('the first held earlier-page request', firstPageRequest);
-
-    await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement, previousModelCount) => {
-      const feed = feedElement as HTMLElement;
-      const sizer = feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
-      if (!sizer) throw new Error('The virtual sizer is missing before the held page release.');
-      const browserGlobal = globalThis as typeof globalThis & {
-        __chatContinuedEarlierIntentObserved?: boolean;
-      };
-      browserGlobal.__chatContinuedEarlierIntentObserved = false;
-      const observer = new MutationObserver(() => {
-        const modelCount = Number(sizer.dataset.chatVirtualModelCount ?? 0);
-        if (modelCount <= previousModelCount) return;
-        observer.disconnect();
-        feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-        feed.scrollTop = Math.min(feed.scrollTop, feed.clientHeight / 2);
-        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
-        browserGlobal.__chatContinuedEarlierIntentObserved = true;
-      });
-      observer.observe(sizer, {
-        attributes: true,
-        attributeFilter: ['data-chat-virtual-model-count'],
-      });
-    }, modelCountBeforePrefetch);
-    releaseFirstPage();
-
-    await fixture.page.waitForFunction(
-      () =>
-        Boolean(
-          (globalThis as typeof globalThis & { __chatContinuedEarlierIntentObserved?: boolean })
-            .__chatContinuedEarlierIntentObserved,
-        ),
-      undefined,
-      { timeout: 20_000 },
-    );
-    await withDiagnosticTimeout('the continued-gesture earlier-page request', secondPageRequest);
+    await withDiagnosticTimeout('the clamped-gesture earlier-page request', secondPageRequest);
     const modelCountAfterPrefetch = await waitForModelCount(
       fixture.page,
-      modelCountBeforePrefetch + 51,
+      modelCountBeforePrefetch + 100,
     );
     expect(earlierRequestCount).toBe(2);
-    expect(modelCountAfterPrefetch).toBeGreaterThan(modelCountBeforePrefetch + 50);
-    await fixture.page.evaluate(() => {
-      delete (globalThis as typeof globalThis & { __chatContinuedEarlierIntentObserved?: boolean })
-        .__chatContinuedEarlierIntentObserved;
-    });
+    expect(modelCountAfterPrefetch).toBe(modelCountBeforePrefetch + 100);
   } finally {
     releaseFirstPage();
     heldCompletion.releaseEcho();
