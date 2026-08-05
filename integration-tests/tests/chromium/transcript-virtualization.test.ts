@@ -321,6 +321,37 @@ async function waitForSurfaceIdentityChange(page: Page, previous: string): Promi
   );
 }
 
+async function waitForSurfaceIdentity(page: Page, expected: string): Promise<void> {
+  await page.waitForFunction(
+    ({ selector, expectedIdentity }) => {
+      const identities = [...document.querySelectorAll<HTMLElement>(selector)].flatMap((item) => {
+        const value = item.dataset.chatVirtualItem;
+        if (!value) return [];
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) && typeof parsed[0] === 'string' ? [parsed[0]] : [];
+        } catch {
+          return [];
+        }
+      });
+      return identities.length > 0 && identities.every((identity) => identity === expectedIdentity);
+    },
+    { selector: ITEM_SELECTOR, expectedIdentity: expected },
+    { timeout: 20_000 },
+  );
+}
+
+async function synchronizeNativeTranscriptGeneration(
+  fixture: ChromiumFixture,
+  chatId: string,
+): Promise<void> {
+  // Forces native reconciliation before geometry samples a generation-scoped row key.
+  const finalTranscript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  expect(finalTranscript.hasMore).toBe(false);
+  await waitForSurfaceIdentity(fixture.page, `${chatId}:${finalTranscript.generationId}`);
+  await waitForTranscriptReady(fixture.page);
+}
+
 async function scrollToPosition(
   page: Page,
   position: 'start' | 'middle' | 'end',
@@ -1248,7 +1279,7 @@ async function createTranscript(fixture: ChromiumFixture): Promise<string> {
     .getByText('echo:chromium-generation-prime', { exact: true })
     .waitFor();
   await waitForSurfaceIdentityChange(fixture.page, initialSurfaceIdentity);
-  await waitForTranscriptReady(fixture.page);
+  await synchronizeNativeTranscriptGeneration(fixture, chatId);
   return chatId;
 }
 
@@ -2052,6 +2083,7 @@ async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: strin
 }
 
 async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  await synchronizeNativeTranscriptGeneration(fixture, chatId);
   const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await scrollToPosition(fixture.page, 'middle');
