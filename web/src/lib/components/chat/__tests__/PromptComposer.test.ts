@@ -899,8 +899,12 @@ describe('PromptComposer focus', () => {
 
 		await inputAtCaret(textarea, ';;r', 3);
 		expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull();
+		await inputAtCaret(textarea, ';;review ', 9);
+		await inputAtCaret(textarea, ';;review', 8);
+		await inputAtCaret(textarea, ';;', 2);
+		expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull();
 
-		await inputAtCaret(textarea, '', 0);
+		await inputAtCaret(textarea, ';', 1);
 		await inputAtCaret(textarea, ';;', 2);
 		expect(await screen.findByRole('dialog', { name: 'Insert Snippet' })).toBeTruthy();
 	});

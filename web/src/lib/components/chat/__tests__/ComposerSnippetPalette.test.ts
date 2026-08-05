@@ -144,6 +144,13 @@ describe('ComposerSnippetPalette', () => {
 		expect(preview.textContent).toContain('Summarize item 1');
 	});
 
+	it('hides the preview while the mobile keyboard needs the palette height', async () => {
+		render(ComposerSnippetPaletteTestHost, { mobile: true, keyboardHeight: 320 });
+
+		await screen.findByRole('option', { name: /^item-0\b/ });
+		expect(screen.queryByRole('region', { name: 'Template preview' })).toBeNull();
+	});
+
 	it('badges templates that use the arguments and project path tokens', async () => {
 		render(ComposerSnippetPaletteTestHost, {
 			count: 1,

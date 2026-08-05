@@ -248,6 +248,7 @@
 		const input = event.currentTarget as HTMLTextAreaElement;
 		snippetPalette.updateDetectedTrigger(
 			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
+			input.value,
 		);
 	}
 

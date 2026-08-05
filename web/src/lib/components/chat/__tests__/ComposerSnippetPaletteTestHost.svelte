@@ -17,6 +17,8 @@
 		initialQuery?: string;
 		contextHint?: string | null;
 		insertionResult?: SnippetInsertionResult;
+		mobile?: boolean;
+		keyboardHeight?: number;
 	}
 
 	let {
@@ -26,6 +28,8 @@
 		initialQuery = '',
 		contextHint = null,
 		insertionResult = 'inserted',
+		mobile = false,
+		keyboardHeight = 0,
 	}: Props = $props();
 
 	let open = $state(true);
@@ -51,6 +55,8 @@
 	}));
 
 	const appShell = new AppShellStore();
+	appShell.isMobile = untrack(() => mobile);
+	appShell.keyboardHeight = untrack(() => keyboardHeight);
 	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
 	const localSettings = new LocalSettingsStore();
 	localSettings.set('snippetTrigger', ';;');

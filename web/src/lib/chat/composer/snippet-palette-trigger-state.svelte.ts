@@ -4,19 +4,20 @@ export class SnippetPaletteTriggerState {
 	isOpen = $state(false);
 	trigger = $state<SnippetTrigger | null>(null);
 	initialQuery = $state('');
-	#dismissedTriggerStart: number | null = null;
+	#activePrefix = '';
+	#dismissedOccurrence: { start: number; prefix: string } | null = null;
 
 	openFromMenu(): void {
-		this.#open(null);
+		this.#open(null, '');
 	}
 
-	updateDetectedTrigger(trigger: SnippetTrigger | null): void {
+	updateDetectedTrigger(trigger: SnippetTrigger | null, sourceText: string): void {
+		this.#clearDismissalWhenPrefixIsRemoved(sourceText);
 		if (!trigger) {
-			this.#dismissedTriggerStart = null;
 			if (this.trigger) this.complete();
 			return;
 		}
-		this.#open(trigger);
+		this.#open(trigger, sourceText);
 	}
 
 	// Modal inertness prevents composer input or menu opens while a hidden trigger backs the argument chain.
@@ -25,7 +26,9 @@ export class SnippetPaletteTriggerState {
 	}
 
 	dismiss(): void {
-		if (this.trigger) this.#dismissedTriggerStart = this.trigger.start;
+		if (this.trigger) {
+			this.#dismissedOccurrence = { start: this.trigger.start, prefix: this.#activePrefix };
+		}
 		this.complete();
 	}
 
@@ -33,18 +36,29 @@ export class SnippetPaletteTriggerState {
 		this.isOpen = false;
 		this.trigger = null;
 		this.initialQuery = '';
+		this.#activePrefix = '';
 	}
 
 	reset(): void {
 		this.complete();
-		this.#dismissedTriggerStart = null;
+		this.#dismissedOccurrence = null;
 	}
 
-	#open(trigger: SnippetTrigger | null): void {
+	#open(trigger: SnippetTrigger | null, sourceText: string): void {
 		if (this.isOpen) return;
-		if (trigger && trigger.start === this.#dismissedTriggerStart) return;
+		if (trigger && trigger.start === this.#dismissedOccurrence?.start) return;
 		this.trigger = trigger;
+		this.#activePrefix = trigger
+			? sourceText.slice(trigger.start, trigger.end - trigger.query.length)
+			: '';
 		this.initialQuery = trigger?.query ?? '';
 		this.isOpen = true;
+	}
+
+	#clearDismissalWhenPrefixIsRemoved(sourceText: string): void {
+		const dismissed = this.#dismissedOccurrence;
+		if (!dismissed) return;
+		if (sourceText.startsWith(dismissed.prefix, dismissed.start)) return;
+		this.#dismissedOccurrence = null;
 	}
 }

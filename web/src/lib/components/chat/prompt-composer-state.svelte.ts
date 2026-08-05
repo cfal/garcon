@@ -48,13 +48,16 @@ export class PromptComposerUiState {
 		this.setFileMentionTrigger(fileTrigger);
 		if (fileTrigger) {
 			this.setSlashCommandTrigger(null);
-			this.snippetPalette.updateDetectedTrigger(null);
+			this.snippetPalette.updateDetectedTrigger(null, value);
 			return;
 		}
 
 		this.setSlashCommandTrigger(findSlashCommandTrigger(value, caret));
 		if (isComposing) return;
-		this.snippetPalette.updateDetectedTrigger(findSnippetTrigger(value, caret, snippetTrigger));
+		this.snippetPalette.updateDetectedTrigger(
+			findSnippetTrigger(value, caret, snippetTrigger),
+			value,
+		);
 	}
 
 	/** Resets ephemeral UI on chat switch. Returns true if the chat changed. */

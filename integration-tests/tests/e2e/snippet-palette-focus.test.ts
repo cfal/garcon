@@ -22,7 +22,7 @@ describe('snippet palette focus', () => {
       });
 
       const app = new SpaDriver(fixture.page, fixture.integration);
-      await fixture.page.setViewport({ width: 844, height: 390, isMobile: true });
+      await fixture.page.setViewport({ width: 390, height: 844, isMobile: true });
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.clickButton('New Chat');
@@ -30,6 +30,15 @@ describe('snippet palette focus', () => {
       await app.fill(
         '[role="dialog"] input[aria-label="Project Path"]',
         fixture.integration.dirs.project,
+      );
+      await fixture.page.evaluate(() => {
+        const viewport = window.visualViewport;
+        if (!viewport) throw new Error('Missing visual viewport.');
+        Object.defineProperty(viewport, 'height', { configurable: true, value: 390 });
+        viewport.dispatchEvent(new Event('resize'));
+      });
+      await fixture.page.waitForFunction(
+        () => document.documentElement.style.getPropertyValue('--app-height') === '390px',
       );
 
       await fixture.page.$eval(NEW_CHAT_COMPOSER, (element) => {
@@ -53,11 +62,11 @@ describe('snippet palette focus', () => {
         );
         const list = document.querySelector<HTMLElement>('[role="listbox"]');
         return {
-          previewTabIndex: preview?.tabIndex ?? -1,
+          previewVisible: Boolean(preview?.getClientRects().length),
           listHeight: list?.getBoundingClientRect().height ?? 0,
         };
       });
-      expect(paletteLayout.previewTabIndex).toBe(0);
+      expect(paletteLayout.previewVisible).toBe(false);
       expect(paletteLayout.listHeight).toBeGreaterThan(0);
       await fixture.page.evaluate(() => {
         const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(

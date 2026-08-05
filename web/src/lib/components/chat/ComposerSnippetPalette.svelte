@@ -4,7 +4,7 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Settings2 from '@lucide/svelte/icons/settings-2';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { getLocalSettings, getSnippets } from '$lib/context';
+	import { getAppShell, getLocalSettings, getSnippets } from '$lib/context';
 	import type { SnippetInsertionHandler } from '$lib/chat/composer/snippet-insertion.js';
 	import { normalizeSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
 	import { snippetPreview } from '$lib/snippets/snippet-presentation.js';
@@ -41,6 +41,7 @@
 	}: Props = $props();
 
 	const snippets = getSnippets();
+	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const uid = $props.id();
 	const listId = `${uid}-list`;
@@ -61,6 +62,7 @@
 		onEditSnippets: () => onEditSnippets(),
 	});
 	const triggerHint = $derived(normalizeSnippetTrigger(localSettings.snippetTrigger));
+	const mobileKeyboardVisible = $derived(appShell.isMobile && appShell.keyboardHeight > 0);
 
 	$effect(() => {
 		palette.syncOpen(open, initialQuery);
@@ -190,14 +192,14 @@
 			{/if}
 		</div>
 
-		{#if palette.highlightedSnippet}
-			<div class="shrink-0 border-t border-border px-4 py-3">
+		{#if palette.highlightedSnippet && !mobileKeyboardVisible}
+			<div class="snippet-template-preview-shell shrink-0 border-t border-border px-4 py-3">
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- overflow preview is keyboard-scrollable and exposes the complete template; follow-up: INLINE_SNIPPET_EXPANSION.md#a11y-suppression-register -->
 				<pre
 					role="region"
 					tabindex="0"
 					aria-label={m.snippets_template_preview_label()}
-					class="snippet-template-preview h-28 overflow-y-auto font-mono text-xs leading-4 whitespace-pre-wrap text-muted-foreground sm:h-40"
+					class="h-28 overflow-y-auto font-mono text-xs leading-4 whitespace-pre-wrap text-muted-foreground sm:h-40"
 				>{palette.highlightedSnippet.template}</pre>
 			</div>
 		{/if}
@@ -234,9 +236,9 @@
 />
 
 <style>
-	@media (max-height: 30rem) {
-		.snippet-template-preview {
-			height: 4rem;
+	@media (max-height: 36rem) {
+		.snippet-template-preview-shell {
+			display: none;
 		}
 	}
 </style>
