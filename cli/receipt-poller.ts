@@ -42,6 +42,34 @@ export async function pollTurnReceipt(
   signal?: AbortSignal,
   dependencies: ReceiptPollerDependencies = {},
 ): Promise<AgentTurnReceipt> {
+  return pollCorrelatedTurnReceipt(
+    client,
+    chatId,
+    turnId,
+    clientRequestId,
+    signal,
+    dependencies,
+  );
+}
+
+export async function pollExistingTurnReceipt(
+  client: ReceiptClient,
+  chatId: string,
+  turnId: string,
+  signal?: AbortSignal,
+  dependencies: ReceiptPollerDependencies = {},
+): Promise<AgentTurnReceipt> {
+  return pollCorrelatedTurnReceipt(client, chatId, turnId, undefined, signal, dependencies);
+}
+
+async function pollCorrelatedTurnReceipt(
+  client: ReceiptClient,
+  chatId: string,
+  turnId: string,
+  expectedClientRequestId: string | undefined,
+  signal?: AbortSignal,
+  dependencies: ReceiptPollerDependencies = {},
+): Promise<AgentTurnReceipt> {
   const delay = dependencies.delay ?? abortableDelay;
   const now = dependencies.now ?? Date.now;
   const random = dependencies.random ?? Math.random;
@@ -60,10 +88,12 @@ export async function pollTurnReceipt(
       if (
         receipt.chatId !== chatId
         || receipt.turnId !== turnId
-        || receipt.clientRequestId !== clientRequestId
+        || (expectedClientRequestId !== undefined
+          && receipt.clientRequestId !== expectedClientRequestId)
       ) {
         throw new CliError('receipt polling', 'server returned a receipt for a different turn', 3);
       }
+      expectedClientRequestId ??= receipt.clientRequestId;
       if (receipt.state !== 'pending') return receipt;
 
       if (now() - lastRuntimeCheck >= RUNTIME_RECHECK_INTERVAL_MS) {

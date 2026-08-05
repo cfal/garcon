@@ -15,6 +15,7 @@ import createScheduledPromptRoutes from './scheduled-prompts.js';
 import createTerminalRoutes from './terminals.js';
 import { createRuntimeRoutes } from './runtime.js';
 import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
+import { createChatSnapshotRoutes } from './chat-snapshot.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -98,6 +99,12 @@ export default function createAllRoutes({
   return {
     ...createRuntimeRoutes(runtimeState),
     ...createAgentTurnReceiptRoutes(commandLedger),
+    ...createChatSnapshotRoutes({
+      summaries: chatListProjector,
+      execution: queue,
+      chatViews,
+      pendingInputs,
+    }),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),

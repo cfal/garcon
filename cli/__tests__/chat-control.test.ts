@@ -49,7 +49,7 @@ function output(): CliOutput & {
     sentRecords, stoppedRecords,
     accepted() {},
     completed() {},
-    listing() {},
+    result() {},
     sent(chatId, delivery, turnId) { sentRecords.push([chatId, delivery, turnId]); },
     stopped(chatId, outcome) { stoppedRecords.push(`${chatId}:${outcome}`); },
     diagnostic() {},

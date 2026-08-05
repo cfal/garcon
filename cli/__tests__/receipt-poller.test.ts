@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import { CliError } from '../errors.js';
 import { GarconHttpError, GarconTransportError } from '../garcon-client.js';
-import { pollTurnReceipt, type ReceiptClient } from '../receipt-poller.js';
+import {
+  pollExistingTurnReceipt,
+  pollTurnReceipt,
+  type ReceiptClient,
+} from '../receipt-poller.js';
 
 const CHAT_ID = '1785337200123456';
 const TURN_ID = 'turn-1';
@@ -28,6 +32,39 @@ const pending: AgentTurnReceipt = {
 };
 
 describe('pollTurnReceipt', () => {
+  test('pins the first existing receipt client request identity', async () => {
+    let requests = 0;
+    const client: ReceiptClient = {
+      async getTurnReceipt() {
+        requests += 1;
+        return requests === 1 ? pending : completed;
+      },
+      async verifyRuntime() { return true; },
+    };
+
+    expect(await pollExistingTurnReceipt(client, CHAT_ID, TURN_ID, undefined, {
+      delay: async () => undefined,
+    })).toBe(completed);
+    expect(requests).toBe(2);
+  });
+
+  test('rejects a client request identity change after reattachment', async () => {
+    let requests = 0;
+    const client: ReceiptClient = {
+      async getTurnReceipt() {
+        requests += 1;
+        return requests === 1
+          ? pending
+          : { ...completed, clientRequestId: 'different-request' };
+      },
+      async verifyRuntime() { return true; },
+    };
+
+    await expect(pollExistingTurnReceipt(client, CHAT_ID, TURN_ID, undefined, {
+      delay: async () => undefined,
+    })).rejects.toThrow('different turn');
+  });
+
   test('backs off while pending and returns the correlated terminal receipt', async () => {
     let requests = 0;
     const delays: number[] = [];

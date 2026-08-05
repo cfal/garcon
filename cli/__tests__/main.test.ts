@@ -15,14 +15,16 @@ const stubDiscovery = async () => ({
   workspaceDir: '/tmp/ws',
 });
 
-function capturedOutput(): { output: CliOutput; diagnostics: string[] } {
+function capturedOutput(): { output: CliOutput; diagnostics: string[]; results: string[] } {
   const diagnostics: string[] = [];
+  const results: string[] = [];
   return {
     diagnostics,
+    results,
     output: {
       accepted() {},
       completed() {},
-      listing() {},
+      result(content) { results.push(content); },
       sent() {},
       stopped() {},
       diagnostic(message) { diagnostics.push(message); },
@@ -44,6 +46,91 @@ function acceptedControlResponse(_input: string | URL | Request, init?: RequestI
 }
 
 describe('main', () => {
+  test('status reads one snapshot without reading stdin or resolving a project path', async () => {
+    const capture = capturedOutput();
+    let requestedUrl = '';
+    const exitCode = await main(['status', CHAT_ID, '--messages', '0', '--json'], {
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json({
+          observedAt: '2026-08-04T12:00:00.000Z',
+          messageLimit: 0,
+          chat: {
+            id: CHAT_ID,
+            title: 'Review',
+            agentId: 'codex',
+            model: null,
+            apiProviderId: null,
+            modelEndpointId: null,
+            modelProtocol: null,
+            permissionMode: 'default',
+            thinkingMode: 'none',
+            projectPath: '/project/that/need/not/exist',
+            tags: ['cli'],
+            activity: { createdAt: null, lastActivityAt: null },
+          },
+          processingPhase: null,
+          control: {
+            serverInstanceId: 'instance',
+            queue: {
+              entries: [],
+              dispatchingEntryId: null,
+              steeringEntryId: null,
+              recentlyDispatched: [],
+              pause: null,
+              reorderRevision: 0,
+            },
+            version: 0,
+            updatedAt: null,
+          },
+          pendingUserInputs: [],
+          transcript: { availability: 'not-requested' },
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      readStdin: async () => { throw new Error('stdin must not be read'); },
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(requestedUrl).toContain(`/api/v1/chats/snapshot?chatId=${CHAT_ID}&limit=0`);
+    expect(JSON.parse(capture.results[0]!)).toMatchObject({ chat: { id: CHAT_ID } });
+    expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('wait reads an existing receipt without reading stdin or resolving a project path', async () => {
+    const capture = capturedOutput();
+    let requestedUrl = '';
+    const exitCode = await main([
+      'wait', CHAT_ID, '--turn', 'turn-1', '--json',
+    ], {
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json({
+          state: 'completed',
+          chatId: CHAT_ID,
+          turnId: 'turn-1',
+          clientRequestId: 'request-1',
+          acceptedAt: '2026-08-04T12:00:00.000Z',
+          updatedAt: '2026-08-04T12:00:00.000Z',
+          settledAt: '2026-08-04T12:00:00.000Z',
+          output: {
+            availability: 'available',
+            completeness: 'complete',
+            assistantMessages: ['Done'],
+          },
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      readStdin: async () => { throw new Error('stdin must not be read'); },
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(requestedUrl).toContain('/api/v1/chats/turn-receipt?');
+    expect(capture.diagnostics).toEqual([]);
+  });
+
   test('interrupts a pending stdin read before runtime discovery', async () => {
     const controller = new AbortController();
     const capture = capturedOutput();

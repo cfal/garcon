@@ -139,7 +139,7 @@ Configure Telegram notifications in Settings. Create and manage scheduled prompt
 
 ### Agent Consultations From The CLI
 
-`garcon-cli` starts an ordinary Garcon chat through an already-running local server, waits for the submitted turn, and prints the chat ID and final assistant response. The same chat remains visible in the SPA, including its tools, permission requests, transcript, and Stop controls.
+`garcon-cli` starts an ordinary Garcon chat through an already-running local server, waits for the submitted turn, and prints the accepted chat and turn IDs before the final assistant response. The same chat remains visible in the SPA, including its tools, permission requests, transcript, and Stop controls.
 
 ```bash
 garcon-cli \
@@ -177,7 +177,34 @@ repeatable tags with `--tag review --tag delegated`; every new chat receives the
 automatically, and `cli` records creation through `garcon-cli` and nothing else. `--title` sets
 an explicit title on either a new or resumed chat.
 
-The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, or `stop`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `status`, or `wait`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+
+Every accepted start or resume prints an exact handle before waiting:
+
+```text
+chat id: 1785337200123456
+turn id: 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
+```
+
+Retain both values to reattach after a terminal interruption without submitting the prompt again:
+
+```bash
+garcon-cli --workspace default wait 1785337200123456 \
+  --turn 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
+```
+
+`wait --json` prints the terminal turn receipt as one JSON document. Turn receipts belong to the running server process and may expire under retention pressure, so reattachment can fail after a server restart or receipt eviction even though the chat transcript remains available in Garcon.
+
+Inspect current chat-level progress when no retained turn handle is available:
+
+```bash
+garcon-cli --workspace default status 1785337200123456
+garcon-cli --workspace default status 1785337200123456 --messages 20 --json
+```
+
+`status` returns the current processing phase, execution control, pending inputs, and the latest 10 normalized transcript messages by default. `--messages` accepts `0` through `200`; zero skips transcript loading for a lightweight execution-state check. A temporarily unavailable transcript is reported inside an otherwise successful snapshot. JSON is the stable machine-readable interface; plain text redacts image bodies and truncates each message at 4,000 characters.
+
+Status is a one-shot, non-transactional chat observation. `status: idle` does not prove that a particular turn settled or that a just-finished message batch is already visible. Use `wait` with the exact accepted chat and turn IDs when completion identity matters, especially before retrying write-capable delegated work.
 
 ### One-Shot Chat Control From The CLI
 

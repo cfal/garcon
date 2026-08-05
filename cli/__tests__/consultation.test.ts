@@ -62,12 +62,15 @@ const settings = {
   },
 } as RemoteSettingsSnapshot;
 
-function output(): CliOutput & { acceptedIds: string[]; messages: string[][] } {
+function output(): CliOutput & {
+  acceptedHandles: Array<{ chatId: string; turnId: string }>;
+  messages: string[][];
+} {
   return {
-    acceptedIds: [], messages: [],
-    accepted(chatId) { this.acceptedIds.push(chatId); },
+    acceptedHandles: [], messages: [],
+    accepted({ chatId, turnId }) { this.acceptedHandles.push({ chatId, turnId }); },
     completed(messages) { this.messages.push([...messages]); },
-    listing() {},
+    result() {},
     sent() {},
     stopped() {},
     diagnostic() {},
@@ -110,7 +113,7 @@ describe('runConsultation', () => {
       chatId: CHAT_ID, agentId: 'codex', projectPath: '/repo', command: 'Implement it',
       permissionMode: 'acceptEdits', thinkingMode: 'high', tags: ['cli', 'review-needed'],
     });
-    expect(testOutput.acceptedIds).toEqual([CHAT_ID]);
+    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Implementation review' }]);
     expect(testOutput.messages).toEqual([['Done']]);
   });
@@ -206,7 +209,7 @@ describe('runConsultation', () => {
     })).rejects.toThrow('rename failed');
 
     expect(receiptRead).toBe(true);
-    expect(testOutput.acceptedIds).toEqual([CHAT_ID]);
+    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
     expect(testOutput.messages).toEqual([['Done']]);
   });
 

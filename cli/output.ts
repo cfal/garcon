@@ -1,4 +1,5 @@
 import type { ChatStopOutcome } from '@garcon/common/chat-types';
+import type { AgentTurnCommandResponse } from '@garcon/common/chat-command-contracts';
 
 export interface CliWritable {
   write(chunk: string): unknown;
@@ -7,9 +8,9 @@ export interface CliWritable {
 export type AsyncDelivery = 'new-turn' | 'steer';
 
 export interface CliOutput {
-  accepted(chatId: string): void;
+  accepted(handle: Pick<AgentTurnCommandResponse, 'chatId' | 'turnId'>): void;
   completed(messages: readonly string[]): void;
-  listing(content: string): void;
+  result(content: string): void;
   sent(chatId: string, delivery: AsyncDelivery, turnId: string): void;
   stopped(chatId: string, outcome: Exclude<ChatStopOutcome, 'failed'>): void;
   diagnostic(message: string): void;
@@ -20,15 +21,15 @@ export function createCliOutput(
   stderr: CliWritable = process.stderr,
 ): CliOutput {
   return {
-    accepted(chatId) {
-      stdout.write(`chat id: ${chatId}\n`);
+    accepted({ chatId, turnId }) {
+      stdout.write(`chat id: ${chatId}\nturn id: ${turnId}\n`);
     },
     completed(messages) {
       const nonEmpty = messages.filter((message) => message.trim().length > 0);
       if (nonEmpty.length === 0) return;
       stdout.write(`${nonEmpty.join('\n\n')}\n`);
     },
-    listing(content) {
+    result(content) {
       stdout.write(`${content.replace(/\n+$/, '')}\n`);
     },
     sent(chatId, delivery, turnId) {

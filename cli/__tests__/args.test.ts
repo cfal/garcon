@@ -155,6 +155,122 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['--help'], ENV)).toEqual({ kind: 'help' });
   });
 
+  test('parses an exact turn wait with connection options and JSON output', () => {
+    expect(parseCliArgs([
+      '--workspace', 'work',
+      '--config-dir', '/conf',
+      '--server', 'http://127.0.0.1:8080',
+      'wait', CHAT_ID,
+      '--turn', 'turn-1',
+      '--json',
+    ], ENV)).toEqual({
+      kind: 'wait',
+      workspace: 'work',
+      configDir: '/conf',
+      serverUrl: 'http://127.0.0.1:8080',
+      chatId: CHAT_ID,
+      turnId: 'turn-1',
+      json: true,
+    });
+  });
+
+  test('parses chat status with a bounded transcript tail', () => {
+    expect(parseCliArgs([
+      '--workspace', 'work',
+      '--config-dir', '/conf',
+      '--server', 'http://127.0.0.1:8080',
+      'status', CHAT_ID,
+      '--messages', '20',
+      '--json',
+    ], ENV)).toEqual({
+      kind: 'status',
+      workspace: 'work',
+      configDir: '/conf',
+      serverUrl: 'http://127.0.0.1:8080',
+      chatId: CHAT_ID,
+      messageLimit: 20,
+      json: true,
+    });
+    expect(parseCliArgs(['status', CHAT_ID], ENV)).toMatchObject({
+      kind: 'status',
+      messageLimit: 10,
+      json: false,
+    });
+    expect(parseCliArgs(['status', CHAT_ID, '--messages', '0'], ENV)).toMatchObject({
+      messageLimit: 0,
+    });
+  });
+
+  test('treats -- wait as a new-chat prompt', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--', 'wait', 'for', 'the', 'review',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      prompt: 'wait for the review',
+    });
+  });
+
+  test('treats -- status as a new-chat prompt', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--', 'status', 'the', 'current', 'work',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      prompt: 'status the current work',
+    });
+  });
+
+  test.each([
+    { args: ['status'], message: 'exactly one chat ID' },
+    { args: ['status', CHAT_ID, 'extra'], message: 'exactly one chat ID' },
+    { args: ['status', '123'], message: 'valid Garcon chat ID' },
+    { args: ['status', CHAT_ID, '--messages=-1'], message: 'integer from 0 through 200' },
+    { args: ['status', CHAT_ID, '--messages', '201'], message: 'integer from 0 through 200' },
+    { args: ['status', CHAT_ID, '--messages', '1.5'], message: 'integer from 0 through 200' },
+    { args: ['status', CHAT_ID, '--messages', '1e2'], message: 'integer from 0 through 200' },
+    { args: ['status', CHAT_ID, '--messages', '1', '--messages', '2'], message: 'only once' },
+    { args: ['status', CHAT_ID, '--turn', 'turn-1'], message: '--turn cannot be used with status' },
+    { args: ['status', CHAT_ID, '--cwd', '.'], message: '--cwd cannot be used with status' },
+    { args: ['status', CHAT_ID, '--agent', 'codex'], message: '--agent cannot be used with status' },
+    { args: ['status', CHAT_ID, '--provider', 'p'], message: '--provider cannot be used with status' },
+    { args: ['status', CHAT_ID, '--endpoint', 'e'], message: '--endpoint cannot be used with status' },
+    { args: ['status', CHAT_ID, '--model', 'gpt'], message: '--model cannot be used with status' },
+    { args: ['status', CHAT_ID, '--permissions', 'plan'], message: '--permissions cannot be used with status' },
+    { args: ['status', CHAT_ID, '--reasoning-effort', 'high'], message: '--reasoning-effort cannot be used with status' },
+    { args: ['status', CHAT_ID, '--title', 'T'], message: '--title cannot be used with status' },
+    { args: ['status', CHAT_ID, '--tag', 'review'], message: '--tag cannot be used with status' },
+    { args: ['status', CHAT_ID, '--resume', CHAT_ID], message: '--resume cannot be used with status' },
+    { args: ['status', CHAT_ID, '--allow-steer'], message: '--allow-steer cannot be used with status' },
+    { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--messages', '1'], message: '--messages cannot be used with wait' },
+    { args: ['list', 'agents', '--messages', '1'], message: '--messages cannot be used with list' },
+    { args: ['stop', CHAT_ID, '--messages', '1'], message: '--messages cannot be used with stop' },
+    { args: ['send-async', CHAT_ID, '--messages', '1', 'message'], message: '--messages cannot be used with send-async' },
+    { args: ['--agent', 'codex', '--model', 'gpt', '--messages', '1', 'prompt'], message: '--messages can only be used with status' },
+  ])('rejects invalid status arguments: $message', ({ args, message }) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test.each([
+    { args: ['wait', CHAT_ID], message: 'valid --turn ID' },
+    { args: ['wait', CHAT_ID, '--turn', ''], message: 'valid --turn ID' },
+    { args: ['wait', CHAT_ID, '--turn', ' padded '], message: 'valid --turn ID' },
+    { args: ['wait', CHAT_ID, '--turn', 'a'.repeat(257)], message: 'valid --turn ID' },
+    { args: ['wait', '123', '--turn', 'turn-1'], message: 'valid Garcon chat ID' },
+    { args: ['wait', CHAT_ID, 'extra', '--turn', 'turn-1'], message: 'exactly one chat ID' },
+    { args: ['wait', CHAT_ID, '--turn', 'one', '--turn', 'two'], message: 'only once' },
+    { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--cwd', '.'], message: '--cwd cannot be used with wait' },
+    { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--allow-steer'], message: '--allow-steer cannot be used with wait' },
+    { args: ['list', 'agents', '--turn', 'turn-1'], message: '--turn cannot be used with list' },
+    { args: ['stop', CHAT_ID, '--turn', 'turn-1'], message: '--turn cannot be used with stop' },
+    { args: ['send-async', CHAT_ID, '--turn', 'turn-1', 'message'], message: '--turn cannot be used with send-async' },
+    { args: ['--agent', 'codex', '--model', 'gpt', '--turn', 'turn-1', 'prompt'], message: '--turn can only be used with wait' },
+  ])('rejects invalid wait arguments: $message', ({ args, message }) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
   test('parses a minimal send-async command', () => {
     expect(parseCliArgs(['send-async', CHAT_ID, 'Implement the review'], ENV)).toEqual({
       kind: 'send-async',
