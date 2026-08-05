@@ -12,13 +12,10 @@ import {
   createOpenCodeTurnContext,
   openCodeEventBelongsToTurn,
   type OpenCodeSession,
-  type OpenCodeTurnContext,
 } from './turn-events.js';
-import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
-import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
+import { ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
-import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type { OpenCodeConfig } from '../../config.js';
@@ -56,6 +53,8 @@ import {
   OpenCodeTimeoutError,
   withAbortableTimeout,
 } from './request-control.js';
+import { convertOpenCodeEventToChatMessages } from './event-converter.js';
+import { OpenCodeSteeringController } from './steering.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -377,6 +376,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #sessions = new Map<string, OpenCodeSession>();
   #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
   #pendingPermissions = new Map<string, PendingPermission>();
+  readonly steering: OpenCodeSteeringController;
   readonly #endpointCoordinator: OpenCodeEndpointCoordinator;
   readonly #globalEventListener: OpenCodeGlobalEventListener;
   #modelCache: OpenCodeModelCache | null = null;
@@ -425,6 +425,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         ? (input) => this.#confirmGlobalEventDelivery(input)
         : async () => undefined,
       handleEvent: (client, event) => this.#handleGlobalSSEEvent(client, event),
+    });
+    this.steering = new OpenCodeSteeringController({
+      requestTimeoutMs: this.#options.requestTimeoutMs,
+      getSession: (agentSessionId) => this.#sessions.get(agentSessionId),
+      getClient: () => this.getClient(),
+      runScopedRequest: (label, scope, operation) => (
+        this.#runScopedSessionRequest(label, scope, operation)
+      ),
+      settleIdle: (agentSessionId, session, idleEventId) => (
+        this.#settleIdleSession(agentSessionId, session, idleEventId)
+      ),
     });
   }
 
@@ -566,6 +577,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const failure = error instanceof Error ? error : new Error(String(error));
     for (const [agentSessionId, session] of this.#sessions) {
       if (session.status !== 'running') continue;
+      this.steering.stagePendingCleanup(session);
       const eventMetadata = session.turn.eventMetadata;
       session.providerWorkRequiresQuiescence = true;
       session.status = 'completed';
@@ -581,6 +593,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   #failTurnForProviderError(agentSessionId: string, session: OpenCodeSession, message: string): void {
+    this.steering.stagePendingCleanup(session);
     const metadata = session.turn.eventMetadata;
     session.providerWorkRequiresQuiescence = true;
     session.status = 'completed';
@@ -596,6 +609,14 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     if (session.status !== 'running' || !session.turn.providerObservedEventId || !idleEventId
       || idleEventId <= session.turn.providerObservedEventId
       || session.turn.assistantMessageIds.size === 0) return;
+    if (session.turn.pendingSteeringMessageIds.size > 0) {
+      this.#failTurnForProviderError(
+        agentSessionId,
+        session,
+        'OpenCode stopped before processing accepted steering input',
+      );
+      return;
+    }
     const contextOverflow = session.turn.pendingContextOverflowError;
     if (contextOverflow) {
       this.#failTurnForProviderError(agentSessionId, session, contextOverflow);
@@ -676,117 +697,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return this.#initPromise;
   }
 
-  #convertOpenCodeEventToChatMessages(
-    event: SSEEvent,
-    turn: OpenCodeTurnContext,
-  ): ChatMessage[] | undefined {
-    const chatMessages: ChatMessage[] = [];
-    const now = new Date().toISOString();
-    const props = event.properties || {};
-    const roleFromEvent = (
-      props.info?.role
-      || props.part?.role
-      || props.part?.snapshot?.role
-      || props.message?.role
-      || null
-    );
-
-    const { assistantPartTypes, messageRoles } = turn;
-
-    switch (event.type) {
-      case 'message.updated': {
-        const info = props.info || {};
-        const messageId = info.id;
-        if (!messageId) {
-          this.#logger.warn('OpenCode event is missing a message ID', { eventType: event.type });
-          return;
-        }
-        if (info.finish !== 'stop') {
-          if (info.role && info.role !== 'user') {
-            messageRoles.set(messageId, info.role);
-          }
-        } else {
-          messageRoles.delete(messageId);
-        }
-        break;
-      }
-
-      case 'message.part.updated': {
-        const part = props.part || {};
-        if (!part.id) {
-          this.#logger.warn('OpenCode event is missing a part ID', { eventType: event.type });
-          return;
-        }
-
-        const messageId = part.messageID;
-        if (!messageId) {
-          this.#logger.warn('OpenCode event is missing a message ID', { eventType: event.type });
-          return;
-        }
-
-        const messageRole = roleFromEvent || messageRoles.get(messageId) || null;
-        if (!messageRole) {
-          return;
-        }
-
-        if (part.type === 'tool') {
-          if (part.state?.status === 'completed') {
-            const toolUse = convertOpenCodeToolUse(now, part);
-            chatMessages.push(toolUse);
-            chatMessages.push(new ToolResultMessage(
-              now,
-              toolUse.toolId,
-              normalizeToolResultContent(part.state.output),
-              false,
-            ));
-          } else if (part.state?.status === 'error') {
-            const toolUse = convertOpenCodeToolUse(now, part);
-            chatMessages.push(toolUse);
-            chatMessages.push(new ToolResultMessage(
-              now,
-              toolUse.toolId,
-              normalizeToolResultContent(part.state.error || 'Error'),
-              true,
-            ));
-          }
-          break;
-        }
-
-        if (part.type === 'text' || part.type === 'reasoning') {
-          assistantPartTypes.set(part.id, part.type);
-        }
-
-        if (part.text) {
-          const partType = assistantPartTypes.get(part.id);
-          if (!partType) {
-            this.#logger.warn('OpenCode final text part was not observed earlier', {
-              eventType: event.type,
-            });
-            return;
-          }
-          assistantPartTypes.delete(part.id);
-
-          if (partType === 'text') {
-            chatMessages.push(new AssistantMessage(now, part.text));
-          } else {
-            chatMessages.push(new ThinkingMessage(now, part.text));
-          }
-        }
-        break;
-      }
-
-      case 'message.part.delta':
-        break;
-
-      default:
-        break;
-    }
-
-    return chatMessages;
-  }
-
   #dispatchOpenCodeEvent(event: SSEEvent, session: OpenCodeSession): void {
-    const chatMessages = this.#convertOpenCodeEventToChatMessages(event, session.turn);
+    const chatMessages = convertOpenCodeEventToChatMessages(event, session.turn, this.#logger);
     if (!chatMessages || !chatMessages.length) {
       return;
     }
@@ -911,12 +823,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       this.#handlePermissionEvent(client, event, sessionId, session, chatId);
       return;
     }
+    this.steering.observeAcknowledgement(session, event);
     if (!openCodeEventBelongsToTurn(session, event)) return;
     this.#dispatchOpenCodeEvent(event, session);
 
     if (event.type !== 'session.status' || event.properties?.status?.type !== 'idle') return;
     if (session.aborting) {
       session.skippedIdleEventId = event.id ?? null;
+      return;
+    }
+    if (session.activeSteeringDeliveries > 0) {
+      this.steering.deferIdle(session, event.id ?? null);
       return;
     }
     this.#settleIdleSession(sessionId, session, event.id ?? null);
@@ -1197,6 +1114,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       recentEventIds: new Set(),
       providerWorkRequiresQuiescence: false,
       terminalEventsFencedUntilPrompt: false,
+      activeSteeringDeliveries: 0,
+      deferredIdleEventId: null,
+      pendingSteeringRevertMessageId: null,
       turn,
     });
     this.emitSessionCreated(chatId);
@@ -1244,6 +1164,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         || sess.turn !== turn
       ) return;
       this.#logger.error('OpenCode prompt failed', { agentSessionId, error: err.message });
+      this.steering.stagePendingCleanup(sess);
       sess.providerWorkRequiresQuiescence = true;
       sess.status = 'completed';
       sess.lastActivityAt = Date.now();
@@ -1290,13 +1211,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const client = await this.getClient();
     if (session) {
       await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+      await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
     }
     const waiter = this.#createTurnWaiter(agentSessionId);
     if (session) {
       session.status = 'running';
       session.aborting = false;
       session.skippedIdleEventId = null;
+      session.activeSteeringDeliveries = 0;
+      session.deferredIdleEventId = null;
       session.chatId = chatId;
+      session.model = model;
       session.permissionMode = permissionMode;
       session.directory = scope.directory;
       session.lastActivityAt = Date.now();
@@ -1313,6 +1238,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         recentEventIds: new Set(),
         providerWorkRequiresQuiescence: false,
         terminalEventsFencedUntilPrompt: false,
+        activeSteeringDeliveries: 0,
+        deferredIdleEventId: null,
+        pendingSteeringRevertMessageId: null,
         turn,
       });
     }
@@ -1350,6 +1278,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       }
       this.#logger.error('OpenCode query failed', { agentSessionId, error: err.message });
       if (!sess || sess.status !== 'running' || sess.turn !== turn) throw err;
+      this.steering.stagePendingCleanup(sess);
       sess.providerWorkRequiresQuiescence = true;
       sess.status = 'completed';
       sess.lastActivityAt = Date.now();
@@ -1415,6 +1344,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       || session.status !== 'running'
       || session.turn !== turn
     ) return false;
+    this.steering.stagePendingCleanup(session);
     session.status = 'aborted';
     session.lastActivityAt = Date.now();
     this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session aborted'));

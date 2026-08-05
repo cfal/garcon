@@ -39,6 +39,10 @@ describe('OpenCodeAgentIntegration', () => {
     });
     expect(integration.auth).toBeDefined();
     expect(integration.singleQuery).toBeDefined();
+    expect(integration.steering).toMatchObject({
+      captureTarget: expect.any(Function),
+      steer: expect.any(Function),
+    });
     expect(integration.commands).toBeNull();
     expect(integration.endpoints).toBeNull();
     expect(host.environment.get).not.toHaveBeenCalled();

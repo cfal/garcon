@@ -66,7 +66,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly forking: NonNullable<AgentIntegration['forking']>;
-  readonly steering = null;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
@@ -85,6 +85,10 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     this.execution = new OpenCodeExecution(runtime, nativeSessions);
+    this.steering = {
+      captureTarget: (request) => runtime.steering.captureTarget(request.agentSessionId),
+      steer: (request) => runtime.steering.steer(request),
+    };
     this.transcript = createOpenCodeTranscript(runtime, nativeSessions, sessionId, logger);
     this.catalog = createModelCatalog({
       logger: host.logger,

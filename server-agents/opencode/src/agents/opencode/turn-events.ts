@@ -12,6 +12,8 @@ export interface OpenCodeTurnContext {
   providerPromptText: string;
   providerObservedEventId: string | null;
   providerContinuationMessageIds: Set<string>;
+  providerSteeringPartIds: Set<string>;
+  pendingSteeringMessageIds: Set<string>;
   observedUserMessageIds: Set<string>;
   autoCompactionActive: boolean;
   pendingContextOverflowError: string | null;
@@ -39,6 +41,11 @@ export interface OpenCodeSession {
   // Terminal session events have no prompt identity. Recovery drops the abort backlog until
   // OpenCode publishes the exact caller-owned part for the successor prompt.
   terminalEventsFencedUntilPrompt: boolean;
+  activeSteeringDeliveries: number;
+  deferredIdleEventId: string | null;
+  // A stopped turn leaves accepted follow-up messages in OpenCode's transcript. The next
+  // prompt reverts the earliest unconsumed one before OpenCode can include it in model input.
+  pendingSteeringRevertMessageId: string | null;
   turn: OpenCodeTurnContext;
 }
 
@@ -55,10 +62,12 @@ export function createOpenCodeTurnContext(
   return {
     eventMetadata,
     providerMessageId: null,
-    providerPromptPartId: `prt_${crypto.randomUUID().replaceAll('-', '')}`,
+    providerPromptPartId: createOpenCodePromptPartId(),
     providerPromptText: promptText,
     providerObservedEventId: null,
     providerContinuationMessageIds: new Set(),
+    providerSteeringPartIds: new Set(),
+    pendingSteeringMessageIds: new Set(),
     observedUserMessageIds: new Set(),
     autoCompactionActive: false,
     pendingContextOverflowError: null,
@@ -66,6 +75,26 @@ export function createOpenCodeTurnContext(
     messageRoles: new Map(),
     assistantPartTypes: new Map(),
   };
+}
+
+export function createOpenCodePromptPartId(): string {
+  return `prt_${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
+export function observeOpenCodeSteeringPart(
+  session: OpenCodeSession,
+  event: SSEEvent,
+): string | null {
+  if (event.type !== 'message.part.updated') return null;
+  const part = event.properties?.part;
+  const partId = typeof part?.id === 'string' ? part.id : '';
+  const messageId = typeof part?.messageID === 'string' ? part.messageID : '';
+  if (!partId || !messageId || !session.turn.providerSteeringPartIds.has(partId)) return null;
+
+  session.turn.providerContinuationMessageIds.add(messageId);
+  session.turn.pendingSteeringMessageIds.add(messageId);
+  session.turn.providerObservedEventId = event.id ?? null;
+  return partId;
 }
 
 export function acceptUniqueOpenCodeTurnEvent(
@@ -131,6 +160,7 @@ export function openCodeEventBelongsToTurn(
     }
     turn.providerObservedEventId = event.id ?? null;
     turn.assistantMessageIds.add(messageId);
+    turn.pendingSteeringMessageIds.delete(info.parentID);
     return true;
   }
   if (event.type === 'message.part.updated') {

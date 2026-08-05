@@ -3,9 +3,13 @@ import type {
   AgentRunCommandRequest,
   StartChatCommandRequest,
 } from '../../../common/chat-command-contracts.js';
-import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
+import type {
+  ChatSessionStoppedMessage,
+  PendingUserInputUpdatedMessage,
+} from '../../../common/ws-events.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { claudeText } from '../../support/fake-claude-model.js';
+import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
 import {
   type IntegrationDirectories,
@@ -27,6 +31,11 @@ import {
 } from '../../support/live-codex.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
+import {
+  scriptedOpenCodeRunRequest,
+  scriptedOpenCodeStartRequest,
+  startScriptedOpenCodeTestEnvironment,
+} from '../../support/scripted-opencode.js';
 
 interface HeldModelTurn {
   readonly requested: Promise<unknown>;
@@ -35,8 +44,16 @@ interface HeldModelTurn {
 
 interface SteeringContractDriver {
   readonly id: string;
-  readonly serverEnvironment: Record<string, string>;
+  readonly serverEnvironment?: Record<string, string>;
+  readonly resolveServerEnvironment?: (
+    directories: IntegrationDirectories,
+  ) => Record<string, string>;
   readonly prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
+  readonly afterGarconStop?: (directories: IntegrationDirectories) => Promise<void>;
+  readonly extraDiagnostics?: (
+    directories: IntegrationDirectories,
+  ) => Record<string, unknown>;
+  readonly emitsTurnTerminalOnStop?: boolean;
   startRequest(input: {
     chatId: string;
     projectPath: string;
@@ -170,7 +187,10 @@ function defineSteeringConformance(
           driver.assertSettled();
         }, {
           serverEnvironment: driver.serverEnvironment,
+          resolveServerEnvironment: driver.resolveServerEnvironment,
           prepareWorkspace: driver.prepareWorkspace,
+          afterGarconStop: driver.afterGarconStop,
+          extraDiagnostics: driver.extraDiagnostics,
         });
       } finally {
         held.release();
@@ -216,15 +236,26 @@ function defineSteeringConformance(
             afterIndex: stopCursor,
             timeoutMs: LIVE_TURN_TIMEOUT_MS,
           });
-          await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
-            afterIndex: stopCursor,
-            timeoutMs: LIVE_TURN_TIMEOUT_MS,
-          });
-          expectStoppedTurnEventOrder(
-            fixture.client.eventsSince(stopCursor),
-            chatId,
-            active.turnId,
-          );
+          if (driver.emitsTurnTerminalOnStop === false) {
+            await fixture.client.waitForEvent(
+              (event): event is ChatSessionStoppedMessage =>
+                event.type === 'chat-session-stopped'
+                && event.chatId === chatId
+                && event.intent === 'stop',
+              `${providerName} stop confirmation`,
+              { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+            );
+          } else {
+            await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
+              afterIndex: stopCursor,
+              timeoutMs: LIVE_TURN_TIMEOUT_MS,
+            });
+            expectStoppedTurnEventOrder(
+              fixture.client.eventsSince(stopCursor),
+              chatId,
+              active.turnId,
+            );
+          }
 
           held.release();
           driver.scriptReply(recoveryReply);
@@ -248,7 +279,10 @@ function defineSteeringConformance(
           driver.assertSettled();
         }, {
           serverEnvironment: driver.serverEnvironment,
+          resolveServerEnvironment: driver.resolveServerEnvironment,
           prepareWorkspace: driver.prepareWorkspace,
+          afterGarconStop: driver.afterGarconStop,
+          extraDiagnostics: driver.extraDiagnostics,
         });
       } finally {
         held.release();
@@ -298,6 +332,32 @@ defineSteeringConformance('Codex', async () => {
     dispose: () => environment.dispose(),
   };
 });
+
+if (process.platform === 'linux') {
+  defineSteeringConformance('OpenCode', async () => {
+    const environment = startScriptedOpenCodeTestEnvironment();
+    return {
+      driver: {
+        id: 'opencode',
+        resolveServerEnvironment: environment.resolveServerEnvironment,
+        prepareWorkspace: environment.prepareWorkspace,
+        afterGarconStop: environment.afterGarconStop,
+        extraDiagnostics: environment.extraDiagnostics,
+        emitsTurnTerminalOnStop: false,
+        startRequest: scriptedOpenCodeStartRequest,
+        runRequest: scriptedOpenCodeRunRequest,
+        holdReply: (reply) => environment.model.scriptHeldTurn([chatCompletionsText(reply)]),
+        scriptReply: (reply) => environment.model.scriptTurn([chatCompletionsText(reply)]),
+        markRequests: () => environment.model.markRequests(),
+        userTextsSince: (cursor) => environment.model.requestsSince(cursor)
+          .flatMap((request) => request.userTexts),
+        assertSettled: () => environment.model.assertSettled(),
+        reset: () => environment.model.reset(),
+      },
+      dispose: () => environment.dispose(),
+    };
+  });
+}
 
 function marker(provider: string, label: string): string {
   return `SCRIPTED_${provider.toUpperCase()}_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
