@@ -272,9 +272,11 @@ async function waitForStablePinnedTranscriptLayout(page: Page, scenario = 'unnam
           previous = current;
           if (stableFrames >= 7) return;
         }
-        throw new Error(`Pinned transcript geometry did not settle: ${JSON.stringify(diagnostic)}`);
+        throw new Error(
+          `Pinned transcript geometry did not settle (${input.scenario}): ${JSON.stringify(diagnostic)}`,
+        );
       },
-      { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR },
+      { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR, scenario },
     ),
   );
 }

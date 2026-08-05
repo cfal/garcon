@@ -676,8 +676,15 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (!this.options.visible || !viewport || !root) return;
 		return observeConversationRootOffset(viewport, root, (margin) => {
 			if (Math.abs(margin - this.#scrollMargin) <= OFFSET_TOLERANCE_PX) return;
+			// A late root-offset change moves the physical end outside TanStack's own
+			// anchoring, so a pinned viewport resting at the end re-pins after the update.
+			const repinEnd =
+				untrack(() => this.options.pinned) &&
+				this.#activeTargetScrolls === 0 &&
+				this.isAtEnd(Math.abs(margin - this.#scrollMargin) + CHAT_GEOMETRY_END_THRESHOLD_PX);
 			this.#scrollMargin = margin;
 			this.#instance().setOptions({ scrollMargin: margin });
+			if (repinEnd && this.isReady()) this.#scrollToPhysicalEnd();
 		});
 	}
 
