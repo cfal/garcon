@@ -26,8 +26,9 @@
 
 	function updateOpen(next: boolean): void {
 		if (!next && requestClose) {
-			requestClose();
+			// Restores the controlled value before a synchronous request callback may close it.
 			open = true;
+			requestClose();
 			return;
 		}
 		open = next;
