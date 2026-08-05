@@ -197,6 +197,7 @@ async function waitForStablePinnedTranscriptLayout(page: Page): Promise<void> {
         const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         let previous:
           | {
+              dataRevision: number;
               distanceFromEnd: number;
               itemCount: number;
               lastBottom: number;
@@ -236,6 +237,7 @@ async function waitForStablePinnedTranscriptLayout(page: Page): Promise<void> {
           }
           const last = items.at(-1);
           const current = {
+            dataRevision: Number(sizer?.dataset.chatVirtualDataRevision ?? 0),
             distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
             itemCount: items.length,
             lastBottom: last?.rect.bottom ?? Number.NaN,
@@ -256,6 +258,7 @@ async function waitForStablePinnedTranscriptLayout(page: Page): Promise<void> {
             discontinuities.length === 0;
           const unchanged =
             previous !== null &&
+            current.dataRevision === previous.dataRevision &&
             current.itemCount === previous.itemCount &&
             current.lastKey === previous.lastKey &&
             current.modelCount === previous.modelCount &&
@@ -1548,7 +1551,77 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     .getByText('echo:chromium-pinned-append', { exact: true })
     .waitFor();
   await waitForStablePinnedTranscriptLayout(fixture.page);
+
+  const pinnedSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'New Terminal');
+  await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
+  await appendTurn(fixture.integration, chatId, 'chromium-pinned-hidden-append');
+  await selectMainWorkspaceSurface(fixture.page, pinnedSurfaceLabel);
+  await fixture.page
+    .locator(FEED_SELECTOR)
+    .getByText('echo:chromium-pinned-hidden-append', { exact: true })
+    .waitFor();
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   fixture.assertNoBrowserErrors();
+}
+
+// Samples every frame across a chat switch and rejects any painted frame where feed
+// content is visible away from the physical end, or where the initial paint gate lets
+// content or the overlay scrollbar paint while the feed is still positioning.
+async function expectNoSwitchPaintFlicker(
+  fixture: ChromiumFixture,
+  switchAction: () => Promise<void>,
+): Promise<void> {
+  const samples = fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const surfaceOf = (): string => {
+      const item = feed.querySelector<HTMLElement>('[data-chat-virtual-item]');
+      const value = item?.dataset.chatVirtualItem;
+      if (!value) return '';
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return Array.isArray(parsed) && typeof parsed[0] === 'string' ? parsed[0] : '';
+      } catch {
+        return '';
+      }
+    };
+    const initialSurface = surfaceOf();
+    const violations: Array<Record<string, unknown>> = [];
+    let switchObserved = false;
+    let settledFrames = 0;
+    for (let attempt = 0; attempt < 600 && settledFrames < 12; attempt += 1) {
+      await frame();
+      const content = feed.querySelector<HTMLElement>('[data-chat-feed-content]');
+      if (!content) continue;
+      const rowCount = content.querySelectorAll('[data-chat-virtual-item]').length;
+      const busy = feed.getAttribute('aria-busy') === 'true';
+      const contentVisible = getComputedStyle(content).visibility !== 'hidden';
+      const scrollbar = [
+        ...document.querySelectorAll<HTMLElement>('[data-chat-feed-scrollbar]'),
+      ].find((candidate) => candidate.parentElement?.contains(feed));
+      const scrollbarVisible = Boolean(
+        scrollbar && scrollbar.isConnected && getComputedStyle(scrollbar).visibility !== 'hidden',
+      );
+      const distanceFromEnd = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
+      if (busy || surfaceOf() !== initialSurface) switchObserved = true;
+      if (!switchObserved) continue;
+      if (busy && rowCount > 0 && (contentVisible || scrollbarVisible)) {
+        violations.push({ attempt, busy, contentVisible, scrollbarVisible, distanceFromEnd });
+      } else if (!busy && contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) > 2) {
+        violations.push({ attempt, busy, contentVisible, distanceFromEnd, rowCount });
+      }
+      const settled = !busy && contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) <= 1;
+      settledFrames = settled ? settledFrames + 1 : 0;
+    }
+    return { settledFrames, switchObserved, violations };
+  });
+  await switchAction();
+  const observed = await withDiagnosticTimeout('the switch paint samples', samples, 30_000);
+  expect(observed.violations, JSON.stringify(observed, null, 2)).toEqual([]);
+  expect(observed.switchObserved, JSON.stringify(observed, null, 2)).toBe(true);
+  expect(observed.settledFrames, JSON.stringify(observed, null, 2)).toBeGreaterThanOrEqual(12);
 }
 
 async function verifyChatSwitchBottomRestore(
@@ -1561,10 +1634,14 @@ async function verifyChatSwitchBottomRestore(
 
   const secondaryMarker = 'chromium-switch-secondary';
   const secondaryChatId = await seedTranscript(fixture.integration, 12, secondaryMarker);
-  await selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker);
+  await expectNoSwitchPaintFlicker(fixture, () =>
+    selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker),
+  );
   await waitForStablePinnedTranscriptLayout(fixture.page);
 
-  await selectSidebarChat(fixture.page, primaryChatId, 'chromium-virtual-turn-0');
+  await expectNoSwitchPaintFlicker(fixture, () =>
+    selectSidebarChat(fixture.page, primaryChatId, 'chromium-virtual-turn-0'),
+  );
   await waitForStablePinnedTranscriptLayout(fixture.page);
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
@@ -1798,6 +1875,22 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   await clickMenuItem(fixture.page, 'Exit split view');
   await waitForTranscriptScale(fixture.page, 1);
   await waitForStablePinnedTranscriptLayout(fixture.page);
+
+  // Applies the scale change while the surface is hidden so the deferred show-time
+  // measurement path, not the visible reset path, restores the pinned end.
+  const scaleSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'New Terminal');
+  await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
+  const hiddenScaleChatId = await seedTranscript(fixture.integration, 1);
+  await addSidebarChatToSplit(fixture.page, hiddenScaleChatId);
+  await selectMainWorkspaceSurface(fixture.page, scaleSurfaceLabel);
+  await waitForTranscriptScale(fixture.page, 0.85);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'Exit split view');
+  await waitForTranscriptScale(fixture.page, 1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   fixture.assertNoBrowserErrors();
 }
 
@@ -1831,6 +1924,16 @@ async function verifyCountShrinkMeasurements(fixture: ChromiumFixture): Promise<
   expect(compactedGeometry.itemCount).toBeGreaterThan(2);
   expect(compactedGeometry.transcriptItemCount).toBeGreaterThan(1);
   expect(compactedGeometry.overlaps).toEqual([]);
+  expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
+
+  await appendTurn(fixture.integration, chatId, 'chromium-post-shrink-append');
+  await fixture.page
+    .locator(FEED_SELECTOR)
+    .getByText('echo:chromium-post-shrink-append', { exact: true })
+    .waitFor();
+  await waitForStablePinnedTranscriptLayout(fixture.page);
+  const postPublicationGeometry = await transcriptGeometry(fixture.page);
+  expect(postPublicationGeometry.overlaps).toEqual([]);
   expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
   fixture.assertNoBrowserErrors();
 }
@@ -2045,7 +2148,7 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 120_000);
 
-  test('remeasures surviving rows after live-edge compaction', async () => {
+  test('preserves survivor geometry after live-edge compaction and a later publication', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
       'transcript-count-shrink-measurements',
