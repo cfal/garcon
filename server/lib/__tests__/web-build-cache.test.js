@@ -146,6 +146,23 @@ describe('web build cache', () => {
     expect(await isWebBuildCurrent(options)).toBe(false);
   });
 
+  it('invalidates the marker when its content is corrupt or from another version', async () => {
+    const fixture = await createFixture();
+    const options = { ...fixture, inputs: [fixture.input], sourcePath: fixture.input };
+    await recordWebBuild(options);
+    expect(await isWebBuildCurrent(options)).toBe(true);
+    const recorded = JSON.parse(await fs.readFile(fixture.markerPath, 'utf8'));
+
+    await fs.writeFile(fixture.markerPath, '{not json');
+    expect(await isWebBuildCurrent(options)).toBe(false);
+
+    await fs.writeFile(
+      fixture.markerPath,
+      JSON.stringify({ ...recorded, version: recorded.version + 1 }),
+    );
+    expect(await isWebBuildCurrent(options)).toBe(false);
+  });
+
   it('invalidates the marker when a recorded emitted asset is missing', async () => {
     const fixture = await createFixture();
     const options = { ...fixture, inputs: [fixture.input], sourcePath: fixture.input };
@@ -177,8 +194,16 @@ describe('web build cache', () => {
 
   it('records the pre-build hash so concurrent source changes stay invalidated', async () => {
     const fixture = await createFixture();
-    const options = { ...fixture, inputs: [fixture.input], sourcePath: fixture.input };
-    const preBuildHash = await computeWebBuildHash(options.inputs);
+    // One explicit environment keeps every hash comparable, so only the simulated
+    // mid-build source change can invalidate the marker.
+    const environment = { NODE_ENV: 'production' };
+    const options = {
+      ...fixture,
+      environment,
+      inputs: [fixture.input],
+      sourcePath: fixture.input,
+    };
+    const preBuildHash = await computeWebBuildHash(options.inputs, environment);
     await fs.writeFile(path.join(fixture.input, 'app.ts'), 'changed during build');
     await recordWebBuild({ ...options, hash: preBuildHash });
 

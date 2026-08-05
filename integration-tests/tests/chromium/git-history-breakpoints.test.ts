@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
@@ -8,9 +8,9 @@ import {
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
+import { requireCurrentWebBuild } from '../../support/web-build-gate.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const WEB_BUILD_INDEX = join(REPO_ROOT, 'web', 'build', 'index.html');
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
 const PANEL_SELECTOR =
   '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]';
@@ -83,7 +83,8 @@ async function createHistoryFixture(projectPath: string): Promise<void> {
 }
 
 async function createChromiumFixture(): Promise<ChromiumFixture> {
-  await access(WEB_BUILD_INDEX);
+  // Gates on a current web build before any server or browser starts.
+  await requireCurrentWebBuild();
   const integration = await createIntegrationFixture();
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;

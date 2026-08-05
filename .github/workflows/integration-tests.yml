@@ -303,8 +303,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  chromium-dnd-e2e:
-    name: Chromium drag-and-drop E2E
+  chromium-e2e:
+    name: Chromium E2E
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -350,14 +350,14 @@ jobs:
         working-directory: integration-tests
         run: bun run typecheck
 
-      - name: Run Chromium drag-and-drop E2E
+      - name: Run Chromium E2E
         run: bun run test:integration:chromium
 
       - name: Upload Chromium diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: chromium-dnd-e2e-diagnostics
+          name: chromium-e2e-diagnostics
           path: integration-tests/artifacts/chromium/
           if-no-files-found: ignore
           retention-days: 7
