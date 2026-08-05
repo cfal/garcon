@@ -17,6 +17,7 @@ import { withTimeout } from './deferred.js';
 
 export const LIVE_CODEX_MODEL = 'gpt-5.4-nano';
 export const LIVE_CODEX_THINKING_MODE = 'low';
+export type CodexTestToolMode = 'direct' | 'code_mode' | 'code_mode_only';
 
 const CODEX_BINARY = fileURLToPath(
   new URL('../node_modules/.bin/codex', import.meta.url),
@@ -89,6 +90,7 @@ interface LiveCodexTestEnvironmentOptions {
   // Scripted-model environments proxy to a local fake, so any placeholder key works and no
   // credential needs to exist in the environment.
   testingKey?: string;
+  toolMode?: CodexTestToolMode;
 }
 
 type CodexProxyProcess = Bun.Subprocess<'pipe', 'ignore', 'ignore'>;
@@ -229,7 +231,14 @@ export async function startLiveCodexTestEnvironment(
       const codexHome = join(directories.home, '.codex');
       const catalogPath = join(codexHome, 'live-models.json');
       await mkdir(codexHome, { recursive: true, mode: 0o700 });
-      await writeFile(catalogPath, JSON.stringify(LIVE_MODEL_CATALOG), { mode: 0o600 });
+      const modelCatalog = {
+        ...LIVE_MODEL_CATALOG,
+        models: LIVE_MODEL_CATALOG.models.map((model) => ({
+          ...model,
+          tool_mode: options.toolMode ?? model.tool_mode,
+        })),
+      };
+      await writeFile(catalogPath, JSON.stringify(modelCatalog), { mode: 0o600 });
       await writeFile(join(codexHome, 'config.toml'), [
         'model_provider = "garcon-live-openai"',
         `model_catalog_json = ${JSON.stringify(catalogPath)}`,

@@ -1,9 +1,10 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { assistantContents } from '../../support/chat-assertions.js';
+import { assistantContents, messagesOfType } from '../../support/chat-assertions.js';
 import {
   codexAssistantMessage,
+  codexCodeModeCall,
   codexExecCommandCall,
 } from '../../support/fake-codex-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -25,7 +26,7 @@ describe('scripted Codex interrupt lifecycle', () => {
   let environment: ScriptedCodexTestEnvironment | undefined;
 
   beforeAll(async () => {
-    environment = await startScriptedCodexTestEnvironment();
+    environment = await startScriptedCodexTestEnvironment({ toolMode: 'code_mode' });
   });
 
   afterAll(async () => {
@@ -72,6 +73,12 @@ describe('scripted Codex interrupt lifecycle', () => {
       expect(assistantContents((await fixture.client.getMessages(chatId)).messages).join('\n'))
         .not.toContain(stoppedReply);
 
+      const recoveryCommandMarker = marker('RECOVERY_COMMAND');
+      const recoveryCommand = `printf ${JSON.stringify(recoveryCommandMarker)}`;
+      testEnvironment.model.scriptTurn([codexCodeModeCall(
+        'call_recovery_code_mode',
+        `const result = await tools.exec_command({cmd: ${JSON.stringify(recoveryCommand)}}); text(result.output);`,
+      )]);
       testEnvironment.model.scriptTurn([codexAssistantMessage(recoveryReply)]);
       const recoveryCursor = fixture.client.markEvents();
       const recovery = await fixture.client.runChat(liveCodexRunRequest({
@@ -86,6 +93,31 @@ describe('scripted Codex interrupt lifecycle', () => {
         marker: recoveryReply,
         afterIndex: recoveryCursor,
       });
+      const liveMessages = fixture.client.eventsSince(recoveryCursor).flatMap((event) =>
+        event.type === 'chat-messages'
+          && event.chatId === chatId
+          ? event.messages
+          : []);
+      expect(assistantContents(liveMessages).filter((content) => content === recoveryReply))
+        .toEqual([recoveryReply]);
+      const liveRecoveryCommands = messagesOfType(liveMessages, 'bash-tool-use')
+        .filter((message) => message.command.includes(recoveryCommandMarker));
+      expect(liveRecoveryCommands).toHaveLength(1);
+      expect(
+        messagesOfType(liveMessages, 'tool-result')
+          .filter((message) => message.toolId === liveRecoveryCommands[0]?.toolId),
+      ).toHaveLength(1);
+
+      const messages = (await fixture.client.getMessages(chatId)).messages;
+      expect(assistantContents(messages).filter((content) => content === recoveryReply))
+        .toEqual([recoveryReply]);
+      const recoveryCommands = messagesOfType(messages, 'bash-tool-use')
+        .filter((message) => message.command.includes(recoveryCommandMarker));
+      expect(recoveryCommands).toHaveLength(1);
+      expect(
+        messagesOfType(messages, 'tool-result')
+          .filter((message) => message.toolId === recoveryCommands[0]?.toolId),
+      ).toHaveLength(1);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

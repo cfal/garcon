@@ -55,6 +55,16 @@ export function codexExecCommandCall(
   };
 }
 
+export function codexCodeModeCall(callId: string, input: string): CodexScriptedItem {
+  return {
+    type: 'custom_tool_call',
+    name: 'exec',
+    input,
+    call_id: callId,
+    status: 'completed',
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

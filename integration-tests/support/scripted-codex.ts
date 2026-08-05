@@ -6,6 +6,7 @@
 import { FakeCodexModel } from './fake-codex-model.js';
 import {
   startLiveCodexTestEnvironment,
+  type CodexTestToolMode,
   type LiveCodexTestEnvironment,
 } from './live-codex.js';
 
@@ -13,13 +14,16 @@ export interface ScriptedCodexTestEnvironment extends LiveCodexTestEnvironment {
   readonly model: FakeCodexModel;
 }
 
-export async function startScriptedCodexTestEnvironment(): Promise<ScriptedCodexTestEnvironment> {
+export async function startScriptedCodexTestEnvironment(options: {
+  readonly toolMode?: CodexTestToolMode;
+} = {}): Promise<ScriptedCodexTestEnvironment> {
   const model = FakeCodexModel.start();
   let environment: LiveCodexTestEnvironment;
   try {
     environment = await startLiveCodexTestEnvironment({
       upstreamUrl: model.responsesUrl,
       testingKey: `garcon-scripted-codex-${crypto.randomUUID()}`,
+      toolMode: options.toolMode,
     });
   } catch (error) {
     model.stop();
