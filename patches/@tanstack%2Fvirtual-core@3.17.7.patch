@@ -1,16 +1,22 @@
+diff --git a/node_modules/@tanstack/virtual-core/.bun-tag-b9d179b784e1b513 b/.bun-tag-b9d179b784e1b513
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
-index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..05549a05a8b1736351c4329c60d7e3bed7ac354d 100644
+index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..19b4c722e46a7b84c29f20a0d1c283c053e01a38 100644
 --- a/dist/cjs/index.cjs
 +++ b/dist/cjs/index.cjs
-@@ -218,6 +218,7 @@ class Virtualizer {
+@@ -218,6 +218,10 @@ class Virtualizer {
                  }
                  return;
                }
 +              if (!this.isIndexInRange(index)) return;
++              const key = this.options.getItemKey(index);
++              const prevNode = this.elementsCache.get(key);
++              if (prevNode !== void 0 && prevNode !== node && prevNode.isConnected) return;
                if (this.shouldMeasureDuringScroll(index)) {
                  this.resizeItem(
                    index,
-@@ -805,6 +806,7 @@ class Virtualizer {
+@@ -805,6 +809,7 @@ class Virtualizer {
        }
        return true;
      };
@@ -18,15 +24,18 @@ index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..05549a05a8b1736351c4329c60d7e3be
      this.measureElement = (node) => {
        if (!node) {
          this.elementsCache.forEach((cached, key2) => {
-@@ -816,6 +818,7 @@ class Virtualizer {
+@@ -816,8 +821,10 @@ class Virtualizer {
          return;
        }
        const index = this.indexFromElement(node);
 +      if (!this.isIndexInRange(index)) return;
        const key = this.options.getItemKey(index);
        const prevNode = this.elementsCache.get(key);
++      if (prevNode !== void 0 && prevNode !== node && prevNode.isConnected) return;
        if (prevNode !== node) {
-@@ -831,7 +834,7 @@ class Virtualizer {
+         if (prevNode) {
+           this.observer.unobserve(prevNode);
+@@ -831,7 +838,7 @@ class Virtualizer {
      };
      this.resizeItem = (index, size) => {
        var _a, _b;
@@ -36,18 +45,21 @@ index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..05549a05a8b1736351c4329c60d7e3be
        let itemStart;
        let key;
 diff --git a/dist/esm/index.js b/dist/esm/index.js
-index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..c0a95131b82947eda788b2bc30eed09e069fff7b 100644
+index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..46ae917722107d4514ac36dc9ce6c782a6a1dcbb 100644
 --- a/dist/esm/index.js
 +++ b/dist/esm/index.js
-@@ -216,6 +216,7 @@ class Virtualizer {
+@@ -216,6 +216,10 @@ class Virtualizer {
                  }
                  return;
                }
 +              if (!this.isIndexInRange(index)) return;
++              const key = this.options.getItemKey(index);
++              const prevNode = this.elementsCache.get(key);
++              if (prevNode !== void 0 && prevNode !== node && prevNode.isConnected) return;
                if (this.shouldMeasureDuringScroll(index)) {
                  this.resizeItem(
                    index,
-@@ -803,6 +804,7 @@ class Virtualizer {
+@@ -803,6 +807,7 @@ class Virtualizer {
        }
        return true;
      };
@@ -55,15 +67,18 @@ index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..c0a95131b82947eda788b2bc30eed09e
      this.measureElement = (node) => {
        if (!node) {
          this.elementsCache.forEach((cached, key2) => {
-@@ -814,6 +816,7 @@ class Virtualizer {
+@@ -814,8 +819,10 @@ class Virtualizer {
          return;
        }
        const index = this.indexFromElement(node);
 +      if (!this.isIndexInRange(index)) return;
        const key = this.options.getItemKey(index);
        const prevNode = this.elementsCache.get(key);
++      if (prevNode !== void 0 && prevNode !== node && prevNode.isConnected) return;
        if (prevNode !== node) {
-@@ -829,7 +832,7 @@ class Virtualizer {
+         if (prevNode) {
+           this.observer.unobserve(prevNode);
+@@ -829,7 +836,7 @@ class Virtualizer {
      };
      this.resizeItem = (index, size) => {
        var _a, _b;
@@ -73,19 +88,34 @@ index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..c0a95131b82947eda788b2bc30eed09e
        let itemStart;
        let key;
 diff --git a/src/index.ts b/src/index.ts
-index e209208a6d1b4e0713f78deab96598819ed697ad..bc74b3ea7096d6c0cf3749b84f3c569e67173f4f 100644
+index e209208a6d1b4e0713f78deab96598819ed697ad..ebe00ebb5d2e7d5b2cd0510949d2138d1d5fad1a 100644
 --- a/src/index.ts
 +++ b/src/index.ts
-@@ -489,6 +489,8 @@ export class Virtualizer<
+@@ -489,6 +489,23 @@ export class Virtualizer<
                return
              }
  
 +            if (!this.isIndexInRange(index)) return
 +
++            // Rejects a stale in-range index that names a key currently owned
++            // by a different connected element, so a retained row observed
++            // mid-update (e.g. after a history prepend shifts indexes) cannot
++            // attribute its size to the wrong key. A disconnected owner keeps
++            // upstream behavior. Garcon extension, not yet upstream.
++            const key = this.options.getItemKey(index)
++            const prevNode = this.elementsCache.get(key)
++            if (
++              prevNode !== undefined &&
++              prevNode !== node &&
++              prevNode.isConnected
++            ) {
++              return
++            }
++
              if (this.shouldMeasureDuringScroll(index)) {
                this.resizeItem(
                  index,
-@@ -1171,6 +1173,9 @@ export class Virtualizer<
+@@ -1171,6 +1188,9 @@ export class Virtualizer<
      },
    )
  
@@ -95,7 +125,7 @@ index e209208a6d1b4e0713f78deab96598819ed697ad..bc74b3ea7096d6c0cf3749b84f3c569e
    private getMeasurements = memo(
      () => [this.getMeasurementOptions(), this.itemSizeCacheVersion],
      (
-@@ -1511,6 +1516,8 @@ export class Virtualizer<
+@@ -1511,9 +1531,18 @@ export class Virtualizer<
      }
  
      const index = this.indexFromElement(node)
@@ -104,7 +134,17 @@ index e209208a6d1b4e0713f78deab96598819ed697ad..bc74b3ea7096d6c0cf3749b84f3c569e
      const key = this.options.getItemKey(index)
      const prevNode = this.elementsCache.get(key)
  
-@@ -1534,7 +1541,7 @@ export class Virtualizer<
++    // Rejects a stale in-range index whose key a different connected element
++    // owns; a disconnected owner still hands the key to a remounting element.
++    // Garcon extension, not yet upstream.
++    if (prevNode !== undefined && prevNode !== node && prevNode.isConnected) {
++      return
++    }
++
+     if (prevNode !== node) {
+       if (prevNode) {
+         this.observer.unobserve(prevNode)
+@@ -1534,7 +1563,7 @@ export class Virtualizer<
    }
  
    resizeItem = (index: number, size: number) => {
