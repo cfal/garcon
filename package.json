@@ -65,5 +65,8 @@
     "web"
   ],
   "author": "Alex Lau <github@alau.ca>",
-  "license": "GPL-3.0"
+  "license": "GPL-3.0",
+  "patchedDependencies": {
+    "@tanstack/virtual-core@3.17.7": "patches/@tanstack%2Fvirtual-core@3.17.7.patch"
+  }
 }

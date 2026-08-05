@@ -1,0 +1,115 @@
+diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
+index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..05549a05a8b1736351c4329c60d7e3bed7ac354d 100644
+--- a/dist/cjs/index.cjs
++++ b/dist/cjs/index.cjs
+@@ -218,6 +218,7 @@ class Virtualizer {
+                 }
+                 return;
+               }
++              if (!this.isIndexInRange(index)) return;
+               if (this.shouldMeasureDuringScroll(index)) {
+                 this.resizeItem(
+                   index,
+@@ -805,6 +806,7 @@ class Virtualizer {
+       }
+       return true;
+     };
++    this.isIndexInRange = (index) => index >= 0 && index < this.options.count;
+     this.measureElement = (node) => {
+       if (!node) {
+         this.elementsCache.forEach((cached, key2) => {
+@@ -816,6 +818,7 @@ class Virtualizer {
+         return;
+       }
+       const index = this.indexFromElement(node);
++      if (!this.isIndexInRange(index)) return;
+       const key = this.options.getItemKey(index);
+       const prevNode = this.elementsCache.get(key);
+       if (prevNode !== node) {
+@@ -831,7 +834,7 @@ class Virtualizer {
+     };
+     this.resizeItem = (index, size) => {
+       var _a, _b;
+-      if (index < 0 || index >= this.options.count) return;
++      if (!this.isIndexInRange(index)) return;
+       let cachedSize;
+       let itemStart;
+       let key;
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..c0a95131b82947eda788b2bc30eed09e069fff7b 100644
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -216,6 +216,7 @@ class Virtualizer {
+                 }
+                 return;
+               }
++              if (!this.isIndexInRange(index)) return;
+               if (this.shouldMeasureDuringScroll(index)) {
+                 this.resizeItem(
+                   index,
+@@ -803,6 +804,7 @@ class Virtualizer {
+       }
+       return true;
+     };
++    this.isIndexInRange = (index) => index >= 0 && index < this.options.count;
+     this.measureElement = (node) => {
+       if (!node) {
+         this.elementsCache.forEach((cached, key2) => {
+@@ -814,6 +816,7 @@ class Virtualizer {
+         return;
+       }
+       const index = this.indexFromElement(node);
++      if (!this.isIndexInRange(index)) return;
+       const key = this.options.getItemKey(index);
+       const prevNode = this.elementsCache.get(key);
+       if (prevNode !== node) {
+@@ -829,7 +832,7 @@ class Virtualizer {
+     };
+     this.resizeItem = (index, size) => {
+       var _a, _b;
+-      if (index < 0 || index >= this.options.count) return;
++      if (!this.isIndexInRange(index)) return;
+       let cachedSize;
+       let itemStart;
+       let key;
+diff --git a/src/index.ts b/src/index.ts
+index e209208a6d1b4e0713f78deab96598819ed697ad..bc74b3ea7096d6c0cf3749b84f3c569e67173f4f 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -489,6 +489,8 @@ export class Virtualizer<
+               return
+             }
+ 
++            if (!this.isIndexInRange(index)) return
++
+             if (this.shouldMeasureDuringScroll(index)) {
+               this.resizeItem(
+                 index,
+@@ -1171,6 +1173,9 @@ export class Virtualizer<
+     },
+   )
+ 
++  private isIndexInRange = (index: number): boolean =>
++    index >= 0 && index < this.options.count
++
+   private getMeasurements = memo(
+     () => [this.getMeasurementOptions(), this.itemSizeCacheVersion],
+     (
+@@ -1511,6 +1516,8 @@ export class Virtualizer<
+     }
+ 
+     const index = this.indexFromElement(node)
++    if (!this.isIndexInRange(index)) return
++
+     const key = this.options.getItemKey(index)
+     const prevNode = this.elementsCache.get(key)
+ 
+@@ -1534,7 +1541,7 @@ export class Virtualizer<
+   }
+ 
+   resizeItem = (index: number, size: number) => {
+-    if (index < 0 || index >= this.options.count) return
++    if (!this.isIndexInRange(index)) return
+ 
+     // Fast field reads. For lanes===1 we read raw start/size from the flat
+     // typed array, avoiding a Proxy.get + VirtualItem allocation per call.
