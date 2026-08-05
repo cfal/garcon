@@ -135,6 +135,10 @@
 		});
 		chatState.revealAllLoadedMessages();
 	}
+
+	function showInterleavedEarlierError(): void {
+		chatState.pageStates.earlier = { status: 'error', error: 'Interleaved failure' };
+	}
 	setActiveTranscriptState(chatState);
 	setAgentState(new AgentState());
 	const localSettings = createLocalSettingsStore();
@@ -179,4 +183,5 @@
 {/if}
 {#if transcriptScenario === 'count-shrink-survivors'}
 	<button onclick={shrinkTranscriptKeepingTail}>Shrink transcript keeping tail</button>
+	<button onclick={showInterleavedEarlierError}>Show earlier error</button>
 {/if}

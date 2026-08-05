@@ -1,5 +1,4 @@
 import type { SvelteVirtualizer } from '@tanstack/svelte-virtual';
-import { tick } from 'svelte';
 
 const HIDDEN_ANCHOR_FALLBACK_RADIUS = 8;
 
@@ -46,51 +45,6 @@ export function nextConversationAnimationFrame(): Promise<void> {
 		if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
 		else queueMicrotask(resolve);
 	});
-}
-
-export async function resetMountedConversationMeasurements(
-	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>,
-	getRoot: () => HTMLDivElement | null,
-	canMeasure: () => boolean,
-	canMeasureDuringScroll: () => boolean,
-): Promise<boolean> {
-	instance.measure();
-	await tick();
-	await nextConversationAnimationFrame();
-	if (!canMeasure()) return false;
-	if (!getRoot()) return false;
-
-	const measureCurrentElements = (): boolean => {
-		const root = getRoot();
-		if (!root) return false;
-		const elements = [...root.children].filter((element): element is HTMLDivElement =>
-			element.hasAttribute('data-chat-virtual-item'),
-		);
-		for (const element of elements) instance.measureElement(element);
-		return elements.every((element) => {
-			const key = element.dataset.chatVirtualItem;
-			return key !== undefined && instance.itemSizeCache.has(key);
-		});
-	};
-
-	const remeasureWhenAllowed = async (): Promise<boolean> => {
-		// Core ignores manual measurements during native scrolling. A programmatic restore opens
-		// that gate, while uninterrupted user scrolling retains estimates until it settles.
-		while (instance.isScrolling) {
-			if (!canMeasure()) return false;
-			if (canMeasureDuringScroll() && measureCurrentElements()) return true;
-			await nextConversationAnimationFrame();
-		}
-		if (!canMeasure()) return false;
-		// Remeasures surviving keyed nodes because their Svelte attachments do not rerun after shrink.
-		return measureCurrentElements();
-	};
-
-	if (instance.isScrolling) {
-		void remeasureWhenAllowed();
-		return true;
-	}
-	return remeasureWhenAllowed();
 }
 
 export function sameConversationNumberArrays(

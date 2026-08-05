@@ -35,7 +35,6 @@ import {
 	conversationTargetAlignmentDelta,
 	findConversationTargetNode,
 	nextConversationAnimationFrame as nextAnimationFrame,
-	resetMountedConversationMeasurements,
 	sameConversationNumberArrays,
 	scrollConversationToPhysicalEnd,
 } from './conversation-feed-virtual-runtime.js';
@@ -146,7 +145,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#unsubscribe = this.virtualizer.subscribe((instance) => {
 			this.#instanceValue = instance;
 		});
-
 		$effect(() => this.#acknowledgeData(options.projectedDataRevision));
 		$effect(() => this.#publishGeometry(options.geometry));
 		$effect(() => this.#publishRetention(options.retention.retainedKeys));
@@ -222,15 +220,23 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
-		if (this.#measureOnShow) {
-			this.#measureOnShow = false;
-			void this.#resetMeasurementsAfterCommit(this.options.geometry, false, this.#userIntentEpoch);
-		}
+		const resetMeasurements = this.#measureOnShow;
+		this.#measureOnShow = false;
+		const surfaceIdentity = this.options.geometry.surfaceIdentity;
 		this.#hiddenAnchor = null;
 		this.#pendingEndScroll = false;
+		const layoutToken = this.#layoutMutationToken;
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		this.#scrollToPhysicalEnd();
-		void this.#completeEndRestore(this.#layoutMutationToken, operationEpoch);
+		if (resetMeasurements) {
+			void this.#completeEndRestoreAfterMeasurement(
+				layoutToken,
+				operationEpoch,
+				surfaceIdentity,
+			);
+		} else {
+			void this.#completeEndRestore(layoutToken, operationEpoch);
+		}
 	}
 
 	restoreInitialEnd(): void {
@@ -340,15 +346,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#hiddenAnchor = null;
 		this.#hiddenScrollOffset = null;
 		if (!this.isReady()) return 'not-ready';
-		const clearMeasurements = this.#measureOnShow;
 		const userIntentEpoch = this.#userIntentEpoch;
+		const resetMeasurements = this.#measureOnShow;
 		this.#measureOnShow = false;
+		const surfaceIdentity = this.options.geometry.surfaceIdentity;
 		if (!anchor) {
-			if (clearMeasurements) {
-				const surfaceIdentity = this.options.geometry.surfaceIdentity;
-				const measured = await this.#resetMountedMeasurements(
-					() => this.isReady() && this.options.geometry.surfaceIdentity === surfaceIdentity,
-				);
+			if (resetMeasurements) {
+				const measured = await this.#measureAfterCommit(surfaceIdentity);
 				if (!measured) return this.isReady() ? 'missing-anchor' : 'not-ready';
 			}
 			if (scrollOffset !== null) {
@@ -357,7 +361,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			}
 			return 'missing-anchor';
 		}
-		if (await this.#restoreVirtualAnchor(anchor, clearMeasurements)) return 'restored';
+		if (await this.#restoreVirtualAnchor(anchor, resetMeasurements)) return 'restored';
 		if (!this.isReady() || scrollOffset === null || userIntentEpoch !== this.#userIntentEpoch) {
 			return 'missing-anchor';
 		}
@@ -497,11 +501,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		});
 		const restorePolicyEnd =
 			snapshot.endBehavior === 'restore-if-pinned' && untrack(() => this.options.pinned);
-		const resetUserIntentEpoch = this.#userIntentEpoch;
-		// Core 3.17.7 can accept a connected stale row after count shrink. Measurement resets remain
-		// required until https://github.com/TanStack/virtual/commit/d2cf98beea1696c7187c06b57c9e724d1957963c ships in the pinned release.
-		const resetMeasurements =
-			snapshot.measurementReset === 'all' || keys.length < this.#configuredKeys.length;
+		// The pinned core carries upstream #1246, so count shrink preserves surviving keyed
+		// measurements and ignores stale connected indexes without a Garcon reset pass.
+		const resetMeasurements = snapshot.measurementReset === 'all';
 		// The keyed snapshot restore completes the reading position after Svelte commits the new sizer.
 		// It uses only TanStack coordinates and replaces the narrower pre-commit offset bridge.
 		const preserveEdgeReadingPosition = shouldPreserveConversationVirtualEdge({
@@ -571,7 +573,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 		if (this.#activeTargetScrolls > 0) {
 			if (resetMeasurements) {
-				void this.#resetMeasurementsAfterCommit(snapshot, false, resetUserIntentEpoch);
+				void this.#resetMeasurementsAfterCommit(snapshot, false, this.#userIntentEpoch);
 			}
 			return;
 		}
@@ -579,11 +581,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		// A concurrent viewport resize can request the same pinned-end restore before the scale reset
 		// commits. The required cache reset therefore validates semantic ownership, not the layout token.
 		if (resetMeasurements && restorePolicyEnd) {
-			void this.#resetMeasurementsAfterCommit(snapshot, true, resetUserIntentEpoch);
+			void this.#resetMeasurementsAfterCommit(snapshot, true, this.#userIntentEpoch);
 		} else if (resetMeasurements && preservationAnchor) {
 			this.#scheduleReadingRestore(preservationAnchor, true);
 		} else if (resetMeasurements) {
-			void this.#resetMeasurementsAfterCommit(snapshot, false, resetUserIntentEpoch);
+			void this.#resetMeasurementsAfterCommit(snapshot, false, this.#userIntentEpoch);
 		} else if (restorePolicyEnd) {
 			void this.#restorePolicyEndAfterCommit(layoutToken, snapshot);
 		} else if (preservationAnchor) {
@@ -696,30 +698,29 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	async #restoreVirtualAnchor(
 		anchor: ConversationVirtualAnchor,
-		clearMeasurements: boolean,
+		resetMeasurements: boolean,
 	): Promise<boolean> {
 		const token = ++this.#layoutMutationToken;
-		const model = this.options.model;
-		const key = [anchor.key, ...anchor.fallbackKeys].find((candidate) =>
-			model.indexByKey.has(candidate),
+		const initialModel = this.options.model;
+		const initialKey = [anchor.key, ...anchor.fallbackKeys].find((candidate) =>
+			initialModel.indexByKey.has(candidate),
 		);
-		if (!key) return false;
-		const release = this.options.retention.acquire(key, 'target');
+		if (!initialKey) return false;
+		const release = this.options.retention.acquire(initialKey, 'target');
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		try {
-			if (clearMeasurements) {
-				await tick();
-				await nextAnimationFrame();
-				if (!this.#isCurrentLayoutOperation(token, operationEpoch)) return false;
-				if (
-					!(await this.#resetMountedMeasurements(() =>
-						this.#isCurrentLayoutOperation(token, operationEpoch),
-					))
-				) {
+			if (resetMeasurements) {
+				if (!(await this.#measureAfterCommit(this.options.geometry.surfaceIdentity))) {
 					if (!this.options.visible) this.#measureOnShow = true;
 					return false;
 				}
+				if (!this.#isCurrentLayoutOperation(token, operationEpoch)) return false;
 			}
+			const model = this.options.model;
+			const key = [anchor.key, ...anchor.fallbackKeys].find((candidate) =>
+				model.indexByKey.has(candidate),
+			);
+			if (!key) return false;
 			const index = model.indexByKey.get(key);
 			if (index === undefined) return false;
 			this.#instance().scrollToIndex(index, { align: 'start', behavior: 'auto' });
@@ -768,9 +769,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	#scheduleReadingRestore(
 		anchor: ConversationVirtualAnchor,
-		clearMeasurements: boolean,
+		resetMeasurements: boolean,
 	): void {
-		void this.#restoreVirtualAnchor(anchor, clearMeasurements).then((restored) => {
+		void this.#restoreVirtualAnchor(anchor, resetMeasurements).then((restored) => {
 			if (this.#pendingReadingAnchor !== anchor) return;
 			const resolvable = [anchor.key, ...anchor.fallbackKeys].some((key) =>
 				this.options.model.indexByKey.has(key),
@@ -803,23 +804,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		restorePolicyEnd: boolean,
 		userIntentEpoch: number,
 	): Promise<void> {
-		await tick();
-		await nextAnimationFrame();
-		if (this.options.geometry.geometryRevision !== snapshot.geometryRevision) {
-			return;
-		}
-		if (!this.options.visible) {
-			this.#measureOnShow = true;
-			return;
-		}
-		if (!this.isReady()) return;
-		const measured = await this.#resetMountedMeasurements(
-			() => this.isReady() && this.options.geometry.geometryRevision === snapshot.geometryRevision,
-		);
-		if (!measured) {
-			if (!this.options.visible) this.#measureOnShow = true;
-			return;
-		}
+		const measured = await this.#measureAfterCommit(snapshot.surfaceIdentity);
+		if (!measured) return;
 		await tick();
 		await nextAnimationFrame();
 		if (
@@ -833,6 +819,34 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		) {
 			this.scrollToEnd();
 		}
+	}
+
+	async #measureAfterCommit(surfaceIdentity: string): Promise<boolean> {
+		await tick();
+		await nextAnimationFrame();
+		if (
+			this.#destroyed ||
+			this.options.geometry.surfaceIdentity !== surfaceIdentity
+		) {
+			return false;
+		}
+		if (!this.options.visible) {
+			this.#measureOnShow = true;
+			return false;
+		}
+		if (!this.isReady()) return false;
+		this.#instance().measure();
+		return true;
+	}
+
+	async #completeEndRestoreAfterMeasurement(
+		token: number,
+		operationEpoch: number,
+		surfaceIdentity: string,
+	): Promise<void> {
+		await this.#measureAfterCommit(surfaceIdentity);
+		if (this.#isCurrentLayoutOperation(token, operationEpoch)) this.#scrollToPhysicalEnd();
+		await this.#completeEndRestore(token, operationEpoch);
 	}
 
 	async #completeEndRestore(token: number, operationEpoch: number): Promise<void> {
@@ -881,9 +895,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		) {
 			return;
 		}
-		const operationEpoch = this.#beginProgrammaticScrollOperation();
-		this.#scrollToPhysicalEnd();
-		await this.#completeEndRestore(this.#layoutMutationToken, operationEpoch);
+		this.scrollToEnd();
 	}
 
 	#scrollToPhysicalEnd(): void {
@@ -913,15 +925,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			previousOffset = viewport.scrollTop;
 		}
 		this.#finishProgrammaticScrollOperation(operationEpoch);
-	}
-
-	#resetMountedMeasurements(canMeasure: () => boolean): Promise<boolean> {
-		return resetMountedConversationMeasurements(
-			this.#instance(),
-			() => this.options.virtualRoot,
-			canMeasure,
-			() => this.#programmaticScrollActive,
-		);
 	}
 
 	#beginProgrammaticScrollOperation(): number {

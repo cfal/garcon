@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
@@ -276,7 +277,7 @@ describe('ConversationFeed', () => {
 		}
 	});
 
-	it('remeasures rows that survive a count shrink after active scrolling settles', async () => {
+	it('preserves measured survivor geometry across count shrink and a later publication', async () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		try {
 			const { container } = render(ConversationFeedTestHost, {
@@ -294,32 +295,30 @@ describe('ConversationFeed', () => {
 				?.closest<HTMLElement>('[data-chat-virtual-item]');
 			const followingRow = measuredRow?.nextElementSibling as HTMLElement | null;
 			if (!measuredRow || !followingRow) {
-				throw new Error('Expected a mounted tail row and end spacer');
+				throw new Error('Expected the mounted tail row and end spacer');
 			}
-			let measurementReads = 0;
-			Object.defineProperty(measuredRow, 'offsetHeight', {
-				configurable: true,
-				get() {
-					measurementReads += 1;
-					return 600;
-				},
-			});
+			const survivorKey = measuredRow.dataset.chatVirtualItem;
+			expect(survivorKey).toBeTruthy();
 			ResizeObserverHarness.emit(measuredRow, 900, 600);
 			const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
 			if (!viewport) throw new Error('Expected the Chat viewport');
+			viewport.scrollTop += 37;
 			await fireEvent.scroll(viewport);
 
 			await fireEvent.click(screen.getByRole('button', { name: 'Shrink transcript keeping tail' }));
+			await tick();
+			await fireEvent.click(screen.getByRole('button', { name: 'Show earlier error' }));
+			await tick();
 			await waitFor(() =>
 				expect(
 					container
 						.querySelector('[data-chat-virtual-sizer]')
 						?.getAttribute('data-chat-virtual-model-count'),
-				).toBe('22'),
+				).toBe('23'),
 			);
 			expect(measuredRow.isConnected).toBe(true);
 			expect(followingRow.isConnected).toBe(true);
-			await waitFor(() => expect(measurementReads).toBeGreaterThan(0));
+			expect(measuredRow.dataset.chatVirtualItem).toBe(survivorKey);
 			await waitFor(() => {
 				const start = (element: HTMLElement): number =>
 					Number(element.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? Number.NaN);

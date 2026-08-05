@@ -127,23 +127,6 @@ async function selectSidebarChat(page: Page, chatId: string, marker: string): Pr
   await waitForTranscriptReady(page);
 }
 
-async function settledDistanceFromEnd(page: Page): Promise<number> {
-  return page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
-    const feed = feedElement as HTMLElement;
-    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    let previous = Number.POSITIVE_INFINITY;
-    let stableFrames = 0;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      await frame();
-      const distance = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
-      stableFrames = Math.abs(distance - previous) <= 0.5 ? stableFrames + 1 : 0;
-      previous = distance;
-      if (stableFrames >= 8) return distance;
-    }
-    throw new Error('Chat-switch end distance did not settle.');
-  });
-}
-
 async function waitForModelCount(page: Page, minimum: number): Promise<number> {
   await page.waitForFunction(
     ({ selector, minimumCount }) => {
@@ -202,6 +185,94 @@ async function waitForDistanceFromEnd(page: Page, maximum: number): Promise<void
     },
     { selector: FEED_SELECTOR, maximumDistance: maximum },
     { timeout: 20_000 },
+  );
+}
+
+async function waitForStablePinnedTranscriptLayout(page: Page): Promise<void> {
+  await withDiagnosticTimeout(
+    'the pinned transcript geometry to settle',
+    page.locator(FEED_SELECTOR).evaluate(
+      async (feedElement, input) => {
+        const feed = feedElement as HTMLElement;
+        const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        let previous:
+          | {
+              distanceFromEnd: number;
+              itemCount: number;
+              lastBottom: number;
+              lastHeight: number;
+              lastKey: string;
+              modelCount: number;
+              scrollHeight: number;
+              scrollTop: number;
+            }
+          | null = null;
+        let stableFrames = 0;
+        let diagnostic: unknown = null;
+
+        for (let attempt = 0; attempt < 90; attempt += 1) {
+          await frame();
+          const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
+          const items = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)]
+            .map((item) => ({
+              index: Number(item.dataset.index),
+              key: item.dataset.chatVirtualItem ?? '',
+              rect: item.getBoundingClientRect(),
+            }))
+            .filter((item) => Number.isFinite(item.index))
+            .sort((left, right) => left.index - right.index);
+          const overlaps: Array<{ previous: string; next: string; amount: number }> = [];
+          const discontinuities: Array<{ previous: string; next: string; delta: number }> = [];
+          for (let index = 1; index < items.length; index += 1) {
+            const prior = items[index - 1];
+            const current = items[index];
+            if (!prior || !current || current.index !== prior.index + 1) continue;
+            const delta = current.rect.top - prior.rect.bottom;
+            if (delta < -1) {
+              overlaps.push({ previous: prior.key, next: current.key, amount: -delta });
+            } else if (delta > 1) {
+              discontinuities.push({ previous: prior.key, next: current.key, delta });
+            }
+          }
+          const last = items.at(-1);
+          const current = {
+            distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
+            itemCount: items.length,
+            lastBottom: last?.rect.bottom ?? Number.NaN,
+            lastHeight: last?.rect.height ?? Number.NaN,
+            lastKey: last?.key ?? '',
+            modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
+            scrollHeight: feed.scrollHeight,
+            scrollTop: feed.scrollTop,
+          };
+          const ready =
+            feed.getAttribute('aria-busy') === 'false' &&
+            feed.dataset.chatPinnedToBottom === 'true' &&
+            !feed.querySelector('[data-chat-layout-pending]') &&
+            current.itemCount > 0 &&
+            current.modelCount > 0 &&
+            Math.abs(current.distanceFromEnd) <= 1 &&
+            overlaps.length === 0 &&
+            discontinuities.length === 0;
+          const unchanged =
+            previous !== null &&
+            current.itemCount === previous.itemCount &&
+            current.lastKey === previous.lastKey &&
+            current.modelCount === previous.modelCount &&
+            Math.abs(current.distanceFromEnd - previous.distanceFromEnd) <= 0.5 &&
+            Math.abs(current.lastBottom - previous.lastBottom) <= 0.5 &&
+            Math.abs(current.lastHeight - previous.lastHeight) <= 0.5 &&
+            Math.abs(current.scrollHeight - previous.scrollHeight) <= 0.5 &&
+            Math.abs(current.scrollTop - previous.scrollTop) <= 0.5;
+          stableFrames = ready && unchanged ? stableFrames + 1 : 0;
+          diagnostic = { current, discontinuities, overlaps, ready, stableFrames };
+          previous = current;
+          if (stableFrames >= 7) return;
+        }
+        throw new Error(`Pinned transcript geometry did not settle: ${JSON.stringify(diagnostic)}`);
+      },
+      { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR },
+    ),
   );
 }
 
@@ -1387,13 +1458,13 @@ async function verifyLaterPageReadingPosition(
   const latestWindowRevision = await virtualDataRevision(fixture.page);
   await returnToLatest.click();
   await waitForVirtualDataRevisionAfter(fixture.page, latestWindowRevision);
-  await waitForDistanceFromEnd(fixture.page, 1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   await appendTurn(fixture.integration, chatId, 'chromium-later-window-live-append');
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-later-window-live-append', { exact: true })
     .waitFor();
-  await waitForDistanceFromEnd(fixture.page, 1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   fixture.assertNoBrowserErrors();
 }
 
@@ -1476,8 +1547,7 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-pinned-append', { exact: true })
     .waitFor();
-  await waitForDistanceFromEnd(fixture.page, 1);
-  expect((await transcriptGeometry(fixture.page)).distanceFromEnd).toBeLessThanOrEqual(1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   fixture.assertNoBrowserErrors();
 }
 
@@ -1492,12 +1562,10 @@ async function verifyChatSwitchBottomRestore(
   const secondaryMarker = 'chromium-switch-secondary';
   const secondaryChatId = await seedTranscript(fixture.integration, 12, secondaryMarker);
   await selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker);
-  expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
-  expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
 
   await selectSidebarChat(fixture.page, primaryChatId, 'chromium-virtual-turn-0');
-  expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
-  expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
     userScrolledUp: false,
@@ -1509,7 +1577,7 @@ async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture)
   const chatId = await seedTranscript(fixture.integration, 15, 'chromium-native-reload-base');
   await prepareTranscript(fixture, chatId, 20);
   await scrollToPosition(fixture.page, 'end');
-  await waitForDistanceFromEnd(fixture.page, 1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
 
   const prompt = 'chromium-native-reload-stream';
   const accepted = await fixture.integration.client.runDirectChat({
@@ -1521,7 +1589,7 @@ async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture)
     'agent-run-finished',
   );
   await fixture.page.locator(FEED_SELECTOR).getByText(`echo:${prompt}`, { exact: true }).waitFor();
-  await waitForDistanceFromEnd(fixture.page, 1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
 
   const beforeReload = await fixture.integration.client.getMessages(chatId);
   const eventCursor = fixture.integration.client.markEvents();
@@ -1576,8 +1644,7 @@ async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture)
     [prompt, `echo:${prompt}`],
   );
   expect(exactTextCounts).toEqual([1, 1]);
-  expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
-  expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
     userScrolledUp: false,
@@ -1726,11 +1793,11 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Split view');
   await waitForTranscriptScale(fixture.page, 0.85);
-  await waitForDistanceFromEnd(fixture.page, 1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Exit split view');
   await waitForTranscriptScale(fixture.page, 1);
-  await waitForDistanceFromEnd(fixture.page, 1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
   fixture.assertNoBrowserErrors();
 }
 
@@ -1757,10 +1824,12 @@ async function verifyCountShrinkMeasurements(fixture: ChromiumFixture): Promise<
     { selector: SIZER_SELECTOR, previousCount: expandedModelCount },
     { timeout: 20_000 },
   );
-  await waitForDistanceFromEnd(fixture.page, 1);
+  await waitForStablePinnedTranscriptLayout(fixture.page);
 
   const compactedGeometry = await transcriptGeometry(fixture.page);
   expect(compactedGeometry.modelCount).toBeLessThan(expandedModelCount);
+  expect(compactedGeometry.itemCount).toBeGreaterThan(2);
+  expect(compactedGeometry.transcriptItemCount).toBeGreaterThan(1);
   expect(compactedGeometry.overlaps).toEqual([]);
   expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
   fixture.assertNoBrowserErrors();
