@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -15,9 +15,9 @@ import {
 } from './integration-fixture.js';
 import { LightpandaProcess } from './lightpanda-process.js';
 import { withTimeout } from './deferred.js';
+import { requireCurrentWebBuild } from './web-build-gate.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const WEB_BUILD_INDEX = join(REPO_ROOT, 'web', 'build', 'index.html');
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'e2e');
 
 export class E2eFixture {
@@ -50,7 +50,7 @@ export class E2eFixture {
   }
 
   static async create(options: IntegrationFixtureOptions = {}): Promise<E2eFixture> {
-    await access(WEB_BUILD_INDEX);
+    await requireCurrentWebBuild();
     const integration = await createIntegrationFixture(options);
     let lightpanda: LightpandaProcess | null = null;
     let browser: Browser | null = null;

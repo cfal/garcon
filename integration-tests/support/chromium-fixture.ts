@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
@@ -8,9 +8,9 @@ import {
   type IntegrationFixtureOptions,
 } from './integration-fixture.js';
 import { withTimeout } from './deferred.js';
+import { requireCurrentWebBuild } from './web-build-gate.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const WEB_BUILD_INDEX = join(REPO_ROOT, 'web', 'build', 'index.html');
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
 const FIXTURE_SETUP_TIMEOUT_MS = 25_000;
 const SCENARIO_TIMEOUT_MS = 120_000;
@@ -47,7 +47,7 @@ export async function createChromiumFixture(
   integrationOptions: IntegrationFixtureOptions = {},
   sharedBrowser?: Browser,
 ): Promise<ChromiumFixture> {
-  await access(WEB_BUILD_INDEX);
+  await requireCurrentWebBuild();
   const integration = await createIntegrationFixture(integrationOptions);
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;

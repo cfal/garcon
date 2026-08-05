@@ -3,8 +3,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  assertWebBuildCurrent,
   computeWebBuildHash,
   isWebBuildCurrent,
+  productionWebBuildEnvironment,
   recordWebBuild,
 } from '../../../scripts/web-build-cache.js';
 
@@ -23,13 +25,18 @@ async function createFixture() {
   temporaryDirectories.push(root);
   const input = path.join(root, 'input');
   const buildDir = path.join(root, 'build');
+  const lockfile = path.join(root, 'bun.lock');
   const markerPath = path.join(buildDir, '.marker');
+  const patches = path.join(root, 'patches');
   await fs.mkdir(input);
+  await fs.mkdir(patches);
   await fs.mkdir(path.join(buildDir, '_app'), { recursive: true });
   await fs.writeFile(path.join(input, 'app.ts'), 'first');
+  await fs.writeFile(lockfile, 'lockfile');
+  await fs.writeFile(path.join(patches, 'dependency.patch'), 'patch');
   await fs.writeFile(path.join(buildDir, 'index.html'), '<main></main>');
   await fs.writeFile(path.join(buildDir, '_app', 'app.js'), 'compiled');
-  return { input, buildDir, markerPath };
+  return { input, buildDir, lockfile, markerPath, patches };
 }
 
 describe('web build cache', () => {
@@ -73,6 +80,42 @@ describe('web build cache', () => {
       ...baseline,
       UNRELATED: 'second',
     })).toBe(first);
+  });
+
+  it('normalizes production builds independently of the test process environment', async () => {
+    const fixture = await createFixture();
+    const production = productionWebBuildEnvironment({
+      NODE_ENV: 'test',
+      PUBLIC_APP_NAME: 'Garcon',
+    });
+    expect(production).toEqual({
+      NODE_ENV: 'production',
+      PUBLIC_APP_NAME: 'Garcon',
+    });
+
+    const options = {
+      ...fixture,
+      environment: production,
+      inputs: [fixture.input],
+      sourcePath: fixture.input,
+    };
+    await recordWebBuild(options);
+
+    expect(await isWebBuildCurrent(options)).toBe(true);
+  });
+
+  it('invalidates when the root lockfile or a package patch changes', async () => {
+    const fixture = await createFixture();
+    const inputs = [fixture.input, fixture.lockfile, fixture.patches];
+    const options = { ...fixture, inputs, sourcePath: fixture.input };
+    await recordWebBuild(options);
+
+    await fs.writeFile(fixture.lockfile, 'changed lockfile');
+    expect(await isWebBuildCurrent(options)).toBe(false);
+
+    await recordWebBuild(options);
+    await fs.writeFile(path.join(fixture.patches, 'dependency.patch'), 'changed patch');
+    expect(await isWebBuildCurrent(options)).toBe(false);
   });
 
   it('ignores generated input directories', async () => {
@@ -139,5 +182,20 @@ describe('web build cache', () => {
     await recordWebBuild({ ...options, hash: preBuildHash });
 
     expect(await isWebBuildCurrent(options)).toBe(false);
+  });
+
+  it('asserts that the recorded build is current with actionable remediation', async () => {
+    const fixture = await createFixture();
+    const options = { ...fixture, inputs: [fixture.input], sourcePath: fixture.input };
+
+    await expect(assertWebBuildCurrent(options)).rejects.toThrow('Run `bun run build`');
+
+    await recordWebBuild(options);
+    await expect(assertWebBuildCurrent(options)).resolves.toBeUndefined();
+
+    await fs.writeFile(path.join(fixture.input, 'app.ts'), 'stale');
+    await expect(assertWebBuildCurrent(options)).rejects.toThrow(
+      'Do not use `bun run --cwd web build`',
+    );
   });
 });

@@ -23,7 +23,8 @@ export const webBuildInputs = [
   path.join(repoRoot, 'web', 'messages'),
   path.join(repoRoot, 'web', 'src'),
   path.join(repoRoot, 'web', 'static'),
-  path.join(repoRoot, 'web', 'bun.lock'),
+  path.join(repoRoot, 'bun.lock'),
+  path.join(repoRoot, 'patches'),
   path.join(repoRoot, 'web', 'codemirror-packages.ts'),
   path.join(repoRoot, 'web', 'package.json'),
   path.join(repoRoot, 'web', 'project.inlang', 'settings.json'),
@@ -31,6 +32,10 @@ export const webBuildInputs = [
   path.join(repoRoot, 'web', 'tsconfig.json'),
   path.join(repoRoot, 'web', 'vite.config.ts'),
 ];
+
+export function productionWebBuildEnvironment(environment = process.env) {
+  return { ...environment, NODE_ENV: 'production' };
+}
 
 async function collectFiles(inputPath, rootPath, inputIndex, files, ignoredPaths) {
   if (ignoredPaths.has(inputPath)) return;
@@ -159,6 +164,7 @@ async function hasRecordedBuildAssets(buildDir, assets) {
 
 export async function isWebBuildCurrent({
   buildDir = webBuildDir,
+  environment = productionWebBuildEnvironment(),
   markerPath = webBuildMarker,
   inputs = webBuildInputs,
   sourcePath = path.join(repoRoot, 'web', 'src'),
@@ -171,11 +177,12 @@ export async function isWebBuildCurrent({
   if (!marker || !await hasRecordedBuildAssets(buildDir, marker.assets)) return false;
   // Published packages contain the compiled client but not its source tree.
   if (!sourceStat) return true;
-  return marker.hash === await computeWebBuildHash(inputs);
+  return marker.hash === await computeWebBuildHash(inputs, environment);
 }
 
 export async function recordWebBuild({
   buildDir = webBuildDir,
+  environment = productionWebBuildEnvironment(),
   hash,
   markerPath = webBuildMarker,
   inputs = webBuildInputs,
@@ -183,8 +190,17 @@ export async function recordWebBuild({
   await fs.mkdir(buildDir, { recursive: true });
   const marker = {
     version: webBuildMarkerVersion,
-    hash: hash ?? await computeWebBuildHash(inputs),
+    hash: hash ?? await computeWebBuildHash(inputs, environment),
     assets: await listBuildAssets(buildDir, markerPath),
   };
   await fs.writeFile(markerPath, `${JSON.stringify(marker)}\n`);
+}
+
+export async function assertWebBuildCurrent(options = {}) {
+  if (await isWebBuildCurrent(options)) return;
+  throw new Error(
+    'web/build is missing or stale for the current client sources, dependencies, patches, or build environment. ' +
+      'Run `bun run build` from the repository root before browser tests. ' +
+      'Do not use `bun run --cwd web build`; it does not record the Garcon build marker.',
+  );
 }

@@ -1,0 +1,27 @@
+export interface WebBuildCacheOptions {
+  buildDir?: string;
+  environment?: Record<string, string | undefined>;
+  hash?: string;
+  inputs?: readonly string[];
+  markerPath?: string;
+  sourcePath?: string;
+}
+
+export const repoRoot: string;
+export const webBuildDir: string;
+export const webBuildMarker: string;
+export const webBuildInputs: readonly string[];
+
+export function productionWebBuildEnvironment(
+  environment?: Record<string, string | undefined>,
+): Record<string, string | undefined>;
+
+export function computeWebBuildHash(
+  inputs?: readonly string[],
+  environment?: Record<string, string | undefined>,
+  ignoredPaths?: ReadonlySet<string>,
+): Promise<string>;
+
+export function isWebBuildCurrent(options?: WebBuildCacheOptions): Promise<boolean>;
+export function recordWebBuild(options?: WebBuildCacheOptions): Promise<void>;
+export function assertWebBuildCurrent(options?: WebBuildCacheOptions): Promise<void>;
