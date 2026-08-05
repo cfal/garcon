@@ -150,6 +150,8 @@ describe('ConversationFeedVirtualController helpers', () => {
 					['b', 300],
 					['c', 120],
 				]),
+				renderedKeys: new Set<string>(),
+				estimates: [],
 				leadingSize: 16,
 				viewportHeight: 400,
 			}),
@@ -161,6 +163,8 @@ describe('ConversationFeedVirtualController helpers', () => {
 					['a', 250],
 					['c', 200],
 				]),
+				renderedKeys: new Set<string>(),
+				estimates: [],
 				leadingSize: 16,
 				viewportHeight: 400,
 			}),
@@ -172,10 +176,47 @@ describe('ConversationFeedVirtualController helpers', () => {
 					['a', 100],
 					['b', 120],
 				]),
+				renderedKeys: new Set<string>(),
+				estimates: [],
 				leadingSize: 16,
 				viewportHeight: 400,
 			}),
 		).toBe('underfilled');
+	});
+
+	it('resolves rendered keys without cache entries to their exact estimates', () => {
+		// TanStack omits the cache entry when a wrapper renders at its estimate, so a
+		// rendered key must classify as measured instead of forcing another probe.
+		expect(
+			classifyMeasuredConversationViewportFill({
+				keys: ['a', 'b', 'c'],
+				measuredSizes: new Map([['a', 250]]),
+				renderedKeys: new Set(['b', 'c']),
+				estimates: [120, 90, 60],
+				leadingSize: 16,
+				viewportHeight: 400,
+			}),
+		).toBe('overflow');
+		expect(
+			classifyMeasuredConversationViewportFill({
+				keys: ['a', 'b'],
+				measuredSizes: new Map([['a', 100]]),
+				renderedKeys: new Set(['b']),
+				estimates: [120, 90],
+				leadingSize: 16,
+				viewportHeight: 400,
+			}),
+		).toBe('underfilled');
+		expect(
+			classifyMeasuredConversationViewportFill({
+				keys: ['a', 'b'],
+				measuredSizes: new Map([['a', 100]]),
+				renderedKeys: new Set(['a']),
+				estimates: [120, 90],
+				leadingSize: 16,
+				viewportHeight: 400,
+			}),
+		).toBeNull();
 	});
 
 	it('clamps target alignment to attainable scroll boundaries', () => {

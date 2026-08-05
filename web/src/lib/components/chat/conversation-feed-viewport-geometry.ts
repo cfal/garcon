@@ -82,13 +82,19 @@ export function createRetainedConversationRangeExtractor(
 export function classifyMeasuredConversationViewportFill(input: {
 	keys: readonly string[];
 	measuredSizes: { get(key: string): number | undefined };
+	renderedKeys: { has(key: string): boolean };
+	estimates: readonly number[];
 	leadingSize: number;
 	viewportHeight: number;
 }): 'overflow' | 'underfilled' | null {
 	let physicalSize = input.leadingSize;
 	let allMeasured = true;
-	for (const key of input.keys) {
-		const size = input.measuredSizes.get(key);
+	for (const [index, key] of input.keys.entries()) {
+		// TanStack omits a cache entry when a wrapper renders exactly at its estimate,
+		// so a rendered key without a cache entry is measured at that estimate.
+		const size =
+			input.measuredSizes.get(key) ??
+			(input.renderedKeys.has(key) ? input.estimates[index] : undefined);
 		if (size === undefined) {
 			allMeasured = false;
 			physicalSize = 0;

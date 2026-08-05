@@ -99,6 +99,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#userIntentEpoch = 0;
 	#scrollMargin = 0;
 	#lastViewportRect: Rect = { width: 0, height: CHAT_FALLBACK_VIEWPORT_HEIGHT };
+	// Keys whose wrappers have rendered for the current surface and styling; cleared with
+	// the measurement cache on surface replacement and global invalidation.
+	#renderedKeys = new Set<string>();
 	#destroyed = false;
 
 	constructor(private readonly options: ConversationFeedVirtualControllerOptions) {
@@ -147,7 +150,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#instanceValue = instance;
 		});
 		$effect(() => this.#acknowledgeData(options.projectedDataRevision));
-		$effect(() => this.#publishGeometry(options.geometry));
+		$effect(() => {
+			const snapshot = options.geometry;
+			// Geometry publication tracks only the snapshot; visibility, viewport, pinned,
+			// and retention transitions are owned by their dedicated effects.
+			untrack(() => this.#publishGeometry(snapshot));
+		});
 		$effect(() => this.#publishRetention(options.retention.retainedKeys));
 		$effect(() => this.#publishPinned(options.pinned));
 		$effect(() => this.#publishVisibility());
@@ -156,6 +164,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	measureItem: Attachment<HTMLDivElement> = (element) => {
 		this.#instance().measureElement(element);
+		// A rendered wrapper is measured even when TanStack omits its cache entry
+		// because the rendered size equals the estimate.
+		const key = this.#configuredKeys[Number(element.dataset.index)];
+		if (key !== undefined) this.#renderedKeys.add(key);
 		return () => this.#instance().measureElement(null);
 	};
 
@@ -318,6 +330,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				const classification = classifyMeasuredConversationViewportFill({
 					keys,
 					measuredSizes: instance.itemSizeCache,
+					renderedKeys: this.#renderedKeys,
+					estimates: this.#configuredEstimates,
 					leadingSize: this.#scrollMargin,
 					viewportHeight: viewport.clientHeight,
 				});
@@ -331,7 +345,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					}
 					return classification;
 				}
-				const nextUnmeasuredIndex = keys.findIndex((key) => !instance.itemSizeCache.has(key));
+				const nextUnmeasuredIndex = keys.findIndex(
+					(key) => !instance.itemSizeCache.has(key) && !this.#renderedKeys.has(key),
+				);
 				if (nextUnmeasuredIndex < 0) return 'unsettled';
 				instance.scrollToIndex(nextUnmeasuredIndex, { align: 'start', behavior: 'auto' });
 			}
@@ -693,6 +709,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#hiddenScrollOffset = null;
 		this.#pendingEndScroll = false;
 		this.#measureOnShow = false;
+		this.#renderedKeys.clear();
 		this.#instance().measure();
 	}
 
@@ -803,8 +820,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		token: number,
 		snapshot: ConversationVirtualGeometrySnapshot,
 	): Promise<void> {
+		// Writes the end offset after the sizer commits but before the browser paints,
+		// so a pinned publication never paints a frame at the pre-mutation offset. The
+		// scrollToEnd convergence loop still verifies across later measurement frames.
 		await tick();
-		await nextAnimationFrame();
 		if (
 			token !== this.#layoutMutationToken ||
 			!this.isReady() ||
@@ -854,6 +873,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return false;
 		}
 		if (!this.isReady()) return false;
+		this.#renderedKeys.clear();
 		this.#instance().measure();
 		return true;
 	}
@@ -904,8 +924,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		restoreEpoch: number,
 		surfaceIdentity: string,
 	): Promise<void> {
+		// Positions before the first paint of the committed sizer; the convergence loop
+		// owns later measurement-driven corrections.
 		await tick();
-		await nextAnimationFrame();
 		if (
 			restoreEpoch !== this.#initialEndRestoreEpoch ||
 			surfaceIdentity !== this.#configuredSurfaceIdentity ||
