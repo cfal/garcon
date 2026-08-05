@@ -112,6 +112,15 @@ async function pageRequestCount(page: Page): Promise<number> {
   );
 }
 
+async function waitForTranscriptIdle(page: Page): Promise<void> {
+  await page.waitForFunction(
+    ({ selector }) =>
+      document.querySelector<HTMLElement>(selector)?.getAttribute('aria-busy') === 'false',
+    { timeout: 20_000 },
+    { selector: FEED_SELECTOR },
+  );
+}
+
 async function waitForModelCount(page: Page, minimum: number): Promise<void> {
   await page.waitForFunction(
     ({ selector, minimumCount }) =>
@@ -158,6 +167,9 @@ describe("Lightpanda transcript scrolling", () => {
       await app.openChat(chatId);
       await fixture.waitForSpaWebSocket();
       await waitForModelCount(fixture.page, 50);
+      // The initial paint gate now holds aria-busy through the staged reveal and end
+      // restoration, so readiness is awaited instead of asserted immediately.
+      await waitForTranscriptIdle(fixture.page);
       await installPageRequestGate(fixture.page);
 
       const initial = await virtualTranscriptSnapshot(fixture.page);

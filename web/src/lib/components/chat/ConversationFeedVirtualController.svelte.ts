@@ -26,15 +26,16 @@ import {
 	createRetainedConversationRangeExtractor,
 	isConversationTargetLayoutReady,
 	resolveConversationViewportRect,
-	selectConversationReadingAnchor,
 	shouldPreserveConversationVirtualEdge,
 } from './conversation-feed-viewport-geometry.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
 import {
-	conversationAnchorFallbackKeys,
+	captureConversationVirtualAnchor,
+	type ConversationVirtualAnchor,
 	conversationTargetAlignmentDelta,
 	findConversationTargetNode,
 	nextConversationAnimationFrame as nextAnimationFrame,
+	observeConversationRootOffset,
 	sameConversationNumberArrays,
 	scrollConversationToPhysicalEnd,
 } from './conversation-feed-virtual-runtime.js';
@@ -45,11 +46,6 @@ const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
-interface ConversationVirtualAnchor {
-	key: string;
-	offsetWithinItem: number;
-	fallbackKeys: readonly string[];
-}
 interface ConversationFeedVirtualControllerOptions {
 	get model(): ConversationVirtualFeedModel;
 	get geometry(): ConversationVirtualGeometrySnapshot;
@@ -678,21 +674,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const viewport = this.options.viewport;
 		const root = this.options.virtualRoot;
 		if (!this.options.visible || !viewport || !root) return;
-		const update = (): void => {
-			const next =
-				root.getBoundingClientRect().top -
-				viewport.getBoundingClientRect().top +
-				viewport.scrollTop;
-			if (Math.abs(next - this.#scrollMargin) <= OFFSET_TOLERANCE_PX) return;
-			this.#scrollMargin = next;
-			this.#instance().setOptions({ scrollMargin: next });
-		};
-		update();
-		if (typeof ResizeObserver === 'undefined') return;
-		const observer = new ResizeObserver(update);
-		observer.observe(viewport);
-		observer.observe(root);
-		return () => observer.disconnect();
+		return observeConversationRootOffset(viewport, root, (margin) => {
+			if (Math.abs(margin - this.#scrollMargin) <= OFFSET_TOLERANCE_PX) return;
+			this.#scrollMargin = margin;
+			this.#instance().setOptions({ scrollMargin: margin });
+		});
 	}
 
 	#detachAndResetOldSurface(): void {
@@ -714,22 +700,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#captureVirtualAnchor(preferTranscript = false): ConversationVirtualAnchor | null {
-		const instance = this.#instance();
-		const offset = this.options.viewport?.scrollTop ?? instance.scrollOffset ?? 0;
-		const itemAtOffset = instance.getVirtualItemForOffset(offset);
-		// Prefix controls occupy offset zero, so history prepends preserve the nearest message instead.
-		const item = preferTranscript
-			? selectConversationReadingAnchor(
-					instance.getVirtualItems(),
-					offset,
-					this.#configuredTranscriptKeys,
-				)
-			: itemAtOffset;
-		if (!item || typeof item.key !== 'string') return null;
-		const index = this.#configuredKeys.indexOf(item.key);
-		const fallbackKeys =
-			index < 0 ? [] : conversationAnchorFallbackKeys(this.#configuredKeys, index);
-		return { key: item.key, offsetWithinItem: offset - item.start, fallbackKeys };
+		return captureConversationVirtualAnchor({
+			instance: this.#instance(),
+			viewport: this.options.viewport,
+			keys: this.#configuredKeys,
+			transcriptKeys: this.#configuredTranscriptKeys,
+			preferTranscript,
+		});
 	}
 
 	async #restoreVirtualAnchor(

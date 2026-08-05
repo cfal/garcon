@@ -1,6 +1,52 @@
 import type { SvelteVirtualizer } from '@tanstack/svelte-virtual';
+import { selectConversationReadingAnchor } from './conversation-feed-viewport-geometry.js';
 
 const HIDDEN_ANCHOR_FALLBACK_RADIUS = 8;
+
+export interface ConversationVirtualAnchor {
+	key: string;
+	offsetWithinItem: number;
+	fallbackKeys: readonly string[];
+}
+
+export function captureConversationVirtualAnchor(input: {
+	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
+	viewport: HTMLDivElement | null;
+	keys: readonly string[];
+	transcriptKeys: ReadonlySet<string>;
+	preferTranscript: boolean;
+}): ConversationVirtualAnchor | null {
+	const offset = input.viewport?.scrollTop ?? input.instance.scrollOffset ?? 0;
+	// Prefix controls occupy offset zero, so history prepends preserve the nearest message instead.
+	const item = input.preferTranscript
+		? selectConversationReadingAnchor(
+				input.instance.getVirtualItems(),
+				offset,
+				input.transcriptKeys,
+			)
+		: input.instance.getVirtualItemForOffset(offset);
+	if (!item || typeof item.key !== 'string') return null;
+	const index = input.keys.indexOf(item.key);
+	const fallbackKeys = index < 0 ? [] : conversationAnchorFallbackKeys(input.keys, index);
+	return { key: item.key, offsetWithinItem: offset - item.start, fallbackKeys };
+}
+
+export function observeConversationRootOffset(
+	viewport: HTMLDivElement,
+	root: HTMLDivElement,
+	applyMargin: (margin: number) => void,
+): (() => void) | undefined {
+	const update = (): void =>
+		applyMargin(
+			root.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop,
+		);
+	update();
+	if (typeof ResizeObserver === 'undefined') return;
+	const observer = new ResizeObserver(update);
+	observer.observe(viewport);
+	observer.observe(root);
+	return () => observer.disconnect();
+}
 
 export function conversationAnchorFallbackKeys(keys: readonly string[], index: number): string[] {
 	const fallbacks: string[] = [];
