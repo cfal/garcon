@@ -346,8 +346,11 @@ async function synchronizeNativeTranscriptGeneration(
   chatId: string,
 ): Promise<void> {
   // Forces native reconciliation before geometry samples a generation-scoped row key.
-  const finalTranscript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const liveTranscript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  expect(liveTranscript.hasMore).toBe(false);
+  const finalTranscript = await fixture.integration.client.reloadChat(chatId);
   expect(finalTranscript.hasMore).toBe(false);
+  expect(finalTranscript.lastSeq).toBe(liveTranscript.lastSeq);
   await waitForSurfaceIdentity(fixture.page, `${chatId}:${finalTranscript.generationId}`);
   await waitForTranscriptReady(fixture.page);
 }
@@ -564,15 +567,71 @@ async function readingAnchor(page: Page): Promise<ReadingAnchor> {
   }, ITEM_SELECTOR);
 }
 
-async function anchorByKey(page: Page, key: string): Promise<ReadingAnchor> {
-  await page.waitForFunction(
-    ({ itemSelector, expectedKey }) =>
-      [...document.querySelectorAll<HTMLElement>(itemSelector)].some(
-        (candidate) => candidate.dataset.chatVirtualItem === expectedKey,
-      ),
-    { itemSelector: ITEM_SELECTOR, expectedKey: key },
-    { timeout: 20_000 },
-  );
+async function anchorByKey(
+  page: Page,
+  key: string,
+  context?: Record<string, unknown>,
+): Promise<ReadingAnchor> {
+  try {
+    await page.waitForFunction(
+      ({ itemSelector, expectedKey }) =>
+        [...document.querySelectorAll<HTMLElement>(itemSelector)].some(
+          (candidate) => candidate.dataset.chatVirtualItem === expectedKey,
+        ),
+      { itemSelector: ITEM_SELECTOR, expectedKey: key },
+      { timeout: 20_000 },
+    );
+  } catch (error) {
+    const expectedIdentity = (() => {
+      try {
+        const parsed = JSON.parse(key);
+        return Array.isArray(parsed) && typeof parsed[0] === 'string' ? parsed[0] : null;
+      } catch {
+        return null;
+      }
+    })();
+    const current = await page
+      .locator(FEED_SELECTOR)
+      .evaluate((feedElement, input) => {
+        const feed = feedElement as HTMLElement;
+        const mountedKeys = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].flatMap(
+          (item) => item.dataset.chatVirtualItem ?? [],
+        );
+        const mountedIdentities = [
+          ...new Set(
+            mountedKeys.flatMap((mountedKey) => {
+              try {
+                const parsed = JSON.parse(mountedKey);
+                return Array.isArray(parsed) && typeof parsed[0] === 'string' ? [parsed[0]] : [];
+              } catch {
+                return [];
+              }
+            }),
+          ),
+        ];
+        const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
+        return {
+          mountedIdentities,
+          mountedKeys,
+          scrollTop: feed.scrollTop,
+          maximumScrollTop: Math.max(0, feed.scrollHeight - feed.clientHeight),
+          distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
+          pinned: feed.dataset.chatPinnedToBottom === 'true',
+          userScrolledUp: feed.dataset.chatUserScrolledUp === 'true',
+          modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
+          dataRevision: Number(sizer?.dataset.chatVirtualDataRevision ?? 0),
+          scale: sizer?.dataset.chatTranscriptScale,
+        };
+      }, { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR })
+      .catch(() => null);
+    throw new Error(
+      `Timed out waiting for the strict reading anchor:\n${JSON.stringify(
+        { expectedKey: key, expectedIdentity, context, current },
+        null,
+        2,
+      )}\n${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   return page.locator(FEED_SELECTOR).evaluate(
     async (feedElement, input) => {
       const feed = feedElement as HTMLElement;
@@ -1279,7 +1338,7 @@ async function createTranscript(fixture: ChromiumFixture): Promise<string> {
     .getByText('echo:chromium-generation-prime', { exact: true })
     .waitFor();
   await waitForSurfaceIdentityChange(fixture.page, initialSurfaceIdentity);
-  await synchronizeNativeTranscriptGeneration(fixture, chatId);
+  await waitForTranscriptReady(fixture.page);
   return chatId;
 }
 
@@ -2090,11 +2149,19 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   await seedTranscript(fixture.integration, 1);
 
   const detachedAnchor = await readingAnchor(fixture.page);
+  const detachedIdentity = await surfaceIdentity(fixture.page);
+  const detachedPolicy = await viewportPolicy(fixture.page);
   const detachedLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Split view');
   await waitForTranscriptScale(fixture.page, 0.85);
-  const splitAnchor = await anchorByKey(fixture.page, detachedAnchor.key);
+  const splitAnchor = await anchorByKey(fixture.page, detachedAnchor.key, {
+    phase: 'post-split-scale',
+    detachedAnchor,
+    detachedIdentity,
+    detachedPolicy,
+    detachedLayout,
+  });
   const splitLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
   expect(
     Math.abs(splitAnchor.offset - detachedAnchor.offset),
