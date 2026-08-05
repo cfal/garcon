@@ -204,3 +204,11 @@ export async function assertWebBuildCurrent(options = {}) {
       'Do not use `bun run --cwd web build`; it does not record the Garcon build marker.',
   );
 }
+
+export function assertWebBuildInputsUnchanged(expectedHash, actualHash) {
+  if (expectedHash === actualHash) return;
+  throw new Error(
+    'Web build inputs changed while the client was compiling. Run `bun run build` again before ' +
+      'starting the server or browser tests.',
+  );
+}

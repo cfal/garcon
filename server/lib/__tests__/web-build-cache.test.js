@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   assertWebBuildCurrent,
+  assertWebBuildInputsUnchanged,
   computeWebBuildHash,
   isWebBuildCurrent,
   productionWebBuildEnvironment,
@@ -182,6 +183,13 @@ describe('web build cache', () => {
     await recordWebBuild({ ...options, hash: preBuildHash });
 
     expect(await isWebBuildCurrent(options)).toBe(false);
+  });
+
+  it('rejects a build whose inputs changed while compilation was running', () => {
+    expect(() => assertWebBuildInputsUnchanged('before', 'before')).not.toThrow();
+    expect(() => assertWebBuildInputsUnchanged('before', 'after')).toThrow(
+      'Web build inputs changed while the client was compiling',
+    );
   });
 
   it('asserts that the recorded build is current with actionable remediation', async () => {

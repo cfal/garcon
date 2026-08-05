@@ -25,3 +25,4 @@ export function computeWebBuildHash(
 export function isWebBuildCurrent(options?: WebBuildCacheOptions): Promise<boolean>;
 export function recordWebBuild(options?: WebBuildCacheOptions): Promise<void>;
 export function assertWebBuildCurrent(options?: WebBuildCacheOptions): Promise<void>;
+export function assertWebBuildInputsUnchanged(expectedHash: string, actualHash: string): void;
