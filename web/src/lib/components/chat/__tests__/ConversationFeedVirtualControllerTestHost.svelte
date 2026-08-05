@@ -13,6 +13,8 @@
 	interface Exposure {
 		controller: ConversationFeedVirtualController;
 		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
+		initialEndRestoredCount(): number;
+		restoreHiddenWithConcurrentGeometry(): Promise<void>;
 	}
 
 	interface Props {
@@ -31,6 +33,7 @@
 	let viewport: HTMLDivElement | null = $state(null);
 	let virtualRoot: HTMLDivElement | null = $state(null);
 	let releaseRetention: (() => void) | null = null;
+	let initialEndRestoredCount = 0;
 
 	const keys = $derived(
 		Array.from({ length: itemCount }, (_, index) => JSON.stringify([surfaceIdentity, index])),
@@ -98,6 +101,9 @@
 		get retention() {
 			return retention;
 		},
+		onInitialEndRestored() {
+			initialEndRestoredCount += 1;
+		},
 	});
 	const virtualizer = controller.virtualizer;
 
@@ -108,7 +114,12 @@
 		});
 		unsubscribe();
 		if (!instance) throw new Error('Expected the virtualizer store to emit synchronously');
-		onReady({ controller, instance });
+		onReady({
+			controller,
+			instance,
+			initialEndRestoredCount: () => initialEndRestoredCount,
+			restoreHiddenWithConcurrentGeometry,
+		});
 	});
 
 	onDestroy(() => {
@@ -147,6 +158,19 @@
 		visible = true;
 		await tick();
 		controller.scrollToEnd();
+	}
+
+	async function restoreHiddenWithConcurrentGeometry(): Promise<void> {
+		visible = false;
+		await tick();
+		visible = true;
+		await tick();
+		const restore = controller.restoreHiddenReadingPosition();
+		if (viewport) viewport.scrollTop = 0;
+		textScale = 0.85;
+		measurementReset = 'all';
+		geometryRevision += 1;
+		await restore;
 	}
 </script>
 

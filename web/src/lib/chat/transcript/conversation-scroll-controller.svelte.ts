@@ -135,7 +135,13 @@ export class ConversationScrollController {
 
 	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
 		this.deps.getViewport()?.cancelForUserIntent();
-		this.#cancelViewportOperations();
+		// Continued scrolling owns the page's viewport position without cancelling its
+		// data request. Explicit navigation still advances the shared operation epoch.
+		if (this.#isPageMutationInProgress) {
+			this.deps.chatState.invalidatePendingWindowNavigation();
+		} else {
+			this.#cancelViewportOperations();
+		}
 		this.#clearInitialBottomRestore();
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
 		this.#userScrollIntent = {
@@ -146,6 +152,9 @@ export class ConversationScrollController {
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {
+		// The next chat's paint gate must not be completed by a deferred end restore
+		// that still belongs to the prior virtual surface.
+		this.deps.getViewport()?.cancelPendingLayoutMutation();
 		this.#cancelViewportOperations();
 		this.#resetPagingContext();
 		this.#initialBottomRestoreChatId = chatId;
@@ -238,9 +247,11 @@ export class ConversationScrollController {
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
+		const requestIntentEpoch = this.#userScrollIntent.epoch;
 
-		// Disarms the crossed boundary before awaiting data. It re-arms only after the
-		// viewport leaves the edge, so measurement-driven scroll events cannot chain requests.
+		// Disarms the crossed boundary before awaiting data. It re-arms after the
+		// viewport leaves the edge or a newer same-direction input survives the settle,
+		// so measurement-driven scroll events cannot chain requests by themselves.
 		this.#boundaryArmed[direction] = false;
 		// Requires a fresh post-page downward gesture before near-end geometry resumes live following.
 		this.#followLiveRequiresIntentAfter = Math.max(
@@ -250,6 +261,7 @@ export class ConversationScrollController {
 		this.#preserveHistoryBrowsing();
 		this.#isPageMutationInProgress = true;
 		let result: TranscriptPageLoadResult;
+		let continuedPageIntent: boolean;
 		try {
 			result = await this.#mutatePage(direction, () => {
 				if (direction === 'earlier' && this.deps.chatState.revealEarlierLoadedRows()) {
@@ -261,21 +273,35 @@ export class ConversationScrollController {
 			});
 		} finally {
 			const latestIntentEpoch = this.#userScrollIntent.epoch;
-			// A completed page consumes every gesture observed during its mutation. Chaining
-			// another page requires intent that arrives after the new geometry settles.
+			continuedPageIntent =
+				reason === 'scroll' && this.#hasContinuedPageIntent(direction, requestIntentEpoch);
+			// Layout-generated scroll events cannot chain pages because they add no input
+			// epoch. A newer same-direction gesture remains eligible after layout settles.
 			this.#followLiveRequiresIntentAfter = Math.max(
 				this.#followLiveRequiresIntentAfter,
 				latestIntentEpoch,
 			);
 			this.#consumedIntentEpoch = {
-				earlier: Math.max(this.#consumedIntentEpoch.earlier, latestIntentEpoch),
-				later: Math.max(this.#consumedIntentEpoch.later, latestIntentEpoch),
+				earlier: Math.max(
+					this.#consumedIntentEpoch.earlier,
+					direction === 'earlier' && continuedPageIntent
+						? requestIntentEpoch
+						: latestIntentEpoch,
+				),
+				later: Math.max(
+					this.#consumedIntentEpoch.later,
+					direction === 'later' && continuedPageIntent ? requestIntentEpoch : latestIntentEpoch,
+				),
 			};
 			this.#isPageMutationInProgress = false;
 		}
 		if (this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
 		this.#syncBoundaryLatch(direction);
 		if (reason === 'button') this.#preserveHistoryBrowsing();
+		if (result === 'loaded' && continuedPageIntent && this.#isNearPageBoundary(direction)) {
+			this.#boundaryArmed[direction] = true;
+			this.#handleBoundaryProximity(direction, true);
+		}
 		return result;
 	}
 
@@ -495,6 +521,7 @@ export class ConversationScrollController {
 		const viewport = this.deps.getViewport();
 		if (!chatId || !viewport) return 'invalidated';
 		const operationEpoch = this.#beginViewportOperation();
+		const userIntentEpoch = this.#userScrollIntent.epoch;
 		const windowRevision = this.deps.chatState.windowRevision;
 		const result = await mutate();
 		if (
@@ -505,19 +532,20 @@ export class ConversationScrollController {
 			return 'invalidated';
 		}
 		if (result !== 'loaded') return result;
-		// Treats the page operation as settled only after its data revision reaches the
-		// virtualizer and the resulting anchor correction completes.
+		// Waits until the data revision and anchor correction settle. A continued paging
+		// gesture already owns the viewport, so it may proceed after superseding that correction.
 		const layout = await viewport.waitForLayout({
 			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
 		});
 		if (
-			layout !== 'settled' ||
 			this.deps.chatState.windowRevision !== windowRevision ||
 			!this.#isCurrentViewportOperation(chatId, operationEpoch)
 		) {
 			return 'invalidated';
 		}
-		return result;
+		return layout === 'settled' || this.#hasContinuedPageIntent(direction, userIntentEpoch)
+			? result
+			: 'invalidated';
 	}
 
 	async #waitForCurrentLayout(result: TranscriptPageLoadResult): Promise<TranscriptPageLoadResult> {
@@ -667,6 +695,17 @@ export class ConversationScrollController {
 		return (
 			this.#userScrollIntent.receivedAt > 0 &&
 			performance.now() - this.#userScrollIntent.receivedAt <= USER_SCROLL_INTENT_WINDOW_MS
+		);
+	}
+
+	#hasContinuedPageIntent(
+		direction: TranscriptPageDirection,
+		requestIntentEpoch: number,
+	): boolean {
+		return (
+			this.#userScrollIntent.epoch > requestIntentEpoch &&
+			this.#userScrollIntent.direction === direction &&
+			this.#hasRecentUserScrollIntent()
 		);
 	}
 

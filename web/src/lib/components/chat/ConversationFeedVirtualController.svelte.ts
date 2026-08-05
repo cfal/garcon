@@ -46,6 +46,7 @@ const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
+const REQUIRED_END_STABLE_FRAMES = 2;
 interface ConversationFeedVirtualControllerOptions {
 	get model(): ConversationVirtualFeedModel;
 	get geometry(): ConversationVirtualGeometrySnapshot;
@@ -873,6 +874,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	async #completeEndRestore(token: number, operationEpoch: number): Promise<void> {
+		let previousGeometry: { scrollHeight: number; totalSize: number } | null = null;
+		let stableEndFrames = 0;
 		try {
 			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
 				await tick();
@@ -884,11 +887,26 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				) {
 					return;
 				}
-				if (this.isAtEnd()) {
+				const viewport = this.options.viewport;
+				if (!viewport) return;
+				const geometry = {
+					scrollHeight: viewport.scrollHeight,
+					totalSize: this.#instance().getTotalSize(),
+				};
+				const unchanged =
+					previousGeometry !== null &&
+					Math.abs(geometry.scrollHeight - previousGeometry.scrollHeight) <= OFFSET_TOLERANCE_PX &&
+					Math.abs(geometry.totalSize - previousGeometry.totalSize) <= OFFSET_TOLERANCE_PX;
+				stableEndFrames = this.isAtEnd() && unchanged ? stableEndFrames + 1 : 0;
+				if (stableEndFrames >= REQUIRED_END_STABLE_FRAMES) {
 					this.options.onInitialEndRestored?.();
 					return;
 				}
-				this.#scrollToPhysicalEnd();
+				// The Svelte adapter updates core before the enlarged sizer commits. The
+				// first end write can therefore clamp to the old physical maximum, so the
+				// paint gate waits for both virtual and physical size to remain settled.
+				if (!this.isAtEnd()) this.#scrollToPhysicalEnd();
+				previousGeometry = geometry;
 			}
 			if (
 				token !== this.#layoutMutationToken ||
@@ -897,6 +915,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			) {
 				return;
 			}
+			// Active streaming may prevent consecutive equal sizes indefinitely. The
+			// bounded fallback reveals only after one final synchronous physical-end write;
+			// later pinned measurements retain ownership instead of leaving the feed hidden.
 			this.#scrollToPhysicalEnd();
 			this.options.onInitialEndRestored?.();
 		} finally {

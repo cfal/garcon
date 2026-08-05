@@ -1252,6 +1252,110 @@ async function createTranscript(fixture: ChromiumFixture): Promise<string> {
   return chatId;
 }
 
+async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): Promise<void> {
+  const chatId = await seedTranscript(fixture.integration, 90, 'chromium-processing-prefetch');
+  await prepareTranscript(fixture, chatId);
+  const prompt = 'chromium-processing-prefetch-held';
+  const heldCompletion = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: prompt });
+  let releaseFirstPage!: () => void;
+  const firstPageGate = new Promise<void>((resolve) => (releaseFirstPage = resolve));
+  let resolveFirstPageRequest!: () => void;
+  const firstPageRequest = new Promise<void>((resolve) => (resolveFirstPageRequest = resolve));
+  let resolveSecondPageRequest!: () => void;
+  const secondPageRequest = new Promise<void>((resolve) => (resolveSecondPageRequest = resolve));
+  let earlierRequestCount = 0;
+  let turnId: string | null = null;
+
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeSeq')) {
+      earlierRequestCount += 1;
+      if (earlierRequestCount === 1) {
+        resolveFirstPageRequest();
+        await firstPageGate;
+      } else if (earlierRequestCount === 2) {
+        resolveSecondPageRequest();
+      }
+    }
+    await route.continue();
+  });
+
+  try {
+    const accepted = await fixture.integration.client.runDirectChat({
+      chatId,
+      content: prompt,
+      agent: fixture.integration.directAgents.openAi,
+    });
+    turnId = accepted.turnId ?? null;
+    await withDiagnosticTimeout('the held processing turn', heldCompletion.received);
+    await fixture.page.locator('[data-slot="chat-processing-status"]').waitFor({ state: 'visible' });
+    const modelCountBeforePrefetch = await waitForStableModelCount(fixture.page, 50);
+
+    await signalScrollIntent(fixture.page, 'earlier');
+    await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) => {
+      const feed = feedElement as HTMLElement;
+      feed.scrollTop = Math.min(feed.clientHeight / 2, Math.max(0, feed.scrollHeight - feed.clientHeight));
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await withDiagnosticTimeout('the first held earlier-page request', firstPageRequest);
+
+    await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement, previousModelCount) => {
+      const feed = feedElement as HTMLElement;
+      const sizer = feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
+      if (!sizer) throw new Error('The virtual sizer is missing before the held page release.');
+      const browserGlobal = globalThis as typeof globalThis & {
+        __chatContinuedEarlierIntentObserved?: boolean;
+      };
+      browserGlobal.__chatContinuedEarlierIntentObserved = false;
+      const observer = new MutationObserver(() => {
+        const modelCount = Number(sizer.dataset.chatVirtualModelCount ?? 0);
+        if (modelCount <= previousModelCount) return;
+        observer.disconnect();
+        feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+        feed.scrollTop = Math.min(feed.scrollTop, feed.clientHeight / 2);
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+        browserGlobal.__chatContinuedEarlierIntentObserved = true;
+      });
+      observer.observe(sizer, {
+        attributes: true,
+        attributeFilter: ['data-chat-virtual-model-count'],
+      });
+    }, modelCountBeforePrefetch);
+    releaseFirstPage();
+
+    await fixture.page.waitForFunction(
+      () =>
+        Boolean(
+          (globalThis as typeof globalThis & { __chatContinuedEarlierIntentObserved?: boolean })
+            .__chatContinuedEarlierIntentObserved,
+        ),
+      undefined,
+      { timeout: 20_000 },
+    );
+    await withDiagnosticTimeout('the continued-gesture earlier-page request', secondPageRequest);
+    const modelCountAfterPrefetch = await waitForModelCount(
+      fixture.page,
+      modelCountBeforePrefetch + 51,
+    );
+    expect(earlierRequestCount).toBe(2);
+    expect(modelCountAfterPrefetch).toBeGreaterThan(modelCountBeforePrefetch + 50);
+    await fixture.page.evaluate(() => {
+      delete (globalThis as typeof globalThis & { __chatContinuedEarlierIntentObserved?: boolean })
+        .__chatContinuedEarlierIntentObserved;
+    });
+  } finally {
+    releaseFirstPage();
+    heldCompletion.releaseEcho();
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+
+  if (turnId === null) throw new Error('The held processing turn was not accepted.');
+  expect((await fixture.integration.client.waitForTurnTerminal(chatId, turnId)).type).toBe(
+    'agent-run-finished',
+  );
+  fixture.assertNoBrowserErrors();
+}
+
 async function prepareTranscript(
   fixture: ChromiumFixture,
   chatId: string,
@@ -1576,6 +1680,9 @@ async function expectNoSwitchPaintFlicker(
 ): Promise<void> {
   const samples = fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
     const feed = feedElement as HTMLElement;
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatSwitchPaintSamplerReady?: boolean;
+    };
     const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     const surfaceOf = (): string => {
       const item = feed.querySelector<HTMLElement>('[data-chat-virtual-item]');
@@ -1589,7 +1696,9 @@ async function expectNoSwitchPaintFlicker(
       }
     };
     const initialSurface = surfaceOf();
+    browserGlobal.__chatSwitchPaintSamplerReady = true;
     const violations: Array<Record<string, unknown>> = [];
+    const transition: Array<Record<string, unknown>> = [];
     const visibleItemGeometry = () => {
       const feedRect = feed.getBoundingClientRect();
       return [...feed.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')].flatMap((item) => {
@@ -1606,6 +1715,8 @@ async function expectNoSwitchPaintFlicker(
     };
     let switchObserved = false;
     let settledFrames = 0;
+    let violationCount = 0;
+    const beforeSwitch: Array<Record<string, unknown>> = [];
     let settledGeometry: ReturnType<typeof visibleItemGeometry> | null = null;
     for (let attempt = 0; attempt < 600 && settledFrames < 12; attempt += 1) {
       await frame();
@@ -1621,14 +1732,43 @@ async function expectNoSwitchPaintFlicker(
         scrollbar && scrollbar.isConnected && getComputedStyle(scrollbar).visibility !== 'hidden',
       );
       const distanceFromEnd = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
-      if (busy || surfaceOf() !== initialSurface) switchObserved = true;
-      if (!switchObserved) continue;
-      if (busy && rowCount > 0 && (contentVisible || scrollbarVisible)) {
-        violations.push({ attempt, busy, contentVisible, scrollbarVisible, distanceFromEnd });
-      } else if (!busy && contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) > 2) {
-        violations.push({ attempt, busy, contentVisible, distanceFromEnd, rowCount });
+      const currentSurface = surfaceOf();
+      if (currentSurface && currentSurface !== initialSurface) switchObserved = true;
+      const sizer = feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
+      const sample = {
+        attempt,
+        busy,
+        contentVisible,
+        scrollbarVisible,
+        distanceFromEnd,
+        scrollTop: feed.scrollTop,
+        scrollHeight: feed.scrollHeight,
+        clientHeight: feed.clientHeight,
+        rowCount,
+        modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
+        totalSize: Number.parseFloat(sizer?.style.height ?? '0'),
+        pinned: feed.dataset.chatPinnedToBottom,
+        userScrolledUp: feed.dataset.chatUserScrolledUp,
+        surface: currentSurface,
+        path: location.pathname,
+      };
+      if (!switchObserved) {
+        beforeSwitch.push(sample);
+        if (beforeSwitch.length > 12) beforeSwitch.shift();
+        continue;
       }
-      const settled = !busy && contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) <= 1;
+      if (transition.length === 0) transition.push(...beforeSwitch);
+      if (transition.length < 36) transition.push(sample);
+      const recordViolation = (violation: Record<string, unknown>): void => {
+        violationCount += 1;
+        if (violations.length < 12) violations.push(violation);
+      };
+      if (!contentVisible && scrollbarVisible) {
+        recordViolation({ ...sample, kind: 'paint-gate-scrollbar-visible' });
+      } else if (contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) > 2) {
+        recordViolation({ ...sample, kind: 'visible-end-drift' });
+      }
+      const settled = contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) <= 1;
       if (settled) {
         const currentGeometry = visibleItemGeometry();
         if (settledGeometry) {
@@ -1644,7 +1784,7 @@ async function expectNoSwitchPaintFlicker(
               );
             });
           if (changed) {
-            violations.push({
+            recordViolation({
               attempt,
               kind: 'settled-visible-geometry-changed',
               previous: settledGeometry,
@@ -1655,15 +1795,25 @@ async function expectNoSwitchPaintFlicker(
           settledGeometry = currentGeometry;
         }
       } else if (settledGeometry) {
-        violations.push({ attempt, kind: 'settled-feed-became-unsettled', busy, contentVisible });
+        recordViolation({ attempt, kind: 'settled-feed-became-unsettled', busy, contentVisible });
       }
       settledFrames = settled ? settledFrames + 1 : 0;
     }
-    return { settledFrames, switchObserved, violations };
+    delete browserGlobal.__chatSwitchPaintSamplerReady;
+    return { settledFrames, switchObserved, transition, violationCount, violations };
   });
+  await fixture.page.waitForFunction(
+    () =>
+      Boolean(
+        (globalThis as typeof globalThis & { __chatSwitchPaintSamplerReady?: boolean })
+          .__chatSwitchPaintSamplerReady,
+      ),
+    undefined,
+    { timeout: 5_000 },
+  );
   await switchAction();
   const observed = await withDiagnosticTimeout('the switch paint samples', samples, 30_000);
-  expect(observed.violations, JSON.stringify(observed, null, 2)).toEqual([]);
+  expect(observed.violationCount, JSON.stringify(observed, null, 2)).toBe(0);
   expect(observed.switchObserved, JSON.stringify(observed, null, 2)).toBe(true);
   expect(observed.settledFrames, JSON.stringify(observed, null, 2)).toBeGreaterThanOrEqual(12);
 }
@@ -1727,12 +1877,14 @@ async function verifyChatSwitchBottomRestore(
   primaryChatId: string,
   environment: ScriptedClaudeTestEnvironment,
 ): Promise<void> {
+  const secondaryMarker = 'chromium-heterogeneous-switch-0';
+  const secondaryChatId = await seedHeterogeneousTranscript(fixture, environment);
+  // The scripted start can select its newly created chat. Re-establishes the primary
+  // surface before sampling the actual sidebar switch in either direction.
   await prepareTranscript(fixture, primaryChatId);
   await scrollToPosition(fixture.page, 'end');
   await waitForDistanceFromEnd(fixture.page, 1);
 
-  const secondaryMarker = 'chromium-heterogeneous-switch-0';
-  const secondaryChatId = await seedHeterogeneousTranscript(fixture, environment);
   await expectNoSwitchPaintFlicker(fixture, () =>
     selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker),
   );
@@ -1979,16 +2131,24 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   await waitForTranscriptScale(fixture.page, 1);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-scale-exit');
 
-  // Applies the scale change while the surface is hidden so the deferred show-time
-  // measurement path, not the visible reset path, restores the pinned end.
+  // Publishes new geometry while an already-scaled surface is hidden. The show-time
+  // attachment must restore the pinned end before the later visible scale reset.
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'Split view');
+  await waitForTranscriptScale(fixture.page, 0.85);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-enter');
   const scaleSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
-  const hiddenScaleChatId = await seedTranscript(fixture.integration, 1);
-  await addSidebarChatToSplit(fixture.page, hiddenScaleChatId);
+  const hiddenAppendMarker = 'chromium-hidden-scaled-append';
+  await appendTurn(fixture.integration, chatId, hiddenAppendMarker);
   await selectMainWorkspaceSurface(fixture.page, scaleSurfaceLabel);
   await waitForTranscriptScale(fixture.page, 0.85);
+  await fixture.page
+    .locator(FEED_SELECTOR)
+    .getByText(`echo:${hiddenAppendMarker}`, { exact: true })
+    .waitFor();
   await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-show');
   await openMainWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Exit split view');
@@ -2189,6 +2349,20 @@ describe('Chromium transcript virtualization', () => {
       },
       diagnostics,
       { serverEnvironment: testEnvironment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('prefetches earlier history while the active turn is processing', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-processing-prefetch',
+      async (fixture, markPhase) => {
+        markPhase('prefetching earlier history during a held processing turn');
+        await verifyEarlierPrefetchDuringProcessing(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
       browser,
     );
   }, 180_000);

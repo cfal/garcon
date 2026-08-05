@@ -277,6 +277,8 @@ describe('ConversationFeedVirtualController helpers', () => {
 interface ControllerExposure {
 	controller: ConversationFeedVirtualController;
 	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
+	initialEndRestoredCount(): number;
+	restoreHiddenWithConcurrentGeometry(): Promise<void>;
 }
 
 function nextFrame(): Promise<void> {
@@ -366,6 +368,29 @@ describe('ConversationFeedVirtualController', () => {
 		await waitFor(() => expect(measure).toHaveBeenCalledOnce());
 	});
 
+	it('keeps the hidden reading anchor through concurrent show-time geometry', async () => {
+		const { exposure } = await renderController();
+		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+		if (!viewport) throw new Error('Expected the controller viewport');
+		viewport.scrollTop = 180;
+		viewport.dispatchEvent(new Event('scroll'));
+		await nextFrame();
+		const readingItem = exposure.instance.getVirtualItemForOffset(viewport.scrollTop);
+		if (!readingItem) throw new Error('Expected a virtual reading item');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
+
+		await exposure.restoreHiddenWithConcurrentGeometry();
+		await nextFrame();
+		await nextFrame();
+		expect(scrollToIndex).toHaveBeenCalled();
+		expect(scrollToIndex.mock.lastCall).toEqual([
+			readingItem.index,
+			{ align: 'start', behavior: 'auto' },
+		]);
+	});
+
 	it('clears prior measurements when the surface identity changes', async () => {
 		const { exposure } = await renderController();
 		const measure = vi.spyOn(exposure.instance, 'measure');
@@ -407,6 +432,24 @@ describe('ConversationFeedVirtualController', () => {
 		// The uncancelled control restore proves the deferred write lands without the gesture.
 		exposure.controller.restoreInitialEnd();
 		await waitFor(() => expect(scrollToOffset).toHaveBeenCalled());
+	});
+
+	it('releases the initial paint gate after bounded streaming geometry', async () => {
+		const { exposure } = await renderController();
+		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+		if (!viewport) throw new Error('Expected the controller viewport');
+		let physicalHeight = 400;
+		Object.defineProperties(viewport, {
+			clientHeight: { configurable: true, value: 200 },
+			scrollHeight: {
+				configurable: true,
+				get: () => (physicalHeight += 10),
+			},
+		});
+
+		exposure.controller.scrollToEnd();
+
+		await waitFor(() => expect(exposure.initialEndRestoredCount()).toBe(1));
 	});
 
 	it('restores the detached reading anchor on text-scale resets instead of the end', async () => {

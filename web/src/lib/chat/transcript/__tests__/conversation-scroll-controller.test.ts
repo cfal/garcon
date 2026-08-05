@@ -305,6 +305,32 @@ describe('ConversationScrollController', () => {
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
 	});
 
+	it('preserves continued earlier intent while a prefetch settles', async () => {
+		let resolveFirstPage!: (result: 'loaded') => void;
+		const firstPage = new Promise<'loaded'>((resolve) => (resolveFirstPage = resolve));
+		const loadEarlierPage = vi
+			.fn<ConversationScrollState['loadEarlierPage']>()
+			.mockImplementationOnce(() => firstPage)
+			.mockResolvedValueOnce('exhausted');
+		const fixture = controllerFixture({
+			viewport: fakeViewport({
+				waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>(async () => 'superseded'),
+			}),
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 350 },
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.controller.handleScroll();
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.controller.handleScroll();
+		resolveFirstPage('loaded');
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
+	});
+
 	it('detaches on fresh upward intent inside the later threshold', () => {
 		const viewport = fakeViewport({ isAtEnd: vi.fn(() => true) });
 		const { controller, state } = controllerFixture({ viewport });
@@ -808,8 +834,9 @@ describe('ConversationScrollController', () => {
 	});
 
 	it('tracks and completes initial end restoration', () => {
-		const { controller } = controllerFixture();
+		const { controller, viewport } = controllerFixture();
 		controller.prepareInitialBottomRestore('chat-1');
+		expect(viewport.cancelPendingLayoutMutation).toHaveBeenCalledOnce();
 		expect(controller.isPreparingInitialScroll).toBe(true);
 		controller.completeInitialBottomRestore();
 		expect(controller.isPreparingInitialScroll).toBe(false);
