@@ -38,7 +38,6 @@ function scrollState(
 		displayMessageCount: 1,
 		feedMutationClock: mutationClock(),
 		generationId: 'generation-1',
-		hasInitialMessagesToReveal: false,
 		hasLaterMessages: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
@@ -814,45 +813,6 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPreparingInitialScroll).toBe(true);
 		controller.completeInitialBottomRestore();
 		expect(controller.isPreparingInitialScroll).toBe(false);
-	});
-
-	it('holds the initial paint gate through the staged chat-switch reveal', () => {
-		let hasInitialMessagesToReveal = true;
-		const { controller, viewport, state } = controllerFixture();
-		Object.defineProperty(state, 'hasInitialMessagesToReveal', {
-			configurable: true,
-			get: () => hasInitialMessagesToReveal,
-		});
-		controller.prepareInitialBottomRestore('chat-1');
-		controller.reconcileInitialBottomRestore(true);
-		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
-		controller.completeInitialBottomRestore();
-		expect(controller.isPreparingInitialScroll).toBe(true);
-
-		controller.reconcileInitialBottomRestore(true);
-		expect(viewport.restoreInitialEnd).toHaveBeenCalledTimes(2);
-
-		hasInitialMessagesToReveal = false;
-		controller.completeInitialBottomRestore();
-		expect(controller.isPreparingInitialScroll).toBe(false);
-		controller.reconcileInitialBottomRestore(true);
-		expect(viewport.restoreInitialEnd).toHaveBeenCalledTimes(2);
-	});
-
-	it('cancels staged chat-switch restoration when the user scrolls', () => {
-		const { controller, viewport, state } = controllerFixture();
-		Object.defineProperty(state, 'hasInitialMessagesToReveal', {
-			configurable: true,
-			get: () => true,
-		});
-		controller.prepareInitialBottomRestore('chat-1');
-		controller.reconcileInitialBottomRestore(true);
-		controller.completeInitialBottomRestore();
-
-		controller.noteUserScrollIntent('earlier');
-		controller.reconcileInitialBottomRestore(true);
-
-		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
 	});
 
 	it('retries initial-end reconciliation after viewport autofill finishes', async () => {

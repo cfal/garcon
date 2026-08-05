@@ -108,12 +108,6 @@ describe('ConversationFeed', () => {
 		expect(viewport.contains(spacer)).toBe(true);
 	});
 
-	it('hides the local truncation control during the automatic initial reveal', () => {
-		render(ConversationFeedTestHost, { transcriptScenario: 'initial-reveal' });
-
-		expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
-	});
-
 	it('keeps feed content and scrollbar invisible while preparing the initial position', async () => {
 		const { container, rerender } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'row-ids',

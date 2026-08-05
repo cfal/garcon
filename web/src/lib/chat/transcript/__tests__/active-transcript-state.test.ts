@@ -959,7 +959,7 @@ describe('ActiveTranscriptState', () => {
 		expect(restored.chatMessages.map(contentOf)).toEqual(['first', 'second']);
 	});
 
-	it('reveals a restored transcript window in bounded switch batches', () => {
+	it('restores the bounded transcript window immediately', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 100 });
 		const messages = Array.from({ length: 100 }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -975,17 +975,11 @@ describe('ActiveTranscriptState', () => {
 
 		chat.activateChat('chat-1');
 
-		expect(chat.visibleRows).toHaveLength(20);
-		expect(chat.hasInitialMessagesToReveal).toBe(true);
-		chat.revealInitialMessages();
-		expect(chat.visibleRows).toHaveLength(40);
-		for (let index = 0; index < 3; index += 1) chat.revealInitialMessages();
 		expect(chat.visibleRows).toHaveLength(100);
-		expect(chat.hasInitialMessagesToReveal).toBe(false);
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
 	});
 
-	it('permanently completes a partial restored transcript after revealing its snapshot', () => {
+	it('keeps a partial restored transcript visible through later growth', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 100 });
 		const messages = Array.from({ length: 30 }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -1000,11 +994,9 @@ describe('ActiveTranscriptState', () => {
 		const chat = new ActiveTranscriptState(transcriptCache);
 
 		chat.activateChat('chat-1');
-		chat.revealInitialMessages();
 
 		expect(chat.visibleRows).toHaveLength(30);
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
-		expect(chat.hasInitialMessagesToReveal).toBe(false);
 
 		chat.applyMessages(
 			'chat-1',
@@ -1015,7 +1007,6 @@ describe('ActiveTranscriptState', () => {
 		);
 
 		expect(chat.visibleRows).toHaveLength(60);
-		expect(chat.hasInitialMessagesToReveal).toBe(false);
 	});
 
 	it('keeps every explicitly revealed row visible as live messages append', () => {
@@ -1034,7 +1025,6 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.visibleRows).toHaveLength(175);
 		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
-		expect(chat.hasInitialMessagesToReveal).toBe(false);
 
 		chat.upsertPendingUserInput(
 			pendingInput({ clientRequestId: 'request-176', content: 'message-176' }),
@@ -1156,7 +1146,6 @@ describe('ActiveTranscriptState', () => {
 			);
 
 			expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
-			expect(chat.hasInitialMessagesToReveal).toBe(false);
 
 			chat.applyMessages(
 				'chat-1',
@@ -1167,11 +1156,10 @@ describe('ActiveTranscriptState', () => {
 			);
 
 			expect(chat.visibleRows).toHaveLength(40);
-			expect(chat.hasInitialMessagesToReveal).toBe(false);
 		},
 	);
 
-	it('bounds the first render when a switched chat is not cached yet', () => {
+	it('bounds the first loaded window when a switched chat is not cached yet', () => {
 		const chat = new ActiveTranscriptState();
 		const messages = Array.from({ length: 100 }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -1192,8 +1180,7 @@ describe('ActiveTranscriptState', () => {
 			epoch,
 		);
 
-		expect(chat.visibleRows).toHaveLength(20);
-		expect(chat.hasInitialMessagesToReveal).toBe(true);
+		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
 	});
 
 	it('loads only the first page for initial-prompt navigation', async () => {
@@ -1952,8 +1939,7 @@ describe('ActiveTranscriptState', () => {
 		const initialLoad = chat.navigateToWindow('chat-1', 'initial');
 		expect(getChatMessages).toHaveBeenCalledOnce();
 		chat.activateChat('chat-2');
-		expect(chat.visibleRows).toHaveLength(20);
-		expect(chat.hasInitialMessagesToReveal).toBe(true);
+		expect(chat.visibleRows).toHaveLength(30);
 
 		resolvePage({
 			chatId: 'chat-1',
@@ -1970,8 +1956,7 @@ describe('ActiveTranscriptState', () => {
 		await expect(initialLoad).resolves.toBe('invalidated');
 
 		expect(chat.activeChatId).toBe('chat-2');
-		expect(chat.visibleRows).toHaveLength(20);
-		expect(chat.hasInitialMessagesToReveal).toBe(true);
+		expect(chat.visibleRows).toHaveLength(30);
 	});
 
 	it('lets a new chat paginate while the previous chat page request is still pending', async () => {

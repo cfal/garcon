@@ -25,7 +25,6 @@
 		showAnnouncementTrigger?: boolean;
 		transcriptScenario?:
 			| 'empty'
-			| 'initial-reveal'
 			| 'local-truncation'
 			| 'loading-later'
 			| 'error-earlier'
@@ -72,43 +71,30 @@
 		const messageCount =
 			initialTranscriptScenario === 'twenty-thousand'
 				? 20_000
-				: initialTranscriptScenario === 'initial-reveal'
-					? 50
-					: initialTranscriptScenario === 'loading-later'
+				: initialTranscriptScenario === 'loading-later'
 						? 5
 						: 120;
 		const messages = Array.from({ length: messageCount }, (_, index) => ({
 			seq: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
-		if (initialTranscriptScenario === 'initial-reveal') {
-			chatState.transcriptCache.replaceFromPage('chat-1', {
-				generationId: 'generation-1',
-				messages,
-				lastSeq: messageCount,
-				pageOldestSeq: 1,
-				hasMore: false,
-			});
-			chatState.activateChat('chat-1');
-		} else {
-			chatState.replaceGeneration('chat-1', 'generation-1', messages, {
-				lastSeq: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
-				pageOldestSeq: 1,
-				hasMore: false,
-			});
-			if (initialTranscriptScenario === 'loading-later') {
-				chatState.pageStates.later = { status: 'loading', error: null };
-			}
-			if (initialTranscriptScenario === 'error-earlier') {
-				chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };
-			}
-			if (
-				initialTranscriptScenario === 'twenty-thousand' ||
-				initialTranscriptScenario === 'count-shrink' ||
-				initialTranscriptScenario === 'count-shrink-survivors'
-			) {
-				chatState.revealAllLoadedMessages();
-			}
+		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastSeq: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		if (initialTranscriptScenario === 'loading-later') {
+			chatState.pageStates.later = { status: 'loading', error: null };
+		}
+		if (initialTranscriptScenario === 'error-earlier') {
+			chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };
+		}
+		if (
+			initialTranscriptScenario === 'twenty-thousand' ||
+			initialTranscriptScenario === 'count-shrink' ||
+			initialTranscriptScenario === 'count-shrink-survivors'
+		) {
+			chatState.revealAllLoadedMessages();
 		}
 	}
 

@@ -38,7 +38,6 @@ export type ConversationScrollState = Pick<
 	| 'displayMessageCount'
 	| 'feedMutationClock'
 	| 'generationId'
-	| 'hasInitialMessagesToReveal'
 	| 'hasLaterMessages'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
@@ -156,10 +155,6 @@ export class ConversationScrollController {
 	completeInitialBottomRestore(): void {
 		if (this.#initialBottomRestoreChatId !== this.deps.sessions.selectedChatId) return;
 		if (this.deps.chatState.displayMessageCount === 0) return;
-		// The paint gate holds through the staged initial reveal: each reveal batch grows the
-		// sizer and re-anchors the end, so revealing after the first settled batch would show
-		// the feed flickering through intermediate scroll positions and thumb sizes.
-		if (this.deps.chatState.hasInitialMessagesToReveal) return;
 		this.#initialBottomPaintChatId = null;
 		this.#initialBottomRestoreChatId = null;
 	}
@@ -244,7 +239,10 @@ export class ConversationScrollController {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
 
+		// Disarms the crossed boundary before awaiting data. It re-arms only after the
+		// viewport leaves the edge, so measurement-driven scroll events cannot chain requests.
 		this.#boundaryArmed[direction] = false;
+		// Requires a fresh post-page downward gesture before near-end geometry resumes live following.
 		this.#followLiveRequiresIntentAfter = Math.max(
 			this.#followLiveRequiresIntentAfter,
 			this.#userScrollIntent.epoch,
@@ -263,6 +261,8 @@ export class ConversationScrollController {
 			});
 		} finally {
 			const latestIntentEpoch = this.#userScrollIntent.epoch;
+			// A completed page consumes every gesture observed during its mutation. Chaining
+			// another page requires intent that arrives after the new geometry settles.
 			this.#followLiveRequiresIntentAfter = Math.max(
 				this.#followLiveRequiresIntentAfter,
 				latestIntentEpoch,
@@ -385,8 +385,7 @@ export class ConversationScrollController {
 			return;
 		}
 		if (!this.deps.chatState.hasLaterMessages) {
-			if (this.deps.chatState.isUserScrolledUp || this.deps.chatState.hasInitialMessagesToReveal)
-				return;
+			if (this.deps.chatState.isUserScrolledUp) return;
 		} else {
 			this.#preserveHistoryBrowsing();
 		}
@@ -395,6 +394,8 @@ export class ConversationScrollController {
 		if (!viewport) return;
 		this.#isAutoFillingViewport = true;
 		try {
+			// Deliberately chains pages only while the visible viewport remains underfilled.
+			// This is the sole geometry-driven paging path.
 			while (this.deps.sessions.selectedChatId === chatId && this.#isViewportVisible) {
 				if (this.#activeTargetNavigations > 0) return;
 				const layout = await viewport.waitForLayout({
@@ -504,6 +505,8 @@ export class ConversationScrollController {
 			return 'invalidated';
 		}
 		if (result !== 'loaded') return result;
+		// Treats the page operation as settled only after its data revision reaches the
+		// virtualizer and the resulting anchor correction completes.
 		const layout = await viewport.waitForLayout({
 			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
 		});
@@ -548,6 +551,8 @@ export class ConversationScrollController {
 			return;
 		}
 		if (!this.#boundaryArmed[direction] || !this.#canRequestPage(direction)) return;
+		// Accepts only a fresh directional gesture at a re-armed edge. Restores and
+		// ResizeObserver scroll events have no gesture epoch and cannot page history.
 		const intent = this.#userScrollIntent;
 		if (
 			intent.epoch <= this.#consumedIntentEpoch[direction] ||

@@ -40,14 +40,11 @@ export type { ChatTranscriptRow } from './transcript-row-projection.js';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
-export const INITIAL_SWITCH_VISIBLE_MESSAGES = 20;
 export const ACTIVE_TRANSCRIPT_RETENTION_LIMIT = 200;
-const SWITCH_REVEAL_BATCH_SIZE = 20;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
 type SnapshotBatch = { generationId: string; messages: ChatViewMessage[]; noticeRevision: number };
 export type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
-type InitialRevealPhase = 'pending' | 'revealing' | 'complete';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
@@ -106,7 +103,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#loadingPageDirection: TranscriptPageDirection | null = null;
 	#pageLoadOperationEpoch = 0;
 	#windowNavigationEpoch = 0;
-	#initialRevealPhase = $state<InitialRevealPhase>('complete');
 	#preserveExpandedVisibleWindow = false;
 	#feedMutations = new ConversationFeedMutationState();
 
@@ -223,7 +219,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get hasEarlierRowsToReveal(): boolean {
-		if (this.#initialRevealPhase !== 'complete') return false;
 		const firstVisibleSeq = this.#visibleRows.find(
 			(row): row is ChatTranscriptRow => row.kind === 'message' && row.seq !== undefined,
 		)?.seq;
@@ -416,7 +411,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = messages.length;
 		this.#replacePendingUserInputs(options.pendingUserInputs ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
-		this.#initialRevealPhase = 'complete';
 		this.localNotices = [];
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
@@ -474,7 +468,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			const result = this.applyMessages(chatId, generationId, messages, noticeRevision);
 			if (result !== 'applied') return result;
 		}
-		this.#resolvePendingInitialReveal();
 		return 'applied';
 	}
 
@@ -753,7 +746,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
-		this.#initialRevealPhase = 'complete';
 		this.#recordFeedMutation('replacement');
 	}
 
@@ -781,39 +773,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return changed;
 	}
 
-	get hasInitialMessagesToReveal(): boolean {
-		return this.#initialRevealPhase === 'revealing';
-	}
-
-	revealInitialMessages(): void {
-		if (!this.hasInitialMessagesToReveal) return;
-		const nextCount = Math.min(
-			INITIAL_VISIBLE_MESSAGES,
-			this.visibleMessageCount + SWITCH_REVEAL_BATCH_SIZE,
-		);
-		if (nextCount >= Math.min(INITIAL_VISIBLE_MESSAGES, this.displayMessageCount)) {
-			this.completeInitialMessagesReveal();
-			return;
-		}
-		this.visibleMessageCount = nextCount;
-		this.#recordFeedMutation('initial');
-	}
-
-	completeInitialMessagesReveal(): void {
-		const changed =
-			this.visibleMessageCount < INITIAL_VISIBLE_MESSAGES ||
-			this.#initialRevealPhase !== 'complete';
-		this.visibleMessageCount = Math.max(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
-		this.#initialRevealPhase = 'complete';
-		if (changed) this.#recordFeedMutation('initial');
-	}
-
 	revealAllLoadedMessages(): void {
-		const changed =
-			this.visibleMessageCount < this.displayMessageCount ||
-			this.#initialRevealPhase !== 'complete';
+		const changed = this.visibleMessageCount < this.displayMessageCount;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
-		this.#initialRevealPhase = 'complete';
 		this.#rememberExpandedVisibleWindow();
 		if (changed) this.#recordFeedMutation('initial');
 	}
@@ -890,7 +852,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.hasEarlierMessages = false;
 			this.totalMessages = page.messages.length;
 			this.visibleMessageCount = page.messages.length;
-			this.#initialRevealPhase = 'complete';
 			if (this.hasLaterMessages) {
 				this.isUserScrolledUp = true;
 			}
@@ -928,8 +889,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.activeChatId = chatId;
 		this.resetForNewChat();
 		if (!chatId) return null;
-		this.visibleMessageCount = INITIAL_SWITCH_VISIBLE_MESSAGES;
-		this.#initialRevealPhase = 'pending';
+		// Publishes the bounded cache window atomically; the virtual feed limits mounted row work.
 		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;
 		this.entries = restored.messages;
@@ -939,17 +899,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = restored.messages.length;
 		this.hasEarlierMessages = false;
 		this.loadStatus = restored.messages.length === 0 ? 'empty' : 'loaded';
-		this.#resolvePendingInitialReveal();
 		return { count: restored.messages.length, stale: restored.stale };
-	}
-
-	#resolvePendingInitialReveal(): void {
-		if (this.#initialRevealPhase !== 'pending') return;
-		if (this.displayMessageCount > INITIAL_SWITCH_VISIBLE_MESSAGES) {
-			this.#initialRevealPhase = 'revealing';
-			return;
-		}
-		this.completeInitialMessagesReveal();
 	}
 
 	removeCachedMessages(chatId: string): void {

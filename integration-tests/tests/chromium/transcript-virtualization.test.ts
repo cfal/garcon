@@ -1568,9 +1568,8 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
   fixture.assertNoBrowserErrors();
 }
 
-// Samples every frame across a chat switch and rejects any painted frame where feed
-// content is visible away from the physical end, or where the initial paint gate lets
-// content or the overlay scrollbar paint while the feed is still positioning.
+// Samples every frame across a chat switch and rejects visible end drift, paint-gate
+// leaks, and post-reveal changes to the visible virtual row geometry.
 async function expectNoSwitchPaintFlicker(
   fixture: ChromiumFixture,
   switchAction: () => Promise<void>,
@@ -1591,8 +1590,23 @@ async function expectNoSwitchPaintFlicker(
     };
     const initialSurface = surfaceOf();
     const violations: Array<Record<string, unknown>> = [];
+    const visibleItemGeometry = () => {
+      const feedRect = feed.getBoundingClientRect();
+      return [...feed.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')].flatMap((item) => {
+        const rect = item.getBoundingClientRect();
+        if (rect.bottom <= feedRect.top + 1 || rect.top >= feedRect.bottom - 1) return [];
+        return [
+          {
+            key: item.dataset.chatVirtualItem ?? '',
+            top: rect.top - feedRect.top,
+            height: rect.height,
+          },
+        ];
+      });
+    };
     let switchObserved = false;
     let settledFrames = 0;
+    let settledGeometry: ReturnType<typeof visibleItemGeometry> | null = null;
     for (let attempt = 0; attempt < 600 && settledFrames < 12; attempt += 1) {
       await frame();
       const content = feed.querySelector<HTMLElement>('[data-chat-feed-content]');
@@ -1615,6 +1629,34 @@ async function expectNoSwitchPaintFlicker(
         violations.push({ attempt, busy, contentVisible, distanceFromEnd, rowCount });
       }
       const settled = !busy && contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) <= 1;
+      if (settled) {
+        const currentGeometry = visibleItemGeometry();
+        if (settledGeometry) {
+          const changed =
+            currentGeometry.length !== settledGeometry.length ||
+            currentGeometry.some((item, index) => {
+              const previous = settledGeometry?.[index];
+              return (
+                !previous ||
+                item.key !== previous.key ||
+                Math.abs(item.top - previous.top) > 1 ||
+                Math.abs(item.height - previous.height) > 1
+              );
+            });
+          if (changed) {
+            violations.push({
+              attempt,
+              kind: 'settled-visible-geometry-changed',
+              previous: settledGeometry,
+              current: currentGeometry,
+            });
+          }
+        } else {
+          settledGeometry = currentGeometry;
+        }
+      } else if (settledGeometry) {
+        violations.push({ attempt, kind: 'settled-feed-became-unsettled', busy, contentVisible });
+      }
       settledFrames = settled ? settledFrames + 1 : 0;
     }
     return { settledFrames, switchObserved, violations };
@@ -1626,20 +1668,79 @@ async function expectNoSwitchPaintFlicker(
   expect(observed.settledFrames, JSON.stringify(observed, null, 2)).toBeGreaterThanOrEqual(12);
 }
 
+function heterogeneousAssistantResponse(index: number): string {
+  const paragraphs = Array.from(
+    { length: (index % 4) + 1 },
+    (_, paragraph) =>
+      `Paragraph ${paragraph + 1} for response ${index} exercises variable-height Markdown during chat restoration.`,
+  ).join('\n\n');
+  const code =
+    index % 2 === 0
+      ? `\n\n\`\`\`ts\nconst restoredRow${index} = { index: ${index}, stable: true };\nconsole.log(restoredRow${index});\n\`\`\``
+      : '';
+  return `## Heterogeneous response ${index}\n\n${paragraphs}${code}`;
+}
+
+async function seedHeterogeneousTranscript(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+): Promise<string> {
+  const chatId = fixture.integration.newChatId();
+  for (let index = 0; index < 9; index += 1) {
+    const toolOutput = Array.from(
+      { length: (index % 4) + 1 },
+      (_, line) => `heterogeneous-tool-${index}-line-${line + 1}`,
+    ).join('\\n');
+    environment.model.scriptTurn([
+      claudeToolUse(`toolu_chromium_switch_${index}`, 'Bash', {
+        command: `printf '%b' '${toolOutput}\\n'`,
+      }),
+    ]);
+    environment.model.scriptTurn([claudeText(heterogeneousAssistantResponse(index))]);
+    const accepted =
+      index === 0
+        ? await fixture.integration.client.startChat(
+            liveClaudeStartRequest({
+              chatId,
+              projectPath: fixture.integration.dirs.project,
+              command: `chromium-heterogeneous-switch-${index}`,
+              permissionMode: 'bypassPermissions',
+            }),
+          )
+        : await fixture.integration.client.runChat(
+            liveClaudeRunRequest({
+              chatId,
+              command: `chromium-heterogeneous-switch-${index}`,
+              permissionMode: 'bypassPermissions',
+            }),
+          );
+    expect(
+      (await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId)).type,
+    ).toBe('agent-run-finished');
+  }
+  environment.model.assertSettled();
+  return chatId;
+}
+
 async function verifyChatSwitchBottomRestore(
   fixture: ChromiumFixture,
   primaryChatId: string,
+  environment: ScriptedClaudeTestEnvironment,
 ): Promise<void> {
   await prepareTranscript(fixture, primaryChatId);
   await scrollToPosition(fixture.page, 'end');
   await waitForDistanceFromEnd(fixture.page, 1);
 
-  const secondaryMarker = 'chromium-switch-secondary';
-  const secondaryChatId = await seedTranscript(fixture.integration, 12, secondaryMarker);
+  const secondaryMarker = 'chromium-heterogeneous-switch-0';
+  const secondaryChatId = await seedHeterogeneousTranscript(fixture, environment);
   await expectNoSwitchPaintFlicker(fixture, () =>
     selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker),
   );
   await waitForStablePinnedTranscriptLayout(fixture.page, 'switch-to-secondary');
+  const visibleHeights = await fixture.page.locator(ITEM_SELECTOR).evaluateAll((items) =>
+    items.map((item) => Math.round((item as HTMLElement).getBoundingClientRect().height)),
+  );
+  expect(new Set(visibleHeights).size, JSON.stringify(visibleHeights)).toBeGreaterThanOrEqual(3);
 
   await expectNoSwitchPaintFlicker(fixture, () =>
     selectSidebarChat(fixture.page, primaryChatId, 'chromium-virtual-turn-0'),
@@ -2082,7 +2183,7 @@ describe('Chromium transcript virtualization', () => {
         markPhase('verifying detached, hidden, and pinned append geometry');
         await verifyAppendGeometry(fixture, chatId);
         markPhase('verifying chat-switch end restoration');
-        await verifyChatSwitchBottomRestore(fixture, chatId);
+        await verifyChatSwitchBottomRestore(fixture, chatId, testEnvironment);
         markPhase('verifying detached and pinned text-scale transitions');
         await verifyTextScaleTransitions(fixture, chatId);
       },

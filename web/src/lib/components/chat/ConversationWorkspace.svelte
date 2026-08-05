@@ -38,7 +38,6 @@
 		UserMessageNavigatorController,
 		type UserMessageNavigatorRegistration,
 	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
-	import { scheduleInitialTranscriptReveal } from '$lib/chat/transcript/initial-transcript-reveal.js';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { isAcceptedConversationSubmission } from '$lib/chat/conversation/conversation-submission-outcome.js';
@@ -419,20 +418,6 @@
 		const chatId = sessions.selectedChatId;
 		const generationId = chatState.generationId;
 		userMessageNavigator.reconcileActiveTranscript(chatId, generationId);
-	});
-
-	$effect(() => {
-		const chatId = chatState.activeChatId;
-		const shouldReveal = chatState.hasInitialMessagesToReveal;
-		if (!chatId || !shouldReveal) return;
-
-		return scheduleInitialTranscriptReveal(() => {
-			if (chatState.activeChatId !== chatId) return false;
-			untrack(() => chatState.revealInitialMessages());
-			const shouldContinue = chatState.hasInitialMessagesToReveal;
-			if (!shouldContinue) void scroll.fillUnderfilledViewport();
-			return shouldContinue;
-		});
 	});
 
 	const isPreparingInitialScroll = $derived(
