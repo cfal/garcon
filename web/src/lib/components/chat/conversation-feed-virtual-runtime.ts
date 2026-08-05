@@ -3,12 +3,12 @@ import {
 	observeElementRect,
 	type Rect,
 	type SvelteVirtualizer,
-	type VirtualItem,
 	type Virtualizer,
 } from '@tanstack/svelte-virtual';
 import {
 	attainableConversationTargetOffset,
 	CHAT_GEOMETRY_END_THRESHOLD_PX,
+	isConversationVirtualViewportCovered,
 	isConversationTargetLayoutReady,
 	resolveConversationViewportRect,
 	selectConversationReadingAnchor,
@@ -98,14 +98,27 @@ export class ConversationMountedVirtualItems {
 		return keys;
 	}
 
-	committedRangeSignature(
-		virtualItems: readonly VirtualItem[],
+	committedViewportRangeSignature(
+		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>,
 		configuredKeys: readonly string[],
+		viewport: HTMLDivElement | null,
 	): string | null {
+		if (!viewport) return null;
+		const virtualItems = instance.getVirtualItems();
 		if (virtualItems.length === 0 && configuredKeys.length > 0) return null;
 		const committedByIndex = this.#keysByIndex(configuredKeys);
 		for (const item of virtualItems) {
 			if (committedByIndex.get(item.index) !== String(item.key)) return null;
+		}
+		if (
+			!isConversationVirtualViewportCovered(virtualItems, {
+				scrollOffset: viewport.scrollTop,
+				viewportSize: viewport.clientHeight,
+				scrollMargin: instance.options.scrollMargin,
+				totalSize: instance.getTotalSize(),
+			})
+		) {
+			return null;
 		}
 		return virtualItems.map((item) => `${item.index}:${String(item.key)}`).join('|');
 	}

@@ -936,11 +936,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#committedVirtualRangeSignature(): string | null {
-		// Delayed measurements can expand the range until TanStack closes its scroll cycle.
+		// The paint gate waits for TanStack to settle and committed rows to cover the viewport.
 		if (this.#instance().isScrolling) return null;
-		return this.#mountedItems.committedRangeSignature(
-			this.#instance().getVirtualItems(),
+		return this.#mountedItems.committedViewportRangeSignature(
+			this.#instance(),
 			this.#configuredKeys,
+			this.options.viewport,
 		);
 	}
 

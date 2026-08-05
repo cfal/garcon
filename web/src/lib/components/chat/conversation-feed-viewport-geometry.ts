@@ -99,6 +99,33 @@ export function selectConversationReadingAnchor<T extends { key: unknown; end: n
 	);
 }
 
+// Rejects a stale or disjoint range that could add a visible row after reveal.
+export function isConversationVirtualViewportCovered(
+	virtualItems: readonly { start: number; end: number }[],
+	input: {
+		scrollOffset: number;
+		viewportSize: number;
+		scrollMargin: number;
+		totalSize: number;
+	},
+): boolean {
+	const visibleStart = Math.max(input.scrollOffset, input.scrollMargin);
+	const visibleEnd = Math.min(
+		input.scrollOffset + input.viewportSize,
+		input.scrollMargin + input.totalSize,
+	);
+	if (visibleEnd <= visibleStart + CHAT_GEOMETRY_END_THRESHOLD_PX) return true;
+
+	let coveredThrough = visibleStart;
+	for (const item of virtualItems) {
+		if (item.end < coveredThrough - CHAT_GEOMETRY_END_THRESHOLD_PX) continue;
+		if (item.start > coveredThrough + CHAT_GEOMETRY_END_THRESHOLD_PX) return false;
+		coveredThrough = Math.max(coveredThrough, item.end);
+		if (coveredThrough >= visibleEnd - CHAT_GEOMETRY_END_THRESHOLD_PX) return true;
+	}
+	return false;
+}
+
 export function retainedConversationRange(
 	range: Range,
 	retainedIndexes: readonly number[],
