@@ -91,13 +91,13 @@
 	const virtualizer = controller.virtualizer;
 
 	onMount(() => {
-		let exposed = false;
-		const unsubscribe = controller.virtualizer.subscribe((instance) => {
-			if (exposed) return;
-			exposed = true;
-			onReady({ controller, instance });
+		let instance: SvelteVirtualizer<HTMLElement, HTMLDivElement> | undefined;
+		const unsubscribe = controller.virtualizer.subscribe((value) => {
+			instance ??= value;
 		});
-		return unsubscribe;
+		unsubscribe();
+		if (!instance) throw new Error('Expected the virtualizer store to emit synchronously');
+		onReady({ controller, instance });
 	});
 
 	onDestroy(() => {

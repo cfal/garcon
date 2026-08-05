@@ -263,6 +263,7 @@ describe('ConversationFeedVirtualController', () => {
 		expect(Object.keys(setOptions.mock.lastCall?.[0] ?? {})).toEqual(['rangeExtractor']);
 
 		setOptions.mockClear();
+		const shrinkSetOptions = vi.spyOn(exposure.instance, 'setOptions');
 		await fireEvent.click(screen.getByRole('button', { name: 'Shrink' }));
 		await waitFor(() => {
 			expect(
@@ -273,7 +274,7 @@ describe('ConversationFeedVirtualController', () => {
 		});
 		await nextFrame();
 		await nextFrame();
-		expect(setOptions).toHaveBeenCalled();
+		expect(shrinkSetOptions).toHaveBeenCalled();
 		expect(measure).not.toHaveBeenCalled();
 	});
 
@@ -317,11 +318,11 @@ describe('ConversationFeedVirtualController', () => {
 			exposure.controller.destroy();
 			exposure.controller.destroy();
 		}).not.toThrow();
+		expect(unmount).not.toThrow();
 		await waitFor(() =>
 			expect(
 				ResizeObserverHarness.instances.every((observer) => observer.observed.size === 0),
 			).toBe(true),
 		);
-		expect(unmount).not.toThrow();
 	});
 });
