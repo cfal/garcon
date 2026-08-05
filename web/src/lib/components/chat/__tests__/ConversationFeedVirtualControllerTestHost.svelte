@@ -14,7 +14,10 @@
 		controller: ConversationFeedVirtualController;
 		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
 		initialEndRestoredCount(): number;
+		releaseWithheldEndItem(): Promise<void>;
 		restoreHiddenWithConcurrentGeometry(): Promise<void>;
+		withholdEndItem(): Promise<void>;
+		withholdItem(index: number): Promise<void>;
 	}
 
 	interface Props {
@@ -34,6 +37,7 @@
 	let virtualRoot: HTMLDivElement | null = $state(null);
 	let releaseRetention: (() => void) | null = null;
 	let initialEndRestoredCount = 0;
+	let withheldIndex: number | null = $state(null);
 
 	const keys = $derived(
 		Array.from({ length: itemCount }, (_, index) => JSON.stringify([surfaceIdentity, index])),
@@ -118,7 +122,10 @@
 			controller,
 			instance,
 			initialEndRestoredCount: () => initialEndRestoredCount,
+			releaseWithheldEndItem,
 			restoreHiddenWithConcurrentGeometry,
+			withholdEndItem,
+			withholdItem,
 		});
 	});
 
@@ -166,11 +173,26 @@
 		visible = true;
 		await tick();
 		const restore = controller.restoreHiddenReadingPosition();
+		// Mimics a show-time clamp before the concurrent scale geometry publishes.
 		if (viewport) viewport.scrollTop = 0;
 		textScale = 0.85;
 		measurementReset = 'all';
 		geometryRevision += 1;
 		await restore;
+	}
+
+	async function withholdEndItem(): Promise<void> {
+		await withholdItem($virtualizer.getVirtualItems().at(-1)?.index ?? -1);
+	}
+
+	async function withholdItem(index: number): Promise<void> {
+		withheldIndex = index >= 0 ? index : null;
+		await tick();
+	}
+
+	async function releaseWithheldEndItem(): Promise<void> {
+		withheldIndex = null;
+		await tick();
 	}
 </script>
 
@@ -190,14 +212,16 @@
 		style:position="relative"
 	>
 		{#each $virtualizer.getVirtualItems() as virtualItem (virtualItem.key)}
-			<div
-				data-index={virtualItem.index}
-				data-chat-virtual-item={String(virtualItem.key)}
-				style:height={`${geometry.estimates[virtualItem.index]}px`}
-				style:position="absolute"
-				style:transform={`translateY(${virtualItem.start}px)`}
-				{@attach controller.measureItem}
-			></div>
+			{#if virtualItem.index !== withheldIndex}
+				<div
+					data-index={virtualItem.index}
+					data-chat-virtual-item={String(virtualItem.key)}
+					style:height={`${geometry.estimates[virtualItem.index]}px`}
+					style:position="absolute"
+					style:transform={`translateY(${virtualItem.start}px)`}
+					{@attach controller.measureItem}
+				></div>
+			{/if}
 		{/each}
 	</div>
 </div>

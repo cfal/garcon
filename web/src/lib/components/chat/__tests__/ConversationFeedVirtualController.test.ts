@@ -278,7 +278,10 @@ interface ControllerExposure {
 	controller: ConversationFeedVirtualController;
 	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
 	initialEndRestoredCount(): number;
+	releaseWithheldEndItem(): Promise<void>;
 	restoreHiddenWithConcurrentGeometry(): Promise<void>;
+	withholdEndItem(): Promise<void>;
+	withholdItem(index: number): Promise<void>;
 }
 
 function nextFrame(): Promise<void> {
@@ -391,6 +394,33 @@ describe('ConversationFeedVirtualController', () => {
 		]);
 	});
 
+	it('captures a scale anchor from the virtual rows Svelte has committed', async () => {
+		const { exposure } = await renderController();
+		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+		if (!viewport) throw new Error('Expected the controller viewport');
+		const virtualItems = exposure.instance.getVirtualItems();
+		const uncommittedItem = virtualItems[0];
+		const committedItem = virtualItems[1];
+		if (!uncommittedItem || !committedItem) {
+			throw new Error('Expected adjacent virtual reading items');
+		}
+		viewport.scrollTop = uncommittedItem.start;
+		viewport.dispatchEvent(new Event('scroll'));
+		await nextFrame();
+		await exposure.withholdItem(uncommittedItem.index);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle scale' }));
+
+		await waitFor(() =>
+			expect(scrollToIndex).toHaveBeenCalledWith(committedItem.index, {
+				align: 'start',
+				behavior: 'auto',
+			}),
+		);
+	});
+
 	it('clears prior measurements when the surface identity changes', async () => {
 		const { exposure } = await renderController();
 		const measure = vi.spyOn(exposure.instance, 'measure');
@@ -449,6 +479,18 @@ describe('ConversationFeedVirtualController', () => {
 
 		exposure.controller.scrollToEnd();
 
+		await waitFor(() => expect(exposure.initialEndRestoredCount()).toBe(1));
+	});
+
+	it('keeps the initial paint gate closed until the current virtual range commits', async () => {
+		const { exposure } = await renderController();
+		await exposure.withholdEndItem();
+
+		exposure.controller.scrollToEnd();
+		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
+		expect(exposure.initialEndRestoredCount()).toBe(0);
+
+		await exposure.releaseWithheldEndItem();
 		await waitFor(() => expect(exposure.initialEndRestoredCount()).toBe(1));
 	});
 

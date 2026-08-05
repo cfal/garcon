@@ -44,6 +44,7 @@ import type { ConversationFeedRetentionState } from './ConversationFeedRetention
 export const CHAT_VIRTUAL_OVERSCAN = 6;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
+const MAX_RANGE_COMMIT_ITERATIONS = 60;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
 const REQUIRED_END_STABLE_FRAMES = 2;
@@ -99,6 +100,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	// Keys whose wrappers have rendered for the current surface and styling; cleared with
 	// the measurement cache on surface replacement and global invalidation.
 	#renderedKeys = new Set<string>();
+	// The live element set follows attachment cleanup while keyed wrappers may change index in place.
+	#attachedItemElements = new Set<HTMLDivElement>();
 	#destroyed = false;
 
 	constructor(private readonly options: ConversationFeedVirtualControllerOptions) {
@@ -160,12 +163,16 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	measureItem: Attachment<HTMLDivElement> = (element) => {
+		this.#attachedItemElements.add(element);
 		this.#instance().measureElement(element);
 		// A rendered wrapper is measured even when TanStack omits its cache entry
 		// because the rendered size equals the estimate.
 		const key = this.#configuredKeys[Number(element.dataset.index)];
 		if (key !== undefined) this.#renderedKeys.add(key);
-		return () => this.#instance().measureElement(null);
+		return () => {
+			this.#attachedItemElements.delete(element);
+			this.#instance().measureElement(null);
+		};
 	};
 
 	destroy(): void {
@@ -179,6 +186,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#measureOnShow = false;
 		this.#pendingEndScroll = false;
 		this.#virtualScrollElement = null;
+		this.#attachedItemElements.clear();
 		this.#instance().setOptions({
 			getScrollElement: this.#getScrollElement,
 			useCachedMeasurements: true,
@@ -393,7 +401,24 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
 			return 'restored';
 		}
-		if (await this.#restoreVirtualAnchor(anchor, resetMeasurements)) return 'restored';
+		// Carries the hide-time key through a same-surface geometry publication that
+		// races the show restore. The newer publication reuses this anchor instead of
+		// capturing the temporarily clamped offset under its new measurements.
+		this.#pendingReadingAnchor = anchor;
+		const restoreToken = this.#layoutMutationToken + 1;
+		if (await this.#restoreVirtualAnchor(anchor, resetMeasurements)) {
+			if (this.#pendingReadingAnchor === anchor) this.#pendingReadingAnchor = null;
+			return 'restored';
+		}
+		if (this.#pendingReadingAnchor !== anchor) return 'missing-anchor';
+		const resolvable = [anchor.key, ...anchor.fallbackKeys].some((key) =>
+			this.options.model.indexByKey.has(key),
+		);
+		if (resolvable && this.#layoutMutationToken !== restoreToken) {
+			// A newer geometry publication has already scheduled this retained anchor.
+			return 'restored';
+		}
+		this.#pendingReadingAnchor = null;
 		// The anchor restore advances the layout token internally, so identity, readiness, and
 		// the user-intent epoch are the coherent guards for its raw offset fallback.
 		if (scrollOffset === null || !offsetWriteStillValid()) return 'missing-anchor';
@@ -704,15 +729,36 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#pendingEndScroll = false;
 		this.#measureOnShow = false;
 		this.#renderedKeys.clear();
+		this.#attachedItemElements.clear();
 		this.#instance().measure();
 	}
 
 	#captureVirtualAnchor(preferTranscript = false): ConversationVirtualAnchor | null {
+		let transcriptKeys = this.#configuredTranscriptKeys;
+		if (preferTranscript) {
+			const attachedTranscriptKeys = new Set<string>();
+			for (const element of this.#attachedItemElements) {
+				if (!element.isConnected) continue;
+				const index = Number(element.dataset.index);
+				const key = element.dataset.chatVirtualItem;
+				if (
+					Number.isInteger(index) &&
+					key !== undefined &&
+					this.#configuredKeys[index] === key &&
+					this.#configuredTranscriptKeys.has(key)
+				) {
+					attachedTranscriptKeys.add(key);
+				}
+			}
+			// A structural update can start after core publishes its range but before Svelte
+			// commits every wrapper. The anchor follows a row the reader can actually see.
+			if (attachedTranscriptKeys.size > 0) transcriptKeys = attachedTranscriptKeys;
+		}
 		return captureConversationVirtualAnchor({
 			instance: this.#instance(),
 			viewport: this.options.viewport,
 			keys: this.#configuredKeys,
-			transcriptKeys: this.#configuredTranscriptKeys,
+			transcriptKeys,
 			preferTranscript,
 		});
 	}
@@ -874,10 +920,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	async #completeEndRestore(token: number, operationEpoch: number): Promise<void> {
-		let previousGeometry: { scrollHeight: number; totalSize: number } | null = null;
+		let previousGeometry: {
+			scrollHeight: number;
+			totalSize: number;
+			virtualRange: string;
+		} | null = null;
 		let stableEndFrames = 0;
 		try {
-			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
+			for (let attempt = 0; attempt < MAX_RANGE_COMMIT_ITERATIONS; attempt += 1) {
 				await tick();
 				await nextAnimationFrame();
 				if (
@@ -889,24 +939,35 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				}
 				const viewport = this.options.viewport;
 				if (!viewport) return;
+				const virtualRange = this.#committedVirtualRangeSignature();
 				const geometry = {
 					scrollHeight: viewport.scrollHeight,
 					totalSize: this.#instance().getTotalSize(),
+					virtualRange: virtualRange ?? '',
 				};
 				const unchanged =
 					previousGeometry !== null &&
 					Math.abs(geometry.scrollHeight - previousGeometry.scrollHeight) <= OFFSET_TOLERANCE_PX &&
-					Math.abs(geometry.totalSize - previousGeometry.totalSize) <= OFFSET_TOLERANCE_PX;
-				stableEndFrames = this.isAtEnd() && unchanged ? stableEndFrames + 1 : 0;
+					Math.abs(geometry.totalSize - previousGeometry.totalSize) <= OFFSET_TOLERANCE_PX &&
+					geometry.virtualRange === previousGeometry.virtualRange;
+				stableEndFrames =
+					this.isAtEnd() && virtualRange !== null && unchanged ? stableEndFrames + 1 : 0;
 				if (stableEndFrames >= REQUIRED_END_STABLE_FRAMES) {
 					this.options.onInitialEndRestored?.();
 					return;
 				}
-				// The Svelte adapter updates core before the enlarged sizer commits. The
-				// first end write can therefore clamp to the old physical maximum, so the
-				// paint gate waits for both virtual and physical size to remain settled.
+				// The Svelte adapter updates core before the enlarged sizer and virtual rows
+				// commit. The paint gate therefore waits for stable geometry and an attached
+				// wrapper for every item in core's current range.
 				if (!this.isAtEnd()) this.#scrollToPhysicalEnd();
 				previousGeometry = geometry;
+				if (attempt + 1 >= MAX_SETTLE_ITERATIONS && virtualRange !== null) {
+					// Active streaming may prevent equal sizes indefinitely. A committed
+					// range can reveal after one final physical-end write without exposing a gap.
+					this.#scrollToPhysicalEnd();
+					this.options.onInitialEndRestored?.();
+					return;
+				}
 			}
 			if (
 				token !== this.#layoutMutationToken ||
@@ -915,9 +976,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			) {
 				return;
 			}
-			// Active streaming may prevent consecutive equal sizes indefinitely. The
-			// bounded fallback reveals only after one final synchronous physical-end write;
-			// later pinned measurements retain ownership instead of leaving the feed hidden.
+			// A broken row commit cannot conceal the conversation indefinitely. The extended
+			// bound gives Svelte a full second at 60 Hz before the final liveness fallback.
 			this.#scrollToPhysicalEnd();
 			this.options.onInitialEndRestored?.();
 		} finally {
@@ -945,6 +1005,25 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	#scrollToPhysicalEnd(): void {
 		scrollConversationToPhysicalEnd(this.#instance(), this.options.viewport);
+	}
+
+	#committedVirtualRangeSignature(): string | null {
+		const virtualItems = this.#instance().getVirtualItems();
+		if (virtualItems.length === 0 && this.#configuredKeys.length > 0) return null;
+		const committedByIndex = new Map<number, string>();
+		for (const element of this.#attachedItemElements) {
+			if (!element.isConnected) continue;
+			const index = Number(element.dataset.index);
+			const key = element.dataset.chatVirtualItem;
+			if (!Number.isInteger(index) || key === undefined || this.#configuredKeys[index] !== key) {
+				continue;
+			}
+			committedByIndex.set(index, key);
+		}
+		for (const item of virtualItems) {
+			if (committedByIndex.get(item.index) !== String(item.key)) return null;
+		}
+		return virtualItems.map((item) => `${item.index}:${String(item.key)}`).join('|');
 	}
 
 	async #completeSimpleScroll(operationEpoch: number, token: number): Promise<void> {
