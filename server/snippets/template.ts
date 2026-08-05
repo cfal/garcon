@@ -6,6 +6,7 @@ import {
 export interface SnippetTemplateValues {
   arguments: string;
   projectPath: string;
+  chatId: string;
 }
 
 export class SnippetExpansionError extends Error {
@@ -36,8 +37,19 @@ export function expandSnippetTemplate(
   for (const match of matchSnippetTemplateTokens(template)) {
     append(template.slice(cursor, match.index));
     if (match.escaped) append(match.raw.slice(1));
-    else
-      append(match.variable === 'arguments' ? values.arguments : values.projectPath);
+    else {
+      switch (match.variable) {
+        case 'arguments':
+          append(values.arguments);
+          break;
+        case 'project_path':
+          append(values.projectPath);
+          break;
+        case 'chat_id':
+          append(values.chatId);
+          break;
+      }
+    }
     cursor = match.index + match.raw.length;
   }
 

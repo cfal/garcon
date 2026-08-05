@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import {
   normalizeExpandSnippetRequest,
   normalizeSnippetDefinitionInput,
+  snippetTemplateUsesChatId,
   type CreateSnippetRequest,
   type ExpandSnippetRequest,
   type ExpandSnippetResponse,
@@ -166,6 +167,14 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
         404,
       );
     }
+    const chatId = input.context.type === 'chat' ? input.context.chatId : null;
+    if (chatId === null && snippetTemplateUsesChatId(snippet.template)) {
+      throw new SnippetDomainError(
+        'SNIPPET_CHAT_ID_REQUIRED',
+        'The {{chat_id}} placeholder requires an existing chat',
+        422,
+      );
+    }
     const { contextProjectPath, resolvedProjectPath } =
       await this.#resolveProjectPath(input.context);
     let expandedText: string;
@@ -173,6 +182,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       expandedText = expandSnippetTemplate(snippet.template, {
         arguments: input.arguments,
         projectPath: resolvedProjectPath,
+        chatId: chatId ?? '',
       });
     } catch (error) {
       if (error instanceof SnippetExpansionError) {

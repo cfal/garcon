@@ -6,10 +6,18 @@ export const SNIPPET_EXPANDED_MAX_LENGTH = 64_000;
 export const SNIPPET_SHORT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 export const SNIPPET_ARGUMENTS_TOKEN = '{{arguments}}';
 export const SNIPPET_PROJECT_PATH_TOKEN = '{{project_path}}';
+export const SNIPPET_CHAT_ID_TOKEN = '{{chat_id}}';
 
-const SNIPPET_TEMPLATE_TOKEN_PATTERN = /\\?\{\{(?:arguments|project_path)\}\}/g;
+const SNIPPET_TEMPLATE_TOKEN_PATTERN =
+  /\\?\{\{(?:arguments|project_path|chat_id)\}\}/g;
 
-export type SnippetTemplateVariable = 'arguments' | 'project_path';
+export type SnippetTemplateVariable = 'arguments' | 'project_path' | 'chat_id';
+
+function snippetTemplateVariable(token: string): SnippetTemplateVariable {
+  if (token === SNIPPET_ARGUMENTS_TOKEN) return 'arguments';
+  if (token === SNIPPET_PROJECT_PATH_TOKEN) return 'project_path';
+  return 'chat_id';
+}
 
 export interface SnippetTemplateTokenMatch {
   index: number;
@@ -28,24 +36,32 @@ export function* matchSnippetTemplateTokens(
     yield {
       index: match.index,
       raw,
-      variable: token === SNIPPET_ARGUMENTS_TOKEN ? 'arguments' : 'project_path',
+      variable: snippetTemplateVariable(token),
       escaped,
     };
   }
 }
 
-export function snippetTemplateUsesArguments(template: string): boolean {
+function snippetTemplateUsesVariable(
+  template: string,
+  variable: SnippetTemplateVariable,
+): boolean {
   for (const match of matchSnippetTemplateTokens(template)) {
-    if (!match.escaped && match.variable === 'arguments') return true;
+    if (!match.escaped && match.variable === variable) return true;
   }
   return false;
 }
 
+export function snippetTemplateUsesArguments(template: string): boolean {
+  return snippetTemplateUsesVariable(template, 'arguments');
+}
+
 export function snippetTemplateUsesProjectPath(template: string): boolean {
-  for (const match of matchSnippetTemplateTokens(template)) {
-    if (!match.escaped && match.variable === 'project_path') return true;
-  }
-  return false;
+  return snippetTemplateUsesVariable(template, 'project_path');
+}
+
+export function snippetTemplateUsesChatId(template: string): boolean {
+  return snippetTemplateUsesVariable(template, 'chat_id');
 }
 
 export const SNIPPET_ERROR_CODES = {
@@ -57,6 +73,7 @@ export const SNIPPET_ERROR_CODES = {
   limitReached: 'SNIPPET_LIMIT_REACHED',
   expansionTooLong: 'SNIPPET_EXPANSION_TOO_LONG',
   chatNotFound: 'SNIPPET_CHAT_NOT_FOUND',
+  chatIdRequired: 'SNIPPET_CHAT_ID_REQUIRED',
   projectPathRequired: 'SNIPPET_PROJECT_PATH_REQUIRED',
   projectPathOutsideBase: 'SNIPPET_PROJECT_PATH_OUTSIDE_BASE',
   projectPathNotFound: 'SNIPPET_PROJECT_PATH_NOT_FOUND',

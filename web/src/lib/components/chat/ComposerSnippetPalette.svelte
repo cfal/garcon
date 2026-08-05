@@ -11,8 +11,10 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		SNIPPET_ARGUMENTS_TOKEN,
+		SNIPPET_CHAT_ID_TOKEN,
 		SNIPPET_PROJECT_PATH_TOKEN,
 		snippetTemplateUsesArguments,
+		snippetTemplateUsesChatId,
 		snippetTemplateUsesProjectPath,
 	} from '$shared/snippets';
 	import ComposerSnippetArgumentsDialog from './ComposerSnippetArgumentsDialog.svelte';
@@ -155,7 +157,7 @@
 							>
 								<FileText class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
 								<span class="min-w-0 flex-1">
-									<span class="flex items-center gap-2">
+									<span class="flex flex-wrap items-center gap-2">
 										<span class="truncate text-sm font-medium">{snippet.shortName}</span>
 										{#if snippetTemplateUsesArguments(snippet.template)}
 											<span
@@ -175,6 +177,16 @@
 												})}
 											>
 												{SNIPPET_PROJECT_PATH_TOKEN}
+											</span>
+										{/if}
+										{#if snippetTemplateUsesChatId(snippet.template)}
+											<span
+												class="shrink-0 rounded border border-border bg-background px-1 font-mono text-[10px] text-muted-foreground"
+												aria-label={m.snippets_token_chat_id_label({
+													token: SNIPPET_CHAT_ID_TOKEN,
+												})}
+											>
+												{SNIPPET_CHAT_ID_TOKEN}
 											</span>
 										{/if}
 									</span>

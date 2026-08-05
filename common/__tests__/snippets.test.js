@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { snippetTemplateUsesProjectPath } from '../snippets.js';
+import {
+  snippetTemplateUsesChatId,
+  snippetTemplateUsesProjectPath,
+} from '../snippets.js';
 
 describe('snippetTemplateUsesProjectPath', () => {
   it('detects an unescaped project path token', () => {
@@ -18,5 +21,13 @@ describe('snippetTemplateUsesProjectPath', () => {
     expect(
       snippetTemplateUsesProjectPath('\\{{project_path}} and {{project_path}}'),
     ).toBe(true);
+  });
+});
+
+describe('snippetTemplateUsesChatId', () => {
+  it('detects only unescaped chat ID tokens', () => {
+    expect(snippetTemplateUsesChatId('Send from {{chat_id}}')).toBe(true);
+    expect(snippetTemplateUsesChatId('Keep \\{{chat_id}} literal')).toBe(false);
+    expect(snippetTemplateUsesChatId('Review {{arguments}}')).toBe(false);
   });
 });

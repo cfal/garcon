@@ -4,7 +4,13 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { getSnippets } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { Snippet, SnippetDefinitionInput } from '$shared/snippets';
+	import {
+		SNIPPET_ARGUMENTS_TOKEN,
+		SNIPPET_CHAT_ID_TOKEN,
+		SNIPPET_PROJECT_PATH_TOKEN,
+		type Snippet,
+		type SnippetDefinitionInput,
+	} from '$shared/snippets';
 	import { SnippetFormState } from './snippet-form-state.svelte.js';
 
 	interface Props {
@@ -55,7 +61,7 @@
 <Dialog.Root {open} requestClose={() => !form.saving && onClose()}>
 		<Dialog.Content
 			class="top-[var(--app-viewport-center-y)] flex max-h-[min(42rem,calc(var(--app-height)-1rem))] flex-col sm:top-[50%] sm:max-w-2xl"
-	>
+		>
 		<Dialog.Header>
 			<Dialog.Title>
 				{snippet ? m.snippets_form_edit_title() : m.snippets_form_add_title()}
@@ -97,8 +103,9 @@
 					onkeydown={handleTemplateKeyDown}
 					rows="12"
 					placeholder={m.snippets_template_placeholder({
-						argumentsToken: '{{arguments}}',
-						projectPathToken: '{{project_path}}',
+						argumentsToken: SNIPPET_ARGUMENTS_TOKEN,
+						projectPathToken: SNIPPET_PROJECT_PATH_TOKEN,
+						chatIdToken: SNIPPET_CHAT_ID_TOKEN,
 					})}
 					aria-invalid={Boolean(form.templateError)}
 					aria-describedby="snippet-template-help snippet-template-error"
@@ -106,8 +113,9 @@
 				></textarea>
 				<p id="snippet-template-help" class="text-xs text-muted-foreground">
 					{m.snippets_template_help({
-						argumentsToken: '{{arguments}}',
-						projectPathToken: '{{project_path}}',
+						argumentsToken: SNIPPET_ARGUMENTS_TOKEN,
+						projectPathToken: SNIPPET_PROJECT_PATH_TOKEN,
+						chatIdToken: SNIPPET_CHAT_ID_TOKEN,
 					})}
 				</p>
 				<p id="snippet-template-error" class="min-h-4 text-xs text-destructive">

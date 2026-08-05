@@ -98,6 +98,34 @@ describe('snippet service', () => {
     expect(events).toEqual([]);
   });
 
+  it('expands chat IDs only when an existing chat supplies the context', async () => {
+    const { service } = await serviceFixture();
+    await service.create({
+      expectedRevision: 0,
+      snippet: {
+        shortName: 'handoff',
+        template: 'Reply to {{chat_id}} about {{arguments}}',
+      },
+    });
+
+    await expect(
+      service.expand({
+        shortName: 'handoff',
+        arguments: 'the review',
+        context: { type: 'chat', chatId: 'chat-a' },
+      }),
+    ).resolves.toMatchObject({
+      expandedText: 'Reply to chat-a about the review',
+    });
+    await expect(
+      service.expand({
+        shortName: 'handoff',
+        arguments: 'the review',
+        context: { type: 'project', projectPath: '/draft/repo' },
+      }),
+    ).rejects.toMatchObject({ code: 'SNIPPET_CHAT_ID_REQUIRED', status: 422 });
+  });
+
   it('rejects missing chats and unknown snippets', async () => {
     const { service } = await serviceFixture();
     await expect(

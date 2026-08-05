@@ -151,10 +151,10 @@ describe('ComposerSnippetPalette', () => {
 		expect(screen.queryByRole('region', { name: 'Template preview' })).toBeNull();
 	});
 
-	it('badges templates that use the arguments and project path tokens', async () => {
+	it('badges templates that use the supported tokens', async () => {
 		render(ComposerSnippetPaletteTestHost, {
 			count: 1,
-			firstTemplate: 'Review {{arguments}} in {{project_path}}',
+			firstTemplate: 'Chat {{chat_id}}: review {{arguments}} in {{project_path}}',
 		});
 
 		await screen.findByRole('option', { name: /item-0/ });
@@ -165,6 +165,9 @@ describe('ComposerSnippetPalette', () => {
 		expect(
 			screen.getByLabelText('Uses the {{project_path}} placeholder').textContent,
 		).toBe('{{project_path}}');
+		expect(
+			screen.getByLabelText('Uses the {{chat_id}} placeholder').textContent,
+		).toBe('{{chat_id}}');
 	});
 
 	it('collects arguments before inserting a snippet that uses them', async () => {
