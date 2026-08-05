@@ -1,11 +1,33 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { SvelteVirtualizer } from '@tanstack/svelte-virtual';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness';
 import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
+
+const virtualizerSubscriptions = vi.hoisted(() => ({
+	teardowns: [] as Array<Mock<() => void>>,
+}));
+
+// Records each store subscription teardown so tests can observe the controller unsubscribing
+// exactly once; all virtualizer behavior stays real.
+vi.mock('@tanstack/svelte-virtual', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@tanstack/svelte-virtual')>();
+	const createVirtualizer: typeof actual.createVirtualizer = (options) => {
+		const store = actual.createVirtualizer(options);
+		return {
+			subscribe(run, invalidate) {
+				const teardown = vi.fn(store.subscribe(run, invalidate));
+				virtualizerSubscriptions.teardowns.push(teardown);
+				return teardown;
+			},
+		};
+	};
+	return { ...actual, createVirtualizer };
+});
 import {
 	classifyMeasuredConversationViewportFill,
 	classifyConversationVirtualStructure,
@@ -241,6 +263,7 @@ describe('ConversationFeedVirtualController', () => {
 	let restoreResizeObserver: () => void;
 
 	beforeEach(() => {
+		virtualizerSubscriptions.teardowns.length = 0;
 		restoreResizeObserver = installResizeObserverHarness();
 	});
 
@@ -262,8 +285,9 @@ describe('ConversationFeedVirtualController', () => {
 		await waitFor(() => expect(setOptions).toHaveBeenCalled());
 		expect(Object.keys(setOptions.mock.lastCall?.[0] ?? {})).toEqual(['rangeExtractor']);
 
-		setOptions.mockClear();
-		const shrinkSetOptions = vi.spyOn(exposure.instance, 'setOptions');
+		// The adapter reattaches its own setOptions binding on every store emission, so the spy
+		// above detached when the retention publication emitted. Assert the same-surface count
+		// shrink through the options TanStack actually applied: new options, no measurement pass.
 		await fireEvent.click(screen.getByRole('button', { name: 'Shrink' }));
 		await waitFor(() => {
 			expect(
@@ -274,7 +298,7 @@ describe('ConversationFeedVirtualController', () => {
 		});
 		await nextFrame();
 		await nextFrame();
-		expect(shrinkSetOptions).toHaveBeenCalled();
+		expect(exposure.instance.options.count).toBe(4);
 		expect(measure).not.toHaveBeenCalled();
 	});
 
@@ -324,5 +348,90 @@ describe('ConversationFeedVirtualController', () => {
 				ResizeObserverHarness.instances.every((observer) => observer.observed.size === 0),
 			).toBe(true),
 		);
+	});
+
+	it('drops deferred end restores when user intent lands mid-flight', async () => {
+		const { exposure } = await renderController();
+		const scrollToOffset = vi.spyOn(exposure.instance, 'scrollToOffset');
+		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
+
+		exposure.controller.restoreInitialEnd();
+		exposure.controller.cancelForUserIntent();
+		await nextFrame();
+		await nextFrame();
+		await nextFrame();
+		expect(scrollToOffset).not.toHaveBeenCalled();
+		expect(scrollToIndex).not.toHaveBeenCalled();
+
+		// The uncancelled control restore proves the deferred write lands without the gesture.
+		exposure.controller.restoreInitialEnd();
+		await waitFor(() => expect(scrollToOffset).toHaveBeenCalled());
+	});
+
+	it('restores the detached reading anchor on text-scale resets instead of the end', async () => {
+		const { exposure } = await renderController();
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+		const measure = vi.spyOn(exposure.instance, 'measure');
+		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
+		const scrollToOffset = vi.spyOn(exposure.instance, 'scrollToOffset');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle scale' }));
+		await waitFor(() => expect(measure).toHaveBeenCalledOnce());
+		// The end restore path never targets an index; the anchor restore always starts with one.
+		await waitFor(() =>
+			expect(scrollToIndex).toHaveBeenCalledWith(expect.any(Number), {
+				align: 'start',
+				behavior: 'auto',
+			}),
+		);
+		await waitFor(() => expect(scrollToOffset).toHaveBeenCalled());
+		expect(measure).toHaveBeenCalledOnce();
+	});
+
+	it('tears down the virtualizer store subscription exactly once across repeated destroys', async () => {
+		const { exposure } = await renderController();
+		// The controller subscription is the first one issued against its own store.
+		const controllerTeardown = virtualizerSubscriptions.teardowns[0];
+		expect(controllerTeardown).toBeDefined();
+		expect(controllerTeardown).not.toHaveBeenCalled();
+
+		exposure.controller.destroy();
+		exposure.controller.destroy();
+		expect(controllerTeardown).toHaveBeenCalledTimes(1);
+	});
+
+	it('drives measurement only through TanStack ingress, never the measureElement option', async () => {
+		const { exposure } = await renderController();
+		const instance = exposure.instance;
+		// The adapter merges the current options into every publication, so a spy installed on the
+		// resolved options survives all controller setOptions calls.
+		const measureElement = vi.fn(instance.options.measureElement);
+		instance.options.measureElement = measureElement;
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Shrink' }));
+		await nextFrame();
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle scale' }));
+		await nextFrame();
+		await fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+		await waitFor(() =>
+			expect(
+				document.querySelector('[data-controller-viewport]')?.getAttribute('data-visible'),
+			).toBe('false'),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Show and restore' }));
+		await nextFrame();
+		await nextFrame();
+		// Surface replacement recreates every row element, forcing fresh attachment ingress.
+		await fireEvent.click(screen.getByRole('button', { name: 'Replace surface' }));
+		await waitFor(() => expect(measureElement).toHaveBeenCalled());
+		await nextFrame();
+		await nextFrame();
+
+		// TanStack ingress always passes the virtualizer as the third argument; a direct Garcon
+		// call to the configured option would record a different shape.
+		for (const call of measureElement.mock.calls) {
+			expect(call).toHaveLength(3);
+			expect(call[2]).toBe(instance);
+		}
 	});
 });

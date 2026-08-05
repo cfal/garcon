@@ -142,6 +142,21 @@ describe('ConversationFeedProjectionState', () => {
 		);
 	});
 
+	it('never requests a global measurement reset for a same-surface count shrink', () => {
+		const projections = new ConversationFeedProjectionState();
+		const first = projections.reconcile(input());
+		const shrunk = projections.reconcile(
+			input({
+				rows: rows().slice(0, 1),
+				mutationClock: clock(2, { replacement: 2 }),
+			}),
+		);
+
+		expect(shrunk.geometry.keys.length).toBeLessThan(first.geometry.keys.length);
+		expect(shrunk.geometry.geometryRevision).toBeGreaterThan(first.geometry.geometryRevision);
+		expect(shrunk.geometry.measurementReset).toBe('none');
+	});
+
 	it('marks text scale as a full measurement reset while retaining stable keys', () => {
 		const projections = new ConversationFeedProjectionState();
 		const first = projections.reconcile(input());

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick } from 'svelte';
 	import type { SvelteVirtualizer } from '@tanstack/svelte-virtual';
+	import { UserMessage } from '$shared/chat-types';
 	import type { ConversationVirtualGeometrySnapshot } from '../ConversationFeedProjectionState.svelte.js';
 	import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte.js';
 	import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
@@ -23,7 +24,7 @@
 	let contentRevision = $state(0);
 	let geometryRevision = $state(1);
 	let measurementReset = $state<ConversationVirtualGeometrySnapshot['measurementReset']>('none');
-	const pinned = true;
+	let pinned = $state(true);
 	let surfaceIdentity = $state('surface-1');
 	let textScale = $state(1);
 	let visible = $state(true);
@@ -36,9 +37,19 @@
 	);
 	const model = $derived.by((): ConversationVirtualFeedModel => {
 		void contentRevision;
-		const items: ConversationVirtualFeedItem[] = keys.map((key) => ({
-			kind: 'viewport-start-spacer',
+		// Transcript-kind items keep reading-anchor capture eligible, matching production feeds.
+		const items: ConversationVirtualFeedItem[] = keys.map((key, index) => ({
+			kind: 'transcript',
 			key,
+			item: {
+				kind: 'message',
+				id: `row-${index}`,
+				rowIds: [`row-${index}`],
+				virtualKey: `row-${index}`,
+				message: new UserMessage('2026-08-03T00:00:00.000Z', `prompt ${index}`),
+				index,
+				prevMessage: null,
+			},
 			spacingAfter: 'none',
 		}));
 		return {
@@ -171,6 +182,7 @@
 <button onclick={retainFirst}>Retain first</button>
 <button onclick={shrink}>Shrink</button>
 <button onclick={toggleScale}>Toggle scale</button>
+<button onclick={() => (pinned = !pinned)}>Toggle pinned</button>
 <button onclick={() => (visible = false)}>Hide</button>
 <button onclick={showAndRestore}>Show and restore</button>
 <button onclick={replaceSurface}>Replace surface</button>

@@ -165,6 +165,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
+		this.#hiddenAnchor = null;
+		this.#hiddenScrollOffset = null;
+		this.#measureOnShow = false;
+		this.#pendingEndScroll = false;
 		this.#virtualScrollElement = null;
 		this.#instance().setOptions({
 			getScrollElement: this.#getScrollElement,
@@ -214,6 +218,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	scrollToEnd(): void {
+		if (this.#destroyed) return;
 		if (!this.isReady()) {
 			this.#pendingEndScroll = true;
 			return;
@@ -225,6 +230,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#measureOnShow = false;
 		const surfaceIdentity = this.options.geometry.surfaceIdentity;
 		this.#hiddenAnchor = null;
+		this.#hiddenScrollOffset = null;
 		this.#pendingEndScroll = false;
 		const layoutToken = this.#layoutMutationToken;
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
@@ -241,6 +247,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	restoreInitialEnd(): void {
+		if (this.#destroyed) return;
 		if (!this.isReady()) {
 			this.#pendingEndScroll = true;
 			return;
@@ -348,24 +355,35 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#hiddenScrollOffset = null;
 		if (!this.isReady()) return 'not-ready';
 		const userIntentEpoch = this.#userIntentEpoch;
+		const layoutToken = this.#layoutMutationToken;
 		const resetMeasurements = this.#measureOnShow;
 		this.#measureOnShow = false;
 		const surfaceIdentity = this.options.geometry.surfaceIdentity;
+		// A raw stored offset is only meaningful on the surface it was captured from, so every
+		// offset write deferred past an await revalidates surface identity, readiness, and the
+		// user-intent epoch before touching the viewport.
+		const offsetWriteStillValid = (): boolean =>
+			this.isReady() &&
+			this.options.geometry.surfaceIdentity === surfaceIdentity &&
+			userIntentEpoch === this.#userIntentEpoch;
 		if (!anchor) {
 			if (resetMeasurements) {
 				const measured = await this.#measureAfterCommit(surfaceIdentity);
 				if (!measured) return this.isReady() ? 'missing-anchor' : 'not-ready';
 			}
-			if (scrollOffset !== null) {
-				this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
-				return 'restored';
+			if (scrollOffset === null) return 'missing-anchor';
+			// Nothing on this path advances the layout token itself, so a moved token means a
+			// structural publication landed mid-restore and now owns the viewport position.
+			if (!offsetWriteStillValid() || layoutToken !== this.#layoutMutationToken) {
+				return 'missing-anchor';
 			}
-			return 'missing-anchor';
+			this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
+			return 'restored';
 		}
 		if (await this.#restoreVirtualAnchor(anchor, resetMeasurements)) return 'restored';
-		if (!this.isReady() || scrollOffset === null || userIntentEpoch !== this.#userIntentEpoch) {
-			return 'missing-anchor';
-		}
+		// The anchor restore advances the layout token internally, so identity, readiness, and
+		// the user-intent epoch are the coherent guards for its raw offset fallback.
+		if (scrollOffset === null || !offsetWriteStillValid()) return 'missing-anchor';
 		this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
 		return 'restored';
 	}
@@ -711,8 +729,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		try {
 			if (resetMeasurements) {
+				// A failed measure already re-arms measure-on-show inside #measureAfterCommit.
 				if (!(await this.#measureAfterCommit(this.options.geometry.surfaceIdentity))) {
-					if (!this.options.visible) this.#measureOnShow = true;
 					return false;
 				}
 				if (!this.#isCurrentLayoutOperation(token, operationEpoch)) return false;
