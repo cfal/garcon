@@ -21,6 +21,7 @@
 
 	interface Props {
 		reserveTopFloatingToolbar?: boolean;
+		isPreparingInitialScroll?: boolean;
 		showAnnouncementTrigger?: boolean;
 		transcriptScenario?:
 			| 'empty'
@@ -36,6 +37,7 @@
 
 	const {
 		reserveTopFloatingToolbar = false,
+		isPreparingInitialScroll = false,
 		showAnnouncementTrigger = false,
 		transcriptScenario = 'empty',
 	}: Props = $props();
@@ -169,6 +171,7 @@
 
 <ConversationFeed
 	{reserveTopFloatingToolbar}
+	{isPreparingInitialScroll}
 	isVisible={true}
 	pinnedToBottom={true}
 	surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.generationId}`}

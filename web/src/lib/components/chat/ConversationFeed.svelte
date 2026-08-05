@@ -383,11 +383,16 @@
 		data-chat-user-scrolled-up={chatState.isUserScrolledUp}
 		class={feedViewportClass}
 	>
-		<div class={feedContentClass}>
+		<div class={feedContentClass} data-chat-feed-content>
 			{@render feedContent()}
 		</div>
 	</ScrollAreaPrimitive.Viewport>
-	<Scrollbar orientation="vertical" class="w-1.5" onpointerdown={onUserScrollIntent} />
+	<Scrollbar
+		orientation="vertical"
+		class={cn('w-1.5', isPreparingInitialScroll && 'invisible')}
+		data-chat-feed-scrollbar
+		onpointerdown={onUserScrollIntent}
+	/>
 	<ScrollAreaPrimitive.Corner />
 	<div
 		class="sr-only"

@@ -800,7 +800,7 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPreparingInitialScroll).toBe(false);
 	});
 
-	it('reveals the first settled end while restoring each staged chat-switch batch', () => {
+	it('holds the initial paint gate through the staged chat-switch reveal', () => {
 		let hasInitialMessagesToReveal = true;
 		const { controller, viewport, state } = controllerFixture();
 		Object.defineProperty(state, 'hasInitialMessagesToReveal', {
@@ -811,13 +811,14 @@ describe('ConversationScrollController', () => {
 		controller.reconcileInitialBottomRestore(true);
 		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
 		controller.completeInitialBottomRestore();
-		expect(controller.isPreparingInitialScroll).toBe(false);
+		expect(controller.isPreparingInitialScroll).toBe(true);
 
 		controller.reconcileInitialBottomRestore(true);
 		expect(viewport.restoreInitialEnd).toHaveBeenCalledTimes(2);
 
 		hasInitialMessagesToReveal = false;
 		controller.completeInitialBottomRestore();
+		expect(controller.isPreparingInitialScroll).toBe(false);
 		controller.reconcileInitialBottomRestore(true);
 		expect(viewport.restoreInitialEnd).toHaveBeenCalledTimes(2);
 	});

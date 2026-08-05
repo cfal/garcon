@@ -156,8 +156,11 @@ export class ConversationScrollController {
 	completeInitialBottomRestore(): void {
 		if (this.#initialBottomRestoreChatId !== this.deps.sessions.selectedChatId) return;
 		if (this.deps.chatState.displayMessageCount === 0) return;
-		this.#initialBottomPaintChatId = null;
+		// The paint gate holds through the staged initial reveal: each reveal batch grows the
+		// sizer and re-anchors the end, so revealing after the first settled batch would show
+		// the feed flickering through intermediate scroll positions and thumb sizes.
 		if (this.deps.chatState.hasInitialMessagesToReveal) return;
+		this.#initialBottomPaintChatId = null;
 		this.#initialBottomRestoreChatId = null;
 	}
 

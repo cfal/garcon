@@ -114,6 +114,27 @@ describe('ConversationFeed', () => {
 		expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
 	});
 
+	it('keeps feed content and scrollbar invisible while preparing the initial position', async () => {
+		const { container, rerender } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'row-ids',
+			isPreparingInitialScroll: true,
+		});
+		const viewport = container.querySelector('[data-chat-scroll-viewport]') as HTMLElement;
+		expect(viewport.getAttribute('aria-busy')).toBe('true');
+		const content = container.querySelector('[data-chat-feed-content]') as HTMLElement;
+		expect(content.className).toContain('invisible');
+		for (const scrollbar of container.querySelectorAll('[data-chat-feed-scrollbar]')) {
+			expect(scrollbar.className).toContain('invisible');
+		}
+
+		await rerender({ isPreparingInitialScroll: false });
+		expect(viewport.getAttribute('aria-busy')).toBe('false');
+		expect(content.className).not.toContain('invisible');
+		for (const scrollbar of container.querySelectorAll('[data-chat-feed-scrollbar]')) {
+			expect(scrollbar.className).not.toContain('invisible');
+		}
+	});
+
 	it('shows a directional earlier boundary after the automatic reveal window', async () => {
 		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation' });
 
