@@ -32,6 +32,7 @@ import {
 	classifyMeasuredConversationViewportFill,
 	classifyConversationVirtualStructure,
 	attainableConversationTargetOffset,
+	conversationVirtualGeometryChangesBeforeAnchor,
 	createRetainedConversationRangeExtractor,
 	isConversationTargetLayoutReady,
 	retainedConversationRange,
@@ -152,6 +153,36 @@ describe('ConversationFeedVirtualController helpers', () => {
 				restorePolicyEnd: false,
 			}),
 		).toBe(false);
+	});
+
+	it('restores only geometry that can move the reading anchor start', () => {
+		expect(
+			conversationVirtualGeometryChangesBeforeAnchor({
+				previousKeys: ['start', 'before', 'anchor', 'end'],
+				previousEstimates: [16, 80, 120, 16],
+				nextKeys: ['start', 'before', 'anchor', 'appended', 'end'],
+				nextEstimates: [16, 80, 120, 180, 16],
+				anchorKey: 'anchor',
+			}),
+		).toBe(false);
+		expect(
+			conversationVirtualGeometryChangesBeforeAnchor({
+				previousKeys: ['start', 'before', 'anchor', 'end'],
+				previousEstimates: [16, 80, 120, 16],
+				nextKeys: ['start', 'prepended', 'before', 'anchor', 'end'],
+				nextEstimates: [16, 180, 80, 120, 16],
+				anchorKey: 'anchor',
+			}),
+		).toBe(true);
+		expect(
+			conversationVirtualGeometryChangesBeforeAnchor({
+				previousKeys: ['start', 'before', 'anchor'],
+				previousEstimates: [16, 80, 120],
+				nextKeys: ['start', 'before', 'anchor'],
+				nextEstimates: [16, 96, 120],
+				anchorKey: 'anchor',
+			}),
+		).toBe(true);
 	});
 
 	it('anchors the first meaningfully visible transcript item instead of a subpixel sliver', () => {
@@ -370,6 +401,30 @@ describe('ConversationFeedVirtualController', () => {
 		await nextFrame();
 		expect(exposure.instance.options.count).toBe(4);
 		expect(measure).not.toHaveBeenCalled();
+	});
+
+	it('leaves detached tail append anchoring to TanStack without a keyed restore', async () => {
+		const { exposure } = await renderController();
+		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+		if (!viewport) throw new Error('Expected the controller viewport');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+		viewport.scrollTop = 80;
+		viewport.dispatchEvent(new Event('scroll'));
+		await nextFrame();
+		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Append' }));
+		await waitFor(() =>
+			expect(
+				document
+					.querySelector('[data-controller-sizer]')
+					?.getAttribute('data-controller-model-count'),
+			).toBe('13'),
+		);
+		await nextFrame();
+		await nextFrame();
+
+		expect(scrollToIndex).not.toHaveBeenCalled();
 	});
 
 	it('resets text-scale measurements immediately when visible and once on show when hidden', async () => {

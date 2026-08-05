@@ -43,6 +43,29 @@ export function shouldPreserveConversationVirtualEdge(input: {
 	);
 }
 
+export function conversationVirtualGeometryChangesBeforeAnchor(input: {
+	previousKeys: readonly string[];
+	previousEstimates: readonly number[];
+	nextKeys: readonly string[];
+	nextEstimates: readonly number[];
+	anchorKey: string;
+}): boolean {
+	const previousAnchorIndex = input.previousKeys.indexOf(input.anchorKey);
+	const nextAnchorIndex = input.nextKeys.indexOf(input.anchorKey);
+	if (previousAnchorIndex < 0 || nextAnchorIndex < 0) return true;
+
+	return (
+		!arraysEqual(
+			input.previousKeys.slice(0, previousAnchorIndex),
+			input.nextKeys.slice(0, nextAnchorIndex),
+		) ||
+		!arraysEqual(
+			input.previousEstimates.slice(0, previousAnchorIndex),
+			input.nextEstimates.slice(0, nextAnchorIndex),
+		)
+	);
+}
+
 export function selectConversationReadingAnchor<T extends { key: unknown; end: number }>(
 	items: readonly T[],
 	scrollOffset: number,

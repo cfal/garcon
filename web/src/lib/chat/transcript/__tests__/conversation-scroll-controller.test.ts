@@ -228,6 +228,18 @@ describe('ConversationScrollController', () => {
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
 	});
 
+	it('prefetches from an upward gesture when the top edge cannot emit another scroll event', async () => {
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const { controller } = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 0 },
+		});
+
+		controller.noteUserScrollIntent('earlier');
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+	});
+
 	it('does not prefetch earlier history outside the viewport-ahead zone', () => {
 		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
 		const { controller } = controllerFixture({

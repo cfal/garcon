@@ -148,6 +148,13 @@
 		geometryRevision += 1;
 	}
 
+	function appendItem(): void {
+		controller.prepareForGeometryPublication(geometryRevision + 1);
+		itemCount += 1;
+		measurementReset = 'none';
+		geometryRevision += 1;
+	}
+
 	function toggleScale(): void {
 		controller.prepareForGeometryPublication(geometryRevision + 1);
 		textScale = textScale === 1 ? 0.85 : 1;
@@ -229,6 +236,7 @@
 </div>
 
 <button onclick={publishContent}>Publish content</button>
+<button onclick={appendItem}>Append</button>
 <button onclick={retainFirst}>Retain first</button>
 <button onclick={shrink}>Shrink</button>
 <button onclick={toggleScale}>Toggle scale</button>

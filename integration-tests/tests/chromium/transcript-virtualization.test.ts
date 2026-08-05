@@ -24,6 +24,12 @@ interface ReadingAnchor {
   offset: number;
 }
 
+interface ReadingAnchorFrameSample {
+  frame: number;
+  offset: number | null;
+  scrollTop: number;
+}
+
 interface SelectionSnapshot {
   key: string;
   rowId: string;
@@ -565,6 +571,65 @@ async function readingAnchor(page: Page): Promise<ReadingAnchor> {
     if (!anchor || !key) throw new Error('No visible transcript item is available as an anchor.');
     return { key, offset: anchor.rect.top - viewport.top };
   }, ITEM_SELECTOR);
+}
+
+async function startReadingAnchorFrameSampler(page: Page, anchor: ReadingAnchor): Promise<void> {
+  await page.locator(FEED_SELECTOR).evaluate(
+    async (feedElement, input) => {
+      const feed = feedElement as HTMLElement;
+      const browserGlobal = globalThis as typeof globalThis & {
+        __chatReadingAnchorSampler?: {
+          active: boolean;
+          frame: number;
+          key: string;
+          samples: ReadingAnchorFrameSample[];
+        };
+      };
+      const sampler = {
+        active: true,
+        frame: 0,
+        key: input.key,
+        samples: [] as ReadingAnchorFrameSample[],
+      };
+      browserGlobal.__chatReadingAnchorSampler = sampler;
+      const sample = () => {
+        if (!sampler.active) return;
+        const viewport = feed.getBoundingClientRect();
+        const item = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].find(
+          (candidate) => candidate.dataset.chatVirtualItem === sampler.key,
+        );
+        sampler.samples.push({
+          frame: sampler.frame,
+          offset: item ? item.getBoundingClientRect().top - viewport.top : null,
+          scrollTop: feed.scrollTop,
+        });
+        sampler.frame += 1;
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    },
+    { itemSelector: ITEM_SELECTOR, key: anchor.key },
+  );
+}
+
+async function finishReadingAnchorFrameSampler(page: Page): Promise<ReadingAnchorFrameSample[]> {
+  return page.evaluate(async () => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatReadingAnchorSampler?: {
+        active: boolean;
+        samples: ReadingAnchorFrameSample[];
+      };
+    };
+    const sampler = browserGlobal.__chatReadingAnchorSampler;
+    if (!sampler) throw new Error('The reading-anchor frame sampler is missing.');
+    for (let frame = 0; frame < 6; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    sampler.active = false;
+    delete browserGlobal.__chatReadingAnchorSampler;
+    return sampler.samples;
+  });
 }
 
 async function anchorByKey(
@@ -1381,12 +1446,13 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     await fixture.page.locator('[data-slot="chat-processing-status"]').waitFor({ state: 'visible' });
     const modelCountBeforePrefetch = await waitForStableModelCount(fixture.page, 50);
 
-    await signalScrollIntent(fixture.page, 'earlier');
     await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) => {
       const feed = feedElement as HTMLElement;
-      feed.scrollTop = Math.min(feed.clientHeight / 2, Math.max(0, feed.scrollHeight - feed.clientHeight));
+      feed.scrollTop = 0;
       feed.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
+    // A clamped viewport emits no further scroll event for another upward gesture.
+    await signalScrollIntent(fixture.page, 'earlier');
     await withDiagnosticTimeout('the first held earlier-page request', firstPageRequest);
 
     await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement, previousModelCount) => {
@@ -1709,9 +1775,26 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
 
   await scrollToPosition(fixture.page, 'middle');
   const detachedAnchor = await readingAnchor(fixture.page);
+  await startReadingAnchorFrameSampler(fixture.page, detachedAnchor);
   await appendTurn(fixture.integration, chatId, 'chromium-detached-append');
   await fixture.page.getByRole('status').filter({ hasText: 'New response available' }).waitFor();
   const restoredDetachedAnchor = await anchorByKey(fixture.page, detachedAnchor.key);
+  const detachedAppendFrames = await finishReadingAnchorFrameSampler(fixture.page);
+  expect(detachedAppendFrames.length).toBeGreaterThan(2);
+  expect(
+    detachedAppendFrames.filter((sample) => sample.offset === null),
+    JSON.stringify({ detachedAnchor, detachedAppendFrames }, null, 2),
+  ).toEqual([]);
+  expect(
+    Math.max(
+      ...detachedAppendFrames.map((sample) =>
+        sample.offset === null
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(sample.offset - detachedAnchor.offset),
+      ),
+    ),
+    JSON.stringify({ detachedAnchor, detachedAppendFrames }, null, 2),
+  ).toBeLessThanOrEqual(1);
   expect(
     Math.abs(restoredDetachedAnchor.offset - detachedAnchor.offset),
     JSON.stringify({ detachedAnchor, restoredDetachedAnchor }),

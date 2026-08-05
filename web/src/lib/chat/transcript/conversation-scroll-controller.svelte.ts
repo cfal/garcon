@@ -144,11 +144,27 @@ export class ConversationScrollController {
 		}
 		this.#clearInitialBottomRestore();
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
+		const intentEpoch = this.#userScrollIntent.epoch + 1;
 		this.#userScrollIntent = {
-			epoch: this.#userScrollIntent.epoch + 1,
+			epoch: intentEpoch,
 			direction,
 			receivedAt: performance.now(),
 		};
+		// Evaluates a clamped edge after the gesture because another wheel or key input
+		// at that edge may not produce the usual scroll event.
+		if (direction) {
+			const chatId = this.deps.sessions.selectedChatId;
+			queueMicrotask(() => {
+				if (
+					this.#userScrollIntent.epoch !== intentEpoch ||
+					this.#userScrollIntent.direction !== direction ||
+					this.deps.sessions.selectedChatId !== chatId
+				) {
+					return;
+				}
+				this.#handleBoundaryProximity(direction, this.#isNearPageBoundary(direction));
+			});
+		}
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {

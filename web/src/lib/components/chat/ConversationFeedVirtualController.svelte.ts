@@ -15,6 +15,7 @@ import {
 	CHAT_GEOMETRY_END_THRESHOLD_PX,
 	classifyConversationVirtualStructure,
 	classifyMeasuredConversationViewportFill,
+	conversationVirtualGeometryChangesBeforeAnchor,
 	createRetainedConversationRangeExtractor,
 	shouldPreserveConversationVirtualEdge,
 } from './conversation-feed-viewport-geometry.js';
@@ -530,7 +531,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			endBehavior: snapshot.endBehavior,
 			restorePolicyEnd,
 		});
-		const shouldCaptureReadingPosition =
+		const readingPositionPolicyApplies =
 			this.options.visible &&
 			this.#activeTargetScrolls === 0 &&
 			(structure === 'interior-only' || resetMeasurements || preserveEdgeReadingPosition) &&
@@ -541,14 +542,28 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			snapshot.geometryRevision,
 			preferTranscriptAnchor,
 		);
-		const preservationAnchor = shouldCaptureReadingPosition
+		const candidateAnchor = readingPositionPolicyApplies
 			? (this.#pendingReadingAnchor ??
 				preCommitAnchor ??
 				this.#captureVirtualAnchor(preferTranscriptAnchor))
 			: null;
+		// TanStack already anchors an unaffected trailing publication. A second keyed
+		// restore would align the row to the start for a frame before restoring its offset.
+		const shouldRestoreReadingPosition = Boolean(
+			candidateAnchor &&
+			(this.#pendingReadingAnchor !== null ||
+				conversationVirtualGeometryChangesBeforeAnchor({
+					previousKeys: this.#configuredKeys,
+					previousEstimates: this.#configuredEstimates,
+					nextKeys: keys,
+					nextEstimates: estimates,
+					anchorKey: candidateAnchor.key,
+				})),
+		);
+		const preservationAnchor = shouldRestoreReadingPosition ? candidateAnchor : null;
 		if (preservationAnchor && !restorePolicyEnd) {
 			this.#pendingReadingAnchor = preservationAnchor;
-		} else if (!shouldCaptureReadingPosition || restorePolicyEnd) {
+		} else if (!shouldRestoreReadingPosition || restorePolicyEnd) {
 			this.#pendingReadingAnchor = null;
 		}
 
