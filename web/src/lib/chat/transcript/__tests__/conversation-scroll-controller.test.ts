@@ -73,7 +73,7 @@ interface FakeViewport extends ConversationViewportPort {
 		typeof vi.fn<ConversationViewportPort['restoreHiddenReadingPosition']>
 	>;
 	cancelPendingLayoutMutation: ReturnType<typeof vi.fn<() => void>>;
-	cancelForUserIntent: ReturnType<typeof vi.fn<() => void>>;
+	cancelForUserIntent: ReturnType<typeof vi.fn<ConversationViewportPort['cancelForUserIntent']>>;
 	scrollToTarget: ReturnType<typeof vi.fn<ConversationViewportPort['scrollToTarget']>>;
 }
 
@@ -81,6 +81,7 @@ function fakeViewport(overrides: Partial<ConversationViewportPort> = {}): FakeVi
 	return {
 		isReady: vi.fn(() => true),
 		isAtEnd: vi.fn(() => false),
+		ownsScrollPosition: vi.fn(() => false),
 		scrollToStart: vi.fn(),
 		scrollToEnd: vi.fn(),
 		restoreInitialEnd: vi.fn(),
@@ -182,7 +183,7 @@ describe('ConversationScrollController', () => {
 	it('cancels pending layout work before recording every user gesture', () => {
 		const { controller, viewport } = controllerFixture();
 		controller.noteUserScrollIntent('earlier');
-		expect(viewport.cancelForUserIntent).toHaveBeenCalledOnce();
+		expect(viewport.cancelForUserIntent).toHaveBeenCalledWith('earlier');
 	});
 
 	it('requires fresh downward intent to repin inside the later threshold', () => {
@@ -268,6 +269,93 @@ describe('ConversationScrollController', () => {
 		fixture.controller.handleScroll();
 
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenNthCalledWith(1, null);
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenNthCalledWith(2, 'earlier');
+	});
+
+	it('keeps earlier prefetch armed across a slow pointer-originated scroll', async () => {
+		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 900 },
+		});
+
+		fixture.controller.noteUserScrollIntent();
+		fixture.scroller.scrollTop = 850;
+		fixture.controller.handleScroll();
+		now.mockReturnValue(1_500);
+		fixture.scroller.scrollTop = 820;
+		fixture.controller.handleScroll();
+		now.mockReturnValue(2_200);
+		fixture.scroller.scrollTop = 750;
+		fixture.controller.handleScroll();
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+		now.mockRestore();
+	});
+
+	it('does not page after stale earlier intent enters the zone without input', async () => {
+		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 2_000 },
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		await Promise.resolve();
+		fixture.scroller.scrollTop = 1_900;
+		fixture.controller.handleScroll();
+		now.mockReturnValue(1_000_000);
+		fixture.scroller.scrollTop = 700;
+		fixture.controller.handleScroll();
+		await Promise.resolve();
+
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		now.mockRestore();
+	});
+
+	it('does not page from a viewport-owned scroll inside the intent window', async () => {
+		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 2_000 },
+			viewport: fakeViewport({ ownsScrollPosition: vi.fn(() => true) }),
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		await Promise.resolve();
+		fixture.scroller.scrollTop = 700;
+		fixture.controller.handleScroll();
+		await Promise.resolve();
+
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		now.mockRestore();
+	});
+
+	it('pages after viewport scroll ownership releases inside the intent window', async () => {
+		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const ownsScrollPosition = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 900 },
+			viewport: fakeViewport({ ownsScrollPosition }),
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		await Promise.resolve();
+		fixture.scroller.scrollTop = 775;
+		fixture.controller.handleScroll();
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		fixture.scroller.scrollTop = 750;
+		fixture.controller.handleScroll();
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+		expect(ownsScrollPosition).toHaveBeenCalledTimes(2);
+		now.mockRestore();
 	});
 
 	it('prefetches later history without widening the live-end repin zone', async () => {
@@ -309,6 +397,46 @@ describe('ConversationScrollController', () => {
 		controller.handleScroll();
 
 		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
+	it('does not carry earlier intent across a paging-context reset', async () => {
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 900 },
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		await Promise.resolve();
+		fixture.sessions.selectedChatId = 'chat-2';
+		fixture.controller.prepareInitialBottomRestore('chat-2');
+		fixture.scroller.scrollTop = 750;
+		fixture.controller.handleScroll();
+		await Promise.resolve();
+
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
+	it('requires fresh earlier intent after leaving and re-entering the load-ahead zone', async () => {
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 900 },
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		await Promise.resolve();
+		fixture.scroller.scrollTop = 750;
+		await expect(fixture.controller.requestPage('earlier', 'scroll')).resolves.toBe('exhausted');
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+
+		fixture.scroller.scrollTop = 900;
+		fixture.controller.handleScroll();
+		fixture.scroller.scrollTop = 750;
+		fixture.controller.handleScroll();
+		await Promise.resolve();
+
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
 	});
 
 	it('rearms an advanced earlier cursor after its geometry settle is superseded', async () => {
@@ -382,6 +510,31 @@ describe('ConversationScrollController', () => {
 		resolveFirstPage('loaded');
 
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
+	});
+
+	it('fills the earlier load-ahead zone after a slow page advances its cursor', async () => {
+		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+		let resolveFirstPage!: (result: 'loaded') => void;
+		const firstPage = new Promise<'loaded'>((resolve) => (resolveFirstPage = resolve));
+		const loadEarlierPage = vi
+			.fn<ConversationScrollState['loadEarlierPage']>()
+			.mockImplementationOnce(() => firstPage)
+			.mockResolvedValueOnce('exhausted');
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 350 },
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.controller.handleScroll();
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+
+		now.mockReturnValue(2_200);
+		fixture.state.feedMutationClock = mutationClock(1, 1);
+		resolveFirstPage('loaded');
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
+		now.mockRestore();
 	});
 
 	it('detaches on fresh upward intent inside the later threshold', () => {
@@ -847,6 +1000,43 @@ describe('ConversationScrollController', () => {
 		controller.setViewportVisible(true);
 		await vi.waitFor(() => expect(viewport.restoreHiddenReadingPosition).toHaveBeenCalledOnce());
 		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+	});
+
+	it('rebaselines inferred gesture direction across viewport visibility changes', () => {
+		vi.spyOn(performance, 'now').mockReturnValue(100);
+		const fixture = controllerFixture({ scroller: { scrollTop: 900 } });
+		fixture.controller.noteUserScrollIntent();
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
+
+		fixture.controller.setViewportVisible(false);
+		fixture.scroller.scrollTop = 100;
+		fixture.controller.handleScroll();
+		fixture.controller.setViewportVisible(true);
+		fixture.controller.handleScroll();
+
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledTimes(1);
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledWith(null);
+	});
+
+	it('does not page from an owned hidden-offset clamp after a directionless press', async () => {
+		vi.spyOn(performance, 'now').mockReturnValue(100);
+		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
+		const viewport = fakeViewport({ ownsScrollPosition: vi.fn(() => true) });
+		const fixture = controllerFixture({
+			viewport,
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 700, scrollTop: 5_000 },
+		});
+		fixture.controller.noteUserScrollIntent();
+		fixture.controller.setViewportVisible(false);
+		fixture.scroller.scrollTop = 1_200;
+		fixture.controller.setViewportVisible(true);
+
+		fixture.controller.handleScroll();
+		await Promise.resolve();
+
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		expect(viewport.cancelForUserIntent.mock.calls).toEqual([[null]]);
 	});
 
 	it('cancels a queued hidden-position restore when explicit navigation starts', async () => {

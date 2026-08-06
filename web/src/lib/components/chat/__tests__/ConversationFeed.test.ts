@@ -8,6 +8,46 @@ import {
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness.js';
 
+async function showFeedScrollbar(container: HTMLElement): Promise<{
+	scrollbar: HTMLElement;
+	thumb: HTMLElement;
+	viewport: HTMLElement;
+}> {
+	const root = container.querySelector<HTMLElement>('[data-scroll-area-root]');
+	const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
+	const content = container.querySelector<HTMLElement>('[data-scroll-area-content]');
+	if (!root || !viewport || !content) throw new Error('Expected the feed scroll-area elements');
+	Object.defineProperties(viewport, {
+		offsetHeight: { configurable: true, value: 720 },
+		offsetWidth: { configurable: true, value: 900 },
+		scrollHeight: { configurable: true, value: 4_000 },
+		scrollWidth: { configurable: true, value: 900 },
+	});
+	await waitFor(() => {
+		expect(
+			ResizeObserverHarness.instances.some((observer) => observer.observed.has(viewport)),
+		).toBe(true);
+		expect(ResizeObserverHarness.instances.some((observer) => observer.observed.has(content))).toBe(
+			true,
+		);
+	});
+	for (const observer of ResizeObserverHarness.instances) {
+		if (observer.observed.has(viewport)) {
+			ResizeObserverHarness.emitFrom(observer, viewport, 900, 720);
+		}
+		if (observer.observed.has(content)) {
+			ResizeObserverHarness.emitFrom(observer, content, 900, 4_000);
+		}
+	}
+	await fireEvent.pointerEnter(root);
+	await waitFor(() => expect(container.querySelector('[data-chat-feed-scrollbar]')).not.toBeNull());
+	const scrollbar = container.querySelector<HTMLElement>('[data-chat-feed-scrollbar]');
+	const thumb = container.querySelector<HTMLElement>('[data-slot="scroll-area-thumb"]');
+	if (!scrollbar || !thumb) throw new Error('Expected the feed scrollbar and thumb');
+	await tick();
+	return { scrollbar, thumb, viewport };
+}
+
 describe('ConversationFeed', () => {
 	const originalOffsetHeight = Object.getOwnPropertyDescriptor(
 		HTMLElement.prototype,
@@ -129,11 +169,90 @@ describe('ConversationFeed', () => {
 		}
 	});
 
-	it('shows a directional earlier boundary after the automatic reveal window', async () => {
-		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation' });
+	it('reports an immediate scrollbar track jump from its committed offset', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		let feedViewport: HTMLElement | null = null;
+		const observedScrollTops: number[] = [];
+		const onUserScrollIntent = vi.fn(() => observedScrollTops.push(feedViewport?.scrollTop ?? -1));
+		try {
+			const { container } = render(ConversationFeedTestHost, {
+				onUserScrollIntent,
+				transcriptScenario: 'twenty-thousand',
+			});
+			const { scrollbar, thumb, viewport } = await showFeedScrollbar(container);
+			feedViewport = viewport;
+			viewport.scrollTop = 500;
+			vi.spyOn(thumb, 'getBoundingClientRect').mockReturnValue({ top: 80, bottom: 120 } as DOMRect);
+			document.addEventListener('pointerdown', () => (viewport.scrollTop = 0), { once: true });
 
-		expect(await screen.findByRole('button', { name: 'Load earlier messages' })).toBeTruthy();
-		expect(screen.queryByText('Load more')).toBeNull();
+			await fireEvent.pointerDown(scrollbar, { button: 0, clientY: 90, pointerId: 1 });
+
+			expect(onUserScrollIntent.mock.calls).toEqual([['earlier']]);
+			expect(observedScrollTops).toEqual([500]);
+			expect(viewport.scrollTop).toBe(0);
+		} finally {
+			restoreResizeObserver();
+		}
+	});
+
+	it('reports wheel direction over the custom scrollbar before it scrolls', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		let feedViewport: HTMLElement | null = null;
+		const observedScrollTops: number[] = [];
+		const onUserScrollIntent = vi.fn(() => observedScrollTops.push(feedViewport?.scrollTop ?? -1));
+		try {
+			const { container } = render(ConversationFeedTestHost, {
+				onUserScrollIntent,
+				transcriptScenario: 'twenty-thousand',
+			});
+			const { scrollbar, viewport } = await showFeedScrollbar(container);
+			feedViewport = viewport;
+			viewport.scrollTop = 500;
+			document.addEventListener('wheel', () => (viewport.scrollTop = 0), { once: true });
+
+			await fireEvent.wheel(scrollbar, { deltaY: -40 });
+			expect(viewport.scrollTop).toBe(0);
+			viewport.scrollTop = 500;
+			await fireEvent.wheel(scrollbar, { deltaY: 40 });
+
+			expect(onUserScrollIntent.mock.calls).toEqual([['earlier'], ['later']]);
+			expect(observedScrollTops).toEqual([500, 500]);
+		} finally {
+			restoreResizeObserver();
+		}
+	});
+
+	it('defers thumb pickup until pointer movement establishes direction', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		const onUserScrollIntent = vi.fn();
+		try {
+			const { container } = render(ConversationFeedTestHost, {
+				onUserScrollIntent,
+				transcriptScenario: 'twenty-thousand',
+			});
+			const { thumb, viewport } = await showFeedScrollbar(container);
+			viewport.scrollTop = 500;
+			thumb.addEventListener('pointerdown', () => (viewport.scrollTop = 499.5), { once: true });
+
+			await fireEvent.pointerDown(thumb, { button: 0, clientY: 100, pointerId: 2 });
+			expect(onUserScrollIntent.mock.calls).toEqual([[null]]);
+			await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 80, pointerId: 2 });
+			await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 120, pointerId: 2 });
+			await fireEvent.pointerUp(thumb, { button: 0, clientY: 120, pointerId: 2 });
+
+			expect(onUserScrollIntent.mock.calls).toEqual([[null], ['earlier'], ['later']]);
+		} finally {
+			restoreResizeObserver();
+		}
+	});
+
+	it('keeps the automatic earlier-history boundary out of the transcript', () => {
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'local-truncation',
+		});
+
+		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
+		expect(container.querySelector('[data-transcript-page-boundary="earlier"]')).toBeNull();
 	});
 
 	it('renders later loading below the transcript without a native bottom anchor', async () => {
@@ -154,9 +273,20 @@ describe('ConversationFeed', () => {
 	});
 
 	it('keeps an earlier failure in flow as a directional retry', async () => {
-		render(ConversationFeedTestHost, { transcriptScenario: 'error-earlier' });
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'error-earlier',
+		});
+		const retry = await screen.findByRole('button', { name: 'Retry earlier messages' });
+		const boundary = container.querySelector('[data-transcript-page-boundary="earlier"]');
+		const transcript = container.querySelector('[data-chat-row-id]');
+		if (!boundary || !transcript) throw new Error('Expected the earlier boundary and transcript');
 
-		expect(await screen.findByRole('button', { name: 'Retry earlier messages' })).toBeTruthy();
+		expect(boundary.compareDocumentPosition(transcript)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		await fireEvent.click(retry);
+
+		const loading = await screen.findByRole('button', { name: 'Loading earlier messages...' });
+		expect(loading.getAttribute('aria-busy')).toBe('true');
+		expect(container.querySelector('[data-transcript-page-boundary="earlier"]')).toBe(boundary);
 	});
 
 	it('passes durable and pending row identities to mounted virtual rows', async () => {

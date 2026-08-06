@@ -23,15 +23,17 @@ import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-i
 import {
 	captureConversationVirtualAnchor,
 	type ConversationVirtualAnchor,
+	ConversationEarlierPrependAnchorOwnership,
 	createConversationElementRectObserver,
 	ConversationMountedVirtualItems,
 	ConversationPreCommitAnchorBuffer,
 	nextConversationLayoutFrame,
 	observeConversationRootOffset,
+	performConversationOwnedScroll,
+	positionPendingConversationAnchor,
 	sameConversationNumberArrays,
 	settleConversationVirtualAnchor,
 	settleConversationEndRestore,
-	settleConversationScroll,
 	settleConversationTarget,
 	scrollConversationToPhysicalEnd,
 } from './conversation-feed-virtual-runtime.js';
@@ -68,19 +70,15 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#configuredPinned: boolean;
 	#appliedDataRevision: number;
 	#configuredVisible: boolean;
-	// Cancellation ownership stays field-specific. Structural publication, visibility, targets, user
-	// intent, replacement, and teardown advance the layout token to invalidate deferred anchor/end writes.
-	// New targets, user intent, replacement, and teardown advance the target token. Programmatic epochs
-	// supersede TanStack scroll operations; user intent advances both epochs and may supersede core's active
-	// target. The initial-end epoch owns only the deferred initial/latest restore. The user-intent epoch
-	// prevents older scale/end work from restoring after a genuine gesture. Active targets suppress passive
-	// writes until their balanced finally block exits. Pending and hidden anchors carry one keyed reading
-	// position; pending end and measure-on-show carry one deferred viewport operation for the current surface.
+	// Structural changes advance layout and target tokens; programmatic epochs own TanStack and attachment writes.
+	// Preserved prepend intent keeps that ownership. User intent supersedes older restores, while active targets
+	// suppress passive writes. Pending anchors and deferred viewport operations belong to the current surface.
 	#layoutMutationToken = 0;
 	#targetToken = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
 	#hiddenScrollOffset: number | null = null;
 	#pendingReadingAnchor: ConversationVirtualAnchor | null = null;
+	#earlierPrependAnchor = new ConversationEarlierPrependAnchorOwnership();
 	#readingRestoreGeneration = 0;
 	#preCommitAnchorBuffer = new ConversationPreCommitAnchorBuffer();
 	#measureOnShow = false;
@@ -181,6 +179,19 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		};
 	};
 
+	// The pending anchor exists only while its settle loop owns the programmatic scroll epoch.
+	positionReadingAnchor(virtualItem: { key: unknown; index: number }): Attachment<HTMLDivElement> {
+		return (element) =>
+			positionPendingConversationAnchor({
+				anchor: this.#pendingReadingAnchor,
+				element,
+				virtualItem,
+				indexByKey: this.options.model.indexByKey,
+				viewport: this.isReady() ? this.options.viewport : null,
+				scrollToOffset: (offset) => this.#instance().scrollToOffset(offset, { behavior: 'auto' }),
+			});
+	}
+
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
@@ -231,14 +242,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		);
 	}
 
+	readonly ownsScrollPosition = (): boolean => this.#programmaticScrollActive;
+
 	scrollToStart(): void {
 		if (!this.isReady()) return;
 		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
-		const operationEpoch = this.#beginProgrammaticScrollOperation();
-		this.#instance().scrollToOffset(0, { behavior: 'auto' });
-		void this.#completeSimpleScroll(operationEpoch, this.#layoutMutationToken);
+		void this.#writeSimpleScroll(() => this.#instance().scrollToOffset(0, { behavior: 'auto' }));
 	}
 
 	scrollToEnd(): void {
@@ -283,9 +294,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
-		const operationEpoch = this.#beginProgrammaticScrollOperation();
-		this.#instance().scrollBy(delta, { behavior: 'auto' });
-		void this.#completeSimpleScroll(operationEpoch, this.#layoutMutationToken);
+		void this.#writeSimpleScroll(() => this.#instance().scrollBy(delta, { behavior: 'auto' }));
 	}
 
 	async waitForLayout(
@@ -390,13 +399,15 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				const measured = await this.#measureAfterCommit(surfaceIdentity);
 				if (!measured) return this.isReady() ? 'missing-anchor' : 'not-ready';
 			}
-			if (scrollOffset === null) return 'missing-anchor';
-			// Nothing on this path advances the layout token itself, so a moved token means a
-			// structural publication landed mid-restore and now owns the viewport position.
-			if (!offsetWriteStillValid() || layoutToken !== this.#layoutMutationToken) {
+			if (
+				scrollOffset === null ||
+				!(await this.#writeSimpleScroll(
+					() => this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' }),
+					() => offsetWriteStillValid() && layoutToken === this.#layoutMutationToken,
+				))
+			) {
 				return 'missing-anchor';
 			}
-			this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
 			return 'restored';
 		}
 		// Carries the hide-time key through a same-surface geometry publication that
@@ -419,10 +430,15 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return 'restored';
 		}
 		this.#pendingReadingAnchor = null;
-		// The anchor restore advances the layout token internally, so identity, readiness, and
-		// the user-intent epoch are the coherent guards for its raw offset fallback.
-		if (scrollOffset === null || !offsetWriteStillValid()) return 'missing-anchor';
-		this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
+		if (
+			scrollOffset === null ||
+			!(await this.#writeSimpleScroll(
+				() => this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' }),
+				offsetWriteStillValid,
+			))
+		) {
+			return 'missing-anchor';
+		}
 		return 'restored';
 	}
 
@@ -430,16 +446,27 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#layoutMutationToken += 1;
 		this.#readingRestoreGeneration += 1;
 		this.#pendingReadingAnchor = null;
+		this.#earlierPrependAnchor.clear();
 		this.#programmaticScrollActive = false;
 		this.#programmaticScrollEpoch += 1;
 	}
 
-	cancelForUserIntent(): void {
+	cancelForUserIntent(direction: 'earlier' | 'later' | null): void {
 		this.#userIntentEpoch += 1;
 		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
-		const shouldSupersedeCore = this.#programmaticScrollActive;
 		const viewport = this.options.viewport;
+		const pendingAnchor = this.#pendingReadingAnchor;
+		const preservesEarlierPrepend = this.#earlierPrependAnchor.preserves(
+			direction,
+			pendingAnchor,
+			viewport?.scrollTop ?? Number.POSITIVE_INFINITY,
+		);
+		if (preservesEarlierPrepend) {
+			this.options.onInitialEndRestored?.();
+			return;
+		}
+		const shouldSupersedeCore = this.#programmaticScrollActive;
 		this.cancelPendingLayoutMutation();
 		if (shouldSupersedeCore && viewport && this.isReady()) {
 			this.#instance().scrollToOffset(viewport.scrollTop, { behavior: 'auto' });
@@ -555,6 +582,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		} else {
 			this.#pendingReadingAnchor = null;
 		}
+		this.#earlierPrependAnchor.carry(
+			this.#pendingReadingAnchor,
+			snapshot.mutationKinds.has('history-earlier'),
+		);
 
 		if (identityChanged) this.#detachAndResetOldSurface();
 		const indexByKey = new Map(keys.map((key, index) => [key, index] as const));
@@ -786,6 +817,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			// The latest attempt consumes its anchor even when layout never settles. Only a
 			// newer scheduled attempt may carry the same anchor across a passive supersession.
 			this.#pendingReadingAnchor = null;
+			this.#earlierPrependAnchor.complete(anchor);
 		});
 	}
 
@@ -911,15 +943,16 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		);
 	}
 
-	async #completeSimpleScroll(operationEpoch: number, token: number): Promise<void> {
-		try {
-			await settleConversationScroll({
-				isCurrent: () => this.#isCurrentLayoutOperation(token, operationEpoch),
-				readOffset: () => this.options.viewport?.scrollTop ?? null,
-			});
-		} finally {
-			this.#finishProgrammaticScrollOperation(operationEpoch);
-		}
+	async #writeSimpleScroll(write: () => void, isValid = () => true): Promise<boolean> {
+		const token = this.#layoutMutationToken;
+		return performConversationOwnedScroll({
+			begin: () => this.#beginProgrammaticScrollOperation(),
+			finish: (epoch) => this.#finishProgrammaticScrollOperation(epoch),
+			isCurrent: (epoch) => this.#isCurrentLayoutOperation(token, epoch),
+			isValid,
+			readOffset: () => this.options.viewport?.scrollTop ?? null,
+			write,
+		});
 	}
 
 	#beginProgrammaticScrollOperation(): number {
@@ -930,6 +963,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#isCurrentProgrammaticScrollOperation(epoch: number): boolean {
 		return epoch === this.#programmaticScrollEpoch;
 	}
+
 	#isCurrentLayoutOperation(token: number, epoch: number): boolean {
 		return (
 			token === this.#layoutMutationToken &&

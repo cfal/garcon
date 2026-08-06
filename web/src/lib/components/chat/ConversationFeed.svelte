@@ -28,6 +28,11 @@
 		canUseForkAtMessageAction,
 	} from '$lib/chat/actions/fork-at-message-action.js';
 	import { visiblePendingPermissionRequests } from '$lib/chat/transcript/conversation-feed-items.js';
+	import {
+		conversationScrollbarScrollDirection,
+		conversationScrollbarTrackDirection,
+		conversationWheelScrollDirection,
+	} from '$lib/chat/transcript/conversation-scroll-gesture.js';
 	import { ConversationFeedProjectionState } from './ConversationFeedProjectionState.svelte.js';
 	import { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
 	import { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
@@ -43,7 +48,7 @@
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
-		onUserScrollIntent?: () => void;
+		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
 		onPermissionDecision?: (
 			permissionRequestId: string,
 			decision: PermissionDecisionPayload & { message?: string },
@@ -117,6 +122,42 @@
 		appShell.requestSidebarRecenterToSelected();
 	}
 
+	let scrollbarPointerY: number | null = null;
+
+	function handleScrollbarPointerDownCapture(event: PointerEvent): void {
+		if (event.button !== 0 || !(event.currentTarget instanceof HTMLElement)) return;
+		const target = event.target instanceof Element ? event.target : null;
+		const isThumbPickup = Boolean(target?.closest('[data-slot="scroll-area-thumb"]'));
+		scrollbarPointerY = event.clientY;
+		if (isThumbPickup) {
+			onUserScrollIntent?.(null);
+			return;
+		}
+		const thumbRect = event.currentTarget
+			.querySelector<HTMLElement>('[data-slot="scroll-area-thumb"]')
+			?.getBoundingClientRect();
+		const direction = thumbRect
+			? conversationScrollbarTrackDirection(event.clientY, thumbRect.top, thumbRect.bottom)
+			: null;
+		onUserScrollIntent?.(direction);
+	}
+
+	function handleScrollbarPointerMove(event: PointerEvent): void {
+		if (scrollbarPointerY === null || (event.buttons & 1) === 0) return;
+		const direction = conversationScrollbarScrollDirection(scrollbarPointerY, event.clientY);
+		scrollbarPointerY = event.clientY;
+		if (direction) onUserScrollIntent?.(direction);
+	}
+
+	function handleScrollbarWheel(event: WheelEvent): void {
+		const direction = conversationWheelScrollDirection(event.deltaY);
+		if (direction) onUserScrollIntent?.(direction);
+	}
+
+	function finishScrollbarPointerIntent(): void {
+		scrollbarPointerY = null;
+	}
+
 	const feedScrollAreaClass = 'h-full overflow-hidden relative';
 	const feedViewportClass = $derived(
 		cn(
@@ -159,7 +200,10 @@
 		isLiveWindow: !chatState.hasLaterMessages,
 		showTopToolbarSpacer: reserveTopFloatingToolbar,
 		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
-		showEarlierBoundary: chatState.canLoadEarlier || chatState.pageStates.earlier.status !== 'idle',
+		showEarlierBoundary:
+			chatState.pageStates.earlier.status === 'error' ||
+			(chatState.pageStates.earlier.status === 'loading' &&
+				chatState.pageStates.earlier.error !== null),
 		showLaterBoundary: chatState.canLoadLater || chatState.pageStates.later.status !== 'idle',
 		reserveComposerTraySpace,
 		floatingPermissions:
@@ -394,7 +438,12 @@
 		orientation="vertical"
 		class={cn('w-1.5', isPreparingInitialScroll && 'invisible')}
 		data-chat-feed-scrollbar
-		onpointerdown={onUserScrollIntent}
+		onpointerdowncapture={handleScrollbarPointerDownCapture}
+		onwheel={handleScrollbarWheel}
+		onpointermove={handleScrollbarPointerMove}
+		onpointerup={finishScrollbarPointerIntent}
+		onpointercancel={finishScrollbarPointerIntent}
+		onlostpointercapture={finishScrollbarPointerIntent}
 	/>
 	<ScrollAreaPrimitive.Corner />
 	<div

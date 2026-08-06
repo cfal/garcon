@@ -1485,12 +1485,108 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     expect(loadAheadDistance).toBeGreaterThan(0);
     expect(await transcriptBoundaryIntersectsViewport(fixture.page, 'earlier')).toBe(false);
 
+    expect(
+      await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
+    ).toBe(0);
+    const boundarySweep = await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+        const feed = feedElement as HTMLElement;
+        const offsets: number[] = [];
+        const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        for (let attempt = 0; attempt < 32 && feed.scrollTop > 0; attempt += 1) {
+          offsets.push(feed.scrollTop);
+          feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -80 }));
+          feed.scrollTop = Math.max(0, feed.scrollTop - feed.clientHeight / 4);
+          feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+          await frame();
+        }
+        return { offsets, scrollTop: feed.scrollTop };
+      });
+    expect(boundarySweep.scrollTop, JSON.stringify(boundarySweep, null, 2)).toBe(0);
+    expect(
+      await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
+    ).toBe(0);
+    const prependAnchor = await readingAnchor(fixture.page);
+    await startReadingAnchorFrameSampler(fixture.page, prependAnchor);
+    await fixture.page.locator(FEED_SELECTOR).evaluate(
+      (feedElement, input) => {
+        const feed = feedElement as HTMLElement;
+        const browserGlobal = globalThis as typeof globalThis & {
+          __chatClampedEarlierIntentPump?: {
+            complete: boolean;
+            frames: number;
+            growthFrame: number | null;
+            observedModelCount: number;
+          };
+        };
+        const pumpState = {
+          complete: false,
+          frames: 0,
+          growthFrame: null as number | null,
+          observedModelCount: input.initialModelCount,
+        };
+        browserGlobal.__chatClampedEarlierIntentPump = pumpState;
+        const pump = () => {
+          feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -80 }));
+          pumpState.frames += 1;
+          const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
+          pumpState.observedModelCount = Number(
+            sizer?.dataset.chatVirtualModelCount ?? Number.NaN,
+          );
+          if (pumpState.observedModelCount > input.initialModelCount) {
+            pumpState.growthFrame = pumpState.frames;
+            pumpState.complete = true;
+          } else if (pumpState.frames >= 180) {
+            pumpState.complete = true;
+          } else {
+            requestAnimationFrame(pump);
+          }
+        };
+        requestAnimationFrame(pump);
+      },
+      { initialModelCount: modelCountBeforePrefetch, sizerSelector: SIZER_SELECTOR },
+    );
+
     releaseFirstPage();
 
+    await fixture.page.waitForFunction(
+      () =>
+        (
+          globalThis as typeof globalThis & {
+            __chatClampedEarlierIntentPump?: { complete: boolean };
+          }
+        ).__chatClampedEarlierIntentPump?.complete === true,
+    );
+    const intentPump = await fixture.page.evaluate(() => {
+      const browserGlobal = globalThis as typeof globalThis & {
+        __chatClampedEarlierIntentPump?: {
+          complete: boolean;
+          frames: number;
+          growthFrame: number | null;
+          observedModelCount: number;
+        };
+      };
+      const result = browserGlobal.__chatClampedEarlierIntentPump;
+      delete browserGlobal.__chatClampedEarlierIntentPump;
+      return result;
+    });
+    expect(intentPump?.growthFrame, JSON.stringify(intentPump, null, 2)).not.toBeNull();
+    expect(intentPump?.growthFrame).toBe(intentPump?.frames);
+    expect(intentPump?.observedModelCount).toBeGreaterThan(modelCountBeforePrefetch);
     const modelCountAfterFirstPage = await waitForStableModelCount(
       fixture.page,
       modelCountBeforePrefetch + 50,
     );
+    const prependFrames = await finishReadingAnchorFrameSampler(fixture.page);
+    expect(
+      Math.max(
+        ...prependFrames.map((sample) =>
+          sample.offset === null
+            ? Number.POSITIVE_INFINITY
+            : Math.abs(sample.offset - prependAnchor.offset),
+        ),
+      ),
+      JSON.stringify({ prependAnchor, prependFrames }, null, 2),
+    ).toBeLessThanOrEqual(1);
     expect(earlierRequestCount).toBe(1);
     expect(modelCountAfterFirstPage).toBe(modelCountBeforePrefetch + 50);
 
@@ -1560,18 +1656,23 @@ async function revealEarlierTranscript(
       const prefetchPosition = await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
         const feed = feedElement as HTMLElement;
         const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
-        const target = Math.min(maximum, Math.max(101, feed.clientHeight * 0.75));
-        feed.scrollTop = target;
-        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
-        await settle();
-        await settle();
-        return {
-          scrollTop: feed.scrollTop,
-          viewportHeight: feed.clientHeight,
-        };
+        const attempts: Array<{ maximum: number; target: number; scrollTop: number }> = [];
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+          const target = Math.min(maximum, Math.max(101, feed.clientHeight * 0.75));
+          feed.scrollTop = target;
+          feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+          await settle();
+          await settle();
+          attempts.push({ maximum, target, scrollTop: feed.scrollTop });
+          // First measurements may correct the offset; the anchor sampler starts after they settle.
+          if (feed.scrollTop > 100 && feed.scrollTop <= feed.clientHeight) {
+            return { attempts, scrollTop: feed.scrollTop, viewportHeight: feed.clientHeight };
+          }
+        }
+        throw new Error(`The earlier prefetch position did not settle: ${JSON.stringify(attempts)}`);
       });
-      expect(prefetchPosition.scrollTop).toBeGreaterThan(100);
+      expect(prefetchPosition.scrollTop, JSON.stringify(prefetchPosition)).toBeGreaterThan(100);
       expect(prefetchPosition.scrollTop).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
       const anchor = await readingAnchor(page);
       await startReadingAnchorFrameSampler(page, anchor);

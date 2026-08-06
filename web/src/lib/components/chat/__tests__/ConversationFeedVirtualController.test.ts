@@ -43,7 +43,10 @@ import {
 import {
 	conversationAnchorScrollOffset,
 	conversationAnchorViewportOffset,
+	ConversationEarlierPrependAnchorOwnership,
 	ConversationPreCommitAnchorBuffer,
+	positionCommittedConversationAnchor,
+	positionPendingConversationAnchor,
 } from '../conversation-feed-virtual-runtime';
 import ConversationFeedVirtualControllerTestHost from './ConversationFeedVirtualControllerTestHost.svelte';
 
@@ -65,6 +68,67 @@ describe('ConversationFeedVirtualController helpers', () => {
 
 		expect(viewportOffset).toBe(429);
 		expect(conversationAnchorScrollOffset(1_808, 59.8, viewportOffset)).toBeCloseTo(1_319.2);
+	});
+
+	it('does not carry directionless press origins into later gestures', () => {
+		const ownership = new ConversationEarlierPrependAnchorOwnership();
+		const anchor = { key: 'anchor', viewportOffset: 0, fallbackKeys: [] };
+		ownership.carry(anchor, true);
+
+		expect(ownership.preserves(null, anchor, 80)).toBe(true);
+		expect(ownership.preserves('earlier', anchor, 0)).toBe(true);
+		ownership.clear();
+		ownership.carry(anchor, true);
+		expect(ownership.preserves(null, anchor, 0)).toBe(true);
+		expect(ownership.preserves('earlier', anchor, 80)).toBe(false);
+	});
+
+	it('positions a committed anchor before its next animation frame', () => {
+		const viewport = document.createElement('div');
+		const element = document.createElement('div');
+		viewport.scrollTop = 120;
+		vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ top: 40 } as DOMRect);
+		vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({ top: 390 } as DOMRect);
+		const scrollToOffset = vi.fn();
+
+		positionCommittedConversationAnchor({
+			element,
+			viewport,
+			viewportOffset: 50,
+			scrollToOffset,
+		});
+
+		expect(scrollToOffset).toHaveBeenCalledWith(420);
+	});
+
+	it('positions only the connected wrapper for the pending keyed index', () => {
+		const viewport = document.createElement('div');
+		const element = document.createElement('div');
+		viewport.append(element);
+		document.body.append(viewport);
+		element.dataset.chatVirtualItem = 'anchor';
+		element.dataset.index = '4';
+		viewport.scrollTop = 120;
+		vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ top: 40 } as DOMRect);
+		vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({ top: 390 } as DOMRect);
+		const scrollToOffset = vi.fn();
+		const input = {
+			anchor: { key: 'anchor', viewportOffset: 50, fallbackKeys: [] },
+			element,
+			virtualItem: { key: 'anchor', index: 4 },
+			indexByKey: new Map([['anchor', 4]]),
+			viewport,
+			scrollToOffset,
+		};
+
+		positionPendingConversationAnchor(input);
+		expect(scrollToOffset).toHaveBeenCalledWith(420);
+
+		scrollToOffset.mockClear();
+		element.dataset.index = '3';
+		positionPendingConversationAnchor(input);
+		expect(scrollToOffset).not.toHaveBeenCalled();
+		viewport.remove();
 	});
 
 	it('classifies identity, edge, estimate-only, and no-op changes', () => {
@@ -351,9 +415,13 @@ interface ControllerExposure {
 	controller: ConversationFeedVirtualController;
 	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
 	initialEndRestoredCount(): number;
+	prepareHiddenOffsetWithMissingAnchor(): Promise<void>;
+	prepareHiddenOffsetWithoutAnchor(): Promise<void>;
 	prependWithRetainedWithheldAnchor(index: number): Promise<void>;
 	releaseWithheldEndItem(): Promise<void>;
 	restoreHiddenWithConcurrentGeometry(): Promise<void>;
+	stageEarlierPrependWithTail(index: number): Promise<void>;
+	stageLatchedEarlierPrependWithTail(index: number): Promise<void>;
 	withholdEndItem(): Promise<void>;
 	withholdItem(index: number): Promise<void>;
 }
@@ -379,6 +447,44 @@ async function renderController(): Promise<{
 	return { exposure, unmount: rendered.unmount };
 }
 
+async function preparePendingEarlierPrepend(
+	publish: (exposure: ControllerExposure, index: number) => Promise<void>,
+) {
+	const { exposure } = await renderController();
+	const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+	if (!viewport) throw new Error('Expected the controller viewport');
+	await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+	viewport.scrollTop = 86;
+	viewport.dispatchEvent(new Event('scroll'));
+	await nextFrame();
+	const readingItem = exposure.instance.getVirtualItemForOffset(viewport.scrollTop);
+	if (!readingItem) throw new Error('Expected a virtual reading item');
+	const readingOffset = conversationAnchorViewportOffset(
+		readingItem.start,
+		exposure.instance.options.scrollMargin,
+		viewport.scrollTop,
+	);
+	const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
+	const scrollToOffset = vi.spyOn(exposure.instance, 'scrollToOffset');
+
+	await publish(exposure, readingItem.index);
+	expect(
+		Array.from(document.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')).some(
+			(element) => element.dataset.chatVirtualItem === String(readingItem.key),
+		),
+	).toBe(false);
+	const repositionedItem = exposure.instance
+		.getVirtualItems()
+		.find((item) => item.key === readingItem.key);
+	if (!repositionedItem) throw new Error('Expected the reading item after the prepend');
+	const expectedScrollOffset = conversationAnchorScrollOffset(
+		repositionedItem.start,
+		exposure.instance.options.scrollMargin,
+		readingOffset,
+	);
+	return { exposure, viewport, scrollToIndex, scrollToOffset, expectedScrollOffset };
+}
+
 describe('ConversationFeedVirtualController', () => {
 	let restoreResizeObserver: () => void;
 
@@ -390,6 +496,7 @@ describe('ConversationFeedVirtualController', () => {
 	afterEach(() => {
 		cleanup();
 		restoreResizeObserver();
+		vi.restoreAllMocks();
 	});
 
 	it('keeps content and retention publications separate from structural measurement', async () => {
@@ -446,6 +553,34 @@ describe('ConversationFeedVirtualController', () => {
 		expect(scrollToIndex).not.toHaveBeenCalled();
 	});
 
+	it('releases viewport ownership after a simple programmatic scroll settles', async () => {
+		const { exposure } = await renderController();
+
+		exposure.controller.scrollBy(10);
+		expect(exposure.controller.ownsScrollPosition()).toBe(true);
+
+		await waitFor(() => expect(exposure.controller.ownsScrollPosition()).toBe(false));
+	});
+
+	it.each([
+		['a hidden offset without a reading anchor', 'prepareHiddenOffsetWithoutAnchor'],
+		['a hidden offset whose reading anchor disappeared', 'prepareHiddenOffsetWithMissingAnchor'],
+	] as const)('owns %s until its fallback restore settles', async (_label, prepare) => {
+		const { exposure } = await renderController();
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+		await exposure[prepare]();
+		const scrollToOffset = exposure.instance.scrollToOffset.bind(exposure.instance);
+		const ownedDuringWrite: boolean[] = [];
+		vi.spyOn(exposure.instance, 'scrollToOffset').mockImplementation((offset, options) => {
+			ownedDuringWrite.push(exposure.controller.ownsScrollPosition());
+			scrollToOffset(offset, options);
+		});
+
+		await expect(exposure.controller.restoreHiddenReadingPosition()).resolves.toBe('restored');
+		expect(ownedDuringWrite).toEqual([true]);
+		expect(exposure.controller.ownsScrollPosition()).toBe(false);
+	});
+
 	it('positions a mounted edge anchor directly without first aligning it to the top', async () => {
 		const { exposure } = await renderController();
 		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
@@ -479,6 +614,57 @@ describe('ConversationFeedVirtualController', () => {
 			readingOffset,
 		);
 		expect(scrollToOffset.mock.calls[0]?.[0]).toBeCloseTo(expectedScrollOffset);
+	});
+
+	it('keeps a clamped prepend latched through a tail publication', async () => {
+		const { exposure, viewport, scrollToIndex, scrollToOffset, expectedScrollOffset } =
+			await preparePendingEarlierPrepend((current, index) =>
+				current.stageLatchedEarlierPrependWithTail(index),
+			);
+		scrollToIndex.mockClear();
+		scrollToOffset.mockClear();
+		viewport.scrollTop = 80;
+		exposure.controller.cancelForUserIntent('earlier');
+		await exposure.releaseWithheldEndItem();
+
+		await waitFor(() =>
+			expect(scrollToOffset).toHaveBeenCalledWith(expectedScrollOffset, { behavior: 'auto' }),
+		);
+	});
+
+	it('keeps an unlatched earlier prepend through a tail publication at the clamped edge', async () => {
+		const { exposure, viewport, scrollToIndex, scrollToOffset, expectedScrollOffset } =
+			await preparePendingEarlierPrepend((current, index) =>
+				current.stageEarlierPrependWithTail(index),
+			);
+		scrollToIndex.mockClear();
+		scrollToOffset.mockClear();
+		viewport.scrollTop = 0;
+		exposure.controller.cancelForUserIntent('earlier');
+		await exposure.releaseWithheldEndItem();
+
+		await waitFor(() =>
+			expect(scrollToOffset).toHaveBeenCalledWith(expectedScrollOffset, { behavior: 'auto' }),
+		);
+	});
+
+	it('cancels a pending earlier prepend after a tail publication away from the edge', async () => {
+		const { exposure, viewport, scrollToIndex, scrollToOffset } =
+			await preparePendingEarlierPrepend((current, index) =>
+				current.stageEarlierPrependWithTail(index),
+			);
+		scrollToIndex.mockClear();
+		scrollToOffset.mockClear();
+		viewport.scrollTop = 80;
+		exposure.controller.cancelForUserIntent(null);
+		exposure.controller.cancelForUserIntent('earlier');
+		scrollToIndex.mockClear();
+		scrollToOffset.mockClear();
+		await exposure.releaseWithheldEndItem();
+		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
+
+		expect(scrollToIndex).not.toHaveBeenCalled();
+		expect(scrollToOffset).not.toHaveBeenCalled();
 	});
 
 	it('uses an index target when a retained virtual anchor has no committed wrapper', async () => {
@@ -607,7 +793,7 @@ describe('ConversationFeedVirtualController', () => {
 		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
 
 		exposure.controller.restoreInitialEnd();
-		exposure.controller.cancelForUserIntent();
+		exposure.controller.cancelForUserIntent(null);
 		await nextFrame();
 		await nextFrame();
 		await nextFrame();

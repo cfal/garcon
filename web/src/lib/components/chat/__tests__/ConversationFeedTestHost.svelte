@@ -20,6 +20,7 @@
 	} from '$lib/context';
 
 	interface Props {
+		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
 		reserveTopFloatingToolbar?: boolean;
 		isPreparingInitialScroll?: boolean;
 		showAnnouncementTrigger?: boolean;
@@ -35,6 +36,7 @@
 	}
 
 	const {
+		onUserScrollIntent,
 		reserveTopFloatingToolbar = false,
 		isPreparingInitialScroll = false,
 		showAnnouncementTrigger = false,
@@ -72,8 +74,8 @@
 			initialTranscriptScenario === 'twenty-thousand'
 				? 20_000
 				: initialTranscriptScenario === 'loading-later'
-						? 5
-						: 120;
+					? 5
+					: 120;
 		const messages = Array.from({ length: messageCount }, (_, index) => ({
 			seq: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
@@ -127,6 +129,13 @@
 	function showInterleavedEarlierError(): void {
 		chatState.pageStates.earlier = { status: 'error', error: 'Interleaved failure' };
 	}
+
+	function retryEarlierPage(): void {
+		chatState.pageStates.earlier = {
+			status: 'loading',
+			error: chatState.pageStates.earlier.error,
+		};
+	}
 	setActiveTranscriptState(chatState);
 	setAgentState(new AgentState());
 	const localSettings = createLocalSettingsStore();
@@ -156,8 +165,10 @@
 </script>
 
 <ConversationFeed
+	{onUserScrollIntent}
 	{reserveTopFloatingToolbar}
 	{isPreparingInitialScroll}
+	onLoadEarlier={retryEarlierPage}
 	isVisible={true}
 	pinnedToBottom={true}
 	surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.generationId}`}

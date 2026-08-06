@@ -14,9 +14,13 @@
 		controller: ConversationFeedVirtualController;
 		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
 		initialEndRestoredCount(): number;
+		prepareHiddenOffsetWithMissingAnchor(): Promise<void>;
+		prepareHiddenOffsetWithoutAnchor(): Promise<void>;
 		releaseWithheldEndItem(): Promise<void>;
 		restoreHiddenWithConcurrentGeometry(): Promise<void>;
 		prependWithRetainedWithheldAnchor(index: number): Promise<void>;
+		stageEarlierPrependWithTail(index: number): Promise<void>;
+		stageLatchedEarlierPrependWithTail(index: number): Promise<void>;
 		withholdEndItem(): Promise<void>;
 		withholdItem(index: number): Promise<void>;
 	}
@@ -28,6 +32,7 @@
 	let { onReady }: Props = $props();
 	let itemCount = $state(12);
 	let firstItemNumber = $state(0);
+	let historyEarlierMutation = $state(false);
 	let contentRevision = $state(0);
 	let geometryRevision = $state(1);
 	let measurementReset = $state<ConversationVirtualGeometrySnapshot['measurementReset']>('none');
@@ -40,6 +45,7 @@
 	let releaseRetention: (() => void) | null = null;
 	let initialEndRestoredCount = 0;
 	let withheldKey: string | null = $state(null);
+	let transcriptEligible = $state(true);
 
 	const keys = $derived(
 		Array.from({ length: itemCount }, (_, index) =>
@@ -49,27 +55,31 @@
 	const model = $derived.by((): ConversationVirtualFeedModel => {
 		void contentRevision;
 		// Transcript-kind items keep reading-anchor capture eligible, matching production feeds.
-		const items: ConversationVirtualFeedItem[] = keys.map((key, index) => ({
-			kind: 'transcript',
-			key,
-			item: {
-				kind: 'message',
-				id: `row-${index}`,
-				rowIds: [`row-${index}`],
-				virtualKey: `row-${index}`,
-				message: new UserMessage('2026-08-03T00:00:00.000Z', `prompt ${index}`),
-				index,
-				prevMessage: null,
-			},
-			spacingAfter: 'none',
-		}));
+		const items: ConversationVirtualFeedItem[] = keys.map((key, index) =>
+			transcriptEligible
+				? {
+						kind: 'transcript',
+						key,
+						item: {
+							kind: 'message',
+							id: `row-${index}`,
+							rowIds: [`row-${index}`],
+							virtualKey: `row-${index}`,
+							message: new UserMessage('2026-08-03T00:00:00.000Z', `prompt ${index}`),
+							index,
+							prevMessage: null,
+						},
+						spacingAfter: 'none',
+					}
+				: { kind: 'viewport-start-spacer', key, spacingAfter: 'none' },
+		);
 		return {
 			items,
 			indexByKey: new Map(keys.map((key, index) => [key, index])),
 			indexByRowId: new Map(),
 			targetByDomAnchorId: new Map(),
 			transcriptStartIndex: 0,
-			transcriptEndIndex: items.length,
+			transcriptEndIndex: transcriptEligible ? items.length : 0,
 		};
 	});
 	const geometry = $derived.by((): ConversationVirtualGeometrySnapshot => ({
@@ -78,7 +88,7 @@
 		keys,
 		estimates: keys.map(() => 40 * textScale),
 		measurementReset,
-		mutationKinds: new Set(),
+		mutationKinds: new Set(historyEarlierMutation ? ['history-earlier' as const] : []),
 		endBehavior: 'restore-if-pinned',
 	}));
 	const retention = new ConversationFeedRetentionState();
@@ -124,9 +134,13 @@
 			controller,
 			instance,
 			initialEndRestoredCount: () => initialEndRestoredCount,
+			prepareHiddenOffsetWithMissingAnchor,
+			prepareHiddenOffsetWithoutAnchor,
 			releaseWithheldEndItem,
 			restoreHiddenWithConcurrentGeometry,
 			prependWithRetainedWithheldAnchor,
+			stageEarlierPrependWithTail,
+			stageLatchedEarlierPrependWithTail,
 			withholdEndItem,
 			withholdItem,
 		});
@@ -160,15 +174,33 @@
 		releaseRetention = retention.acquire(key, 'focus');
 		withheldKey = key;
 		await tick();
+		historyEarlierMutation = true;
 		firstItemNumber -= 4;
 		itemCount += 4;
 		measurementReset = 'none';
 		geometryRevision += 1;
 		await tick();
+		await tick();
+	}
+
+	async function stageEarlierPrependWithTail(index: number): Promise<void> {
+		await prependWithRetainedWithheldAnchor(index);
+		appendItem();
+		await tick();
+	}
+
+	async function stageLatchedEarlierPrependWithTail(index: number): Promise<void> {
+		await prependWithRetainedWithheldAnchor(index);
+		if (viewport) viewport.scrollTop = 0;
+		controller.cancelForUserIntent(null);
+		controller.cancelForUserIntent('earlier');
+		appendItem();
+		await tick();
 	}
 
 	function appendItem(): void {
 		controller.prepareForGeometryPublication(geometryRevision + 1);
+		historyEarlierMutation = false;
 		itemCount += 1;
 		measurementReset = 'none';
 		geometryRevision += 1;
@@ -176,6 +208,7 @@
 
 	function prependItems(): void {
 		controller.prepareForGeometryPublication(geometryRevision + 1);
+		historyEarlierMutation = true;
 		firstItemNumber -= 4;
 		itemCount += 4;
 		measurementReset = 'none';
@@ -217,6 +250,30 @@
 		await restore;
 	}
 
+	async function prepareHiddenOffsetWithoutAnchor(): Promise<void> {
+		controller.prepareForGeometryPublication(geometryRevision + 1);
+		transcriptEligible = false;
+		geometryRevision += 1;
+		await tick();
+		if (viewport) viewport.scrollTop = 86;
+		visible = false;
+		await tick();
+		visible = true;
+		await tick();
+	}
+
+	async function prepareHiddenOffsetWithMissingAnchor(): Promise<void> {
+		if (viewport) viewport.scrollTop = 86;
+		visible = false;
+		await tick();
+		controller.prepareForGeometryPublication(geometryRevision + 1);
+		firstItemNumber += 100;
+		geometryRevision += 1;
+		await tick();
+		visible = true;
+		await tick();
+	}
+
 	async function withholdEndItem(): Promise<void> {
 		await withholdItem($virtualizer.getVirtualItems().at(-1)?.index ?? -1);
 	}
@@ -249,6 +306,7 @@
 	>
 		{#each $virtualizer.getVirtualItems() as virtualItem (virtualItem.key)}
 			{#if String(virtualItem.key) !== withheldKey}
+				<!-- Real browser geometry covers positionReadingAnchor; zero-valued test rects would invent corrections. -->
 				<div
 					data-index={virtualItem.index}
 					data-chat-virtual-item={String(virtualItem.key)}

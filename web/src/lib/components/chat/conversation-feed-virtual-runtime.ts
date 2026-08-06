@@ -29,6 +29,54 @@ export interface ConversationVirtualAnchor {
 	fallbackKeys: readonly string[];
 }
 
+// Keeps prepend provenance with the keyed restore instead of the latest geometry snapshot. The clamped
+// latch lasts only for the bounded eight-iteration anchor restore, so coasting survives its offset writes.
+// Source-aware intent can later let a discrete track jump override the latch without weakening coasting.
+export class ConversationEarlierPrependAnchorOwnership {
+	#anchor: ConversationVirtualAnchor | null = null;
+	#clamped = false;
+
+	clear(): void {
+		this.#anchor = null;
+		this.#clamped = false;
+	}
+
+	carry(anchor: ConversationVirtualAnchor | null, isEarlierPublication: boolean): void {
+		if (!anchor) {
+			this.clear();
+			return;
+		}
+		if (isEarlierPublication) {
+			if (this.#anchor !== anchor) {
+				this.#clamped = false;
+			}
+			this.#anchor = anchor;
+		} else if (this.#anchor !== anchor) {
+			this.clear();
+		}
+	}
+
+	preserves(
+		direction: 'earlier' | 'later' | null,
+		anchor: ConversationVirtualAnchor | null,
+		scrollTop: number,
+	): boolean {
+		if (!anchor || this.#anchor !== anchor) return false;
+		// A directionless press is stateless; its movement is classified before scrolling.
+		if (direction === null) return true;
+		if (direction !== 'earlier') return false;
+		if (!this.#clamped && scrollTop > CHAT_GEOMETRY_END_THRESHOLD_PX) {
+			return false;
+		}
+		this.#clamped = true;
+		return true;
+	}
+
+	complete(anchor: ConversationVirtualAnchor): void {
+		if (this.#anchor === anchor) this.clear();
+	}
+}
+
 // TanStack includes scrollMargin in item.start while the rendered row transform removes it.
 export function conversationAnchorViewportOffset(
 	itemStart: number,
@@ -44,6 +92,48 @@ export function conversationAnchorScrollOffset(
 	viewportOffset: number,
 ): number {
 	return itemStart - scrollMargin - viewportOffset;
+}
+
+export function positionCommittedConversationAnchor(input: {
+	element: HTMLElement;
+	viewport: HTMLElement;
+	viewportOffset: number;
+	scrollToOffset(offset: number): void;
+}): void {
+	const elementOffset =
+		input.element.getBoundingClientRect().top - input.viewport.getBoundingClientRect().top;
+	const correction = elementOffset - input.viewportOffset;
+	if (Math.abs(correction) <= GEOMETRY_TOLERANCE_PX) return;
+	input.scrollToOffset(Math.max(0, input.viewport.scrollTop + correction));
+}
+
+export function positionPendingConversationAnchor(input: {
+	anchor: ConversationVirtualAnchor | null;
+	element: HTMLElement;
+	virtualItem: { key: unknown; index: number };
+	indexByKey: ReadonlyMap<string, number>;
+	viewport: HTMLElement | null;
+	scrollToOffset(offset: number): void;
+}): void {
+	if (!input.anchor || !input.viewport) return;
+	const key = [input.anchor.key, ...input.anchor.fallbackKeys].find((candidate) =>
+		input.indexByKey.has(candidate),
+	);
+	if (
+		!input.element.isConnected ||
+		key !== String(input.virtualItem.key) ||
+		input.indexByKey.get(key) !== input.virtualItem.index ||
+		input.element.dataset.chatVirtualItem !== key ||
+		Number(input.element.dataset.index) !== input.virtualItem.index
+	) {
+		return;
+	}
+	positionCommittedConversationAnchor({
+		element: input.element,
+		viewport: input.viewport,
+		viewportOffset: key === input.anchor.key ? input.anchor.viewportOffset : 0,
+		scrollToOffset: input.scrollToOffset,
+	});
 }
 
 export class ConversationPreCommitAnchorBuffer {
@@ -379,6 +469,29 @@ export async function settleConversationScroll(input: {
 			return;
 		}
 		previousOffset = offset;
+	}
+}
+
+export async function performConversationOwnedScroll(input: {
+	begin(): number;
+	finish(epoch: number): void;
+	isCurrent(epoch: number): boolean;
+	isValid(): boolean;
+	readOffset(): number | null;
+	write(): void;
+}): Promise<boolean> {
+	if (!input.isValid()) return false;
+	const epoch = input.begin();
+	try {
+		if (!input.isValid() || !input.isCurrent(epoch)) return false;
+		input.write();
+		await settleConversationScroll({
+			isCurrent: () => input.isValid() && input.isCurrent(epoch),
+			readOffset: input.readOffset,
+		});
+		return true;
+	} finally {
+		input.finish(epoch);
 	}
 }
 

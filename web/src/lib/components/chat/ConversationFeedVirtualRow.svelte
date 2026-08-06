@@ -100,6 +100,7 @@
 	onfocusin={handleFocusIn}
 	onfocusout={handleFocusOut}
 	{@attach controller.measureItem}
+	{@attach controller.positionReadingAnchor(virtualItem)}
 >
 	<svelte:boundary>
 		<ConversationFeedVirtualItem

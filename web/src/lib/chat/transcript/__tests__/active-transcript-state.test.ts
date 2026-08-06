@@ -287,6 +287,43 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
 
+	it('retains an earlier failure while its explicit retry is loading', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
+			lastSeq: 100,
+			pageOldestSeq: 51,
+			hasMore: true,
+		});
+		vi.mocked(getChatMessages).mockRejectedValueOnce(new Error('network unavailable'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
+		let resolveRetry!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveRetry = resolve;
+			}),
+		);
+		const retry = chat.loadEarlierPage('chat-1');
+
+		expect(chat.pageStates.earlier).toEqual({
+			status: 'loading',
+			error: 'network unavailable',
+		});
+		resolveRetry({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: [entry(50, assistant('message-50'))],
+				lastSeq: 100,
+				pageOldestSeq: 50,
+				hasMore: false,
+			}),
+		});
+		await expect(retry).resolves.toBe('loaded');
+		expect(chat.pageStates.earlier).toEqual({ status: 'idle', error: null });
+	});
+
 	it('invalidates an earlier page when gap recovery replaces the loaded window', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration(

@@ -112,6 +112,27 @@ async function pageRequestCount(page: Page): Promise<number> {
   );
 }
 
+async function requestEarlierPageByScroll(page: Page): Promise<void> {
+  await page.$eval(FEED_SELECTOR, (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+    const target = Math.min(maximum, feed.clientHeight * 1.5);
+    if (target <= 0) throw new Error("Transcript cannot enter the earlier load-ahead zone");
+    feed.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "PageUp" }));
+    feed.scrollTop = target;
+    feed.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await page.waitForFunction(
+    () =>
+      (
+        globalThis as typeof globalThis & {
+          __transcriptPageRequestGate?: { requestCount: number };
+        }
+      ).__transcriptPageRequestGate?.requestCount === 1,
+    { timeout: 20_000 },
+  );
+}
+
 async function waitForTranscriptIdle(page: Page): Promise<void> {
   await page.waitForFunction(
     ({ selector }) =>
@@ -142,17 +163,6 @@ async function virtualTranscriptSnapshot(page: Page): Promise<VirtualTranscriptS
   }), { sizer: SIZER_SELECTOR, item: ITEM_SELECTOR });
 }
 
-async function earlierBoundaryPrecedesTranscript(page: Page): Promise<boolean> {
-  return page.$eval(FEED_SELECTOR, (feed) => {
-    const boundary = feed.querySelector('[data-transcript-page-boundary="earlier"]');
-    const transcript = feed.querySelector("[data-chat-row-id]");
-    if (!boundary || !transcript) throw new Error("Earlier transcript boundary is not mounted");
-    return Boolean(
-      boundary.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-  });
-}
-
 describe("Lightpanda transcript scrolling", () => {
   test("pages earlier history while keeping the virtual DOM bounded", async () => {
     await withE2eFixture("transcript-scrolling", async (fixture) => {
@@ -178,12 +188,18 @@ describe("Lightpanda transcript scrolling", () => {
       expect(initial.mountedCount).toBeLessThan(initial.modelCount);
       expect(initial.mountedCount).toBeLessThan(60);
       expect(await app.hasButton("Load more")).toBe(false);
+      expect(await app.hasButton("Load earlier messages")).toBe(false);
 
       await setPageRequestGate(fixture.page, true);
-      await app.clickButton("Load earlier messages");
-      await app.waitForText("Loading earlier messages...");
+      await requestEarlierPageByScroll(fixture.page);
+      await fixture.page.waitForFunction(
+        ({ selector }) =>
+          document.querySelector<HTMLElement>(selector)?.getAttribute("aria-busy") === "true",
+        { timeout: 20_000 },
+        { selector: FEED_SELECTOR },
+      );
       expect((await virtualTranscriptSnapshot(fixture.page)).busy).toBe(true);
-      expect(await earlierBoundaryPrecedesTranscript(fixture.page)).toBe(true);
+      expect(await app.hasButton("Load earlier messages")).toBe(false);
       await releasePageRequest(fixture.page);
       await waitForModelCount(fixture.page, initial.modelCount + 50);
 

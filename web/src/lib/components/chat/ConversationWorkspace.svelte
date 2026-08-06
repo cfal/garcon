@@ -33,6 +33,7 @@
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 	import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+	import { observeConversationViewportScrollGestures } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import {
 		UserMessageNavigatorController,
@@ -440,46 +441,13 @@
 		scroll.setViewportVisible(isVisible);
 	});
 
-	// Marks real scroll gestures on the actual viewport element. This avoids
-	// depending on wrapper component event forwarding for wheel, touch, and scrollbar input.
+	// Marks real scroll gestures on the actual viewport element without wrapper event forwarding.
 	$effect(() => {
 		const node = scrollContainer;
 		if (!node) return;
-
-		const handleWheel = (event: WheelEvent) => {
-			if (event.deltaY === 0) return;
-			scroll.noteUserScrollIntent(event.deltaY < 0 ? 'earlier' : 'later');
-		};
-		const handleTouchStart = () => scroll.noteUserScrollIntent();
-		const handlePointerDown = (event: PointerEvent) => {
-			if (event.button !== 0 || event.pointerType === 'touch') return;
-			scroll.noteUserScrollIntent();
-		};
-		const handleKeydown = (event: KeyboardEvent) => {
-			if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
-				scroll.noteUserScrollIntent('earlier');
-				return;
-			}
-			if (event.key === ' ') {
-				scroll.noteUserScrollIntent(event.shiftKey ? 'earlier' : 'later');
-				return;
-			}
-			if (event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === 'End') {
-				scroll.noteUserScrollIntent('later');
-			}
-		};
-
-		node.addEventListener('wheel', handleWheel, { capture: true, passive: true });
-		node.addEventListener('touchstart', handleTouchStart, { capture: true, passive: true });
-		node.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
-		node.addEventListener('keydown', handleKeydown, { capture: true });
-
-		return () => {
-			node.removeEventListener('wheel', handleWheel, { capture: true });
-			node.removeEventListener('touchstart', handleTouchStart, { capture: true });
-			node.removeEventListener('pointerdown', handlePointerDown, { capture: true });
-			node.removeEventListener('keydown', handleKeydown, { capture: true });
-		};
+		return observeConversationViewportScrollGestures(node, (direction) =>
+			scroll.noteUserScrollIntent(direction),
+		);
 	});
 
 	// Scrolls to bottom when the scroll container becomes available.
@@ -629,7 +597,7 @@
 			<ConversationFeed
 				bind:scrollContainer
 				onscroll={() => scroll.handleScroll()}
-				onUserScrollIntent={() => scroll.noteUserScrollIntent()}
+				onUserScrollIntent={(direction) => scroll.noteUserScrollIntent(direction)}
 				onLoadEarlier={() => void scroll.requestPage('earlier', 'button')}
 				onLoadLater={() => void scroll.requestPage('later', 'button')}
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}

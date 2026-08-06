@@ -10,6 +10,7 @@ export type ConversationViewportTargetResult =
 export interface ConversationViewportPort {
 	isReady(): boolean;
 	isAtEnd(threshold?: number): boolean;
+	ownsScrollPosition(): boolean;
 	scrollToStart(): void;
 	scrollToEnd(): void;
 	restoreInitialEnd(): void;
@@ -18,7 +19,7 @@ export interface ConversationViewportPort {
 	measureViewportFill(): Promise<ConversationViewportFillResult>;
 	restoreHiddenReadingPosition(): Promise<HiddenReadingRestoreResult>;
 	cancelPendingLayoutMutation(): void;
-	cancelForUserIntent(): void;
+	cancelForUserIntent(direction: 'earlier' | 'later' | null): void;
 	scrollToTarget(
 		target: ConversationViewportTarget,
 		options?: { align?: 'center' | 'start' | 'end' },

@@ -534,7 +534,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const generationId = this.generationId;
 		const operationEpoch = this.#pageLoadOperationEpoch;
 		const newestSeq = this.newestLoadedSeq;
-		this.pageStates[direction] = { status: 'loading', error: null };
+		const retryError =
+			this.pageStates[direction].status === 'error' ? this.pageStates[direction].error : null;
+		this.pageStates[direction] = { status: 'loading', error: retryError };
 		const loadPromise = this.#performPageLoad(
 			direction,
 			chatId,

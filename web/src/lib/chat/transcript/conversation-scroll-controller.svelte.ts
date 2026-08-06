@@ -137,7 +137,7 @@ export class ConversationScrollController {
 	}
 
 	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
-		this.deps.getViewport()?.cancelForUserIntent();
+		this.deps.getViewport()?.cancelForUserIntent(direction);
 		// Continued scrolling owns the page's viewport position without cancelling its
 		// data request. Explicit navigation still advances the shared operation epoch.
 		if (this.#isPageMutationInProgress) {
@@ -229,11 +229,12 @@ export class ConversationScrollController {
 		const node = this.deps.getScrollContainer();
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
 		const inferredDirection = this.#inferScrollDirection(node.scrollTop);
-		this.#applyInferredIntentDirection(inferredDirection);
 		if (this.#isPageMutationInProgress) {
 			this.#preserveHistoryBrowsing();
 			return;
 		}
+		if (this.deps.getViewport()?.ownsScrollPosition()) return;
+		this.#applyInferredIntentDirection(inferredDirection);
 		const nearBottom = this.isNearBottom();
 		const hasRecentUserScrollIntent = this.#hasRecentUserScrollIntent();
 		if (this.deps.chatState.hasLaterMessages) {
@@ -330,8 +331,12 @@ export class ConversationScrollController {
 			direction === 'earlier' &&
 			requestBoundarySignature !== null &&
 			this.#earlierBoundarySignature() !== requestBoundarySignature;
+		const shouldContinueEarlierPrefetch =
+			direction === 'earlier' &&
+			earlierBoundaryAdvanced &&
+			this.#userScrollIntent.direction === 'earlier';
 		if (
-			continuedPageIntent &&
+			(continuedPageIntent || shouldContinueEarlierPrefetch) &&
 			this.#isNearPageBoundary(direction) &&
 			(result === 'loaded' || earlierBoundaryAdvanced)
 		) {
@@ -533,6 +538,7 @@ export class ConversationScrollController {
 		if (isVisible === this.#isViewportVisible) return;
 		this.#isViewportVisible = isVisible;
 		this.#cancelViewportOperations();
+		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? null;
 		if (!isVisible) return;
 		void this.#restoreVisibleViewport();
 	}
@@ -599,14 +605,14 @@ export class ConversationScrollController {
 	}
 
 	#applyInferredIntentDirection(direction: TranscriptPageDirection | null): void {
-		if (
-			!direction ||
-			this.#userScrollIntent.direction !== null ||
-			!this.#hasRecentUserScrollIntent()
-		) {
-			return;
+		if (!direction || !this.#hasRecentUserScrollIntent()) return;
+		if (this.#userScrollIntent.direction === null) {
+			this.deps.getViewport()?.cancelForUserIntent(direction);
+			this.#userScrollIntent = { ...this.#userScrollIntent, direction };
 		}
-		this.#userScrollIntent = { ...this.#userScrollIntent, direction };
+		if (this.#userScrollIntent.direction === direction) {
+			this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: performance.now() };
+		}
 	}
 
 	#handleBoundaryProximity(direction: TranscriptPageDirection, isNearBoundary: boolean): void {
@@ -621,14 +627,20 @@ export class ConversationScrollController {
 		} else if (!this.#laterBoundaryArmed) {
 			return;
 		}
-		// Accepts only fresh directional input for an unrequested cursor. Restores and
-		// ResizeObserver scroll events have no gesture epoch and cannot page history.
+		// Earlier browsing remains armed across a slow drag or momentum scroll and
+		// advances only with the cursor. Later paging still requires fresh input.
 		const intent = this.#userScrollIntent;
-		if (
-			intent.epoch <= this.#consumedIntentEpoch[direction] ||
-			intent.direction !== direction ||
-			!this.#hasRecentUserScrollIntent()
-		) {
+		const hasEligibleIntent =
+			direction === 'earlier'
+				? intent.direction === 'earlier' &&
+					((intent.epoch > this.#consumedIntentEpoch.earlier &&
+						this.#hasRecentUserScrollIntent()) ||
+						(this.#earlierBoundaryRequestSignature !== null &&
+							this.#earlierBoundaryRequestSignature !== this.#earlierBoundarySignature()))
+				: intent.epoch > this.#consumedIntentEpoch.later &&
+					intent.direction === 'later' &&
+					this.#hasRecentUserScrollIntent();
+		if (!hasEligibleIntent) {
 			return;
 		}
 		if (direction === 'later') this.#laterBoundaryArmed = false;
