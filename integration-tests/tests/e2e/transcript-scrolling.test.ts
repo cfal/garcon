@@ -115,9 +115,9 @@ async function pageRequestCount(page: Page): Promise<number> {
 async function requestEarlierPageByScroll(page: Page): Promise<void> {
   await page.$eval(FEED_SELECTOR, (feedElement) => {
     const feed = feedElement as HTMLElement;
-    const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
-    const target = Math.min(maximum, feed.clientHeight * 1.5);
-    if (target <= 0) throw new Error("Transcript cannot enter the earlier load-ahead zone");
+    // Reports keyboard intent before applying its scroll; Lightpanda clamps the
+    // desired offset to its reported top edge instead of exposing native extent.
+    const target = feed.clientHeight * 1.5;
     feed.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "PageUp" }));
     feed.scrollTop = target;
     feed.dispatchEvent(new Event("scroll", { bubbles: true }));
