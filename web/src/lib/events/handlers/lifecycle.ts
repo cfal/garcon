@@ -6,10 +6,8 @@ import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
-const AGENT_REPORTED_FAILURE_EXIT_CODE = 1;
-
-function agentReportedFailure(exitCode: number | undefined): boolean {
-	return exitCode === AGENT_REPORTED_FAILURE_EXIT_CODE;
+function agentRunSucceeded(exitCode: number | undefined): boolean {
+	return exitCode === 0;
 }
 
 export interface LifecycleContext {
@@ -27,6 +25,7 @@ export interface LifecycleContext {
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
 	markChatTranscriptValidated: (chatId: string) => void;
+	notifyCompletion: () => void;
 }
 
 export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: LifecycleContext) {
@@ -37,10 +36,10 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 
 	if (!successorIsProcessing) ctx.clearTurnStatus(completedChatId);
 
-	const runFailed = agentReportedFailure(msg.exitCode);
+	const runSucceeded = agentRunSucceeded(msg.exitCode);
 
 	// Navigate to completed chat if it was pending and didn't error.
-	if (pendingChatId && !currentChatId && !runFailed) {
+	if (pendingChatId && !currentChatId && runSucceeded) {
 		ctx.setCurrentChatId(completedChatId);
 		ctx.setIsSystemChatChange(true);
 		if (completedChatId) {
@@ -49,9 +48,11 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 		ctx.clearPendingChatId();
 	}
 
-	if (completedChatId && !runFailed) {
+	if (completedChatId && runSucceeded) {
 		ctx.markChatTranscriptValidated(completedChatId);
 	}
+
+	if (runSucceeded && !successorIsProcessing) ctx.notifyCompletion();
 
 	// Preserve plan-exit permission requests across turn boundaries
 	if (!successorIsProcessing) {

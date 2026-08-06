@@ -525,4 +525,42 @@ describe('LocalSettingsStore', () => {
 		expect(restored.snippetTrigger).toBe(';;');
 		restored.destroy();
 	});
+
+	it('defaults, persists, and restores completion sound preferences', () => {
+		const store = createLocalSettingsStore();
+		expect(store.completionSoundMode).toBe('off');
+		expect(store.completionSoundVolume).toBe(0.7);
+		expect(store.completionSoundVisibility).toBe('unfocused');
+
+		store.set('completionSoundMode', 'custom');
+		store.set('completionSoundVolume', 0.45);
+		store.set('completionSoundVisibility', 'always');
+		store.set('customCompletionSoundName', 'done.ogg');
+
+		const restored = createLocalSettingsStore();
+		expect(restored.completionSoundMode).toBe('custom');
+		expect(restored.completionSoundVolume).toBe(0.45);
+		expect(restored.completionSoundVisibility).toBe('always');
+		expect(restored.customCompletionSoundName).toBe('done.ogg');
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('sanitizes malformed completion sound preferences', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				completionSoundMode: 'loud',
+				completionSoundVolume: 3,
+				completionSoundVisibility: 'sometimes',
+				customCompletionSoundName: 42,
+			}),
+		);
+		const store = createLocalSettingsStore();
+		expect(store.completionSoundMode).toBe('off');
+		expect(store.completionSoundVolume).toBe(1);
+		expect(store.completionSoundVisibility).toBe('unfocused');
+		expect(store.customCompletionSoundName).toBeNull();
+		store.destroy();
+	});
 });

@@ -22,6 +22,7 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		getPendingChatId: () => null,
 		clearPendingChatId: vi.fn(),
 		markChatTranscriptValidated: vi.fn(),
+		notifyCompletion: vi.fn(),
 		...overrides,
 	};
 }
@@ -33,11 +34,21 @@ describe('handleAgentComplete', () => {
 		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('does not mark validated when exitCode is 1', () => {
+	it('notifies on successful completion', () => {
 		const ctx = createCtx();
-		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 1), ctx);
-		expect(ctx.markChatTranscriptValidated).not.toHaveBeenCalled();
+		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
+		expect(ctx.notifyCompletion).toHaveBeenCalledOnce();
 	});
+
+	it.each([1, 2, 127, undefined])(
+		'does not notify or mark validated when exitCode is %s',
+		(exitCode) => {
+			const ctx = createCtx();
+			handleAgentComplete(new AgentRunFinishedMessage('chat-1', exitCode), ctx);
+			expect(ctx.markChatTranscriptValidated).not.toHaveBeenCalled();
+			expect(ctx.notifyCompletion).not.toHaveBeenCalled();
+		},
+	);
 
 	it('clears selected-turn metadata', () => {
 		const ctx = createCtx();
@@ -52,6 +63,7 @@ describe('handleAgentComplete', () => {
 
 		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
 		expect(ctx.conversationUi.clearTurnPermissionRequests).not.toHaveBeenCalled();
+		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 	});
 
 	it('navigates to pending chat on success', () => {
