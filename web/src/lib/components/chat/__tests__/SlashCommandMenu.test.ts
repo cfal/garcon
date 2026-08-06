@@ -184,7 +184,7 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('/goal')).toBeNull();
 	});
 
-	it('lists the steer command from capability data', () => {
+	it('lists the steer commands from capability data', () => {
 		const { unmount } = render(SlashCommandMenuTestHost, {
 			...baseProps,
 			supportsSteering: true,
@@ -198,14 +198,27 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Send guidance to the active turn')).toBeTruthy();
 		unmount();
 
+		const alias = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			supportsSteering: true,
+			isVisible: true,
+			query: 'st',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		expect(screen.getByText('/st')).toBeTruthy();
+		expect(screen.getByText('Short alias for /steer')).toBeTruthy();
+		alias.unmount();
+
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
-			query: 'steer',
+			query: 'st',
 			onSelect: vi.fn(),
 			onClose: vi.fn(),
 		});
 		expect(screen.queryByText('/steer')).toBeNull();
+		expect(screen.queryByText('/st')).toBeNull();
 	});
 
 	it('hides the fork command when not supported', () => {

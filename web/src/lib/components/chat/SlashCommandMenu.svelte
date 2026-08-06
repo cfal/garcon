@@ -97,7 +97,7 @@
 		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
 			if (command.name === 'fork') return supportsFork;
 			if (command.name === 'in') return canScheduleIn;
-			if (command.name === 'steer') return supportsSteering;
+			if (command.name === 'steer' || command.name === 'st') return supportsSteering;
 			if (command.name === 'goal') return supportsGoals;
 			return true;
 		});
