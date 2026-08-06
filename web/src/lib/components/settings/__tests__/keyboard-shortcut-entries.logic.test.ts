@@ -50,6 +50,15 @@ describe('keyboard shortcut entries', () => {
 		);
 	});
 
+	it('documents both steer command spellings', () => {
+		expect(SLASH_COMMANDS).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ command: '/steer <prompt>' }),
+				expect.objectContaining({ command: '/st <prompt>' }),
+			]),
+		);
+	});
+
 	it('documents both snippet command spellings', () => {
 		expect(SLASH_COMMANDS).toEqual(
 			expect.arrayContaining([

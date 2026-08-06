@@ -64,6 +64,7 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		const goal = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'goal');
 		const scheduleIn = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'in');
 		const steer = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'steer');
+		const steerShort = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'st');
 		const rename = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'rename');
 		const move = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'move');
 		const tag = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'tag');
@@ -80,6 +81,8 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(scheduleIn?.description).toBeTruthy();
 		expect(steer?.source).toBe('command');
 		expect(steer?.description).toBeTruthy();
+		expect(steerShort?.source).toBe('command');
+		expect(steerShort?.description).toBeTruthy();
 		expect(rename?.source).toBe('command');
 		expect(rename?.description).toBeTruthy();
 		expect(move).toHaveLength(1);
@@ -224,11 +227,17 @@ describe('parseSteerCommand', () => {
 			kind: 'valid',
 			prompt: 'Check the test\nthen continue',
 		});
+		expect(parseSteerCommand('/ST Check the test\nthen continue')).toEqual({
+			kind: 'valid',
+			prompt: 'Check the test\nthen continue',
+		});
 	});
 
 	it('requires guidance and ignores similar commands', () => {
 		expect(parseSteerCommand('/steer')).toEqual({ kind: 'invalid' });
+		expect(parseSteerCommand('/st')).toEqual({ kind: 'invalid' });
 		expect(parseSteerCommand('/steering continue')).toEqual({ kind: 'not-command' });
+		expect(parseSteerCommand('/status continue')).toEqual({ kind: 'not-command' });
 	});
 });
 

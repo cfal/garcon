@@ -264,6 +264,8 @@ describe('Settings', () => {
 			expect(screen.getByText('/rename <title>')).toBeTruthy();
 			expect(screen.getByText('/move <top|bottom>')).toBeTruthy();
 			expect(screen.getByText('/tag <add|rm> <tag> [tag...]')).toBeTruthy();
+			expect(screen.getByText('/steer <prompt>')).toBeTruthy();
+			expect(screen.getByText('/st <prompt>')).toBeTruthy();
 			expect(screen.getByText('/snippet <short-name> [arguments]')).toBeTruthy();
 			expect(screen.getByText('/s <short-name> [arguments]')).toBeTruthy();
 		} finally {

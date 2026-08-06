@@ -54,6 +54,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		description: 'Send guidance to the active turn',
 	},
 	{
+		name: 'st',
+		source: 'command',
+		description: 'Short alias for /steer',
+	},
+	{
 		name: 's',
 		source: 'command',
 		description: 'Short alias for /snippet',
@@ -119,7 +124,7 @@ export type SteerCommandParseResult =
 	| { kind: 'invalid' }
 	| { kind: 'valid'; prompt: string };
 
-const STEER_COMMAND_RE = /^\s*\/steer(?=\s|$)(?:\s+([\s\S]*))?$/i;
+const STEER_COMMAND_RE = /^\s*\/(?:steer|st)(?=\s|$)(?:\s+([\s\S]*))?$/i;
 
 export function parseSteerCommand(input: string): SteerCommandParseResult {
 	const match = STEER_COMMAND_RE.exec(input);

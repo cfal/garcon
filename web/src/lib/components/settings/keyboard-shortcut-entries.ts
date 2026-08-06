@@ -40,6 +40,8 @@ export const SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 	{ command: '/rename <title>', description: m.settings_slash_command_rename },
 	{ command: '/move <top|bottom>', description: m.settings_slash_command_move },
 	{ command: '/tag <add|rm> <tag> [tag...]', description: m.settings_slash_command_tag },
+	{ command: '/steer <prompt>', description: m.settings_slash_command_steer },
+	{ command: '/st <prompt>', description: m.settings_slash_command_steer_short },
 	{
 		command: '/snippet <short-name> [arguments]',
 		description: m.settings_slash_command_snippet,
