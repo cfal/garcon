@@ -6,6 +6,7 @@ import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-cont
 import { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
 import { GitHistorySurfaceController } from '$lib/git/history/git-history-surface.svelte.js';
 import { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface.svelte.js';
+import type { GitComparisonSessionStore } from '$lib/git/review/git-comparison-session-store.js';
 import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
@@ -13,6 +14,7 @@ import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.sve
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
 	createPullRequests(): PullRequestsStore;
+	comparisonSessions: GitComparisonSessionStore;
 }
 
 export class FilesSurfaceController implements PortableSingletonController {
@@ -147,6 +149,7 @@ export class SingletonSurfaceRegistry {
 			controller.dispose();
 		}
 		this.#controllers.clear();
+		this.deps.comparisonSessions.clear();
 	}
 
 	#controller<K extends PortableSingletonKind>(kind: K): SingletonControllerByKind[K] {

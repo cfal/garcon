@@ -20,6 +20,19 @@ export interface GitComparisonDialogDefaults {
 	mode?: GitComparisonMode;
 }
 
+export type GitComparisonSpecification =
+	| {
+			fromRevision: string;
+			toKind: 'working-tree';
+			mode: 'direct';
+	  }
+	| {
+			fromRevision: string;
+			toKind: 'revision';
+			toRevision: string;
+			mode: GitComparisonMode;
+	  };
+
 export interface GitComparisonDisplayOptions {
 	diffMode: DiffMode;
 	contextLines: number;
@@ -42,6 +55,24 @@ export class GitComparisonController {
 
 	get documentError(): string | null {
 		return this.bodyError ?? (this.dialogOpen ? null : this.error);
+	}
+
+	get confirmedSpecification(): GitComparisonSpecification | null {
+		const snapshot = this.snapshot;
+		if (!snapshot) return null;
+		if (snapshot.to.kind === 'working-tree') {
+			return {
+				fromRevision: snapshot.from.requestedRevision,
+				toKind: 'working-tree',
+				mode: 'direct',
+			};
+		}
+		return {
+			fromRevision: snapshot.from.requestedRevision,
+			toKind: 'revision',
+			toRevision: snapshot.to.requestedRevision,
+			mode: snapshot.mode,
+		};
 	}
 
 	private snapshotAbort: AbortController | null = null;
@@ -350,11 +381,13 @@ export class GitComparisonController {
 	}
 
 	private restoreInputsFromSnapshot(): void {
-		const snapshot = this.snapshot;
-		if (!snapshot) return;
-		this.fromRevision = snapshot.from.requestedRevision;
-		this.toKind = snapshot.to.kind === 'working-tree' ? 'working-tree' : 'revision';
-		if (snapshot.to.kind === 'revision') this.toRevision = snapshot.to.requestedRevision;
-		this.mode = snapshot.mode;
+		const specification = this.confirmedSpecification;
+		if (!specification) return;
+		this.fromRevision = specification.fromRevision;
+		this.toKind = specification.toKind;
+		this.mode = specification.mode;
+		if (specification.toKind === 'revision') {
+			this.toRevision = specification.toRevision;
+		}
 	}
 }

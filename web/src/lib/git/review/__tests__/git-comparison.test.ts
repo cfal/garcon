@@ -134,6 +134,74 @@ describe('GitComparisonController', () => {
 		expect([comparison.fromRevision, comparison.toRevision]).toEqual(['feature', 'main']);
 	});
 
+	it('exposes requested revision names rather than resolved hashes', async () => {
+		const original = revisionSnapshotWithFile();
+		if (original.to.kind !== 'revision') throw new Error('Expected a revision snapshot.');
+		const snapshot = {
+			...original,
+			mode: 'merge-base' as const,
+			from: { ...original.from, requestedRevision: 'origin/main' },
+			to: { ...original.to, requestedRevision: 'HEAD' },
+		};
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
+		const comparison = new GitComparisonController();
+		comparison.setSpecification({
+			fromRevision: 'origin/main',
+			toKind: 'revision',
+			toRevision: 'HEAD',
+			mode: 'merge-base',
+		});
+
+		expect(await comparison.compare('/project')).toBe(true);
+		expect(comparison.confirmedSpecification).toEqual({
+			fromRevision: 'origin/main',
+			toKind: 'revision',
+			toRevision: 'HEAD',
+			mode: 'merge-base',
+		});
+		expect(comparison.confirmedSpecification?.fromRevision).not.toBe(snapshot.from.hash);
+	});
+
+	it('normalizes confirmed Working Tree comparisons and clears them on reset', async () => {
+		const snapshot = {
+			...workingTreeSnapshot(),
+			from: { ...workingTreeSnapshot().from, requestedRevision: 'origin/main' },
+		};
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
+		const comparison = new GitComparisonController();
+		comparison.setSpecification({ fromRevision: 'origin/main', toKind: 'working-tree' });
+
+		expect(await comparison.compare('/project')).toBe(true);
+		expect(comparison.confirmedSpecification).toEqual({
+			fromRevision: 'origin/main',
+			toKind: 'working-tree',
+			mode: 'direct',
+		});
+
+		comparison.reset();
+		expect(comparison.confirmedSpecification).toBeNull();
+	});
+
+	it('keeps the prior confirmed specification after a failed request', async () => {
+		vi.mocked(getGitComparisonSnapshot)
+			.mockResolvedValueOnce(workingTreeSnapshot())
+			.mockResolvedValueOnce({
+				status: 'not-found',
+				project: '/project',
+				endpoint: 'from',
+				revision: 'missing',
+				message: 'Missing revision.',
+			});
+		const comparison = new GitComparisonController();
+		comparison.setSpecification({ fromRevision: 'main', toKind: 'working-tree' });
+		expect(await comparison.compare('/project')).toBe(true);
+		const confirmed = comparison.confirmedSpecification;
+
+		comparison.setSpecification({ fromRevision: 'missing', toKind: 'working-tree' });
+		expect(await comparison.compare('/project')).toBe(false);
+		expect(comparison.confirmedSpecification).toEqual(confirmed);
+	});
+
 	it('loads a frozen Working Tree comparison and detects later changes', async () => {
 		const snapshot = { ...workingTreeSnapshot(), repoRoot: '/repo' };
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);

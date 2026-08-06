@@ -2,9 +2,14 @@ import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-sta
 import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import { GitProjectInvalidationStore } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
+import { GitComparisonSessionStore } from '$lib/git/review/git-comparison-session-store.js';
 import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-controller-deps.js';
 
-export function createGitSurfaceTestDeps(): GitSurfaceControllerDeps {
+export interface GitSurfaceTestDeps extends GitSurfaceControllerDeps {
+	comparisonSessions: GitComparisonSessionStore;
+}
+
+export function createGitSurfaceTestDeps(): GitSurfaceTestDeps {
 	const invalidations = new GitProjectInvalidationStore();
 	return {
 		createGitBranchSelector: () => new GitBranchSelectorState(),
@@ -13,5 +18,6 @@ export function createGitSurfaceTestDeps(): GitSurfaceControllerDeps {
 		}),
 		invalidationVersion: (effectiveProjectKey) => invalidations.version(effectiveProjectKey),
 		reviewDisplay: new GitReviewDisplaySettingsStore(),
+		comparisonSessions: new GitComparisonSessionStore(),
 	};
 }

@@ -120,10 +120,8 @@
 			onSearchRefs={(query) => {
 				if (projectPath) return controller.target.branches.fetchRefs(projectPath, query);
 			}}
-			onCompare={() => {
-				if (projectPath) void comparison.compare(projectPath);
-			}}
-			onClose={() => comparison.closeDialog()}
+			onCompare={() => void controller.compareCurrentSpecification()}
+			onClose={() => controller.closeComparisonDialog()}
 		/>
 	{/if}
 </div>
