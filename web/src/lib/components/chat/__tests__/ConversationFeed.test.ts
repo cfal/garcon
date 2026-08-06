@@ -255,6 +255,25 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-transcript-page-boundary="earlier"]')).toBeNull();
 	});
 
+	it('shows automatic earlier loading outside virtual geometry', () => {
+		const { container } = render(ConversationFeedTestHost, {
+			reserveTopFloatingToolbar: true,
+			transcriptScenario: 'loading-earlier',
+		});
+		const viewport = screen.getByRole('region', { name: 'Chat messages' });
+		const indicator = container.querySelector<HTMLElement>('[data-chat-earlier-loading-indicator]');
+
+		expect(indicator?.textContent).toContain('Loading earlier messages...');
+		expect(indicator?.classList.contains('top-[var(--workspace-floating-taskbar-inset)]')).toBe(
+			true,
+		);
+		expect(indicator?.closest('[data-chat-virtual-sizer]')).toBeNull();
+		expect(viewport.contains(indicator)).toBe(false);
+		expect(viewport.getAttribute('aria-busy')).toBe('true');
+		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
+		expect(container.querySelector('[data-transcript-page-boundary="earlier"]')).toBeNull();
+	});
+
 	it('renders later loading below the transcript without a native bottom anchor', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'loading-later',
@@ -287,6 +306,7 @@ describe('ConversationFeed', () => {
 		const loading = await screen.findByRole('button', { name: 'Loading earlier messages...' });
 		expect(loading.getAttribute('aria-busy')).toBe('true');
 		expect(container.querySelector('[data-transcript-page-boundary="earlier"]')).toBe(boundary);
+		expect(container.querySelector('[data-chat-earlier-loading-indicator]')).toBeNull();
 	});
 
 	it('passes durable and pending row identities to mounted virtual rows', async () => {
