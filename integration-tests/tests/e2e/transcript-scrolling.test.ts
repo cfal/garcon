@@ -199,7 +199,7 @@ describe("Lightpanda transcript scrolling", () => {
         { selector: FEED_SELECTOR },
       );
       expect((await virtualTranscriptSnapshot(fixture.page)).busy).toBe(true);
-      await app.waitForText("Loading earlier messages...");
+      await fixture.page.waitForSelector('[data-chat-earlier-loading-indicator]');
       expect(await app.hasButton("Load earlier messages")).toBe(false);
       await releasePageRequest(fixture.page);
       await waitForModelCount(fixture.page, initial.modelCount + 50);

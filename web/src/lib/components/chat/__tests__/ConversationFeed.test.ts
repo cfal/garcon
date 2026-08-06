@@ -264,7 +264,18 @@ describe('ConversationFeed', () => {
 		const indicator = container.querySelector<HTMLElement>('[data-chat-earlier-loading-indicator]');
 
 		expect(indicator?.textContent).toContain('Loading earlier messages...');
-		expect(indicator?.classList.contains('top-[var(--workspace-floating-taskbar-inset)]')).toBe(
+		expect(
+			indicator?.classList.contains('top-[calc(var(--workspace-floating-taskbar-inset)+0.5rem)]'),
+		).toBe(true);
+		expect(indicator?.classList.contains('left-1/2')).toBe(true);
+		expect(indicator?.classList.contains('-translate-x-1/2')).toBe(true);
+		expect(indicator?.classList.contains('size-8')).toBe(true);
+		expect(indicator?.classList.contains('rounded-full')).toBe(true);
+		expect(indicator?.classList.contains('border')).toBe(true);
+		expect(indicator?.classList.contains('bg-background')).toBe(true);
+		expect(indicator?.classList.contains('shadow-none')).toBe(true);
+		expect(indicator?.classList.contains('inset-x-0')).toBe(false);
+		expect(screen.getByText('Loading earlier messages...').classList.contains('sr-only')).toBe(
 			true,
 		);
 		expect(indicator?.closest('[data-chat-virtual-sizer]')).toBeNull();
