@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
+import { INTEGRATION_ANTHROPIC_API_KEY } from '../../support/anthropic-test-contract.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   claudeText,
@@ -70,6 +72,76 @@ describe('Claude against a scripted model', () => {
         request.toolResults.some((toolResult) =>
           toolResult.toolUseId === 'toolu_scripted_1' && toolResult.content.includes(marker)));
       if (!followUp) throw new Error('Tool result never reached the scripted model.');
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  });
+
+  test('pins subagents to the selected custom endpoint model', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const childPrompt = `Inspect the scripted project ${crypto.randomUUID()}.`;
+    const childReply = `SCRIPTED_CHILD_${crypto.randomUUID().replaceAll('-', '')}`;
+    const reply = `SCRIPTED_PARENT_${crypto.randomUUID().replaceAll('-', '')}`;
+    // An unknown custom ID reproduces Claude Code's Opus fallback; a Haiku alias cannot.
+    const selectedModel = 'integration-custom-claude-model';
+    const requestStart = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptTurn([
+      claudeToolUse('toolu_scripted_agent', 'Agent', {
+        description: 'Inspect the scripted project',
+        prompt: childPrompt,
+        subagent_type: 'Explore',
+        run_in_background: false,
+      }),
+    ]);
+    testEnvironment.model.scriptTurn([claudeText(childReply)]);
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-custom-subagent-model', async (fixture) => {
+      const created = await fixture.client.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+        templateId: 'custom',
+        label: 'Integration Custom Claude',
+        endpoint: {
+          protocol: 'anthropic-messages',
+          baseUrl: testEnvironment.model.baseUrl,
+          apiKey: INTEGRATION_ANTHROPIC_API_KEY,
+          defaultModel: selectedModel,
+          models: [{ value: selectedModel, label: 'Integration Custom Claude Model' }],
+          supportsImages: true,
+          modelDiscovery: 'anthropic-models',
+        },
+      });
+      const endpoint = created.endpoints[0];
+      if (!endpoint) throw new Error('Created provider did not contain an endpoint.');
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const request = liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'Delegate the scripted inspection.',
+        permissionMode: 'bypassPermissions',
+      });
+      const turn = await fixture.client.startChat({
+        ...request,
+        model: selectedModel,
+        apiProviderId: created.id,
+        modelEndpointId: endpoint.id,
+        modelProtocol: endpoint.protocol,
+      });
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const requests = testEnvironment.model.requestsSince(requestStart);
+      const childRequest = requests.find((candidate) => candidate.lastUserText.includes(childPrompt));
+      if (!childRequest) throw new Error('The scripted subagent never reached the fake model.');
+      expect(childRequest.body.model).toBe(selectedModel);
+      expect(requests[0]?.body.model).toBe(selectedModel);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
