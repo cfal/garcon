@@ -23,14 +23,13 @@ import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-i
 import {
 	captureConversationVirtualAnchor,
 	type ConversationVirtualAnchor,
-	conversationAnchorScrollOffset,
 	createConversationElementRectObserver,
 	ConversationMountedVirtualItems,
 	ConversationPreCommitAnchorBuffer,
-	nextConversationAnimationFrame as nextAnimationFrame,
 	nextConversationLayoutFrame,
 	observeConversationRootOffset,
 	sameConversationNumberArrays,
+	settleConversationVirtualAnchor,
 	settleConversationEndRestore,
 	settleConversationScroll,
 	settleConversationTarget,
@@ -753,55 +752,22 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			if (!key) return false;
 			const index = model.indexByKey.get(key);
 			if (index === undefined) return false;
-			this.#instance().scrollToIndex(index, { align: 'start', behavior: 'auto' });
-			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-				await nextConversationLayoutFrame();
-				if (
-					token !== this.#layoutMutationToken ||
-					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
-					!this.isReady()
-				) {
-					return false;
-				}
-				const item = this.#instance()
-					.getVirtualItems()
-					.find((candidate) => candidate.key === key);
-				if (!item) continue;
-				const viewportOffset = key === anchor.key ? anchor.viewportOffset : 0;
-				const scrollOffset = conversationAnchorScrollOffset(
-					item.start,
-					this.#instance().options.scrollMargin,
-					viewportOffset,
-				);
-				this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
-				await nextAnimationFrame();
-				if (
-					token !== this.#layoutMutationToken ||
-					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
-					!this.isReady()
-				) {
-					return false;
-				}
-				const settledItem = this.#instance()
-					.getVirtualItems()
-					.find((candidate) => candidate.key === key);
-				const settledOffset = this.options.viewport?.scrollTop ?? this.#instance().scrollOffset;
-				if (
-					settledItem &&
-					settledOffset != null &&
-					Math.abs(
-						settledOffset -
-							conversationAnchorScrollOffset(
-								settledItem.start,
-								this.#instance().options.scrollMargin,
-								viewportOffset,
-							),
-					) <= OFFSET_TOLERANCE_PX
-				) {
-					return true;
-				}
+			if (resetMeasurements) {
+				this.#instance().scrollToIndex(index, { align: 'start', behavior: 'auto' });
 			}
-			return false;
+			return await settleConversationVirtualAnchor({
+				instance: this.#instance(),
+				mountedItems: this.#mountedItems,
+				configuredKeys: this.#configuredKeys,
+				key,
+				index,
+				viewportOffset: key === anchor.key ? anchor.viewportOffset : 0,
+				readScrollOffset: () => this.options.viewport?.scrollTop ?? this.#instance().scrollOffset,
+				isCurrent: () =>
+					token === this.#layoutMutationToken &&
+					this.#isCurrentProgrammaticScrollOperation(operationEpoch) &&
+					this.isReady(),
+			});
 		} finally {
 			release();
 			this.#finishProgrammaticScrollOperation(operationEpoch);

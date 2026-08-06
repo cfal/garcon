@@ -351,6 +351,7 @@ interface ControllerExposure {
 	controller: ConversationFeedVirtualController;
 	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
 	initialEndRestoredCount(): number;
+	prependWithRetainedWithheldAnchor(index: number): Promise<void>;
 	releaseWithheldEndItem(): Promise<void>;
 	restoreHiddenWithConcurrentGeometry(): Promise<void>;
 	withholdEndItem(): Promise<void>;
@@ -443,6 +444,62 @@ describe('ConversationFeedVirtualController', () => {
 		await nextFrame();
 
 		expect(scrollToIndex).not.toHaveBeenCalled();
+	});
+
+	it('positions a mounted edge anchor directly without first aligning it to the top', async () => {
+		const { exposure } = await renderController();
+		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+		if (!viewport) throw new Error('Expected the controller viewport');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+		viewport.scrollTop = 86;
+		viewport.dispatchEvent(new Event('scroll'));
+		await nextFrame();
+		const readingItem = exposure.instance.getVirtualItemForOffset(viewport.scrollTop);
+		if (!readingItem) throw new Error('Expected a virtual reading item');
+		const readingOffset = conversationAnchorViewportOffset(
+			readingItem.start,
+			exposure.instance.options.scrollMargin,
+			viewport.scrollTop,
+		);
+		expect(readingOffset).toBeLessThan(0);
+		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
+		const scrollToOffset = vi.spyOn(exposure.instance, 'scrollToOffset');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Prepend' }));
+		await waitFor(() => expect(scrollToOffset).toHaveBeenCalled());
+
+		expect(scrollToIndex).not.toHaveBeenCalled();
+		const repositionedItem = exposure.instance
+			.getVirtualItems()
+			.find((item) => item.key === readingItem.key);
+		if (!repositionedItem) throw new Error('Expected the reading item after the prepend');
+		const expectedScrollOffset = conversationAnchorScrollOffset(
+			repositionedItem.start,
+			exposure.instance.options.scrollMargin,
+			readingOffset,
+		);
+		expect(scrollToOffset.mock.calls[0]?.[0]).toBeCloseTo(expectedScrollOffset);
+	});
+
+	it('uses an index target when a retained virtual anchor has no committed wrapper', async () => {
+		const { exposure } = await renderController();
+		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+		if (!viewport) throw new Error('Expected the controller viewport');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+		viewport.scrollTop = 86;
+		viewport.dispatchEvent(new Event('scroll'));
+		await nextFrame();
+		const readingItem = exposure.instance.getVirtualItemForOffset(viewport.scrollTop);
+		if (!readingItem) throw new Error('Expected a virtual reading item');
+		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
+
+		await exposure.prependWithRetainedWithheldAnchor(readingItem.index);
+		await waitFor(() =>
+			expect(scrollToIndex).toHaveBeenCalledWith(readingItem.index + 4, {
+				align: 'start',
+				behavior: 'auto',
+			}),
+		);
 	});
 
 	it('resets text-scale measurements immediately when visible and once on show when hidden', async () => {

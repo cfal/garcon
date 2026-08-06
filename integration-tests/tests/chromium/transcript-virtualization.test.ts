@@ -1551,7 +1551,7 @@ async function prepareTranscript(
 async function revealEarlierTranscript(
   page: Page,
   initialModelCount: number,
-): Promise<ReadingAnchor> {
+): Promise<{ anchor: ReadingAnchor; frames: ReadingAnchorFrameSample[] }> {
   return withDiagnosticTimeout(
     'the earlier transcript page to be revealed',
     (async () => {
@@ -1574,12 +1574,13 @@ async function revealEarlierTranscript(
       expect(prefetchPosition.scrollTop).toBeGreaterThan(100);
       expect(prefetchPosition.scrollTop).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
       const anchor = await readingAnchor(page);
+      await startReadingAnchorFrameSampler(page, anchor);
       const previousRevision = await virtualDataRevision(page);
       await signalScrollIntent(page, 'earlier');
       await page.locator(FEED_SELECTOR).dispatchEvent('scroll');
       await waitForVirtualDataRevisionAfter(page, previousRevision);
       await waitForModelCount(page, initialModelCount + 1);
-      return anchor;
+      return { anchor, frames: await finishReadingAnchorFrameSampler(page) };
     })(),
   );
 }
@@ -1589,8 +1590,22 @@ async function verifyBoundedPrepend(fixture: ChromiumFixture, chatId: string): P
   await scrollToPosition(fixture.page, 'end');
   await waitForDistanceFromEnd(fixture.page, 1);
   await verifyDetachedNearEndGrowth(fixture.page);
-  const prependAnchor = await revealEarlierTranscript(fixture.page, initialModelCount);
+  const { anchor: prependAnchor, frames: prependFrames } = await revealEarlierTranscript(
+    fixture.page,
+    initialModelCount,
+  );
   const restoredPrependAnchor = await anchorByKey(fixture.page, prependAnchor.key);
+  expect(prependFrames.length).toBeGreaterThan(2);
+  expect(
+    Math.max(
+      ...prependFrames.map((sample) =>
+        sample.offset === null
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(sample.offset - prependAnchor.offset),
+      ),
+    ),
+    JSON.stringify({ prependAnchor, prependFrames }, null, 2),
+  ).toBeLessThanOrEqual(1);
   expect(Math.abs(restoredPrependAnchor.offset - prependAnchor.offset)).toBeLessThanOrEqual(1);
 
   const expandedGeometry = await transcriptGeometry(fixture.page);

@@ -338,6 +338,25 @@ describe('ConversationScrollController', () => {
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
 	});
 
+	it('rearms the same earlier cursor after an invalidated prefetch', async () => {
+		const loadEarlierPage = vi
+			.fn<ConversationScrollState['loadEarlierPage']>()
+			.mockResolvedValueOnce('invalidated')
+			.mockResolvedValueOnce('exhausted');
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 750 },
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		await expect(fixture.controller.requestPage('earlier', 'scroll')).resolves.toBe('invalidated');
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.controller.handleScroll();
+
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
+	});
+
 	it('preserves continued earlier intent while a prefetch settles', async () => {
 		let resolveFirstPage!: (result: 'loaded') => void;
 		const firstPage = new Promise<'loaded'>((resolve) => (resolveFirstPage = resolve));

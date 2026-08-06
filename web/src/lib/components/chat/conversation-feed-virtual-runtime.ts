@@ -3,6 +3,7 @@ import {
 	observeElementRect,
 	type Rect,
 	type SvelteVirtualizer,
+	type VirtualItem,
 	type Virtualizer,
 } from '@tanstack/svelte-virtual';
 import {
@@ -17,6 +18,7 @@ import {
 const HIDDEN_ANCHOR_FALLBACK_RADIUS = 8;
 const MAX_END_RESTORE_ITERATIONS = 60;
 const MAX_EARLY_END_RESTORE_ITERATIONS = 8;
+const MAX_ANCHOR_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const REQUIRED_END_STABLE_FRAMES = 2;
 const GEOMETRY_TOLERANCE_PX = 0.5;
@@ -87,6 +89,17 @@ export class ConversationMountedVirtualItems {
 		this.#elements.clear();
 	}
 
+	committedVirtualItem(
+		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>,
+		configuredKeys: readonly string[],
+		key: string,
+	): VirtualItem | undefined {
+		const committedByIndex = this.#keysByIndex(configuredKeys);
+		return instance
+			.getVirtualItems()
+			.find((item) => String(item.key) === key && committedByIndex.get(item.index) === key);
+	}
+
 	transcriptKeys(
 		configuredKeys: readonly string[],
 		eligibleKeys: ReadonlySet<string>,
@@ -134,6 +147,59 @@ export class ConversationMountedVirtualItems {
 		}
 		return keysByIndex;
 	}
+}
+
+export async function settleConversationVirtualAnchor(input: {
+	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
+	mountedItems: ConversationMountedVirtualItems;
+	configuredKeys: readonly string[];
+	key: string;
+	index: number;
+	viewportOffset: number;
+	readScrollOffset(): number | null;
+	isCurrent(): boolean;
+}): Promise<boolean> {
+	for (let attempt = 0; attempt < MAX_ANCHOR_SETTLE_ITERATIONS; attempt += 1) {
+		await nextConversationLayoutFrame();
+		if (!input.isCurrent()) return false;
+		const item = input.mountedItems.committedVirtualItem(
+			input.instance,
+			input.configuredKeys,
+			input.key,
+		);
+		if (!item) {
+			// An index target remains valid while an offscreen or retained wrapper materializes.
+			input.instance.scrollToIndex(input.index, { align: 'start', behavior: 'auto' });
+			continue;
+		}
+		const scrollOffset = conversationAnchorScrollOffset(
+			item.start,
+			input.instance.options.scrollMargin,
+			input.viewportOffset,
+		);
+		input.instance.scrollToOffset(scrollOffset, { behavior: 'auto' });
+		await nextConversationAnimationFrame();
+		if (!input.isCurrent()) return false;
+		const settledItem = input.instance
+			.getVirtualItems()
+			.find((candidate) => candidate.key === input.key);
+		const settledOffset = input.readScrollOffset();
+		if (
+			settledItem &&
+			settledOffset != null &&
+			Math.abs(
+				settledOffset -
+					conversationAnchorScrollOffset(
+						settledItem.start,
+						input.instance.options.scrollMargin,
+						input.viewportOffset,
+					),
+			) <= GEOMETRY_TOLERANCE_PX
+		) {
+			return true;
+		}
+	}
+	return false;
 }
 
 export function captureConversationVirtualAnchor(input: {

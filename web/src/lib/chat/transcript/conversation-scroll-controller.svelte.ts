@@ -317,6 +317,13 @@ export class ConversationScrollController {
 			this.#isPageMutationInProgress = false;
 		}
 		if (this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
+		if (
+			direction === 'earlier' &&
+			result === 'invalidated' &&
+			this.#earlierBoundaryRequestSignature === requestBoundarySignature
+		) {
+			this.#earlierBoundaryRequestSignature = null;
+		}
 		this.#syncBoundaryLatch(direction);
 		if (reason === 'button') this.#preserveHistoryBrowsing();
 		const earlierBoundaryAdvanced =

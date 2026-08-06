@@ -16,6 +16,7 @@
 		initialEndRestoredCount(): number;
 		releaseWithheldEndItem(): Promise<void>;
 		restoreHiddenWithConcurrentGeometry(): Promise<void>;
+		prependWithRetainedWithheldAnchor(index: number): Promise<void>;
 		withholdEndItem(): Promise<void>;
 		withholdItem(index: number): Promise<void>;
 	}
@@ -26,6 +27,7 @@
 
 	let { onReady }: Props = $props();
 	let itemCount = $state(12);
+	let firstItemNumber = $state(0);
 	let contentRevision = $state(0);
 	let geometryRevision = $state(1);
 	let measurementReset = $state<ConversationVirtualGeometrySnapshot['measurementReset']>('none');
@@ -37,10 +39,12 @@
 	let virtualRoot: HTMLDivElement | null = $state(null);
 	let releaseRetention: (() => void) | null = null;
 	let initialEndRestoredCount = 0;
-	let withheldIndex: number | null = $state(null);
+	let withheldKey: string | null = $state(null);
 
 	const keys = $derived(
-		Array.from({ length: itemCount }, (_, index) => JSON.stringify([surfaceIdentity, index])),
+		Array.from({ length: itemCount }, (_, index) =>
+			JSON.stringify([surfaceIdentity, firstItemNumber + index]),
+		),
 	);
 	const model = $derived.by((): ConversationVirtualFeedModel => {
 		void contentRevision;
@@ -122,6 +126,7 @@
 			initialEndRestoredCount: () => initialEndRestoredCount,
 			releaseWithheldEndItem,
 			restoreHiddenWithConcurrentGeometry,
+			prependWithRetainedWithheldAnchor,
 			withholdEndItem,
 			withholdItem,
 		});
@@ -148,9 +153,31 @@
 		geometryRevision += 1;
 	}
 
+	async function prependWithRetainedWithheldAnchor(index: number): Promise<void> {
+		controller.prepareForGeometryPublication(geometryRevision + 1);
+		releaseRetention?.();
+		const key = keys[index] ?? 'missing';
+		releaseRetention = retention.acquire(key, 'focus');
+		withheldKey = key;
+		await tick();
+		firstItemNumber -= 4;
+		itemCount += 4;
+		measurementReset = 'none';
+		geometryRevision += 1;
+		await tick();
+	}
+
 	function appendItem(): void {
 		controller.prepareForGeometryPublication(geometryRevision + 1);
 		itemCount += 1;
+		measurementReset = 'none';
+		geometryRevision += 1;
+	}
+
+	function prependItems(): void {
+		controller.prepareForGeometryPublication(geometryRevision + 1);
+		firstItemNumber -= 4;
+		itemCount += 4;
 		measurementReset = 'none';
 		geometryRevision += 1;
 	}
@@ -195,12 +222,12 @@
 	}
 
 	async function withholdItem(index: number): Promise<void> {
-		withheldIndex = index >= 0 ? index : null;
+		withheldKey = index >= 0 ? (keys[index] ?? null) : null;
 		await tick();
 	}
 
 	async function releaseWithheldEndItem(): Promise<void> {
-		withheldIndex = null;
+		withheldKey = null;
 		await tick();
 	}
 </script>
@@ -221,7 +248,7 @@
 		style:position="relative"
 	>
 		{#each $virtualizer.getVirtualItems() as virtualItem (virtualItem.key)}
-			{#if virtualItem.index !== withheldIndex}
+			{#if String(virtualItem.key) !== withheldKey}
 				<div
 					data-index={virtualItem.index}
 					data-chat-virtual-item={String(virtualItem.key)}
@@ -237,6 +264,7 @@
 
 <button onclick={publishContent}>Publish content</button>
 <button onclick={appendItem}>Append</button>
+<button onclick={prependItems}>Prepend</button>
 <button onclick={retainFirst}>Retain first</button>
 <button onclick={shrink}>Shrink</button>
 <button onclick={toggleScale}>Toggle scale</button>
