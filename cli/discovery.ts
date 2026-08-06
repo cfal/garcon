@@ -72,8 +72,8 @@ async function canonicalWorkspace(configDir: string, workspace: string): Promise
       throw new Error('workspace is not a direct child of the config directory');
     }
     const canonicalWorkspaceDir = await fsPromises.realpath(namedWorkspace);
-    if (canonicalWorkspaceDir !== namedWorkspace || path.dirname(canonicalWorkspaceDir) !== canonicalConfigDir) {
-      throw new Error('workspace directory must be a direct, non-symlink child of the config directory');
+    if (path.dirname(canonicalWorkspaceDir) !== canonicalConfigDir) {
+      throw new Error('workspace directory must resolve to a direct child of the config directory');
     }
     return canonicalWorkspaceDir;
   } catch (error) {

@@ -177,6 +177,40 @@ describe('discoverRuntime', () => {
     })).rejects.toThrow('upgrade Garcon and garcon-cli together');
   });
 
+  test('follows a named workspace symlink to a sibling workspace directory', async () => {
+    if (process.platform === 'win32') return;
+    const testFixture = await fixture();
+    const targetWorkspaceDir = `${testFixture.workspaceDir}-target`;
+    await fs.rename(testFixture.workspaceDir, targetWorkspaceDir);
+    await fs.symlink(path.basename(targetWorkspaceDir), testFixture.workspaceDir, 'dir');
+    const descriptor = {
+      ...testFixture.descriptor,
+      workspaceDir: targetWorkspaceDir,
+    };
+    await fs.writeFile(
+      path.join(targetWorkspaceDir, SERVER_RUNTIME_FILENAME),
+      JSON.stringify(descriptor),
+      { mode: 0o600 },
+    );
+
+    const connection = await discoverRuntime({
+      configDir: testFixture.configDir,
+      workspace: 'review',
+    }, {
+      fetch: async (input) => Response.json({
+        schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
+        instanceId: descriptor.instanceId,
+        proof: runtimeProof(
+          String(descriptor.localCapability),
+          String(descriptor.instanceId),
+          input,
+        ),
+      }),
+    });
+
+    expect(connection.workspaceDir).toBe(targetWorkspaceDir);
+  });
+
   test('rejects a workspace symlink that escapes the config directory', async () => {
     if (process.platform === 'win32') return;
     const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-cli-config-'));

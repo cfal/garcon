@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { userContents } from '../../support/chat-assertions.js';
@@ -120,6 +121,29 @@ function controlArguments(fixture: IntegrationFixture, command: string[]): strin
 }
 
 describe('garcon-cli', () => {
+  test('discovers a running named workspace through a sibling symlink', async () => {
+    await withIntegrationFixture('garcon-cli-workspace-symlink', async (fixture) => {
+      const listedAgents = await runCli([
+        '--config-dir', fixture.dirs.config,
+        '--workspace', WORKSPACE,
+        'list', 'agents', '--json',
+      ]);
+
+      expect(listedAgents.exitCode).toBe(0);
+      expect(listedAgents.stderr).toBe('');
+      expect(JSON.parse(listedAgents.stdout).agents).toContainEqual(
+        expect.objectContaining({ id: fixture.directAgents.openAi.agentId }),
+      );
+    }, {
+      namedWorkspace: WORKSPACE,
+      prepareWorkspace: async (dirs) => {
+        const targetWorkspace = `${dirs.workspace}-target`;
+        await fs.rename(dirs.workspace, targetWorkspace);
+        await fs.symlink(path.basename(targetWorkspace), dirs.workspace, 'dir');
+      },
+    });
+  });
+
   test('starts and resumes a visible tagged chat through a named workspace', async () => {
     await withIntegrationFixture('garcon-cli-start-resume', async (fixture) => {
       const agent = fixture.directAgents.openAi;
