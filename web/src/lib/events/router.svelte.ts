@@ -161,6 +161,7 @@ export interface EventRouterStores {
 	conversationUi: ConversationUiPort;
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
+	notifyCompletion: () => void;
 }
 
 function extractFirstLine(text: string): string {
@@ -287,6 +288,7 @@ function buildDispatch(
 		getPendingChatId,
 		clearPendingChatId,
 		markChatTranscriptValidated: stores.chatState.markChatTranscriptValidated,
+		notifyCompletion: stores.notifyCompletion,
 	};
 
 	const chatEventCtx: ChatEventContext = {

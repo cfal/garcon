@@ -216,11 +216,31 @@ describe('server event wiring', () => {
       lastOrdinal: 2,
       messages: [{ ordinal: 2, message: { content: 'answer' } }],
     });
+    expect(fixture.published[3]).toMatchObject({
+      type: 'agent-run-finished',
+      outcome: 'finished',
+    });
     expect(fixture.queueService.onAgentTurnTerminal).toHaveBeenCalledWith('chat-1', turn, 'finished');
     expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
       'agent-run:chat-1:request-1',
       'finished',
       {},
+    );
+  });
+
+  it('preserves interrupted completion outcomes in the browser contract', async () => {
+    const fixture = createFixture();
+
+    fixture.agent.finished('chat-1', 0, turn, 'interrupted');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toContainEqual(
+      expect.objectContaining({
+        type: 'agent-run-finished',
+        chatId: 'chat-1',
+        exitCode: 0,
+        outcome: 'interrupted',
+      }),
     );
   });
 

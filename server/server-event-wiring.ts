@@ -433,6 +433,7 @@ export function wireServerEvents({
             turnMetadata?.turnId,
             turnMetadata?.clientRequestId,
             turnMetadata?.upstreamRequestId,
+            outcome,
           ),
         );
         await markPublicTurnTerminal(

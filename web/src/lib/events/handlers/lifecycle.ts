@@ -12,6 +12,10 @@ function agentReportedFailure(exitCode: number | undefined): boolean {
 	return exitCode === AGENT_REPORTED_FAILURE_EXIT_CODE;
 }
 
+function agentRunSucceeded(msg: AgentRunFinishedMessage): boolean {
+	return msg.exitCode === 0 && msg.outcome !== 'interrupted';
+}
+
 export interface LifecycleContext {
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
@@ -27,6 +31,7 @@ export interface LifecycleContext {
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
 	markChatTranscriptValidated: (chatId: string) => void;
+	notifyCompletion: () => void;
 }
 
 export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: LifecycleContext) {
@@ -52,6 +57,8 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	if (completedChatId && !runFailed) {
 		ctx.markChatTranscriptValidated(completedChatId);
 	}
+
+	if (agentRunSucceeded(msg) && !successorIsProcessing) ctx.notifyCompletion();
 
 	// Preserve plan-exit permission requests across turn boundaries
 	if (!successorIsProcessing) {

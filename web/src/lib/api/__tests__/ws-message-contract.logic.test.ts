@@ -539,8 +539,9 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'agent-run-finished',
 				chatId: 'c-1',
+				outcome: 'interrupted',
 			}),
-		).toBeInstanceOf(AgentRunFinishedMessage);
+		).toMatchObject({ outcome: 'interrupted' });
 		for (const exitCode of ['0', 1.5, null, Number.NaN]) {
 			expect(
 				parseServerWsMessage({
@@ -762,6 +763,13 @@ describe('parseServerWsMessage', () => {
 				SnippetsInvalidatedMessage,
 			);
 		}
+		expect(
+			parseServerWsMessage({
+				type: 'agent-run-finished',
+				chatId: 'c-1',
+				outcome: 'failed',
+			}),
+		).toBeNull();
 		expect(parseServerWsMessage({ type: 'snippets-invalidated', reason: 'reordered' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'snippets-invalidated', reason: 'renamed' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'snippets-invalidated' })).toBeNull();

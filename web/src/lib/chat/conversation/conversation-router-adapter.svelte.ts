@@ -43,6 +43,7 @@ export interface ConversationRouterStoreDeps {
 	conversationUi: ConversationUiPort;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
+	notifyCompletion: () => void;
 	transcriptCache?: ChatTranscriptCache;
 	backgroundTranscriptLoader?: Pick<BackgroundTranscriptLoader, 'queueLoad'>;
 	visiblePreviews?: {
@@ -233,6 +234,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				deps.sessions.patchLastReadAt(chatId, readAt);
 			},
 		},
+		notifyCompletion: deps.notifyCompletion,
 	};
 }
 
