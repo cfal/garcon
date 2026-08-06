@@ -476,6 +476,76 @@ describe('Lightpanda standalone Git views', () => {
       expect(await app.hasButton('Close view')).toBe(true);
       expect(await app.hasButton('Back')).toBe(false);
 
+      await fixture.page.waitForFunction(
+        () => {
+          const panel = document.querySelector(
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+              + '[aria-hidden="false"]',
+          );
+          return panel?.textContent?.includes('working tree revision') === true
+            && !panel.textContent.includes('Loading comparison');
+        },
+        { timeout: 20_000 },
+      );
+      await app.clickResponsiveAction('Edit');
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
+      await app.fill('#git-comparison-from', 'HEAD~1');
+      await app.clickDialogButton('Revision');
+      await app.fill('#git-comparison-to', 'HEAD');
+      await app.clickDialogButton('Compare');
+      await fixture.page.waitForFunction(
+        () => {
+          const panel = document.querySelector(
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+              + '[aria-hidden="false"]',
+          );
+          return panel?.textContent?.includes('second revision') === true
+            && !panel.textContent.includes('working tree revision')
+            && !panel.textContent.includes('Loading comparison');
+        },
+        { timeout: 20_000 },
+      );
+
+      await app.clickButton('Close view');
+      await fixture.page.waitForSelector(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:chat"]'
+          + '[aria-hidden="false"]',
+      );
+      expect(await fixture.page.$(
+        '[data-workspace-surface-id="singleton:git-compare"]',
+      )).toBeNull();
+
+      await app.clickButton('Settings');
+      await app.waitForMenuItemEnabled('Open Git Compare');
+      await app.clickMenuItem('Open Git Compare');
+      await fixture.page.waitForSelector(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+          + '[aria-hidden="false"]',
+      );
+      await fixture.page.waitForFunction(
+        () => {
+          const panel = document.querySelector(
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+              + '[aria-hidden="false"]',
+          );
+          return panel?.textContent?.includes('second revision') === true
+            && !panel.textContent.includes('working tree revision')
+            && !panel.textContent.includes('Loading comparison');
+        },
+        { timeout: 20_000 },
+      );
+      await app.clickResponsiveAction('Edit');
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
+      expect(await fixture.page.$eval(
+        '#git-comparison-from',
+        (element) => (element as HTMLInputElement).value,
+      )).toBe('HEAD~1');
+      expect(await fixture.page.$eval(
+        '#git-comparison-to',
+        (element) => (element as HTMLInputElement).value,
+      )).toBe('HEAD');
+      await app.clickDialogButton('Cancel');
+
       await app.setViewport(1_440, 900);
       await fixture.page.waitForSelector('[data-floating-workspace-toolbar]');
       await fixture.page.waitForFunction(

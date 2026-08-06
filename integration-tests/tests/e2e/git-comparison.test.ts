@@ -1,8 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Page } from 'puppeteer-core';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
+
+const COMPARE_PANEL = '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+  + '[aria-hidden="false"]';
 
 async function runGit(projectPath: string, args: string[]): Promise<void> {
   const process = Bun.spawn(['git', ...args], {
@@ -18,7 +22,118 @@ async function runGit(projectPath: string, args: string[]): Promise<void> {
   if (exitCode !== 0) throw new Error(`git ${args[0]} failed: ${stderr.trim()}`);
 }
 
+async function waitForComparisonMarkers(
+  page: Page,
+  present: string[],
+  absent: string[],
+): Promise<void> {
+  await page.waitForFunction(
+    ({ panelSelector, expected, excluded }) => {
+      const panel = document.querySelector(panelSelector);
+      const text = panel?.textContent ?? '';
+      return panel?.querySelector('[data-git-diff-document]') !== null
+        && !text.includes('Loading comparison')
+        && expected.every((marker) => text.includes(marker))
+        && excluded.every((marker) => !text.includes(marker));
+    },
+    { timeout: 20_000 },
+    { panelSelector: COMPARE_PANEL, expected: present, excluded: absent },
+  );
+}
+
 describe('Lightpanda Git comparison', () => {
+  test('restores each chat comparison range and resets it for a new client', async () => {
+    await withE2eFixture('git-comparison-session-memory', async (fixture) => {
+      const project = fixture.integration.dirs.project;
+      await runGit(project, ['init', '-b', 'main']);
+      await runGit(project, ['config', 'user.email', 'test@example.com']);
+      await runGit(project, ['config', 'user.name', 'E2E Test']);
+      await writeFile(join(project, 'base.txt'), 'base marker\n', 'utf8');
+      await runGit(project, ['add', '.']);
+      await runGit(project, ['commit', '-m', 'base']);
+      await runGit(project, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      await writeFile(join(project, 'head-only.txt'), 'head comparison marker\n', 'utf8');
+      await runGit(project, ['add', '.']);
+      await runGit(project, ['commit', '-m', 'head change']);
+      await writeFile(join(project, 'worktree-only.txt'), 'working tree marker\n', 'utf8');
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('git-comparison-chat-a', { projectPath: project });
+      await app.waitForText('echo:git-comparison-chat-a');
+      await app.startOpenAiDirectChat('git-comparison-chat-b', { projectPath: project });
+      await app.waitForText('echo:git-comparison-chat-b');
+
+      const chats = (await fixture.integration.client.listChats()).sessions;
+      const chatA = chats.find((chat) => chat.preview.firstMessage === 'git-comparison-chat-a');
+      const chatB = chats.find((chat) => chat.preview.firstMessage === 'git-comparison-chat-b');
+      if (!chatA || !chatB) throw new Error('Both comparison chats must be listed.');
+
+      await app.clickSidebarChatContaining('git-comparison-chat-a');
+      await app.waitForSelectedChat(chatA.id);
+      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await fixture.page.waitForSelector(COMPARE_PANEL);
+      await waitForComparisonMarkers(fixture.page, ['working tree marker'], [
+        'head comparison marker',
+      ]);
+      await app.clickResponsiveAction('Edit');
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
+      await app.fill('#git-comparison-from', 'origin/main');
+      await app.clickDialogButton('Revision');
+      await app.fill('#git-comparison-to', 'HEAD');
+      await app.clickDialogButton('Compare');
+      await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
+        'working tree marker',
+      ]);
+
+      await app.clickSidebarChatContaining('git-comparison-chat-b');
+      await app.waitForSelectedChat(chatB.id);
+      await app.selectMainWorkspaceSurface('Compare');
+      await waitForComparisonMarkers(fixture.page, ['working tree marker'], [
+        'head comparison marker',
+      ]);
+
+      await app.clickSidebarChatContaining('git-comparison-chat-a');
+      await app.waitForSelectedChat(chatA.id);
+      await app.selectMainWorkspaceSurface('Compare');
+      await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
+        'working tree marker',
+      ]);
+      await app.clickResponsiveAction('Edit');
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
+      expect(await fixture.page.$eval(
+        '#git-comparison-from',
+        (element) => (element as HTMLInputElement).value,
+      )).toBe('origin/main');
+      expect(await fixture.page.$eval(
+        '#git-comparison-to',
+        (element) => (element as HTMLInputElement).value,
+      )).toBe('HEAD');
+      expect(await fixture.page.$eval(
+        '[role="dialog"] button[aria-pressed="true"]',
+        (element) => element.textContent?.trim(),
+      )).toBe('Revision');
+      await app.clickDialogButton('Cancel');
+
+      await fixture.page.waitForFunction(
+        () => localStorage.getItem('workspace_layout_v1')?.includes('git-compare') === true,
+        { timeout: 20_000 },
+      );
+      const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
+      await fixture.page.reload({ waitUntil: [] });
+      await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
+      await app.waitForSelectedChat(chatA.id);
+      await fixture.page.waitForSelector('[id="main-panel-singleton:git-compare"]');
+      await app.selectMainWorkspaceSurface('Compare');
+      await waitForComparisonMarkers(fixture.page, ['working tree marker'], [
+        'head comparison marker',
+      ]);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test('keeps a large comparison virtualized and appends a line comment without sending', async () => {
     await withE2eFixture('git-comparison-comment', async (fixture) => {
       const project = fixture.integration.dirs.project;
