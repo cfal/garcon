@@ -3,24 +3,29 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import v8 from 'node:v8';
 import type { ChatMessage } from '../../common/chat-types.js';
-import { AgentSwitchMessage, UserMessage, parseChatMessages } from '../../common/chat-types.js';
+import { AgentSwitchMessage, UserMessage } from '../../common/chat-types.js';
 import {
   createNativeSeedReceipt,
   renderTranscriptSeed,
 } from '../../common/transcript-seed.js';
 import { isRecord } from '../../common/json.js';
 import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
-import {
-  emptyOwnershipJournalV2,
-  type AgentOwnershipJournalFileV2,
-  type DeleteIntentV2,
-  type SourceReleaseCleanup,
-} from './agent-ownership-journal.js';
+import type { AgentOwnershipJournalFileV3 } from './agent-ownership-journal.js';
 import { CarryOverTranscriptStore } from './carryover-transcript-store.js';
 import { readChatRegistryVersion, readLegacyChatRegistryV3 } from './legacy-chat-registry-v3.js';
+import {
+  LegacyCarryOverDataError,
+  type LegacyCarryOverSegment,
+  activeLegacySegments,
+  convertLinkedHistory,
+  migrateLegacyOwnershipJournal,
+  migrateV4Receipt,
+  parseLegacyCarryOverFile,
+} from './legacy-carryover-import.js';
+import { parseCarryOverSegmentRefs, type CarryOverSegmentRef } from './store.js';
 
-const MIGRATION_MARKER_VERSION = 1 as const;
-const MIGRATION_MARKER_FILE = 'carryover-transcripts/migration-v1.json';
+const MIGRATION_MARKER_VERSION = 2 as const;
+const MIGRATION_MARKER_FILE = 'carryover-transcripts/migration-v2.json';
 const LEGACY_CARRYOVER_FILE = 'chat-carryover.json';
 const OWNERSHIP_JOURNAL_FILE = 'agent-ownership-journal.json';
 
@@ -30,6 +35,8 @@ interface CarryOverMigrationMarkerBase {
   readonly sourceRegistrySha256: string;
   readonly sourceJournalSha256: string;
   readonly legacyJournalBackupFile: string;
+  readonly sourceRegistryVersion: 3 | 4;
+  readonly sourceWorkspaceVersion: number | null;
   readonly startedAt: string;
 }
 
@@ -38,50 +45,36 @@ type CarryOverMigrationMarker =
   | (CarryOverMigrationMarkerBase & {
       readonly phase: 'ready-to-commit';
       readonly targetRegistrySha256: string;
-      readonly nodeSummarySha256: string;
-      readonly nodeCount: number;
+      readonly segmentSummarySha256: string;
+      readonly segmentCount: number;
     })
   | (CarryOverMigrationMarkerBase & {
       readonly phase: 'complete';
       readonly targetRegistrySha256: string;
-      readonly nodeSummarySha256: string;
-      readonly nodeCount: number;
+      readonly segmentSummarySha256: string;
+      readonly segmentCount: number;
       readonly completedAt: string;
       readonly rollbackSafe: boolean;
     });
-
-interface LegacyCarryOverSegment {
-  readonly agentId: string;
-  readonly model: string;
-  readonly messages: readonly ChatMessage[];
-  readonly at: string;
-  readonly boundary: boolean;
-  readonly boundaryTarget: { readonly agentId: string; readonly model: string } | null;
-}
-
-class LegacyCarryOverDataError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'LegacyCarryOverDataError';
-  }
-}
 
 export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Promise<void> {
   const registryVersion = await readChatRegistryVersion(workspaceDir);
   if (registryVersion === null) return;
   const marker = await readMarker(workspaceDir);
   const workspaceVersion = await readWorkspaceVersion(workspaceDir);
-  if (registryVersion === 4) {
-    if (workspaceVersion !== null && workspaceVersion >= 4) return;
+  if (registryVersion === 5) {
+    if (workspaceVersion !== null && workspaceVersion >= 5) return;
     if (!marker || marker.phase === 'in-progress') {
-      throw new Error('Schema-v4 chat registry has no committed carryover migration marker');
+      throw new Error('Schema-v5 chat registry has no committed carryover migration marker');
     }
     await resumeCommittedMigration(workspaceDir, marker);
     return;
   }
-  if (registryVersion !== 3) throw new Error(`Unsupported chat registry version: ${registryVersion}`);
+  if (registryVersion !== 3 && registryVersion !== 4) {
+    throw new Error(`Unsupported chat registry version: ${registryVersion}`);
+  }
   if (marker?.phase === 'complete') {
-    throw new Error('Completed carryover migration marker cannot accompany a schema-v3 registry');
+    throw new Error('Completed carryover migration marker cannot accompany a legacy registry');
   }
   await assertWorkspaceVersionAllowsMigration(workspaceDir);
   await ensureMigrationDirectories(workspaceDir);
@@ -89,7 +82,11 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   const registryPath = path.join(workspaceDir, 'chats.json');
   const carryOverPath = path.join(workspaceDir, LEGACY_CARRYOVER_FILE);
   const journalPath = path.join(workspaceDir, OWNERSHIP_JOURNAL_FILE);
-  await assertMigrationCapacity(workspaceDir, await optionalFileSize(carryOverPath));
+  const sourceBytes = await optionalFileSize(carryOverPath)
+    + (registryVersion === 4
+      ? await directorySize(path.join(workspaceDir, 'carryover-transcripts', 'nodes'))
+      : 0);
+  await assertMigrationCapacity(workspaceDir, sourceBytes);
   const [registryBytes, carryOverBytes, journalBytes] = await Promise.all([
     fs.readFile(registryPath),
     readOptionalFile(carryOverPath),
@@ -109,83 +106,122 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
     version: MIGRATION_MARKER_VERSION,
     ...sourceDigests,
     legacyJournalBackupFile,
+    sourceRegistryVersion: registryVersion,
+    sourceWorkspaceVersion: workspaceVersion,
     startedAt,
   };
   await writeMarker(workspaceDir, { ...markerBase, phase: 'in-progress' });
   await writeMigrationBackup(workspaceDir, legacyJournalBackupFile, journalBytes);
   await writeMigrationBackup(
     workspaceDir,
-    `migration-backups/chats.v3.${sourceDigests.sourceRegistrySha256.slice(0, 16)}.json`,
+    registryBackupFile(markerBase),
     registryBytes,
   );
 
-  const legacyRegistry = await readLegacyChatRegistryV3(workspaceDir);
-  if (!legacyRegistry) return;
-  const rawCarryOver = parseLegacyCarryOverFile(carryOverBytes);
-  const nodes = new CarryOverTranscriptStore({ workspaceDir });
-  await nodes.initialize();
+  const segmentsStore = new CarryOverTranscriptStore({ workspaceDir });
+  await segmentsStore.initialize();
   const sessions: Record<string, Record<string, unknown>> = {};
-  const roots: Array<readonly [string, string | null]> = [];
-  const migratedNodeIds = new Set<string>();
-
-  for (const [chatId, entry] of Object.entries(legacyRegistry.sessions)) {
-    const rawCarryOverEntry = rawCarryOver.get(chatId);
-    try {
-      const segments = activeLegacySegments(rawCarryOverEntry, entry);
-      const converted = await convertLegacySegments({
-        chatId,
-        entry,
-        segments,
-        sourceDigest: sourceDigests.sourceCarryOverSha256,
-        startedAt,
-        nodes,
-      });
-      for (const nodeId of converted.nodeIds) migratedNodeIds.add(nodeId);
-      roots.push([chatId, converted.headId]);
-      sessions[chatId] = {
-        ...entry,
-        carryOverHeadId: converted.headId,
-        nativeSeedReceipt: converted.nativeSeedReceipt,
-        carryOverMigrationQuarantine: null,
-      };
-    } catch (error) {
-      if (!isQuarantinableMigrationError(error)) throw error;
-      const artifactId = deterministicUuid(`quarantine:${sourceDigests.sourceCarryOverSha256}:${chatId}`);
-      await writeJsonFileAtomic(
-        path.join(workspaceDir, 'carryover-transcripts', 'quarantine', `${artifactId}.json`),
-        { version: 1, chatId, entry: rawCarryOverEntry ?? null },
-        { mode: 0o600 },
-      );
-      roots.push([chatId, null]);
-      sessions[chatId] = {
-        ...entry,
-        carryOverHeadId: null,
-        nativeSeedReceipt: null,
-        carryOverMigrationQuarantine: {
-          artifactId,
-          errorCode: migrationErrorCode(error),
-        },
-      };
+  const migratedSegmentIds = new Set<string>();
+  if (registryVersion === 3) {
+    const legacyRegistry = await readLegacyChatRegistryV3(workspaceDir);
+    if (!legacyRegistry) return;
+    const rawCarryOver = parseLegacyCarryOverFile(carryOverBytes);
+    for (const [chatId, entry] of Object.entries(legacyRegistry.sessions)) {
+      const rawCarryOverEntry = rawCarryOver.get(chatId);
+      try {
+        const converted = await convertLegacySegments({
+          chatId,
+          entry,
+          segments: activeLegacySegments(rawCarryOverEntry, entry),
+          sourceDigest: sourceDigests.sourceCarryOverSha256,
+          startedAt,
+          store: segmentsStore,
+        });
+        for (const id of converted.segmentIds) migratedSegmentIds.add(id);
+        sessions[chatId] = {
+          ...entry,
+          carryOverSegments: converted.refs,
+          nativeSeedReceipt: converted.nativeSeedReceipt,
+          carryOverMigrationQuarantine: null,
+        };
+      } catch (error) {
+        if (!isQuarantinableMigrationError(error)) throw error;
+        const quarantine = await quarantineCarryOverEntry({
+          workspaceDir,
+          chatId,
+          sourceArtifact: rawCarryOverEntry ?? null,
+          sourceDigest: sourceDigests.sourceCarryOverSha256,
+          error,
+        });
+        sessions[chatId] = {
+          ...entry,
+          carryOverSegments: [],
+          nativeSeedReceipt: null,
+          carryOverMigrationQuarantine: quarantine,
+        };
+      }
+    }
+  } else {
+    const sourceRegistry = parseSourceRegistryV4(registryBytes);
+    for (const [chatId, entry] of Object.entries(sourceRegistry.sessions)) {
+      try {
+        const converted = await convertLinkedHistory({
+          workspaceDir,
+          chatId,
+          entry,
+          headId: nullableString(entry.carryOverHeadId),
+          store: segmentsStore,
+        });
+        for (const id of converted.segmentIds) migratedSegmentIds.add(id);
+        sessions[chatId] = {
+          ...entry,
+          carryOverSegments: converted.refs,
+          nativeSeedReceipt: migrateV4Receipt(entry.nativeSeedReceipt, entry.carryOverHeadId),
+        };
+      } catch (error) {
+        if (!isQuarantinableMigrationError(error)) throw error;
+        const quarantine = await quarantineCarryOverEntry({
+          workspaceDir,
+          chatId,
+          sourceArtifact: {
+            registryEntry: entry,
+            linkedHeadId: nullableString(entry.carryOverHeadId),
+          },
+          sourceDigest: sourceDigests.sourceRegistrySha256,
+          error,
+        });
+        sessions[chatId] = {
+          ...entry,
+          carryOverSegments: [],
+          nativeSeedReceipt: null,
+          carryOverMigrationQuarantine: quarantine,
+        };
+      }
+      delete sessions[chatId].carryOverHeadId;
     }
   }
 
-  const targetRegistry = { version: 4, sessions };
-  const nodeCount = migratedNodeIds.size;
+  const targetRegistry = { version: 5, sessions };
+  const segmentCount = migratedSegmentIds.size;
   const targetRegistryBytes = serializeJson(targetRegistry);
   const targetRegistrySha256 = digest(targetRegistryBytes);
-  const nodeSummarySha256 = digest(Buffer.from(JSON.stringify(roots.sort(([left], [right]) => (
-    left.localeCompare(right)
-  )))));
+  const segmentSummarySha256 = segmentSummary(sessions);
   const ready: CarryOverMigrationMarker = {
     ...markerBase,
     phase: 'ready-to-commit',
     targetRegistrySha256,
-    nodeSummarySha256,
-    nodeCount,
+    segmentSummarySha256,
+    segmentCount,
   };
   await writeMarker(workspaceDir, ready);
 
-  const targetJournal = migrateLegacyOwnershipJournal(journalBytes, sessions);
+  const targetJournal = await migrateLegacyOwnershipJournal({
+    workspaceDir,
+    bytes: journalBytes,
+    sessions,
+    sourceRegistryVersion: registryVersion,
+    store: segmentsStore,
+  });
   await writeJsonFileAtomic(registryPath, targetRegistry, { mode: 0o600 });
   await writeJsonFileAtomic(journalPath, targetJournal, { mode: 0o600 });
   const committedRegistryBytes = await fs.readFile(registryPath);
@@ -205,7 +241,7 @@ export async function markCarryOverMigrationRollbackUnsafe(workspaceDir: string)
   const marker = await readMarker(workspaceDir);
   if (!marker) return;
   if (marker.phase !== 'complete') {
-    throw new Error('Cannot accept new carryover nodes while migration is incomplete');
+    throw new Error('Cannot accept new carryover segments while migration is incomplete');
   }
   if (!marker.rollbackSafe) return;
   await writeMarker(workspaceDir, { ...marker, rollbackSafe: false });
@@ -215,6 +251,8 @@ export async function finalizeCarryOverMigrationValidation(workspaceDir: string)
   const marker = await readMarker(workspaceDir);
   if (!marker || marker.phase !== 'complete') return;
   if (marker.rollbackSafe) await writeMarker(workspaceDir, { ...marker, rollbackSafe: false });
+  const retainLinkedSources = marker.sourceRegistryVersion === 4
+    && await targetRegistryHasQuarantine(workspaceDir);
   await Promise.all([
     fs.rm(migratedCarryOverPath(workspaceDir, marker.startedAt), { force: true }),
     fs.rm(path.join(workspaceDir, registryBackupFile(marker)), { force: true }),
@@ -222,6 +260,12 @@ export async function finalizeCarryOverMigrationValidation(workspaceDir: string)
       workspaceDir,
       safeMigrationRelativePath(marker.legacyJournalBackupFile),
     ), { force: true }),
+    ...(marker.sourceRegistryVersion === 4 && !retainLinkedSources
+      ? [fs.rm(path.join(workspaceDir, 'carryover-transcripts', 'nodes'), {
+          recursive: true,
+          force: true,
+        })]
+      : []),
   ]);
   await Promise.all([
     syncDirectory(workspaceDir),
@@ -234,7 +278,7 @@ export async function rollbackLegacyCarryOverMigration(
 ): Promise<'restored' | 'already-restored'> {
   const marker = await readMarker(workspaceDir);
   const registryVersion = await readChatRegistryVersion(workspaceDir);
-  if (registryVersion === 3 && !marker) return 'already-restored';
+  if ((registryVersion === 3 || registryVersion === 4) && !marker) return 'already-restored';
   if (!marker || marker.phase !== 'complete') {
     throw new Error('No completed carryover migration is available to roll back');
   }
@@ -274,7 +318,9 @@ export async function rollbackLegacyCarryOverMigration(
     path.join(workspaceDir, OWNERSHIP_JOURNAL_FILE),
     journalBackup,
   );
-  await writeJsonFileAtomic(path.join(workspaceDir, 'workspace-version.json'), { version: 3 }, {
+  await writeJsonFileAtomic(path.join(workspaceDir, 'workspace-version.json'), {
+    version: marker.sourceWorkspaceVersion ?? marker.sourceRegistryVersion,
+  }, {
     mode: 0o600,
   });
   await writeBytesAtomic(registryPath, registryBackup, 0o600);
@@ -308,7 +354,15 @@ async function resumeCommittedMigration(
     if (digest(journalBackup) !== marker.sourceJournalSha256) {
       throw new Error('Legacy ownership-journal backup does not match its migration marker');
     }
-    const targetJournal = migrateLegacyOwnershipJournal(journalBackup, targetRegistry.sessions);
+    const store = new CarryOverTranscriptStore({ workspaceDir });
+    await store.initialize();
+    const targetJournal = await migrateLegacyOwnershipJournal({
+      workspaceDir,
+      bytes: journalBackup,
+      sessions: targetRegistry.sessions,
+      sourceRegistryVersion: marker.sourceRegistryVersion,
+      store,
+    });
     await writeJsonFileAtomic(journalPath, targetJournal, { mode: 0o600 });
     await writeMarker(workspaceDir, {
       ...marker,
@@ -331,14 +385,18 @@ async function convertLegacySegments(input: {
   readonly segments: readonly LegacyCarryOverSegment[];
   readonly sourceDigest: string;
   readonly startedAt: string;
-  readonly nodes: CarryOverTranscriptStore;
-}): Promise<{ headId: string | null; nativeSeedReceipt: unknown; nodeIds: readonly string[] }> {
+  readonly store: CarryOverTranscriptStore;
+}): Promise<{
+  refs: readonly CarryOverSegmentRef[];
+  nativeSeedReceipt: unknown;
+  segmentIds: readonly string[];
+}> {
   const current = {
     agentId: legacyRequiredString(input.entry.agentId, 'chat agent'),
     model: legacyStringValue(input.entry.model, 'chat model'),
   };
-  let headId: string | null = null;
-  const nodeIds: string[] = [];
+  const refs: CarryOverSegmentRef[] = [];
+  const segmentIds: string[] = [];
   const rendered: ChatMessage[] = [];
   const legacyRendered: ChatMessage[] = [];
   for (const [index, segment] of input.segments.entries()) {
@@ -353,10 +411,9 @@ async function convertLegacySegments(input: {
     const next = input.segments[index + 1];
     const target = segment.boundaryTarget ?? next ?? current;
     if (messages.length > 0 || segment.boundary) {
-      const nodeId = deterministicUuid([
+      const segmentId = deterministicUuid([
         input.sourceDigest,
         String(index),
-        headId ?? '',
         JSON.stringify(messages),
         segment.agentId,
         segment.model,
@@ -366,27 +423,37 @@ async function convertLegacySegments(input: {
         target.agentId,
         target.model,
       ].join(':'));
-      const prepared = await input.nodes.prepareMaterialized({
-        operationId: `migration:${input.sourceDigest}:${input.chatId}:${index}`,
-        id: nodeId,
-        parentId: headId,
-        source: {
+      if (messages.length > 0) {
+        const prepared = await input.store.prepareSegment({
+          operationId: `migration:${input.sourceDigest}:${input.chatId}:${index}`,
+          id: segmentId,
+          seedSanitation,
+          messages,
+        });
+        await prepared.commit();
+        prepared.releaseRoot();
+        await input.store.verifySegment({
+          id: segmentId,
           agentId: segment.agentId,
           model: segment.model,
-          nativeSessionId: null,
-          nativeRevision: `migration:${input.sourceDigest}:${nodeId}`,
-        },
-        boundary: segment.boundary
-          ? { kind: 'handoff', targetAtCapture: { agentId: target.agentId, model: target.model } }
+          capturedAt: segment.at || input.startedAt,
+          storedMessageCount: messages.length,
+          visibleMessageCount: messages.length,
+          trailingHandoff: null,
+        });
+        segmentIds.push(segmentId);
+      }
+      refs.push({
+        id: segmentId,
+        agentId: segment.agentId,
+        model: segment.model,
+        capturedAt: segment.at || input.startedAt,
+        storedMessageCount: messages.length,
+        visibleMessageCount: messages.length,
+        trailingHandoff: segment.boundary
+          ? { agentId: target.agentId, model: target.model }
           : null,
-        seedSanitation,
-        messages,
-        createdAt: segment.at || input.startedAt,
       });
-      await prepared.commit();
-      prepared.releaseRoot();
-      headId = nodeId;
-      nodeIds.push(nodeId);
       rendered.push(...messages);
       if (segment.boundary) {
         const boundary = new AgentSwitchMessage(
@@ -411,25 +478,40 @@ async function convertLegacySegments(input: {
     }
   }
 
-  await input.nodes.assertReachableForHandoff(headId);
-  const migrated = await input.nodes.loadAll(headId, current);
+  await input.store.assertAvailable(refs);
+  const migrated = await input.store.loadAll(refs);
   if (canonicalMessages(migrated) !== canonicalMessages(rendered)) {
     throw new Error(`Migrated carryover transcript differs for chat ${input.chatId}`);
   }
-  if (rendered.length > 0 && headId === null) {
-    throw new Error(`Migrated carryover transcript has no history head for chat ${input.chatId}`);
+  if (rendered.length > 0 && refs.length === 0) {
+    throw new Error(`Migrated carryover transcript has no segment references for chat ${input.chatId}`);
   }
   const agentSessionId = nullableString(input.entry.agentSessionId);
-  const nativeSeedReceipt = headId && agentSessionId
+  const nativeSeedReceipt = refs.length > 0 && agentSessionId
     ? createNativeSeedReceipt({
-        headId,
         agentSessionId,
         placement: 'user-prefix',
         format: 'legacy-v0',
         prefix: `${renderTranscriptSeed(legacyRendered)}\n\n`,
       })
     : null;
-  return { headId, nativeSeedReceipt, nodeIds };
+  return { refs, nativeSeedReceipt, segmentIds };
+}
+
+async function quarantineCarryOverEntry(input: {
+  readonly workspaceDir: string;
+  readonly chatId: string;
+  readonly sourceArtifact: unknown;
+  readonly sourceDigest: string;
+  readonly error: unknown;
+}): Promise<{ readonly artifactId: string; readonly errorCode: string }> {
+  const artifactId = deterministicUuid(`quarantine:${input.sourceDigest}:${input.chatId}`);
+  await writeJsonFileAtomic(
+    path.join(input.workspaceDir, 'carryover-transcripts', 'quarantine', `${artifactId}.json`),
+    { version: 1, chatId: input.chatId, entry: input.sourceArtifact },
+    { mode: 0o600 },
+  );
+  return { artifactId, errorCode: migrationErrorCode(input.error) };
 }
 
 function stripExactLegacyPrefix(
@@ -450,138 +532,6 @@ function stripExactLegacyPrefix(
   return { messages: next, stripped: true };
 }
 
-function parseLegacyCarryOverFile(bytes: Buffer): Map<string, unknown> {
-  if (bytes.byteLength === 0) return new Map();
-  const parsed: unknown = JSON.parse(bytes.toString('utf8'));
-  if (!isRecord(parsed) || !isRecord(parsed.chats)) throw new Error('Invalid legacy carryover file');
-  return new Map(Object.entries(parsed.chats));
-}
-
-function activeLegacySegments(
-  value: unknown,
-  registryEntry: Readonly<Record<string, unknown>>,
-): LegacyCarryOverSegment[] {
-  if (value === undefined) return [];
-  let rawSegments: unknown;
-  if (Array.isArray(value)) rawSegments = value;
-  else if (isRecord(value)) {
-    const staged = isRecord(value.staged) ? value.staged : null;
-    const stagedCommitted = staged
-      && staged.ownerId === registryEntry.agentId
-      && staged.targetEpoch === registryEntry.agentOwnershipEpoch;
-    rawSegments = stagedCommitted ? staged.segments : value.segments;
-  } else {
-    throw new LegacyCarryOverDataError('Invalid legacy carryover chat entry');
-  }
-  if (!Array.isArray(rawSegments)) {
-    throw new LegacyCarryOverDataError('Invalid legacy carryover segment list');
-  }
-  return rawSegments.map((raw, index) => parseLegacySegment(raw, index));
-}
-
-function parseLegacySegment(value: unknown, index: number): LegacyCarryOverSegment {
-  if (!isRecord(value) || !Array.isArray(value.messages)) {
-    throw new LegacyCarryOverDataError(`Invalid legacy carryover segment ${index}`);
-  }
-  let messages: ChatMessage[];
-  try {
-    messages = parseChatMessages(value.messages);
-  } catch (error) {
-    throw new LegacyCarryOverDataError(`Invalid legacy carryover message in segment ${index}`, {
-      cause: error,
-    });
-  }
-  if (messages.length !== value.messages.length) {
-    throw new LegacyCarryOverDataError(`Invalid legacy carryover message in segment ${index}`);
-  }
-  const boundaryTarget = isRecord(value.boundaryTarget)
-    ? {
-        agentId: legacyRequiredString(value.boundaryTarget.agentId, 'boundary agent'),
-        model: legacyStringValue(value.boundaryTarget.model, 'boundary model'),
-      }
-    : null;
-  const at = typeof value.at === 'string' && Number.isFinite(Date.parse(value.at))
-    ? value.at
-    : new Date(0).toISOString();
-  return {
-    agentId: legacyRequiredString(value.agentId, 'segment agent'),
-    model: legacyStringValue(value.model, 'segment model'),
-    messages,
-    at,
-    boundary: value.boundary !== false,
-    boundaryTarget,
-  };
-}
-
-function migrateLegacyOwnershipJournal(
-  bytes: Buffer,
-  sessions: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
-): AgentOwnershipJournalFileV2 {
-  if (bytes.byteLength === 0) return emptyOwnershipJournalV2();
-  const value: unknown = JSON.parse(bytes.toString('utf8'));
-  if (!isRecord(value)) throw new Error('Invalid legacy ownership journal');
-  if (value.version === 2) return value as unknown as AgentOwnershipJournalFileV2;
-  if (value.version !== 1 || !Array.isArray(value.intents)) {
-    throw new Error('Unsupported legacy ownership journal');
-  }
-  const transferCleanup: SourceReleaseCleanup[] = [];
-  const ownershipIntents: DeleteIntentV2[] = [];
-  for (const raw of value.intents) {
-    if (!isRecord(raw) || !isRecord(raw.oldReference) || typeof raw.chatId !== 'string') {
-      throw new Error('Invalid legacy ownership intent');
-    }
-    const current = sessions[raw.chatId];
-    const source = { ...raw.oldReference, nativeSeedReceipt: null } as unknown as SourceReleaseCleanup['source'];
-    if (raw.kind === 'transfer') {
-      if (current?.agentId === raw.targetAgentId && current.agentOwnershipEpoch === raw.targetEpoch) {
-        transferCleanup.push({
-          version: 1,
-          operationId: requiredString(raw.id, 'legacy transfer ID'),
-          chatId: raw.chatId,
-          source,
-          reason: 'transferred',
-          status: 'pending',
-          attempts: 0,
-          lastErrorCode: null,
-          createdAt: requiredString(raw.createdAt, 'legacy transfer timestamp'),
-        });
-      } else if (!matchesLegacySource(current, raw)) {
-        throw new Error(`Legacy transfer ownership mismatch for ${raw.chatId}`);
-      }
-    } else if (raw.kind === 'delete') {
-      if (!current) {
-        ownershipIntents.push({
-          version: 2,
-          operationId: requiredString(raw.id, 'legacy delete ID'),
-          kind: 'delete',
-          chatId: raw.chatId,
-          phase: 'registry-removed',
-          sourceEpoch: typeof raw.oldEpoch === 'string' ? raw.oldEpoch : null,
-          releaseReferences: [source],
-          createdAt: requiredString(raw.createdAt, 'legacy delete timestamp'),
-        });
-      } else if (!matchesLegacySource(current, raw)) {
-        throw new Error(`Legacy delete ownership mismatch for ${raw.chatId}`);
-      }
-    } else {
-      throw new Error('Invalid legacy ownership intent kind');
-    }
-  }
-  return { version: 2, ownershipIntents, transferCleanup };
-}
-
-function matchesLegacySource(
-  current: Readonly<Record<string, unknown>> | undefined,
-  intent: Readonly<Record<string, unknown>>,
-): boolean {
-  if (!current) return false;
-  const reference = intent.oldReference as Record<string, unknown>;
-  return current.agentId === reference.agentId
-    && current.agentOwnershipEpoch === intent.oldEpoch
-    && current.agentSessionId === reference.agentSessionId
-    && JSON.stringify(current.nativeSession) === JSON.stringify(reference.nativeSession);
-}
-
 async function assertMigrationCapacity(workspaceDir: string, sourceBytes: number): Promise<void> {
   if (sourceBytes === 0) return;
   const requiredDisk = Math.ceil(sourceBytes * 2.5) + 64 * 1024 * 1024;
@@ -598,10 +548,35 @@ async function assertMigrationCapacity(workspaceDir: string, sourceBytes: number
   }
 }
 
+async function directorySize(directory: string): Promise<number> {
+  let entries;
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw error;
+  }
+  let total = 0;
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) total += await directorySize(entryPath);
+    else if (entry.isFile()) total += (await fs.stat(entryPath)).size;
+  }
+  return total;
+}
+
+async function targetRegistryHasQuarantine(workspaceDir: string): Promise<boolean> {
+  const registry = parseTargetRegistry(await fs.readFile(path.join(workspaceDir, 'chats.json')));
+  return Object.values(registry.sessions).some((entry) => (
+    entry.carryOverMigrationQuarantine !== null
+    && entry.carryOverMigrationQuarantine !== undefined
+  ));
+}
+
 async function assertWorkspaceVersionAllowsMigration(workspaceDir: string): Promise<void> {
   const version = await readWorkspaceVersion(workspaceDir);
-  if (version !== null && version >= 4) {
-    throw new Error('Workspace version 4 cannot contain a schema-v3 chat registry');
+  if (version !== null && version >= 5) {
+    throw new Error('Workspace version 5 cannot contain a legacy chat registry');
   }
 }
 
@@ -640,11 +615,11 @@ async function archiveLegacyCarryOver(filePath: string, startedAt: string): Prom
 
 function migratedCarryOverPath(workspaceDir: string, startedAt: string): string {
   const suffix = startedAt.replaceAll(':', '').replaceAll('.', '');
-  return path.join(workspaceDir, `chat-carryover.v4.migrated.${suffix}.json`);
+  return path.join(workspaceDir, `chat-carryover.v5.migrated.${suffix}.json`);
 }
 
 function registryBackupFile(marker: CarryOverMigrationMarkerBase): string {
-  return `migration-backups/chats.v3.${marker.sourceRegistrySha256.slice(0, 16)}.json`;
+  return `migration-backups/chats.v${marker.sourceRegistryVersion}.${marker.sourceRegistrySha256.slice(0, 16)}.json`;
 }
 
 async function readRollbackCarryOverSource(
@@ -687,7 +662,7 @@ async function archiveRollbackMarker(
   const suffix = marker.completedAt.replaceAll(':', '').replaceAll('.', '');
   await fs.rename(
     markerPath,
-    path.join(path.dirname(markerPath), `migration-v1.rolled-back.${suffix}.json`),
+    path.join(path.dirname(markerPath), `migration-v2.rolled-back.${suffix}.json`),
   );
   await syncDirectory(path.dirname(markerPath));
 }
@@ -754,6 +729,12 @@ function parseMigrationMarker(value: unknown): CarryOverMigrationMarker {
     legacyJournalBackupFile: safeMigrationRelativePath(
       requiredString(value.legacyJournalBackupFile, 'legacy journal backup'),
     ),
+    sourceRegistryVersion: value.sourceRegistryVersion === 3 || value.sourceRegistryVersion === 4
+      ? value.sourceRegistryVersion
+      : (() => { throw new Error('Invalid carryover migration source registry version'); })(),
+    sourceWorkspaceVersion: value.sourceWorkspaceVersion === null
+      ? null
+      : nonNegativeInteger(value.sourceWorkspaceVersion, 'source workspace version'),
     startedAt: timestampValue(value.startedAt, 'migration start'),
   };
   if (value.phase === 'in-progress') return { ...base, phase: 'in-progress' };
@@ -763,8 +744,8 @@ function parseMigrationMarker(value: unknown): CarryOverMigrationMarker {
   const committed = {
     ...base,
     targetRegistrySha256: sha256Value(value.targetRegistrySha256, 'target registry'),
-    nodeSummarySha256: sha256Value(value.nodeSummarySha256, 'node summary'),
-    nodeCount: nonNegativeInteger(value.nodeCount, 'migration node count'),
+    segmentSummarySha256: sha256Value(value.segmentSummarySha256, 'segment summary'),
+    segmentCount: nonNegativeInteger(value.segmentCount, 'migration segment count'),
   };
   if (value.phase === 'ready-to-commit') return { ...committed, phase: 'ready-to-commit' };
   if (value.rollbackSafe !== true && value.rollbackSafe !== false) {
@@ -817,12 +798,38 @@ function serializeJson(value: unknown): Buffer {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-function parseTargetRegistry(bytes: Buffer): {
+function parseSourceRegistryV4(bytes: Buffer): {
   readonly version: 4;
   readonly sessions: Record<string, Readonly<Record<string, unknown>>>;
 } {
   const value: unknown = JSON.parse(bytes.toString('utf8'));
   if (!isRecord(value) || value.version !== 4 || !isRecord(value.sessions)) {
+    throw new Error('Invalid version-four chat registry');
+  }
+  const sessions: Record<string, Readonly<Record<string, unknown>>> = {};
+  for (const [chatId, entry] of Object.entries(value.sessions)) {
+    if (!isRecord(entry)) throw new Error(`Invalid version-four chat registry entry for ${chatId}`);
+    sessions[chatId] = entry;
+  }
+  return { version: 4, sessions };
+}
+
+function segmentSummary(
+  sessions: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+): string {
+  const selected = Object.entries(sessions).map(([chatId, entry]) => [
+    chatId,
+    entry.carryOverSegments ?? [],
+  ] as const).sort(([left], [right]) => left.localeCompare(right));
+  return digest(Buffer.from(JSON.stringify(selected)));
+}
+
+function parseTargetRegistry(bytes: Buffer): {
+  readonly version: 5;
+  readonly sessions: Record<string, Readonly<Record<string, unknown>>>;
+} {
+  const value: unknown = JSON.parse(bytes.toString('utf8'));
+  if (!isRecord(value) || value.version !== 5 || !isRecord(value.sessions)) {
     throw new Error('Invalid migrated chat registry');
   }
   const sessions: Record<string, Readonly<Record<string, unknown>>> = {};
@@ -830,56 +837,42 @@ function parseTargetRegistry(bytes: Buffer): {
     if (!isRecord(entry)) throw new Error(`Invalid migrated chat registry entry for ${chatId}`);
     sessions[chatId] = entry;
   }
-  return { version: 4, sessions };
+  return { version: 5, sessions };
 }
 
-function parseTargetJournal(bytes: Buffer): AgentOwnershipJournalFileV2 {
+function parseTargetJournal(bytes: Buffer): AgentOwnershipJournalFileV3 {
   const value: unknown = JSON.parse(bytes.toString('utf8'));
   if (
     !isRecord(value)
-    || value.version !== 2
+    || value.version !== 3
     || !Array.isArray(value.ownershipIntents)
     || !Array.isArray(value.transferCleanup)
   ) {
     throw new Error('Invalid migrated ownership journal');
   }
-  return value as unknown as AgentOwnershipJournalFileV2;
+  return value as unknown as AgentOwnershipJournalFileV3;
 }
 
 async function validateMigratedRoots(
   workspaceDir: string,
   sessions: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
-  marker: { readonly nodeCount: number; readonly nodeSummarySha256: string },
+  marker: { readonly segmentCount: number; readonly segmentSummarySha256: string },
 ): Promise<void> {
-  const nodes = new CarryOverTranscriptStore({ workspaceDir });
-  await nodes.initialize();
-  const roots: Array<readonly [string, string | null]> = [];
-  const nodeIds = new Set<string>();
+  const store = new CarryOverTranscriptStore({ workspaceDir });
+  await store.initialize();
+  const ids = new Set<string>();
   for (const [chatId, entry] of Object.entries(sessions)) {
-    const headId = entry.carryOverHeadId === null
-      ? null
-      : requiredString(entry.carryOverHeadId, `carryover head for ${chatId}`);
-    roots.push([chatId, headId]);
-    if (!headId) continue;
-    await nodes.assertReachableForHandoff(headId);
-    await nodes.loadAll(headId, {
-      agentId: requiredString(entry.agentId, `agent for ${chatId}`),
-      model: stringValue(entry.model, `model for ${chatId}`),
-    });
-    let cursor: string | null = headId;
-    while (cursor) {
-      if (nodeIds.has(cursor)) break;
-      const node = await nodes.readManifest(cursor);
-      nodeIds.add(node.id);
-      if (node.kind === 'prefix') nodeIds.add(node.sourceNodeId);
-      cursor = node.parentId;
+    if (!Array.isArray(entry.carryOverSegments)) {
+      throw new Error(`Invalid carryover segments for ${chatId}`);
     }
+    const refs = parseCarryOverSegmentRefs(entry.carryOverSegments);
+    await store.assertAvailable(refs);
+    await store.loadAll(refs);
+    for (const ref of refs) if (ref.storedMessageCount > 0) ids.add(ref.id);
   }
-  const summary = digest(Buffer.from(JSON.stringify(roots.sort(([left], [right]) => (
-    left.localeCompare(right)
-  )))));
-  if (summary !== marker.nodeSummarySha256 || nodeIds.size !== marker.nodeCount) {
-    throw new Error('Migrated carryover node summary does not match its marker');
+  const summary = segmentSummary(sessions);
+  if (summary !== marker.segmentSummarySha256 || ids.size !== marker.segmentCount) {
+    throw new Error('Migrated carryover segment summary does not match its marker');
   }
 }
 
@@ -961,4 +954,14 @@ function stringValue(value: unknown, field: string): string {
 
 function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
+}
+
+function isFileSystemError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && 'code' in error
+    && typeof error.code === 'string'
+    && /^E[A-Z]+/.test(error.code),
+  );
 }

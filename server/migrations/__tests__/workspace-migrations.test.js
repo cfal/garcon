@@ -33,6 +33,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('core-record-migration', migrate);
     await runner.run('ephemeral-queue-state-cleanup', migrate);
     await runner.run('carryover-node-migration', migrate);
+    await runner.run('carryover-segment-migration', migrate);
     await runner.finish();
 
     expect(migrate).not.toHaveBeenCalled();
@@ -63,9 +64,16 @@ describe('WorkspaceMigrationRunner', () => {
       },
     }));
     await runner.run('carryover-node-migration', async () => { events.push('carryover-node'); });
+    await runner.run('carryover-segment-migration', async () => { events.push('carryover-segment'); });
     await runner.finish();
 
-    expect(events).toEqual(['chat-id', 'core-record', 'ownership', 'carryover-node']);
+    expect(events).toEqual([
+      'chat-id',
+      'core-record',
+      'ownership',
+      'carryover-node',
+      'carryover-segment',
+    ]);
     await expect(fs.stat(queuesDir)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(path.join(workspaceDir, 'pending-user-inputs.json'))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -92,10 +100,11 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('core-record-migration', early);
     await runner.run('ephemeral-queue-state-cleanup', cleanup);
     await runner.run('carryover-node-migration', cleanup);
+    await runner.run('carryover-segment-migration', cleanup);
     await runner.finish();
 
     expect(early).not.toHaveBeenCalled();
-    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(cleanup).toHaveBeenCalledTimes(3);
     expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
   });
 
