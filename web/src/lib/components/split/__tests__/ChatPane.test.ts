@@ -7,6 +7,8 @@
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(() =>
 		Promise.resolve({
+			historyState: { kind: 'complete' },
+			chatId: 'chat-1',
 			generationId: 'generation-1',
 			messages: [
 				{

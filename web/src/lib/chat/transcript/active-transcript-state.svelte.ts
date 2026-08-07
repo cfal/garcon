@@ -29,7 +29,7 @@ import type {
 	ChatRestoreResult,
 } from './active-transcript-port.js';
 import { collectEarlierTranscriptMessages } from './transcript-page-progress.js';
-import * as m from '$lib/paraglide/messages.js';
+import { displayLocalNotices } from './degraded-history-notice.js';
 import {
 	applyPendingDeliveryStatuses,
 	mergeRowsWithPendingInputs,
@@ -137,21 +137,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return ids;
 	});
 
-	#displayLocalNotices = $derived.by(() => {
-		if (this.hasLaterMessages) return [] as LocalNoticeRow[];
-		if (this.historyState.kind !== 'degraded') return this.localNotices;
-		return [
-			{
-				kind: 'local-notice' as const,
-				id: 'carryover-history-unavailable',
-				noticeType: 'error' as const,
-				content: m.chat_history_unavailable(),
-				timestamp: '',
-				revision: -1,
-			},
-			...this.localNotices,
-		];
-	});
+	#displayLocalNotices = $derived(
+		displayLocalNotices(this.hasLaterMessages, this.historyState, this.localNotices),
+	);
 
 	#displayRows = $derived.by(() => {
 		const durableRows = this.#renderEntries.map((entry) => ({

@@ -127,7 +127,7 @@ describe('ActiveTranscriptState', () => {
 		]);
 		expect(transcriptCache.get('chat-1')).toBeNull();
 		expect(chat.applyMessages('chat-1', 'generation-new', [entry(1, assistant('ignored'))]))
-			.toBe('invalidated');
+			.toBe('gap-detected');
 	});
 
 	it('records applied feed mutations by provenance without counting duplicates', () => {
