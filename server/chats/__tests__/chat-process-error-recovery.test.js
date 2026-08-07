@@ -4,12 +4,12 @@ import { ChatNativeReloader } from '../chat-native-reload.js';
 import { ChatProcessErrorRecovery } from '../chat-process-error-recovery.js';
 import { PendingUserInputService } from '../pending-user-input-service.js';
 import { ChatViewStore } from '../chat-view-store.js';
+import {
+  transcriptLoader,
+  transcriptSnapshot,
+} from './chat-transcript-test-helpers.js';
 
 const TS = '2026-06-01T00:00:00.000Z';
-
-function fullLoader(loadAll) {
-  return { loadAll };
-}
 
 function deferred() {
   let resolve;
@@ -31,7 +31,7 @@ describe('ChatProcessErrorRecovery', () => {
     });
     const reloader = new ChatNativeReloader(
       views,
-      { loadNativeMessages: async () => nativeMessages },
+      { loadSnapshot: async () => transcriptSnapshot(nativeMessages) },
       () => true,
     );
     const recovery = new ChatProcessErrorRecovery(views, reloader, pendingInputs);
@@ -66,7 +66,9 @@ describe('ChatProcessErrorRecovery', () => {
     const views = new ChatViewStore(() => false);
     const reloader = new ChatNativeReloader(
       views,
-      { loadNativeMessages: async () => [new AssistantMessage(TS, 'native')] },
+      {
+        loadSnapshot: async () => transcriptSnapshot([new AssistantMessage(TS, 'native')]),
+      },
       () => false,
     );
     const settlementError = new Error('pending store unavailable');
@@ -99,7 +101,7 @@ describe('ChatProcessErrorRecovery', () => {
     });
     const reloader = new ChatNativeReloader(
       views,
-      { loadNativeMessages: () => nativeLoad.promise },
+      { loadSnapshot: async () => transcriptSnapshot(await nativeLoad.promise) },
       () => true,
     );
     const recovery = new ChatProcessErrorRecovery(views, reloader, pendingInputs);
@@ -125,14 +127,14 @@ describe('ChatProcessErrorRecovery', () => {
     });
     const reloader = new ChatNativeReloader(
       views,
-      { loadNativeMessages: async () => { throw new Error('native unavailable'); } },
+      { loadSnapshot: async () => { throw new Error('native unavailable'); } },
       () => true,
     );
     const recovery = new ChatProcessErrorRecovery(views, reloader, pendingInputs);
 
     const result = await recovery.recover('chat-1', 'provider crashed');
     const loadAll = mock(async () => [new AssistantMessage(TS, 'native history')]);
-    const page = await views.getOrCreatePage('chat-1', fullLoader(loadAll), 20);
+    const page = await views.getOrCreatePage('chat-1', transcriptLoader(loadAll), 20);
 
     expect(result.kind).toBe('fallback-appended');
     expect(loadAll).toHaveBeenCalledTimes(1);

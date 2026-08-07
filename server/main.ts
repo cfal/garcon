@@ -16,6 +16,7 @@ Options:
   --workspace-dir <directory>    Use an explicit workspace directory path.
   --workspace <name>             Use workspace name under config dir (workspace-<name>).
   --project-base-dir <directory> Restrict file access to a project root directory.
+  --rollback-carryover-migration Restore the pre-v4 carryover workspace and exit.
 
 Environment Variables:
   GARCON_PORT                      Listen port (0..65535). If 0, picks a random port.

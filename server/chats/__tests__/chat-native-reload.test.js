@@ -2,6 +2,10 @@ import { describe, expect, it, mock } from 'bun:test';
 import { ChatNativeReloader } from '../chat-native-reload.js';
 import { ChatViewStore } from '../chat-view-store.js';
 import { AssistantMessage, ErrorMessage, UserMessage } from '../../../common/chat-types.js';
+import {
+  transcriptLoader,
+  transcriptSnapshot,
+} from './chat-transcript-test-helpers.js';
 
 const TS = '2026-06-01T00:00:00.000Z';
 
@@ -21,17 +25,24 @@ describe('ChatNativeReloader', () => {
   it('manual reload replaces the existing generation', async () => {
     const views = new ChatViewStore(() => false);
     const nativeSource = {
-      loadNativeMessages: mock(async () => [user('native prompt'), assistant('native response')]),
+      loadSnapshot: mock(async () => transcriptSnapshot([
+        user('native prompt'),
+        assistant('native response'),
+      ])),
     };
     const reloader = new ChatNativeReloader(views, nativeSource, () => false);
-    const before = await views.appendAfterEnsuringGeneration('chat-1', async () => [], [user('old')]);
+    const before = await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [user('old')],
+    );
 
     const replacement = await reloader.reloadFromNative('chat-1', 'manual-reload');
 
     expect(replacement.generationId).not.toBe(before.generationId);
     expect(replacement.mode).toBe('manual-reload');
     expect(contents(replacement)).toEqual(['native prompt', 'native response']);
-    expect(nativeSource.loadNativeMessages).toHaveBeenCalledWith('chat-1');
+    expect(nativeSource.loadSnapshot).toHaveBeenCalledWith('chat-1');
   });
 
   it('logs the reload mode as the generation replacement reason', async () => {
@@ -42,7 +53,7 @@ describe('ChatNativeReloader', () => {
       const views = new ChatViewStore(() => false);
       const reloader = new ChatNativeReloader(
         views,
-        { loadNativeMessages: async () => [assistant('native')] },
+        { loadSnapshot: async () => transcriptSnapshot([assistant('native')]) },
         () => false,
       );
       const before = await views.appendToCurrentOrEmpty('chat-1', [assistant('live')]);
@@ -64,7 +75,10 @@ describe('ChatNativeReloader', () => {
   it('process-error reload appends a normal in-memory error row', async () => {
     const views = new ChatViewStore(() => false);
     const nativeSource = {
-      loadNativeMessages: mock(async () => [user('native prompt'), assistant('native response')]),
+      loadSnapshot: mock(async () => transcriptSnapshot([
+        user('native prompt'),
+        assistant('native response'),
+      ])),
     };
     const reloader = new ChatNativeReloader(views, nativeSource, () => false);
 
@@ -78,7 +92,9 @@ describe('ChatNativeReloader', () => {
 
   it('process-error reload persists the humanized failure reason when provided', async () => {
     const views = new ChatViewStore(() => false);
-    const nativeSource = { loadNativeMessages: mock(async () => [assistant('native response')]) };
+    const nativeSource = {
+      loadSnapshot: mock(async () => transcriptSnapshot([assistant('native response')])),
+    };
     const reloader = new ChatNativeReloader(views, nativeSource, () => false);
 
     const reason = 'Codex rate limit exceeded. Please wait a moment and try again.';
@@ -90,7 +106,9 @@ describe('ChatNativeReloader', () => {
 
   it('process-error reload falls back to the death notice for a blank reason', async () => {
     const views = new ChatViewStore(() => false);
-    const nativeSource = { loadNativeMessages: mock(async () => [assistant('native response')]) };
+    const nativeSource = {
+      loadSnapshot: mock(async () => transcriptSnapshot([assistant('native response')])),
+    };
     const reloader = new ChatNativeReloader(views, nativeSource, () => false);
 
     const reload = await reloader.reloadFromNative('chat-1', 'process-error', '   ');
@@ -99,11 +117,13 @@ describe('ChatNativeReloader', () => {
   });
 
   it('rejects manual reload for running chats', async () => {
-    const nativeSource = { loadNativeMessages: mock(async () => [assistant('native')]) };
+    const nativeSource = {
+      loadSnapshot: mock(async () => transcriptSnapshot([assistant('native')])),
+    };
     const reloader = new ChatNativeReloader(new ChatViewStore(() => true), nativeSource, () => true);
 
     await expect(reloader.reloadFromNative('chat-1', 'manual-reload')).rejects.toThrow(/running/i);
-    expect(nativeSource.loadNativeMessages).not.toHaveBeenCalled();
+    expect(nativeSource.loadSnapshot).not.toHaveBeenCalled();
   });
 
   it('rechecks execution ownership after a held native read before replacing', async () => {
@@ -115,9 +135,9 @@ describe('ChatNativeReloader', () => {
     const views = new ChatViewStore(() => active);
     const original = await views.appendToCurrentOrEmpty('chat-1', [assistant('original')]);
     const nativeSource = {
-      loadNativeMessages: mock(async () => {
+      loadSnapshot: mock(async () => {
         await nativeGate;
-        return [assistant('native')];
+        return transcriptSnapshot([assistant('native')]);
       }),
     };
     const reloader = new ChatNativeReloader(views, nativeSource, () => active);
@@ -134,7 +154,9 @@ describe('ChatNativeReloader', () => {
   });
 
   it('allows process-error reload for running chats', async () => {
-    const nativeSource = { loadNativeMessages: mock(async () => [assistant('native')]) };
+    const nativeSource = {
+      loadSnapshot: mock(async () => transcriptSnapshot([assistant('native')])),
+    };
     const reloader = new ChatNativeReloader(new ChatViewStore(() => true), nativeSource, () => true);
 
     const reload = await reloader.reloadFromNative('chat-1', 'process-error');
@@ -149,9 +171,9 @@ describe('ChatNativeReloader', () => {
       release = resolve;
     });
     const nativeSource = {
-      loadNativeMessages: mock(async () => {
+      loadSnapshot: mock(async () => {
         await gate;
-        return [assistant('native')];
+        return transcriptSnapshot([assistant('native')]);
       }),
     };
     const reloader = new ChatNativeReloader(new ChatViewStore(() => false), nativeSource, () => false);
@@ -162,7 +184,7 @@ describe('ChatNativeReloader', () => {
     const [first, second] = await Promise.all([firstPromise, secondPromise]);
 
     expect(first.generationId).toBe(second.generationId);
-    expect(nativeSource.loadNativeMessages).toHaveBeenCalledTimes(1);
+    expect(nativeSource.loadSnapshot).toHaveBeenCalledTimes(1);
   });
 
   it('does not coalesce process-error reloads behind manual reloads', async () => {
@@ -172,13 +194,13 @@ describe('ChatNativeReloader', () => {
     });
     let calls = 0;
     const nativeSource = {
-      loadNativeMessages: mock(async () => {
+      loadSnapshot: mock(async () => {
         calls += 1;
         if (calls === 1) {
           await manualGate;
-          return [assistant('manual native')];
+          return transcriptSnapshot([assistant('manual native')]);
         }
-        return [assistant('process native')];
+        return transcriptSnapshot([assistant('process native')]);
       }),
     };
     const reloader = new ChatNativeReloader(new ChatViewStore(() => false), nativeSource, () => false);
@@ -193,7 +215,7 @@ describe('ChatNativeReloader', () => {
     expect(manual.generationId).not.toBe(process.generationId);
     expect(contents(manual)).toEqual(['manual native']);
     expect(contents(process)).toEqual(['process native', 'The process died.']);
-    expect(nativeSource.loadNativeMessages).toHaveBeenCalledTimes(2);
+    expect(nativeSource.loadSnapshot).toHaveBeenCalledTimes(2);
   });
 
   it('does not coalesce manual reloads behind process-error reloads', async () => {
@@ -203,13 +225,13 @@ describe('ChatNativeReloader', () => {
     });
     let calls = 0;
     const nativeSource = {
-      loadNativeMessages: mock(async () => {
+      loadSnapshot: mock(async () => {
         calls += 1;
         if (calls === 1) {
           await processGate;
-          return [assistant('process native')];
+          return transcriptSnapshot([assistant('process native')]);
         }
-        return [assistant('manual native')];
+        return transcriptSnapshot([assistant('manual native')]);
       }),
     };
     const reloader = new ChatNativeReloader(new ChatViewStore(() => false), nativeSource, () => false);
@@ -224,6 +246,6 @@ describe('ChatNativeReloader', () => {
     expect(process.generationId).not.toBe(manual.generationId);
     expect(contents(process)).toEqual(['process native', 'The process died.']);
     expect(contents(manual)).toEqual(['manual native']);
-    expect(nativeSource.loadNativeMessages).toHaveBeenCalledTimes(2);
+    expect(nativeSource.loadSnapshot).toHaveBeenCalledTimes(2);
   });
 });

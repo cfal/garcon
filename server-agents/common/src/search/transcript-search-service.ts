@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
 import type {
   AgentLogger,
@@ -56,6 +57,8 @@ export interface TranscriptSearchCatalogEntry {
     | { readonly state: 'absent' }
     | { readonly state: 'failed'; readonly code: string; readonly retryable: boolean };
   readonly carryOverRevision: string;
+  readonly agentSessionId: string | null;
+  readonly nativeSeedReceipt: NativeSeedReceipt | null;
 }
 
 export interface TranscriptSearchCatalogSnapshot {
@@ -595,7 +598,7 @@ export class TranscriptSearchService {
     const catalogEntry = this.#latestCatalog?.chats.find((entry) => entry.chatId === event.chatId);
     if (!handler || !catalogEntry || catalogEntry.agentId !== event.agentId
         || catalogEntry.source.state !== 'ready'
-        || canonicalDigest(catalogEntry.source.reference) !== event.sourceDescriptorHash) return;
+        || catalogSourceDescriptorHash(catalogEntry) !== event.sourceDescriptorHash) return;
     const dirtyGeneration = this.#dirtyReplay.get(event.chatId);
     if (dirtyGeneration && (compareGeneration(event.generation, dirtyGeneration) ?? -1) < 0) return;
     const controller = new AbortController();
@@ -801,6 +804,16 @@ export class TranscriptSearchService {
     await this.#reader.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS);
     await this.#indexer.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS);
   }
+}
+
+function catalogSourceDescriptorHash(entry: TranscriptSearchCatalogEntry): string | null {
+  return entry.source.state === 'ready'
+    ? canonicalDigest({
+        source: entry.source.reference,
+        agentSessionId: entry.agentSessionId,
+        nativeSeedReceipt: entry.nativeSeedReceipt,
+      })
+    : null;
 }
 
 function workerEventError(event: IndexerEvent | ReaderEvent): Error | null {

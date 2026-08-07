@@ -33,8 +33,10 @@ function makeRouter(fork) {
     start: mock(async () => ({
       agentSessionId: 'started-session',
       nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'started-session' } },
+      nativeSeedReceipt: null,
     })),
     resume: mock(async () => undefined),
+    abort: mock(async () => true),
     runningSessions: mock(() => []),
   };
   const integration = {
@@ -83,7 +85,8 @@ function makeRouter(fork) {
     },
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
     getCarryOverRevision: () => 'carry-1',
-    loadCarryOver: () => [],
+    loadCarriedContext: async () => null,
+    getCarryOverMessageCount: async () => 0,
   });
   return { router, entry, entries, execution, messages, integration };
 }

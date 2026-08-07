@@ -8,17 +8,19 @@ import type {
 } from '../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
+import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
+import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 import { runProjectPathUpdateTransaction } from '../agents/project-path-update-transaction.js';
 import {
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
 import { createLogger } from '../lib/log.js';
+import { withCurrentExecutionControl } from '../lib/command-execution-control-error.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import {
   CommandSupport,
   CommandValidationError,
   commandResultFromRecord,
-  runOptionsForCommand,
   type CompactInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
@@ -50,10 +52,11 @@ export class SessionCommands {
       images: input.images,
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
-      options: runOptionsForCommand(input),
+      options: input.handoff ? {} : runOptionsForCommand(input),
       expectedAgentId: input.expectedAgentId,
       tagsToAdd: input.tagsToAdd,
       permissionFallbackPolicy: input.permissionFallbackPolicy,
+      handoff: input.handoff,
     };
     const replay = await this.support.replayHttpRun(normalizedInput);
     if (replay) {
@@ -71,6 +74,24 @@ export class SessionCommands {
         `Expected agent ${input.expectedAgentId}, but chat uses ${chat.agentId}`,
         409,
       );
+    }
+    if (input.handoff) {
+      const handoffCommand = await prepareAgentHandoffCommand({
+        chatId: input.chatId,
+        clientRequestId: input.clientRequestId,
+        handoff: input.handoff,
+        source: chat,
+        permissionFallbackPolicy: input.permissionFallbackPolicy,
+        service: this.deps.handoffs,
+        execution: this.deps.queue,
+      });
+      normalizedInput.options = handoffCommand.options;
+      const result = await this.support.submitHttpRun(
+        normalizedInput,
+        handoffCommand.preparation,
+      );
+      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
+      return result;
     }
     if (!input.model && !chat.model) {
       throw new CommandValidationError(
@@ -394,7 +415,12 @@ export class SessionCommands {
           }),
         });
       } catch (error) {
-        throw await this.support.withCurrentExecutionControl(input.chatId, error);
+        throw await withCurrentExecutionControl({
+          chatId: input.chatId,
+          error,
+          handoff: false,
+          readControl: (chatId) => this.deps.queue.readChatExecutionControl(chatId),
+        });
       }
       return commandResultFromRecord(ledger.record);
     }

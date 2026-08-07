@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, UserMessage, type ChatMessage } from '@garcon/common/chat-types';
+import { createNativeSeedReceipt } from '@garcon/common/transcript-seed';
+import { canonicalDigest } from '../digest.js';
 import { TranscriptSearchService } from '../transcript-search-service.js';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
@@ -153,6 +156,54 @@ describe('TranscriptSearchService', () => {
     expect((await search(service, 'deletedtoken', ['one'])).results).toEqual([]);
     await service.close();
   });
+
+  it('rebuilds when a receipt appears and removes only its exact carried-context prefix', async () => {
+    const root = await workspace();
+    const headId = '11111111-1111-4111-8111-111111111111';
+    const prefix = '<carried-context version="1" id="11111111-1111-4111-8111-111111111111">\nseedonlytoken\n</carried-context>\n\n';
+    const native = [new UserMessage(timestamp, `${prefix}realprompttoken`)];
+    const service = createService(root, {
+      one: [new AssistantMessage(timestamp, 'archivedtoken')],
+    });
+    await enable(service);
+    const initial = entry('one', 'r1', native, `carry-v2:${headId}`);
+    await service.reconcile(snapshot(service, 1, [initial]));
+    await waitForSearch(service, 'seedonlytoken', ['one']);
+
+    const receipt = createNativeSeedReceipt({
+      headId,
+      agentSessionId: 'native-one',
+      placement: 'user-prefix',
+      prefix,
+    });
+    await service.reconcile(snapshot(service, 2, [{
+      ...initial,
+      agentSessionId: 'native-one',
+      nativeSeedReceipt: receipt,
+    }]));
+    await waitForSearch(service, 'realprompttoken', ['one']);
+    await waitForMissingSearch(service, 'seedonlytoken', ['one']);
+
+    expect((await search(service, 'archivedtoken', ['one'])).results).toHaveLength(1);
+    const db = new Database(path.join(root, 'transcript-search', 'index.sqlite'), {
+      readonly: true,
+      create: false,
+    });
+    const persisted = db.query<{
+      agentSessionId: string | null;
+      nativeSeedReceiptDigest: string;
+    }, []>(`
+      SELECT agent_session_id AS agentSessionId,
+        native_seed_receipt_digest AS nativeSeedReceiptDigest
+      FROM search_chat_state WHERE chat_id = 'one'
+    `).get();
+    db.close();
+    expect(persisted).toEqual({
+      agentSessionId: 'native-one',
+      nativeSeedReceiptDigest: canonicalDigest(receipt),
+    });
+    await service.close();
+  });
 });
 
 async function workspace(): Promise<string> {
@@ -171,7 +222,7 @@ function createService(
     logger,
     workerFactory,
     async openCarryOverStream(request) {
-      if (request.expectedRevision !== 'carry-v1:1') {
+      if (request.expectedRevision === 'carry-v1:0') {
         return { revision: request.expectedRevision, batches: emptyBatches() };
       }
       return {
@@ -211,6 +262,8 @@ function entry(chatId: string, revision: string, messages: ChatMessage[], carryO
       },
     },
     carryOverRevision,
+    agentSessionId: null,
+    nativeSeedReceipt: null,
   };
 }
 
@@ -225,6 +278,19 @@ async function waitForSearch(service: TranscriptSearchService, text: string, cha
     });
     if (result.results.length > 0) return result;
     if (Date.now() >= deadline) throw new Error(`Search result did not become available: ${text}`);
+    await Bun.sleep(20);
+  }
+}
+
+async function waitForMissingSearch(
+  service: TranscriptSearchService,
+  text: string,
+  chatIds: string[],
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    if ((await search(service, text, chatIds)).results.length === 0) return;
+    if (Date.now() >= deadline) throw new Error(`Stale search result remained available: ${text}`);
     await Bun.sleep(20);
   }
 }

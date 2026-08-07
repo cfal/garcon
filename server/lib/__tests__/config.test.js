@@ -91,6 +91,12 @@ describe('getPort', () => {
     expect(() => initializeServerConfig()).toThrow('Invalid GARCON_MAX_WS_CLIENTS value');
   });
 
+  it('parses the explicit carryover rollback startup flag', () => {
+    process.argv = [...originalArgv, '--rollback-carryover-migration'];
+
+    expect(initializeServerConfig().rollbackCarryOverMigration).toBe(true);
+  });
+
   it('rejects negative websocket client limits during initialization', () => {
     process.env.GARCON_MAX_WS_CLIENTS = '-1';
 

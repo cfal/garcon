@@ -1,4 +1,5 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
+import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevision,
@@ -146,6 +147,10 @@ export default class CursorAgentIntegration implements AgentIntegration {
               agentSessionId: forked.agentSessionId,
               modelEndpointId: null,
             }),
+            nativeSeedReceipt: retargetNativeSeedReceipt(
+              request.source.nativeSeedReceipt,
+              forked.agentSessionId,
+            ),
           },
         };
       },

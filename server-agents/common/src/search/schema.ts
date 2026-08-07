@@ -1,9 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { canonicalDigest } from './digest.js';
 import type { HistoricalSearchMessageRow } from './rows.js';
 
-export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 4;
+export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 5;
 
 export type SearchChatStatus = 'pending' | 'sealed' | 'failed' | 'unsupported';
 
@@ -20,6 +21,8 @@ export interface SearchChatState {
   readonly sourceDescriptorHash: string | null;
   readonly sourceRevision: string | null;
   readonly carryOverRevision: string;
+  readonly agentSessionId: string | null;
+  readonly nativeSeedReceiptDigest: string;
   readonly contentDigest: string | null;
   readonly sealedSourceKey: string | null;
   readonly operationEpoch: string;
@@ -38,6 +41,8 @@ export interface SearchChatAttempt {
   readonly sourceDescriptorHash: string | null;
   readonly sourceRevision: string | null;
   readonly carryOverRevision: string;
+  readonly agentSessionId: string | null;
+  readonly nativeSeedReceiptDigest: string;
   readonly operationEpoch: string;
   readonly operationSequence: number;
 }
@@ -89,6 +94,8 @@ export function createSchema(db: Database): void {
       source_descriptor_hash TEXT,
       source_revision TEXT,
       carry_over_revision TEXT NOT NULL,
+      agent_session_id TEXT,
+      native_seed_receipt_digest TEXT NOT NULL,
       content_digest TEXT,
       sealed_source_key TEXT,
       operation_epoch TEXT NOT NULL,
@@ -168,6 +175,7 @@ function validateExistingSchema(db: Database): void {
   requireColumns(db, 'search_chat_state', [
     'chat_id', 'agent_id', 'model', 'source_api_version', 'projector_version',
     'source_descriptor_hash', 'source_revision', 'carry_over_revision',
+    'agent_session_id', 'native_seed_receipt_digest',
     'content_digest', 'sealed_source_key', 'operation_epoch', 'operation_sequence',
     'message_count', 'status', 'last_error_code', 'last_checked_at', 'indexed_at',
     'updated_at',
@@ -308,7 +316,9 @@ export function getChatState(db: Database, chatId: string): SearchChatState | nu
   return db.query<SearchChatState, [string]>(`
     SELECT chat_id AS chatId, agent_id AS agentId, model,
       source_descriptor_hash AS sourceDescriptorHash, source_revision AS sourceRevision,
-      carry_over_revision AS carryOverRevision, content_digest AS contentDigest,
+      carry_over_revision AS carryOverRevision, agent_session_id AS agentSessionId,
+      native_seed_receipt_digest AS nativeSeedReceiptDigest,
+      content_digest AS contentDigest,
       sealed_source_key AS sealedSourceKey, operation_epoch AS operationEpoch,
       operation_sequence AS operationSequence, message_count AS messageCount, status,
       last_checked_at AS lastCheckedAt
@@ -342,14 +352,20 @@ export function markChatAttempt(
     INSERT INTO search_chat_state(
       chat_id, agent_id, model, source_api_version, projector_version,
       source_descriptor_hash, source_revision, carry_over_revision,
+      agent_session_id, native_seed_receipt_digest,
       operation_epoch, operation_sequence, message_count, status,
       last_error_code, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
     ON CONFLICT(chat_id) DO UPDATE SET
       agent_id = excluded.agent_id,
       model = excluded.model,
       source_api_version = excluded.source_api_version,
       projector_version = excluded.projector_version,
+      source_descriptor_hash = excluded.source_descriptor_hash,
+      source_revision = excluded.source_revision,
+      carry_over_revision = excluded.carry_over_revision,
+      agent_session_id = excluded.agent_session_id,
+      native_seed_receipt_digest = excluded.native_seed_receipt_digest,
       operation_epoch = excluded.operation_epoch,
       operation_sequence = excluded.operation_sequence,
       status = excluded.status,
@@ -358,7 +374,8 @@ export function markChatAttempt(
   `).run(
     attempt.chatId, attempt.agentId, attempt.model, attempt.sourceApiVersion,
     attempt.projectorVersion, attempt.sourceDescriptorHash, attempt.sourceRevision,
-    attempt.carryOverRevision, attempt.operationEpoch, attempt.operationSequence,
+    attempt.carryOverRevision, attempt.agentSessionId, attempt.nativeSeedReceiptDigest,
+    attempt.operationEpoch, attempt.operationSequence,
     status, errorCode, timestamp,
   );
 }
@@ -370,9 +387,10 @@ export function sealChatFromStaging(db: Database, seal: SearchChatSeal): void {
       INSERT INTO search_chat_state(
         chat_id, agent_id, model, source_api_version, projector_version,
         source_descriptor_hash, source_revision, carry_over_revision,
+        agent_session_id, native_seed_receipt_digest,
         content_digest, sealed_source_key, operation_epoch, operation_sequence,
         message_count, status, last_error_code, last_checked_at, indexed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sealed', NULL, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sealed', NULL, ?, ?, ?)
       ON CONFLICT(chat_id) DO UPDATE SET
         agent_id = excluded.agent_id,
         model = excluded.model,
@@ -381,6 +399,8 @@ export function sealChatFromStaging(db: Database, seal: SearchChatSeal): void {
         source_descriptor_hash = excluded.source_descriptor_hash,
         source_revision = excluded.source_revision,
         carry_over_revision = excluded.carry_over_revision,
+        agent_session_id = excluded.agent_session_id,
+        native_seed_receipt_digest = excluded.native_seed_receipt_digest,
         content_digest = excluded.content_digest,
         sealed_source_key = excluded.sealed_source_key,
         operation_epoch = excluded.operation_epoch,
@@ -392,6 +412,7 @@ export function sealChatFromStaging(db: Database, seal: SearchChatSeal): void {
     `).run(
       seal.chatId, seal.agentId, seal.model, seal.sourceApiVersion, seal.projectorVersion,
       seal.sourceDescriptorHash, seal.sourceRevision, seal.carryOverRevision,
+      seal.agentSessionId, seal.nativeSeedReceiptDigest,
       seal.contentDigest, seal.sealedSourceKey, seal.operationEpoch, seal.operationSequence,
       seal.messageCount, timestamp, timestamp, timestamp,
     );
@@ -420,7 +441,7 @@ export function runIdleMaintenance(db: Database): void {
   db.exec('PRAGMA incremental_vacuum(2048)');
 }
 
-// Retains the benchmark helper while the production writer uses explicit v4 seals.
+// Retains the benchmark helper while the production writer uses explicit v5 seals.
 export function replaceChatRows(
   db: Database,
   chatId: string,
@@ -439,6 +460,8 @@ export function replaceChatRows(
     sourceDescriptorHash: null,
     sourceRevision: sourceKey,
     carryOverRevision: 'carry-v1:0',
+    agentSessionId: null,
+    nativeSeedReceiptDigest: canonicalDigest(null),
     contentDigest: sourceKey,
     sealedSourceKey: sourceKey,
     operationEpoch: 'benchmark',

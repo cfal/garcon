@@ -98,9 +98,15 @@ export function parseCarryOverNode(value: unknown, expectedId?: string): CarryOv
     };
   }
 
-  if (messageCount < 1) throw new Error('Materialized carryover node must not be empty');
-  if (!Array.isArray(value.pages) || value.pages.length === 0) {
+  const boundary = parseBoundary(value.boundary);
+  if (messageCount === 0 && boundary === null) {
+    throw new Error('Materialized carryover node must contain messages or a boundary');
+  }
+  if (!Array.isArray(value.pages) || (messageCount > 0 && value.pages.length === 0)) {
     throw new Error('Materialized carryover node has no pages');
+  }
+  if (messageCount === 0 && value.pages.length !== 0) {
+    throw new Error('Boundary-only carryover node must not contain pages');
   }
   const pages = value.pages.map((page, index) => parsePage(page, index));
   let expectedSequence = 0;
@@ -118,7 +124,7 @@ export function parseCarryOverNode(value: unknown, expectedId?: string): CarryOv
     parentId,
     createdAt,
     source,
-    boundary: parseBoundary(value.boundary),
+    boundary,
     seedSanitation: parseSeedSanitation(value.seedSanitation),
     messageCount,
     pages,

@@ -72,6 +72,7 @@ export function createRouteCommandService({
   agents,
   commandLedger,
   pendingInputs,
+	handoffs,
 	pathCache,
 	chatListProjector,
   forkChatFileCopy: forkChatFileCopyOverride,
@@ -92,6 +93,26 @@ export function createRouteCommandService({
     agents,
     ledger: commandLedger,
     pendingInputs,
+	handoffs: handoffs ?? {
+		resolveTarget: async ({ handoff }) => ({
+			agentId: handoff.target.agentId,
+			model: handoff.target.model,
+			apiProviderId: handoff.target.apiProviderId ?? null,
+			modelEndpointId: handoff.target.modelEndpointId ?? null,
+			modelProtocol: handoff.target.modelProtocol ?? null,
+			permissionMode: handoff.target.permissionMode ?? 'default',
+			thinkingMode: handoff.target.thinkingMode ?? 'none',
+			agentSettings: handoff.target.agentSettings ?? {
+				ownerId: handoff.target.agentId,
+				schemaVersion: 1,
+				values: {},
+			},
+		}),
+		createPreparation: () => ({
+			prepare: async () => undefined,
+			compensate: async () => undefined,
+		}),
+	},
     fileMentions: { resolve: async (command) => command },
     ownership: {
       delete: async (chatId) => {

@@ -1,14 +1,14 @@
 import crypto from 'crypto';
 import {
-  UserMessage,
   type ChatImage,
-  type ChatMessage,
+  type UserMessage,
   type UserMessageDeliveryStatus,
 } from '../../common/chat-types.js';
 import type {
   PendingUserInput,
   PendingUserInputClearReason,
 } from '../../common/pending-user-input.js';
+import { isPendingUserInputInFlight } from '../../common/pending-user-input.js';
 import {
   PendingUserInputStore,
   type PendingUserInputRecord,
@@ -20,17 +20,15 @@ import {
   matchingRequestIds,
   type IdentitylessEvidenceClaim,
 } from './pending-input-matching.js';
+import {
+  nativeUserMessages,
+  scanCurrentNativeUserEvidence,
+} from './native-pending-evidence-scanner.js';
 
 const logger = createLogger('pending-inputs');
 
 function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }): number {
   return left.createdAt.localeCompare(right.createdAt);
-}
-
-function userMessages(messages: ChatMessage[] | null): UserMessage[] {
-  return (messages ?? []).filter(
-    (message): message is UserMessage => message instanceof UserMessage,
-  );
 }
 
 export interface RegisterPendingUserInputOptions {
@@ -50,21 +48,6 @@ export interface PendingUserInputCohort {
 interface NativeReconcileRun {
   dirty: boolean;
   promise: Promise<void>;
-}
-
-function isInFlightDeliveryStatus(status: UserMessageDeliveryStatus): boolean {
-  switch (status) {
-    case 'submitting':
-    case 'accepted':
-      return true;
-    case 'unconfirmed':
-    case 'failed':
-      return false;
-    default: {
-      const exhaustiveStatus: never = status;
-      throw new Error(`Unhandled pending input delivery status: ${exhaustiveStatus}`);
-    }
-  }
 }
 
 export interface PendingUserInputServiceContract {
@@ -118,7 +101,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   hasInFlightForChat(chatId: string): boolean {
     return this.store
       .listRecordsForChat(chatId)
-      .some((record) => isInFlightDeliveryStatus(record.deliveryStatus));
+      .some((record) => isPendingUserInputInFlight(record.deliveryStatus));
   }
 
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {
@@ -174,7 +157,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     this.#clearMatches(
       chatId,
       records,
-      userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
+      nativeUserMessages(this.#messages.getRetainedHistoryMessages(chatId)),
     );
   }
 
@@ -217,7 +200,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       this.#clearMatches(
         chatId,
         this.#currentCohortRecords(cohort),
-        userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
+        nativeUserMessages(this.#messages.getRetainedHistoryMessages(chatId)),
       );
     }
   }
@@ -227,8 +210,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       const cohort = this.captureCohort(chatId);
       const records = this.#currentCohortRecords(cohort);
       if (records.length === 0) return;
-      const nativeMessages = await this.#messages.loadNativeMessages(chatId);
-      this.#clearMatches(chatId, this.#currentCohortRecords(cohort), userMessages(nativeMessages));
+      await this.#scanNativeEvidence(cohort, true);
     });
   }
 
@@ -238,12 +220,12 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       if (records.length === 0) return;
 
       try {
-        const nativeMessages = await this.#messages.loadNativeMessages(cohort.chatId);
-        this.#settleCohort(cohort, userMessages(nativeMessages));
+        const nativeMessages = await this.#scanNativeEvidence(cohort, false);
+        this.#settleCohort(cohort, nativeMessages);
       } catch {
         this.#settleCohort(
           cohort,
-          userMessages(this.#messages.getRetainedHistoryMessages(cohort.chatId)),
+          nativeUserMessages(this.#messages.getRetainedHistoryMessages(cohort.chatId)),
         );
       }
     });
@@ -252,8 +234,25 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   settleRetainedCohort(cohort: PendingUserInputCohort): void {
     this.#settleCohort(
       cohort,
-      userMessages(this.#messages.getRetainedHistoryMessages(cohort.chatId)),
+      nativeUserMessages(this.#messages.getRetainedHistoryMessages(cohort.chatId)),
     );
+  }
+
+  async #scanNativeEvidence(
+    cohort: PendingUserInputCohort,
+    allowIdentityless: boolean,
+  ): Promise<UserMessage[]> {
+    return scanCurrentNativeUserEvidence({
+      chatId: cohort.chatId,
+      reader: this.#messages,
+      shouldContinue: () => this.#currentCohortRecords(cohort).length > 0,
+      acceptEvidence: (messages) => this.#clearMatches(
+        cohort.chatId,
+        this.#currentCohortRecords(cohort),
+        messages,
+        allowIdentityless,
+      ),
+    });
   }
 
   #reconcilableRecords(chatId: string): PendingUserInputRecord[] {

@@ -73,7 +73,7 @@ function startRequest(projectPath, signal = new AbortController().signal) {
     },
     prompt: 'hello',
     attachments: [],
-    carryOver: [],
+    carriedContext: null,
   };
 }
 

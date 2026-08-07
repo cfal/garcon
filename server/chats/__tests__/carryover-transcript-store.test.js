@@ -8,6 +8,7 @@ import {
   CarryOverTranscriptError,
   CarryOverTranscriptStore,
 } from '../carryover-transcript-store.ts';
+import { decodeCarryOverPage } from '../carryover-page-codec.ts';
 
 const FIRST = '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e';
 const SECOND = 'd5f2380b-6228-49f5-8484-b2d7e16380ab';
@@ -96,6 +97,30 @@ describe('CarryOverTranscriptStore', () => {
     });
     expect(page.messages.map((message) => message.content)).toEqual(['two', 'three']);
     expect(page).toMatchObject({ total: 4, offset: 1, limit: 2, hasMore: true });
+  });
+
+  it('preserves a handoff boundary for an empty provider segment', async () => {
+    await commitMaterialized(store, {
+      id: FIRST,
+      parentId: null,
+      agentId: 'a',
+      model: 'one',
+      targetAgentId: 'b',
+      targetModel: 'two',
+      messages: [],
+    });
+
+    const manifest = await store.readManifest(FIRST);
+    expect(manifest).toMatchObject({ messageCount: 0, pages: [] });
+    expect(await store.logicalMessageCount(FIRST)).toBe(1);
+    expect(await store.loadAll(FIRST, { agentId: 'b', model: 'two' })).toEqual([
+      expect.objectContaining({
+        type: 'agent-switch',
+        fromAgentId: 'a',
+        toAgentId: 'b',
+      }),
+    ]);
+    expect(await store.resolveCutoff(FIRST, 1)).toEqual({ kind: 'reuse', headId: FIRST });
   });
 
   it('allows one oversized message in its own page', async () => {
@@ -204,6 +229,89 @@ describe('CarryOverTranscriptStore', () => {
     expect(store.writerRoots()).toContain(FIRST);
     prepared.releaseRoot();
     expect(store.writerRoots()).not.toContain(FIRST);
+  });
+
+  it('runs the durable migration fence before a committed node is released', async () => {
+    let fenced = 0;
+    const fencedStore = new CarryOverTranscriptStore({
+      workspaceDir,
+      async onNodeCommitted() {
+        fenced += 1;
+      },
+    });
+    await fencedStore.initialize();
+    const prepared = await fencedStore.prepareMaterialized(materializedRequest({
+      id: FIRST,
+      parentId: null,
+      agentId: 'a',
+      model: 'one',
+      targetAgentId: 'b',
+      targetModel: 'two',
+      messages: [new UserMessage(TIMESTAMP, 'one')],
+    }));
+
+    await prepared.commit();
+
+    expect(fenced).toBe(1);
+    expect(fencedStore.writerRoots()).toContain(FIRST);
+    prepared.releaseRoot();
+  });
+
+  it('keeps a node compensatable when its durable migration fence fails', async () => {
+    const fencedStore = new CarryOverTranscriptStore({
+      workspaceDir,
+      onNodeCommitted: () => Promise.reject(new Error('migration marker write failed')),
+    });
+    await fencedStore.initialize();
+    const prepared = await fencedStore.prepareMaterialized(materializedRequest({
+      id: FIRST,
+      parentId: null,
+      agentId: 'a',
+      model: 'one',
+      targetAgentId: 'b',
+      targetModel: 'two',
+      messages: [new UserMessage(TIMESTAMP, 'one')],
+    }));
+
+    await expect(prepared.commit()).rejects.toThrow('migration marker write failed');
+    await prepared.discard();
+
+    await expect(fs.stat(path.join(
+      workspaceDir,
+      'carryover-transcripts',
+      'nodes',
+      FIRST,
+    ))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('does not remember a cancelled page read as node corruption', async () => {
+    await commitMaterialized(store, {
+      id: FIRST,
+      parentId: null,
+      agentId: 'a',
+      model: 'one',
+      targetAgentId: 'b',
+      targetModel: 'two',
+      messages: [new UserMessage(TIMESTAMP, 'one')],
+    });
+    let cancelNextRead = true;
+    const reader = new CarryOverTranscriptStore({
+      workspaceDir,
+      async decodePage(...args) {
+        if (cancelNextRead) {
+          cancelNextRead = false;
+          throw new DOMException('Aborted', 'AbortError');
+        }
+        return decodeCarryOverPage(...args);
+      },
+    });
+    await reader.initialize();
+
+    await expect(reader.loadAll(FIRST, { agentId: 'b', model: 'two' }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    await expect(reader.assertReachableForHandoff(FIRST)).resolves.toBeUndefined();
+    expect(await reader.loadAll(FIRST, { agentId: 'b', model: 'two' }))
+      .toHaveLength(2);
   });
 });
 

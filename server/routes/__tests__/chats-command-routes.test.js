@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { QUEUE_ENTRY_ID_MAX_BYTES } from '../../../common/chat-command-contracts.ts';
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -52,12 +51,10 @@ import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { CommandValidationError } from '../../lib/command-validation-error.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
-import { AgentSwitchError } from '../../agents/agent-switch-service.js';
 import {
   DomainError,
   QueueEntrySteerError,
   SteerDeliveryError,
-  TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
 } from '../../lib/domain-error.js';
 import {
   QueueEntryMutationError,
@@ -443,21 +440,6 @@ function createRouteAgent(sessionOverrides = {}) {
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
-  const agentSwitch = {
-    switchAgentModel: mock((req) =>
-      Promise.resolve(
-        registry.updateChat(req.chatId, {
-          agentId: req.agentId,
-          model: req.model,
-          apiProviderId: req.apiProviderId ?? null,
-          modelEndpointId: req.modelEndpointId ?? null,
-          modelProtocol: req.modelProtocol ?? null,
-          permissionMode: 'default',
-          thinkingMode: 'none',
-        }),
-      ),
-    ),
-  };
   const commandLedger = createRouteCommandLedger('chats-command-routes');
   const pendingInputs = createRoutePendingInputs();
   const chatListProjector = createRouteChatListProjector({
@@ -476,7 +458,6 @@ function createRouteAgent(sessionOverrides = {}) {
     chatViews,
     agents,
     pendingInputs,
-    agentSwitch,
     chatListProjector,
     commandService: createRouteCommandService({
       registry,
@@ -521,7 +502,6 @@ function createRouteAgent(sessionOverrides = {}) {
     metadata,
     chatViews,
     agents,
-    agentSwitch,
     routes,
   };
 }
@@ -692,6 +672,42 @@ describe('REST chat command routes', () => {
         queue: { entries: [], pause: null },
       },
     });
+  });
+
+  it('POST /run rejects a handoff before preparation when the chat is not idle', async () => {
+    const agent = createRouteAgent();
+    const control = storedQueue([queueEntry('entry-1')], { version: 5 });
+    agent.queue.ownsExecution.mockReturnValue(true);
+    agent.queue.readChatExecutionControl.mockResolvedValue(control);
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      {
+        clientRequestId: 'req-handoff-busy',
+        clientMessageId: 'msg-handoff-busy',
+        chatId: CHAT_ID,
+        command: 'delegate this work',
+        handoff: {
+          expectedAgentOwnershipEpoch: 'epoch-1',
+          target: {
+            agentId: 'codex',
+            model: 'gpt-5.5',
+            permissionMode: 'default',
+            thinkingMode: 'high',
+            agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+          },
+        },
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({
+      success: false,
+      errorCode: 'AGENT_HANDOFF_REQUIRES_IDLE',
+      retryable: true,
+      control: { version: 5, queue: { entries: [{ id: 'entry-1' }] } },
+    });
+    expect(agent.queue.reserveDirectTurn).not.toHaveBeenCalled();
   });
 
   it('POST /fork-run forks once and schedules the target turn', async () => {
@@ -1488,49 +1504,6 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(422);
     expect(body.errorCode).toBe('MODEL_SELECTION_ERROR');
     expect(body.error).toBe('Endpoint not found');
-  });
-
-  it('PATCH /agent-model maps active-turn switch conflicts to 409', async () => {
-    const agent = createRouteAgent();
-    agent.agentSwitch.switchAgentModel.mockRejectedValueOnce(
-      new AgentSwitchError('Stop the current turn before switching agents.', 409, 'SESSION_BUSY'),
-    );
-
-    const { response, body } = await callJson(
-      agent.routes['/api/v1/chats/agent-model'].PATCH,
-      { chatId: CHAT_ID, agentId: 'codex', model: 'gpt-5' },
-      'PATCH',
-    );
-
-    expect(response.status).toBe(409);
-    expect(body.errorCode).toBe('SESSION_BUSY');
-    expect(body.error).toBe('Stop the current turn before switching agents.');
-    expect(body.retryable).toBe(false);
-  });
-
-  it('PATCH /agent-model maps unavailable source transcripts without exposing provider details', async () => {
-    const agent = createRouteAgent();
-    agent.agentSwitch.switchAgentModel.mockRejectedValueOnce(
-      new AgentIntegrationError(
-        'TRANSCRIPT_UNAVAILABLE',
-        'Cannot open /home/private/.codex/sessions/rollout-secret.jsonl',
-        true,
-      ),
-    );
-
-    const { response, body } = await callJson(
-      agent.routes['/api/v1/chats/agent-model'].PATCH,
-      { chatId: CHAT_ID, agentId: 'codex', model: 'gpt-5' },
-      'PATCH',
-    );
-
-    expect(response.status).toBe(503);
-    expect(body).toMatchObject({
-      success: false,
-      error: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
-      errorCode: 'TRANSCRIPT_UNAVAILABLE',
-      retryable: true,
-    });
   });
 
   it('PATCH /project-path validates, prepares the agent, and patches the registry', async () => {

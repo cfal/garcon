@@ -6,6 +6,7 @@ import type { ChatProcessingPhase } from './chat-types.js';
 export interface ChatListEntry {
   id: string;
   agentId: string;
+  agentOwnershipEpoch: string;
   model: string | null;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;

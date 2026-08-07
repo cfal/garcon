@@ -173,7 +173,7 @@ describe('workspace chat ID migration', () => {
   it('does not reinterpret uncommon numeric lengths', async () => {
     const workspaceDir = await tempWorkspace();
     await writeJson(workspaceDir, 'chats.json', {
-      version: 3,
+      version: 4,
       sessions: { '177463477993': chatEntry() },
     });
 

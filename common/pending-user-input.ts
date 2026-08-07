@@ -19,6 +19,21 @@ export interface PendingUserInput {
 
 export type PendingUserInputClearReason = 'chat-removed' | 'persisted';
 
+export function isPendingUserInputInFlight(status: UserMessageDeliveryStatus): boolean {
+  switch (status) {
+    case 'submitting':
+    case 'accepted':
+      return true;
+    case 'unconfirmed':
+    case 'failed':
+      return false;
+    default: {
+      const exhaustiveStatus: never = status;
+      throw new Error(`Unhandled pending input delivery status: ${exhaustiveStatus}`);
+    }
+  }
+}
+
 function isChatImage(value: unknown): value is ChatImage {
   if (!value || typeof value !== 'object') return false;
   const raw = value as Record<string, unknown>;

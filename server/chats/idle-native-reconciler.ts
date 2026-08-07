@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { ChatMessage } from '../../common/chat-types.js';
+import type { NativeSnapshotReconciliation } from './chat-view-store.js';
 import { createLogger } from '../lib/log.js';
 import { ChatRunningError } from './errors.js';
 
@@ -9,13 +10,12 @@ const DEFAULT_DEBOUNCE_MS = 5_000;
 const DEFAULT_SETTLE_MS = 250;
 
 interface NativeHistorySource {
-  loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
+  loadNativeSnapshot(chatId: string): Promise<NativeSnapshotReconciliation>;
 }
 
 interface ReconcilableViews {
-  getNativeHistoryLastSeq(chatId: string): number | null;
   getCursor(chatId: string): { generationId: string; lastSeq: number } | null;
-  reconcileNativeSnapshot(chatId: string, messages: readonly ChatMessage[]): Promise<void>;
+  reconcileNativeSnapshot(chatId: string, input: NativeSnapshotReconciliation): Promise<void>;
 }
 
 export interface IdleNativeReconcilerOptions {
@@ -93,19 +93,17 @@ export class IdleNativeReconciler {
     try {
       if (this.#stopped || this.#ownsExecution(chatId)) return;
       const before = this.#views.getCursor(chatId);
-      // Nothing above the seqs read from the transcript means every client seq already addresses
-      // a native position, so there is nothing to rebuild.
-      if (before === null || before.lastSeq === this.#views.getNativeHistoryLastSeq(chatId)) return;
+      if (before === null) return;
       // Providers persist a settled turn after its live events, so a single read can catch the
       // transcript mid-flush and rebuild the view from a rendering that is about to change,
       // surrendering messages the user already saw. Acting only when two spaced reads agree
       // defers to the flush; the next idle signal retries once the transcript stops moving.
-      const first = await this.#source.loadNativeMessages(chatId);
+      const first = await this.#source.loadNativeSnapshot(chatId);
       await sleep(this.#settleMs);
       if (this.#stopped) return;
-      const messages = await this.#source.loadNativeMessages(chatId);
-      if (this.#stopped || !sameRendering(first, messages)) return;
-      await this.#views.reconcileNativeSnapshot(chatId, messages);
+      const snapshot = await this.#source.loadNativeSnapshot(chatId);
+      if (this.#stopped || !sameSnapshot(first, snapshot)) return;
+      await this.#views.reconcileNativeSnapshot(chatId, snapshot);
       const after = this.#views.getCursor(chatId);
       if (this.#stopped || !after || before.generationId === after.generationId) return;
       this.#onGenerationReset(chatId, after.generationId, after.lastSeq);
@@ -117,6 +115,9 @@ export class IdleNativeReconciler {
   }
 }
 
-function sameRendering(a: ChatMessage[], b: ChatMessage[]): boolean {
-  return a.length === b.length && JSON.stringify(a) === JSON.stringify(b);
+function sameSnapshot(a: NativeSnapshotReconciliation, b: NativeSnapshotReconciliation): boolean {
+  return a.compositeRevision === b.compositeRevision
+    && a.nativePrefixDigest === b.nativePrefixDigest
+    && a.messages.length === b.messages.length
+    && JSON.stringify(a.messages) === JSON.stringify(b.messages);
 }

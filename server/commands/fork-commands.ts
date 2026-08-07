@@ -14,10 +14,10 @@ import {
   CommandSupport,
   CommandValidationError,
   agentTurnResultFromRecord,
-  runOptionsForCommand,
   type NormalizedSubmitForkRunInput,
   type SubmitForkRunInput,
 } from './command-support.js';
+import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 
 const logger = createLogger('commands:fork');
 
@@ -368,6 +368,7 @@ export class ForkCommands {
         await this.deps.agents.discardForkedAgentSession(target.agentId, {
           agentSessionId: target.agentSessionId,
           nativeSession: target.nativeSession,
+          nativeSeedReceipt: target.nativeSeedReceipt,
         });
       } catch (error) {
         failures.push(error);

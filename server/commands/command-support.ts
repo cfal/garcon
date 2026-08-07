@@ -6,13 +6,13 @@ import {
   QUEUE_ENTRY_ID_MAX_BYTES,
   isCommandCorrelationIdWithinLimit,
   isQueueEntryIdWithinLimit,
+  type AgentHandoffRequest,
   type AgentInterruptAndSendCommandRequest,
   type AgentRunCommandRequest,
   type AgentStopCommandRequest,
   type AgentTurnCommandResponse,
   type CompactCommandRequest,
   type CommandAcceptedResponse,
-  type CommandErrorCode,
   type ForkRunCommandRequest,
   type PermissionDecisionCommandRequest,
   type ProjectPathPatchRequest,
@@ -30,16 +30,26 @@ import type {
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
 import { assertAttachmentsSupported } from '../attachments/support.js';
 import type { StoredChatExecutionControlState } from '../chat-execution/control-state.ts';
+import type { DirectInputPreparation } from '../chat-execution/types.js';
+import {
+  agentHandoffReplayDisposition,
+  withHandoffChatProjection,
+} from '../agents/agent-handoff-command.js';
+import { agentRunCommandPayload } from '../agents/agent-run-command-input.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
+import type { AgentHandoffService } from '../agents/agent-handoff-service.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
-import type { CarryOverForkStage } from '../chats/chat-carryover-store.js';
+import type { CarryOverTranscriptStore } from '../chats/carryover-transcript-store.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import { DomainError } from '../lib/domain-error.js';
+import {
+  CommandExecutionControlError,
+  withCurrentExecutionControl,
+} from '../lib/command-execution-control-error.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
@@ -55,6 +65,7 @@ export interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
+  setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
   recordChatStartup(defaults: Record<string, unknown>): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;
@@ -66,18 +77,10 @@ export interface MetadataDep {
   getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
 
-export interface CarryOverDep {
-  stageFork(input: {
-    sourceChatId: string;
-    targetChatId: string;
-    targetEpoch: string;
-    ownerId: string;
-    ownerModel: string;
-    upToSequence?: number;
-  }): Promise<CarryOverForkStage>;
-  promoteStaged(chatId: string, targetEpoch: string): Promise<void>;
-  discardStaged(chatId: string, targetEpoch: string): Promise<void>;
-}
+export type CarryOverDep = Pick<
+  CarryOverTranscriptStore,
+  'assertReachableForHandoff' | 'logicalMessageCount' | 'preparePrefix' | 'resolveCutoff'
+>;
 
 export type PendingInputsDep = Pick<
   PendingUserInputServiceContract,
@@ -123,7 +126,7 @@ export type ForkChatFileCopyDep = (args: {
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
-  carryOver?: CarryOverDep;
+  carryOver: CarryOverDep;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
   getViewCursor(chatId: string): { lastSeq: number } | null;
   forkAgentSession: (args: {
@@ -157,11 +160,12 @@ export interface ChatCommandServiceDeps {
   pendingInputs: PendingInputsDep;
   fileMentions: FileMentionResolverDep;
   forkChatFileCopy: ForkChatFileCopyDep;
-  carryOver?: CarryOverDep;
+  carryOver: CarryOverDep;
   chatIds: Pick<ChatIdAllocator, 'allocate'>;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
+  handoffs: Pick<AgentHandoffService, 'resolveTarget' | 'createPreparation'>;
   chatMutationLock?: KeyedPromiseLock;
 }
 
@@ -178,6 +182,7 @@ export interface NormalizedSubmitRunInput {
   expectedAgentId?: string;
   tagsToAdd?: string[];
   permissionFallbackPolicy?: 'require-explicit-bypass';
+  handoff?: AgentHandoffRequest;
 }
 
 export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
@@ -249,26 +254,8 @@ export interface DeleteChatInput {
   chatId: string;
 }
 
-export interface AcceptedRunPreparation {
-  operation: 'fork-run';
-  prepare(): Promise<void>;
-  compensate(): Promise<void>;
-}
-
 export { CommandValidationError };
-
-export class CommandExecutionControlError extends CommandValidationError {
-  constructor(
-    code: CommandErrorCode,
-    message: string,
-    status: number,
-    retryable: boolean,
-    readonly control: StoredChatExecutionControlState,
-  ) {
-    super(code, message, status, retryable);
-    this.name = 'CommandExecutionControlError';
-  }
-}
+export { CommandExecutionControlError };
 
 export function commandResultFromRecord(
   record: CommandLedgerRecord,
@@ -294,20 +281,6 @@ export function agentTurnResultFromRecord(
     ...commandResultFromRecord(record, status),
     chatId: record.chatId,
     turnId: record.turnId,
-  };
-}
-
-export function runOptionsForCommand(
-  input: AgentRunCommandRequest | ForkRunCommandRequest,
-): RunAgentTurnOptions {
-  return {
-    ...(input.model === undefined ? {} : { model: input.model }),
-    ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
-    ...(input.thinkingMode === undefined ? {} : { thinkingMode: input.thinkingMode }),
-    ...(input.agentSettings === undefined ? {} : { agentSettings: input.agentSettings }),
-    ...(input.apiProviderId === undefined ? {} : { apiProviderId: input.apiProviderId }),
-    ...(input.modelEndpointId === undefined ? {} : { modelEndpointId: input.modelEndpointId }),
-    ...(input.modelProtocol === undefined ? {} : { modelProtocol: input.modelProtocol }),
   };
 }
 
@@ -445,6 +418,7 @@ export class CommandSupport {
 
   async submitHttpRun(
     input: NormalizedSubmitRunInput,
+    preparation?: DirectInputPreparation,
   ): Promise<AgentTurnCommandResponse> {
     const clientRequestId = this.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.requireClientRequestId(input.clientMessageId, 'clientMessageId');
@@ -453,7 +427,7 @@ export class CommandSupport {
       commandType: 'agent-run',
       chatId: input.chatId,
       clientRequestId,
-      payload: runPayload(input, clientMessageId),
+      payload: agentRunCommandPayload(input, clientMessageId),
       turnId,
     });
     return this.scheduleAcceptedHttpRun(
@@ -461,6 +435,7 @@ export class CommandSupport {
       input,
       { clientRequestId, clientMessageId, turnId },
       'agent-run',
+      preparation,
     );
   }
 
@@ -473,19 +448,27 @@ export class CommandSupport {
       commandLedgerKey('agent-run', input.chatId, clientRequestId),
     );
     if (!existing) return null;
-    if (existing.payloadHash !== commandPayloadHash(runPayload(input, clientMessageId))) {
+    if (existing.payloadHash !== commandPayloadHash(agentRunCommandPayload(input, clientMessageId))) {
       throw new CommandValidationError(
         'IDEMPOTENCY_CONFLICT',
         'clientRequestId was reused with different payload',
         409,
       );
     }
-    if (
-      existing.status === 'failed'
-      && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
-      && existing.publicTerminalAt === undefined
-    ) {
-      return null;
+    const replayDisposition = agentHandoffReplayDisposition({
+      handoff: input.handoff,
+      currentOwnershipEpoch: this.deps.chats.getChat(input.chatId)?.agentOwnershipEpoch,
+      recordStatus: existing.status,
+      isUnpublishedPreScheduleFailure: existing.status === 'failed'
+        && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
+        && existing.publicTerminalAt === undefined,
+    });
+    if (replayDisposition === 'retry') return null;
+    if (replayDisposition === 'rethrow-failure') {
+      this.throwRecordedExecutionFailure(existing);
+    }
+    if (replayDisposition === 'return-duplicate') {
+      return this.agentTurnResultWithOptionalChat(existing, 'duplicate', true);
     }
     if (existing.publicTerminalAt === undefined) {
       this.throwRecordedExecutionFailure(existing);
@@ -504,7 +487,7 @@ export class CommandSupport {
     input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
     commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
-    preparation?: AcceptedRunPreparation,
+    preparation?: DirectInputPreparation,
   ): Promise<AgentTurnCommandResponse> {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError(
@@ -516,7 +499,11 @@ export class CommandSupport {
     const recoveringAcceptedCommand = ledger.kind === 'duplicate'
       && ledger.record.status === 'accepted';
     if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
-      return agentTurnResultFromRecord(ledger.record, 'duplicate');
+      return this.agentTurnResultWithOptionalChat(
+        ledger.record,
+        'duplicate',
+        Boolean(input.handoff),
+      );
     }
 
     const options: RunAgentTurnOptions = {
@@ -542,49 +529,29 @@ export class CommandSupport {
         preparation,
       });
     } catch (error) {
-      throw await this.withCurrentExecutionControl(input.chatId, error);
+      throw await withCurrentExecutionControl({
+        chatId: input.chatId,
+        error,
+        handoff: Boolean(input.handoff),
+        readControl: (chatId) => this.deps.queue.readChatExecutionControl(chatId),
+      });
     }
-    return agentTurnResultFromRecord(
+    return this.agentTurnResultWithOptionalChat(
       ledger.record,
       recoveringAcceptedCommand ? 'duplicate' : 'accepted',
+      Boolean(input.handoff),
     );
   }
 
-  async withCurrentExecutionControl(chatId: string, error: unknown): Promise<unknown> {
-    if (error instanceof CommandExecutionControlError) return error;
-    if (!(error instanceof DomainError) || error.code !== 'SESSION_BUSY') return error;
-
-    let control: StoredChatExecutionControlState;
-    try {
-      control = await this.deps.queue.readChatExecutionControl(chatId);
-    } catch {
-      return error;
-    }
-    return new CommandExecutionControlError(
-      'SESSION_BUSY',
-      error.message,
-      error.status,
-      error.retryable,
-      control,
+  async agentTurnResultWithOptionalChat(
+    record: CommandLedgerRecord,
+    status: CommandAcceptedResponse['status'],
+    includeChat: boolean,
+  ): Promise<AgentTurnCommandResponse> {
+    return withHandoffChatProjection(
+      agentTurnResultFromRecord(record, status),
+      includeChat,
+      (chatId) => this.projectCommandChat(chatId),
     );
   }
-}
-
-function runPayload(input: NormalizedSubmitRunInput, clientMessageId: string): Record<string, unknown> {
-  return {
-    chatId: input.chatId,
-    clientMessageId,
-    command: input.command,
-    images: input.images,
-    permissionMode: input.options?.permissionMode,
-    thinkingMode: input.options?.thinkingMode,
-    agentSettings: input.options?.agentSettings,
-    model: input.options?.model,
-    apiProviderId: input.options?.apiProviderId,
-    modelEndpointId: input.options?.modelEndpointId,
-    modelProtocol: input.options?.modelProtocol,
-    expectedAgentId: input.expectedAgentId,
-    tagsToAdd: input.tagsToAdd,
-    permissionFallbackPolicy: input.permissionFallbackPolicy,
-  };
 }

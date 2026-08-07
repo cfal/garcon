@@ -275,6 +275,8 @@ export class TranscriptSearchController {
       updatedAt: registration.updatedAt,
       source,
       carryOverRevision: registration.reference.carryOverRevision,
+      agentSessionId: registration.reference.agentSessionId,
+      nativeSeedReceipt: registration.reference.nativeSeedReceipt,
     };
   }
 

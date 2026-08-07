@@ -124,9 +124,14 @@ export interface CommandSettlementPort {
 }
 
 export interface DirectInputPreparation {
-  operation: 'chat-start' | 'fork-run';
-  prepare(): Promise<void>;
+  operation: 'chat-start' | 'fork-run' | 'agent-handoff';
+  prepare(context: DirectInputPreparationContext): Promise<void>;
   compensate(): Promise<void>;
+}
+
+export interface DirectInputPreparationContext {
+  readonly signal: AbortSignal;
+  assertAdmissionActive(): void;
 }
 
 export interface AcceptedDirectInput {

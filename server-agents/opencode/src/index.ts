@@ -1,4 +1,5 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
+import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevision,
@@ -138,6 +139,10 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
               agentSessionId,
               modelEndpointId: null,
             }),
+            nativeSeedReceipt: retargetNativeSeedReceipt(
+              request.source.nativeSeedReceipt,
+              agentSessionId,
+            ),
           },
         };
       },

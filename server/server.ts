@@ -16,7 +16,7 @@ import {
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { resolveFileMentionsInCommand } from './chats/file-mentions.js';
-import { wireServerEvents } from './server-event-wiring.js';
+import { wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
 // Classes
@@ -49,14 +49,8 @@ import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
-import {
-  ChatCarryOverStore,
-  renderCarriedTranscript,
-} from './chats/chat-carryover-store.js';
 import { AgentRegistry } from './agents/index.js';
-import { AgentDirectory } from './agents/directory.js';
-import { AgentSwitchService } from './agents/agent-switch-service.js';
-import { stripFirstUserSeed } from '@garcon/common/transcript-seed';
+import { renderCarriedContextPrefix } from '@garcon/common/transcript-seed';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
@@ -88,6 +82,16 @@ import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
+import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
+import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
+import {
+  markCarryOverMigrationRollbackUnsafe,
+  migrateLegacyCarryOverWorkspace,
+  rollbackLegacyCarryOverMigration,
+} from './chats/chat-carryover-migration.js';
+import { LinkedChatTranscriptReader } from './chats/linked-chat-transcript-reader.js';
+import { AgentHandoffService } from './agents/agent-handoff-service.js';
+import { SettledNativeCaptureService } from './agents/settled-native-capture.js';
 import { SnippetStore } from './snippets/store.js';
 import {
   SnippetProjectPathService,
@@ -115,6 +119,7 @@ import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,
 } from './lib/http-route-types.js';
+import { TranscriptSearchCarryOverError } from '@garcon/server-agent-common/search/transcript-search-service';
 
 const logger = createLogger('server');
 
@@ -144,6 +149,13 @@ export async function startServer(): Promise<void> {
       },
     });
     const workspaceDir = workspaceLease.workspaceDir;
+    if (config.rollbackCarryOverMigration) {
+      const result = await rollbackLegacyCarryOverMigration(workspaceDir);
+      logger.info(`Carryover migration rollback ${result}. The server was not started.`);
+      await workspaceLease.release();
+      workspaceLease = null;
+      return;
+    }
     const runtimeState = createServerRuntimeState(workspaceDir);
     const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
     await workspaceMigrations.run('chat-id-migration', async () => {
@@ -178,10 +190,12 @@ export async function startServer(): Promise<void> {
     const apiProviderStore = new ApiProviderStore();
     await apiProviderStore.init();
 
-    const carryOver = new ChatCarryOverStore({
-      filePath: path.join(workspaceDir, 'chat-carryover.json'),
+    const carryOver = new CarryOverTranscriptStore({
+      workspaceDir,
+      onNodeCommitted: () => markCarryOverMigrationRollbackUnsafe(workspaceDir),
     });
-    await carryOver.init();
+    await carryOver.initialize();
+    let carryOverRegistry: ChatRegistry | null = null;
 
     const integrationHostFactory = new IntegrationHostFactory({
       workspaceDir,
@@ -193,7 +207,15 @@ export async function startServer(): Promise<void> {
       },
       async loadCarryOver(request) {
         request.signal.throwIfAborted();
-        const revision = carryOver.getRevision(request.chatId);
+        const entry = carryOverRegistry?.getChat(request.chatId);
+        if (!entry) {
+          throw new AgentIntegrationError(
+            'SOURCE_REVISION_CHANGED',
+            `Carry-over source is unavailable for chat ${request.chatId}`,
+            true,
+          );
+        }
+        const revision = carryOver.revision(entry.carryOverHeadId);
         if (revision !== request.expectedRevision) {
           throw new AgentIntegrationError(
             'SOURCE_REVISION_CHANGED',
@@ -203,7 +225,7 @@ export async function startServer(): Promise<void> {
         }
         return {
           revision,
-          messages: renderCarriedTranscript(carryOver.getSegments(request.chatId), {
+          messages: await carryOver.loadAll(entry.carryOverHeadId, {
             agentId: request.currentAgentId,
             model: request.currentModel,
           }),
@@ -222,25 +244,30 @@ export async function startServer(): Promise<void> {
     await workspaceMigrations.run('core-record-migration', () => (
       migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry })
     ));
-    await chatRegistry.init();
-    await settings.init();
-    carryOver.bindRegistry(chatRegistry);
     await integrationRegistry.start();
+    await workspaceMigrations.run('ephemeral-queue-state-cleanup', () => cleanupLegacyQueueState({
+      workspaceDir,
+      settleOwnershipIntents: async () => undefined,
+    }));
+    await workspaceMigrations.run('carryover-node-migration', () => (
+      migrateLegacyCarryOverWorkspace(workspaceDir)
+    ));
+    await chatRegistry.init();
+    carryOverRegistry = chatRegistry;
+    await settings.init();
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
       registry: chatRegistry,
-      carryOver,
       integrations: integrationRegistry,
     });
-    let ownershipInitialized = false;
-    await workspaceMigrations.run('ephemeral-queue-state-cleanup', () => cleanupLegacyQueueState({
-      workspaceDir,
-      async settleOwnershipIntents() {
-        await agentOwnership.initialize();
-        ownershipInitialized = true;
-      },
-    }));
-    if (!ownershipInitialized) await agentOwnership.initialize();
+    await agentOwnership.initialize();
+    const carryOverGarbageCollector = new CarryOverGarbageCollector({
+      registry: chatRegistry,
+      journal: agentOwnership,
+      store: carryOver,
+    });
+    await carryOverGarbageCollector.initialize();
+    chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
     await workspaceMigrations.finish();
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
@@ -260,11 +287,25 @@ export async function startServer(): Promise<void> {
       registry: chatRegistry,
       integrations: integrationRegistry,
       endpointResolver,
-      getCarryOverRevision: (chatId) => carryOver.getRevision(chatId),
-      loadCarryOver: (chatId, entry) => renderCarriedTranscript(carryOver.getSegments(chatId), {
-        agentId: entry.agentId,
-        model: entry.model ?? '',
-      }),
+      getCarryOverRevision: (entry) => carryOver.revision(entry.carryOverHeadId ?? null),
+      async loadCarriedContext(entry, signal) {
+        if (entry.carryOverMigrationQuarantine) {
+          throw new Error('Archived chat history is unavailable');
+        }
+        if (!entry.carryOverHeadId) return null;
+        const messages = await carryOver.loadTailForSeed({
+          headId: entry.carryOverHeadId,
+          current: { agentId: entry.agentId, model: entry.model ?? '' },
+          signal,
+        });
+        return {
+          headId: entry.carryOverHeadId,
+          prefix: renderCarriedContextPrefix(entry.carryOverHeadId, messages),
+        };
+      },
+      getCarryOverMessageCount: (entry, signal) => (
+        carryOver.logicalMessageCount(entry.carryOverHeadId ?? null, signal)
+      ),
       chatMutationLock,
     });
 
@@ -279,19 +320,6 @@ export async function startServer(): Promise<void> {
     });
     await metadata.init();
 
-    // Agent-switch coordinator: snapshots the outgoing transcript and stages a
-    // fresh session under the new agent. Uses a directory built from the same
-    // agent suite the registry wraps.
-    const agentDirectory = new AgentDirectory(integrationRegistry);
-    const agentSwitch = new AgentSwitchService({
-      registry: chatRegistry,
-      directory: agentDirectory,
-      endpointResolver,
-      carryOver,
-      ownership: agentOwnership,
-      chatMutationLock,
-    });
-
     // Bound once the coordinator exists. Until then nothing can own execution beyond a running
     // provider session, so transcript retention and reload gating consult the same question the
     // coordinator answers rather than assembling their own union of ownership state.
@@ -304,37 +332,55 @@ export async function startServer(): Promise<void> {
     const chatViews = new ChatViewStore(ownsExecution);
     const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
     chatViewPruneTimer.unref();
-    // Prepends carried-over segments, interleaved with agent-switch boundary
-    // markers, and strips the seed from the new session's first user turn so a
-    // switched chat shows its full history once and only once.
-    const loadNativeMessages = async (chatId: string) => {
-      const session = chatRegistry.getChat(chatId);
-      if (!session) return [];
-      const native = await agentRegistry.loadMessages(session, chatId);
-      const segments = carryOver.getSegments(chatId);
-      if (segments.length === 0) return native;
-      const carried = renderCarriedTranscript(segments, {
-        agentId: session.agentId,
-        model: session.model,
-      });
-      return [...carried, ...stripFirstUserSeed(native)];
-    };
-    const loadNativeMessagePage = async (chatId: string, limit: number, offset: number) => {
-      const session = chatRegistry.getChat(chatId);
-      // Falls back to the composite full loader because carried segments and the
-      // stripped continuation seed do not share the native transcript's offsets.
-      if (!session || carryOver.getSegments(chatId).length > 0) return null;
-      return agentRegistry.loadMessagePage(session, limit, offset, chatId);
-    };
+    const transcripts = new LinkedChatTranscriptReader({
+      registry: chatRegistry,
+      agents: agentRegistry,
+      carryOver,
+    });
+    const loadChatSnapshot = (chatId: string) => transcripts.loadAll(chatId);
+    const loadChatMessages = async (chatId: string) => (await loadChatSnapshot(chatId)).messages;
+    const loadCurrentNativeMessages = (chatId: string) => (
+      transcripts.loadCurrentNativeMessages(chatId)
+    );
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
-      { loadNativeMessages },
+      { loadSnapshot: loadChatSnapshot },
       ownsExecution,
     );
     const transcriptSearchService = new TranscriptSearchService({
       workspaceDirectory: workspaceDir,
       logger,
-      openCarryOverStream: (request) => carryOver.openSearchStream(request),
+      async openCarryOverStream(request) {
+        request.signal.throwIfAborted();
+        const entry = chatRegistry.getChat(request.chatId);
+        if (!entry || entry.carryOverMigrationQuarantine) {
+          throw new TranscriptSearchCarryOverError({
+            kind: 'transcript-search-carry-over-failure',
+            code: 'CARRY_OVER_UNAVAILABLE',
+            retryable: false,
+          });
+        }
+        const revision = carryOver.revision(entry.carryOverHeadId);
+        if (revision !== request.expectedRevision) {
+          throw new TranscriptSearchCarryOverError({
+            kind: 'transcript-search-carry-over-failure',
+            code: 'CARRY_OVER_REVISION_CHANGED',
+            retryable: true,
+          });
+        }
+        return {
+          revision,
+          batches: carryOver.stream({
+            headId: entry.carryOverHeadId,
+            current: {
+              agentId: request.currentAgentId,
+              model: request.currentModel,
+            },
+            maxMessagesPerBatch: request.limits.maxMessagesPerBatch,
+            signal: request.signal,
+          }),
+        };
+      },
     });
     const chatSearch = new TranscriptSearchController({
       integrations: integrationRegistry,
@@ -348,7 +394,7 @@ export async function startServer(): Promise<void> {
             integration,
             chatId,
             session,
-            carryOver.getRevision(chatId),
+            carryOver.revision(session.carryOverHeadId),
           ),
           updatedAt: metadata.getChatMetadata(chatId)?.lastActivity ?? null,
         }];
@@ -377,7 +423,10 @@ export async function startServer(): Promise<void> {
       },
     };
     const chatMessageReader = {
-      loadNativeMessages,
+      loadNativeMessages: loadCurrentNativeMessages,
+      loadNativeWindow: (input: Parameters<LinkedChatTranscriptReader['loadNativeWindow']>[0]) => (
+        transcripts.loadNativeWindow(input)
+      ),
       getMessages(chatId: string) {
         return chatViews.getLoadedMessages(chatId);
       },
@@ -396,8 +445,8 @@ export async function startServer(): Promise<void> {
         return chatViews.getOrCreatePage(
           chatId,
           {
-            loadAll: () => loadNativeMessages(chatId),
-            loadPage: (limit, offset) => loadNativeMessagePage(chatId, limit, offset),
+            loadAll: () => loadChatSnapshot(chatId),
+            loadPage: (limit, offset) => transcripts.loadPage(chatId, limit, offset),
           },
           limit,
           beforeSeq,
@@ -405,9 +454,9 @@ export async function startServer(): Promise<void> {
       },
       async reconcileNativeSnapshot(
         chatId: string,
-        messages: Parameters<ChatViewStore['reconcileNativeSnapshot']>[1],
+        input: Parameters<ChatViewStore['reconcileNativeSnapshot']>[1],
       ) {
-        await chatViews.reconcileNativeSnapshot(chatId, messages);
+        await chatViews.reconcileNativeSnapshot(chatId, input);
       },
     };
     const chatMessageAppender = {
@@ -417,12 +466,28 @@ export async function startServer(): Promise<void> {
       ) {
         return chatViews.appendAfterEnsuringGeneration(
           chatId,
-          () => loadNativeMessages(chatId),
+          {
+            loadAll: () => loadChatSnapshot(chatId),
+            loadPage: (limit, offset) => transcripts.loadPage(chatId, limit, offset),
+          },
           messages,
         );
       },
     };
     const pendingInputs = new PendingUserInputService(chatMessageReader);
+    let eventWiring: ServerEventWiring | null = null;
+    const handoffs = new AgentHandoffService({
+      registry: chatRegistry,
+      integrations: integrationRegistry,
+      endpointResolver,
+      catalog: agentRegistry,
+      carryOver,
+      settledCapture: new SettledNativeCaptureService({ pendingInputs }),
+      ownership: agentOwnership,
+      onCommitted(chatId) {
+        eventWiring?.notifyAgentHandoff(chatId);
+      },
+    });
 
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
@@ -441,7 +506,7 @@ export async function startServer(): Promise<void> {
     executionCoordinator = queue;
     const idleReconciler = new IdleNativeReconciler({
       views: chatViews,
-      source: { loadNativeMessages },
+      source: { loadNativeSnapshot: (chatId) => transcripts.loadNativeReconciliation(chatId) },
       ownsExecution,
       onGenerationReset: (chatId, generationId, lastSeq) => {
         if (!webSocketPublisher) return;
@@ -485,6 +550,7 @@ export async function startServer(): Promise<void> {
       chatListProjector,
       pathCache,
       ownership: agentOwnership,
+      handoffs,
       chatMutationLock,
     });
 
@@ -526,7 +592,7 @@ export async function startServer(): Promise<void> {
     );
 
     let webSocketPublisher: WebSocketMessagePublisher | null = null;
-    const eventWiring = await startExecutionControlPlane({
+    eventWiring = await startExecutionControlPlane({
       wireEvents: () => wireServerEvents({
         server: {
           publish(topic, payload) {
@@ -550,7 +616,8 @@ export async function startServer(): Promise<void> {
         telegramSettings,
         scheduledPrompts,
         snippets,
-        loadNativeMessages,
+        loadChatSnapshot,
+        loadChatPage: (chatId, limit, offset) => transcripts.loadPage(chatId, limit, offset),
         searchIndex: chatSearch,
       }),
       startScheduledPrompts: () => scheduledPrompts.start(),
@@ -573,7 +640,6 @@ export async function startServer(): Promise<void> {
       apiProviders,
       chatCommands,
       chatListProjector,
-      agentSwitch,
       modelCatalogResponseCache,
       lastSelectedChat,
       scheduledPrompts,
@@ -773,7 +839,7 @@ export async function startServer(): Promise<void> {
         const backgroundTasks = await waitForShutdownPhasesWithTimeout([
           () => chatCommands.waitForBackgroundTasks(),
           () => queue.waitForExecutionOwners(),
-          () => eventWiring.waitForIdle(),
+          () => eventWiring!.waitForIdle(),
         ]);
         if (!backgroundTasks.completed) {
           cleanupFailed = true;
@@ -787,7 +853,6 @@ export async function startServer(): Promise<void> {
         await integrationRegistry.stop();
         terminalManager.shutdown();
         await metadata.flush();
-        await carryOver.flush();
         await chatRegistry.flush();
       } catch (err) {
         cleanupFailed = true;

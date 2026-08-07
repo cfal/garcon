@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevisions,
@@ -192,6 +193,7 @@ async function forkJsonlAtPoint(
           model: request.model,
           nativeSession,
           carryOverRevision: '',
+          nativeSeedReceipt: null,
           settings: request.settings,
         },
         signal: request.admission.signal,
@@ -209,7 +211,14 @@ async function forkJsonlAtPoint(
     }
     return {
       kind: 'materialized',
-      session: { agentSessionId: result.agentSessionId, nativeSession },
+      session: {
+        agentSessionId: result.agentSessionId,
+        nativeSession,
+        nativeSeedReceipt: retargetNativeSeedReceipt(
+          request.source.nativeSeedReceipt,
+          result.agentSessionId,
+        ),
+      },
     };
   } catch (error) {
     if (request.point || options.transformEntries) {

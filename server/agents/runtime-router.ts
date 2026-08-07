@@ -11,6 +11,11 @@ import {
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import {
+  createNativeSeedReceipt,
+  type CarriedContext,
+  type NativeSeedReceipt,
+} from '@garcon/common/transcript-seed';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import {
   normalizePermissionMode,
@@ -47,8 +52,9 @@ export interface AgentRuntimeRouterOptions {
   directory: AgentDirectory;
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
-  getCarryOverRevision(chatId: string): string;
-  loadCarryOver(chatId: string, entry: AgentChatEntry): readonly ChatMessage[];
+  getCarryOverRevision(entry: AgentChatEntry): string;
+  loadCarriedContext(entry: AgentChatEntry, signal?: AbortSignal): Promise<CarriedContext | null>;
+  getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
 }
 
 export interface RunSingleQueryOptions {
@@ -70,8 +76,15 @@ export class AgentRuntimeRouter {
   readonly #directory: AgentDirectory;
   readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #events: AgentEventBus;
-  readonly #getCarryOverRevision: (chatId: string) => string;
-  readonly #loadCarryOver: (chatId: string, entry: AgentChatEntry) => readonly ChatMessage[];
+  readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
+  readonly #loadCarriedContext: (
+    entry: AgentChatEntry,
+    signal?: AbortSignal,
+  ) => Promise<CarriedContext | null>;
+  readonly #getCarryOverMessageCount: (
+    entry: AgentChatEntry,
+    signal?: AbortSignal,
+  ) => Promise<number>;
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
@@ -79,7 +92,8 @@ export class AgentRuntimeRouter {
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
     this.#getCarryOverRevision = options.getCarryOverRevision;
-    this.#loadCarryOver = options.loadCarryOver;
+    this.#loadCarriedContext = options.loadCarriedContext;
+    this.#getCarryOverMessageCount = options.getCarryOverMessageCount;
   }
 
   async startSession(chatId: string, prompt: string, opts: {
@@ -94,7 +108,7 @@ export class AgentRuntimeRouter {
     turnId?: string;
     commandType?: AgentExecutionCommandType;
     executionAdmission?: AgentExecutionAdmission;
-    carryOver?: readonly ChatMessage[];
+      carriedContext?: CarriedContext | null;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   } = {}): Promise<void> {
@@ -129,21 +143,27 @@ export class AgentRuntimeRouter {
       ...this.#executionContext(chatId, entry, selection, operation, opts),
       prompt: resolvedPrompt,
       attachments: attachments(opts.images),
-      carryOver: opts.carryOver ?? [],
+        carriedContext: opts.carriedContext ?? null,
     } satisfies Parameters<typeof integration.execution.start>[0];
 
     this.#events.trackTurn(chatId, operationMetadata(operation));
     let started: Awaited<ReturnType<typeof integration.execution.start>> | null = null;
     try {
-      started = await integration.execution.start(request);
-      assertExecutionAdmissionOpen(opts);
-      const updated = await this.#registry.updateChat(chatId, {
+        started = await integration.execution.start(request);
+        assertExecutionAdmissionOpen(opts);
+        const nativeSeedReceipt = validateStartedReceipt(
+          started.nativeSeedReceipt,
+          request.carriedContext,
+          started.agentSessionId,
+        );
+        const updated = await this.#registry.updateChat(chatId, {
         agentSessionId: started.agentSessionId,
         nativeSession: started.nativeSession,
         model: selection.model,
         apiProviderId: selection.apiProviderId,
         modelEndpointId: selection.endpointId,
-        modelProtocol: selection.protocol,
+          modelProtocol: selection.protocol,
+          nativeSeedReceipt,
       }, { flush: true });
       if (!updated) throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     } catch (error) {
@@ -168,11 +188,15 @@ export class AgentRuntimeRouter {
     assertExecutionAdmissionOpen(opts);
     const persistedEntry = this.#registry.getChat(chatId);
     const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
-    if (!entry.agentSessionId) {
-      await this.startSession(chatId, prompt, {
+      if (!entry.agentSessionId) {
+        const carriedContext = await this.#loadCarriedContext(
+          entry,
+          opts.executionAdmission?.signal,
+        );
+        await this.startSession(chatId, prompt, {
         ...opts,
         commandType: opts.commandType ?? 'agent-run',
-        carryOver: this.#loadCarryOver(chatId, entry),
+          carriedContext,
       });
       return;
     }
@@ -349,7 +373,7 @@ export class AgentRuntimeRouter {
         integration,
         request.chatId,
         { ...entry, nativeSession: request.nativeSession },
-        this.#getCarryOverRevision(request.chatId),
+          this.#getCarryOverRevision(entry),
       ),
       nextProjectPath: request.nextProjectPath,
       signal: new AbortController().signal,
@@ -458,7 +482,7 @@ export class AgentRuntimeRouter {
         integration,
         args.sourceChatId,
         source,
-        this.#getCarryOverRevision(args.sourceChatId),
+          this.#getCarryOverRevision(source),
       );
       const sourceSnapshot = args.messageSequence
         ? await integration.transcript.load({
@@ -466,8 +490,8 @@ export class AgentRuntimeRouter {
             signal: new AbortController().signal,
           })
         : null;
-      const carryOverMessageCount = args.messageSequence
-        ? this.#loadCarryOver(args.sourceChatId, source).length
+        const carryOverMessageCount = args.messageSequence
+          ? await this.#getCarryOverMessageCount(source)
         : 0;
       if (args.messageSequence) {
         const messageCount = carryOverMessageCount + (sourceSnapshot?.messages.length ?? 0);
@@ -500,8 +524,9 @@ export class AgentRuntimeRouter {
       return {
         kind: 'materialized',
         session: {
-          agentSessionId: result.session.agentSessionId,
-          nativeSession: result.session.nativeSession,
+            agentSessionId: result.session.agentSessionId,
+            nativeSession: result.session.nativeSession,
+            nativeSeedReceipt: result.session.nativeSeedReceipt,
         },
       };
     } catch (error) {
@@ -678,6 +703,28 @@ function attachments(images: RunAgentTurnOptions['images'] = []) {
 
 function supportedValue<T extends string>(values: readonly string[], value: T, fallback: T): T {
   return values.includes(value) ? value : fallback;
+}
+
+function validateStartedReceipt(
+  receipt: NativeSeedReceipt | null,
+  carriedContext: CarriedContext | null,
+  agentSessionId: string,
+): NativeSeedReceipt | null {
+  if (!carriedContext) {
+    if (receipt !== null) throw new Error('Agent returned a seed receipt without carried context');
+    return null;
+  }
+  if (!receipt) throw new Error('Agent did not return a receipt for carried context');
+  const expected = createNativeSeedReceipt({
+    headId: carriedContext.headId,
+    agentSessionId,
+    placement: receipt.placement,
+    prefix: carriedContext.prefix,
+  });
+  if (JSON.stringify(receipt) !== JSON.stringify(expected)) {
+    throw new Error('Agent returned an invalid carried-context receipt');
+  }
+  return receipt;
 }
 
 function isAgentSettingsEnvelope(value: unknown): value is AgentSettingsEnvelope {

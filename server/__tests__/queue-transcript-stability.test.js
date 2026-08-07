@@ -14,6 +14,10 @@ import { DirectChatRuntimeBase } from '../../server-agents/common/src/direct/dir
 import {
   CommandLedger,
 } from '../commands/command-ledger.js';
+import {
+  snapshotLoader,
+  transcriptLoader,
+} from '../chats/__tests__/chat-transcript-test-helpers.js';
 
 function deferred() {
   let resolve;
@@ -59,7 +63,7 @@ describe('queue and transcript stability', () => {
         {
           appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
             requestedChatId,
-            async () => [],
+            transcriptLoader(async () => []),
             messages,
           ),
         },
@@ -147,7 +151,7 @@ describe('queue and transcript stability', () => {
         {
           appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
             requestedChatId,
-            async () => [],
+            transcriptLoader(async () => []),
             messages,
           ),
         },
@@ -368,7 +372,7 @@ describe('queue and transcript stability', () => {
         {
           appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
             requestedChatId,
-            async () => [],
+            transcriptLoader(async () => []),
             messages,
           ),
         },
@@ -467,7 +471,7 @@ describe('queue and transcript stability', () => {
         {
           appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
             requestedChatId,
-            async () => [],
+            transcriptLoader(async () => []),
             messages,
           ),
         },
@@ -558,7 +562,7 @@ describe('queue and transcript stability', () => {
         {
           appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
             requestedChatId,
-            async () => [...nativeMessages],
+            transcriptLoader(async () => [...nativeMessages]),
             messages,
           ),
         },
@@ -569,7 +573,7 @@ describe('queue and transcript stability', () => {
       executionCoordinator = queue;
       const reloader = new ChatNativeReloader(
         views,
-        { loadNativeMessages },
+        { loadSnapshot: snapshotLoader(loadNativeMessages) },
         ownsExecution,
       );
 

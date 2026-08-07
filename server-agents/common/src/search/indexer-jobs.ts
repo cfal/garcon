@@ -26,8 +26,10 @@ import {
 } from './schema.js';
 import {
   catalogEntryKey,
+  catalogSourceDescriptorHash,
+  nativeSeedReceiptDigest,
   rowsForBatch,
-  stripFirstUserSeedPreservingSource,
+  sanitizeFirstRecordedSeedPreservingSource,
   TRANSCRIPT_INDEX_LOAD_LIMITS,
   validateCatalogEntry,
   validateNativeBatch,
@@ -428,7 +430,8 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
   activeBuilds.set(entry.chatId, controller);
   const generation = attemptGeneration(entry);
   const source = entry.source.state === 'ready' ? entry.source.reference : null;
-  const descriptorHash = source ? canonicalDigest(source) : null;
+  const descriptorHash = catalogSourceDescriptorHash(entry);
+  const receiptDigest = nativeSeedReceiptDigest(entry.nativeSeedReceipt);
   const moduleApiVersion = registrations.get(entry.agentId)?.apiVersion ?? 1;
   let provider: AgentTranscriptIndexSource | null = null;
   let sourceRevision: string | null = null;
@@ -442,6 +445,8 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
     sourceDescriptorHash: descriptorHash,
     sourceRevision,
     carryOverRevision: entry.carryOverRevision,
+    agentSessionId: entry.agentSessionId,
+    nativeSeedReceiptDigest: receiptDigest,
     operationEpoch: generation.epoch,
     operationSequence: generation.sequence,
   };
@@ -469,6 +474,8 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
       sourceDescriptorHash: descriptorHash,
       sourceRevision: sourceRevision ?? `generation:${generation.sequence}`,
       carryOverRevision: entry.carryOverRevision,
+      agentSessionId: entry.agentSessionId,
+      nativeSeedReceiptDigest: receiptDigest,
     });
     post({
       type: 'job-state',
@@ -491,6 +498,8 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
       && previous.sourceDescriptorHash === descriptorHash
       && previous.sourceRevision === sourceRevision
       && previous.carryOverRevision === entry.carryOverRevision
+      && previous.agentSessionId === entry.agentSessionId
+      && previous.nativeSeedReceiptDigest === receiptDigest
       && sourceRevision !== null;
     safetyCheckedAt.set(entry.chatId, Date.now());
     if (unchanged) {
@@ -529,7 +538,11 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
         let batch = validateNativeBatch(rawBatch);
         if (!seedHandled) {
           const firstUser = batch.some((message) => message.type === 'user-message');
-          batch = stripFirstUserSeedPreservingSource(batch);
+          batch = sanitizeFirstRecordedSeedPreservingSource(
+            batch,
+            entry.nativeSeedReceipt,
+            entry.agentSessionId,
+          );
           seedHandled = firstUser;
         }
         const rows = rowsForBatch(batch, ordinal, content);
@@ -551,6 +564,8 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
       descriptorHash,
       sourceRevision,
       carryOverRevision: entry.carryOverRevision,
+      agentSessionId: entry.agentSessionId,
+      nativeSeedReceiptDigest: receiptDigest,
       contentDigest,
     });
     if (rowCount === 0) {

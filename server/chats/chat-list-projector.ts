@@ -159,6 +159,7 @@ export class ChatListProjector {
     return {
       id: chat.id,
       agentId: chat.agentId,
+      agentOwnershipEpoch: session.agentOwnershipEpoch,
       model: chat.model,
       apiProviderId: chat.apiProviderId,
       modelEndpointId: chat.modelEndpointId,

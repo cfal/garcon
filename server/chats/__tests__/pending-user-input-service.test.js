@@ -2,7 +2,11 @@ import { describe, expect, it, mock } from 'bun:test';
 import { PendingUserInputService } from '../pending-user-input-service.js';
 import { ChatViewStore } from '../chat-view-store.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
-import { transcriptRevision } from '../../lib/transcript-revision.js';
+import {
+  historyPage,
+  snapshotLoader,
+  transcriptLoader,
+} from './chat-transcript-test-helpers.js';
 
 function createReader() {
   return {
@@ -599,7 +603,7 @@ describe('PendingUserInputService', () => {
     });
     await views.appendAfterEnsuringGeneration(
       'chat-1',
-      async () => history,
+      transcriptLoader(async () => history),
       [new UserMessage(
         '2026-06-01T00:00:00.000Z',
         'accepted input',
@@ -686,7 +690,7 @@ describe('PendingUserInputService', () => {
     });
     const live = await views.appendAfterEnsuringGeneration(
       'chat-1',
-      async () => history,
+      transcriptLoader(async () => history),
       [new UserMessage(
         '2026-06-01T00:00:00.000Z',
         'persisted',
@@ -708,7 +712,7 @@ describe('PendingUserInputService', () => {
 
     expect(service.listForChat('chat-1')).toEqual([]);
     expect(views.getCursor('chat-1')?.generationId).toBe(live.generationId);
-    await views.getOrCreateMessages('chat-1', async () => nativeMessages);
+    await views.getOrCreateMessages('chat-1', snapshotLoader(async () => nativeMessages));
     const retained = views.readPage('chat-1', 10);
     expect(retained.messages.map((entry) => entry.seq)).toEqual([2, 3]);
     expect(retained.messages[1].message).toMatchObject({
@@ -720,19 +724,8 @@ describe('PendingUserInputService', () => {
       },
     });
 
-    const loadAll = mock(async () => nativeMessages);
-    const loadPage = mock(async (limit, offset) => {
-      const end = nativeMessages.length - offset;
-      const start = Math.max(0, end - limit);
-      return {
-        messages: nativeMessages.slice(start, end),
-        total: nativeMessages.length,
-        hasMore: start > 0,
-        offset,
-        limit,
-        revision: transcriptRevision(nativeMessages),
-      };
-    });
+    const loadAll = mock(snapshotLoader(async () => nativeMessages));
+    const loadPage = mock(async (limit, offset) => historyPage(nativeMessages, limit, offset));
     const older = await views.getOrCreatePage(
       'chat-1',
       { loadAll, loadPage },
@@ -766,7 +759,7 @@ describe('PendingUserInputService', () => {
     });
     const live = await views.appendAfterEnsuringGeneration(
       'chat-1',
-      async () => history,
+      transcriptLoader(async () => history),
       [new UserMessage(
         '2026-06-01T00:00:00.000Z',
         'persisted',
@@ -792,7 +785,7 @@ describe('PendingUserInputService', () => {
     await service.reconcileNativeHistory('chat-1');
 
     expect(service.listForChat('chat-1')).toEqual([]);
-    await views.getOrCreateMessages('chat-1', async () => nativeMessages);
+    await views.getOrCreateMessages('chat-1', snapshotLoader(async () => nativeMessages));
     expect(views.getCursor('chat-1')?.generationId).toBe(live.generationId);
     const retained = views.readPage('chat-1', 10);
     expect(retained.messages.at(-1)?.message).toMatchObject({
@@ -804,19 +797,8 @@ describe('PendingUserInputService', () => {
       },
     });
 
-    const loadAll = mock(async () => nativeMessages);
-    const loadPage = mock(async (limit, offset) => {
-      const end = nativeMessages.length - offset;
-      const start = Math.max(0, end - limit);
-      return {
-        messages: nativeMessages.slice(start, end),
-        total: nativeMessages.length,
-        hasMore: start > 0,
-        offset,
-        limit,
-        revision: transcriptRevision(nativeMessages),
-      };
-    });
+    const loadAll = mock(snapshotLoader(async () => nativeMessages));
+    const loadPage = mock(async (limit, offset) => historyPage(nativeMessages, limit, offset));
     const older = await views.getOrCreatePage(
       'chat-1',
       { loadAll, loadPage },
@@ -848,7 +830,7 @@ describe('PendingUserInputService', () => {
     });
     const live = await views.appendAfterEnsuringGeneration(
       'chat-1',
-      async () => history,
+      transcriptLoader(async () => history),
       [new UserMessage(
         '2026-06-01T00:00:00.000Z',
         'persisted',
@@ -871,11 +853,55 @@ describe('PendingUserInputService', () => {
     expect(service.listForChat('chat-1')).toMatchObject([
       { clientRequestId: 'req-live', turnId: 'turn-live' },
     ]);
-    await views.getOrCreateMessages('chat-1', async () => nativeMessages);
+    await views.getOrCreateMessages('chat-1', snapshotLoader(async () => nativeMessages));
     expect(views.getCursor('chat-1')?.generationId).not.toBe(live.generationId);
     expect(views.readPage('chat-1', 10).messages.at(-1)?.message).toMatchObject({
       metadata: { clientRequestId: 'req-native', turnId: 'turn-native' },
     });
+  });
+
+  it('scans native pages newest-first and stops once all pending identities settle', async () => {
+    const nativeMessages = Array.from({ length: 600 }, (_, index) => (
+      index === 100
+        ? new UserMessage(
+          '2026-06-01T00:00:00.100Z',
+          'persisted',
+          undefined,
+          { clientRequestId: 'req-1' },
+        )
+        : new AssistantMessage('2026-06-01T00:00:00.000Z', `history-${index}`)
+    ));
+    const loadNativeMessages = mock(async () => {
+      throw new Error('Full native load must not run when paging is available');
+    });
+    const loadNativeWindow = mock(async ({ limit, offsetFromNewest = 0 }) => {
+      const end = Math.max(0, nativeMessages.length - offsetFromNewest);
+      const start = Math.max(0, end - limit);
+      return {
+        messages: nativeMessages.slice(start, end),
+        totalNativeMessages: nativeMessages.length,
+        offsetFromNewest,
+        nativeRevision: 'native-r1',
+      };
+    });
+    const service = new PendingUserInputService({
+      loadNativeMessages,
+      loadNativeWindow,
+      getRetainedHistoryMessages: () => [],
+    });
+    await service.register('chat-1', 'persisted', {
+      clientRequestId: 'req-1',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+
+    await service.reconcileNativeHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+    expect(loadNativeWindow.mock.calls.map(([input]) => input.offsetFromNewest)).toEqual([
+      0,
+      250,
+    ]);
+    expect(loadNativeMessages).not.toHaveBeenCalled();
   });
 
 });

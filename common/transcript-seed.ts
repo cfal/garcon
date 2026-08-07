@@ -23,6 +23,11 @@ export interface NativeSeedReceipt {
   readonly sha256: string;
 }
 
+export interface CarriedContext {
+  readonly headId: string;
+  readonly prefix: string;
+}
+
 export type SanitizeCarriedContextResult =
   | { readonly kind: 'not-applicable'; readonly messages: readonly ChatMessage[] }
   | { readonly kind: 'stripped-exact'; readonly messages: readonly ChatMessage[] }
@@ -72,6 +77,30 @@ export function createNativeSeedReceipt(input: {
   };
 }
 
+export function receiptForCarriedContext(
+  carriedContext: CarriedContext | null,
+  agentSessionId: string,
+  placement: NativeSeedReceipt['placement'] = 'user-prefix',
+): NativeSeedReceipt | null {
+  return carriedContext
+    ? createNativeSeedReceipt({
+        headId: carriedContext.headId,
+        agentSessionId,
+        placement,
+        prefix: carriedContext.prefix,
+      })
+    : null;
+}
+
+export function retargetNativeSeedReceipt(
+  receipt: NativeSeedReceipt | null,
+  agentSessionId: string,
+): NativeSeedReceipt | null {
+  if (!receipt) return null;
+  if (!agentSessionId) throw new Error('Native seed receipt session ID is required');
+  return { ...receipt, agentSessionId };
+}
+
 export function parseNativeSeedReceipt(value: unknown): NativeSeedReceipt | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const receipt = value as Record<string, unknown>;
@@ -106,6 +135,20 @@ export function sanitizeRecordedCarriedContext(input: {
   const index = messages.findIndex((message) => message.type === 'user-message');
   if (index === -1) return { kind: 'absent', messages };
   const original = messages[index] as UserMessage;
+  const prefix = original.content.slice(0, receipt.codeUnitLength);
+  if (prefix.length === receipt.codeUnitLength && sha256(prefix) === receipt.sha256) {
+    const next = messages.slice();
+    next[index] = new UserMessage(
+      original.timestamp,
+      original.content.slice(receipt.codeUnitLength),
+      original.images,
+      original.metadata,
+    );
+    return { kind: 'stripped-exact', messages: next };
+  }
+
+  // Legacy receipts are migration-only exact hashes and never enable marker heuristics.
+  if (receipt.format === 'legacy-v0') return { kind: 'absent', messages };
   if (!original.content.startsWith(CARRIED_CONTEXT_OPEN_PREFIX)) {
     return { kind: 'absent', messages };
   }
@@ -115,19 +158,7 @@ export function sanitizeRecordedCarriedContext(input: {
   if (marker.headId !== receipt.headId) {
     return mismatch(messages, marker.headId, 'Recorded carried-context marker names another head');
   }
-  const prefix = original.content.slice(0, receipt.codeUnitLength);
-  if (prefix.length !== receipt.codeUnitLength || sha256(prefix) !== receipt.sha256) {
-    return { kind: 'absent', messages };
-  }
-
-  const next = messages.slice();
-  next[index] = new UserMessage(
-    original.timestamp,
-    original.content.slice(receipt.codeUnitLength),
-    original.images,
-    original.metadata,
-  );
-  return { kind: 'stripped-exact', messages: next };
+  return { kind: 'absent', messages };
 }
 
 export function renderTranscriptSeed(

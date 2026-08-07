@@ -17,6 +17,12 @@ import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
 import { InvalidChatIdError, parseChatId } from './chat-id.js';
 import type { ChatStopOutcome } from './chat-types.js';
+import type { RepairHistoryAcceptNativeRequest } from './chat-history-repair.js';
+
+export type {
+  RepairHistoryAcceptNativeRequest,
+  RepairHistoryAcceptNativeResponse,
+} from './chat-history-repair.js';
 
 export type CommandStatus = 'accepted' | 'duplicate';
 
@@ -59,6 +65,12 @@ export type CommandErrorCode = Extract<
   | 'EXPECTED_AGENT_MISMATCH'
   | 'EXPLICIT_BYPASS_REQUIRED'
   | 'INCOMPLETE_EXECUTION_CONFIG'
+  | 'STALE_CHAT_OWNERSHIP'
+  | 'AGENT_HANDOFF_REQUIRES_IDLE'
+  | 'SOURCE_TRANSCRIPT_UNAVAILABLE'
+  | 'CARRYOVER_HISTORY_UNAVAILABLE'
+  | 'CONTEXT_ENVELOPE_MISMATCH'
+  | 'CHAT_DELETED'
   | 'OPERATION_UNSUPPORTED'
   | 'SOURCE_REVISION_CHANGED'
   | 'TRANSCRIPT_UNAVAILABLE'
@@ -90,6 +102,7 @@ export interface CommandAcceptedResponse {
 export interface AgentTurnCommandResponse extends CommandAcceptedResponse {
   chatId: string;
   turnId: string;
+  chat?: ChatListEntry | null;
 }
 
 export interface StartChatCommandResponse extends AgentTurnCommandResponse {
@@ -154,6 +167,23 @@ export interface AgentRunCommandRequest {
   expectedAgentId?: string;
   tagsToAdd?: string[];
   permissionFallbackPolicy?: 'require-explicit-bypass';
+  handoff?: AgentHandoffRequest;
+}
+
+export interface AgentHandoffTarget {
+  agentId: string;
+  model: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  agentSettings?: AgentSettingsEnvelope;
+}
+
+export interface AgentHandoffRequest {
+  target: AgentHandoffTarget;
+  expectedAgentOwnershipEpoch: string;
 }
 
 export interface ForkRunCommandRequest {
@@ -377,31 +407,6 @@ export interface ModelPatchResponse {
   modelProtocol?: ApiProtocol | null;
 }
 
-// Switches a chat to a different agent (or model within the same agent). A
-// cross-agent switch starts a fresh native session seeded from the prior
-// transcript, so the response echoes the modes normalized for the target agent.
-export interface AgentModelPatchRequest {
-  chatId: string;
-  agentId: string;
-  model: string;
-  apiProviderId?: string | null;
-  modelEndpointId?: string | null;
-  modelProtocol?: ApiProtocol | null;
-}
-
-export interface AgentModelPatchResponse {
-  success: true;
-  chatId: string;
-  agentId: string;
-  model: string;
-  apiProviderId?: string | null;
-  modelEndpointId?: string | null;
-  modelProtocol?: ApiProtocol | null;
-  permissionMode: PermissionMode;
-  thinkingMode: ThinkingMode;
-  agentSettings: AgentSettingsEnvelope;
-}
-
 export interface ProjectPathPatchRequest {
   chatId: string;
   projectPath: string;
@@ -461,6 +466,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
 
 export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequest {
   const body = requestRecord(value);
+  const handoff = optionalAgentHandoffRequest(body.handoff);
   const images = optionalImages(body.images);
   const model = optionalNonEmptyString(body, 'model');
   const apiProviderId = optionalNullableString(body, 'apiProviderId');
@@ -479,6 +485,19 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
   const permissionMode = optionalPermissionMode(body.permissionMode);
   const thinkingMode = optionalThinkingMode(body.thinkingMode);
   const agentSettings = optionalAgentSettings(body.agentSettings, 'agentSettings');
+  if (handoff && (
+    model !== undefined
+    || apiProviderId !== undefined
+    || modelEndpointId !== undefined
+    || modelProtocol !== undefined
+    || permissionMode !== undefined
+    || thinkingMode !== undefined
+    || agentSettings !== undefined
+  )) {
+    throw new CommandRequestValidationError(
+      'handoff cannot be combined with same-agent execution overrides',
+    );
+  }
   const expectedAgentId = optionalNonEmptyString(body, 'expectedAgentId');
   const permissionFallbackPolicy = body.permissionFallbackPolicy;
   if (
@@ -513,6 +532,47 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
     ...(permissionFallbackPolicy === 'require-explicit-bypass'
       ? { permissionFallbackPolicy }
       : {}),
+    ...(handoff === undefined ? {} : { handoff }),
+  };
+}
+
+function optionalAgentHandoffRequest(value: unknown): AgentHandoffRequest | undefined {
+  if (value === undefined) return undefined;
+  const handoff = requestRecord(value);
+  const target = requestRecord(handoff.target);
+  const agentId = requiredString(target, 'agentId');
+  const model = requiredString(target, 'model');
+  const apiProviderId = optionalNullableString(target, 'apiProviderId');
+  const modelEndpointId = optionalNullableString(target, 'modelEndpointId');
+  const modelProtocol = optionalApiProtocol(target.modelProtocol);
+  if (modelEndpointId !== undefined && modelEndpointId !== null && apiProviderId == null) {
+    throw new CommandRequestValidationError(
+      'handoff.target.apiProviderId is required with modelEndpointId',
+    );
+  }
+  const permissionMode = optionalPermissionMode(target.permissionMode);
+  const thinkingMode = optionalThinkingMode(target.thinkingMode);
+  const agentSettings = optionalAgentSettings(target.agentSettings, 'handoff.target.agentSettings');
+  if (agentSettings && agentSettings.ownerId !== agentId) {
+    throw new CommandRequestValidationError(
+      'handoff.target.agentSettings must be owned by handoff.target.agentId',
+    );
+  }
+  return {
+    target: {
+      agentId,
+      model,
+      ...(apiProviderId === undefined ? {} : { apiProviderId }),
+      ...(modelEndpointId === undefined ? {} : { modelEndpointId }),
+      ...(modelProtocol === undefined ? {} : { modelProtocol }),
+      ...(permissionMode === undefined ? {} : { permissionMode }),
+      ...(thinkingMode === undefined ? {} : { thinkingMode }),
+      ...(agentSettings === undefined ? {} : { agentSettings }),
+    },
+    expectedAgentOwnershipEpoch: requiredString(
+      handoff,
+      'expectedAgentOwnershipEpoch',
+    ),
   };
 }
 
@@ -565,6 +625,21 @@ export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequ
 
 export function parseDeleteChatCommandRequest(value: unknown): DeleteChatCommandRequest {
   return { chatId: requiredChatId(requestRecord(value), 'chatId') };
+}
+
+export function parseRepairHistoryAcceptNativeRequest(
+  value: unknown,
+): RepairHistoryAcceptNativeRequest {
+  const body = requestRecord(value);
+  if (body.action !== 'accept-native') {
+    throw new CommandRequestValidationError('action must be accept-native');
+  }
+  return {
+    action: 'accept-native',
+    chatId: requiredChatId(body, 'chatId'),
+    expectedHeadId: requiredString(body, 'expectedHeadId'),
+    expectedAgentOwnershipEpoch: requiredString(body, 'expectedAgentOwnershipEpoch'),
+  };
 }
 
 export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryCreateCommandRequest {

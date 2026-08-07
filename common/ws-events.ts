@@ -246,6 +246,7 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'archive-toggled',
   'tags-updated',
   'chats-reordered',
+  'agent-handoff',
 ] as const;
 
 export type ChatListInvalidationReason =
@@ -433,7 +434,10 @@ function parseChatListInvalidationReason(
 }
 
 function parseResetReason(value: unknown): ChatGenerationResetReason | null {
-  return value === 'manual-reload' || value === 'process-error' || value === 'idle-reconcile'
+  return value === 'manual-reload'
+    || value === 'process-error'
+    || value === 'idle-reconcile'
+    || value === 'agent-handoff'
     ? value
     : null;
 }

@@ -1,4 +1,4 @@
-import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   type AgentExecution,
@@ -78,6 +78,11 @@ export class CodexExecution implements AgentExecution {
           agentSessionId: started.agentSessionId,
           modelEndpointId: request.endpoint?.endpointId ?? null,
         }),
+        nativeSeedReceipt: receiptForCarriedContext(
+          request.carriedContext,
+          started.agentSessionId,
+          runtimeRequest.codexGoalCommand ? 'provider-context' : 'user-prefix',
+        ),
       };
       this.#events.emit({
         type: 'session-created',
@@ -231,16 +236,14 @@ function prepareStartRequest(
       false,
     );
   }
-  const carryOver = request.carryOver.length > 0
-    ? renderTranscriptSeed([...request.carryOver])
-    : null;
+  const carriedContext = request.carriedContext?.prefix ?? null;
   return {
     ...executionFields(request),
-    command: goal?.objective ?? (carryOver ? `${carryOver}\n\n${request.prompt}` : request.prompt),
+    command: goal?.objective ?? (carriedContext ? `${carriedContext}${request.prompt}` : request.prompt),
     images: request.attachments,
     ...configuration,
     ...(goal ? { codexGoalCommand: goal } : {}),
-    ...(goal && carryOver ? { codexSeedContext: carryOver } : {}),
+    ...(goal && carriedContext ? { codexSeedContext: carriedContext } : {}),
   };
 }
 

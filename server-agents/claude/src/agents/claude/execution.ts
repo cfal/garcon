@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type { ClaudeThinkingMode } from '@garcon/common/chat-modes';
 import {
   AgentIntegrationError,
@@ -77,9 +77,7 @@ export class ClaudeExecution implements AgentExecution {
       const runtimeRequest = {
         ...executionFields(request),
         agentSessionId,
-        command: request.carryOver.length > 0
-          ? `${renderTranscriptSeed([...request.carryOver])}\n\n${request.prompt}`
-          : request.prompt,
+        command: `${request.carriedContext?.prefix ?? ''}${request.prompt}`,
         images: request.attachments,
         envOverrides,
       };
@@ -103,6 +101,7 @@ export class ClaudeExecution implements AgentExecution {
           agentSessionId,
           modelEndpointId: request.endpoint?.endpointId ?? null,
         }),
+        nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
       };
       this.#events.emit({
         type: 'session-created',

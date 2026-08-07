@@ -37,6 +37,7 @@ export interface ServerConfig {
   authDisabled: boolean;
   trustProxyEnabled: boolean;
   httpCompressionEnabled: boolean;
+  rollbackCarryOverMigration: boolean;
 }
 
 let activeConfig: Readonly<ServerConfig> | null = null;
@@ -124,6 +125,7 @@ function parseServerConfig(): ServerConfig {
     authDisabled: parseAuthDisabled(),
     trustProxyEnabled: envBool('TRUST_PROXY', false),
     httpCompressionEnabled: envBool('HTTP_COMPRESSION', true),
+    rollbackCarryOverMigration: process.argv.includes('--rollback-carryover-migration'),
   };
 }
 

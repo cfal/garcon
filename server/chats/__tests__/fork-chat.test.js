@@ -1,7 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
 
+import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { forkChatFileCopy } from '../fork-chat.js';
 
+const HEAD_ID = '11111111-1111-4111-8111-111111111111';
+const PREFIX_ID = '22222222-2222-4222-8222-222222222222';
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 
 function sourceSession(overrides = {}) {
@@ -23,7 +26,20 @@ function sourceSession(overrides = {}) {
     tags: ['review'],
     permissionMode: 'acceptEdits',
     thinkingMode: 'high',
+    carryOverHeadId: null,
+    nativeSeedReceipt: null,
+    carryOverMigrationQuarantine: null,
     ...overrides,
+  };
+}
+
+function makePreparedPrefix() {
+  return {
+    id: PREFIX_ID,
+    messageCount: 2,
+    commit: mock(async () => undefined),
+    discard: mock(async () => undefined),
+    releaseRoot: mock(() => undefined),
   };
 }
 
@@ -57,14 +73,12 @@ function makeDeps(overrides = {}) {
     getChatMetadata: mock(() => ({ firstMessage: 'First prompt' })),
     addNewChatMetadata: mock(() => undefined),
   };
+  const preparedPrefix = overrides.preparedPrefix ?? makePreparedPrefix();
   const carryOver = {
-    stageFork: mock(async () => ({
-      sourceRenderedMessageCount: 0,
-      selectedRenderedMessageCount: 0,
-      staged: false,
-    })),
-    promoteStaged: mock(async () => undefined),
-    discardStaged: mock(async () => undefined),
+    assertReachableForHandoff: mock(async () => undefined),
+    logicalMessageCount: mock(async () => 0),
+    resolveCutoff: mock(async (headId) => ({ kind: 'reuse', headId })),
+    preparePrefix: mock(async () => preparedPrefix),
     ...overrides.carryOver,
   };
   const ownership = overrides.ownership ?? {
@@ -78,6 +92,7 @@ function makeDeps(overrides = {}) {
     session: {
       agentSessionId: 'target-native',
       nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
+      nativeSeedReceipt: null,
     },
   }));
   const discardForkedAgentSession = overrides.discardForkedAgentSession
@@ -91,21 +106,20 @@ function makeDeps(overrides = {}) {
     getViewCursor,
     forkAgentSession,
     discardForkedAgentSession,
+    preparedPrefix,
     sessions,
   };
 }
 
 describe('forkChatFileCopy', () => {
-  it('creates a lazy whole fork from carry-over before the provider materializes', async () => {
+  it('shares a whole archived head without creating pages or a provider session', async () => {
     const deps = makeDeps({
-      source: sourceSession({ agentSessionId: null, nativeSession: null }),
-      carryOver: {
-        stageFork: mock(async () => ({
-          sourceRenderedMessageCount: 3,
-          selectedRenderedMessageCount: 3,
-          staged: true,
-        })),
-      },
+      source: sourceSession({
+        agentSessionId: null,
+        nativeSession: null,
+        carryOverHeadId: HEAD_ID,
+      }),
+      carryOver: { logicalMessageCount: mock(async () => 3) },
     });
 
     const result = await forkChatFileCopy({
@@ -117,21 +131,25 @@ describe('forkChatFileCopy', () => {
 
     expect(result.agentSessionId).toBeNull();
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
+    expect(deps.carryOver.preparePrefix).not.toHaveBeenCalled();
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentSessionId: null,
       nativeSession: null,
+      carryOverHeadId: HEAD_ID,
       agentOwnershipEpoch: expect.any(String),
     });
-    expect(deps.carryOver.promoteStaged).toHaveBeenCalledOnce();
   });
 
-  it('keeps a point wholly inside carry-over lazy even when native history exists', async () => {
+  it('creates an immutable prefix for a point inside archived history', async () => {
+    const quarantine = { artifactId: 'legacy', errorCode: 'INVALID_CARRYOVER_ENTRY' };
     const deps = makeDeps({
+      source: sourceSession({ carryOverHeadId: HEAD_ID, carryOverMigrationQuarantine: quarantine }),
       carryOver: {
-        stageFork: mock(async () => ({
-          sourceRenderedMessageCount: 4,
-          selectedRenderedMessageCount: 2,
-          staged: true,
+        logicalMessageCount: mock(async () => 4),
+        resolveCutoff: mock(async () => ({
+          kind: 'prefix',
+          sourceNodeId: HEAD_ID,
+          messageCount: 2,
         })),
       },
     });
@@ -146,17 +164,18 @@ describe('forkChatFileCopy', () => {
 
     expect(result.agentSessionId).toBeNull();
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
+    expect(deps.preparedPrefix.commit).toHaveBeenCalledOnce();
+    expect(deps.preparedPrefix.releaseRoot).toHaveBeenCalledOnce();
+    expect(deps.sessions.get('target-chat')).toMatchObject({
+      carryOverHeadId: PREFIX_ID,
+      carryOverMigrationQuarantine: quarantine,
+    });
   });
 
-  it('creates a lazy child when an unmaterialized provider fork would lose no visible messages', async () => {
+  it('keeps a lazy whole child when an unmaterialized fork loses no visible native messages', async () => {
     const deps = makeDeps({
-      carryOver: {
-        stageFork: mock(async () => ({
-          sourceRenderedMessageCount: 2,
-          selectedRenderedMessageCount: 2,
-          staged: true,
-        })),
-      },
+      source: sourceSession({ carryOverHeadId: HEAD_ID }),
+      carryOver: { logicalMessageCount: mock(async () => 2) },
       getViewCursor: mock(() => ({ lastSeq: 2 })),
       forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
     });
@@ -172,12 +191,8 @@ describe('forkChatFileCopy', () => {
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentSessionId: null,
       nativeSession: null,
+      carryOverHeadId: HEAD_ID,
     });
-    expect(deps.carryOver.promoteStaged).toHaveBeenCalledWith(
-      'target-chat',
-      expect.any(String),
-    );
-    expect(deps.discardForkedAgentSession).not.toHaveBeenCalled();
   });
 
   it('refuses an unmaterialized provider fork when the source view has native messages', async () => {
@@ -193,28 +208,21 @@ describe('forkChatFileCopy', () => {
       ...deps,
     })).rejects.toMatchObject({
       code: 'TRANSCRIPT_NOT_YET_PERSISTED',
-      message: "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
       status: 409,
       retryable: true,
     });
 
-    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith(
-      'target-chat',
-      expect.any(String),
-    );
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
-  it('rejects a point beyond lazy carry-over without leaving staged state', async () => {
+  it('rejects a point beyond archived history when no native session exists', async () => {
     const deps = makeDeps({
-      source: sourceSession({ agentSessionId: null, nativeSession: null }),
-      carryOver: {
-        stageFork: mock(async () => ({
-          sourceRenderedMessageCount: 2,
-          selectedRenderedMessageCount: 2,
-          staged: true,
-        })),
-      },
+      source: sourceSession({
+        agentSessionId: null,
+        nativeSession: null,
+        carryOverHeadId: HEAD_ID,
+      }),
+      carryOver: { logicalMessageCount: mock(async () => 2) },
     });
 
     await expect(forkChatFileCopy({
@@ -225,7 +233,107 @@ describe('forkChatFileCopy', () => {
       ...deps,
     })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', status: 422 });
 
-    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith('target-chat', expect.any(String));
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('translates a combined point into a native provider fork and preserves settings', async () => {
+    const deps = makeDeps({
+      source: sourceSession({ carryOverHeadId: HEAD_ID }),
+      carryOver: { logicalMessageCount: mock(async () => 2) },
+    });
+
+    const result = await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToSequence: 3,
+      ...deps,
+    });
+
+    expect(result).toMatchObject({
+      sourceChatId: 'source-chat',
+      chatId: 'target-chat',
+      agentId: 'test',
+      agentSessionId: 'target-native',
+    });
+    expect(deps.forkAgentSession).toHaveBeenCalledWith({
+      sourceSession: expect.objectContaining({ agentSessionId: 'source-native' }),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      messageSequence: 3,
+    });
+    expect(deps.sessions.get('target-chat')).toMatchObject({
+      agentId: 'test',
+      agentSessionId: 'target-native',
+      carryOverHeadId: HEAD_ID,
+      model: 'model-a',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      agentSettingsById: {
+        test: envelope('test', { mode: 'careful' }),
+        other: envelope('other', { retained: true }),
+      },
+    });
+  });
+
+  it('retargets and persists an exact provider seed receipt', async () => {
+    const sourceReceipt = createNativeSeedReceipt({
+      headId: HEAD_ID,
+      agentSessionId: 'source-native',
+      placement: 'user-prefix',
+      prefix: 'seed',
+    });
+    const targetReceipt = { ...sourceReceipt, agentSessionId: 'target-native' };
+    const deps = makeDeps({
+      source: sourceSession({ carryOverHeadId: HEAD_ID, nativeSeedReceipt: sourceReceipt }),
+      carryOver: { logicalMessageCount: mock(async () => 2) },
+      forkAgentSession: mock(async () => ({
+        kind: 'materialized',
+        session: {
+          agentSessionId: 'target-native',
+          nativeSession: { ownerId: 'test', schemaVersion: 1, value: {} },
+          nativeSeedReceipt: targetReceipt,
+        },
+      })),
+    });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    });
+
+    expect(deps.sessions.get('target-chat').nativeSeedReceipt).toEqual(targetReceipt);
+  });
+
+  it('rejects and discards a fork with an invalid provider seed receipt', async () => {
+    const sourceReceipt = createNativeSeedReceipt({
+      headId: HEAD_ID,
+      agentSessionId: 'source-native',
+      placement: 'user-prefix',
+      prefix: 'seed',
+    });
+    const deps = makeDeps({
+      source: sourceSession({ carryOverHeadId: HEAD_ID, nativeSeedReceipt: sourceReceipt }),
+      forkAgentSession: mock(async () => ({
+        kind: 'materialized',
+        session: {
+          agentSessionId: 'target-native',
+          nativeSession: { ownerId: 'test', schemaVersion: 1, value: {} },
+          nativeSeedReceipt: { ...sourceReceipt, agentSessionId: 'wrong-session' },
+        },
+      })),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    })).rejects.toThrow('invalid carried-context receipt');
+
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
@@ -240,98 +348,34 @@ describe('forkChatFileCopy', () => {
       ...deps,
     })).rejects.toThrow('Chat ID collision');
 
-    expect(deps.discardForkedAgentSession).toHaveBeenCalledWith(
-      'test',
-      expect.objectContaining({ agentSessionId: 'target-native' }),
-    );
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
   });
 
-  it('stages the exact combined cutoff and activates it under the target ownership epoch', async () => {
-    const deps = makeDeps();
-
-    const result = await forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      upToSequence: 3,
-      ...deps,
-    });
-
-    expect(result).toEqual({
-      sourceChatId: 'source-chat',
-      chatId: 'target-chat',
-      agentId: 'test',
-      agentSessionId: 'target-native',
-      sourceNextForkOrdinal: 1,
-      rollback: expect.any(Function),
-    });
-    expect(deps.carryOver.stageFork).toHaveBeenCalledWith({
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      targetEpoch: expect.any(String),
-      ownerId: 'test',
-      ownerModel: 'model-a',
-      upToSequence: 3,
-    });
-    expect(deps.forkAgentSession).toHaveBeenCalledWith({
-      sourceSession: expect.objectContaining({
-        agentId: 'test',
-        agentSessionId: 'source-native',
-        agentOwnershipEpoch: 'source-epoch',
-      }),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      messageSequence: 3,
-    });
-    const target = deps.sessions.get('target-chat');
-    expect(target).toMatchObject({
-      agentId: 'test',
-      agentSessionId: 'target-native',
-      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
-      agentOwnershipEpoch: expect.any(String),
-      agentSettingsById: {
-        test: envelope('test', { mode: 'careful' }),
-        other: envelope('other', { retained: true }),
+  it('discards a prepared prefix when target setup fails', async () => {
+    const failure = new Error('settings failed');
+    const deps = makeDeps({
+      source: sourceSession({ carryOverHeadId: HEAD_ID }),
+      carryOver: {
+        logicalMessageCount: mock(async () => 4),
+        resolveCutoff: mock(async () => ({
+          kind: 'prefix',
+          sourceNodeId: HEAD_ID,
+          messageCount: 2,
+        })),
       },
-      model: 'model-a',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'high',
+      settings: { setSessionName: mock(async () => { throw failure; }) },
     });
-    expect(deps.registry.flush).toHaveBeenCalled();
-    expect(deps.carryOver.promoteStaged).toHaveBeenCalledWith(
-      'target-chat',
-      target.agentOwnershipEpoch,
-    );
-    expect(deps.settings.setSessionName).toHaveBeenCalledWith('target-chat', 'Source title (1)');
-    expect(deps.metadata.addNewChatMetadata).toHaveBeenCalledWith('target-chat', 'First prompt');
-  });
-
-  it('discards inactive carry-over when the integration fork fails', async () => {
-    const failure = new Error('native fork failed');
-    const deps = makeDeps({ forkAgentSession: mock(async () => { throw failure; }) });
 
     await expect(forkChatFileCopy({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
+      upToSequence: 2,
       ...deps,
     })).rejects.toBe(failure);
 
-    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith('target-chat', expect.any(String));
-    expect(deps.registry.addChat).not.toHaveBeenCalled();
-  });
-
-  it('discards inactive carry-over when the integration returns no target', async () => {
-    const deps = makeDeps({ forkAgentSession: mock(async () => null) });
-
-    await expect(forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      ...deps,
-    })).rejects.toThrow('Failed to create fork target');
-
-    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith('target-chat', expect.any(String));
+    expect(deps.ownership.delete).toHaveBeenCalledWith('target-chat');
+    expect(deps.preparedPrefix.discard).toHaveBeenCalledOnce();
   });
 
   it('uses and advances the persisted source fork ordinal', async () => {
@@ -358,8 +402,6 @@ describe('forkChatFileCopy', () => {
       ...deps,
     });
 
-    expect(deps.sessions.get('target-chat')).toBeDefined();
-    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(4);
     await result.rollback();
     await result.rollback();
 
@@ -368,28 +410,5 @@ describe('forkChatFileCopy', () => {
     expect(deps.ownership.delete).toHaveBeenCalledOnce();
     expect(deps.settings.removeFromAllOrderLists).toHaveBeenCalledOnce();
     expect(deps.settings.removeSessionName).toHaveBeenCalledOnce();
-  });
-
-  it('rolls back through integration ownership when target setup fails', async () => {
-    const failure = new Error('settings failed');
-    const deps = makeDeps({
-      source: sourceSession({ nextForkOrdinal: 3 }),
-      settings: { setSessionName: mock(async () => { throw failure; }) },
-    });
-
-    await expect(forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      ...deps,
-    })).rejects.toBe(failure);
-
-    expect(deps.ownership.delete).toHaveBeenCalledWith('target-chat');
-    expect(deps.discardForkedAgentSession).toHaveBeenCalledWith(
-      'test',
-      expect.objectContaining({ agentSessionId: 'target-native' }),
-    );
-    expect(deps.sessions.get('target-chat')).toBeUndefined();
-    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(3);
   });
 });

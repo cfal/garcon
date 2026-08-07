@@ -1,6 +1,7 @@
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
+import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentTranscriptIndexSourceRef } from './transcript-index.js';
 
 export interface AgentTranscript {
@@ -80,5 +81,6 @@ export interface AgentChatReference {
   readonly model: string;
   readonly nativeSession: AgentNativeSessionRef | null;
   readonly carryOverRevision: string;
+  readonly nativeSeedReceipt: NativeSeedReceipt | null;
   readonly settings: AgentSettingsEnvelope;
 }

@@ -1,4 +1,4 @@
-import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   type AgentExecution,
@@ -46,9 +46,7 @@ export class AmpExecution implements AgentExecution {
   async start(request: Parameters<AgentExecution['start']>[0]) {
     this.#operations.register(request.chatId, request.operation);
     request.admission.signal.throwIfAborted();
-    const seed = request.carryOver.length > 0
-      ? `${renderTranscriptSeed([...request.carryOver])}\n\n`
-      : '';
+    const seed = request.carriedContext?.prefix ?? '';
     try {
       const result = await this.runtime.startSession({
         chatId: request.chatId,
@@ -72,6 +70,7 @@ export class AmpExecution implements AgentExecution {
           agentSessionId: result.agentSessionId,
           modelEndpointId: null,
         }),
+        nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, result.agentSessionId),
       };
       this.#events.emit({
         type: 'session-created',

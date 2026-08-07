@@ -576,7 +576,10 @@ export class AcceptedInputHandler {
       this.#checkpoint(reservation);
       const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
-      await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare()));
+        await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare({
+          signal: reservation.executionAdmission.signal,
+          assertAdmissionActive: () => this.#checkpoint(reservation),
+        })));
       await this.#checkpointAfter(
         reservation,
         this.#coordinator.registerPending(input.command.chatId, input.content, input.options),

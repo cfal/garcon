@@ -25,10 +25,15 @@ import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatProjectPathUpdatedPayload } from '../../common/ws-events.js';
 import { normalizeTags } from '../../common/tags.js';
+import {
+  parseNativeSeedReceipt,
+  type NativeSeedReceipt,
+} from '../../common/transcript-seed.js';
+import { isCarryOverNodeId } from './carryover-node-types.js';
 
 const logger = createLogger('chats:store');
 
-const CHAT_REGISTRY_VERSION = 3;
+const CHAT_REGISTRY_VERSION = 4;
 // Uses a fixed short debounce so registry mutations persist promptly while bursts coalesce.
 const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
 const ALLOWED_PATCH_FIELDS = [
@@ -46,7 +51,15 @@ const ALLOWED_PATCH_FIELDS = [
   'lastReadAt',
   'permissionMode',
   'thinkingMode',
+  'carryOverHeadId',
+  'nativeSeedReceipt',
+  'carryOverMigrationQuarantine',
 ] as const;
+
+export interface CarryOverMigrationQuarantine {
+  artifactId: string;
+  errorCode: string;
+}
 
 export interface ChatRegistryEntry {
   agentId: AgentName;
@@ -64,6 +77,9 @@ export interface ChatRegistryEntry {
   lastReadAt?: string | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
+  carryOverHeadId: string | null;
+  nativeSeedReceipt: NativeSeedReceipt | null;
+  carryOverMigrationQuarantine: CarryOverMigrationQuarantine | null;
 }
 
 export interface ChatRegistrySnapshot {
@@ -87,6 +103,9 @@ export interface NewChatRegistryEntry {
   modelProtocol?: ApiProtocol | null;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
+  carryOverHeadId?: string | null;
+  nativeSeedReceipt?: NativeSeedReceipt | null;
+  carryOverMigrationQuarantine?: CarryOverMigrationQuarantine | null;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -196,9 +215,13 @@ function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegi
   const nativeSession = normalizeNativeSession(rawEntry.nativeSession, agentId);
   const agentSettingsById = parseAgentSettingsById(rawEntry.agentSettingsById);
   if (!agentSettingsById) throw new Error(`Invalid agentSettingsById for ${agentId || 'unknown agent'}`);
+  const agentSessionId = normalizeNullableString(rawEntry.agentSessionId);
+  const carryOverHeadId = normalizeCarryOverHeadId(rawEntry.carryOverHeadId);
+  const nativeSeedReceipt = normalizeNativeSeedReceipt(rawEntry.nativeSeedReceipt);
+  assertSeedReceiptBinding({ agentSessionId, carryOverHeadId, nativeSeedReceipt });
   return {
     agentId,
-    agentSessionId: normalizeNullableString(rawEntry.agentSessionId),
+    agentSessionId,
     nativeSession,
     agentOwnershipEpoch: normalizeOwnershipEpoch(rawEntry.agentOwnershipEpoch),
     agentSettingsById,
@@ -213,7 +236,46 @@ function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegi
     lastReadAt: normalizeNullableString(rawEntry.lastReadAt),
     nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
     ...normalizeRegistryModes(rawEntry),
+    carryOverHeadId,
+    nativeSeedReceipt,
+    carryOverMigrationQuarantine: normalizeMigrationQuarantine(rawEntry.carryOverMigrationQuarantine),
   };
+}
+
+function normalizeCarryOverHeadId(value: unknown): string | null {
+  if (value === null) return null;
+  if (!isCarryOverNodeId(value)) throw new Error('Invalid carryover head ID');
+  return value.toLowerCase();
+}
+
+function normalizeNativeSeedReceipt(value: unknown): NativeSeedReceipt | null {
+  if (value === null) return null;
+  const receipt = parseNativeSeedReceipt(value);
+  if (!receipt) throw new Error('Invalid native seed receipt');
+  return receipt;
+}
+
+function normalizeMigrationQuarantine(value: unknown): CarryOverMigrationQuarantine | null {
+  if (value === null) return null;
+  if (!isObjectRecord(value)) throw new Error('Invalid carryover migration quarantine');
+  const artifactId = normalizeString(value.artifactId);
+  const errorCode = normalizeString(value.errorCode);
+  if (!artifactId || !errorCode) throw new Error('Invalid carryover migration quarantine');
+  return { artifactId, errorCode };
+}
+
+function assertSeedReceiptBinding(entry: Pick<
+  ChatRegistryEntry,
+  'agentSessionId' | 'carryOverHeadId' | 'nativeSeedReceipt'
+>): void {
+  const receipt = entry.nativeSeedReceipt;
+  if (!receipt) return;
+  if (receipt.agentSessionId !== entry.agentSessionId) {
+    throw new Error('Native seed receipt session mismatch');
+  }
+  if (receipt.headId !== entry.carryOverHeadId) {
+    throw new Error('Native seed receipt head mismatch');
+  }
 }
 
 function normalizeOwnershipEpoch(value: unknown): string {
@@ -294,12 +356,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         this.#registry = createEmptyRegistry();
         return this.#registry;
       }
+      if (parsed.version !== CHAT_REGISTRY_VERSION) {
+        throw new Error(`Unsupported chat registry version: ${String(parsed.version)}`);
+      }
       if (!isObjectRecord(parsed.sessions)) {
         this.#registry = createEmptyRegistry();
         return this.#registry;
-      }
-      if (parsed.version !== CHAT_REGISTRY_VERSION) {
-        throw new Error(`Unsupported chat registry version: ${String(parsed.version)}`);
       }
       const sessions: Record<string, ChatRegistryEntry> = {};
       for (const [rawChatId, rawEntry] of Object.entries(parsed.sessions)) {
@@ -401,6 +463,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     modelProtocol = null,
     permissionMode = 'default',
     thinkingMode = 'none',
+    carryOverHeadId = null,
+    nativeSeedReceipt = null,
+    carryOverMigrationQuarantine = null,
   }: NewChatRegistryEntry): boolean {
     const chatId = parseChatId(id);
     if (!agentId) throw new Error('Agent not specified');
@@ -414,6 +479,14 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       throw new Error(`Native session owner mismatch for ${chatId}`);
     }
     const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode });
+    const normalizedHeadId = normalizeCarryOverHeadId(carryOverHeadId);
+    const normalizedReceipt = normalizeNativeSeedReceipt(nativeSeedReceipt);
+    const normalizedQuarantine = normalizeMigrationQuarantine(carryOverMigrationQuarantine);
+    assertSeedReceiptBinding({
+      agentSessionId,
+      carryOverHeadId: normalizedHeadId,
+      nativeSeedReceipt: normalizedReceipt,
+    });
     registry.sessions[chatId] = {
       agentId,
       nativeSession,
@@ -428,6 +501,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       modelEndpointId,
       modelProtocol,
       ...normalizedModes,
+      carryOverHeadId: normalizedHeadId,
+      nativeSeedReceipt: normalizedReceipt,
+      carryOverMigrationQuarantine: normalizedQuarantine,
     };
     this.#setAgentSessionIdIndex(chatId, agentSessionId);
     this.#emitChatAdded(chatId);
@@ -460,6 +536,22 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     }
     if ('agentSettingsById' in normalizedPatch && !parseAgentSettingsById(normalizedPatch.agentSettingsById)) {
       throw new Error(`Invalid agent settings for ${id}`);
+    }
+    if ('carryOverHeadId' in normalizedPatch) {
+      normalizedPatch.carryOverHeadId = normalizeCarryOverHeadId(normalizedPatch.carryOverHeadId);
+    }
+    if ('nativeSeedReceipt' in normalizedPatch) {
+      normalizedPatch.nativeSeedReceipt = normalizeNativeSeedReceipt(normalizedPatch.nativeSeedReceipt);
+    }
+    if ('carryOverMigrationQuarantine' in normalizedPatch) {
+      normalizedPatch.carryOverMigrationQuarantine = normalizeMigrationQuarantine(
+        normalizedPatch.carryOverMigrationQuarantine,
+      );
+    }
+    const candidate = { ...existing, ...normalizedPatch };
+    assertSeedReceiptBinding(candidate);
+    if (candidate.carryOverHeadId !== null && !isCarryOverNodeId(candidate.carryOverHeadId)) {
+      throw new Error(`Invalid carryover head for ${id}`);
     }
     const previousAgentSessionId = existing.agentSessionId;
     const previousTags = existing.tags;

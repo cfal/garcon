@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 import { CODEX_MODELS } from '@garcon/common/models';
+import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   type AgentForkRequest,
@@ -311,6 +312,10 @@ async function forkWholeCodexSession(
       agentSessionId: result.agentSessionId,
       modelEndpointId: request.endpoint?.endpointId ?? source.modelEndpointId,
     }),
+    nativeSeedReceipt: retargetNativeSeedReceipt(
+      request.source.nativeSeedReceipt,
+      result.agentSessionId,
+    ),
   };
 }
 

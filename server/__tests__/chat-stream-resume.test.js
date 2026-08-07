@@ -9,6 +9,10 @@ import {
   ChatMessagesMessage,
 } from '../../common/ws-events.ts';
 import { AssistantMessage, ErrorMessage, UserMessage } from '../../common/chat-types.js';
+import {
+  snapshotLoader,
+  transcriptLoader,
+} from '../chats/__tests__/chat-transcript-test-helpers.js';
 
 const TS = '2026-06-01T00:00:00.000Z';
 const RELOAD_FAILED_NOTICE = 'The process died. Reloading chat history failed.';
@@ -32,13 +36,21 @@ describe('chat stream resume integration', () => {
 
     await views.appendAfterEnsuringGeneration(
       'chat-1',
-      async () => [],
+      transcriptLoader(async () => []),
       [user('hello', { ...turn, deliveryStatus: 'accepted' })],
     );
-    const first = await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('first')]);
+    const first = await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [assistant('first')],
+    );
     const cursor = { generationId: first.generationId, lastSeq: first.lastSeq };
 
-    await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('missed')]);
+    await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [assistant('missed')],
+    );
 
     const replay = views.readReplay('chat-1', cursor.generationId, cursor.lastSeq);
 
@@ -56,12 +68,12 @@ describe('chat stream resume integration', () => {
     });
     const watched = await views.appendAfterEnsuringGeneration(
       'chat-1',
-      async () => [],
+      transcriptLoader(async () => []),
       [assistant('first')],
     );
     await views.appendAfterEnsuringGeneration(
       'chat-2',
-      async () => [],
+      transcriptLoader(async () => []),
       [assistant('other')],
     );
     views.readReplay('chat-1', watched.generationId, watched.lastSeq);
@@ -69,7 +81,11 @@ describe('chat stream resume integration', () => {
     now = 11;
     views.prune();
     expect(views.getCursor('chat-2')).toBeNull();
-    await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('missed')]);
+    await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [assistant('missed')],
+    );
 
     const replay = views.readReplay('chat-1', watched.generationId, watched.lastSeq);
     expect(replay.mode).toBe('delta');
@@ -80,7 +96,7 @@ describe('chat stream resume integration', () => {
     const views = new ChatViewStore(() => false);
     const nativeReloader = new ChatNativeReloader(
       views,
-      { loadNativeMessages: async () => [assistant('last native message')] },
+      { loadSnapshot: snapshotLoader(async () => [assistant('last native message')]) },
       () => true,
     );
     const pendingInputs = new PendingUserInputService({
@@ -106,7 +122,7 @@ describe('chat stream resume integration', () => {
 
     const late = await views.appendAfterEnsuringGeneration(
       'chat-1',
-      async () => [],
+      transcriptLoader(async () => []),
       [assistant('late')],
       { fence: staleFence },
     );
@@ -135,7 +151,7 @@ describe('chat stream resume integration', () => {
     const views = new ChatViewStore(() => false);
     const nativeReloader = new ChatNativeReloader(
       views,
-      { loadNativeMessages: async () => { throw new Error('native read failed'); } },
+      { loadSnapshot: snapshotLoader(async () => { throw new Error('native read failed'); }) },
       () => true,
     );
     const pendingInputs = new PendingUserInputService({
@@ -145,7 +161,11 @@ describe('chat stream resume integration', () => {
     const recovery = new ChatProcessErrorRecovery(views, nativeReloader, pendingInputs);
     const broadcasts = [];
 
-    const original = await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('warm output')]);
+    const original = await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [assistant('warm output')],
+    );
     const result = await recovery.recover('chat-1', 'process died');
     expect(result.kind).toBe('fallback-appended');
     const appended = result.appended;

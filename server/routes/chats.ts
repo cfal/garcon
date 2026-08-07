@@ -60,9 +60,13 @@ import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
-import { AgentSwitchError, type AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
+import type {
+  CompleteChatHistoryResponse,
+  DegradedChatHistoryResponse,
+} from '../../common/chat-view.js';
+import { isCarryOverNodeId } from '../chats/carryover-node-types.js';
 
 const logger = createLogger('routes:chats');
 const MAX_SEARCH_QUERY_CHARS = 4_096;
@@ -73,10 +77,10 @@ const MAX_SEARCH_CHAT_ID_CHARS = 512;
 import type {
   ExecutionSettingsPatchRequest,
   ModelPatchRequest,
-  AgentModelPatchRequest,
   CommandAcceptedResponse,
   QueueCommandErrorResponse,
   QueueEntrySteerErrorResponse,
+  RepairHistoryAcceptNativeResponse,
   RunningChatsResponse,
 } from '../../common/chat-command-contracts.ts';
 import {
@@ -89,6 +93,7 @@ import {
   parseAgentStopCommandRequest,
   parseCompactCommandRequest,
   parseDeleteChatCommandRequest,
+  parseRepairHistoryAcceptNativeRequest,
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
   parsePermissionDecisionCommandRequest,
@@ -131,6 +136,7 @@ interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
+  setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
   recordChatStartup(defaults: Record<string, unknown>): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;
@@ -246,9 +252,6 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
 }
 
 function chatSettingsPatchErrorResponse(error: unknown): Response {
-  if (error instanceof AgentSwitchError) {
-    return jsonError(error.message, error.status, error.code, error.retryable);
-  }
   if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
     return jsonError(
       transcriptUnavailableMessage(error.retryable),
@@ -387,7 +390,6 @@ interface ChatRouteDeps {
   pendingInputs: PendingInputsDep;
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
-  agentSwitch: AgentSwitchService;
   searchIndex?: ChatSearchDep;
   lastSelectedChat?: LastSelectedChatState;
 }
@@ -404,7 +406,6 @@ export default function createChatRoutes({
   pendingInputs,
   commandService,
   chatListProjector,
-  agentSwitch,
   searchIndex,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
 }: ChatRouteDeps): RouteMap {
@@ -528,6 +529,52 @@ export default function createChatRoutes({
     }
   }
 
+  async function postRepairHistory(body: unknown): Promise<Response> {
+    try {
+      const input = parseCommandRequest(parseRepairHistoryAcceptNativeRequest, body);
+      if (!isCarryOverNodeId(input.expectedHeadId)) {
+        throw new ValidationDomainError('expectedHeadId must be a carryover head ID');
+      }
+      const current = registry.getChat(input.chatId);
+      if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
+      if (
+        current.agentOwnershipEpoch !== input.expectedAgentOwnershipEpoch
+        || current.carryOverHeadId !== input.expectedHeadId.toLowerCase()
+      ) {
+        throw new DomainError(
+          'STALE_CHAT_OWNERSHIP',
+          'Chat history ownership changed before repair.',
+          409,
+          true,
+        );
+      }
+      const receiptCleared = current.nativeSeedReceipt !== null;
+      if (receiptCleared) {
+        const updated = await registry.updateChat(
+          input.chatId,
+          { nativeSeedReceipt: null },
+          { flush: true },
+        );
+        if (!updated) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
+        searchIndex?.catalogMayHaveChanged(input.chatId);
+      }
+      logger.warn('history repair accepted the current native transcript', {
+        chatId: input.chatId,
+        agentId: current.agentId,
+        action: input.action,
+        receiptCleared,
+      });
+      return Response.json({
+        success: true,
+        action: 'accept-native',
+        chatId: input.chatId,
+        receiptCleared,
+      } satisfies RepairHistoryAcceptNativeResponse);
+    } catch (error: unknown) {
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function putLastSelectedChat(body: SetLastSelectedChatRequest | unknown): Promise<Response> {
     const input = bodyRecord(body);
     const rawChatId = input.chatId;
@@ -574,6 +621,7 @@ export default function createChatRoutes({
       const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
       await pendingInputs.reconcileRetainedHistory(chatId);
       return Response.json({
+        historyState: { kind: 'complete' },
         chatId,
         generationId: page.generationId,
         messages: page.messages,
@@ -582,9 +630,20 @@ export default function createChatRoutes({
         hasMore: page.hasMore,
         limit,
         pendingUserInputs: pendingInputs.listForTransport(chatId),
-      });
+      } satisfies CompleteChatHistoryResponse);
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
+      if (error instanceof DomainError && error.code === 'CARRYOVER_HISTORY_UNAVAILABLE') {
+        return Response.json({
+          historyState: {
+            kind: 'degraded',
+            errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+            retryable: false,
+          },
+          chatId,
+          messages: [],
+        } satisfies DegradedChatHistoryResponse);
+      }
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
         return jsonError(
           transcriptUnavailableMessage(error.retryable),
@@ -1132,47 +1191,6 @@ export default function createChatRoutes({
     }
   }
 
-  // Switches a chat's agent (or model within the same agent). Cross-agent
-  // switches start a fresh native session seeded from the prior transcript.
-  async function patchAgentModel(body: AgentModelPatchRequest & Record<string, unknown>): Promise<Response> {
-    try {
-      const chatId = requireStringField(body, 'chatId');
-      const agentId = requireStringField(body, 'agentId');
-      const model = requireStringField(body, 'model');
-      if (!agents.hasAgent(agentId)) return jsonError(`Unsupported agent: ${agentId}`, 422, 'UNSUPPORTED_AGENT');
-      const existingChat = registry.getChat(chatId);
-      if (!existingChat) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-      // Same-agent model changes are owned by /api/v1/chats/model; this endpoint
-      // only performs cross-agent switches that stage a fresh native session.
-      if (agentId === existingChat.agentId) {
-        return jsonError('Use /api/v1/chats/model to change model for the same agent.', 422, 'SAME_AGENT');
-      }
-      const updated = await agentSwitch.switchAgentModel({
-        chatId,
-        agentId,
-        model,
-        apiProviderId: optionalStringOrNull(body.apiProviderId),
-        modelEndpointId: optionalStringOrNull(body.modelEndpointId),
-        modelProtocol: optionalStringOrNull(body.modelProtocol) as AgentModelPatchRequest['modelProtocol'],
-      });
-      searchIndex?.catalogMayHaveChanged(chatId);
-      return Response.json({
-        success: true,
-        chatId,
-        agentId: updated.agentId,
-        model: updated.model,
-        apiProviderId: updated.apiProviderId ?? null,
-        modelEndpointId: updated.modelEndpointId ?? null,
-        modelProtocol: updated.modelProtocol ?? null,
-        permissionMode: updated.permissionMode,
-        thinkingMode: updated.thinkingMode,
-        agentSettings: updated.agentSettingsById[updated.agentId],
-      });
-    } catch (error: unknown) {
-      return chatSettingsPatchErrorResponse(error);
-    }
-  }
-
   async function patchProjectPath(body: unknown): Promise<Response> {
     try {
       const input = parseCommandRequest(parseProjectPathPatchRequest, body);
@@ -1202,6 +1220,7 @@ export default function createChatRoutes({
     '/api/v1/chats/fork-run': { POST: withJsonBody(postForkRunChat) },
     '/api/v1/chats/compact': { POST: withJsonBody(postCompactChat) },
     '/api/v1/chats/messages': { GET: getMessages },
+    '/api/v1/chats/repair-history': { POST: withJsonBody(postRepairHistory) },
     '/api/v1/chats/search': { POST: withJsonBody(postSearchChats) },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
@@ -1234,7 +1253,6 @@ export default function createChatRoutes({
       PATCH: withJsonBody(patchExecutionSettings),
     },
     '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
-    '/api/v1/chats/agent-model': { PATCH: withJsonBody(patchAgentModel) },
     '/api/v1/chats/project-path': { PATCH: withJsonBody(patchProjectPath) },
     '/api/v1/chats/details': { GET: getChatDetails },
     '/api/v1/chats/pin': { POST: withJsonBody(postTogglePin) },

@@ -8,6 +8,7 @@ import type {
   AgentTranscriptSourceLocation,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { CarriedContext } from '@garcon/common/transcript-seed';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
@@ -21,6 +22,7 @@ import type {
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { transcriptRevision } from '../lib/transcript-revision.js';
 import type { IntegrationRegistry } from './integration-registry.js';
 import type {
   AgentChatEntry,
@@ -140,14 +142,15 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #events: AgentEventBus;
   readonly #runtime: AgentRuntimeRouter;
   readonly #settings: AgentSessionSettingsService;
-  readonly #getCarryOverRevision: (chatId: string) => string;
+  readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
 
   constructor(args: {
     registry: IChatRegistry;
     integrations: IntegrationRegistry;
     endpointResolver: ApiProviderEndpointResolver;
-    getCarryOverRevision(chatId: string): string;
-    loadCarryOver(chatId: string, entry: AgentChatEntry): readonly ChatMessage[];
+    getCarryOverRevision(entry: AgentChatEntry): string;
+    loadCarriedContext(entry: AgentChatEntry, signal?: AbortSignal): Promise<CarriedContext | null>;
+    getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
     chatMutationLock?: KeyedPromiseLock;
   }) {
     this.#registry = args.registry;
@@ -164,7 +167,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       endpointResolver: args.endpointResolver,
       events: this.#events,
       getCarryOverRevision: args.getCarryOverRevision,
-      loadCarryOver: args.loadCarryOver,
+        loadCarriedContext: args.loadCarriedContext,
+        getCarryOverMessageCount: args.getCarryOverMessageCount,
     });
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,
@@ -265,19 +269,27 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!session?.agentId) return null;
     const integration = this.#directory.get(session.agentId);
     return integration?.transcript.preview({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
       signal: new AbortController().signal,
     }) ?? null;
   }
 
   async loadMessages(session: AgentChatEntry | null, chatId = ''): Promise<ChatMessage[]> {
-    if (!session?.agentId) return [];
+    return [...(await this.loadTranscriptSnapshot(session, chatId)).messages];
+  }
+
+  async loadTranscriptSnapshot(
+    session: AgentChatEntry | null,
+    chatId = '',
+    signal: AbortSignal = new AbortController().signal,
+  ) {
+    if (!session?.agentId) return { messages: [], revision: transcriptRevision([]) };
     const integration = this.#directory.get(session.agentId);
-    if (!integration) return [];
-    return [...(await integration.transcript.load({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
-      signal: new AbortController().signal,
-    })).messages];
+    if (!integration) return { messages: [], revision: transcriptRevision([]) };
+    return integration.transcript.load({
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
+      signal,
+    });
   }
 
   async loadMessagePage(
@@ -285,14 +297,15 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     limit: number,
     offset: number,
     chatId = '',
+    signal: AbortSignal = new AbortController().signal,
   ): Promise<MutableAgentTranscriptPage | null> {
     if (!session?.agentId) return null;
     const integration = this.#directory.get(session.agentId);
     if (!integration?.transcript.loadPage) return null;
     const page = await integration.transcript.loadPage({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
       page: { limit, offset },
-      signal: new AbortController().signal,
+      signal,
     });
     return page ? { ...page, messages: [...page.messages] } : null;
   }
@@ -309,7 +322,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const integration = this.#directory.get(session.agentId);
     if (!integration) return null;
     const reference = await integration.transcript.resolveNativeSession({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
       signal: new AbortController().signal,
     });
     if (reference?.ownerId !== session.agentId && reference !== null) {
@@ -326,7 +339,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!integration) return null;
     try {
       const source = await integration.transcript.describeSource({
-        chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+        chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
         signal: new AbortController().signal,
       });
       if (source === null) return null;

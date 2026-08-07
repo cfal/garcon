@@ -44,11 +44,14 @@ function persistedEntry(overrides = {}) {
     lastReadAt: null,
     permissionMode: 'default',
     thinkingMode: 'none',
+    carryOverHeadId: null,
+    nativeSeedReceipt: null,
+    carryOverMigrationQuarantine: null,
     ...overrides,
   };
 }
 
-async function writeRegistry(sessions, version = 3) {
+async function writeRegistry(sessions, version = 4) {
   await fs.writeFile(path.join(tempDir, 'chats.json'), JSON.stringify({ version, sessions }));
 }
 
@@ -135,7 +138,7 @@ describe('ChatRegistry', () => {
     }, { flush: true });
 
     const persisted = JSON.parse(await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8'));
-    expect(persisted.version).toBe(3);
+    expect(persisted.version).toBe(4);
     expect(persisted.sessions[CHAT_ID]).toMatchObject({
       agentSessionId: 'native-1',
       nativeSession: nativeSession('test', { id: 'native-1' }),
@@ -204,7 +207,7 @@ describe('ChatRegistry', () => {
     expect(removed).toHaveBeenCalledWith(CHAT_ID, 'user-deletion');
   });
 
-  it('loads a strict version-three registry and rebuilds its native ID index', async () => {
+  it('loads a strict version-four registry and rebuilds its native ID index', async () => {
     await registry.flush();
     await writeRegistry({ [CHAT_ID]: persistedEntry() });
     registry = new ChatRegistry(tempDir);

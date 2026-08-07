@@ -18,7 +18,7 @@ const integration = {
     configuration: [],
   },
   execution: {
-    start: async () => ({ agentSessionId: 'session', nativeSession: null }),
+    start: async () => ({ agentSessionId: 'session', nativeSession: null, nativeSeedReceipt: null }),
     resume: async () => {},
     abort: async () => false,
     isRunning: () => false,

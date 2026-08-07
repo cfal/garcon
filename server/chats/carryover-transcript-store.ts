@@ -5,6 +5,7 @@ import type { ChatMessage } from '../../common/chat-types.js';
 import { AgentSwitchMessage } from '../../common/chat-types.js';
 import { writeJsonFileAtomic, syncDirectory } from '../lib/json-file-store.js';
 import {
+  CarryOverPageIntegrityError,
   decodeCarryOverPage,
   encodeCarryOverPages,
   writeEncodedCarryOverPage,
@@ -79,6 +80,15 @@ export interface CarryOverTranscriptPage {
   readonly revision: string;
 }
 
+export interface CarryOverSweepResult {
+  readonly reachableNodeCount: number;
+  readonly unreachableNodeCount: number;
+  readonly removedNodeCount: number;
+  readonly compressedBytes: number;
+  readonly declaredUncompressedBytes: number;
+  readonly durationMs: number;
+}
+
 export type CarryOverCutoff =
   | { readonly kind: 'reuse'; readonly headId: string | null }
   | { readonly kind: 'prefix'; readonly sourceNodeId: string; readonly messageCount: number };
@@ -100,11 +110,17 @@ export class CarryOverTranscriptStore {
   readonly #manifestCache = new Map<string, CarryOverNode>();
   readonly #degradedNodes = new Set<string>();
   readonly #writerRoots = new Set<string>();
+  readonly #decodePage: typeof decodeCarryOverPage;
+  readonly #onNodeCommitted: (() => Promise<void>) | null;
+  #gcPromise: Promise<void> = Promise.resolve();
+  #nodeCommitPromise: Promise<void> = Promise.resolve();
 
   constructor(options: {
     readonly workspaceDir: string;
     readonly maxNodeDepth?: number;
     readonly manifestCacheSize?: number;
+    readonly decodePage?: typeof decodeCarryOverPage;
+    readonly onNodeCommitted?: () => Promise<void>;
   }) {
     this.#rootDir = path.join(options.workspaceDir, 'carryover-transcripts');
     this.#nodesDir = path.join(this.#rootDir, 'nodes');
@@ -112,6 +128,8 @@ export class CarryOverTranscriptStore {
     this.#trashDir = path.join(this.#rootDir, 'trash');
     this.#maxNodeDepth = options.maxNodeDepth ?? DEFAULT_MAX_NODE_DEPTH;
     this.#manifestCacheSize = options.manifestCacheSize ?? DEFAULT_MANIFEST_CACHE_SIZE;
+    this.#decodePage = options.decodePage ?? decodeCarryOverPage;
+    this.#onNodeCommitted = options.onNodeCommitted ?? null;
   }
 
   async initialize(): Promise<void> {
@@ -130,11 +148,38 @@ export class CarryOverTranscriptStore {
     return new Set(this.#writerRoots);
   }
 
+  async cleanupTemporary(retainedNodeIds: ReadonlySet<string>): Promise<number> {
+    let removed = 0;
+    for (const entry of await fs.readdir(this.#tmpDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const operationDir = path.join(this.#tmpDir, entry.name);
+      const children = await fs.readdir(operationDir, { withFileTypes: true }).catch(() => []);
+      const retained = children.some((child) => (
+        child.isDirectory() && isCarryOverNodeId(child.name) && retainedNodeIds.has(child.name)
+      ));
+      if (retained) continue;
+      await fs.rm(operationDir, { recursive: true, force: true });
+      removed += 1;
+    }
+    if (removed > 0) await syncDirectory(this.#tmpDir);
+    return removed;
+  }
+
+  sweep(roots: ReadonlySet<string>): Promise<CarryOverSweepResult> {
+    const operation = this.#gcPromise
+      .catch(() => undefined)
+      .then(() => this.#sweepNow(roots));
+    this.#gcPromise = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
   async prepareMaterialized(request: PrepareMaterializedNodeRequest): Promise<PreparedCarryOverNode> {
     request.signal?.throwIfAborted();
     const id = requireNodeId(request.id);
     const parentId = request.parentId === null ? null : requireNodeId(request.parentId);
-    if (request.messages.length === 0) throw new Error('Materialized carryover nodes must not be empty');
+    if (request.messages.length === 0 && request.boundary === null) {
+      throw new Error('Materialized carryover nodes must contain messages or a boundary');
+    }
     if (parentId) await this.assertReachableForHandoff(parentId, request.signal);
 
     const preparedDir = this.#preparedNodeDir(request.operationId, id);
@@ -230,8 +275,8 @@ export class CarryOverTranscriptStore {
           await this.#statPages(node, signal);
         }
       }
-    } catch (error) {
-      throw asUnavailable(error);
+      } catch (error) {
+        throwUnavailableUnlessAborted(error);
     }
   }
 
@@ -454,7 +499,7 @@ export class CarryOverTranscriptStore {
         const pageStart = descriptor.firstSequence;
         const pageEnd = pageStart + descriptor.messageCount;
         if (pageEnd <= start || pageStart >= end) continue;
-        const page = await decodeCarryOverPage(
+          const page = await this.#decodePage(
           path.join(this.#nodeDir(materialized.id), descriptor.file),
           descriptor,
           signal,
@@ -466,15 +511,23 @@ export class CarryOverTranscriptStore {
       }
       if (messages.length !== end - start) throw new Error('Carryover page range is incomplete');
       return messages;
-    } catch (error) {
-      this.#degradedNodes.add(materialized.id);
-      throw asUnavailable(error);
+      } catch (error) {
+        if (error instanceof CarryOverPageIntegrityError) {
+          this.#degradedNodes.add(materialized.id);
+        }
+        throwUnavailableUnlessAborted(error);
     }
   }
 
   async #readMaterializedPrefixSource(node: PrefixCarryOverNode): Promise<MaterializedCarryOverNode> {
-    const source = await this.#readManifest(node.sourceNodeId);
-    if (source.kind !== 'materialized') throw new Error('Carryover prefix source is not materialized');
+      const source = await this.#readManifest(node.sourceNodeId);
+      if (source.kind !== 'materialized') {
+        this.#degradedNodes.add(node.id);
+        throw new CarryOverTranscriptError(
+          'CARRYOVER_HISTORY_UNAVAILABLE',
+          'Carryover prefix source is not materialized',
+        );
+      }
     return source;
   }
 
@@ -486,8 +539,18 @@ export class CarryOverTranscriptStore {
       return cached;
     }
     try {
-      const raw = await fs.readFile(path.join(this.#nodeDir(id), 'manifest.json'), 'utf8');
-      const node = parseCarryOverNode(JSON.parse(raw), id);
+        const raw = await fs.readFile(path.join(this.#nodeDir(id), 'manifest.json'), 'utf8');
+        let node: CarryOverNode;
+        try {
+          node = parseCarryOverNode(JSON.parse(raw), id);
+        } catch (error) {
+          this.#degradedNodes.add(id);
+          throw new CarryOverTranscriptError(
+            'CARRYOVER_HISTORY_UNAVAILABLE',
+            `Carryover manifest ${id} is invalid`,
+            { cause: error },
+          );
+        }
       this.#manifestCache.set(id, node);
       while (this.#manifestCache.size > this.#manifestCacheSize) {
         const oldest = this.#manifestCache.keys().next().value;
@@ -495,9 +558,8 @@ export class CarryOverTranscriptStore {
         this.#manifestCache.delete(oldest);
       }
       return node;
-    } catch (error) {
-      this.#degradedNodes.add(id);
-      throw asUnavailable(error);
+      } catch (error) {
+        throwUnavailableUnlessAborted(error);
     }
   }
 
@@ -506,6 +568,7 @@ export class CarryOverTranscriptStore {
       signal?.throwIfAborted();
       const stat = await fs.stat(path.join(this.#nodeDir(node.id), descriptor.file));
       if (!stat.isFile() || stat.size !== descriptor.compressedBytes) {
+        this.#degradedNodes.add(node.id);
         throw new Error(`Carryover page metadata mismatch in ${node.id}`);
       }
     }
@@ -536,6 +599,7 @@ export class CarryOverTranscriptStore {
         committed = true;
         this.#manifestCache.set(manifest.id, manifest);
         await this.#removeEmptyOperationDir(operationId);
+        await this.#recordNodeCommitted();
       },
       discard: async () => {
         if (released) return;
@@ -557,6 +621,15 @@ export class CarryOverTranscriptStore {
     };
   }
 
+  #recordNodeCommitted(): Promise<void> {
+    if (!this.#onNodeCommitted) return Promise.resolve();
+    const operation = this.#nodeCommitPromise
+      .catch(() => undefined)
+      .then(this.#onNodeCommitted);
+    this.#nodeCommitPromise = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
   async #assertIdempotentCollision(finalDir: string, expected: CarryOverNode): Promise<void> {
     try {
       const actual = parseCarryOverNode(
@@ -576,6 +649,62 @@ export class CarryOverTranscriptStore {
         { cause: error },
       );
     }
+  }
+
+  async #sweepNow(roots: ReadonlySet<string>): Promise<CarryOverSweepResult> {
+    const startedAt = Date.now();
+    const reachable = new Set<string>();
+    const pending = new Set<string>([...roots, ...this.#writerRoots].map(requireNodeId));
+    let compressedBytes = 0;
+    let declaredUncompressedBytes = 0;
+    while (pending.size > 0) {
+      const id = pending.values().next().value;
+      if (id === undefined) break;
+      pending.delete(id);
+      if (reachable.has(id)) continue;
+      const node = await this.#readManifest(id);
+      reachable.add(id);
+      if (node.parentId) pending.add(node.parentId);
+      if (node.kind === 'prefix') pending.add(node.sourceNodeId);
+      else {
+        compressedBytes += node.pages.reduce((total, page) => total + page.compressedBytes, 0);
+        declaredUncompressedBytes += node.pages.reduce(
+          (total, page) => total + page.uncompressedBytes,
+          0,
+        );
+      }
+    }
+
+    const candidates = (await fs.readdir(this.#nodesDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && isCarryOverNodeId(entry.name))
+      .map((entry) => entry.name.toLowerCase())
+      .filter((id) => !reachable.has(id));
+    let removedNodeCount = 0;
+    for (const id of candidates) {
+      if (this.#writerRoots.has(id)) continue;
+      const trashPath = path.join(this.#trashDir, `${id}-${crypto.randomUUID()}`);
+      try {
+        await fs.rename(this.#nodeDir(id), trashPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      this.#manifestCache.delete(id);
+      this.#degradedNodes.delete(id);
+      await fs.rm(trashPath, { recursive: true, force: true });
+      removedNodeCount += 1;
+    }
+    if (removedNodeCount > 0) {
+      await Promise.all([syncDirectory(this.#nodesDir), syncDirectory(this.#trashDir)]);
+    }
+    return {
+      reachableNodeCount: reachable.size,
+      unreachableNodeCount: candidates.length,
+      removedNodeCount,
+      compressedBytes,
+      declaredUncompressedBytes,
+      durationMs: Date.now() - startedAt,
+    };
   }
 
   async #removeEmptyOperationDir(operationId: string): Promise<void> {
@@ -609,4 +738,9 @@ function asUnavailable(error: unknown): CarryOverTranscriptError {
         error instanceof Error ? error.message : String(error),
         { cause: error },
       );
+}
+
+function throwUnavailableUnlessAborted(error: unknown): never {
+  if (error instanceof Error && error.name === 'AbortError') throw error;
+  throw asUnavailable(error);
 }

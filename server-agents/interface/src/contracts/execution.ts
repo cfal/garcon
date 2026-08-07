@@ -3,6 +3,7 @@ import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentAttachment, AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
+import type { CarriedContext, NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentIntegrationError } from '../errors.js';
 import type { AgentChatReference, AgentNativeSessionRef } from './transcript.js';
 
@@ -43,7 +44,7 @@ export interface AgentExecutionContext {
 export interface AgentStartRequest extends AgentExecutionContext {
   readonly prompt: string;
   readonly attachments: readonly AgentAttachment[];
-  readonly carryOver: readonly ChatMessage[];
+  readonly carriedContext: CarriedContext | null;
 }
 
 export interface AgentResumeRequest extends AgentExecutionContext {
@@ -93,6 +94,7 @@ export interface AgentExecutionAdmission {
 export interface AgentStartedSession {
   readonly agentSessionId: string;
   readonly nativeSession: AgentNativeSessionRef | null;
+  readonly nativeSeedReceipt: NativeSeedReceipt | null;
 }
 
 export interface AgentRunningSession {

@@ -142,4 +142,33 @@ describe('transcript seed contract', () => {
     expect(sanitizeRecordedCarriedContext({ messages, receipt, agentSessionId: SESSION }))
       .toEqual({ kind: 'not-applicable', messages });
   });
+
+  test('strips migration receipts exactly without enabling legacy marker heuristics', () => {
+    const legacyPrefix = 'The following is a prior conversation.\n<carried-context>\nold\n</carried-context>\n\n';
+    const receipt = createNativeSeedReceipt({
+      headId: HEAD,
+      agentSessionId: SESSION,
+      placement: 'user-prefix',
+      prefix: legacyPrefix,
+      format: 'legacy-v0',
+    });
+    const exact = new UserMessage(
+      '2026-01-02T00:00:00.000Z',
+      `${legacyPrefix}continue`,
+    );
+    const rewritten = new UserMessage(
+      exact.timestamp,
+      `${legacyPrefix.replace('old', 'changed')}continue`,
+    );
+
+    expect(sanitizeRecordedCarriedContext({
+      messages: [exact], receipt, agentSessionId: SESSION,
+    })).toEqual({
+      kind: 'stripped-exact',
+      messages: [new UserMessage(exact.timestamp, 'continue')],
+    });
+    expect(sanitizeRecordedCarriedContext({
+      messages: [rewritten], receipt, agentSessionId: SESSION,
+    })).toEqual({ kind: 'absent', messages: [rewritten] });
+  });
 });

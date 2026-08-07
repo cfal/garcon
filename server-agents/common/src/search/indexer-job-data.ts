@@ -1,6 +1,10 @@
 import type { createHash } from 'node:crypto';
 import { parseChatMessages, type ChatMessage } from '@garcon/common/chat-types';
-import { stripFirstUserSeed } from '@garcon/common/transcript-seed';
+import {
+  parseNativeSeedReceipt,
+  sanitizeRecordedCarriedContext,
+  type NativeSeedReceipt,
+} from '@garcon/common/transcript-seed';
 import {
   attachNativeMessageSource,
   AgentTranscriptIndexError,
@@ -55,13 +59,26 @@ export function validateNativeBatch(batch: readonly ChatMessage[]): ChatMessage[
   return parsed;
 }
 
-export function stripFirstUserSeedPreservingSource(batch: ChatMessage[]): ChatMessage[] {
+export function sanitizeFirstRecordedSeedPreservingSource(
+  batch: ChatMessage[],
+  receipt: NativeSeedReceipt | null,
+  agentSessionId: string | null,
+): ChatMessage[] {
   const index = batch.findIndex((message) => message.type === 'user-message');
   if (index < 0) return batch;
   const source = getNativeMessageSource(batch[index]);
-  const stripped = stripFirstUserSeed(batch);
-  if (source && stripped[index] !== batch[index]) attachNativeMessageSource(stripped[index], source);
-  return stripped;
+  const sanitized = sanitizeRecordedCarriedContext({ messages: batch, receipt, agentSessionId });
+  if (sanitized.kind === 'mismatch') {
+    throw new AgentTranscriptIndexError({
+      kind: 'agent-transcript-index-failure',
+      code: 'CONTEXT_ENVELOPE_MISMATCH',
+      retryable: false,
+      refreshSource: false,
+    });
+  }
+  const messages = [...sanitized.messages];
+  if (source && messages[index] !== batch[index]) attachNativeMessageSource(messages[index], source);
+  return messages;
 }
 
 export function catalogEntryKey(entry: TranscriptSearchCatalogEntry): string {
@@ -71,7 +88,23 @@ export function catalogEntryKey(entry: TranscriptSearchCatalogEntry): string {
     updatedAt: entry.updatedAt,
     source: entry.source,
     carryOverRevision: entry.carryOverRevision,
+    agentSessionId: entry.agentSessionId,
+    nativeSeedReceiptDigest: nativeSeedReceiptDigest(entry.nativeSeedReceipt),
   });
+}
+
+export function nativeSeedReceiptDigest(receipt: NativeSeedReceipt | null): string {
+  return canonicalDigest(receipt);
+}
+
+export function catalogSourceDescriptorHash(entry: TranscriptSearchCatalogEntry): string | null {
+  return entry.source.state === 'ready'
+    ? canonicalDigest({
+        source: entry.source.reference,
+        agentSessionId: entry.agentSessionId,
+        nativeSeedReceiptDigest: nativeSeedReceiptDigest(entry.nativeSeedReceipt),
+      })
+    : null;
 }
 
 export function validateCatalogEntry(entry: TranscriptSearchCatalogEntry): void {
@@ -81,7 +114,19 @@ export function validateCatalogEntry(entry: TranscriptSearchCatalogEntry): void 
       || typeof entry.model !== 'string'
       || (entry.updatedAt !== null && typeof entry.updatedAt !== 'string')
       || typeof entry.carryOverRevision !== 'string'
+      || (entry.agentSessionId !== null && (
+        typeof entry.agentSessionId !== 'string' || entry.agentSessionId.length === 0
+      ))
       || !entry.source || typeof entry.source !== 'object') {
+    throw new Error('INVALID_CATALOG_ENTRY');
+  }
+  const parsedReceipt = parseNativeSeedReceipt(entry.nativeSeedReceipt);
+  if ((entry.nativeSeedReceipt === null) !== (parsedReceipt === null)
+      || (parsedReceipt && (
+        parsedReceipt.agentSessionId !== entry.agentSessionId
+        || entry.carryOverRevision !== `carry-v2:${parsedReceipt.headId}`
+        || JSON.stringify(parsedReceipt) !== JSON.stringify(entry.nativeSeedReceipt)
+      ))) {
     throw new Error('INVALID_CATALOG_ENTRY');
   }
   if (entry.source.state === 'absent') return;

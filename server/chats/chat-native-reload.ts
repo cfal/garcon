@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewPage } from '../../common/chat-view.js';
-import type { ChatViewStore } from './chat-view-store.js';
+import type { ChatTranscriptSnapshot, ChatViewStore } from './chat-view-store.js';
 import { createLogger } from '../lib/log.js';
 import { ChatRunningError } from './errors.js';
 
@@ -9,8 +9,8 @@ const logger = createLogger('chat-native-reload');
 // Fallback notice when a process-error reload has no humanized failure reason.
 export const PROCESS_DIED_MESSAGE = 'The process died.';
 
-interface NativeHistorySource {
-  loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
+interface CompositeHistorySource {
+  loadSnapshot(chatId: string): Promise<ChatTranscriptSnapshot>;
 }
 
 export type NativeReloadMode = 'manual-reload' | 'process-error';
@@ -21,13 +21,13 @@ export interface NativeReloadResult extends ChatViewPage {
 
 export class ChatNativeReloader {
   #views: ChatViewStore;
-  #source: NativeHistorySource;
+  #source: CompositeHistorySource;
   #isChatExecutionActive: (chatId: string) => boolean;
   #inFlight = new Map<string, Promise<NativeReloadResult>>();
 
   constructor(
     views: ChatViewStore,
-    source: NativeHistorySource,
+    source: CompositeHistorySource,
     isChatExecutionActive: (chatId: string) => boolean,
   ) {
     this.#views = views;
@@ -36,7 +36,7 @@ export class ChatNativeReloader {
   }
 
   loadNativeMessages(chatId: string): Promise<ChatMessage[]> {
-    return this.#source.loadNativeMessages(chatId);
+    return this.#source.loadSnapshot(chatId).then((snapshot) => snapshot.messages);
   }
 
   async reloadFromNative(
@@ -77,7 +77,7 @@ export class ChatNativeReloader {
       };
     const page = await this.#views.replaceFromNative(
       chatId,
-      () => this.#source.loadNativeMessages(chatId),
+      () => this.#source.loadSnapshot(chatId),
       { processErrorNotice, assertReplacementAllowed, replacementReason: mode },
     );
     logger.info(`reload complete mode=${mode} chat=${chatId} messages=${page.lastSeq}`);

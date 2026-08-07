@@ -20,6 +20,13 @@ export interface EncodedCarryOverPage {
   readonly bytes: Buffer;
 }
 
+export class CarryOverPageIntegrityError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'CarryOverPageIntegrityError';
+  }
+}
+
 export async function encodeCarryOverPages(
   messages: readonly ChatMessage[],
   signal?: AbortSignal,
@@ -73,27 +80,41 @@ export async function decodeCarryOverPage(
   signal?.throwIfAborted();
   const stat = await fs.stat(filePath);
   if (!stat.isFile() || stat.size !== descriptor.compressedBytes) {
-    throw new Error('Carryover page compressed size differs from its manifest');
+    throw new CarryOverPageIntegrityError(
+      'Carryover page compressed size differs from its manifest',
+    );
   }
 
   const source = createReadStream(filePath);
   const decompressor = createBrotliDecompress();
   const abort = () => {
     const error = signal?.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError');
-    source.destroy(error);
+    // The iterator observes the decompressor; the piped source has no error consumer.
+    source.destroy();
     decompressor.destroy(error);
   };
   signal?.addEventListener('abort', abort, { once: true });
   const chunks: Buffer[] = [];
   let size = 0;
   try {
-    for await (const chunk of source.pipe(decompressor)) {
-      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      size += bytes.byteLength;
-      if (size > descriptor.uncompressedBytes) {
-        throw new Error('Carryover page expands beyond its declared size');
+    try {
+      for await (const chunk of source.pipe(decompressor)) {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += bytes.byteLength;
+        if (size > descriptor.uncompressedBytes) {
+          throw new CarryOverPageIntegrityError(
+            'Carryover page expands beyond its declared size',
+          );
+        }
+        chunks.push(bytes);
       }
-      chunks.push(bytes);
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw error;
+      if (error instanceof CarryOverPageIntegrityError) throw error;
+      if (isCompressionDataError(error)) {
+        throw new CarryOverPageIntegrityError('Carryover page cannot be decompressed', { cause: error });
+      }
+      throw error;
     }
     signal?.throwIfAborted();
   } finally {
@@ -103,13 +124,24 @@ export async function decodeCarryOverPage(
   }
 
   if (size !== descriptor.uncompressedBytes) {
-    throw new Error('Carryover page uncompressed size differs from its manifest');
+    throw new CarryOverPageIntegrityError(
+      'Carryover page uncompressed size differs from its manifest',
+    );
   }
   const uncompressed = Buffer.concat(chunks, size);
-  if (digest(uncompressed) !== descriptor.sha256) throw new Error('Carryover page checksum mismatch');
-  const messages = parseChatMessages(JSON.parse(uncompressed.toString('utf8')));
+  if (digest(uncompressed) !== descriptor.sha256) {
+    throw new CarryOverPageIntegrityError('Carryover page checksum mismatch');
+  }
+  let messages: ChatMessage[];
+  try {
+    messages = parseChatMessages(JSON.parse(uncompressed.toString('utf8')));
+  } catch (error) {
+    throw new CarryOverPageIntegrityError('Carryover page payload is invalid', { cause: error });
+  }
   if (messages.length !== descriptor.messageCount) {
-    throw new Error('Carryover page message count differs from its manifest');
+    throw new CarryOverPageIntegrityError(
+      'Carryover page message count differs from its manifest',
+    );
   }
   return messages;
 }
@@ -138,4 +170,18 @@ function partitionMessages(messages: readonly ChatMessage[]): string[][] {
 
 function digest(bytes: Buffer): string {
   return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function isCompressionDataError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && 'code' in error
+    && typeof error.code === 'string'
+    && error.code.startsWith('Z_'),
+  );
 }
