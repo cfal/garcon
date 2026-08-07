@@ -1,12 +1,10 @@
 // Renders the shared-chat HTML page. Enriches the SPA shell so a shared link is
 // both human-friendly (the Svelte app hydrates as usual) and agent-friendly: the
-// served HTML carries Open Graph/Twitter metadata, a machine-discoverable link to
-// the plain-text transcript, and a no-JavaScript transcript fallback that agents
-// and crawlers can read directly. The fallback is removed the instant JS runs, so
-// browser users never see it.
+// served HTML carries Open Graph/Twitter metadata and machine-discoverable links
+// to the plain-text transcript. The small no-JavaScript fallback links to the
+// transcript instead of embedding it, keeping browser parse cost bounded.
 
 import type { SharedChatSnapshot } from '../../common/share-types.ts';
-import { renderSharedChatText } from './share-transcript.ts';
 import type { PublicAppTitle } from '../app-title.js';
 import { appTitleBootstrapScript } from '../app-title.js';
 
@@ -59,7 +57,9 @@ function buildHeadTags(
     `<meta property="og:site_name" content="${siteName}" />`,
     `<meta property="og:title" content="${title}" />`,
     `<meta property="og:description" content="${description}" />`,
-    canonicalUrl ? `<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />` : '',
+    canonicalUrl
+      ? `<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`
+      : '',
     `<meta name="twitter:card" content="summary" />`,
     `<meta name="twitter:title" content="${title}" />`,
     `<meta name="twitter:description" content="${description}" />`,
@@ -69,12 +69,17 @@ function buildHeadTags(
     .join('\n\t\t');
 }
 
-// Builds the no-JS transcript block. When removable, an inline script strips it
-// before the SPA mounts so browser users never see raw text; agents and crawlers
-// that do not execute JavaScript read the transcript straight from the markup.
-function buildBodyFallback(snapshot: SharedChatSnapshot, removable: boolean): string {
-  const transcript = escapeHtml(renderSharedChatText(snapshot));
-  const block = `<div id="${FALLBACK_ELEMENT_ID}"><pre>${transcript}</pre></div>`;
+// Keeps the fallback independent of transcript size. Agents can follow the
+// explicit plain-text link without forcing every browser to parse the transcript.
+function buildBodyFallback(
+  snapshot: SharedChatSnapshot,
+  token: string,
+  removable: boolean,
+): string {
+  const title = escapeHtml(shareTitle(snapshot));
+  const agent = escapeHtml(snapshot.agentId || 'agent');
+  const llmHref = escapeHtml(`/shared/llm/${encodeURIComponent(token)}`);
+  const block = `<main id="${FALLBACK_ELEMENT_ID}"><h1>${title}</h1><p>Shared ${agent} conversation with ${snapshot.messages.length} messages.</p><p><a href="${llmHref}">Read the full plain-text transcript</a></p></main>`;
   if (!removable) return block;
   return `${block}<script>document.getElementById(${JSON.stringify(FALLBACK_ELEMENT_ID)})?.remove()</script>`;
 }
@@ -90,7 +95,7 @@ export function injectSharedChatContext(
   appTitle: PublicAppTitle,
 ): string {
   const head = buildHeadTags(snapshot, token, canonicalUrl, appTitle);
-  const body = buildBodyFallback(snapshot, true);
+  const body = buildBodyFallback(snapshot, token, true);
   const bootstrap = appTitleBootstrapScript(appTitle);
 
   let html = /<title>[^<]*<\/title>/.test(shell)
@@ -106,7 +111,7 @@ export function injectSharedChatContext(
 }
 
 // Self-contained shared page used when the SPA shell is unavailable (e.g. the
-// build output is missing). Keeps the transcript visible since no SPA will mount.
+// build output is missing). Keeps the plain-text transcript link visible.
 export function renderStandaloneSharedHtml(
   snapshot: SharedChatSnapshot,
   token: string,
@@ -114,7 +119,7 @@ export function renderStandaloneSharedHtml(
   appTitle: PublicAppTitle,
 ): string {
   const head = buildHeadTags(snapshot, token, canonicalUrl, appTitle);
-  const body = buildBodyFallback(snapshot, false);
+  const body = buildBodyFallback(snapshot, token, false);
   return `<!doctype html>
 <html lang="en">
 	<head>

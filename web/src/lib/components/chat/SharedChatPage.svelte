@@ -28,13 +28,36 @@
 
 	const appTitle = getAppTitle();
 
-	let messages = $state<ChatMessage[]>([]);
+	interface SharedMessageEntry {
+		index: number;
+		message: ChatMessage;
+	}
+
+	let messages = $state<SharedMessageEntry[]>([]);
 	let title = $state('');
 	let agentId = $state('');
 	let sharedAt = $state('');
 	let isLoading = $state(true);
+	let isLoadingEarlier = $state(false);
 	let errorMsg = $state<string | null>(null);
+	let olderPageError = $state(false);
+	let nextBefore = $state<number | null>(null);
+	let totalMessages = $state(0);
+	let snapshotVersion = $state<string | null>(null);
 	let thinkingStates = $state<Record<number, boolean>>({});
+
+	function parseMessages(rawMessages: unknown[], startIndex: number): SharedMessageEntry[] {
+		return rawMessages
+			.map((raw: unknown, offset): SharedMessageEntry | null => {
+				try {
+					const message = parseChatMessage(raw as Record<string, unknown>);
+					return message ? { index: startIndex + offset, message } : null;
+				} catch {
+					return null;
+				}
+			})
+			.filter((entry): entry is SharedMessageEntry => entry !== null);
+	}
 
 	onMount(() => {
 		const mql = window.matchMedia('(prefers-color-scheme: dark)');
@@ -61,15 +84,10 @@
 			title = snapshot.title;
 			agentId = snapshot.agentId;
 			sharedAt = snapshot.sharedAt;
-			messages = (snapshot.messages ?? [])
-				.map((raw: unknown) => {
-					try {
-						return parseChatMessage(raw as Record<string, unknown>);
-					} catch {
-						return null;
-					}
-				})
-				.filter((msg): msg is ChatMessage => msg !== null);
+			messages = parseMessages(snapshot.messages ?? [], resp.page.start);
+			totalMessages = resp.page.totalMessages;
+			nextBefore = resp.page.nextBefore;
+			snapshotVersion = resp.page.snapshotVersion;
 		} catch {
 			errorMsg = m.shared_view_not_found();
 		} finally {
@@ -79,6 +97,44 @@
 			window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
 		}
 	});
+
+	async function loadEarlier(): Promise<void> {
+		if (nextBefore === null || isLoadingEarlier) return;
+		isLoadingEarlier = true;
+		olderPageError = false;
+		try {
+			const resp = await getSharedChat(token, nextBefore, snapshotVersion);
+			const olderMessages = parseMessages(resp.snapshot.messages ?? [], resp.page.start);
+			if (resp.page.reset || resp.page.snapshotVersion !== snapshotVersion) {
+				const snapshot = resp.snapshot;
+				title = snapshot.title;
+				agentId = snapshot.agentId;
+				sharedAt = snapshot.sharedAt;
+				messages = olderMessages;
+				totalMessages = resp.page.totalMessages;
+				nextBefore = resp.page.nextBefore;
+				snapshotVersion = resp.page.snapshotVersion;
+				await tick();
+				window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+				return;
+			}
+			// Capture the live viewport immediately before prepending. The reader may
+			// scroll while the request is in flight.
+			const previousHeight = document.documentElement.scrollHeight;
+			const previousScrollY = window.scrollY;
+			messages = [...olderMessages, ...messages];
+			nextBefore = resp.page.nextBefore;
+			totalMessages = resp.page.totalMessages;
+			snapshotVersion = resp.page.snapshotVersion;
+			await tick();
+			const addedHeight = document.documentElement.scrollHeight - previousHeight;
+			window.scrollTo({ top: previousScrollY + addedHeight, behavior: 'instant' });
+		} catch {
+			olderPageError = true;
+		} finally {
+			isLoadingEarlier = false;
+		}
+	}
 
 	function formattedSharedDate(): string {
 		if (!sharedAt) return '';
@@ -91,8 +147,8 @@
 		});
 	}
 
-	function toggleThinking(idx: number) {
-		thinkingStates[idx] = !thinkingStates[idx];
+	function toggleThinking(messageIndex: number) {
+		thinkingStates[messageIndex] = !thinkingStates[messageIndex];
 	}
 
 	function isGroupedWith(prev: ChatMessage | null, current: ChatMessage): boolean {
@@ -166,8 +222,30 @@
 			</div>
 		{:else}
 			<div class="space-y-1">
-				{#each messages as message, idx}
-					{@const prevMessage = idx > 0 ? messages[idx - 1] : null}
+				{#if nextBefore !== null || olderPageError}
+					<div class="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+						<div class="h-px flex-1 bg-border/70"></div>
+						<button
+							type="button"
+							class="h-8 rounded-md px-3 hover:bg-muted disabled:cursor-wait disabled:opacity-60"
+							disabled={isLoadingEarlier}
+							aria-busy={isLoadingEarlier}
+							onclick={loadEarlier}
+						>
+							{#if isLoadingEarlier}
+								{m.chat_transcript_loading_earlier()}
+							{:else if olderPageError}
+								{m.chat_transcript_retry_earlier()}
+							{:else}
+								{m.chat_transcript_load_earlier()}
+							{/if}
+						</button>
+						<div class="h-px flex-1 bg-border/70"></div>
+					</div>
+				{/if}
+				{#each messages as entry, idx (entry.index)}
+					{@const message = entry.message}
+					{@const prevMessage = idx > 0 ? messages[idx - 1].message : null}
 					{@const isGrouped = isGroupedWith(prevMessage, message)}
 					<svelte:boundary>
 						{#snippet failed(error)}
@@ -209,19 +287,20 @@
 										<button
 											type="button"
 											class="flex w-full items-center gap-2 text-left cursor-pointer"
-											onclick={() => toggleThinking(idx)}
-											aria-expanded={thinkingStates[idx] ?? true}
+											onclick={() => toggleThinking(entry.index)}
+											aria-expanded={thinkingStates[entry.index] ?? true}
 										>
 											<span class="text-xs font-medium text-muted-foreground"
 												>{m.chat_message_thinking()}</span
 											>
 											<ChevronRight
-												class="ml-auto w-3 h-3 transition-transform {(thinkingStates[idx] ?? true)
+												class="ml-auto w-3 h-3 transition-transform {(thinkingStates[entry.index] ??
+												true)
 													? 'rotate-90'
 													: ''}"
 											/>
 										</button>
-										{#if thinkingStates[idx] ?? true}
+										{#if thinkingStates[entry.index] ?? true}
 											<div class="mt-0.5 text-sm text-foreground/90">
 												<Markdown source={message.content} variant="thinking" />
 											</div>
@@ -249,7 +328,7 @@
 			class="max-w-4xl mx-auto px-4 sm:px-6 flex items-center justify-between text-xs text-muted-foreground"
 		>
 			<span>{m.shared_view_via_app()}</span>
-			<span>{messages.length} messages</span>
+			<span>{messages.length} of {totalMessages} messages</span>
 		</div>
 	</footer>
 </div>

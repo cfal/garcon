@@ -26,6 +26,16 @@ export interface ShareStatusResponse {
 
 export interface GetSharedChatResponse {
   snapshot: SharedChatSnapshot;
+  page: SharedChatMessagePage;
+}
+
+export interface SharedChatMessagePage {
+  snapshotVersion: string;
+  totalMessages: number;
+  start: number;
+  end: number;
+  nextBefore: number | null;
+  reset?: boolean;
 }
 
 export interface RevokeShareResponse {

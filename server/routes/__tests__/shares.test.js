@@ -19,7 +19,8 @@ function createSnapshot(overrides = {}) {
       {
         type: 'assistant-message',
         timestamp: '2025-01-02T03:05:05.000Z',
-        content: 'Yes. The thread discusses making the shared page readable without JavaScript.',
+        content:
+          'Yes. The thread discusses making the shared page readable without JavaScript.',
       },
       {
         type: 'bash-tool-use',
@@ -42,7 +43,9 @@ function createSnapshot(overrides = {}) {
 function createRoutes(snapshot = createSnapshot(), appTitle = null) {
   return createShareRoutes(
     {
-      getShare: mock((token) => token === snapshot.shareToken ? snapshot : null),
+      getShare: mock((token) =>
+        token === snapshot.shareToken ? snapshot : null,
+      ),
       getShareByChatId: mock(() => null),
       createShare: mock(() => Promise.resolve(snapshot)),
       updateShare: mock(() => Promise.resolve(snapshot)),
@@ -52,11 +55,23 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null) {
     { getChat: mock(() => null) },
     {
       getChatName: mock(() => null),
-      getUiSettings: mock(() => appTitle ? { appIdentity: { title: appTitle } } : {}),
-      getRemoteSettingsVersion: mock(() => appTitle ? 3 : 0),
+      getUiSettings: mock(() =>
+        appTitle ? { appIdentity: { title: appTitle } } : {},
+      ),
+      getRemoteSettingsVersion: mock(() => (appTitle ? 3 : 0)),
     },
     { getChatMetadata: mock(() => null) },
-    { getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })) },
+    {
+      getOrCreatePage: mock(() =>
+        Promise.resolve({
+          messages: [],
+          generationId: 'generation-1',
+          lastSeq: 0,
+          pageOldestSeq: 0,
+          hasMore: false,
+        }),
+      ),
+    },
   );
 }
 
@@ -102,46 +117,274 @@ describe('shared transcript routes', () => {
   });
 });
 
+describe('shared chat snapshot route', () => {
+  it('returns the newest bounded page with an older-page cursor', async () => {
+    const messages = Array.from({ length: 250 }, (_, index) => ({
+      type: 'assistant-message',
+      timestamp: '2025-01-02T03:05:05.000Z',
+      content: `message-${index}`,
+    }));
+    const routes = createRoutes(createSnapshot({ messages }));
+    const response = await routes['/api/v1/shared'].GET(
+      new Request('http://localhost/api/v1/shared?token=share-token&limit=200'),
+      new URL('http://localhost/api/v1/shared?token=share-token&limit=200'),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe(
+      'no-cache, no-store, must-revalidate',
+    );
+    expect(body.snapshot.messages).toHaveLength(200);
+    expect(body.snapshot.messages[0].content).toBe('message-50');
+    expect(body.snapshot.messages[199].content).toBe('message-249');
+    expect(body.page).toEqual({
+      snapshotVersion: '2025-01-02T03:04:05.000Z',
+      totalMessages: 250,
+      start: 50,
+      end: 250,
+      nextBefore: 50,
+    });
+  });
+
+  it('returns an exact older page without overlap', async () => {
+    const messages = Array.from({ length: 250 }, (_, index) => ({
+      type: 'assistant-message',
+      timestamp: '2025-01-02T03:05:05.000Z',
+      content: `message-${index}`,
+    }));
+    const routes = createRoutes(createSnapshot({ messages }));
+    const response = await routes['/api/v1/shared'].GET(
+      new Request(
+        'http://localhost/api/v1/shared?token=share-token&limit=200&before=50&version=2025-01-02T03%3A04%3A05.000Z',
+      ),
+      new URL(
+        'http://localhost/api/v1/shared?token=share-token&limit=200&before=50&version=2025-01-02T03%3A04%3A05.000Z',
+      ),
+    );
+    const body = await response.json();
+
+    expect(body.snapshot.messages).toHaveLength(50);
+    expect(body.snapshot.messages[0].content).toBe('message-0');
+    expect(body.snapshot.messages[49].content).toBe('message-49');
+    expect(body.page).toEqual({
+      snapshotVersion: '2025-01-02T03:04:05.000Z',
+      totalMessages: 250,
+      start: 0,
+      end: 50,
+      nextBefore: null,
+    });
+  });
+
+  it('resets to the newest page when a cursor targets an older snapshot version', async () => {
+    const snapshot = createSnapshot({
+      messages: Array.from({ length: 250 }, (_, index) => ({
+        type: 'assistant-message',
+        timestamp: '2025-01-02T03:05:05.000Z',
+        content: `message-${index}`,
+      })),
+    });
+    const routes = createRoutes(snapshot);
+
+    const firstResponse = await routes['/api/v1/shared'].GET(
+      new Request('http://localhost/api/v1/shared?token=share-token&limit=200'),
+      new URL('http://localhost/api/v1/shared?token=share-token&limit=200'),
+    );
+    const firstBody = await firstResponse.json();
+    expect(firstBody.page.nextBefore).toBe(50);
+
+    snapshot.sharedAt = '2025-01-02T04:04:05.000Z';
+    snapshot.messages = Array.from({ length: 270 }, (_, index) => ({
+      type: 'assistant-message',
+      timestamp: '2025-01-02T03:05:05.000Z',
+      content: `message-${index}`,
+    }));
+
+    const staleResponse = await routes['/api/v1/shared'].GET(
+      new Request(
+        `http://localhost/api/v1/shared?token=share-token&limit=200&before=${firstBody.page.nextBefore}&version=${encodeURIComponent(firstBody.page.snapshotVersion)}`,
+      ),
+      new URL(
+        `http://localhost/api/v1/shared?token=share-token&limit=200&before=${firstBody.page.nextBefore}&version=${encodeURIComponent(firstBody.page.snapshotVersion)}`,
+      ),
+    );
+    const staleBody = await staleResponse.json();
+
+    expect(staleBody.snapshot.messages).toHaveLength(200);
+    expect(staleBody.snapshot.messages[0].content).toBe('message-70');
+    expect(staleBody.snapshot.messages[199].content).toBe('message-269');
+    expect(staleBody.page).toEqual({
+      snapshotVersion: '2025-01-02T04:04:05.000Z',
+      totalMessages: 270,
+      start: 70,
+      end: 270,
+      nextBefore: 70,
+      reset: true,
+    });
+  });
+
+  it('preserves the complete snapshot when pagination is not requested', async () => {
+    const messages = Array.from({ length: 250 }, (_, index) => ({
+      type: 'assistant-message',
+      timestamp: '2025-01-02T03:05:05.000Z',
+      content: `message-${index}`,
+    }));
+    const routes = createRoutes(createSnapshot({ messages }));
+    const response = await routes['/api/v1/shared'].GET(
+      new Request('http://localhost/api/v1/shared?token=share-token'),
+      new URL('http://localhost/api/v1/shared?token=share-token'),
+    );
+    const body = await response.json();
+
+    expect(body.snapshot.messages).toHaveLength(250);
+    expect(body.page).toEqual({
+      snapshotVersion: '2025-01-02T03:04:05.000Z',
+      totalMessages: 250,
+      start: 0,
+      end: 250,
+      nextBefore: null,
+    });
+  });
+});
+
 describe('shared chat page route', () => {
-  it('serves an HTML page with share metadata, an LLM alternate link, and a no-JS transcript', async () => {
+  it('serves bounded HTML with metadata and machine-readable transcript links', async () => {
     const routes = createRoutes();
     const response = await routes['/shared/:token'].GET(
-      new Request('http://localhost/shared/share-token'),
+      new Request('http://localhost/shared/share-token', {
+        headers: { Accept: 'text/html' },
+      }),
       new URL('http://localhost/shared/share-token'),
     );
     const body = await response.text();
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/html');
-    expect(body).toContain('<meta property="og:title" content="Investigate flaky share rendering" />');
+    expect(body).toContain(
+      '<meta property="og:title" content="Investigate flaky share rendering" />',
+    );
     expect(body).toContain('<meta property="og:site_name" content="Garcon" />');
-    expect(body).toContain('<meta property="og:url" content="http://localhost/shared/share-token" />');
+    expect(body).toContain(
+      '<meta property="og:url" content="http://localhost/shared/share-token" />',
+    );
     expect(body).toContain('rel="alternate" type="text/plain"');
     expect(body).toContain('href="/shared/llm/share-token"');
-    // Full transcript is embedded for agents that do not run JavaScript.
-    expect(body).toContain('Title: Investigate flaky share rendering');
+    expect(response.headers.get('link')).toBe(
+      '</shared/llm/share-token>; rel="alternate"; type="text/plain"',
+    );
+    expect(response.headers.get('vary')).toBe('Accept');
+    expect(body).toContain('Read the full plain-text transcript');
+    expect(body).not.toContain('All tests passed.');
+  });
+
+  it('keeps canonical HTML size independent of transcript size', async () => {
+    const largeContent = 'large transcript content '.repeat(100_000);
+    const routes = createRoutes(
+      createSnapshot({
+        messages: [
+          {
+            type: 'assistant-message',
+            timestamp: '2025-01-02T03:05:05.000Z',
+            content: largeContent,
+          },
+        ],
+      }),
+    );
+    const response = await routes['/shared/:token'].GET(
+      new Request('http://localhost/shared/share-token', {
+        headers: { Accept: 'text/html' },
+      }),
+      new URL('http://localhost/shared/share-token'),
+    );
+    const body = await response.text();
+
+    expect(body.length).toBeLessThan(100_000);
+    expect(body).not.toContain(largeContent.slice(0, 1_000));
+  });
+
+  it('serves plain text from the canonical URL when explicitly requested', async () => {
+    const routes = createRoutes();
+    const request = new Request('http://localhost/shared/share-token', {
+      headers: { Accept: 'text/plain' },
+    });
+    const response = await routes['/shared/:token'].GET(
+      request,
+      new URL(request.url),
+    );
+    const body = await response.text();
+
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(response.headers.get('vary')).toBe('Accept');
     expect(body).toContain('All tests passed.');
+  });
+
+  it('negotiates weighted and generic Accept headers without serving rejected types', async () => {
+    const routes = createRoutes();
+    const cases = [
+      { accept: undefined, status: 200, type: 'text/plain' },
+      { accept: '*/*', status: 200, type: 'text/plain' },
+      { accept: 'text/plain;q=0', status: 406, type: null },
+      {
+        accept: 'text/plain;q=1, text/html;q=0',
+        status: 200,
+        type: 'text/plain',
+      },
+      {
+        accept: 'text/plain;q=0.5, text/html;q=0.9',
+        status: 200,
+        type: 'text/html',
+      },
+      { accept: 'text/html, */*;q=0.8', status: 200, type: 'text/html' },
+    ];
+
+    for (const testCase of cases) {
+      const request = new Request('http://localhost/shared/share-token', {
+        headers: testCase.accept ? { Accept: testCase.accept } : undefined,
+      });
+      const response = await routes['/shared/:token'].GET(
+        request,
+        new URL(request.url),
+      );
+
+      expect(response.status).toBe(testCase.status);
+      if (testCase.type) {
+        expect(response.headers.get('content-type')).toContain(testCase.type);
+      }
+      expect(response.headers.get('vary')).toBe('Accept');
+    }
   });
 
   it('uses the remote app title in shared-page metadata', async () => {
     const routes = createRoutes(createSnapshot(), 'Garcon - Work');
     const response = await routes['/shared/:token'].GET(
-      new Request('http://localhost/shared/share-token'),
+      new Request('http://localhost/shared/share-token', {
+        headers: { Accept: 'text/html' },
+      }),
       new URL('http://localhost/shared/share-token'),
     );
     const body = await response.text();
 
     expect(response.status).toBe(200);
-    expect(body).toContain('<title>Investigate flaky share rendering · Garcon - Work</title>');
-    expect(body).toContain('<meta property="og:site_name" content="Garcon - Work" />');
-    expect(body).toContain('<meta name="apple-mobile-web-app-title" content="Garcon - Work" />');
+    expect(body).toContain(
+      '<title>Investigate flaky share rendering · Garcon - Work</title>',
+    );
+    expect(body).toContain(
+      '<meta property="og:site_name" content="Garcon - Work" />',
+    );
+    expect(body).toContain(
+      '<meta name="apple-mobile-web-app-title" content="Garcon - Work" />',
+    );
   });
 
   it('HTML-escapes snapshot content to prevent markup injection', async () => {
-    const snapshot = createSnapshot({ title: 'Bug <img src=x onerror=alert(1)>' });
+    const snapshot = createSnapshot({
+      title: 'Bug <img src=x onerror=alert(1)>',
+    });
     const routes = createRoutes(snapshot);
     const response = await routes['/shared/:token'].GET(
-      new Request('http://localhost/shared/share-token'),
+      new Request('http://localhost/shared/share-token', {
+        headers: { Accept: 'text/html' },
+      }),
       new URL('http://localhost/shared/share-token'),
     );
     const body = await response.text();
