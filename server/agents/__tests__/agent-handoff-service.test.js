@@ -287,9 +287,79 @@ describe('AgentHandoffService', () => {
     });
     expect(commitHandoff).not.toHaveBeenCalled();
   });
+
+  it('requires an explicit target bypass mode under the CLI fallback policy', async () => {
+    const current = sourceChat();
+    const service = createService({
+      registry: { getChat: () => current },
+      carryOver,
+      ...targetResolutionDeps({ permissionModes: ['bypassPermissions'] }),
+    });
+    const request = handoff();
+    delete request.target.permissionMode;
+
+    await expect(service.resolveTarget({
+      chat: current,
+      handoff: request,
+      permissionFallbackPolicy: 'require-explicit-bypass',
+    })).rejects.toMatchObject({
+      code: 'EXPLICIT_BYPASS_REQUIRED',
+      status: 422,
+    });
+
+    request.target.permissionMode = 'bypassPermissions';
+    await expect(service.resolveTarget({
+      chat: current,
+      handoff: request,
+      permissionFallbackPolicy: 'require-explicit-bypass',
+    })).resolves.toMatchObject({
+      agentId: 'target-agent',
+      permissionMode: 'bypassPermissions',
+      agentSettings: envelope('target-agent'),
+    });
+  });
+
+  it('validates target settings without requiring valid source execution settings', async () => {
+    const current = {
+      ...sourceChat(),
+      agentSettingsById: {},
+    };
+    const service = createService({
+      registry: { getChat: () => current },
+      carryOver,
+      ...targetResolutionDeps(),
+    });
+
+    await expect(service.resolveTarget({
+      chat: current,
+      handoff: handoff(),
+    })).resolves.toMatchObject({
+      agentId: 'target-agent',
+      model: 'target-model',
+      agentSettings: envelope('target-agent'),
+    });
+
+    const invalid = handoff();
+    invalid.target.agentSettings = envelope('source-agent');
+    await expect(service.resolveTarget({
+      chat: current,
+      handoff: invalid,
+    })).rejects.toMatchObject({
+      code: 'INCOMPLETE_EXECUTION_CONFIG',
+      status: 422,
+    });
+  });
 });
 
-function createService({ registry, ownership, carryOver, settledCapture } = {}) {
+function createService({
+  registry,
+  ownership,
+  carryOver,
+  settledCapture,
+  integrations: integrationRegistry,
+  endpointResolver,
+  catalog,
+} = {}) {
   const integrations = new Map([
     ['source-agent', integration('source-agent')],
     ['target-agent', integration('target-agent')],
@@ -305,10 +375,36 @@ function createService({ registry, ownership, carryOver, settledCapture } = {}) 
       })),
       assertRevision: mock(async () => {}),
     },
-    integrations: { get: (agentId) => integrations.get(agentId) },
-    endpointResolver: {},
-    catalog: {},
+    integrations: integrationRegistry ?? { get: (agentId) => integrations.get(agentId) },
+    endpointResolver: endpointResolver ?? {},
+    catalog: catalog ?? {},
   });
+}
+
+function targetResolutionDeps({ permissionModes = ['default'] } = {}) {
+  const integrations = new Map([
+    ['source-agent', integration('source-agent')],
+    ['target-agent', integration('target-agent')],
+  ]);
+  return {
+    integrations: { get: (agentId) => integrations.get(agentId) },
+    endpointResolver: {
+      resolveSelection: ({ model }) => ({
+        model,
+        apiProviderId: null,
+        endpointId: null,
+        protocol: null,
+        isLocal: false,
+      }),
+      resolveEndpointReference: () => null,
+    },
+    catalog: {
+      getAgentCatalogEntry: async () => ({
+        supportedPermissionModes: permissionModes,
+        supportedThinkingModes: ['none'],
+      }),
+    },
+  };
 }
 
 function handoffIntent(input, targetEpoch) {

@@ -88,6 +88,80 @@ describe('chat command request parsers', () => {
     expect(parsed.permissionFallbackPolicy).toBe('require-explicit-bypass');
   });
 
+  it('parses one fenced handoff without flattening target execution settings', () => {
+    const parsed = parseAgentRunCommandRequest({
+      clientRequestId: 'request-handoff',
+      clientMessageId: 'message-handoff',
+      chatId: CHAT_ID,
+      command: 'continue elsewhere',
+      permissionFallbackPolicy: 'require-explicit-bypass',
+      handoff: {
+        expectedAgentOwnershipEpoch: 'epoch-1',
+        target: {
+          agentId: 'codex',
+          model: 'gpt-5.6-sol',
+          apiProviderId: 'openai',
+          modelEndpointId: 'responses',
+          modelProtocol: 'openai-compatible',
+          permissionMode: 'bypassPermissions',
+          thinkingMode: 'max',
+          agentSettings: agentSettings('codex'),
+        },
+      },
+    });
+
+    expect(parsed).toMatchObject({
+      handoff: {
+        expectedAgentOwnershipEpoch: 'epoch-1',
+        target: {
+          agentId: 'codex',
+          model: 'gpt-5.6-sol',
+          apiProviderId: 'openai',
+          modelEndpointId: 'responses',
+          modelProtocol: 'openai-compatible',
+          permissionMode: 'bypassPermissions',
+          thinkingMode: 'max',
+          agentSettings: agentSettings('codex'),
+        },
+      },
+    });
+    expect(parsed.model).toBeUndefined();
+    expect(parsed.permissionMode).toBeUndefined();
+  });
+
+  it('rejects incomplete or contradictory handoff requests', () => {
+    const base = {
+      clientRequestId: 'request-handoff-invalid',
+      clientMessageId: 'message-handoff-invalid',
+      chatId: CHAT_ID,
+      command: 'continue elsewhere',
+      handoff: {
+        expectedAgentOwnershipEpoch: 'epoch-1',
+        target: {
+          agentId: 'codex',
+          model: 'gpt-5.6-sol',
+          agentSettings: agentSettings('codex'),
+        },
+      },
+    };
+
+    expect(() => parseAgentRunCommandRequest({
+      ...base,
+      handoff: { target: base.handoff.target },
+    })).toThrow('expectedAgentOwnershipEpoch is required');
+    expect(() => parseAgentRunCommandRequest({
+      ...base,
+      handoff: {
+        ...base.handoff,
+        target: { ...base.handoff.target, agentSettings: agentSettings('claude') },
+      },
+    })).toThrow('handoff.target.agentSettings must be owned by handoff.target.agentId');
+    expect(() => parseAgentRunCommandRequest({
+      ...base,
+      model: 'flat-model',
+    })).toThrow('handoff cannot be combined with same-agent execution overrides');
+  });
+
   it('rejects partial routing and non-canonical explicit modes', () => {
     const base = {
       clientRequestId: 'request-routing',

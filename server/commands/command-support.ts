@@ -464,9 +464,6 @@ export class CommandSupport {
         && existing.publicTerminalAt === undefined,
     });
     if (replayDisposition === 'retry') return null;
-    if (replayDisposition === 'rethrow-failure') {
-      this.throwRecordedExecutionFailure(existing);
-    }
     if (replayDisposition === 'return-duplicate') {
       return this.agentTurnResultWithOptionalChat(existing, 'duplicate', true);
     }

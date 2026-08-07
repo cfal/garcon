@@ -179,6 +179,40 @@ describe('server event wiring', () => {
     }]);
   });
 
+  it('publishes handoff invalidation in one ordered per-chat task', async () => {
+    const published = [];
+    const invalidateFence = mock(() => undefined);
+    const invalidate = mock(() => undefined);
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+      chatViews: { invalidateFence, invalidate },
+    });
+
+    fixture.wiring.notifyAgentHandoff('chat-1');
+    expect(published).toEqual([]);
+    await fixture.wiring.waitForIdle();
+
+    expect(invalidateFence).toHaveBeenCalledWith('chat-1');
+    expect(invalidate).toHaveBeenCalledWith('chat-1');
+    expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
+    expect(published).toEqual([
+      {
+        type: 'chat-list-refresh-requested',
+        reason: 'agent-handoff',
+        chatId: 'chat-1',
+      },
+      {
+        type: 'chat-generation-reset',
+        chatId: 'chat-1',
+        generationId: expect.any(String),
+        reason: 'agent-handoff',
+        lastSeq: 0,
+      },
+    ]);
+  });
+
   it('publishes canonical processing phases before the Stop outcome', async () => {
     let phase = 'running';
     const published = [];

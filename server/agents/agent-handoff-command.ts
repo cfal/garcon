@@ -16,7 +16,6 @@ import type { RunAgentTurnOptions } from './session-types.js';
 export type AgentHandoffReplayDisposition =
   | 'continue'
   | 'retry'
-  | 'rethrow-failure'
   | 'return-duplicate';
 
 export function agentHandoffReplayDisposition(input: {
@@ -25,12 +24,7 @@ export function agentHandoffReplayDisposition(input: {
   readonly recordStatus: string;
   readonly isUnpublishedPreScheduleFailure: boolean;
 }): AgentHandoffReplayDisposition {
-  if (input.isUnpublishedPreScheduleFailure) {
-    return input.handoff
-      && input.currentOwnershipEpoch !== input.handoff.expectedAgentOwnershipEpoch
-      ? 'rethrow-failure'
-      : 'retry';
-  }
+  if (input.isUnpublishedPreScheduleFailure) return 'retry';
   if (!input.handoff || input.recordStatus !== 'accepted') return 'continue';
   return input.currentOwnershipEpoch === input.handoff.expectedAgentOwnershipEpoch
     ? 'retry'

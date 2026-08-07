@@ -23,6 +23,7 @@ import {
 } from '../../chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../../chat-execution/chat-execution-control-repository.ts';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
+import { transcriptLoader } from '../../chats/__tests__/chat-transcript-test-helpers.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import {
@@ -114,14 +115,19 @@ function agentSettings(ownerId = 'claude', values = {}) {
   return { ownerId, schemaVersion: 1, values };
 }
 
-function projectedChat(chatId, projectPath = '/repo') {
+function projectedChat(chatId, projectPath = '/repo', source = {}) {
+  const agentId = source.agentId ?? 'claude';
   return {
     id: chatId,
-    agentId: 'claude',
-    model: 'opus',
-    permissionMode: 'default',
-    thinkingMode: 'none',
-    agentSettings: agentSettings(),
+    agentId,
+    model: source.model ?? 'opus',
+    apiProviderId: source.apiProviderId ?? null,
+    modelEndpointId: source.modelEndpointId ?? null,
+    modelProtocol: source.modelProtocol ?? null,
+    permissionMode: source.permissionMode ?? 'default',
+    thinkingMode: source.thinkingMode ?? 'none',
+    agentSettings: source.agentSettingsById?.[agentId] ?? agentSettings(agentId),
+    agentOwnershipEpoch: source.agentOwnershipEpoch ?? 'epoch-1',
     title: 'Chat',
     projectPath,
     effectiveProjectKey: projectPath,
@@ -573,11 +579,66 @@ function makeService(overrides = {}) {
       sessions.delete(chatId);
     }),
   };
+  const handoffPreparations = [];
+  const defaultHandoffs = {
+    resolveTarget: mock(async ({ chat, handoff }) => {
+      if (handoff.expectedAgentOwnershipEpoch !== chat.agentOwnershipEpoch) {
+        throw new DomainError(
+          'STALE_CHAT_OWNERSHIP',
+          'The chat owner changed before this handoff was submitted.',
+          409,
+        );
+      }
+      const target = handoff.target;
+      return {
+        agentId: target.agentId,
+        model: target.model,
+        apiProviderId: target.apiProviderId ?? null,
+        modelEndpointId: target.modelEndpointId ?? null,
+        modelProtocol: target.modelProtocol ?? null,
+        permissionMode: target.permissionMode ?? 'default',
+        thinkingMode: target.thinkingMode ?? 'none',
+        agentSettings: target.agentSettings ?? agentSettings(target.agentId),
+      };
+    }),
+    createPreparation: mock((input) => {
+      const preparation = {
+        operation: 'agent-handoff',
+        prepare: mock(async () => {
+          const current = sessions.get(input.chatId);
+          if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
+          sessions.set(input.chatId, {
+            ...current,
+            agentId: input.target.agentId,
+            model: input.target.model,
+            apiProviderId: input.target.apiProviderId,
+            modelEndpointId: input.target.modelEndpointId,
+            modelProtocol: input.target.modelProtocol,
+            permissionMode: input.target.permissionMode,
+            thinkingMode: input.target.thinkingMode,
+            agentSettingsById: {
+              ...current.agentSettingsById,
+              [input.target.agentId]: input.target.agentSettings,
+            },
+            agentSessionId: null,
+            nativeSession: null,
+            nativeSeedReceipt: null,
+            carryOverHeadId: 'handoff-head',
+            agentOwnershipEpoch: `${current.agentOwnershipEpoch}:handoff`,
+          });
+        }),
+        compensate: mock(async () => undefined),
+      };
+      handoffPreparations.push(preparation);
+      return preparation;
+    }),
+  };
+  const handoffs = { ...defaultHandoffs, ...overrides.handoffs };
   const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
   const chatListProjector = {
     buildOne: mock((chatId) => {
       const chat = sessions.get(chatId);
-      return Promise.resolve(projectedChat(chatId, chat?.projectPath ?? '/repo'));
+      return Promise.resolve(projectedChat(chatId, chat?.projectPath ?? '/repo', chat));
     }),
   };
   const pathCache = {
@@ -618,6 +679,7 @@ function makeService(overrides = {}) {
     forkChatFileCopy,
     carryOver,
     ownership,
+    handoffs,
     chatMutationLock: overrides.chatMutationLock,
   });
   activeServices.push(service);
@@ -637,6 +699,8 @@ function makeService(overrides = {}) {
     chatListProjector,
     pathCache,
     ownership,
+    handoffs,
+    handoffPreparations,
   };
 }
 
@@ -668,6 +732,25 @@ function attachment(mimeType, content = 'hello') {
     data: `data:${mimeType};base64,${Buffer.from(content).toString('base64')}`,
     name: 'attachment.bin',
     mimeType,
+  };
+}
+
+function handoffRunInput(clientRequestId = 'req-agent-handoff') {
+  return {
+    chatId: SOURCE_CHAT_ID,
+    command: 'continue with codex',
+    clientRequestId,
+    clientMessageId: `msg-${clientRequestId}`,
+    handoff: {
+      expectedAgentOwnershipEpoch: 'epoch-1',
+      target: {
+        agentId: 'codex',
+        model: 'gpt-5.6-sol',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'max',
+        agentSettings: agentSettings('codex', { sandbox: 'danger-full-access' }),
+      },
+    },
   };
 }
 
@@ -1641,6 +1724,187 @@ describe('ChatCommandService', () => {
 
     expect(result.status).toBe('accepted');
     expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+  });
+
+  it('commits one cross-agent handoff before scheduling the target run', async () => {
+    const {
+      service,
+      queue,
+      sessions,
+      handoffs,
+      handoffPreparations,
+    } = makeService({
+      session: { agentSettingsById: {} },
+    });
+    const input = handoffRunInput();
+
+    const result = await service.submitRun(input);
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      chat: {
+        id: SOURCE_CHAT_ID,
+        agentId: 'codex',
+        model: 'gpt-5.6-sol',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'max',
+        agentOwnershipEpoch: 'epoch-1:handoff',
+      },
+    });
+    expect(sessions.get(SOURCE_CHAT_ID)).toMatchObject({
+      agentId: 'codex',
+      agentSessionId: null,
+      carryOverHeadId: 'handoff-head',
+      agentOwnershipEpoch: 'epoch-1:handoff',
+    });
+    expect(handoffs.resolveTarget).toHaveBeenCalledTimes(1);
+    expect(handoffs.createPreparation).toHaveBeenCalledTimes(1);
+    expect(handoffPreparations[0].prepare.mock.invocationCallOrder[0])
+      .toBeLessThan(queue.registerPendingUserInput.mock.invocationCallOrder[0]);
+    expect(queue.runReservedTurn).toHaveBeenCalledWith(
+      expect.anything(),
+      input.command,
+      expect.objectContaining({
+        model: 'gpt-5.6-sol',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'max',
+        agentSettings: input.handoff.target.agentSettings,
+      }),
+    );
+  });
+
+  it('replays a committed handoff before the now-stale epoch and mutable target settings', async () => {
+    const {
+      service,
+      queue,
+      sessions,
+      handoffs,
+      handoffPreparations,
+    } = makeService();
+    const input = handoffRunInput('req-handoff-replay');
+
+    const first = await service.submitRun(input);
+    sessions.get(SOURCE_CHAT_ID).agentSettingsById.codex = agentSettings('codex', {
+      sandbox: 'read-only',
+    });
+    const replay = await service.submitRun(input);
+
+    expect(replay).toMatchObject({
+      status: 'duplicate',
+      turnId: first.turnId,
+      chat: {
+        agentId: 'codex',
+        agentOwnershipEpoch: 'epoch-1:handoff',
+      },
+    });
+    expect(handoffs.resolveTarget).toHaveBeenCalledTimes(1);
+    expect(handoffs.createPreparation).toHaveBeenCalledTimes(1);
+    expect(handoffPreparations[0].prepare).toHaveBeenCalledTimes(1);
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a changed handoff retry from the submitted payload before target resolution', async () => {
+    const { service, handoffs } = makeService();
+    const input = handoffRunInput('req-handoff-conflict');
+    await service.submitRun(input);
+
+    await expect(service.submitRun({
+      ...input,
+      handoff: {
+        ...input.handoff,
+        target: { ...input.handoff.target, model: 'gpt-5.6-codex' },
+      },
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', status: 409 });
+
+    expect(handoffs.resolveTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an accepted handoff private until its locked scheduling transition finishes', async () => {
+    const scheduledWriteEntered = deferred();
+    const allowScheduledWrite = deferred();
+    const fixture = makeService();
+    const updateLedger = fixture.ledger.update.bind(fixture.ledger);
+    fixture.ledger.update = mock(async (key, patch) => {
+      if (patch.status === 'scheduled') {
+        scheduledWriteEntered.resolve();
+        await allowScheduledWrite.promise;
+      }
+      return updateLedger(key, patch);
+    });
+    const input = handoffRunInput('req-handoff-accepted-lock');
+
+    const first = fixture.service.submitRun(input);
+    await scheduledWriteEntered.promise;
+    const replay = fixture.service.submitRun(input);
+    await Promise.resolve();
+
+    expect(fixture.handoffs.resolveTarget).toHaveBeenCalledTimes(1);
+    expect((await readLedgerRecord(
+      fixture.ledger,
+      'agent-run',
+      input.clientRequestId,
+    )).status).toBe('accepted');
+
+    allowScheduledWrite.resolve();
+    await expect(Promise.all([first, replay])).resolves.toMatchObject([
+      { status: 'accepted' },
+      { status: 'duplicate' },
+    ]);
+    expect(fixture.handoffPreparations[0].prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects stale and busy handoffs before accepting a command receipt', async () => {
+    const stale = makeService({ session: { agentOwnershipEpoch: 'epoch-2' } });
+    const staleInput = handoffRunInput('req-handoff-stale');
+
+    await expect(stale.service.submitRun(staleInput)).rejects.toMatchObject({
+      code: 'STALE_CHAT_OWNERSHIP',
+      status: 409,
+    });
+    expect(await readLedgerRecord(
+      stale.ledger,
+      'agent-run',
+      staleInput.clientRequestId,
+    )).toBeNull();
+    expect(stale.handoffs.createPreparation).not.toHaveBeenCalled();
+
+    const busy = makeService({
+      queue: {
+        readChatExecutionControl: mock(async () => storedQueue([queueEntry('queued-1')])),
+      },
+    });
+    const busyInput = handoffRunInput('req-handoff-busy');
+    await expect(busy.service.submitRun(busyInput)).rejects.toMatchObject({
+      code: 'AGENT_HANDOFF_REQUIRES_IDLE',
+      status: 409,
+      retryable: true,
+    });
+    expect(await readLedgerRecord(
+      busy.ledger,
+      'agent-run',
+      busyInput.clientRequestId,
+    )).toBeNull();
+    expect(busy.handoffs.createPreparation).not.toHaveBeenCalled();
+  });
+
+  it('does not recapture after a committed handoff fails before scheduling', async () => {
+    const fixture = makeService();
+    const input = handoffRunInput('req-handoff-committed-failure');
+    fixture.queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
+
+    await expect(fixture.service.submitRun(input)).rejects.toThrow('append failed');
+    expect(fixture.sessions.get(SOURCE_CHAT_ID)).toMatchObject({
+      agentId: 'codex',
+      agentOwnershipEpoch: 'epoch-1:handoff',
+    });
+
+    await expect(fixture.service.submitRun(input)).rejects.toMatchObject({
+      code: 'STALE_CHAT_OWNERSHIP',
+      status: 409,
+    });
+    expect(fixture.handoffs.createPreparation).toHaveBeenCalledTimes(1);
+    expect(fixture.handoffPreparations[0].prepare).toHaveBeenCalledTimes(1);
+    expect(fixture.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('applies supported resume overrides to one turn without persisting them', async () => {
@@ -4650,7 +4914,7 @@ describe('ChatCommandService', () => {
     });
     await views.appendAfterEnsuringGeneration(
       SOURCE_CHAT_ID,
-      async () => [],
+      transcriptLoader(async () => []),
       [new UserMessage(
         '2026-06-01T00:00:00.000Z',
         'interrupted input',
