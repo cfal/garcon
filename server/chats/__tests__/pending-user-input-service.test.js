@@ -878,6 +878,7 @@ describe('PendingUserInputService', () => {
       const end = Math.max(0, nativeMessages.length - offsetFromNewest);
       const start = Math.max(0, end - limit);
       return {
+        kind: 'page',
         messages: nativeMessages.slice(start, end),
         totalNativeMessages: nativeMessages.length,
         offsetFromNewest,
@@ -901,6 +902,37 @@ describe('PendingUserInputService', () => {
       0,
       250,
     ]);
+    expect(loadNativeMessages).not.toHaveBeenCalled();
+  });
+
+  it('consumes a provider fallback snapshot once when native paging is unavailable', async () => {
+    const nativeMessages = Array.from({ length: 600 }, (_, index) => (
+      new AssistantMessage('2026-06-01T00:00:00.000Z', `history-${index}`)
+    ));
+    const loadNativeMessages = mock(async () => {
+      throw new Error('The window fallback already owns the complete snapshot');
+    });
+    const loadNativeWindow = mock(async () => ({
+      kind: 'snapshot',
+      messages: nativeMessages,
+      totalNativeMessages: nativeMessages.length,
+      offsetFromNewest: 0,
+      nativeRevision: 'native-r1',
+    }));
+    const service = new PendingUserInputService({
+      loadNativeMessages,
+      loadNativeWindow,
+      getRetainedHistoryMessages: () => [],
+    });
+    await service.register('chat-1', 'not persisted', {
+      clientRequestId: 'req-missing',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+
+    await service.reconcileNativeHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toHaveLength(1);
+    expect(loadNativeWindow).toHaveBeenCalledTimes(1);
     expect(loadNativeMessages).not.toHaveBeenCalled();
   });
 

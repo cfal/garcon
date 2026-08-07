@@ -32,6 +32,11 @@ export async function scanCurrentNativeUserEvidence(input: {
       offsetFromNewest,
       signal,
     });
+    if (window.kind === 'snapshot') {
+      messages = nativeUserMessages(window.messages);
+      input.acceptEvidence(messages);
+      return messages;
+    }
     if ((nativeRevision !== null && nativeRevision !== window.nativeRevision)
         || (totalNativeMessages !== null
           && totalNativeMessages !== window.totalNativeMessages)) {

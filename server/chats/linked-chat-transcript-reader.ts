@@ -67,9 +67,10 @@ export class LinkedChatTranscriptReader {
     input.signal.throwIfAborted();
     if (!entry) {
       return {
+        kind: 'snapshot',
         messages: [],
         totalNativeMessages: 0,
-        offsetFromNewest: offset,
+        offsetFromNewest: 0,
         nativeRevision: transcriptRevision([]),
       };
     }
@@ -91,6 +92,7 @@ export class LinkedChatTranscriptReader {
         : [...page.messages];
       this.#assertEntryUnchanged(input.chatId, entry);
       return {
+        kind: 'page',
         messages,
         totalNativeMessages: page.total,
         offsetFromNewest: page.offset,
@@ -103,12 +105,11 @@ export class LinkedChatTranscriptReader {
       input.signal,
     );
     this.#assertEntryUnchanged(input.chatId, entry);
-    const end = Math.max(0, native.messages.length - offset);
-    const start = Math.max(0, end - limit);
     return {
-      messages: native.messages.slice(start, end),
+      kind: 'snapshot',
+      messages: native.messages,
       totalNativeMessages: native.messages.length,
-      offsetFromNewest: offset,
+      offsetFromNewest: 0,
       nativeRevision: native.revision,
     };
   }
@@ -210,6 +211,9 @@ export class LinkedChatTranscriptReader {
     const total = archivedCount + native.totalNativeMessages;
     const end = Math.max(0, total - boundedOffset);
     const start = Math.max(0, end - boundedLimit);
+    const nativeMessages = native.kind === 'snapshot'
+      ? sliceFromNewest(native.messages, boundedLimit, boundedOffset)
+      : native.messages;
     const messages: ChatMessage[] = [];
     const archivedEnd = Math.min(end, archivedCount);
     if (start < archivedEnd) {
@@ -221,7 +225,7 @@ export class LinkedChatTranscriptReader {
       });
       messages.push(...page.messages);
     }
-    messages.push(...native.messages);
+    messages.push(...nativeMessages);
     this.#assertEntryUnchanged(chatId, entry);
     const carryOverRevision = this.deps.carryOver.revision(entry.carryOverHeadId);
     return {
@@ -302,6 +306,16 @@ export class LinkedChatTranscriptReader {
       );
     }
   }
+}
+
+function sliceFromNewest(
+  messages: readonly ChatMessage[],
+  limit: number,
+  offsetFromNewest: number,
+): readonly ChatMessage[] {
+  const end = Math.max(0, messages.length - offsetFromNewest);
+  const start = Math.max(0, end - limit);
+  return messages.slice(start, end);
 }
 
 function assertNativePage(page: {

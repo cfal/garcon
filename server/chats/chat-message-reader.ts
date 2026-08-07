@@ -2,12 +2,16 @@ import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewPage } from '../../common/chat-view.js';
 import type { NativeSnapshotReconciliation } from './chat-view-store.js';
 
-export interface NativeTranscriptWindow {
+interface NativeTranscriptWindowBase {
   readonly messages: readonly ChatMessage[];
   readonly totalNativeMessages: number;
   readonly offsetFromNewest: number;
   readonly nativeRevision: string;
 }
+
+export type NativeTranscriptWindow =
+  | (NativeTranscriptWindowBase & { readonly kind: 'page' })
+  | (NativeTranscriptWindowBase & { readonly kind: 'snapshot' });
 
 export interface PendingInputHistoryReader {
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;

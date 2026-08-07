@@ -49,7 +49,7 @@ function fixture(options = {}) {
   const loadArchivedPage = mock(async ({ offset, limit }) => ({
     messages: archived.slice(offset, offset + limit),
   }));
-  const loadNativePage = mock(async (_entry, limit, offset) => (
+  const loadNativePage = options.loadNativePage ?? mock(async (_entry, limit, offset) => (
     nativePage(native, limit, offset)
   ));
   const loadNativeSnapshot = mock(async () => ({ messages: native, revision: 'native-r1' }));
@@ -110,6 +110,28 @@ describe('LinkedChatTranscriptReader', () => {
     expect(page.compositeRevision).toBe(full.compositeRevision);
     expect(page.carryOverRevision).toBe(full.carryOverRevision);
     expect(page.agentOwnershipEpoch).toBe(full.agentOwnershipEpoch);
+  });
+
+  it('returns one complete fallback snapshot and slices it for composite paging', async () => {
+    const loadNativePage = mock(async () => null);
+    const { reader, native, loadNativeSnapshot } = fixture({ loadNativePage });
+
+    const window = await reader.loadNativeWindow({
+      chatId: 'chat-1',
+      limit: 2,
+      offsetFromNewest: 1,
+      signal: new AbortController().signal,
+    });
+    const page = await reader.loadPage('chat-1', 2, 1);
+
+    expect(window).toMatchObject({
+      kind: 'snapshot',
+      messages: native,
+      totalNativeMessages: native.length,
+      offsetFromNewest: 0,
+    });
+    expect(page.messages.map((message) => message.content)).toEqual(['n2', 'n3']);
+    expect(loadNativeSnapshot).toHaveBeenCalledTimes(2);
   });
 
   it('sanitizes only the native window that reaches the first recorded prompt', async () => {
