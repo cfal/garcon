@@ -31,6 +31,10 @@
 	}: SettingsTestHostProps = $props();
 	let desktopLayoutOrder = $state<DesktopLayoutOrder>(['chat-list', 'main', 'workspace-sidebar']);
 	let globalShortcuts = $state<GlobalShortcutOverrides>({});
+	let completionSoundMode = $state<'off' | 'default' | 'custom'>('off');
+	let completionSoundVolume = $state(0.7);
+	let completionSoundVisibility = $state<'always' | 'unfocused'>('unfocused');
+	let customCompletionSoundName = $state<string | null>(null);
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -207,9 +211,17 @@
 		textEditorOpenPlacement: 'source',
 		imageViewerOpenPlacement: 'source',
 		markdownViewerOpenPlacement: 'source',
+		get completionSoundMode() { return completionSoundMode; },
+		get completionSoundVolume() { return completionSoundVolume; },
+		get completionSoundVisibility() { return completionSoundVisibility; },
+		get customCompletionSoundName() { return customCompletionSoundName; },
 		set(key: string, value: unknown) {
 			if (key === 'desktopLayoutOrder') desktopLayoutOrder = normalizeDesktopLayoutOrder(value);
 			if (key === 'globalShortcuts') globalShortcuts = value as GlobalShortcutOverrides;
+			if (key === 'completionSoundMode') completionSoundMode = value as typeof completionSoundMode;
+			if (key === 'completionSoundVolume') completionSoundVolume = value as number;
+			if (key === 'completionSoundVisibility') completionSoundVisibility = value as typeof completionSoundVisibility;
+			if (key === 'customCompletionSoundName') customCompletionSoundName = value as string | null;
 			onLocalSet(key, value);
 		},
 		toggle(key: string) {

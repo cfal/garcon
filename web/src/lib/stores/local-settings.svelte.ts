@@ -23,6 +23,10 @@ import {
 } from '$lib/chat/composer/snippet-trigger.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
+export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
+export type CompletionSoundMode = (typeof COMPLETION_SOUND_MODE_VALUES)[number];
+export const COMPLETION_SOUND_VISIBILITY_VALUES = ['always', 'unfocused'] as const;
+export type CompletionSoundVisibility = (typeof COMPLETION_SOUND_VISIBILITY_VALUES)[number];
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
@@ -124,6 +128,10 @@ export interface LocalSettingsSnapshot {
 	language: string;
 	hiddenToolTypes: HideableToolType[];
 	globalShortcuts: GlobalShortcutOverrides;
+	completionSoundMode: CompletionSoundMode;
+	completionSoundVolume: number;
+	completionSoundVisibility: CompletionSoundVisibility;
+	customCompletionSoundName: string | null;
 }
 
 type BooleanLocalSettingKey =
@@ -177,6 +185,10 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	language: 'en',
 	hiddenToolTypes: [],
 	globalShortcuts: {},
+	completionSoundMode: 'off',
+	completionSoundVolume: 0.7,
+	completionSoundVisibility: 'unfocused',
+	customCompletionSoundName: null,
 };
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
@@ -185,6 +197,26 @@ function parseBoolean(value: unknown, fallback: boolean): boolean {
 
 function parseString(value: unknown, fallback: string): string {
 	return typeof value === 'string' ? value : fallback;
+}
+
+function parseCompletionSoundMode(value: unknown): CompletionSoundMode {
+	return typeof value === 'string' &&
+		COMPLETION_SOUND_MODE_VALUES.includes(value as CompletionSoundMode)
+		? (value as CompletionSoundMode)
+		: DEFAULTS.completionSoundMode;
+}
+
+function parseCompletionSoundVolume(value: unknown): number {
+	return typeof value === 'number' && Number.isFinite(value)
+		? Math.min(1, Math.max(0, value))
+		: DEFAULTS.completionSoundVolume;
+}
+
+function parseCompletionSoundVisibility(value: unknown): CompletionSoundVisibility {
+	return typeof value === 'string' &&
+		COMPLETION_SOUND_VISIBILITY_VALUES.includes(value as CompletionSoundVisibility)
+		? (value as CompletionSoundVisibility)
+		: DEFAULTS.completionSoundVisibility;
 }
 
 function parseTheme(value: unknown): ThemeMode {
@@ -299,6 +331,13 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		language: parseString(parsed.language, DEFAULTS.language),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
+		completionSoundMode: parseCompletionSoundMode(parsed.completionSoundMode),
+		completionSoundVolume: parseCompletionSoundVolume(parsed.completionSoundVolume),
+		completionSoundVisibility: parseCompletionSoundVisibility(parsed.completionSoundVisibility),
+		customCompletionSoundName:
+			typeof parsed.customCompletionSoundName === 'string'
+				? parsed.customCompletionSoundName
+				: null,
 	};
 }
 
@@ -357,6 +396,12 @@ export class LocalSettingsStore {
 	language = $state(DEFAULTS.language);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
+	completionSoundMode = $state<CompletionSoundMode>(DEFAULTS.completionSoundMode);
+	completionSoundVolume = $state(DEFAULTS.completionSoundVolume);
+	completionSoundVisibility = $state<CompletionSoundVisibility>(
+		DEFAULTS.completionSoundVisibility,
+	);
+	customCompletionSoundName = $state<string | null>(DEFAULTS.customCompletionSoundName);
 
 	#storageListener = (event: StorageEvent) => {
 		if (event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
@@ -386,6 +431,9 @@ export class LocalSettingsStore {
 		}
 		if (key === 'globalShortcuts') {
 			next.globalShortcuts = sanitizeGlobalShortcutOverrides(value);
+		}
+		if (key === 'completionSoundVolume') {
+			next.completionSoundVolume = parseCompletionSoundVolume(value);
 		}
 		this.#apply(next);
 		persistLocalSettings(next);
@@ -441,6 +489,10 @@ export class LocalSettingsStore {
 			language: this.language,
 			hiddenToolTypes: this.hiddenToolTypes,
 			globalShortcuts: { ...this.globalShortcuts },
+			completionSoundMode: this.completionSoundMode,
+			completionSoundVolume: this.completionSoundVolume,
+			completionSoundVisibility: this.completionSoundVisibility,
+			customCompletionSoundName: this.customCompletionSoundName,
 		};
 	}
 
@@ -477,6 +529,10 @@ export class LocalSettingsStore {
 		this.language = snap.language;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
 		this.globalShortcuts = { ...snap.globalShortcuts };
+		this.completionSoundMode = snap.completionSoundMode;
+		this.completionSoundVolume = snap.completionSoundVolume;
+		this.completionSoundVisibility = snap.completionSoundVisibility;
+		this.customCompletionSoundName = snap.customCompletionSoundName;
 	}
 }
 
