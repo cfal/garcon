@@ -21,7 +21,7 @@ export async function repairChatHistory(
   const result = await client.repairHistory({
     action: command.action,
     chatId: command.chatId,
-    expectedHeadId: command.expectedHeadId,
+    expectedCarryOverRevision: command.expectedCarryOverRevision,
     expectedAgentOwnershipEpoch: command.expectedAgentOwnershipEpoch,
   }, signal);
   output.result([

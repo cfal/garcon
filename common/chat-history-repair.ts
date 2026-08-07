@@ -1,7 +1,7 @@
 export interface RepairHistoryAcceptNativeRequest {
   action: 'accept-native';
   chatId: string;
-  expectedHeadId: string;
+  expectedCarryOverRevision: string;
   expectedAgentOwnershipEpoch: string;
 }
 

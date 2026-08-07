@@ -24,7 +24,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] list <resource>
   garcon-cli [options] send-async <chat-id> [--allow-steer] <message>
   garcon-cli [options] stop <chat-id>
-  garcon-cli [connection options] repair-history accept-native <chat-id> --expected-head <head-id> --expected-epoch <epoch>
+  garcon-cli [connection options] repair-history accept-native <chat-id> --expected-revision <revision> --expected-epoch <epoch>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
 
@@ -61,7 +61,7 @@ Options:
   --allow-steer                With send-async, steer the active turn when busy; never queues
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
-  --expected-head <head-id>    Expected carryover head for history repair
+  --expected-revision <value>  Expected carryover revision for history repair
   --expected-epoch <epoch>     Expected ownership epoch for history repair
   --json                       Print list, status, or wait results as JSON
   --help                       Show this help
@@ -165,7 +165,7 @@ export interface RepairHistoryCliCommand extends CliConnectionOptions {
   kind: 'repair-history';
   action: 'accept-native';
   chatId: ChatId;
-  expectedHeadId: string;
+  expectedCarryOverRevision: string;
   expectedAgentOwnershipEpoch: string;
 }
 
@@ -195,7 +195,7 @@ const SINGLE_STRING_OPTIONS = [
   'resume',
   'turn',
   'messages',
-  'expected-head',
+  'expected-revision',
   'expected-epoch',
 ] as const;
 
@@ -283,7 +283,7 @@ const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['json', '--json'],
   ['turn', '--turn'],
   ['messages', '--messages'],
-  ['expected-head', '--expected-head'],
+  ['expected-revision', '--expected-revision'],
   ['expected-epoch', '--expected-epoch'],
 ] as const;
 
@@ -381,23 +381,23 @@ function parseRepairHistory(
   if (parsed.positionals.length !== 3 || parsed.positionals[1] !== 'accept-native') {
     throw argumentError('repair-history requires: accept-native <chat-id>');
   }
-  const expectedHeadId = nonEmptyOption(
-    values['expected-head'] as string | undefined,
-    '--expected-head',
+  const expectedCarryOverRevision = nonEmptyOption(
+    values['expected-revision'] as string | undefined,
+    '--expected-revision',
   );
   const expectedAgentOwnershipEpoch = nonEmptyOption(
     values['expected-epoch'] as string | undefined,
     '--expected-epoch',
   );
-  if (!expectedHeadId || !expectedAgentOwnershipEpoch) {
-    throw argumentError('repair-history requires --expected-head and --expected-epoch');
+  if (!expectedCarryOverRevision || !expectedAgentOwnershipEpoch) {
+    throw argumentError('repair-history requires --expected-revision and --expected-epoch');
   }
   return {
     kind: 'repair-history',
     action: 'accept-native',
     ...connection,
     chatId: parseControlChatId(parsed.positionals[2]!, 'repair-history'),
-    expectedHeadId,
+    expectedCarryOverRevision,
     expectedAgentOwnershipEpoch,
   };
 }
@@ -417,8 +417,8 @@ function parseWait(
   connection: CliConnectionOptions,
 ): WaitCliCommand {
   rejectObservationMutationOptions(values, 'wait');
-  if (values['expected-head'] !== undefined || values['expected-epoch'] !== undefined) {
-    throw argumentError('--expected-head and --expected-epoch cannot be used with wait');
+  if (values['expected-revision'] !== undefined || values['expected-epoch'] !== undefined) {
+    throw argumentError('--expected-revision and --expected-epoch cannot be used with wait');
   }
   if (values.messages !== undefined) {
     throw argumentError('--messages cannot be used with wait');
@@ -473,8 +473,8 @@ function parseStatus(
   connection: CliConnectionOptions,
 ): StatusCliCommand {
   rejectObservationMutationOptions(values, 'status');
-  if (values['expected-head'] !== undefined || values['expected-epoch'] !== undefined) {
-    throw argumentError('--expected-head and --expected-epoch cannot be used with status');
+  if (values['expected-revision'] !== undefined || values['expected-epoch'] !== undefined) {
+    throw argumentError('--expected-revision and --expected-epoch cannot be used with status');
   }
   if (values.turn !== undefined) throw argumentError('--turn cannot be used with status');
   if (parsed.positionals.length !== 2) {
@@ -522,7 +522,7 @@ export function parseCliArgs(
         resume: { type: 'string' },
         turn: { type: 'string' },
         messages: { type: 'string' },
-        'expected-head': { type: 'string' },
+        'expected-revision': { type: 'string' },
         'expected-epoch': { type: 'string' },
         'allow-steer': { type: 'boolean' },
         json: { type: 'boolean' },
@@ -614,7 +614,7 @@ export function parseCliArgs(
     rejectListOption(values['allow-steer'], '--allow-steer');
     rejectListOption(values.turn, '--turn');
     rejectListOption(values.messages, '--messages');
-    rejectListOption(values['expected-head'], '--expected-head');
+    rejectListOption(values['expected-revision'], '--expected-revision');
     rejectListOption(values['expected-epoch'], '--expected-epoch');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
@@ -656,8 +656,8 @@ export function parseCliArgs(
   }
   if (values.turn !== undefined) throw argumentError('--turn can only be used with wait');
   if (values.messages !== undefined) throw argumentError('--messages can only be used with status');
-  if (values['expected-head'] !== undefined || values['expected-epoch'] !== undefined) {
-    throw argumentError('--expected-head and --expected-epoch can only be used with repair-history');
+  if (values['expected-revision'] !== undefined || values['expected-epoch'] !== undefined) {
+    throw argumentError('--expected-revision and --expected-epoch can only be used with repair-history');
   }
   if (values['allow-steer'] !== undefined) {
     throw argumentError('--allow-steer can only be used with send-async');

@@ -66,7 +66,7 @@ import type {
   CompleteChatHistoryResponse,
   DegradedChatHistoryResponse,
 } from '../../common/chat-view.js';
-import { isCarryOverNodeId } from '../chats/carryover-node-types.js';
+import { carryOverRevision } from '../chats/carryover-segments.js';
 
 const logger = createLogger('routes:chats');
 const MAX_SEARCH_QUERY_CHARS = 4_096;
@@ -532,14 +532,14 @@ export default function createChatRoutes({
   async function postRepairHistory(body: unknown): Promise<Response> {
     try {
       const input = parseCommandRequest(parseRepairHistoryAcceptNativeRequest, body);
-      if (!isCarryOverNodeId(input.expectedHeadId)) {
-        throw new ValidationDomainError('expectedHeadId must be a carryover head ID');
-      }
       const current = registry.getChat(input.chatId);
       if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
       if (
         current.agentOwnershipEpoch !== input.expectedAgentOwnershipEpoch
-        || current.carryOverHeadId !== input.expectedHeadId.toLowerCase()
+        || carryOverRevision(
+          current.carryOverSegments,
+          current.carryOverMigrationQuarantine,
+        ) !== input.expectedCarryOverRevision
       ) {
         throw new DomainError(
           'STALE_CHAT_OWNERSHIP',
@@ -706,6 +706,16 @@ export default function createChatRoutes({
         lastActivityAt: meta?.lastActivity || null,
         agentSessionId: session.agentSessionId || null,
         transcriptSource: await agents.describeTranscriptSource(session, chatId),
+        carryOverSegments: session.carryOverSegments.map((ref) => ({
+          id: ref.id,
+          agentId: ref.agentId,
+          model: ref.model,
+          capturedAt: ref.capturedAt,
+          storedMessageCount: ref.storedMessageCount,
+          visibleMessageCount: ref.visibleMessageCount,
+          truncated: ref.visibleMessageCount < ref.storedMessageCount,
+          trailingHandoff: ref.trailingHandoff ? { ...ref.trailingHandoff } : null,
+        })),
       };
       return Response.json(response);
     } catch (error: unknown) {

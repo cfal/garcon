@@ -44,6 +44,9 @@ function chatEntry(overrides = {}) {
     },
     projectPath: '/proj',
     tags: [],
+    carryOverSegments: [],
+    nativeSeedReceipt: null,
+    carryOverMigrationQuarantine: null,
     ...overrides,
   };
 }
@@ -448,6 +451,15 @@ describe('GET /api/v1/chats/details', () => {
       projectPath: '/proj',
       agentSessionId: 'agent-session-100',
       transcriptSource: { kind: 'filesystem-path', value: '/tmp/transcript.jsonl' },
+      carryOverSegments: [{
+        id: '11111111-1111-4111-8111-111111111111',
+        agentId: 'claude',
+        model: 'opus',
+        capturedAt: '2026-02-20T09:00:00.000Z',
+        storedMessageCount: 12,
+        visibleMessageCount: 7,
+        trailingHandoff: { agentId: 'codex', model: 'gpt' },
+      }],
     });
     metadata.getChatMetadata.mockReturnValue({
       firstMessage: 'First line\nSecond line',
@@ -469,7 +481,20 @@ describe('GET /api/v1/chats/details', () => {
       lastActivityAt: '2026-02-21T11:00:00.000Z',
       agentSessionId: 'agent-session-100',
       transcriptSource: { kind: 'filesystem-path', value: '/tmp/transcript.jsonl' },
+      carryOverSegments: [{
+        id: '11111111-1111-4111-8111-111111111111',
+        agentId: 'claude',
+        model: 'opus',
+        capturedAt: '2026-02-20T09:00:00.000Z',
+        storedMessageCount: 12,
+        visibleMessageCount: 7,
+        truncated: true,
+        trailingHandoff: { agentId: 'codex', model: 'gpt' },
+      }],
     });
+    expect(JSON.stringify(body.carryOverSegments)).not.toContain('/tmp/transcript.jsonl');
+    expect(body.carryOverSegments[0]).not.toHaveProperty('messages');
+    expect(body.carryOverSegments[0]).not.toHaveProperty('nativeSession');
   });
 
   it('returns 400 when chatId is missing', async () => {
@@ -499,6 +524,7 @@ describe('GET /api/v1/chats/details', () => {
       agentId: 'test-agent',
       projectPath: '/proj',
       agentSessionId: null,
+      carryOverSegments: [],
     });
     metadata.getChatMetadata.mockReturnValue(null);
 
@@ -516,6 +542,7 @@ describe('GET /api/v1/chats/details', () => {
       lastActivityAt: null,
       agentSessionId: null,
       transcriptSource: null,
+      carryOverSegments: [],
     });
   });
 });

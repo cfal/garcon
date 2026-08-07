@@ -222,6 +222,7 @@ describe('ChatActionController', () => {
 			lastActivityAt: null,
 			agentSessionId: 'session-1',
 			transcriptSource: null,
+			carryOverSegments: [],
 		});
 
 		await controller.loadDetails('chat-1', dialogs);

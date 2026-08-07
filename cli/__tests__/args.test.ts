@@ -349,7 +349,7 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs([
       '--workspace', 'work',
       'repair-history', 'accept-native', CHAT_ID,
-      '--expected-head', '11111111-1111-4111-8111-111111111111',
+      '--expected-revision', 'carry-v5:abc123',
       '--expected-epoch', 'epoch-1',
     ], ENV)).toEqual({
       kind: 'repair-history',
@@ -357,16 +357,16 @@ describe('parseCliArgs', () => {
       workspace: 'work',
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
-      expectedHeadId: '11111111-1111-4111-8111-111111111111',
+      expectedCarryOverRevision: 'carry-v5:abc123',
       expectedAgentOwnershipEpoch: 'epoch-1',
     });
   });
 
   test.each([
     ['repair-history', 'accept-native', CHAT_ID],
-    ['repair-history', 'accept-native', CHAT_ID, '--expected-head', 'head'],
+    ['repair-history', 'accept-native', CHAT_ID, '--expected-revision', 'revision'],
     ['repair-history', 'accept-native', CHAT_ID, '--expected-epoch', 'epoch'],
-    ['repair-history', 'unknown', CHAT_ID, '--expected-head', 'head', '--expected-epoch', 'epoch'],
+    ['repair-history', 'unknown', CHAT_ID, '--expected-revision', 'revision', '--expected-epoch', 'epoch'],
   ])('rejects an incomplete history repair: %j', (...args) => {
     expect(() => parseCliArgs(args, ENV)).toThrow('repair-history requires');
   });

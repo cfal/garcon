@@ -85,6 +85,10 @@
 			timeStyle: 'short',
 		});
 	}
+
+	function displayModel(value: string): string {
+		return value || m.sidebar_details_unavailable();
+	}
 </script>
 
 <Dialog.Root open={deleteOpen} onOpenChange={handleDeleteOpenChange}>
@@ -148,6 +152,50 @@
 				class="min-w-0 max-h-[65vh] overflow-y-auto overflow-x-hidden px-6 pt-1 pb-6 sm:max-h-[60vh]"
 			>
 				<div class="space-y-4 min-w-0">
+					{#if chatDetailsDialog?.carryOverSegments.length}
+						<section class="min-w-0 space-y-2" aria-label={m.sidebar_details_carryover_history()}>
+							<h3 class="text-sm font-medium">{m.sidebar_details_carryover_history()}</h3>
+							<ol class="divide-y divide-border border-y border-border">
+								{#each chatDetailsDialog.carryOverSegments as segment}
+									<svelte:boundary>
+										<li class="min-w-0 py-3 text-sm">
+											<div class="min-w-0 break-words font-medium">
+												{segment.agentId} / {displayModel(segment.model)}
+												{#if segment.trailingHandoff}
+													<span class="text-muted-foreground">
+														-&gt; {segment.trailingHandoff.agentId} /
+														{displayModel(segment.trailingHandoff.model)}
+													</span>
+												{/if}
+											</div>
+											<div
+												class="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+											>
+												<span>{formatHumanDate(segment.capturedAt)}</span>
+												<span>
+													{m.sidebar_details_carryover_messages({
+														visible: segment.visibleMessageCount,
+														stored: segment.storedMessageCount,
+													})}
+												</span>
+												{#if segment.truncated}
+													<span>{m.sidebar_details_carryover_truncated()}</span>
+												{/if}
+											</div>
+											<div class="mt-1 break-all font-mono text-xs text-muted-foreground">
+												{segment.id}
+											</div>
+										</li>
+										{#snippet failed()}
+											<li class="py-3 text-sm text-muted-foreground">
+												{m.sidebar_details_unavailable()}
+											</li>
+										{/snippet}
+									</svelte:boundary>
+								{/each}
+							</ol>
+						</section>
+					{/if}
 					<div class="space-y-1">
 						<div class="text-sm font-medium">{m.sidebar_details_created_at()}</div>
 						<div class="text-sm text-muted-foreground">

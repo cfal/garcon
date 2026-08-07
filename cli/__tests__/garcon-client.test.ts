@@ -202,7 +202,7 @@ describe('GarconClient', () => {
     await expect(client.repairHistory({
       action: 'accept-native',
       chatId: runRequest.chatId,
-      expectedHeadId: '11111111-1111-4111-8111-111111111111',
+      expectedCarryOverRevision: 'carry-v5:abc123',
       expectedAgentOwnershipEpoch: 'epoch-1',
     })).resolves.toMatchObject({ receiptCleared: true });
 
@@ -212,7 +212,7 @@ describe('GarconClient', () => {
       body: {
         action: 'accept-native',
         chatId: runRequest.chatId,
-        expectedHeadId: '11111111-1111-4111-8111-111111111111',
+        expectedCarryOverRevision: 'carry-v5:abc123',
         expectedAgentOwnershipEpoch: 'epoch-1',
       },
     });

@@ -95,6 +95,7 @@ export class ChatActionController {
 				lastActivityAt: details.lastActivityAt,
 				agentSessionId: details.agentSessionId,
 				transcriptSource: details.transcriptSource,
+				carryOverSegments: details.carryOverSegments,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

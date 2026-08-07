@@ -19,7 +19,7 @@ describe('repairChatHistory', () => {
       workspace: 'default',
       configDir: '/tmp/garcon',
       chatId: CHAT_ID,
-      expectedHeadId: '11111111-1111-4111-8111-111111111111',
+      expectedCarryOverRevision: 'carry-v5:abc123',
       expectedAgentOwnershipEpoch: 'epoch-1',
     }, { repairHistory }, {
       accepted: mock(() => undefined),
@@ -33,7 +33,7 @@ describe('repairChatHistory', () => {
     expect(repairHistory).toHaveBeenCalledWith({
       action: 'accept-native',
       chatId: CHAT_ID,
-      expectedHeadId: '11111111-1111-4111-8111-111111111111',
+      expectedCarryOverRevision: 'carry-v5:abc123',
       expectedAgentOwnershipEpoch: 'epoch-1',
     }, undefined);
     expect(result).toHaveBeenCalledWith(

@@ -217,6 +217,7 @@ describe('chats API contract', () => {
 			lastActivityAt: '2026-02-21T11:00:00.000Z',
 			agentSessionId: 'thread-abc',
 			transcriptSource: null,
+			carryOverSegments: [],
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -292,29 +293,33 @@ describe('chats API contract', () => {
 	});
 
 	it('startChat rejects a recovered response after the chat was deleted', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			success: true,
-			commandType: 'chat-start',
-			clientRequestId: 'req-deleted',
-			chatId: 'c-deleted',
-			turnId: 'turn-deleted',
-			status: 'duplicate',
-			acceptedAt: '2026-08-01T00:00:00.000Z',
-			chat: null,
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				commandType: 'chat-start',
+				clientRequestId: 'req-deleted',
+				chatId: 'c-deleted',
+				turnId: 'turn-deleted',
+				status: 'duplicate',
+				acceptedAt: '2026-08-01T00:00:00.000Z',
+				chat: null,
+			}),
+		);
 
-		await expect(startChat({
-			clientRequestId: 'req-deleted',
-			clientMessageId: 'msg-deleted',
-			chatId: 'c-deleted',
-			agentId: 'claude',
-			projectPath: '/project',
-			model: 'opus',
-			permissionMode: 'default',
-			thinkingMode: 'none',
-			agentSettings: CLAUDE_SETTINGS,
-			command: 'hello',
-		})).rejects.toMatchObject({
+		await expect(
+			startChat({
+				clientRequestId: 'req-deleted',
+				clientMessageId: 'msg-deleted',
+				chatId: 'c-deleted',
+				agentId: 'claude',
+				projectPath: '/project',
+				model: 'opus',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				agentSettings: CLAUDE_SETTINGS,
+				command: 'hello',
+			}),
+		).rejects.toMatchObject({
 			status: 410,
 			errorCode: 'SESSION_NOT_FOUND',
 		});
@@ -441,26 +446,33 @@ describe('chats API contract', () => {
 	});
 
 	it('rejects a successful handoff response without a durable chat projection', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			success: true,
-			commandType: 'agent-run',
-			clientRequestId: 'req-handoff',
-			chatId: 'c-1',
-			turnId: 'turn-1',
-			status: 'accepted',
-			acceptedAt: '2026-05-14T00:00:00.000Z',
-		}, 202));
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					success: true,
+					commandType: 'agent-run',
+					clientRequestId: 'req-handoff',
+					chatId: 'c-1',
+					turnId: 'turn-1',
+					status: 'accepted',
+					acceptedAt: '2026-05-14T00:00:00.000Z',
+				},
+				202,
+			),
+		);
 
-		await expect(runChat({
-			clientRequestId: 'req-handoff',
-			clientMessageId: 'msg-handoff',
-			chatId: 'c-1',
-			command: 'handoff',
-			handoff: {
-				expectedAgentOwnershipEpoch: 'epoch-1',
-				target: { agentId: 'codex', model: 'gpt-5.5' },
-			},
-		})).rejects.toThrow('durable chat projection is missing');
+		await expect(
+			runChat({
+				clientRequestId: 'req-handoff',
+				clientMessageId: 'msg-handoff',
+				chatId: 'c-1',
+				command: 'handoff',
+				handoff: {
+					expectedAgentOwnershipEpoch: 'epoch-1',
+					target: { agentId: 'codex', model: 'gpt-5.5' },
+				},
+			}),
+		).rejects.toThrow('durable chat projection is missing');
 	});
 
 	it('forkRunChat sends POST /api/v1/chats/fork-run', async () => {
@@ -953,15 +965,17 @@ describe('chats API contract', () => {
 	});
 
 	it('accepts degraded history only without sequence metadata', async () => {
-		fetchMock.mockResolvedValueOnce(jsonResponse({
-			historyState: {
-				kind: 'degraded',
-				errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
-				retryable: false,
-			},
-			chatId: 'c-1',
-			messages: [],
-		}));
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({
+				historyState: {
+					kind: 'degraded',
+					errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+					retryable: false,
+				},
+				chatId: 'c-1',
+				messages: [],
+			}),
+		);
 
 		await expect(getChatMessages({ chatId: 'c-1' })).resolves.toEqual({
 			historyState: {
@@ -973,16 +987,18 @@ describe('chats API contract', () => {
 			messages: [],
 		});
 
-		fetchMock.mockResolvedValueOnce(jsonResponse({
-			historyState: {
-				kind: 'degraded',
-				errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
-				retryable: false,
-			},
-			chatId: 'c-1',
-			messages: [],
-			lastSeq: 0,
-		}));
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({
+				historyState: {
+					kind: 'degraded',
+					errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+					retryable: false,
+				},
+				chatId: 'c-1',
+				messages: [],
+				lastSeq: 0,
+			}),
+		);
 		await expect(getChatMessages({ chatId: 'c-1' })).rejects.toThrow('lastSeq');
 	});
 
@@ -1045,10 +1061,12 @@ describe('chats API contract', () => {
 		};
 		fetchMock.mockResolvedValue(jsonResponse(result));
 
-		await expect(reorderChat({
-			chatId: 'c-1',
-			placement: { kind: 'boundary', boundary: 'top' },
-		})).resolves.toEqual(result);
+		await expect(
+			reorderChat({
+				chatId: 'c-1',
+				placement: { kind: 'boundary', boundary: 'top' },
+			}),
+		).resolves.toEqual(result);
 
 		const [url, options] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/reorder');
@@ -1060,12 +1078,14 @@ describe('chats API contract', () => {
 	});
 
 	it('reorderChat sends a relative placement', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			success: true,
-			chatId: 'c-1',
-			orderGroup: 'pinned',
-			changed: false,
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				chatId: 'c-1',
+				orderGroup: 'pinned',
+				changed: false,
+			}),
+		);
 
 		await reorderChat({
 			chatId: 'c-1',
@@ -1081,15 +1101,20 @@ describe('chats API contract', () => {
 	for (const [name, response] of [
 		['missing chat ID', { success: true, orderGroup: 'normal', changed: true }],
 		['invalid group', { success: true, chatId: 'c-1', orderGroup: 'orphan', changed: true }],
-		['invalid changed value', { success: true, chatId: 'c-1', orderGroup: 'normal', changed: 'yes' }],
+		[
+			'invalid changed value',
+			{ success: true, chatId: 'c-1', orderGroup: 'normal', changed: 'yes' },
+		],
 	] as const) {
 		it(`rejects a reorder response with ${name}`, async () => {
 			fetchMock.mockResolvedValue(jsonResponse(response));
 
-			await expect(reorderChat({
-				chatId: 'c-1',
-				placement: { kind: 'boundary', boundary: 'bottom' },
-			})).rejects.toThrow('Invalid chat reorder response');
+			await expect(
+				reorderChat({
+					chatId: 'c-1',
+					placement: { kind: 'boundary', boundary: 'bottom' },
+				}),
+			).rejects.toThrow('Invalid chat reorder response');
 		});
 	}
 

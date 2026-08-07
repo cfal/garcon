@@ -637,7 +637,7 @@ export function parseRepairHistoryAcceptNativeRequest(
   return {
     action: 'accept-native',
     chatId: requiredChatId(body, 'chatId'),
-    expectedHeadId: requiredString(body, 'expectedHeadId'),
+    expectedCarryOverRevision: requiredString(body, 'expectedCarryOverRevision'),
     expectedAgentOwnershipEpoch: requiredString(body, 'expectedAgentOwnershipEpoch'),
   };
 }

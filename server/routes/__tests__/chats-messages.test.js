@@ -34,7 +34,8 @@ function createRoutesFixture(overrides = {}) {
       agentId: 'claude',
       agentSessionId: 'provider-session-123',
       agentOwnershipEpoch: 'epoch-1',
-      carryOverHeadId: null,
+      carryOverSegments: [],
+      carryOverMigrationQuarantine: null,
       nativeSeedReceipt: null,
       projectPath: '/tmp/project',
       nativePath: '/tmp/session.jsonl',
@@ -402,7 +403,7 @@ describe('GET /api/v1/chats/messages', () => {
 
 describe('POST /api/v1/chats/repair-history', () => {
   const chatId = '1783725900000200';
-  const headId = '11111111-1111-4111-8111-111111111111';
+  const carryOverRevision = 'carry-v1:0';
 
   function request(body) {
     const url = new URL('http://localhost/api/v1/chats/repair-history');
@@ -422,14 +423,14 @@ describe('POST /api/v1/chats/repair-history', () => {
       agentId: 'claude',
       agentSessionId: 'provider-session-123',
       agentOwnershipEpoch: 'epoch-1',
-      carryOverHeadId: headId,
+      carryOverSegments: [],
+      carryOverMigrationQuarantine: null,
       nativeSeedReceipt: {
-        version: 1,
-        kind: 'first-user-prefix',
         agentSessionId: 'provider-session-123',
-        headId,
+        placement: 'user-prefix',
+        format: 'v2-xml',
         sha256: 'a'.repeat(64),
-        byteLength: 10,
+        codeUnitLength: 10,
       },
       projectPath: '/tmp/project',
     };
@@ -445,7 +446,7 @@ describe('POST /api/v1/chats/repair-history', () => {
     const input = request({
       action: 'accept-native',
       chatId,
-      expectedHeadId: headId,
+      expectedCarryOverRevision: carryOverRevision,
       expectedAgentOwnershipEpoch: 'epoch-1',
     });
 
@@ -466,14 +467,15 @@ describe('POST /api/v1/chats/repair-history', () => {
     expect(searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith(chatId);
   });
 
-  it('rejects a stale head or ownership epoch without mutation', async () => {
+  it('rejects a stale carryover revision or ownership epoch without mutation', async () => {
     const updateChat = mock(async () => null);
     const registry = {
       getChat: mock(() => ({
         id: chatId,
         agentId: 'claude',
         agentOwnershipEpoch: 'epoch-2',
-        carryOverHeadId: headId,
+        carryOverSegments: [],
+        carryOverMigrationQuarantine: null,
         nativeSeedReceipt: null,
       })),
       addChat: mock(() => true),
@@ -485,7 +487,7 @@ describe('POST /api/v1/chats/repair-history', () => {
     const input = request({
       action: 'accept-native',
       chatId,
-      expectedHeadId: headId,
+      expectedCarryOverRevision: 'carry-v5:stale',
       expectedAgentOwnershipEpoch: 'epoch-1',
     });
 

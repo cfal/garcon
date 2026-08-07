@@ -30,6 +30,18 @@ describe('ChatActionDialogs', () => {
 				lastActivityAt: '2026-06-27T00:10:00.000Z',
 				agentSessionId: 'agent-session-1',
 				transcriptSource: { kind: 'filesystem-path', value: '/tmp/chat.jsonl' },
+				carryOverSegments: [
+					{
+						id: '11111111-1111-4111-8111-111111111111',
+						agentId: 'claude',
+						model: '',
+						capturedAt: '2026-06-27T00:05:00.000Z',
+						storedMessageCount: 4,
+						visibleMessageCount: 2,
+						truncated: true,
+						trailingHandoff: { agentId: 'codex', model: 'gpt-5.6-sol' },
+					},
+				],
 				isLoading: false,
 				error: null,
 			},
@@ -53,6 +65,12 @@ describe('ChatActionDialogs', () => {
 		expect(nativePath.textContent).toBe('/tmp/chat.jsonl');
 		expect(agentSessionId.textContent).toBe('agent-session-1');
 		expect(firstMessage.textContent).toBe('First message');
+		const carryover = screen.getByRole('region', { name: 'Carryover history' });
+		expect(carryover.textContent).toContain('claude');
+		expect(carryover.textContent).toContain('codex');
+		expect(carryover.textContent).toContain('2/4 messages');
+		expect(carryover.textContent).toContain('Fork cutoff');
+		expect(carryover.textContent).toContain('11111111-1111-4111-8111-111111111111');
 		expect(chatId.parentElement?.nextElementSibling).toBe(nativePath.parentElement);
 
 		copyToClipboard.mockResolvedValue(true);

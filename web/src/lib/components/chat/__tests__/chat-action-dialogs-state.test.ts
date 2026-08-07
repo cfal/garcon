@@ -80,6 +80,7 @@ describe('ChatActionDialogsState', () => {
 			lastActivityAt: '2026-01-02',
 			agentSessionId: 'stale-session',
 			transcriptSource: null,
+			carryOverSegments: [],
 		});
 
 		expect(dialogs.chatDetailsDialog?.chatId).toBe('c2');
