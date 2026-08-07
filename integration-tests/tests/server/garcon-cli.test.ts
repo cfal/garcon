@@ -129,8 +129,7 @@ describe('garcon-cli', () => {
         'list', 'agents', '--json',
       ]);
 
-      expect(listedAgents.exitCode).toBe(0);
-      expect(listedAgents.stderr).toBe('');
+      expect(listedAgents).toMatchObject({ exitCode: 0, stderr: '' });
       expect(JSON.parse(listedAgents.stdout).agents).toContainEqual(
         expect.objectContaining({ id: fixture.directAgents.openAi.agentId }),
       );
@@ -152,8 +151,7 @@ describe('garcon-cli', () => {
         '--workspace', WORKSPACE,
         'list', 'agents', '--json',
       ]);
-      expect(listedAgents.exitCode).toBe(0);
-      expect(listedAgents.stderr).toBe('');
+      expect(listedAgents).toMatchObject({ exitCode: 0, stderr: '' });
       expect(JSON.parse(listedAgents.stdout).agents).toContainEqual(
         expect.objectContaining({ id: agent.agentId }),
       );
@@ -227,6 +225,58 @@ describe('garcon-cli', () => {
         'review-needed',
       ]);
       expect(chatsAfterResume.sessions[0]?.title).toBe('CLI follow-up review');
+    }, { namedWorkspace: WORKSPACE });
+  });
+
+  test('resumes through a different agent as one visible fenced handoff', async () => {
+    await withIntegrationFixture('garcon-cli-agent-handoff', async (fixture) => {
+      const source = fixture.directAgents.openAi;
+      const target = fixture.directAgents.anthropic;
+      const started = await runCli([
+        '--config-dir', fixture.dirs.config,
+        '--workspace', WORKSPACE,
+        '--cwd', fixture.dirs.project,
+        '--agent', source.agentId,
+        '--provider', source.provider.providerId,
+        '--endpoint', source.provider.endpointId,
+        '--model', source.provider.model,
+        'cli-source-turn',
+      ]);
+      expect(started.exitCode).toBe(0);
+      const chatId = started.stdout.match(/^chat id: (\d{16})$/m)?.[1];
+      expect(chatId).toBeString();
+      const before = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId)!;
+
+      const handedOff = await runCli([
+        '--config-dir', fixture.dirs.config,
+        '--workspace', WORKSPACE,
+        '--resume', chatId!,
+        '--agent', target.agentId,
+        '--provider', target.provider.providerId,
+        '--endpoint', target.provider.endpointId,
+        '--model', target.provider.model,
+        '--permissions', 'default',
+        '--reasoning-effort', 'none',
+        '--title', 'CLI delegated handoff',
+        '--tag', 'Delegated Handoff',
+        'cli-target-turn',
+      ]);
+
+      expect(handedOff.exitCode).toBe(0);
+      expect(handedOff.stderr).toBe('');
+      expect(handedOff.stdout).toMatch(new RegExp(`^chat id: ${chatId}\\nturn id: [^\\n]+\\n`));
+      expect(handedOff.stdout).toContain('cli-target-turn');
+      const after = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId)!;
+      expect(after).toMatchObject({
+        agentId: target.agentId,
+        title: 'CLI delegated handoff',
+        tags: ['cli', 'delegated-handoff'],
+      });
+      expect(after.agentOwnershipEpoch).not.toBe(before.agentOwnershipEpoch);
+
+      const history = await fixture.client.getMessages(chatId!);
+      expect(userContents(history.messages)).toEqual(['cli-source-turn', 'cli-target-turn']);
+      expect(history.messages.filter((entry) => entry.message.type === 'agent-switch')).toHaveLength(1);
     }, { namedWorkspace: WORKSPACE });
   });
 
