@@ -35,6 +35,10 @@ export class WorkspaceMigrationRunner {
     this.#skipLadder = skipLadder;
   }
 
+  get initialVersion(): number {
+    return this.#initialVersion;
+  }
+
   static async open(workspaceDir: string): Promise<WorkspaceMigrationRunner> {
     const version = await readWorkspaceVersion(workspaceDir);
     if (version !== null) {

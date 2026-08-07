@@ -89,12 +89,12 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   const registryPath = path.join(workspaceDir, 'chats.json');
   const carryOverPath = path.join(workspaceDir, LEGACY_CARRYOVER_FILE);
   const journalPath = path.join(workspaceDir, OWNERSHIP_JOURNAL_FILE);
+  await assertMigrationCapacity(workspaceDir, await optionalFileSize(carryOverPath));
   const [registryBytes, carryOverBytes, journalBytes] = await Promise.all([
     fs.readFile(registryPath),
     readOptionalFile(carryOverPath),
     readOptionalFile(journalPath),
   ]);
-  await assertMigrationCapacity(workspaceDir, carryOverBytes.byteLength);
   const sourceDigests = {
     sourceCarryOverSha256: digest(carryOverBytes),
     sourceRegistrySha256: digest(registryBytes),
@@ -209,6 +209,24 @@ export async function markCarryOverMigrationRollbackUnsafe(workspaceDir: string)
   }
   if (!marker.rollbackSafe) return;
   await writeMarker(workspaceDir, { ...marker, rollbackSafe: false });
+}
+
+export async function finalizeCarryOverMigrationValidation(workspaceDir: string): Promise<void> {
+  const marker = await readMarker(workspaceDir);
+  if (!marker || marker.phase !== 'complete') return;
+  if (marker.rollbackSafe) await writeMarker(workspaceDir, { ...marker, rollbackSafe: false });
+  await Promise.all([
+    fs.rm(migratedCarryOverPath(workspaceDir, marker.startedAt), { force: true }),
+    fs.rm(path.join(workspaceDir, registryBackupFile(marker)), { force: true }),
+    fs.rm(path.join(
+      workspaceDir,
+      safeMigrationRelativePath(marker.legacyJournalBackupFile),
+    ), { force: true }),
+  ]);
+  await Promise.all([
+    syncDirectory(workspaceDir),
+    syncDirectory(path.join(workspaceDir, 'migration-backups')),
+  ]);
 }
 
 export async function rollbackLegacyCarryOverMigration(
@@ -782,6 +800,15 @@ async function readOptionalFile(filePath: string): Promise<Buffer> {
     return await fs.readFile(filePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0);
+    throw error;
+  }
+}
+
+async function optionalFileSize(filePath: string): Promise<number> {
+  try {
+    return (await fs.stat(filePath)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
     throw error;
   }
 }

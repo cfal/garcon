@@ -27,6 +27,8 @@ describe('WorkspaceMigrationRunner', () => {
     const migrate = mock(async () => undefined);
     const runner = await WorkspaceMigrationRunner.open(workspaceDir);
 
+    expect(runner.initialVersion).toBe(0);
+
     await runner.run('chat-id-migration', migrate);
     await runner.run('core-record-migration', migrate);
     await runner.run('ephemeral-queue-state-cleanup', migrate);
@@ -48,6 +50,8 @@ describe('WorkspaceMigrationRunner', () => {
     ]);
     const events = [];
     const runner = await WorkspaceMigrationRunner.open(workspaceDir);
+
+    expect(runner.initialVersion).toBe(0);
 
     await runner.run('chat-id-migration', async () => { events.push('chat-id'); });
     await runner.run('core-record-migration', async () => { events.push('core-record'); });
@@ -81,6 +85,8 @@ describe('WorkspaceMigrationRunner', () => {
     const early = mock(async () => undefined);
     const cleanup = mock(async () => undefined);
     const runner = await WorkspaceMigrationRunner.open(workspaceDir);
+
+    expect(runner.initialVersion).toBe(2);
 
     await runner.run('chat-id-migration', early);
     await runner.run('core-record-migration', early);

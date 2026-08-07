@@ -5,6 +5,7 @@ import path from 'node:path';
 import { UserMessage } from '../../../common/chat-types.js';
 import { CarryOverTranscriptStore } from '../carryover-transcript-store.ts';
 import {
+  finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
   rollbackLegacyCarryOverMigration,
@@ -181,6 +182,25 @@ describe('legacy carryover migration', () => {
     await expect(rollbackLegacyCarryOverMigration(workspaceDir))
       .rejects.toThrow('unsafe after new-format history was created');
     expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('removes rollback artifacts after a validated subsequent restart', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    await finalizeCarryOverMigrationValidation(workspaceDir);
+
+    expect((await readJson('carryover-transcripts/migration-v1.json')).rollbackSafe).toBe(false);
+    expect((await fs.readdir(workspaceDir)).some((file) => (
+      file.startsWith('chat-carryover.v4.migrated.')
+    ))).toBe(false);
+    expect(await fs.readdir(path.join(workspaceDir, 'migration-backups'))).toEqual([]);
+    await expect(rollbackLegacyCarryOverMigration(workspaceDir))
+      .rejects.toThrow('unsafe after new-format history was created');
   });
 
   async function writeWorkspaceVersion(version) {

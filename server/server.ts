@@ -85,6 +85,7 @@ import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
 import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
 import {
+  finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
   rollbackLegacyCarryOverMigration,
@@ -269,6 +270,9 @@ export async function startServer(): Promise<void> {
     await carryOverGarbageCollector.initialize();
     chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
     await workspaceMigrations.finish();
+    if (workspaceMigrations.initialVersion >= 4) {
+      await finalizeCarryOverMigrationValidation(workspaceDir);
+    }
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
       isApiProviderReferenced(apiProviderId) {
