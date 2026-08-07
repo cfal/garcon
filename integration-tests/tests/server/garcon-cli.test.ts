@@ -4,7 +4,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
-import { userContents } from '../../support/chat-assertions.js';
+import {
+  assistantContents,
+  messagesOfType,
+  userContents,
+} from '../../support/chat-assertions.js';
 import {
   withIntegrationFixture,
   type IntegrationFixture,
@@ -228,7 +232,7 @@ describe('garcon-cli', () => {
     }, { namedWorkspace: WORKSPACE });
   });
 
-  test('resumes through a different agent as one visible fenced handoff', async () => {
+  test('resumes through A to B to A as visible fenced handoffs', async () => {
     await withIntegrationFixture('garcon-cli-agent-handoff', async (fixture) => {
       const source = fixture.directAgents.openAi;
       const target = fixture.directAgents.anthropic;
@@ -247,7 +251,10 @@ describe('garcon-cli', () => {
       expect(chatId).toBeString();
       const before = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId)!;
 
-      const handedOff = await runCli([
+      const targetHeld = fixture.fakeProviders.anthropic.holdNext({
+        model: target.provider.model,
+      });
+      const handoffRun = runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
         '--resume', chatId!,
@@ -261,11 +268,15 @@ describe('garcon-cli', () => {
         '--tag', 'Delegated Handoff',
         'cli-target-turn',
       ]);
+      const targetRequest = await targetHeld.received;
+      expect(occurrences(targetRequest.lastUserText, '<carried-context version="1"')).toBe(1);
+      expect(targetHeld.releaseText('cli-target-answer')).toBe(true);
+      const handedOff = await handoffRun;
 
       expect(handedOff.exitCode).toBe(0);
       expect(handedOff.stderr).toBe('');
       expect(handedOff.stdout).toMatch(new RegExp(`^chat id: ${chatId}\\nturn id: [^\\n]+\\n`));
-      expect(handedOff.stdout).toContain('cli-target-turn');
+      expect(handedOff.stdout).toContain('cli-target-answer');
       const after = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId)!;
       expect(after).toMatchObject({
         agentId: target.agentId,
@@ -274,9 +285,61 @@ describe('garcon-cli', () => {
       });
       expect(after.agentOwnershipEpoch).not.toBe(before.agentOwnershipEpoch);
 
+      const sourceHeld = fixture.fakeProviders.openAi.holdNext({
+        model: source.provider.model,
+      });
+      const returnRun = runCli([
+        '--config-dir', fixture.dirs.config,
+        '--workspace', WORKSPACE,
+        '--resume', chatId!,
+        '--agent', source.agentId,
+        '--provider', source.provider.providerId,
+        '--endpoint', source.provider.endpointId,
+        '--model', source.provider.model,
+        '--permissions', 'default',
+        '--reasoning-effort', 'none',
+        '--title', 'CLI returned handoff',
+        '--tag', 'Returned Handoff',
+        'cli-return-turn',
+      ]);
+      const sourceRequest = await sourceHeld.received;
+      expect(occurrences(sourceRequest.lastUserText, '<carried-context version="1"')).toBe(1);
+      expect(sourceRequest.lastUserText).toContain('cli-target-turn');
+      expect(sourceHeld.releaseText('cli-return-answer')).toBe(true);
+      const returned = await returnRun;
+
+      expect(returned.exitCode).toBe(0);
+      expect(returned.stderr).toBe('');
+      expect(returned.stdout).toMatch(new RegExp(`^chat id: ${chatId}\\nturn id: [^\\n]+\\n`));
+      expect(returned.stdout).toContain('cli-return-answer');
+      const afterReturn = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === chatId,
+      )!;
+      expect(afterReturn).toMatchObject({
+        agentId: source.agentId,
+        title: 'CLI returned handoff',
+        tags: ['cli', 'delegated-handoff', 'returned-handoff'],
+      });
+      expect(afterReturn.agentOwnershipEpoch).not.toBe(after.agentOwnershipEpoch);
+
       const history = await fixture.client.getMessages(chatId!);
-      expect(userContents(history.messages)).toEqual(['cli-source-turn', 'cli-target-turn']);
-      expect(history.messages.filter((entry) => entry.message.type === 'agent-switch')).toHaveLength(1);
+      expect(userContents(history.messages)).toEqual([
+        'cli-source-turn',
+        'cli-target-turn',
+        'cli-return-turn',
+      ]);
+      expect(assistantContents(history.messages)).toEqual([
+        'echo:cli-source-turn',
+        'cli-target-answer',
+        'cli-return-answer',
+      ]);
+      expect(messagesOfType(history.messages, 'agent-switch').map((message) => [
+        message.fromAgentId,
+        message.toAgentId,
+      ])).toEqual([
+        [source.agentId, target.agentId],
+        [target.agentId, source.agentId],
+      ]);
     }, { namedWorkspace: WORKSPACE });
   });
 
@@ -721,3 +784,7 @@ describe('garcon-cli', () => {
     }, { namedWorkspace: WORKSPACE });
   });
 });
+
+function occurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1;
+}
