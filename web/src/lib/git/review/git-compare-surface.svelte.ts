@@ -7,10 +7,7 @@ import {
 	GitComparisonController,
 	type GitComparisonSpecification,
 } from './git-comparison.svelte.js';
-import type {
-	GitComparisonSessionIdentity,
-	GitComparisonSessionStore,
-} from './git-comparison-session-store.js';
+import type { GitComparisonPreferences } from './git-comparison-preferences.js';
 
 export const DEFAULT_GIT_COMPARISON: GitComparisonSpecification = {
 	fromRevision: 'HEAD',
@@ -19,7 +16,12 @@ export const DEFAULT_GIT_COMPARISON: GitComparisonSpecification = {
 };
 
 interface GitCompareSurfaceControllerDeps extends GitSurfaceControllerDeps {
-	comparisonSessions: Pick<GitComparisonSessionStore, 'recall' | 'remember'>;
+	comparisonPreferences: GitComparisonPreferences;
+}
+
+interface GitComparisonSessionIdentity {
+	readonly chatId: string;
+	readonly targetIdentity: string;
 }
 
 interface ActiveGitComparisonSession {
@@ -147,7 +149,7 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 		if (sameSession(this.#loadedSessionIdentity, active.identity)) return;
 
 		const specification =
-			this.deps.comparisonSessions.recall(active.identity) ?? DEFAULT_GIT_COMPARISON;
+			this.deps.comparisonPreferences.recall(active.identity.chatId) ?? DEFAULT_GIT_COMPARISON;
 		this.comparison.setSpecification(specification, {
 			diffMode: this.deps.reviewDisplay.diffMode,
 			contextLines: this.deps.reviewDisplay.contextLines,
@@ -189,7 +191,7 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 	#rememberConfirmedComparison(identity = this.#loadedSessionIdentity): void {
 		const specification = this.comparison.confirmedSpecification;
 		if (!identity || !specification) return;
-		this.deps.comparisonSessions.remember(identity, specification);
+		this.deps.comparisonPreferences.remember(identity.chatId, specification);
 	}
 }
 

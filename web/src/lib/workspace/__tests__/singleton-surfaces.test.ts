@@ -49,7 +49,7 @@ function createRegistry() {
 		registry,
 		commits,
 		pullRequestsStores,
-		comparisonSessions: gitSurfaceDeps.comparisonSessions,
+		comparisonPreferences: gitSurfaceDeps.comparisonPreferences,
 	};
 }
 
@@ -162,23 +162,22 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(registry.gitCompare()).not.toBe(compare);
 	});
 
-	it('retains Compare memory across surface disposal and clears it at root destruction', () => {
-		const { registry, comparisonSessions } = createRegistry();
-		const identity = { chatId: 'chat-a', targetIdentity: 'target-a' };
+	it('retains Compare preferences across surface and root disposal', () => {
+		const { registry, comparisonPreferences } = createRegistry();
 		const specification = {
 			fromRevision: 'origin/main',
 			toKind: 'revision' as const,
 			toRevision: 'HEAD',
 			mode: 'direct' as const,
 		};
-		comparisonSessions.remember(identity, specification);
+		comparisonPreferences.remember('chat-a', specification);
 		registry.gitCompare();
 
 		registry.disposeSurface('git-compare');
-		expect(comparisonSessions.recall(identity)).toEqual(specification);
+		expect(comparisonPreferences.recall('chat-a')).toEqual(specification);
 
 		registry.destroy();
-		expect(comparisonSessions.recall(identity)).toBeNull();
+		expect(comparisonPreferences.recall('chat-a')).toEqual(specification);
 	});
 
 	it('routes visibility for every singleton through one lifecycle owner', () => {

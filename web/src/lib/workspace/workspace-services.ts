@@ -9,7 +9,7 @@ import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidati
 import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
-import { GitComparisonSessionStore } from '$lib/git/review/git-comparison-session-store.js';
+import { LocalGitComparisonPreferences } from '$lib/git/review/git-comparison-preferences.js';
 import { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
 import type {
 	FileOpenPlacementPreference,
@@ -170,7 +170,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		});
 	const gitBranchActions = createGitBranchSelector();
 	const gitReviewDisplay = new GitReviewDisplaySettingsStore();
-	const comparisonSessions = new GitComparisonSessionStore();
+	const comparisonPreferences = new LocalGitComparisonPreferences();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
 		createCommit: () =>
 			new CommitController({
@@ -194,7 +194,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		invalidationVersion: (effectiveProjectKey) =>
 			gitProjectInvalidations.version(effectiveProjectKey),
 		reviewDisplay: gitReviewDisplay,
-		comparisonSessions,
+		comparisonPreferences,
 	});
 	const domainBindings = new WorkspaceDomainBindings({
 		workspaceContext: context,
