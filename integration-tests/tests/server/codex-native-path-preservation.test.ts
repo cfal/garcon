@@ -163,11 +163,11 @@ describe('Codex native transcript path preservation', () => {
           agent: target,
         }));
         expect(switchFailure).toMatchObject({
-          status: 503,
+          status: 422,
           body: {
             success: false,
-            error: 'Chat transcript is temporarily unavailable. Retry the request.',
-            errorCode: 'TRANSCRIPT_UNAVAILABLE',
+            error: 'The source transcript is temporarily unavailable. Retry the handoff.',
+            errorCode: 'SOURCE_TRANSCRIPT_UNAVAILABLE',
             retryable: true,
           },
         });
@@ -307,9 +307,6 @@ describe('Codex native transcript path preservation', () => {
 
         const recovered = await fixture.client.getMessages(chatId);
         expect(messageLabels(recovered.messages.map((entry) => entry.message))).toEqual([
-          carryMarker,
-          `retry-answer-${carryMarker}`,
-          'agent-switch',
           nativeMarker,
           `retry-answer-${nativeMarker}`,
         ]);
@@ -426,7 +423,7 @@ async function seedWorkspace(input: {
   await writeFile(
     join(input.workspace, 'chats.json'),
     JSON.stringify({
-      version: 3,
+      version: 4,
       sessions: {
         [input.chatId]: {
           agentId: 'codex',
@@ -451,6 +448,9 @@ async function seedWorkspace(input: {
           lastReadAt: null,
           permissionMode: 'default',
           thinkingMode: 'none',
+          carryOverHeadId: null,
+          nativeSeedReceipt: null,
+          carryOverMigrationQuarantine: null,
         },
       },
     }),

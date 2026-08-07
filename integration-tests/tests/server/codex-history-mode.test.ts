@@ -122,7 +122,7 @@ describe('Codex history modes', () => {
           JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
         );
         await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-          version: 3,
+          version: 4,
           sessions: {
             [sourceChatId]: {
               agentId: 'codex',
@@ -144,6 +144,9 @@ describe('Codex history modes', () => {
               lastReadAt: null,
               permissionMode: 'default',
               thinkingMode: 'none',
+              carryOverHeadId: null,
+              nativeSeedReceipt: null,
+              carryOverMigrationQuarantine: null,
             },
           },
         }));

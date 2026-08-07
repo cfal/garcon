@@ -403,7 +403,7 @@ async function writeLegacyPiSession(input: {
     JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
   );
   await writeFile(join(input.workspace, 'chats.json'), JSON.stringify({
-    version: 3,
+    version: 4,
     sessions: {
       [input.chatId]: {
         agentId: 'pi',
@@ -425,6 +425,9 @@ async function writeLegacyPiSession(input: {
         lastReadAt: null,
         permissionMode: 'default',
         thinkingMode: 'none',
+        carryOverHeadId: null,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
       },
     },
   }));
