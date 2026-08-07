@@ -69,7 +69,6 @@ export function requireCatalogAgent(
     || !Array.isArray(raw.supportedProtocols)
     || !raw.supportedProtocols.every(isApiProtocol)
     || typeof raw.defaultModel !== 'string'
-    || raw.defaultModel.length === 0
     || typeof raw.acceptsApiProviderEndpoints !== 'boolean'
     || typeof raw.requiresStrictModelDiscovery !== 'boolean'
     || !defaultSettings
@@ -311,6 +310,10 @@ export function resolveHandoffSelection(
   },
 ): AgentHandoffTarget {
   const agent = requireCatalogAgent(catalog, requested.agentId);
+  const model = requested.model ?? agent.defaultModel;
+  if (model.length === 0) {
+    throw catalogError(`agent ${requested.agentId} has no default model; specify --model`);
+  }
   const defaults = executionDefaultsForAgent(settings.executionDefaults, requested.agentId);
   const thinkingMode = strictThinkingMode(
     requested.thinkingMode,
@@ -328,7 +331,7 @@ export function resolveHandoffSelection(
   return {
     agentId: requested.agentId,
     ...resolveModelSelection(catalog, requested.agentId, {
-      model: requested.model ?? agent.defaultModel,
+      model,
       providerId: requested.providerId,
       endpointId: requested.endpointId,
     }),

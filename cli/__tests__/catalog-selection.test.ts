@@ -4,6 +4,8 @@ import type { ApiProviderCatalogEntry } from '@garcon/common/api-providers';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import {
+  requireCatalogAgent,
+  resolveHandoffSelection,
   resolveModelSelection,
   resolveStartSelection,
   validateExplicitModes,
@@ -99,6 +101,20 @@ function settings(permissionMode: 'default' | 'acceptEdits' | 'bypassPermissions
 }
 
 describe('resolveModelSelection', () => {
+  test('accepts a model-less non-strict catalog entry for discovery', () => {
+    const modelLess = agent({
+      defaultModel: '',
+      models: [],
+      requiresStrictModelDiscovery: false,
+    });
+
+    expect(requireCatalogAgent(catalog(modelLess), 'codex')).toMatchObject({
+      id: 'codex',
+      defaultModel: '',
+      models: [],
+    });
+  });
+
   test('resolves an exact live catalog value to its routing tuple', () => {
     expect(resolveModelSelection(catalog(), 'codex', { model: 'east:qwen' })).toEqual({
       model: 'qwen',
@@ -196,6 +212,22 @@ describe('resolveModelSelection', () => {
 });
 
 describe('execution selection', () => {
+  test('requires an explicit model when a handoff target has no default', () => {
+    const modelLessCatalog = catalog(agent({
+      defaultModel: '',
+      models: [],
+      requiresStrictModelDiscovery: false,
+    }));
+
+    expect(() => resolveHandoffSelection(modelLessCatalog, settings(), {
+      agentId: 'codex',
+    })).toThrow('has no default model; specify --model');
+    expect(resolveHandoffSelection(modelLessCatalog, settings(), {
+      agentId: 'codex',
+      model: 'custom-model',
+    }).model).toBe('custom-model');
+  });
+
   test('uses write-capable Garcon defaults and saved agent settings', () => {
     const resolved = resolveStartSelection(catalog(), settings(), {
       agentId: 'codex',
