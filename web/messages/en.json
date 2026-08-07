@@ -1304,6 +1304,8 @@
 	"settings_shortcut_navigate_chat_below": "Go to chat below",
 	"settings_shortcut_toggle_main_sidebar_focus": "Toggle focus between main view and workspace sidebar",
 	"settings_shortcut_open_settings": "Open settings",
+	"settings_shortcut_scroll_half_page_up": "Scroll up half a page",
+	"settings_shortcut_scroll_half_page_down": "Scroll down half a page",
 	"settings_shortcut_send_message": "Send message",
 	"settings_shortcut_system_default": "System default",
 	"settings_shortcut_custom": "Custom",

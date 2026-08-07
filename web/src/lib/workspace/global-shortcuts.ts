@@ -10,6 +10,8 @@ export const GLOBAL_SHORTCUT_IDS = [
 	'navigate-chat-below',
 	'toggle-main-sidebar-focus',
 	'open-settings',
+	'scroll-half-page-up',
+	'scroll-half-page-down',
 ] as const;
 
 export type GlobalShortcutId = (typeof GLOBAL_SHORTCUT_IDS)[number];
@@ -37,7 +39,7 @@ export const GLOBAL_SHORTCUT_DEFINITIONS: readonly GlobalShortcutDefinition[] = 
 	{ id: 'open-sidebar-search', defaultBinding: { key: 's', primary: true } },
 	{ id: 'new-chat', defaultBinding: { key: 'n', ctrl: true } },
 	{ id: 'rename-chat', defaultBinding: { key: 'r', ctrl: true } },
-	{ id: 'delete-chat', defaultBinding: { key: 'd', ctrl: true } },
+	{ id: 'delete-chat', defaultBinding: { key: 'd', ctrl: true, shift: true } },
 	{ id: 'navigate-tab-left', defaultBinding: { key: 'j', ctrl: true, shift: true } },
 	{ id: 'navigate-tab-right', defaultBinding: { key: 'l', ctrl: true, shift: true } },
 	{ id: 'navigate-chat-above', defaultBinding: { key: 'p', ctrl: true, shift: true } },
@@ -47,6 +49,8 @@ export const GLOBAL_SHORTCUT_DEFINITIONS: readonly GlobalShortcutDefinition[] = 
 		defaultBinding: { key: 'o', ctrl: true, shift: true },
 	},
 	{ id: 'open-settings', defaultBinding: { key: ',', ctrl: true } },
+	{ id: 'scroll-half-page-up', defaultBinding: { key: 'u', ctrl: true } },
+	{ id: 'scroll-half-page-down', defaultBinding: { key: 'd', ctrl: true } },
 ];
 
 const definitionById = new Map(
@@ -85,6 +89,18 @@ export function sanitizeGlobalShortcutOverrides(value: unknown): GlobalShortcutO
 		}
 		const binding = normalizeBinding(candidate[id]);
 		if (binding && isSafeGlobalShortcutBinding(binding)) overrides[id] = binding;
+	}
+
+	// Preserves persisted custom bindings when a later release adds or moves a default.
+	for (const definition of GLOBAL_SHORTCUT_DEFINITIONS) {
+		if (Object.hasOwn(overrides, definition.id)) continue;
+		const conflictsWithOverride = GLOBAL_SHORTCUT_IDS.some((id) => {
+			const binding = overrides[id];
+			return binding
+				? globalShortcutBindingsConflict(definition.defaultBinding, binding)
+				: false;
+		});
+		if (conflictsWithOverride) overrides[definition.id] = null;
 	}
 	return overrides;
 }

@@ -234,6 +234,10 @@ export class ConversationScrollController {
 			return;
 		}
 		if (this.deps.getViewport()?.ownsScrollPosition()) return;
+		this.#reconcileUserScroll(inferredDirection);
+	}
+
+	#reconcileUserScroll(inferredDirection: TranscriptPageDirection | null): void {
 		this.#applyInferredIntentDirection(inferredDirection);
 		const nearBottom = this.isNearBottom();
 		const hasRecentUserScrollIntent = this.#hasRecentUserScrollIntent();
@@ -543,16 +547,21 @@ export class ConversationScrollController {
 		void this.#restoreVisibleViewport();
 	}
 
-	handleHalfPageScroll(event: KeyboardEvent): void {
+	// Scrolls the feed half a viewport in the given direction when focus is inside
+	// the composer or the scroll container; binding matching belongs to the caller.
+	scrollFeedHalfPage(event: KeyboardEvent, direction: TranscriptPageDirection): void {
 		const scrollContainer = this.deps.getScrollContainer();
-		if (!scrollContainer || !event.ctrlKey || event.key !== 'u') return;
+		if (!scrollContainer) return;
+		event.preventDefault();
 		const active = document.activeElement;
 		const inTextarea = active?.tagName === 'TEXTAREA';
 		const inContainer = scrollContainer.contains(active) || active === scrollContainer;
 		if (!inTextarea && !inContainer) return;
-		event.preventDefault();
-		this.noteUserScrollIntent('earlier');
-		this.deps.getViewport()?.scrollBy(-scrollContainer.clientHeight / 2);
+		this.noteUserScrollIntent(direction);
+		const half = scrollContainer.clientHeight / 2;
+		const viewport = this.deps.getViewport();
+		viewport?.scrollBy(direction === 'later' ? half : -half);
+		if (viewport) this.#reconcileUserScroll(direction);
 	}
 
 	async #mutatePage(

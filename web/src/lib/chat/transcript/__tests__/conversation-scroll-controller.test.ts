@@ -1267,17 +1267,82 @@ describe('ConversationScrollController', () => {
 		expect(fixture.state.invalidatePendingWindowNavigation).toHaveBeenCalledTimes(2);
 	});
 
-	it('keeps Ctrl-U half-page scrolling on the viewport port', () => {
+	it('scrolls the feed half a viewport in either direction', () => {
 		const scroller = document.createElement('div');
 		Object.defineProperty(scroller, 'clientHeight', { value: 600 });
 		document.body.append(scroller);
 		scroller.tabIndex = -1;
 		scroller.focus();
 		const { controller, viewport } = controllerFixture({ scroller });
-		const event = new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, cancelable: true });
-		controller.handleHalfPageScroll(event);
-		expect(event.defaultPrevented).toBe(true);
+
+		const up = new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, cancelable: true });
+		controller.scrollFeedHalfPage(up, 'earlier');
+		expect(up.defaultPrevented).toBe(true);
 		expect(viewport.scrollBy).toHaveBeenCalledWith(-300);
+
+		const down = new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true });
+		controller.scrollFeedHalfPage(down, 'later');
+		expect(down.defaultPrevented).toBe(true);
+		expect(viewport.scrollBy).toHaveBeenLastCalledWith(300);
+
 		scroller.remove();
+	});
+
+	it('reconciles pinned state after a viewport-owned half-page scroll', () => {
+		const scroller = document.createElement('div');
+		Object.defineProperty(scroller, 'clientHeight', { value: 600 });
+		document.body.append(scroller);
+		scroller.tabIndex = -1;
+		scroller.focus();
+		let atEnd = false;
+		const viewport = fakeViewport({
+			isAtEnd: vi.fn(() => atEnd),
+			ownsScrollPosition: vi.fn(() => true),
+		});
+		const { controller, state } = controllerFixture({ scroller, viewport });
+
+		controller.scrollFeedHalfPage(
+			new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, cancelable: true }),
+			'earlier',
+		);
+		expect(controller.isPinnedToBottom).toBe(false);
+		expect(state.isUserScrolledUp).toBe(true);
+
+		atEnd = true;
+		controller.scrollFeedHalfPage(
+			new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true }),
+			'later',
+		);
+		expect(controller.isPinnedToBottom).toBe(true);
+		expect(state.isUserScrolledUp).toBe(false);
+		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+
+		scroller.remove();
+	});
+
+	it('consumes half-page shortcuts but only scrolls from feed or composer focus', () => {
+		const scroller = document.createElement('div');
+		Object.defineProperty(scroller, 'clientHeight', { value: 600 });
+		document.body.append(scroller);
+		const outside = document.createElement('button');
+		const textarea = document.createElement('textarea');
+		document.body.append(outside, textarea);
+		const { controller, viewport } = controllerFixture({ scroller });
+
+		outside.focus();
+		const ignored = new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true });
+		controller.scrollFeedHalfPage(ignored, 'later');
+		expect(ignored.defaultPrevented).toBe(true);
+		expect(viewport.scrollBy).not.toHaveBeenCalled();
+
+		textarea.focus();
+		const handled = new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true });
+		controller.scrollFeedHalfPage(handled, 'later');
+		expect(handled.defaultPrevented).toBe(true);
+		expect(viewport.scrollBy).toHaveBeenCalledWith(300);
+
+		scroller.remove();
+		outside.remove();
+		textarea.remove();
 	});
 });

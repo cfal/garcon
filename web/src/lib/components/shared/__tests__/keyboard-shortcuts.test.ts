@@ -59,7 +59,7 @@ describe('KeyboardShortcuts', () => {
 		}
 	});
 
-	it('requests delete on Ctrl-D', async () => {
+	it('requests delete on Ctrl-Shift-D', async () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
@@ -69,9 +69,29 @@ describe('KeyboardShortcuts', () => {
 			onToggleCommandMenu: vi.fn(),
 		});
 
-		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true }));
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'D', ctrlKey: true, shiftKey: true }),
+		);
 
 		expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledTimes(1);
+	});
+
+	it('consumes Ctrl-D without deleting while the chat list owns focus', () => {
+		const appShell = createMockAppShell();
+		const event = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			cancelable: true,
+		});
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+		});
+		window.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
 	});
 
 	it('uses a customized delete shortcut immediately', () => {
@@ -98,12 +118,14 @@ describe('KeyboardShortcuts', () => {
 			globalShortcuts: { 'delete-chat': null },
 		});
 
-		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true }));
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'D', ctrlKey: true, shiftKey: true }),
+		);
 
 		expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
 	});
 
-	it('requests delete instead of scrolling while Chat owns focus', async () => {
+	it('leaves Ctrl-D to feed scrolling while Chat owns focus', async () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
@@ -119,7 +141,39 @@ describe('KeyboardShortcuts', () => {
 		input.focus();
 
 		try {
-			input.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }));
+			input.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }),
+			);
+			expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
+		} finally {
+			input.remove();
+		}
+	});
+
+	it('requests delete on Ctrl-Shift-D while Chat owns focus', async () => {
+		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+		});
+
+		const input = document.createElement('input');
+		document.body.appendChild(input);
+		input.focus();
+
+		try {
+			input.dispatchEvent(
+				new KeyboardEvent('keydown', {
+					key: 'D',
+					ctrlKey: true,
+					shiftKey: true,
+					bubbles: true,
+				}),
+			);
 			expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledOnce();
 		} finally {
 			input.remove();

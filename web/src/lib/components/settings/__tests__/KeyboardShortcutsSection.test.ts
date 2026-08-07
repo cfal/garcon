@@ -22,16 +22,18 @@ describe('KeyboardShortcutsSection', () => {
 		await fireEvent.keyDown(changeNewChat, { key: 'd', ctrlKey: true });
 
 		expect(screen.getByRole('status').textContent).toContain(
-			'Ctrl+D was removed from Delete selected chat',
+			'Ctrl+D was removed from Scroll down half a page',
 		);
 		expect(
-			within(screen.getByRole('group', { name: 'Delete selected chat' })).getByText('Unassigned'),
+			within(screen.getByRole('group', { name: 'Scroll down half a page' })).getByText(
+				'Unassigned',
+			),
 		).toBeTruthy();
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}').globalShortcuts,
 		).toMatchObject({
 			'new-chat': { key: 'd', ctrl: true },
-			'delete-chat': null,
+			'scroll-half-page-down': null,
 		});
 	});
 

@@ -21,6 +21,9 @@ describe('keyboard shortcut entries', () => {
 			'O',
 		]);
 		expect(shortcutKeys.get('New chat')).toEqual(['Ctrl', 'N']);
+		expect(shortcutKeys.get('Delete selected chat')).toEqual(['Ctrl', 'Shift', 'D']);
+		expect(shortcutKeys.get('Scroll up half a page')).toEqual(['Ctrl', 'U']);
+		expect(shortcutKeys.get('Scroll down half a page')).toEqual(['Ctrl', 'D']);
 	});
 
 	it('documents the schedule-in command syntax', () => {

@@ -30,6 +30,8 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
 		label: m.settings_shortcut_toggle_main_sidebar_focus,
 	},
 	{ id: 'open-settings', label: m.settings_shortcut_open_settings },
+	{ id: 'scroll-half-page-up', label: m.settings_shortcut_scroll_half_page_up },
+	{ id: 'scroll-half-page-down', label: m.settings_shortcut_scroll_half_page_down },
 ];
 
 export const SLASH_COMMANDS: readonly SlashCommandEntry[] = [

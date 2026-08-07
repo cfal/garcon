@@ -258,6 +258,8 @@ describe('Settings', () => {
 			).toBeTruthy();
 			expect(screen.getByText('New chat')).toBeTruthy();
 			expect(screen.getByText('Delete selected chat')).toBeTruthy();
+			expect(screen.getByText('Scroll up half a page')).toBeTruthy();
+			expect(screen.getByText('Scroll down half a page')).toBeTruthy();
 			expect(screen.getByText('Send message')).toBeTruthy();
 			expect(screen.getByText('/compact')).toBeTruthy();
 			expect(screen.getByText('/fork [<prompt>]')).toBeTruthy();

@@ -142,6 +142,8 @@ export class WorkspaceShortcutDispatcher {
 		} else if (matches('delete-chat')) {
 			event.preventDefault();
 			this.deps.appShell.requestDeleteSelectedChat();
+		} else if (matches('scroll-half-page-up') || matches('scroll-half-page-down')) {
+			event.preventDefault();
 		}
 	}
 

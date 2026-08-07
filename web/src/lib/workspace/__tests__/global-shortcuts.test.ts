@@ -11,7 +11,19 @@ import {
 
 describe('global shortcuts', () => {
 	it('uses defaults until a command is customized or disabled', () => {
-		expect(getEffectiveGlobalShortcut('delete-chat', {})).toEqual({ key: 'd', ctrl: true });
+		expect(getEffectiveGlobalShortcut('delete-chat', {})).toEqual({
+			key: 'd',
+			ctrl: true,
+			shift: true,
+		});
+		expect(getEffectiveGlobalShortcut('scroll-half-page-up', {})).toEqual({
+			key: 'u',
+			ctrl: true,
+		});
+		expect(getEffectiveGlobalShortcut('scroll-half-page-down', {})).toEqual({
+			key: 'd',
+			ctrl: true,
+		});
 		expect(
 			getEffectiveGlobalShortcut('delete-chat', {
 				'delete-chat': { key: 'x', ctrl: true },
@@ -54,15 +66,15 @@ describe('global shortcuts', () => {
 	it('auto-unassigns the previous command when assigning a duplicate', () => {
 		const result = assignGlobalShortcut({}, 'new-chat', { key: 'd', ctrl: true });
 
-		expect(result.unassignedId).toBe('delete-chat');
-		expect(result.overrides['delete-chat']).toBeNull();
+		expect(result.unassignedId).toBe('scroll-half-page-down');
+		expect(result.overrides['scroll-half-page-down']).toBeNull();
 		expect(result.overrides['new-chat']).toEqual({ key: 'd', ctrl: true });
 	});
 
 	it('auto-unassigns a custom conflict when restoring a system default', () => {
 		const result = resetGlobalShortcut(
 			{
-				'new-chat': { key: 'd', ctrl: true },
+				'new-chat': { key: 'd', ctrl: true, shift: true },
 				'delete-chat': null,
 			},
 			'delete-chat',
@@ -83,6 +95,20 @@ describe('global shortcuts', () => {
 			}),
 		).toEqual({
 			'delete-chat': { key: 'x', ctrl: true },
+		});
+	});
+
+	it('disables defaults that conflict with persisted custom bindings', () => {
+		expect(
+			sanitizeGlobalShortcutOverrides({
+				'navigate-tab-left': { key: 'D', ctrl: true, shift: true },
+				'rename-chat': { key: 'D', ctrl: true },
+			}),
+		).toEqual({
+			'navigate-tab-left': { key: 'd', ctrl: true, shift: true },
+			'rename-chat': { key: 'd', ctrl: true },
+			'delete-chat': null,
+			'scroll-half-page-down': null,
 		});
 	});
 

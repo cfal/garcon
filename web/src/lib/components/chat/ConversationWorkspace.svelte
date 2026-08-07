@@ -53,6 +53,10 @@
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
 	import {
+		getEffectiveGlobalShortcut,
+		globalShortcutMatchesEvent,
+	} from '$lib/workspace/global-shortcuts.js';
+	import {
 		composerCapReservation,
 		shouldReserveComposerCapSlot,
 	} from '$lib/chat/composer/composer-cap-layout.js';
@@ -492,7 +496,16 @@
 			controller.handleAbort();
 			return true;
 		}
-		scroll.handleHalfPageScroll(event);
+		const overrides = localSettings.globalShortcuts;
+		const up = getEffectiveGlobalShortcut('scroll-half-page-up', overrides);
+		if (up && globalShortcutMatchesEvent(up, event)) {
+			scroll.scrollFeedHalfPage(event, 'earlier');
+		} else {
+			const down = getEffectiveGlobalShortcut('scroll-half-page-down', overrides);
+			if (down && globalShortcutMatchesEvent(down, event)) {
+				scroll.scrollFeedHalfPage(event, 'later');
+			}
+		}
 		return event.defaultPrevented;
 	}
 
