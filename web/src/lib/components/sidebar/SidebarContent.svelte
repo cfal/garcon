@@ -10,6 +10,7 @@
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
+	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface SidebarContentProps {
 		chats: ChatSessionRecord[];
@@ -74,6 +75,12 @@
 	}: SidebarContentProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+
+	$effect(() => {
+		const region = viewportRef;
+		if (!region) return;
+		return registerNativeWorkspaceScrollRegion(region, 'primary');
+	});
 </script>
 
 <ScrollArea

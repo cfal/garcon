@@ -14,6 +14,7 @@
 		isFocused?: boolean;
 		textScale?: number;
 		hiddenToolTypes?: HideableToolType[];
+		showFocusedContent?: boolean;
 		onFocus?: () => void;
 		onMaximize?: () => void;
 	}
@@ -22,6 +23,7 @@
 		isFocused = false,
 		textScale = 1,
 		hiddenToolTypes = [],
+		showFocusedContent = true,
 		onFocus = () => {},
 		onMaximize = () => {},
 	}: Props = $props();
@@ -80,5 +82,5 @@
 		{onFocus}
 	onClose={() => {}}
 	{onMaximize}
-	{focusedContent}
+	focusedContent={showFocusedContent ? focusedContent : undefined}
 />

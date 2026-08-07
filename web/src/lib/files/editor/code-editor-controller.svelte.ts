@@ -64,6 +64,10 @@ export class CodeEditorController {
 		return this.#view !== null;
 	}
 
+	get scrollElement(): HTMLElement | null {
+		return this.#view?.scrollDOM ?? null;
+	}
+
 	attach(parent: HTMLElement): number {
 		if (this.#view) throw new Error('File editor renderer is already attached');
 		const lease = ++this.#rendererGeneration;

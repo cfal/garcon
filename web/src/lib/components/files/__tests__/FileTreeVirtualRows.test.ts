@@ -126,6 +126,7 @@ describe('FileTreeVirtualRows', () => {
 		const { container } = renderRows(1);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 
+		expect(treegrid?.dataset.workspaceScrollRegion).toBe('primary');
 		expect(treegrid?.classList.contains('overscroll-none')).toBe(true);
 		expect(treegrid?.classList.contains('overscroll-contain')).toBe(false);
 		expect(treegrid?.style.getPropertyValue('overflow-anchor')).toBe('none');

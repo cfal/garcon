@@ -547,16 +547,10 @@ export class ConversationScrollController {
 		void this.#restoreVisibleViewport();
 	}
 
-	// Scrolls the feed half a viewport in the given direction when focus is inside
-	// the composer or the scroll container; binding matching belongs to the caller.
-	scrollFeedHalfPage(event: KeyboardEvent, direction: TranscriptPageDirection): void {
+	// Scrolls the feed through its virtual viewport and reconciles pinning state.
+	scrollFeedHalfPage(direction: TranscriptPageDirection): void {
 		const scrollContainer = this.deps.getScrollContainer();
 		if (!scrollContainer) return;
-		event.preventDefault();
-		const active = document.activeElement;
-		const inTextarea = active?.tagName === 'TEXTAREA';
-		const inContainer = scrollContainer.contains(active) || active === scrollContainer;
-		if (!inTextarea && !inContainer) return;
 		this.noteUserScrollIntent(direction);
 		const half = scrollContainer.clientHeight / 2;
 		const viewport = this.deps.getViewport();

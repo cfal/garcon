@@ -3,6 +3,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitPorcelainPanelProps {
@@ -39,6 +40,7 @@
 		}
 		return `Drop ${activeConfirmation.stashRef}? This removes the stash entry and cannot be undone from this panel.`;
 	});
+	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
 
 	$effect(() => {
 		loadKey;
@@ -92,7 +94,10 @@
 			</button>
 		</div>
 
-		<div class="max-h-56 overflow-auto px-3 pb-3 text-xs">
+		<div
+			class="max-h-56 overflow-auto px-3 pb-3 text-xs"
+			{@attach contextualScrollRegion}
+		>
 			{#if porcelain.inspectorView === 'conflicts'}
 				{#if porcelain.conflicts.length === 0}
 					<p class="py-3 text-muted-foreground">No conflicts</p>

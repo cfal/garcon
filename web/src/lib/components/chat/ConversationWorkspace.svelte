@@ -52,10 +52,7 @@
 	} from '$lib/chat/conversation/chat-max-width.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
-	import {
-		getEffectiveGlobalShortcut,
-		globalShortcutMatchesEvent,
-	} from '$lib/workspace/global-shortcuts.js';
+	import { registerManagedWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import {
 		composerCapReservation,
 		shouldReserveComposerCapSlot,
@@ -484,6 +481,14 @@
 		return scroll.observeScrollContainerResize();
 	});
 
+	$effect(() => {
+		const region = scrollContainer;
+		if (!region) return;
+		return registerManagedWorkspaceScrollRegion(region, 'primary', (_element, direction) =>
+			scroll.scrollFeedHalfPage(direction),
+		);
+	});
+
 	function handleWorkspaceShortcut(event: KeyboardEvent): boolean {
 		if (!isVisible) return false;
 		if (
@@ -496,17 +501,7 @@
 			controller.handleAbort();
 			return true;
 		}
-		const overrides = localSettings.globalShortcuts;
-		const up = getEffectiveGlobalShortcut('scroll-half-page-up', overrides);
-		if (up && globalShortcutMatchesEvent(up, event)) {
-			scroll.scrollFeedHalfPage(event, 'earlier');
-		} else {
-			const down = getEffectiveGlobalShortcut('scroll-half-page-down', overrides);
-			if (down && globalShortcutMatchesEvent(down, event)) {
-				scroll.scrollFeedHalfPage(event, 'later');
-			}
-		}
-		return event.defaultPrevented;
+		return false;
 	}
 
 	$effect(() => workspaceShortcuts.registerSurface(CHAT_SURFACE_ID, handleWorkspaceShortcut));

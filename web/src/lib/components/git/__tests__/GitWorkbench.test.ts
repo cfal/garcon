@@ -184,8 +184,13 @@ describe('GitWorkbench', () => {
 		expect(
 			fileTreeToggle.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
 		).toBe('main');
-		const diffSurface = container.querySelector('[data-git-virtual-diff-root]');
+		const diffSurface = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
 		expect(diffSurface).toBeTruthy();
+		expect(diffSurface?.dataset.workspaceScrollRegion).toBe('primary');
+		expect(
+			container.querySelector<HTMLElement>('[data-git-files-pane] [data-workspace-scroll-region]')
+				?.dataset.workspaceScrollRegion,
+		).toBe('contextual');
 
 		ResizeObserverHarness.emit(workbench, 700);
 		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('narrow'));

@@ -12,6 +12,7 @@
 		type ZoomPoint,
 	} from '$lib/components/shared/zoom-viewport.js';
 	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let { session }: { session: FileSession } = $props();
@@ -21,6 +22,7 @@
 	const ZOOM_STEP = 0.25;
 	const ZOOM_MIN = 0.25;
 	const ZOOM_MAX = 5;
+	const primaryScrollRegion = nativeWorkspaceScrollRegion('primary');
 	let pendingZoomAnchor: ZoomAnchor | null = null;
 	let zoomFrame: number | null = null;
 	let scrollReleaseFrame: number | null = null;
@@ -198,6 +200,7 @@
 	</div>
 	<div
 		bind:this={viewportElement}
+		{@attach primaryScrollRegion}
 		class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted p-4"
 		onwheel={handleWheel}
 		onscroll={(event) => persistViewport(event.currentTarget)}

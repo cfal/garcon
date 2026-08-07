@@ -12,6 +12,10 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import GitCommitListRow from './GitCommitListRow.svelte';
 	import { GitCommitListVirtualController } from './GitCommitListVirtualController.svelte.js';
+	import {
+		managedWorkspaceScrollRegion,
+		scrollElementHalfPage,
+	} from '$lib/workspace/workspace-scroll-region.js';
 
 	interface GitCommitListScreenProps {
 		commits: GitHistoryCommitListItem[];
@@ -107,6 +111,10 @@
 	});
 	const virtualizer = virtual.virtualizer;
 	const measureRow = virtual.measureRow;
+	const primaryScrollRegion = managedWorkspaceScrollRegion('primary', (element, direction) => {
+		virtual.noteUserScrollIntent();
+		scrollElementHalfPage(element, direction);
+	});
 	let virtualItems = $derived($virtualizer.getVirtualItems());
 	let totalHeight = $derived($virtualizer.getTotalSize());
 	let renderedVirtualItems = $derived.by(() =>
@@ -198,6 +206,7 @@
 
 	<div
 		bind:this={listRef}
+		{@attach primaryScrollRegion}
 		class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain bg-background {isMobile
 			? 'pb-16'
 			: ''}"

@@ -26,6 +26,7 @@ describe('FileDialogHost', () => {
 		const rendered = render(FileDialogHostTestHost, { request: 'file' });
 		const dialog = await screen.findByRole('dialog');
 
+		expect(dialog.dataset.workspaceSurfaceId).toMatch(/^file:/);
 		expect(dialog.classList.contains('sm:max-w-none')).toBe(true);
 		expect(dialog.classList.contains('sm:max-w-lg')).toBe(false);
 

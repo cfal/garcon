@@ -58,6 +58,7 @@
 	<Dialog.Content
 		showCloseButton={false}
 		transientKind="file-dialog"
+		data-workspace-surface-id={surfaceId ?? undefined}
 		class={maximized
 			? 'flex h-dvh w-screen max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none'
 			: 'flex h-[min(90dvh,1000px)] w-[min(96vw,1440px)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none'}

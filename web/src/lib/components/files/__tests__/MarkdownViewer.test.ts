@@ -131,6 +131,7 @@ describe('MarkdownViewer', () => {
 		const content = screen.getByRole('region', { name: 'current.md' });
 		expect(content.getAttribute('tabindex')).toBe('-1');
 		expect(content.hasAttribute('data-surface-primary')).toBe(true);
+		expect(content.dataset.workspaceScrollRegion).toBe('primary');
 		content.focus();
 		expect(document.activeElement).toBe(content);
 	});

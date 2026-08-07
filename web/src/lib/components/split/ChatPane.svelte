@@ -19,6 +19,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface ChatPaneProps {
 		paneId: string;
@@ -114,6 +115,12 @@
 				previewScrollContainer.scrollTop = previewScrollContainer.scrollHeight;
 			}
 		});
+	});
+
+	$effect(() => {
+		const region = previewScrollContainer;
+		if (!region || isFocused) return;
+		return registerNativeWorkspaceScrollRegion(region, 'contextual');
 	});
 
 	function isInteractiveTarget(target: EventTarget | null, container: EventTarget | null): boolean {

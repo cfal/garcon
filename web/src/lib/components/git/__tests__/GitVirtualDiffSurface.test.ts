@@ -131,8 +131,9 @@ describe('GitVirtualDiffSurface', () => {
 		const rows = Array.from({ length: 10_000 }, (_, index) => makeHeaderRow(index));
 		const { container } = renderSurface(rows);
 
-		const root = container.querySelector('[data-git-virtual-diff-root]');
+		const root = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
 		expect(root).toBeTruthy();
+		expect(root?.dataset.workspaceScrollRegion).toBe('primary');
 		expect(container.querySelector('[data-git-all-files-scroll-root]')).toBeNull();
 
 		await waitFor(() => {

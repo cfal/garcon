@@ -13,6 +13,7 @@
 		type GitChangedFileTreeRow,
 	} from '$lib/git/review/git-changed-file-tree.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface GitChangedFileTreeProps {
 		files: GitCommitFileSummary[];
@@ -36,6 +37,7 @@
 	let focusedRowKey = $state<string | null>(null);
 	let previousNormalizedFilter = $state('');
 	const rowHeight = 30;
+	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
 	let tree = $derived(buildGitChangedFileTree(files));
 	let rows = $derived(flattenGitChangedFileTree(tree, collapsedDirectories));
 	let activeFocusKey = $derived(
@@ -248,6 +250,7 @@
 	</div>
 	<div
 		bind:this={listRef}
+		{@attach contextualScrollRegion}
 		class="min-h-0 flex-1 overflow-y-auto py-1 focus-visible:outline-none"
 		role="tree"
 		tabindex="0"

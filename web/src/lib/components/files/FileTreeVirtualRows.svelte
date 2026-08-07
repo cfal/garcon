@@ -15,6 +15,7 @@
 		fileTreeViewGeometry,
 		type FileTreeViewMode,
 	} from './file-tree-view-profile.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	let {
 		store,
@@ -91,6 +92,7 @@
 	const interaction = controller.interaction;
 	const virtualizer = controller.virtualizer;
 	const measureVirtualRow = controller.measureVirtualRow;
+	const primaryScrollRegion = nativeWorkspaceScrollRegion('primary');
 	let activeFocusKey = $derived(controller.activeFocusKey);
 	let virtualItems = $derived($virtualizer.getVirtualItems());
 	let totalHeight = $derived($virtualizer.getTotalSize());
@@ -98,6 +100,7 @@
 
 <div
 	bind:this={viewportRef}
+	{@attach primaryScrollRegion}
 	role="treegrid"
 	aria-label={`${m.filetree_project_files()}: ${store.currentDirectoryLabel}`}
 	aria-rowcount={model.rows.length + 1}

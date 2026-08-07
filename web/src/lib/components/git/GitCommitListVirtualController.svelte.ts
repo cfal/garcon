@@ -111,11 +111,7 @@ export class GitCommitListVirtualController {
 		$effect(() => {
 			const viewport = options.viewport;
 			if (!viewport) return;
-			const handleUserScrollIntent = () => {
-				this.#userInteractedViewports.add(viewport);
-				this.#cancelRestore();
-				this.options.onUserScrollIntent();
-			};
+			const handleUserScrollIntent = () => this.noteUserScrollIntent();
 			const cancelRestoreForKey = (event: KeyboardEvent) => {
 				if (
 					event.key === 'ArrowDown' ||
@@ -152,6 +148,14 @@ export class GitCommitListVirtualController {
 				this.#loadBoundaryPending = false;
 			};
 		});
+	}
+
+	noteUserScrollIntent(): void {
+		const viewport = this.options.viewport;
+		if (!viewport) return;
+		this.#userInteractedViewports.add(viewport);
+		this.#cancelRestore();
+		this.options.onUserScrollIntent();
 	}
 
 	measureRow = (element: HTMLDivElement): { update(): void; destroy(): void } => {

@@ -9,6 +9,7 @@
 		getWorkspaceLayout,
 	} from '$lib/context';
 	import { fileSurfaceId, type PresentationHostId } from '$lib/workspace/surface-types.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let { session, presentation }: { session: FileSession; presentation: PresentationHostId } =
@@ -17,6 +18,7 @@
 	const localSettings = getLocalSettings();
 	const notifications = getNotifications();
 	const workspaceLayout = getWorkspaceLayout();
+	const primaryScrollRegion = nativeWorkspaceScrollRegion('primary');
 	let contentElement: HTMLDivElement;
 	const markdownFontSize = $derived(
 		Number.parseInt(localSettings.markdownViewerFontSize, 10) || 12,
@@ -66,6 +68,7 @@
 
 <div
 	bind:this={contentElement}
+	{@attach primaryScrollRegion}
 	data-surface-primary
 	tabindex="-1"
 	role="region"

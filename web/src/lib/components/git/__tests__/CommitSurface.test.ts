@@ -61,11 +61,13 @@ describe('CommitSurface', () => {
 
 		const toolbar = container.querySelector('[data-git-surface-toolbar]');
 		const tree = container.querySelector('[data-commit-file-tree]');
+		const fileScroll = container.querySelector<HTMLElement>('[data-commit-file-scroll]');
 		const summary = container.querySelector('[data-commit-selection-summary]');
 		const message = screen.getByRole('textbox');
 		expect(summary?.textContent).toContain(m.git_quick_commit_select_files());
 		expect(toolbar?.contains(summary)).toBe(false);
 		expect(tree).toBeTruthy();
+		expect(fileScroll?.dataset.workspaceScrollRegion).toBe('primary');
 		expect(summary).toBeTruthy();
 		if (!tree || !summary) return;
 		expect(tree.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

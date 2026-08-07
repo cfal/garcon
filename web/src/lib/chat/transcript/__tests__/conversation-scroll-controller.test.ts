@@ -1270,22 +1270,13 @@ describe('ConversationScrollController', () => {
 	it('scrolls the feed half a viewport in either direction', () => {
 		const scroller = document.createElement('div');
 		Object.defineProperty(scroller, 'clientHeight', { value: 600 });
-		document.body.append(scroller);
-		scroller.tabIndex = -1;
-		scroller.focus();
 		const { controller, viewport } = controllerFixture({ scroller });
 
-		const up = new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, cancelable: true });
-		controller.scrollFeedHalfPage(up, 'earlier');
-		expect(up.defaultPrevented).toBe(true);
+		controller.scrollFeedHalfPage('earlier');
 		expect(viewport.scrollBy).toHaveBeenCalledWith(-300);
 
-		const down = new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true });
-		controller.scrollFeedHalfPage(down, 'later');
-		expect(down.defaultPrevented).toBe(true);
+		controller.scrollFeedHalfPage('later');
 		expect(viewport.scrollBy).toHaveBeenLastCalledWith(300);
-
-		scroller.remove();
 	});
 
 	it('reconciles pinned state after a viewport-owned half-page scroll', () => {
@@ -1301,18 +1292,12 @@ describe('ConversationScrollController', () => {
 		});
 		const { controller, state } = controllerFixture({ scroller, viewport });
 
-		controller.scrollFeedHalfPage(
-			new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, cancelable: true }),
-			'earlier',
-		);
+		controller.scrollFeedHalfPage('earlier');
 		expect(controller.isPinnedToBottom).toBe(false);
 		expect(state.isUserScrolledUp).toBe(true);
 
 		atEnd = true;
-		controller.scrollFeedHalfPage(
-			new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true }),
-			'later',
-		);
+		controller.scrollFeedHalfPage('later');
 		expect(controller.isPinnedToBottom).toBe(true);
 		expect(state.isUserScrolledUp).toBe(false);
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
@@ -1320,7 +1305,7 @@ describe('ConversationScrollController', () => {
 		scroller.remove();
 	});
 
-	it('consumes half-page shortcuts but only scrolls from feed or composer focus', () => {
+	it('leaves focus policy to the workspace shortcut router', () => {
 		const scroller = document.createElement('div');
 		Object.defineProperty(scroller, 'clientHeight', { value: 600 });
 		document.body.append(scroller);
@@ -1330,16 +1315,12 @@ describe('ConversationScrollController', () => {
 		const { controller, viewport } = controllerFixture({ scroller });
 
 		outside.focus();
-		const ignored = new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true });
-		controller.scrollFeedHalfPage(ignored, 'later');
-		expect(ignored.defaultPrevented).toBe(true);
-		expect(viewport.scrollBy).not.toHaveBeenCalled();
+		controller.scrollFeedHalfPage('later');
 
 		textarea.focus();
-		const handled = new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true });
-		controller.scrollFeedHalfPage(handled, 'later');
-		expect(handled.defaultPrevented).toBe(true);
-		expect(viewport.scrollBy).toHaveBeenCalledWith(300);
+		controller.scrollFeedHalfPage('later');
+		expect(viewport.scrollBy).toHaveBeenCalledTimes(2);
+		expect(viewport.scrollBy).toHaveBeenLastCalledWith(300);
 
 		scroller.remove();
 		outside.remove();

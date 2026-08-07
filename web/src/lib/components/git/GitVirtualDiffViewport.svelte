@@ -13,6 +13,10 @@
 		markGitReviewViewportReady,
 	} from '$lib/git/review/git-review-performance.js';
 	import { measureVirtualRow } from './git-virtual-row-measurement.js';
+	import {
+		managedWorkspaceScrollRegion,
+		scrollElementHalfPage,
+	} from '$lib/workspace/workspace-scroll-region.js';
 
 	interface GitVirtualDiffViewportProps {
 		layoutIdentity?: string | null;
@@ -84,6 +88,14 @@
 		if (first === undefined || last === undefined) return [];
 		return source.filePathsInRange(first, last + 1);
 	});
+	const primaryScrollRegion = managedWorkspaceScrollRegion('primary', (element, direction) => {
+		completeScrollRequest();
+		scrollElementHalfPage(element, direction);
+	});
+
+	function completeScrollRequest(): void {
+		if (servicedScrollRequestId) completedScrollRequestId = servicedScrollRequestId;
+	}
 
 	$effect(() => {
 		const nextLayoutIdentity = layoutIdentity;
@@ -131,9 +143,6 @@
 	$effect(() => {
 		const scrollElement = viewportRef;
 		if (!scrollElement) return;
-		const completeScrollRequest = () => {
-			if (servicedScrollRequestId) completedScrollRequestId = servicedScrollRequestId;
-		};
 		const handleKeydown = (event: KeyboardEvent) => {
 			if (scrollKeys.has(event.key)) completeScrollRequest();
 		};
@@ -329,6 +338,7 @@
 
 <div
 	bind:this={viewportRef}
+	{@attach primaryScrollRegion}
 	class="min-h-0 flex-1 overflow-auto bg-muted/15"
 	data-git-virtual-diff-root
 >

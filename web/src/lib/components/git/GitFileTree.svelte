@@ -13,6 +13,7 @@
 	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import type { GitTreeNode, GitChangeKind, GitFileReviewCategory } from '$lib/api/git.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitFileTreeProps {
@@ -86,6 +87,7 @@
 	const treeGuideIndentPx = 12;
 	const treeGuideStartPx = 8;
 	const treeGuideToggleCenterOffsetPx = 10;
+	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
 
 	function treeGuideColumnLeft(depthIndex: number): number {
 		return treeGuideStartPx + depthIndex * treeGuideIndentPx + treeGuideToggleCenterOffsetPx;
@@ -185,7 +187,7 @@
 	</div>
 
 	<!-- Tree content -->
-	<div class="flex-1 overflow-y-auto py-1">
+	<div class="flex-1 overflow-y-auto py-1" {@attach contextualScrollRegion}>
 		{#if tree.length === 0}
 			<div class="px-3 py-4 text-xs text-muted-foreground text-center">
 				{m.git_file_tree_no_changed_files()}

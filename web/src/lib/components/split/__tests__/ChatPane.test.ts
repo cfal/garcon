@@ -53,6 +53,7 @@ describe('ChatPane', () => {
 		expect(document.querySelector('[data-pane-body]')).toBeTruthy();
 		expect(await screen.findByText('Unfocused user question')).toBeTruthy();
 		expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
+		expect(screen.getByRole('log').dataset.workspaceScrollRegion).toBe('contextual');
 		expect(await screen.findByText('2 commands')).toBeTruthy();
 		expect(await screen.findByText('pwd')).toBeTruthy();
 		expect(await screen.findByText('rg split')).toBeTruthy();
@@ -142,6 +143,12 @@ describe('ChatPane', () => {
 
 		expect(screen.getByTestId('focused-workspace')).toBeTruthy();
 		expect(screen.queryByText('Reply...')).toBeNull();
+	});
+
+	it('does not register the preview covered by the focused workspace overlay', async () => {
+		render(ChatPaneTestHost, { isFocused: true, showFocusedContent: false });
+
+		expect((await screen.findByRole('log')).dataset.workspaceScrollRegion).toBeUndefined();
 	});
 
 	it('uses a maximize pane titlebar action instead of delete chat', async () => {

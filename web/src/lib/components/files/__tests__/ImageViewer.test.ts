@@ -51,6 +51,7 @@ describe('ImageViewer', () => {
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		const firstViewport = screen.getByRole('img').closest('.overflow-auto') as HTMLDivElement;
+		expect(firstViewport.dataset.workspaceScrollRegion).toBe('primary');
 		emulateDetachedScrollReset(firstViewport);
 		expect(firstViewport.scrollLeft).toBe(31);
 		expect(firstViewport.scrollTop).toBe(79);

@@ -60,6 +60,19 @@ describe('sidebar search dialog flow', () => {
 		cleanup();
 	});
 
+	it('registers the chat list viewport as the primary scroll region', async () => {
+		const { container } = render(SidebarHost, {
+			chats: [createChat('chat-1', 'First chat')],
+		});
+
+		await waitFor(() => {
+			expect(
+				container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')?.dataset
+					.workspaceScrollRegion,
+			).toBe('primary');
+		});
+	});
+
 	it('restores the search dialog draft after cancelling add saved search', async () => {
 		render(SidebarHost, {
 			chats: [createChat('chat-1', 'First chat')],

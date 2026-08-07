@@ -61,6 +61,7 @@ describe('CodeEditorController', () => {
 		const firstLease = controller.attach(firstParent);
 		const firstScroller = firstParent.querySelector<HTMLElement>('.cm-scroller');
 		if (!firstScroller) throw new Error('Expected CodeMirror scroller');
+		expect(controller.scrollElement).toBe(firstScroller);
 		emulateDetachedScrollReset(firstScroller);
 		firstScroller.scrollLeft = 9;
 		firstScroller.scrollTop = 24;
@@ -73,6 +74,7 @@ describe('CodeEditorController', () => {
 		const secondScroller = secondParent.querySelector<HTMLElement>('.cm-scroller');
 
 		expect(controller.isAttached).toBe(true);
+		expect(controller.scrollElement).toBe(secondScroller);
 		expect(firstParent.querySelector('.cm-editor')).toBeNull();
 		expect(secondParent.querySelector('.cm-editor')).not.toBeNull();
 		expect(session.editorScrollSnapshot).not.toBeNull();
@@ -80,6 +82,7 @@ describe('CodeEditorController', () => {
 		expect(secondScroller?.scrollTop).toBe(24);
 		controller.detach(secondLease);
 		expect(controller.isAttached).toBe(false);
+		expect(controller.scrollElement).toBeNull();
 		expect(session.editorState?.doc.toString()).toBe('first\nsecond\nthird');
 		expect(session.editorState?.selection.main.anchor).toBe(8);
 	});

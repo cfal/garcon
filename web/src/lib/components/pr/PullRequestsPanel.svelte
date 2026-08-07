@@ -16,6 +16,7 @@
 		observeContainerWidth,
 		type ContainerPresentation,
 	} from '$lib/components/shared/container-presentation.js';
+	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface PullRequestsPanelProps {
 		controller: PullRequestsStore;
@@ -56,6 +57,15 @@
 	let containerPresentation = $derived<ContainerPresentation>(
 		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, containerBreakpoints),
 	);
+	let listViewportRef = $state<HTMLElement | null>(null);
+	let listHidden = $derived(containerPresentation === 'narrow' && hasSelection);
+	let detailHidden = $derived(containerPresentation === 'narrow' && !hasSelection);
+
+	$effect(() => {
+		const region = listViewportRef;
+		if (!region) return;
+		return registerNativeWorkspaceScrollRegion(region, 'contextual');
+	});
 </script>
 
 <div
@@ -111,11 +121,13 @@
 						containerPresentation === 'narrow' && 'w-full',
 						containerPresentation === 'compact' && 'w-60 flex-shrink-0 border-r',
 						containerPresentation === 'wide' && 'w-80 flex-shrink-0 border-r',
-						containerPresentation === 'narrow' && hasSelection && 'hidden',
+						listHidden && 'hidden',
 					)}
+					aria-hidden={listHidden}
+					inert={listHidden}
 					data-pr-list
 				>
-					<ScrollArea class="min-h-0 flex-1">
+					<ScrollArea bind:viewportRef={listViewportRef} class="min-h-0 flex-1">
 						<div class="flex flex-col gap-1 p-2">
 							{#if pullRequests.isLoading && !pullRequests.hasLoaded}
 								<div class="px-2 py-3 text-xs text-muted-foreground">
@@ -140,8 +152,10 @@
 				<div
 					class={cn(
 						'flex h-full min-h-0 min-w-0 flex-1 flex-col',
-						containerPresentation === 'narrow' && !hasSelection && 'hidden',
+						detailHidden && 'hidden',
 					)}
+					aria-hidden={detailHidden}
+					inert={detailHidden}
 					data-pr-detail
 				>
 					{#if hasSelection}

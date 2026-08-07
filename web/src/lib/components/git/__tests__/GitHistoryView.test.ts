@@ -246,7 +246,8 @@ describe('GitHistoryView', () => {
 		});
 
 		await screen.findByText('List commit');
-		const list = container.querySelector('[data-git-history-commit-list]');
+		const list = container.querySelector<HTMLElement>('[data-git-history-commit-list]');
+		expect(list?.dataset.workspaceScrollRegion).toBe('primary');
 		expect(list?.contains(screen.getByRole('button', { name: 'Select commits' }))).toBe(false);
 		const commitRow = screen.getByRole('button', { name: 'Open commit List commit' });
 		expect(commitRow.hasAttribute('data-git-history-commit-row')).toBe(true);

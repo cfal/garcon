@@ -16,6 +16,7 @@
 	import type { ResponsiveSurfaceAction } from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import GitSurfaceToolbar from './GitSurfaceToolbar.svelte';
 	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface Props {
 		controller: CommitController;
@@ -27,6 +28,7 @@
 	let dialogBodyEl = $state<HTMLDivElement | null>(null);
 	let messagePanePercent = $state(28);
 	let resizeCleanup: (() => void) | null = null;
+	const primaryScrollRegion = nativeWorkspaceScrollRegion('primary');
 
 	const dialogBodyGridStyle = $derived(
 		isMobile
@@ -151,6 +153,8 @@
 						class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden py-1 {controller.treeErrorMessage
 							? 'pb-12'
 							: ''}"
+						{@attach primaryScrollRegion}
+						data-commit-file-scroll
 					>
 						{#if controller.isLoadingTree}
 							<div
