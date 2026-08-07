@@ -103,9 +103,11 @@ export function buildThreadStartParams(request: CodexStartRequest): Record<strin
 }
 
 export function buildInjectedContextItems(context: string): ThreadInjectItemsParams['items'] {
+  // Keeps provider-owned context distinct from user turns while Codex persists it for later model requests.
+  // https://github.com/openai/codex/blob/e363b08c9175ac1cbe5893615dd2cb9ddf95043b/codex-rs/app-server/tests/suite/v2/thread_inject_items.rs#L27-L83
   return [{
     type: 'message',
-    role: 'user',
+    role: 'developer',
     content: [{ type: 'input_text', text: context }],
   }];
 }

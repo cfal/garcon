@@ -101,6 +101,23 @@ export function retargetNativeSeedReceipt(
   return { ...receipt, agentSessionId };
 }
 
+export function retargetNativeSeedReceiptIfPreserved(
+  receipt: NativeSeedReceipt | null,
+  agentSessionId: string,
+  messages: readonly ChatMessage[],
+): NativeSeedReceipt | null {
+  if (!receipt) return null;
+  const firstUserMessage = messages.find((message) => message.type === 'user-message');
+  if (!(firstUserMessage instanceof UserMessage)) return null;
+  const prefix = firstUserMessage.content.slice(0, receipt.codeUnitLength);
+  if (prefix.length !== receipt.codeUnitLength || sha256(prefix) !== receipt.sha256) return null;
+  if (
+    receipt.placement === 'provider-context'
+    && firstUserMessage.content.length !== receipt.codeUnitLength
+  ) return null;
+  return retargetNativeSeedReceipt(receipt, agentSessionId);
+}
+
 export function parseNativeSeedReceipt(value: unknown): NativeSeedReceipt | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const receipt = value as Record<string, unknown>;

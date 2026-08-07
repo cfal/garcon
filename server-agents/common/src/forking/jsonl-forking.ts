@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { ChatMessage } from '@garcon/common/chat-types';
-import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
+import { retargetNativeSeedReceiptIfPreserved } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevisions,
@@ -183,7 +183,8 @@ async function forkJsonlAtPoint(
       modelEndpointId: request.endpoint?.endpointId ?? sourceNative.modelEndpointId,
     });
     const expectedDigest = result.expectedSemanticDigest ?? expectedForkDigest;
-    if (expectedDigest !== null) {
+    let forkedMessages: readonly ChatMessage[] | null = null;
+    if (expectedDigest !== null || request.source.nativeSeedReceipt) {
       const forked = await options.transcript.load({
         chat: {
           chatId: request.chatId,
@@ -198,10 +199,13 @@ async function forkJsonlAtPoint(
         },
         signal: request.admission.signal,
       });
-      const actualDigest = options.semanticDigest
-        ? options.semanticDigest(forked.messages)
-        : forkTranscriptDigest(forked.messages);
-      if (actualDigest !== expectedDigest) {
+      forkedMessages = forked.messages;
+      const actualDigest = expectedDigest === null
+        ? null
+        : options.semanticDigest
+          ? options.semanticDigest(forked.messages)
+          : forkTranscriptDigest(forked.messages);
+      if (expectedDigest !== null && actualDigest !== expectedDigest) {
         throw new AgentIntegrationError(
           'TRANSCRIPT_UNAVAILABLE',
           'The provider-native fork did not preserve the selected message prefix',
@@ -214,9 +218,10 @@ async function forkJsonlAtPoint(
       session: {
         agentSessionId: result.agentSessionId,
         nativeSession,
-        nativeSeedReceipt: retargetNativeSeedReceipt(
+        nativeSeedReceipt: retargetNativeSeedReceiptIfPreserved(
           request.source.nativeSeedReceipt,
           result.agentSessionId,
+          forkedMessages ?? [],
         ),
       },
     };

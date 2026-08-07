@@ -5,6 +5,7 @@ import {
   parseNativeSeedReceipt,
   renderCarriedContextPrefix,
   renderTranscriptSeed,
+  retargetNativeSeedReceiptIfPreserved,
   sanitizeRecordedCarriedContext,
   stripFirstUserSeed,
   stripTranscriptSeed,
@@ -141,6 +142,28 @@ describe('transcript seed contract', () => {
     const messages = [new UserMessage('2026-01-02T00:00:00.000Z', 'real prompt')];
     expect(sanitizeRecordedCarriedContext({ messages, receipt, agentSessionId: SESSION }))
       .toEqual({ kind: 'not-applicable', messages });
+  });
+
+  test('retargets fork receipts only when the recorded prefix remains', () => {
+    const prefix = renderCarriedContextPrefix(HEAD, []);
+    const receipt = createNativeSeedReceipt({
+      headId: HEAD,
+      agentSessionId: SESSION,
+      placement: 'user-prefix',
+      prefix,
+    });
+    const targetSession = 'forked-session';
+
+    expect(retargetNativeSeedReceiptIfPreserved(
+      receipt,
+      targetSession,
+      [new UserMessage('2026-01-02T00:00:00.000Z', `${prefix}continue`)],
+    )).toEqual({ ...receipt, agentSessionId: targetSession });
+    expect(retargetNativeSeedReceiptIfPreserved(
+      receipt,
+      targetSession,
+      [new UserMessage('2026-01-02T00:00:00.000Z', 'continue')],
+    )).toBeNull();
   });
 
   test('strips migration receipts exactly without enabling legacy marker heuristics', () => {

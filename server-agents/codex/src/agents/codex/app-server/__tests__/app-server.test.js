@@ -3421,7 +3421,7 @@ describe('CodexAppServerRuntime', () => {
         threadId: 'thread-1',
         items: [{
           type: 'message',
-          role: 'user',
+          role: 'developer',
           content: [{ type: 'input_text', text: '<carried-context>Earlier work</carried-context>' }],
         }],
       }],

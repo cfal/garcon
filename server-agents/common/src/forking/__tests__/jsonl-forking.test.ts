@@ -4,6 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { UserMessage, type ChatMessage } from '@garcon/common/chat-types';
+import { createNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   attachNativeMessageSource,
@@ -136,6 +137,7 @@ async function createFixture() {
       model: 'test-model',
       nativeSession: sourceNativeSession,
       carryOverRevision: 'carry-over',
+      nativeSeedReceipt: null,
       settings,
     },
     point: {
@@ -213,6 +215,44 @@ describe('createJsonlForking message validation', () => {
     expect(forkedMessages).not.toContainEqual(
       expect.objectContaining({ content: 'appended while running' }),
     );
+  });
+
+  it('retargets a receipt only when the fork preserves its recorded prefix', async () => {
+    const fixture = await createFixture();
+    const prefix = 'first';
+    const receipt = createNativeSeedReceipt({
+      headId: '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e',
+      agentSessionId: sourceAgentSessionId,
+      placement: 'user-prefix',
+      prefix,
+    });
+    const source = { ...fixture.request.source, nativeSeedReceipt: receipt };
+
+    const preserved = materializedSession(await fixture.forking.fork({
+      ...fixture.request,
+      source,
+    }));
+    const rewritingFork = createJsonlForking({
+      ...fixture.options,
+      rewriteEntry(entry, context) {
+        const rewritten = fixture.options.rewriteEntry?.(entry, context) ?? entry;
+        const record = rewritten as Record<string, unknown>;
+        return record.type === 'message' && record.content === 'first'
+          ? { ...record, content: 'rewritten' }
+          : rewritten;
+      },
+    });
+    const removed = materializedSession(await rewritingFork.fork({
+      ...fixture.request,
+      source,
+      point: null,
+    }));
+
+    expect(preserved.nativeSeedReceipt).toEqual({
+      ...receipt,
+      agentSessionId: preserved.agentSessionId,
+    });
+    expect(removed.nativeSeedReceipt).toBeNull();
   });
 
   it('rejects a rendered message mutation before the snapshot', async () => {
