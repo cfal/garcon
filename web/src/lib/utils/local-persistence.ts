@@ -15,6 +15,7 @@ export const LOCAL_STORAGE_KEYS = {
 	fileTreeSortKey: 'file-tree-sort-key',
 	fileTreeViewPreference: 'file-tree-view-preference',
 	gitDiffDocumentFileTreeVisible: 'git.diffDocumentFileTreeVisible',
+	gitComparisonPreferences: 'pref_git_comparison_ranges_v1',
 	gitHideOtherTabFiles: 'git.hideOtherTabFiles',
 	gitTreePaneWidthPx: 'git.treePaneWidthPx',
 	justRegistered: 'just-registered',
