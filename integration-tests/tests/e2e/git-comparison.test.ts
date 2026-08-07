@@ -42,7 +42,7 @@ async function waitForComparisonMarkers(
 }
 
 describe('Lightpanda Git comparison', () => {
-  test('restores each chat comparison range and resets it for a new client', async () => {
+  test('restores each chat comparison range across a page reload', async () => {
     await withE2eFixture('git-comparison-session-memory', async (fixture) => {
       const project = fixture.integration.dirs.project;
       await runGit(project, ['init', '-b', 'main']);
@@ -121,15 +121,44 @@ describe('Lightpanda Git comparison', () => {
         () => localStorage.getItem('workspace_layout_v1')?.includes('git-compare') === true,
         { timeout: 20_000 },
       );
+      await fixture.page.waitForFunction(
+        (chatId) => {
+          const raw = localStorage.getItem('pref_git_comparison_ranges_v1');
+          if (!raw) return false;
+          try {
+            const parsed = JSON.parse(raw) as {
+              version?: unknown;
+              entries?: Array<{ chatId?: unknown }>;
+            };
+            return parsed.version === 1
+              && parsed.entries?.some((entry) => entry.chatId === chatId) === true;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 20_000 },
+        chatA.id,
+      );
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
       await fixture.page.reload({ waitUntil: [] });
       await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
       await app.waitForSelectedChat(chatA.id);
       await fixture.page.waitForSelector('[id="main-panel-singleton:git-compare"]');
       await app.selectMainWorkspaceSurface('Compare');
-      await waitForComparisonMarkers(fixture.page, ['working tree marker'], [
-        'head comparison marker',
+      await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
+        'working tree marker',
       ]);
+      await app.clickResponsiveAction('Edit');
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
+      expect(await fixture.page.$eval(
+        '#git-comparison-from',
+        (element) => (element as HTMLInputElement).value,
+      )).toBe('origin/main');
+      expect(await fixture.page.$eval(
+        '#git-comparison-to',
+        (element) => (element as HTMLInputElement).value,
+      )).toBe('HEAD');
+      await app.clickDialogButton('Cancel');
       fixture.assertNoBrowserErrors();
     });
   });
