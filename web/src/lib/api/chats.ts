@@ -10,7 +10,11 @@ import {
 } from '$shared/chat-modes';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
-import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
+import {
+	parseChatHistoryState,
+	parseChatViewMessages,
+	type ChatHistoryResponse,
+} from '$shared/chat-view';
 import type {
 	ChatListEntry,
 	ChatListResponse,
@@ -25,6 +29,7 @@ import type {
 	AgentInterruptAndSendCommandRequest,
 	AgentInterruptAndSendResponse,
 	AgentRunCommandRequest,
+	AgentTurnCommandResponse,
 	AgentStopCommandRequest,
 	AgentStopResponse,
 	CompactCommandRequest,
@@ -60,10 +65,6 @@ import type {
 	GenerateChatTitleRequest,
 	GenerateChatTitleResponse,
 } from '$shared/chat-title-contracts';
-import type {
-	AgentModelPatchRequest,
-	AgentModelPatchResponse,
-} from '$shared/chat-command-contracts';
 import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search';
 import type { ChatDetailsResponse } from '$shared/chat-details';
 import {
@@ -80,6 +81,7 @@ import {
 } from '$shared/chat-order-contracts';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
+const AGENT_HANDOFF_TIMEOUT_MS = 10 * 60_000;
 
 function withParsedControl<T extends { control: ChatExecutionControlState }>(response: T): T {
 	const control = parseChatExecutionControlState(response.control);
@@ -174,8 +176,16 @@ export async function startChat(
 	return { ...response, chat: response.chat };
 }
 
-export async function runChat(params: AgentRunCommandRequest): Promise<CommandAcceptedResponse> {
-	return apiPost<CommandAcceptedResponse>('/api/v1/chats/run', params);
+export async function runChat(params: AgentRunCommandRequest): Promise<AgentTurnCommandResponse> {
+	const response = await apiPost<AgentTurnCommandResponse>(
+		'/api/v1/chats/run',
+		params,
+		params.handoff ? { timeoutMs: AGENT_HANDOFF_TIMEOUT_MS } : undefined,
+	);
+	if (params.handoff && !response.chat) {
+		throw new Error('Invalid handoff response: durable chat projection is missing');
+	}
+	return response;
 }
 
 export async function generateChatTitle(
@@ -319,16 +329,6 @@ export async function updateChatModel(params: ModelPatchRequest): Promise<ModelP
 	return apiPatch<ModelPatchResponse>('/api/v1/chats/model', params);
 }
 
-// Continues a chat under a different agent. The server seeds the new runtime
-// from the canonical transcript and returns the normalized execution modes for
-// the target agent, which the client mirrors optimistically. The request and
-// response types are the shared contract imported above.
-export async function updateChatAgentModel(
-	params: AgentModelPatchRequest,
-): Promise<AgentModelPatchResponse> {
-	return apiPatch<AgentModelPatchResponse>('/api/v1/chats/agent-model', params);
-}
-
 export async function updateChatProjectPath(
 	params: ProjectPathPatchRequest,
 ): Promise<ProjectPathPatchResponse> {
@@ -375,22 +375,14 @@ export async function getChatMessages(params: {
 	chatId: string;
 	limit?: number;
 	beforeSeq?: number;
-}): Promise<{
-	chatId: string;
-	messages: ChatViewMessage[];
-	generationId: string;
-	lastSeq: number;
-	pageOldestSeq: number;
-	pendingUserInputs: PendingUserInput[];
-	hasMore: boolean;
-	limit: number;
-}> {
+}): Promise<ChatHistoryResponse> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
 		limit: String(params.limit ?? 50),
 	});
 	if (params.beforeSeq !== undefined) query.set('beforeSeq', String(params.beforeSeq));
 	const response = await apiGet<{
+		historyState?: unknown;
 		chatId?: unknown;
 		messages?: unknown;
 		generationId?: unknown;
@@ -400,13 +392,35 @@ export async function getChatMessages(params: {
 		hasMore?: unknown;
 		limit?: unknown;
 	}>(`/api/v1/chats/messages?${query.toString()}`);
+	const historyState = parseChatHistoryState(response.historyState);
+	if (historyState === null) throw new Error('Invalid chat messages page: historyState');
+	const chatId = requireNonEmptyString(response.chatId, 'chatId');
+	if (historyState.kind === 'degraded') {
+		if (!Array.isArray(response.messages) || response.messages.length !== 0) {
+			throw new Error('Invalid degraded chat history: messages');
+		}
+		for (const field of [
+			'generationId',
+			'lastSeq',
+			'pageOldestSeq',
+			'pendingUserInputs',
+			'hasMore',
+			'limit',
+		] as const) {
+			if (response[field] !== undefined) {
+				throw new Error(`Invalid degraded chat history: ${field}`);
+			}
+		}
+		return { historyState, chatId, messages: [] };
+	}
 	const messages = parseChatViewMessages(response.messages);
 	if (messages === null) throw new Error('Invalid chat messages page: messages');
 	if (typeof response.hasMore !== 'boolean') {
 		throw new Error('Invalid chat messages page: hasMore');
 	}
 	return {
-		chatId: requireNonEmptyString(response.chatId, 'chatId'),
+		historyState,
+		chatId,
 		messages,
 		generationId: requireNonEmptyString(response.generationId, 'generationId'),
 		lastSeq: requireNonNegativeInteger(response.lastSeq, 'lastSeq'),

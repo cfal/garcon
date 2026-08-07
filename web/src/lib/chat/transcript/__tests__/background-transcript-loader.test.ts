@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
-import type { ChatViewMessage, ChatViewPage } from '$shared/chat-view';
+import type { ChatViewMessage, CompleteChatHistoryResponse } from '$shared/chat-view';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -17,13 +17,17 @@ function page(
 	generationId: string,
 	messages: ChatViewMessage[],
 	lastSeq = messages.at(-1)?.seq ?? 0,
-): ChatViewPage {
+): CompleteChatHistoryResponse {
 	return {
+		historyState: { kind: 'complete' },
+		chatId: 'chat-1',
 		generationId,
 		messages,
 		lastSeq,
 		pageOldestSeq: messages[0]?.seq ?? 0,
 		hasMore: false,
+		pendingUserInputs: [],
+		limit: 50,
 	};
 }
 
@@ -174,5 +178,29 @@ describe('BackgroundTranscriptLoader', () => {
 		await loader.waitForIdle('chat-1');
 
 		expect(cache.get('chat-1')?.stale).toBe(true);
+	});
+
+	it('removes cached and held sequence state for degraded history', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'stale')]));
+		const loadPage = vi.fn().mockResolvedValue({
+			historyState: {
+				kind: 'degraded',
+				errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+				retryable: false,
+			},
+			chatId: 'chat-1',
+			messages: [],
+		});
+		const loader = new BackgroundTranscriptLoader({ cache, loadPage });
+
+		loader.queueLoad('chat-1', {
+			generationId: 'generation-1',
+			messages: [entry(2, 'held')],
+			lastSeq: 2,
+		});
+		await loader.waitForIdle('chat-1');
+
+		expect(cache.get('chat-1')).toBeNull();
 	});
 });

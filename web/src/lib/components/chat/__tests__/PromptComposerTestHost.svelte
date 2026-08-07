@@ -173,6 +173,7 @@
 		processingPhase: selectedIsProcessing ? 'running' : null,
 		isUnread: false,
 		status: selectedStatus,
+		agentOwnershipEpoch: selectedStatus === 'draft' ? null : 'epoch-1',
 		tags: [],
 	});
 

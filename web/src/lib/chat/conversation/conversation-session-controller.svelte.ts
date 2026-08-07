@@ -63,6 +63,11 @@ import {
 	submitSteerRoute,
 } from '$lib/chat/conversation/submission-routes.js';
 import * as m from '$lib/paraglide/messages.js';
+import {
+	ConversationExecutionDraftState,
+	executionSelectionFromProjection,
+	type ConversationExecutionSelection,
+} from './conversation-execution-draft-state.svelte.js';
 
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
@@ -207,13 +212,15 @@ export interface SessionControllerDeps {
 		supportsSteering: (agentId: SessionAgentId) => boolean;
 		supportsGoals: (agentId: SessionAgentId) => boolean;
 	};
+	getExecutionDefaults(agentId: SessionAgentId): Pick<
+		ConversationExecutionSelection,
+		'permissionMode' | 'thinkingMode' | 'agentSettings'
+	>;
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 	navigation: { navigateToChat?: (chatId: string) => void };
-	/** Rebuilds the chat transcript from native history (e.g. after an agent switch). */
-	reloadTranscript?: (chatId: string) => Promise<void>;
 	requestProcessingSnapshot: (source: 'admission' | 'stop-probe') => Promise<unknown>;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
 	setInitialBottomRestorePending: (chatId: string | null) => void;
@@ -236,16 +243,30 @@ export class ConversationSessionController {
 	readonly #acceptedInputs: AcceptedInputSubmissionService;
 	readonly #queue: ConversationQueueController;
 	readonly #settings: ConversationSettingsController;
+	readonly #executionDraft: ConversationExecutionDraftState;
 
 	constructor(private deps: SessionControllerDeps) {
+		this.#executionDraft = new ConversationExecutionDraftState({
+			get activeChatId() { return deps.sessions.selectedChatId; },
+			get durableSelection() {
+				return executionSelectionFromProjection(deps.sessions.selectedChat);
+			},
+		});
 		this.#acceptedInputs = new AcceptedInputSubmissionService();
 		this.#slashCommands = new ConversationSlashCommandService({
 			...deps,
 			refetchTranscript: (chatId) => this.#loadChat(chatId),
 		}, this.#acceptedInputs);
-		this.#agentSwitch = new ConversationAgentSwitchService(deps);
+		this.#agentSwitch = new ConversationAgentSwitchService({
+			sessions: deps.sessions,
+			agentState: deps.agentState,
+			modelCatalog: deps.modelCatalog,
+			executionDraft: this.#executionDraft,
+			getExecutionDefaults: deps.getExecutionDefaults,
+		});
 		const acceptedInputs = this.#acceptedInputs;
 		const agentSwitch = this.#agentSwitch;
+		const executionDraft = this.#executionDraft;
 		this.#queue = new ConversationQueueController({
 			get sessions() { return deps.sessions; },
 			get chatState() { return deps.chatState; },
@@ -260,6 +281,7 @@ export class ConversationSessionController {
 			get modelCatalog() { return deps.modelCatalog; },
 			get chatState() { return deps.chatState; },
 			get agentSwitch() { return agentSwitch; },
+			get executionDraft() { return executionDraft; },
 		});
 	}
 
@@ -282,6 +304,30 @@ export class ConversationSessionController {
 			modelEndpointId: agentState.modelEndpointId,
 			modelProtocol: agentState.modelProtocol,
 		};
+	}
+
+	#applyExecutionSelection(selection: ConversationExecutionSelection): void {
+		const { agentState, modelCatalog } = this.deps;
+		agentState.setAgentId(selection.agentId);
+		agentState.setModelSelection({
+			model: modelCatalog.selectionValueFor(
+				selection.agentId,
+				selection.model,
+				selection.modelEndpointId,
+			),
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
+		agentState.permissionMode = normalizeSupportedPermissionMode(
+			selection.permissionMode,
+			modelCatalog.getPermissionModes(selection.agentId),
+		);
+		agentState.thinkingMode = normalizeSupportedThinkingMode(
+			selection.thinkingMode,
+			modelCatalog.getThinkingModes(selection.agentId),
+		);
+		agentState.setAgentSettings(selection.agentSettings);
 	}
 
 	#resetSelectionState(): void {
@@ -339,22 +385,8 @@ export class ConversationSessionController {
 		deps.conversationUi.clearPendingPermissionRequests();
 		deps.setIsViewportPinnedToBottom(true);
 
-		if (selected.agentId) {
-			deps.agentState.setAgentId(selected.agentId);
-		}
-		if (selected.model) {
-			const modelValue = deps.modelCatalog.selectionValueFor(
-				selected.agentId,
-				selected.model,
-				selected.modelEndpointId,
-			);
-			deps.agentState.setModelSelection({
-				model: modelValue,
-				apiProviderId: selected.apiProviderId ?? null,
-				modelEndpointId: selected.modelEndpointId ?? null,
-				modelProtocol: selected.modelProtocol ?? null,
-			});
-		}
+		const activeSelection = this.#executionDraft.activate(chatId);
+		if (activeSelection) this.#applyExecutionSelection(activeSelection);
 
 		if (selected.status === 'draft') {
 			deps.lifecycle.setCurrentChatId(null);
@@ -409,16 +441,6 @@ export class ConversationSessionController {
 			deps.readReceiptOutbox.enqueue(chatId, selected.lastActivityAt);
 			deps.sessions.patchLastReadAt(chatId, selected.lastActivityAt);
 		}
-
-		deps.agentState.permissionMode = normalizeSupportedPermissionMode(
-			selected.permissionMode,
-			deps.modelCatalog.getPermissionModes(selected.agentId),
-		);
-		deps.agentState.thinkingMode = normalizeSupportedThinkingMode(
-			selected.thinkingMode,
-			deps.modelCatalog.getThinkingModes(selected.agentId),
-		);
-		deps.agentState.setAgentSettings(selected.agentSettings);
 
 		this.loadChat(chatId, { minimumMessageLimit: restored?.count ?? 0 });
 	}
@@ -546,6 +568,11 @@ export class ConversationSessionController {
 			ownsComposer,
 		});
 		if (slash.kind === 'handled') return slash.outcome;
+		const handoffPending = selected.status !== 'draft' && this.#executionDraft.isHandoffPending;
+		if (handoffPending && (slash.kind === 'steer' || slash.kind === 'goal-control')) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_idle());
+			return 'rejected';
+		}
 
 		const specializedContext = {
 			chatId,
@@ -588,6 +615,7 @@ export class ConversationSessionController {
 			const route = classifySubmission({
 				isDraft,
 				isProcessing: activeTurn,
+				handoffPending,
 				control: deps.conversationUi.getExecutionControl(chatId),
 				hasAttachments: submissionImages.length > 0,
 			});
@@ -599,6 +627,16 @@ export class ConversationSessionController {
 					composerRevisionAfterClear,
 				);
 				deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
+				return 'rejected';
+			}
+			if (route === 'handoff-requires-idle') {
+				this.#restorePreflightSubmission(
+					chatId,
+					previousText,
+					previousImages,
+					composerRevisionAfterClear,
+				);
+				deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_idle());
 				return 'rejected';
 			}
 			if (route !== 'direct' && directAdmission) {
@@ -644,12 +682,27 @@ export class ConversationSessionController {
 				return submitQueueRoute(deps, this.#acceptedInputs, this.#queue, context);
 			}
 			if (route === 'draft') return submitDraftRoute(deps, this.#acceptedInputs, context);
+			const currentChat = deps.sessions.byId[chatId];
+			const handoff = this.#executionDraft.handoffRequest(
+				currentChat?.agentOwnershipEpoch ?? '',
+			);
 			const outcome = await submitRunRoute(
 				deps,
 				this.#acceptedInputs,
 				this.#queue,
 				context,
 				this.#executionModelSelection(),
+				handoff,
+				(chat) => {
+					const acceptedSelection = executionSelectionFromProjection(chat);
+					if (!acceptedSelection) {
+						throw new Error('Accepted handoff projection has incomplete execution settings');
+					}
+					this.#executionDraft.acceptDurable(acceptedSelection);
+					if (deps.sessions.selectedChatId === chatId) {
+						this.#applyExecutionSelection(acceptedSelection);
+					}
+				},
 			);
 			await deps.requestProcessingSnapshot('admission').catch(() => undefined);
 			return outcome;

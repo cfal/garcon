@@ -1,4 +1,10 @@
-import { applyChatViewMessages, type ChatViewMessage, type ChatViewPage } from '$shared/chat-view';
+import {
+	applyChatViewMessages,
+	isDegradedChatHistoryResponse,
+	type ChatHistoryState,
+	type ChatViewMessage,
+	type ChatViewPage,
+} from '$shared/chat-view';
 import {
 	AssistantMessage,
 	ErrorMessage,
@@ -23,6 +29,7 @@ import type {
 	ChatRestoreResult,
 } from './active-transcript-port.js';
 import { collectEarlierTranscriptMessages } from './transcript-page-progress.js';
+import * as m from '$lib/paraglide/messages.js';
 import {
 	applyPendingDeliveryStatuses,
 	mergeRowsWithPendingInputs,
@@ -41,7 +48,8 @@ export type { ChatTranscriptRow } from './transcript-row-projection.js';
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 export const ACTIVE_TRANSCRIPT_RETENTION_LIMIT = 200;
-type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
+type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
+type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
 type SnapshotBatch = { generationId: string; messages: ChatViewMessage[]; noticeRevision: number };
 export type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
@@ -92,6 +100,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	isUserScrolledUp = $state(false);
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
+	historyState = $state<ChatHistoryState>({ kind: 'complete' });
 	#snapshotBuffer: SnapshotBatch[] | null = null;
 	#loadEpoch = 0;
 	#localNoticeRevision = 0;
@@ -128,9 +137,21 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return ids;
 	});
 
-	#displayLocalNotices = $derived(
-		this.hasLaterMessages ? ([] as LocalNoticeRow[]) : this.localNotices,
-	);
+	#displayLocalNotices = $derived.by(() => {
+		if (this.hasLaterMessages) return [] as LocalNoticeRow[];
+		if (this.historyState.kind !== 'degraded') return this.localNotices;
+		return [
+			{
+				kind: 'local-notice' as const,
+				id: 'carryover-history-unavailable',
+				noticeType: 'error' as const,
+				content: m.chat_history_unavailable(),
+				timestamp: '',
+				revision: -1,
+			},
+			...this.localNotices,
+		];
+	});
 
 	#displayRows = $derived.by(() => {
 		const durableRows = this.#renderEntries.map((entry) => ({
@@ -260,6 +281,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		messages: ChatViewMessage[],
 		noticeRevision = this.#localNoticeRevision,
 	): MessageApplyResult {
+		if (this.historyState.kind === 'degraded') {
+			this.transcriptCache.markStale(chatId);
+			return 'gap-detected';
+		}
 		const previousLastSeq = this.lastSeq;
 		if (this.#snapshotBuffer) {
 			this.transcriptCache.applyMessages(chatId, generationId, messages);
@@ -392,6 +417,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	): void {
 		this.#invalidatePageLoad();
 		this.#preserveExpandedVisibleWindow = false;
+		this.historyState = { kind: 'complete' };
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
@@ -444,6 +470,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		}
 
 		this.#invalidatePageLoad();
+		this.historyState = { kind: 'complete' };
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.windowRevision += 1;
 		if (page.generationId !== this.generationId) {
@@ -489,6 +516,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				if (this.activeChatId && this.activeChatId !== chatId) {
 					this.abortSnapshotLoad(epoch);
 					return this.chatMessages;
+				}
+				if (isDegradedChatHistoryResponse(page)) {
+					if (epoch !== this.#loadEpoch) return this.chatMessages;
+					this.#setDegradedHistory(chatId, page.historyState);
+					return [];
 				}
 				const result = this.setFromPage(chatId, page, epoch);
 
@@ -579,6 +611,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 						},
 			);
 			if (!this.#isCurrentPageLoad(chatId, generationId, operationEpoch)) {
+				return 'invalidated';
+			}
+			if (isDegradedChatHistoryResponse(page)) {
+				this.#setDegradedHistory(chatId, page.historyState);
 				return 'invalidated';
 			}
 			if (page.generationId !== generationId) {
@@ -746,6 +782,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = 0;
 		this.loadStatus = 'idle';
 		this.loadError = null;
+		this.historyState = { kind: 'complete' };
 		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
 		this.#recordFeedMutation('replacement');
@@ -823,6 +860,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			) {
 				return 'invalidated';
 			}
+			if (isDegradedChatHistoryResponse(page)) {
+				this.#setDegradedHistory(chatId, page.historyState);
+				return 'loaded';
+			}
 			if (page.generationId !== generationId) {
 				this.transcriptCache.markStale(chatId);
 				return 'invalidated';
@@ -885,6 +926,33 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.clearMessages();
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.isUserScrolledUp = false;
+	}
+
+	#setDegradedHistory(
+		chatId: string,
+		historyState: Extract<ChatHistoryState, { kind: 'degraded' }>,
+	): void {
+		this.#invalidatePageLoad();
+		this.#preserveExpandedVisibleWindow = false;
+		this.activeChatId = chatId;
+		this.#loadEpoch += 1;
+		this.#snapshotBuffer = null;
+		this.transcriptCache.remove(chatId);
+		this.windowRevision += 1;
+		this.entries = [];
+		this.generationId = '';
+		this.lastSeq = 0;
+		this.oldestSeq = 0;
+		this.#replacePendingUserInputs([]);
+		this.localNotices = [];
+		this.hasEarlierMessages = false;
+		this.totalMessages = 0;
+		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
+		this.loadStatus = 'loaded';
+		this.loadError = null;
+		this.isLoadingMessages = false;
+		this.historyState = historyState;
+		this.#recordFeedMutation('replacement');
 	}
 
 	activateChat(chatId: string | null): ChatRestoreResult | null {

@@ -16,7 +16,6 @@ import {
 	submitGoalControl,
 	startChat,
 	stopChat,
-	updateChatAgentModel,
 	updateChatModel,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
@@ -59,7 +58,6 @@ vi.mock('$lib/api/chats.js', () => ({
 	startChat: vi.fn(),
 	stopChat: vi.fn(),
 	replaceQueuedInput: vi.fn(),
-	updateChatAgentModel: vi.fn(),
 	updateChatModel: vi.fn(),
 	updateExecutionSettings: vi.fn(),
 }));
@@ -83,7 +81,6 @@ const mockSteerChat = vi.mocked(steerChat);
 const mockSteerQueuedEntry = vi.mocked(steerQueuedEntry);
 const mockSubmitGoalControl = vi.mocked(submitGoalControl);
 const mockStopChat = vi.mocked(stopChat);
-const mockUpdateChatAgentModel = vi.mocked(updateChatAgentModel);
 const mockUpdateChatModel = vi.mocked(updateChatModel);
 const mockScheduleChatPrompt = vi.mocked(scheduleChatPrompt);
 
@@ -143,6 +140,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		processingPhase: isProcessing ? 'running' : null,
 		isUnread: true,
 		status: 'running',
+		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
 		...overrides,
 	};
@@ -196,6 +194,7 @@ function createServerEntry(id: string) {
 		isActive: false,
 		isProcessing: false,
 		processingPhase: null,
+		agentOwnershipEpoch: 'epoch-1',
 		isUnread: false,
 	};
 }
@@ -416,13 +415,17 @@ function createDeps(chat = createRunningChat()) {
 			supportsSteering: vi.fn((agentId: string) => agentId === 'claude' || agentId === 'codex'),
 			supportsGoals: vi.fn((agentId: string) => agentId === 'codex'),
 		},
+		getExecutionDefaults: (agentId: string) => ({
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			agentSettings: { ownerId: agentId, schemaVersion: 1, values: {} },
+		}),
 		readReceiptOutbox: {
 			enqueue: vi.fn(),
 		},
 		navigation: {
 			navigateToChat: vi.fn(),
 		},
-		reloadTranscript: undefined as SessionControllerDeps['reloadTranscript'],
 		setIsViewportPinnedToBottom: vi.fn(),
 		setInitialBottomRestorePending: vi.fn(),
 		scrollToBottom: vi.fn(),
@@ -437,6 +440,7 @@ function createDeps(chat = createRunningChat()) {
 
 describe('ConversationSessionController', () => {
 	beforeEach(() => {
+		localStorage.clear();
 		mockForkChat.mockReset();
 		mockForkRunChat.mockReset();
 		mockGetChatExecutionControl.mockReset();
@@ -452,19 +456,6 @@ describe('ConversationSessionController', () => {
 		mockSteerQueuedEntry.mockReset();
 		mockSubmitGoalControl.mockReset();
 		mockStopChat.mockReset();
-		mockUpdateChatAgentModel.mockReset();
-		mockUpdateChatAgentModel.mockResolvedValue({
-			success: true,
-			chatId: 'chat-1',
-			agentId: 'claude',
-			model: 'sonnet',
-			apiProviderId: null,
-			modelEndpointId: null,
-			modelProtocol: null,
-			permissionMode: 'default',
-			thinkingMode: 'none',
-			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
-		});
 		mockUpdateChatModel.mockReset();
 		mockUpdateChatModel.mockResolvedValue({
 			success: true,
@@ -1177,6 +1168,7 @@ describe('ConversationSessionController', () => {
 			success: true,
 			commandType: 'run',
 			clientRequestId: 'req-1',
+			turnId: 'turn-1',
 			chatId: '123',
 			status: 'accepted',
 			acceptedAt: '2026-03-27T08:00:00.000Z',
@@ -2774,39 +2766,102 @@ describe('ConversationSessionController', () => {
 			expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
 		});
 
-		it('continues a cross-agent selection under the new agent via the agent-model endpoint', async () => {
+		it('keeps a cross-agent selection local until the next direct submission', () => {
 			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
 			deps.agentState.agentId = 'claude';
-			mockUpdateChatAgentModel.mockResolvedValueOnce({
-				success: true,
-				chatId: 'chat-1',
-				agentId: 'codex',
-				model: 'gpt-5.5',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-				permissionMode: 'default',
-				thinkingMode: 'none',
-				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
-			});
 			const controller = new ConversationSessionController(deps);
 
 			controller.handleModelSelectionChange({
 				agentId: 'codex',
 				modelValue: 'gpt-5.5',
 			});
-			await flushPromises();
 
 			expect(mockUpdateChatModel).not.toHaveBeenCalled();
-			expect(mockUpdateChatAgentModel).toHaveBeenCalledWith(
-				expect.objectContaining({ chatId: 'chat-1', agentId: 'codex', model: 'gpt-5.5' }),
-			);
 			expect(deps.agentState.setAgentId).toHaveBeenCalledWith('codex');
-			expect(deps.sessions.patchChat).toHaveBeenCalledWith(
-				'chat-1',
-				expect.objectContaining({ agentId: 'codex', model: 'gpt-5.5' }),
-			);
+			expect(deps.sessions.patchChat).not.toHaveBeenCalled();
 			expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+		});
+
+		it('submits the persisted target as one fenced handoff and rebases from the response', async () => {
+			const { deps } = createDeps(createRunningChat({
+				agentId: 'claude',
+				model: 'sonnet',
+				agentOwnershipEpoch: 'epoch-source',
+			}));
+			const controller = new ConversationSessionController(deps);
+			const acceptedChat = {
+				...createServerEntry('chat-1'),
+				agentId: 'codex',
+				agentOwnershipEpoch: 'epoch-target',
+				model: 'gpt-5.5',
+				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+			};
+			mockRunChat.mockResolvedValueOnce({
+				success: true,
+				commandType: 'agent-run',
+				clientRequestId: 'req-handoff',
+				chatId: 'chat-1',
+				turnId: 'turn-handoff',
+				status: 'accepted',
+				acceptedAt: '2026-08-07T00:00:00.000Z',
+				chat: acceptedChat,
+			});
+
+			controller.handleModelSelectionChange({ agentId: 'codex', modelValue: 'gpt-5.5' });
+			deps.composerState.inputText = 'Implement the delegated change';
+			await controller.submitForChat('chat-1');
+
+			const request = mockRunChat.mock.calls[0]?.[0];
+			expect(request).toMatchObject({
+				chatId: 'chat-1',
+				command: 'Implement the delegated change',
+				handoff: {
+					expectedAgentOwnershipEpoch: 'epoch-source',
+					target: {
+						agentId: 'codex',
+						model: 'gpt-5.5',
+						permissionMode: 'default',
+						thinkingMode: 'none',
+						agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+					},
+				},
+			});
+			expect(request).not.toHaveProperty('model');
+			expect(request).not.toHaveProperty('permissionMode');
+			expect(request).not.toHaveProperty('thinkingMode');
+			expect(request).not.toHaveProperty('agentSettings');
+			expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(acceptedChat);
+			expect(deps.agentState.agentId).toBe('codex');
+		});
+
+		it('retains a pending handoff prompt while the chat owns execution', async () => {
+			const chat = createRunningChat({ isProcessing: true, processingPhase: 'running' });
+			const { deps } = createDeps(chat);
+			const controller = new ConversationSessionController(deps);
+			controller.handleModelSelectionChange({ agentId: 'codex', modelValue: 'gpt-5.5' });
+			deps.composerState.inputText = 'Wait and delegate';
+
+			await expect(controller.submitForChat('chat-1')).resolves.toBe('rejected');
+
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(deps.composerState.inputText).toBe('Wait and delegate');
+			expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+				'error',
+				expect.stringContaining('queued messages'),
+			);
+		});
+
+		it('does not route a pending handoff through steering', async () => {
+			const chat = createRunningChat({ isProcessing: true, processingPhase: 'running' });
+			const { deps } = createDeps(chat);
+			const controller = new ConversationSessionController(deps);
+			controller.handleModelSelectionChange({ agentId: 'codex', modelValue: 'gpt-5.5' });
+			deps.composerState.inputText = '/steer Continue under Codex';
+
+			await expect(controller.submitForChat('chat-1')).resolves.toBe('rejected');
+
+			expect(mockSteerChat).not.toHaveBeenCalled();
+			expect(deps.composerState.inputText).toBe('/steer Continue under Codex');
 		});
 	});
 });

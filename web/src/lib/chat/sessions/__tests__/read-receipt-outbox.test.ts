@@ -133,6 +133,7 @@ describe('ReadReceiptOutboxStore', () => {
 			{
 				id: 'a',
 				agentId: 'claude',
+				agentOwnershipEpoch: 'epoch-a',
 				model: 'opus',
 				title: 'A',
 				projectPath: '/p',
@@ -172,6 +173,7 @@ describe('ReadReceiptOutboxStore', () => {
 			{
 				id: 'a',
 				agentId: 'claude',
+				agentOwnershipEpoch: 'epoch-a',
 				model: 'opus',
 				title: 'Unread',
 				projectPath: '/p',
@@ -197,6 +199,7 @@ describe('ReadReceiptOutboxStore', () => {
 			{
 				id: 'b',
 				agentId: 'claude',
+				agentOwnershipEpoch: 'epoch-b',
 				model: 'opus',
 				title: 'Read',
 				projectPath: '/p',

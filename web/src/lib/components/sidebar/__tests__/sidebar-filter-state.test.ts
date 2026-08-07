@@ -27,6 +27,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		status: 'running',
 		tags: [],
 		...overrides,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 

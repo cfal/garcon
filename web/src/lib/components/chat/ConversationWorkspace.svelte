@@ -82,6 +82,11 @@
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
+	import {
+		executionDefaultsForAgent,
+		normalizeSupportedPermissionMode,
+		normalizeSupportedThinkingMode,
+	} from '$shared/execution-defaults';
 
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
@@ -358,6 +363,25 @@
 		conversationUi,
 		startupCoordinator,
 		modelCatalog,
+		getExecutionDefaults: (agentId) => {
+			const defaults = executionDefaultsForAgent(
+				remoteSettings.snapshot?.executionDefaults,
+				agentId,
+			);
+			return {
+				permissionMode: normalizeSupportedPermissionMode(
+					defaults.permissionMode,
+					modelCatalog.getPermissionModes(agentId),
+				),
+				thinkingMode: normalizeSupportedThinkingMode(
+					defaults.thinkingMode,
+					modelCatalog.getThinkingModes(agentId),
+				),
+				agentSettings:
+					defaults.agentSettingsById[agentId]
+					?? modelCatalog.getDefaultAgentSettings(agentId),
+			};
+		},
 		appShell,
 		readReceiptOutbox,
 		navigation: {
@@ -366,7 +390,6 @@
 				void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
 			},
 		},
-		reloadTranscript: (chatId) => reloadChatFromNative(ws, chatState, chatId),
 		requestProcessingSnapshot: (source) => ws.requestProcessingSnapshot(source),
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.setPinnedToBottom(v);

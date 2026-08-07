@@ -40,6 +40,7 @@ function createChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		tags: [],
 		firstMessage: 'First',
 		...overrides,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 

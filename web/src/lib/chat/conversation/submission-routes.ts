@@ -1,6 +1,8 @@
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { ApiProtocol } from '$shared/api-providers';
+import type { AgentHandoffRequest } from '$shared/chat-command-contracts';
+import type { ChatListEntry } from '$shared/chat-list';
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
 import type { ConversationQueueController } from './conversation-queue-controller.svelte.js';
@@ -213,15 +215,21 @@ export async function submitRunRoute(
 	queue: ConversationQueueController,
 	context: SubmissionContext,
 	selection: ExecutionModelSelection,
+	handoff: AgentHandoffRequest | null,
+	onHandoffAccepted: (chat: ChatListEntry) => void,
 ): Promise<ConversationSubmissionOutcome> {
 	const submission = acceptedInputs.run({
 		chatId: context.chatId,
 		command: context.text,
 		images: context.images.length > 0 ? context.images : undefined,
-		permissionMode: deps.agentState.permissionMode,
-		thinkingMode: deps.agentState.thinkingMode,
-		agentSettings: deps.agentState.agentSettings,
-		...selection,
+		...(handoff
+			? { handoff }
+			: {
+				permissionMode: deps.agentState.permissionMode,
+				thinkingMode: deps.agentState.thinkingMode,
+				agentSettings: deps.agentState.agentSettings,
+				...selection,
+			}),
 	});
 	const composerRevisionAfterClear = beginOptimisticInput(
 		deps,
@@ -230,7 +238,12 @@ export async function submitRunRoute(
 		submission.clientMessageId,
 	);
 	try {
-		await submission.submit();
+		const response = await submission.submit();
+		if (handoff) {
+			if (!response.chat) throw new Error('Accepted handoff response omitted its chat projection');
+			deps.sessions.upsertServerChat(response.chat);
+			onHandoffAccepted(response.chat);
+		}
 		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
 		deps.lifecycle.beginTurn(context.chatId);
 		return 'accepted';

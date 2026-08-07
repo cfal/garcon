@@ -14,6 +14,7 @@ import type {
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
 import { errorDetail } from './conversation-submission-helpers.js';
 import * as m from '$lib/paraglide/messages.js';
+import type { ConversationExecutionDraftState } from './conversation-execution-draft-state.svelte.js';
 
 export interface ConversationSettingsControllerOptions {
 	get sessions(): Pick<
@@ -43,6 +44,10 @@ export interface ConversationSettingsControllerOptions {
 	>;
 	get chatState(): Pick<SessionControllerDeps['chatState'], 'appendLocalNotice'>;
 	get agentSwitch(): Pick<ConversationAgentSwitchService, 'switchAgent'>;
+	get executionDraft(): Pick<
+		ConversationExecutionDraftState,
+		'isHandoffPending' | 'patchSelection'
+	>;
 }
 
 export class ConversationSettingsController {
@@ -53,8 +58,7 @@ export class ConversationSettingsController {
 	handleModelSelectionChange(next: AgentSwitchSelection): void {
 		const chatId = this.options.sessions.selectedChatId;
 		if (!chatId) return;
-		const currentAgentId =
-			this.options.sessions.selectedChat?.agentId ?? this.options.agentState.agentId;
+		const currentAgentId = this.options.agentState.agentId;
 		if (next.agentId === currentAgentId) {
 			this.handleModelChange(next.modelValue);
 			return;
@@ -68,6 +72,21 @@ export class ConversationSettingsController {
 		if (!chatId) return;
 		const agentId = agentState.agentId;
 		const selection = modelCatalog.selectionFor(agentId, model);
+		if (this.options.executionDraft.isHandoffPending) {
+			agentState.setModelSelection({
+				model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
+			this.options.executionDraft.patchSelection({
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
+			return;
+		}
 		if (sessions.isDraft(chatId)) {
 			agentState.setModelSelection({
 				model,
@@ -153,6 +172,11 @@ export class ConversationSettingsController {
 		const { sessions, agentState, modelCatalog, chatState } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
+		if (this.options.executionDraft.isHandoffPending) {
+			agentState.permissionMode = mode;
+			this.options.executionDraft.patchSelection({ permissionMode: mode });
+			return;
+		}
 		if (sessions.isDraft(chatId)) {
 			sessions.patchDraftStartup(chatId, { permissionMode: mode });
 			sessions.patchChat(chatId, { permissionMode: mode });
@@ -177,6 +201,11 @@ export class ConversationSettingsController {
 		const { sessions, agentState, modelCatalog, chatState } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
+		if (this.options.executionDraft.isHandoffPending) {
+			agentState.thinkingMode = mode;
+			this.options.executionDraft.patchSelection({ thinkingMode: mode });
+			return;
+		}
 		if (sessions.isDraft(chatId)) {
 			sessions.patchDraftStartup(chatId, { thinkingMode: mode });
 			sessions.patchChat(chatId, { thinkingMode: mode });
@@ -205,6 +234,10 @@ export class ConversationSettingsController {
 		const next = withAgentSetting(previous, descriptor, value);
 		if (next === previous) return;
 		agentState.setAgentSettings(next);
+		if (this.options.executionDraft.isHandoffPending) {
+			this.options.executionDraft.patchSelection({ agentSettings: next });
+			return;
+		}
 		if (sessions.isDraft(chatId)) {
 			sessions.patchDraftStartup(chatId, { agentSettings: next });
 			sessions.patchChat(chatId, { agentSettings: next });

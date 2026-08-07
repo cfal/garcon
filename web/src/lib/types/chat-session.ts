@@ -47,6 +47,7 @@ export interface ChatSessionRecord {
 	processingPhase: ChatProcessingPhase | null;
 	isUnread: boolean;
 	status: ChatStatus;
+	agentOwnershipEpoch: string | null;
 	lastMessage?: string;
 	tags: string[];
 	firstMessage?: string;

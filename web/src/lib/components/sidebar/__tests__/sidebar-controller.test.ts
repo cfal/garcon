@@ -51,6 +51,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		status: 'draft',
 		tags: [],
 		...overrides,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 
@@ -159,6 +160,7 @@ describe('SidebarController', () => {
 				chat: {
 					id: 'c-fork',
 					agentId: 'claude',
+					agentOwnershipEpoch: 'epoch-fork',
 					model: 'sonnet',
 					permissionMode: 'default',
 					thinkingMode: 'none',

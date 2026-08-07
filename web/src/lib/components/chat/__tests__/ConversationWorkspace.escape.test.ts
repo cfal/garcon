@@ -64,6 +64,7 @@ const mockStopChat = vi.mocked(stopChat);
 describe('ConversationWorkspace Escape abort handling', () => {
 	beforeEach(() => {
 		mockGetChatMessages.mockResolvedValue({
+			historyState: { kind: 'complete' },
 			chatId: 'chat-1',
 			generationId: 'gen-1',
 			messages: [],

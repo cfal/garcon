@@ -44,6 +44,7 @@ describe('reloadChatFromNative', () => {
 			],
 		});
 		vi.mocked(getChatMessages).mockResolvedValue({
+			historyState: { kind: 'complete' },
 			chatId: 'chat-1',
 			generationId: 'generation-2',
 			lastSeq: 4,

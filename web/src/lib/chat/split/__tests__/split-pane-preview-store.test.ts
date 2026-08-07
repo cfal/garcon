@@ -28,6 +28,7 @@ function userEntry(seq: number, content: string): ChatViewMessage {
 
 function page(messages: ChatViewMessage[], generationId = 'generation-1') {
 	return {
+		historyState: { kind: 'complete' as const },
 		chatId: 'chat-1',
 		generationId,
 		messages,
@@ -81,6 +82,33 @@ describe('SplitPanePreviewStore', () => {
 		const restored = storage.restore('chat-1');
 		expect(restored?.generationId).toBe('generation-1');
 		expect(restored?.lastSeq).toBe(1);
+	});
+
+	it('shows degraded history without exposing a preview cursor', async () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
+		transcriptCache.replaceFromPage('chat-1', page([entry(1, 'stale')]));
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			historyState: {
+				kind: 'degraded',
+				errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+				retryable: false,
+			},
+			chatId: 'chat-1',
+			messages: [],
+		});
+		const store = new SplitPanePreviewStore(transcriptCache);
+
+		await store.loadSnapshot('chat-1');
+
+		expect(store.entry('chat-1')).toMatchObject({
+			generationId: null,
+			lastSeq: 0,
+			messages: [],
+			isLoading: false,
+			error: expect.any(String),
+		});
+		expect(store.cursor('chat-1')).toBeNull();
+		expect(transcriptCache.get('chat-1')).toBeNull();
 	});
 
 	it('applies contiguous messages and windows the preview', () => {

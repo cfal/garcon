@@ -35,6 +35,7 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		processingPhase: null,
 		isUnread: false,
 		status: 'draft',
+		agentOwnershipEpoch: null,
 		lastMessage: `${title} preview`,
 		tags: [],
 		firstMessage: `${title} first`,

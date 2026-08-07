@@ -55,6 +55,7 @@ function page(
 ) {
 	const messages = overrides.messages ?? [entry(1, assistant('hello'))];
 	return {
+		historyState: { kind: 'complete' as const },
 		generationId: overrides.generationId ?? 'generation-1',
 		messages,
 		lastSeq: overrides.lastSeq ?? messages.at(-1)?.seq ?? 0,
@@ -90,6 +91,43 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: '', lastSeq: 0 });
 		expect(chat.chatMessages).toEqual([]);
 		expect(chat.feedMutationClock.dataRevision).toBe(0);
+	});
+
+	it('renders degraded history without retaining sequence or cache state', async () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
+		transcriptCache.replace(
+			'chat-1',
+			'generation-old',
+			[entry(1, assistant('stale'))],
+			1,
+		);
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			historyState: {
+				kind: 'degraded',
+				errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+				retryable: false,
+			},
+			chatId: 'chat-1',
+			messages: [],
+		});
+		const chat = new ActiveTranscriptState(transcriptCache);
+
+		await chat.loadMessages('chat-1');
+
+		expect(chat.historyState).toEqual({
+			kind: 'degraded',
+			errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+			retryable: false,
+		});
+		expect(chat.getCursor()).toEqual({ generationId: '', lastSeq: 0 });
+		expect(chat.entries).toEqual([]);
+		expect(chat.pendingUserInputs).toEqual([]);
+		expect(chat.visibleRows).toEqual([
+			expect.objectContaining({ kind: 'local-notice', noticeType: 'error' }),
+		]);
+		expect(transcriptCache.get('chat-1')).toBeNull();
+		expect(chat.applyMessages('chat-1', 'generation-new', [entry(1, assistant('ignored'))]))
+			.toBe('invalidated');
 	});
 
 	it('records applied feed mutations by provenance without counting duplicates', () => {

@@ -70,6 +70,7 @@ function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): Ch
 		tags: [],
 		firstMessage: `Chat ${index} first`,
 		...overrides,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 

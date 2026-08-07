@@ -239,6 +239,7 @@ function selectedChat(): ChatSessionRecord {
 		processingPhase: null,
 		isUnread: false,
 		status: 'draft',
+		agentOwnershipEpoch: null,
 		tags: [],
 	};
 }

@@ -47,6 +47,7 @@
 		processingPhase: 'running',
 		isUnread: false,
 		status: 'running',
+		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
 	});
 

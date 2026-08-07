@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { updateExecutionSettings } from '$lib/api/chats.js';
+import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ExecutionSettingsPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -46,6 +46,7 @@ function chat(): ChatSessionRecord {
 		processingPhase: null,
 		isUnread: false,
 		status: 'running',
+		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
 	};
 }
@@ -97,14 +98,24 @@ function createHarness() {
 	};
 	const chatState = { appendLocalNotice: vi.fn() };
 	const agentSwitch = { switchAgent: vi.fn(async () => undefined) };
+	const executionDraft = {
+		isHandoffPending: false,
+		patchSelection: vi.fn(),
+	};
 	const options = {
 		get sessions() { return sessions; },
 		get agentState() { return agentState; },
 		get modelCatalog() { return modelCatalog; },
 		get chatState() { return chatState; },
 		get agentSwitch() { return agentSwitch; },
+		get executionDraft() { return executionDraft; },
 	} satisfies ConversationSettingsControllerOptions;
-	return { controller: new ConversationSettingsController(options), sessions, agentState };
+	return {
+		controller: new ConversationSettingsController(options),
+		sessions,
+		agentState,
+		executionDraft,
+	};
 }
 
 describe('ConversationSettingsController', () => {
@@ -136,5 +147,25 @@ describe('ConversationSettingsController', () => {
 
 		expect(agentState.agentSettings).toEqual(latest);
 		expect(sessions.patchChat).toHaveBeenLastCalledWith('chat-1', { agentSettings: latest });
+	});
+
+	it('keeps target execution edits local while a handoff is pending', () => {
+		const { controller, sessions, executionDraft } = createHarness();
+		executionDraft.isHandoffPending = true;
+
+		controller.handleModelChange('gpt-5.5');
+		controller.handlePermissionModeChange('bypassPermissions');
+		controller.handleThinkingModeChange('high');
+
+		expect(executionDraft.patchSelection).toHaveBeenCalledWith(
+			expect.objectContaining({ model: 'opus' }),
+		);
+		expect(executionDraft.patchSelection).toHaveBeenCalledWith({
+			permissionMode: 'bypassPermissions',
+		});
+		expect(executionDraft.patchSelection).toHaveBeenCalledWith({ thinkingMode: 'high' });
+		expect(updateChatModel).not.toHaveBeenCalled();
+		expect(updateExecutionSettings).not.toHaveBeenCalled();
+		expect(sessions.patchChat).not.toHaveBeenCalled();
 	});
 });

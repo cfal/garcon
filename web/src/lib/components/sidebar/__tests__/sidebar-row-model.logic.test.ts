@@ -38,6 +38,7 @@ function chat(
 		tags: [],
 		firstMessage: '',
 		...overrides,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 

@@ -1,4 +1,8 @@
-import type { ChatViewMessage, ChatViewPage } from '$shared/chat-view';
+import {
+	isDegradedChatHistoryResponse,
+	type ChatHistoryResponse,
+	type ChatViewMessage,
+} from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import { INITIAL_VISIBLE_MESSAGES } from './active-transcript-state.svelte.js';
 import type { ChatTranscriptCache } from './chat-transcript-cache.svelte';
@@ -11,14 +15,14 @@ interface PendingBatch {
 
 export interface BackgroundTranscriptLoaderOptions {
 	cache: ChatTranscriptCache;
-	loadPage?: (chatId: string) => Promise<ChatViewPage>;
+	loadPage?: (chatId: string) => Promise<ChatHistoryResponse>;
 }
 
 export class BackgroundTranscriptLoader {
 	#inFlight = new Map<string, Promise<void>>();
 	#pending = new Map<string, PendingBatch[]>();
 	#cache: ChatTranscriptCache;
-	#loadPage: (chatId: string) => Promise<ChatViewPage>;
+	#loadPage: (chatId: string) => Promise<ChatHistoryResponse>;
 
 	constructor(options: BackgroundTranscriptLoaderOptions) {
 		this.#cache = options.cache;
@@ -52,6 +56,11 @@ export class BackgroundTranscriptLoader {
 		this.#cache.markStale(chatId);
 		try {
 			const page = await this.#loadPage(chatId);
+			if (isDegradedChatHistoryResponse(page)) {
+				this.#cache.remove(chatId);
+				this.#pending.delete(chatId);
+				return false;
+			}
 			this.#cache.replaceFromPage(chatId, page);
 			let pending = this.#pending.get(chatId);
 			while (pending && pending.length > 0) {

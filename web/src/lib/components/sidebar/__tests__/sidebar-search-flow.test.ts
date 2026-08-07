@@ -47,6 +47,7 @@ function createChat(
 		tags: [],
 		firstMessage: `${title} first`,
 		...overrides,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 

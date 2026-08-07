@@ -1,7 +1,8 @@
 import { SvelteMap } from 'svelte/reactivity';
-import type { ChatViewMessage } from '$shared/chat-view';
+import { isDegradedChatHistoryResponse, type ChatViewMessage } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import * as m from '$lib/paraglide/messages.js';
 
 const PREVIEW_LIMIT = 50;
 
@@ -83,6 +84,14 @@ export class SplitPanePreviewStore {
 		try {
 			const page = await getChatMessages({ chatId, limit: PREVIEW_LIMIT });
 			if (this.#loadEpochs.get(chatId) !== epoch) return;
+			if (isDegradedChatHistoryResponse(page)) {
+				this.#transcriptCache.remove(chatId);
+				this.#entries.set(chatId, {
+					...emptyEntry(chatId),
+					error: m.chat_history_unavailable(),
+				});
+				return;
+			}
 			this.#transcriptCache.replaceFromPage(chatId, page);
 			this.restore(chatId);
 		} catch (error) {

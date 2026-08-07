@@ -26,6 +26,10 @@ import type {
 	ChatOrderBoundary,
 	ReorderChatResponse,
 } from '$shared/chat-order-contracts';
+import {
+	chatExecutionDraftStorageKey,
+	removeLocalStorageItem,
+} from '$lib/utils/local-persistence.js';
 
 export interface ChatProcessingTransition {
 	chatId: string;
@@ -120,6 +124,7 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		processingPhase: session.processingPhase,
 		isUnread: session.isUnread ?? false,
 		status: 'running',
+		agentOwnershipEpoch: session.agentOwnershipEpoch,
 		lastMessage: session.preview?.lastMessage || undefined,
 		tags: session.tags ?? [],
 		firstMessage: session.preview?.firstMessage || undefined,
@@ -159,6 +164,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.processingPhase === b.processingPhase &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
+		a.agentOwnershipEpoch === b.agentOwnershipEpoch &&
 		a.lastMessage === b.lastMessage &&
 		a.firstMessage === b.firstMessage &&
 		arraysEqual(a.tags, b.tags)
@@ -567,6 +573,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			processingPhase: null,
 			isUnread: false,
 			status: 'draft',
+			agentOwnershipEpoch: null,
 			tags: normalizedStartup.tags ?? [],
 			firstMessage: undefined,
 		};
@@ -622,6 +629,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	removeChat(chatId: string): void {
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
+		removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
 		if (!this.byId[chatId]) return;
 
 		const nextById = { ...this.byId };

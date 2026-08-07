@@ -8,6 +8,7 @@ function input(
 	return {
 		isDraft: false,
 		isProcessing: false,
+		handoffPending: false,
 		control: emptyChatExecutionControlState('server-instance-test'),
 		hasAttachments: false,
 		...overrides,
@@ -19,6 +20,11 @@ describe('classifySubmission', () => {
 		['draft chat', input({ isDraft: true }), 'draft'],
 		['idle chat', input(), 'direct'],
 		['ordinary active-turn input', input({ isProcessing: true }), 'queue'],
+		[
+			'pending handoff during an active turn',
+			input({ isProcessing: true, handoffPending: true }),
+			'handoff-requires-idle',
+		],
 		[
 			'queued predecessor',
 			input({
@@ -61,6 +67,26 @@ describe('classifySubmission', () => {
 			'attachments requiring queue',
 			input({ isProcessing: true, hasAttachments: true }),
 			'queue-attachments-unsupported',
+		],
+		[
+			'pending handoff behind a queued predecessor',
+			input({
+				handoffPending: true,
+				control: {
+					...emptyChatExecutionControlState('server-instance-test'),
+					queue: {
+						...emptyChatExecutionControlState('server-instance-test').queue,
+						entries: [{
+							id: 'entry-1',
+							content: 'first',
+							revision: 1,
+							createdAt: '2026-07-19T00:00:00.000Z',
+							updatedAt: '2026-07-19T00:00:00.000Z',
+						}],
+					},
+				},
+			}),
+			'handoff-requires-idle',
 		],
 	] as const)('routes %s', (_name, classification, expected) => {
 		expect(classifySubmission(classification)).toBe(expected);

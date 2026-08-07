@@ -1,18 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { updateChatAgentModel } from '$lib/api/chats.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import {
 	ConversationAgentSwitchService,
-	type AgentSwitchSelection,
 	type ConversationAgentSwitchDeps,
 } from '$lib/chat/conversation/conversation-agent-switch-service.js';
-
-vi.mock('$lib/api/chats.js', () => ({
-	updateChatAgentModel: vi.fn(),
-}));
-
-const mockUpdateChatAgentModel = vi.mocked(updateChatAgentModel);
+import type { ConversationExecutionSelection } from '../conversation-execution-draft-state.svelte.js';
 
 function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
@@ -29,7 +22,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		modelProtocol: null,
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort: 'auto' } },
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		createdAt: null,
 		lastActivityAt: null,
 		lastReadAt: null,
@@ -39,23 +32,14 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		processingPhase: null,
 		isUnread: false,
 		status: 'running',
+		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
 		...overrides,
 	};
 }
 
-function nextSelection(): AgentSwitchSelection {
+function claudeSelection(): ConversationExecutionSelection {
 	return {
-		agentId: 'codex',
-		modelValue: 'gpt-5.5',
-	};
-}
-
-function createDeps(chat = createChat()) {
-	const patchChat = vi.fn();
-	const appendLocalNotice = vi.fn();
-	const reloadTranscript = vi.fn().mockResolvedValue(undefined);
-	const agentState: ConversationAgentSwitchDeps['agentState'] = {
 		agentId: 'claude',
 		model: 'sonnet',
 		apiProviderId: null,
@@ -63,14 +47,34 @@ function createDeps(chat = createChat()) {
 		modelProtocol: null,
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort: 'auto' } },
-		setAgentId(agentId) {
-			this.agentId = agentId;
-		},
-		setAgentSettings(settings) {
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+	};
+}
+
+function createDeps(chat = createChat()) {
+	const patchChat = vi.fn();
+	const patchDraftStartup = vi.fn();
+	const replaceSelection = vi.fn();
+	const resetToDurable = vi.fn(() => claudeSelection());
+	const agentState = {
+		agentId: 'claude',
+		model: 'sonnet',
+		apiProviderId: null as string | null,
+		modelEndpointId: null as string | null,
+		modelProtocol: null as 'openai-compatible' | 'anthropic-messages' | null,
+		permissionMode: 'default' as const,
+		thinkingMode: 'none' as const,
+		agentSettings: claudeSelection().agentSettings,
+		setAgentId(agentId: string) { this.agentId = agentId; },
+		setAgentSettings(settings: ConversationExecutionSelection['agentSettings']) {
 			this.agentSettings = settings;
 		},
-		setModelSelection(selection) {
+		setModelSelection(selection: {
+			model: string;
+			apiProviderId: string | null;
+			modelEndpointId: string | null;
+			modelProtocol: 'openai-compatible' | 'anthropic-messages' | null;
+		}) {
 			this.model = selection.model;
 			this.apiProviderId = selection.apiProviderId;
 			this.modelEndpointId = selection.modelEndpointId;
@@ -81,136 +85,88 @@ function createDeps(chat = createChat()) {
 		sessions: {
 			selectedChat: chat,
 			isDraft: vi.fn(() => chat.status === 'draft'),
+			patchDraftStartup,
 			patchChat,
 		},
-		chatState: { appendLocalNotice },
 		agentState,
 		modelCatalog: {
-			selectionFor: vi.fn((agentId, model) => ({
+			selectionFor: vi.fn((_agentId, model) => ({
 				model,
-				apiProviderId: agentId === 'codex' ? 'openai' : null,
+				apiProviderId: 'openai',
 				modelEndpointId: null,
-				modelProtocol: agentId === 'codex' ? ('openai-compatible' as const) : null,
+				modelProtocol: 'openai-compatible' as const,
 			})),
 			selectionValueFor: vi.fn((_agentId, model) => model),
-			getAgentLabel: vi.fn((agentId) => (agentId === 'codex' ? 'Codex' : 'Claude')),
-			getDefaultAgentSettings: vi.fn((agentId) => ({
-				ownerId: agentId,
-				schemaVersion: 1,
-				values: {},
-			})),
-			getPermissionModes: vi.fn(
-				() => ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'] as const,
-			),
-			getThinkingModes: vi.fn(() => ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const),
 		},
-		reloadTranscript,
+		executionDraft: { replaceSelection, resetToDurable },
+		getExecutionDefaults: vi.fn((agentId: string) => ({
+			permissionMode: 'bypassPermissions' as const,
+			thinkingMode: 'high' as const,
+			agentSettings: { ownerId: agentId, schemaVersion: 1, values: { effort: 'high' } },
+		})),
 	} satisfies ConversationAgentSwitchDeps;
-	return { deps, agentState, appendLocalNotice, patchChat, reloadTranscript };
+	return { deps, agentState, patchChat, patchDraftStartup, replaceSelection, resetToDurable };
 }
 
 describe('ConversationAgentSwitchService', () => {
-	beforeEach(() => {
-		vi.clearAllMocks();
-	});
+	it('stores a running-chat switch only in the execution draft', () => {
+		const { deps, agentState, patchChat, replaceSelection } = createDeps();
 
-	it('rejects draft switches without mutating local selection', async () => {
-		const { deps, agentState, appendLocalNotice, patchChat } = createDeps(
-			createChat({ status: 'draft' }),
-		);
+		new ConversationAgentSwitchService(deps).switchAgent('chat-1', {
+			agentId: 'codex',
+			modelValue: 'gpt-5.5',
+		});
 
-		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', nextSelection());
-
-		expect(mockUpdateChatAgentModel).not.toHaveBeenCalled();
-		expect(agentState.agentId).toBe('claude');
+		expect(replaceSelection).toHaveBeenCalledWith({
+			agentId: 'codex',
+			model: 'gpt-5.5',
+			apiProviderId: 'openai',
+			modelEndpointId: null,
+			modelProtocol: 'openai-compatible',
+			permissionMode: 'bypassPermissions',
+			thinkingMode: 'high',
+			agentSettings: {
+				ownerId: 'codex',
+				schemaVersion: 1,
+				values: { effort: 'high' },
+			},
+		});
+		expect(agentState).toMatchObject({ agentId: 'codex', model: 'gpt-5.5' });
 		expect(patchChat).not.toHaveBeenCalled();
-		expect(appendLocalNotice).toHaveBeenCalledWith(
-			'error',
-			expect.stringContaining('before switching agents'),
-		);
 	});
 
-	it('applies the optimistic selection and server-normalized modes', async () => {
-		const { deps, agentState, patchChat, reloadTranscript } = createDeps();
-		mockUpdateChatAgentModel.mockResolvedValueOnce({
-			success: true,
-			chatId: 'chat-1',
+	it('updates draft startup configuration directly', () => {
+		const { deps, patchDraftStartup, patchChat, replaceSelection } = createDeps(
+			createChat({ status: 'draft', agentOwnershipEpoch: null }),
+		);
+
+		new ConversationAgentSwitchService(deps).switchAgent('chat-1', {
 			agentId: 'codex',
-			model: 'gpt-5.5',
-			apiProviderId: 'openai',
-			modelEndpointId: null,
-			modelProtocol: 'openai-compatible',
-			permissionMode: 'bypassPermissions',
-			thinkingMode: 'high',
-			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { effort: 'high' } },
+			modelValue: 'gpt-5.5',
 		});
 
-		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', nextSelection());
-
-		expect(mockUpdateChatAgentModel).toHaveBeenCalledWith({
-			chatId: 'chat-1',
-			agentId: 'codex',
-			model: 'gpt-5.5',
-			apiProviderId: 'openai',
-			modelEndpointId: null,
-			modelProtocol: 'openai-compatible',
-		});
-		expect(agentState).toMatchObject({
-			agentId: 'codex',
-			model: 'gpt-5.5',
-			permissionMode: 'bypassPermissions',
-			thinkingMode: 'high',
-		});
-		expect(patchChat).toHaveBeenLastCalledWith(
+		expect(patchDraftStartup).toHaveBeenCalledWith(
 			'chat-1',
-			expect.objectContaining({ permissionMode: 'bypassPermissions', thinkingMode: 'high' }),
+			expect.objectContaining({ agentId: 'codex', model: 'gpt-5.5' }),
 		);
-		expect(reloadTranscript).toHaveBeenCalledWith('chat-1');
+		expect(patchChat).toHaveBeenCalledWith(
+			'chat-1',
+			expect.objectContaining({ agentId: 'codex', model: 'gpt-5.5' }),
+		);
+		expect(replaceSelection).not.toHaveBeenCalled();
 	});
 
-	it('rolls back the complete selection when the server rejects', async () => {
-		const { deps, agentState, patchChat, appendLocalNotice, reloadTranscript } = createDeps();
-		mockUpdateChatAgentModel.mockRejectedValueOnce(new Error('switch failed'));
+	it('cancels a pending switch when the durable owner is selected', () => {
+		const { deps, agentState, resetToDurable, replaceSelection } = createDeps();
+		agentState.agentId = 'codex';
 
-		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', nextSelection());
-
-		expect(agentState).toMatchObject({
+		new ConversationAgentSwitchService(deps).switchAgent('chat-1', {
 			agentId: 'claude',
-			model: 'sonnet',
-			apiProviderId: null,
-			permissionMode: 'default',
-			thinkingMode: 'none',
-		});
-		expect(patchChat).toHaveBeenLastCalledWith(
-			'chat-1',
-			expect.objectContaining({ agentId: 'claude', model: 'sonnet' }),
-		);
-		expect(appendLocalNotice).toHaveBeenCalledWith(
-			'error',
-			expect.stringContaining('switch failed'),
-		);
-		expect(reloadTranscript).not.toHaveBeenCalled();
-	});
-
-	it('keeps a successful switch when transcript reload fails', async () => {
-		const { deps, agentState, appendLocalNotice, reloadTranscript } = createDeps();
-		reloadTranscript.mockRejectedValueOnce(new Error('history unavailable'));
-		mockUpdateChatAgentModel.mockResolvedValueOnce({
-			success: true,
-			chatId: 'chat-1',
-			agentId: 'codex',
-			model: 'gpt-5.5',
-			apiProviderId: 'openai',
-			modelEndpointId: null,
-			modelProtocol: 'openai-compatible',
-			permissionMode: 'default',
-			thinkingMode: 'none',
-			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+			modelValue: 'ignored',
 		});
 
-		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', nextSelection());
-
-		expect(agentState.agentId).toBe('codex');
-		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(resetToDurable).toHaveBeenCalledOnce();
+		expect(replaceSelection).not.toHaveBeenCalled();
+		expect(agentState).toMatchObject({ agentId: 'claude', model: 'sonnet' });
 	});
 });

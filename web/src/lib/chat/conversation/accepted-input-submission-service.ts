@@ -12,7 +12,7 @@ import type {
 	GoalControlCommandRequest,
 	GoalControlCommandResponse,
 	AgentRunCommandRequest,
-	CommandAcceptedResponse,
+	AgentTurnCommandResponse,
 	ForkRunCommandRequest,
 	ForkRunCommandResponse,
 	QueueEntryCommandResponse,
@@ -37,7 +37,7 @@ type InputFactory<T> = T | (() => T);
 
 export interface AcceptedInputTransport {
 	start(request: StartChatParams): Promise<StartChatCommandResponse & { chat: ChatListEntry }>;
-	run(request: AgentRunCommandRequest): Promise<CommandAcceptedResponse>;
+	run(request: AgentRunCommandRequest): Promise<AgentTurnCommandResponse>;
 	fork(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse>;
 	enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse>;
 	steer(request: SteerCommandRequest): Promise<SteerCommandResponse>;
