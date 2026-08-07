@@ -29,12 +29,8 @@ import type {
 } from '../agents/session-types.js';
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
 import { assertAttachmentsSupported } from '../attachments/support.js';
-import type { StoredChatExecutionControlState } from '../chat-execution/control-state.ts';
 import type { DirectInputPreparation } from '../chat-execution/types.js';
-import {
-  agentHandoffReplayDisposition,
-  withHandoffChatProjection,
-} from '../agents/agent-handoff-command.js';
+import { agentHandoffReplayDisposition, withHandoffChatProjection } from '../agents/agent-handoff-command.js';
 import { agentRunCommandPayload } from '../agents/agent-run-command-input.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
 import type { AgentHandoffService } from '../agents/agent-handoff-service.js';

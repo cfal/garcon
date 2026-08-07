@@ -2,6 +2,11 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { RunAgentTurnOptions } from '../agents/session-types.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
 
+type AttachmentAgentCapabilities = Pick<
+  AgentRegistryServiceContract,
+  'modelSupportsImages' | 'supportsImages' | 'supportsFileAttachmentMimeType'
+>;
+
 export interface AttachmentSupportInput {
   agentId: string;
   model: string;
@@ -11,7 +16,7 @@ export interface AttachmentSupportInput {
 }
 
 export async function assertAttachmentsSupported(
-  agents: AgentRegistryServiceContract,
+  agents: AttachmentAgentCapabilities,
   input: AttachmentSupportInput,
 ): Promise<void> {
   if (input.attachments.length === 0) return;

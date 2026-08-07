@@ -856,6 +856,35 @@ describe('ChatCommandService', () => {
     });
   });
 
+  it('rejects handoff attachments unsupported by the target before preparation', async () => {
+    const modelSupportsImages = mock(async () => false);
+    const { service, agents, handoffPreparations } = makeService({
+      agents: {
+        modelSupportsImages,
+        supportsImages: mock(() => false),
+      },
+    });
+    const input = {
+      ...handoffRunInput('req-handoff-unsupported-image'),
+      images: [attachment('image/png')],
+    };
+
+    await expect(service.submitRun(input)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_AGENT',
+      status: 422,
+    });
+
+    expect(modelSupportsImages).toHaveBeenCalledWith({
+      agentId: 'codex',
+      model: 'gpt-5.6-sol',
+      apiProviderId: null,
+      modelEndpointId: null,
+    });
+    expect(handoffPreparations).toHaveLength(1);
+    expect(handoffPreparations[0].prepare).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
   it('rejects unsupported fork-run attachments before creating the fork', async () => {
     const unsupported = makeService({
       agents: { supportsFileAttachmentMimeType: mock(() => false) },

@@ -6,6 +6,7 @@ import type { ChatListEntry } from '../../common/chat-list.js';
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { CommandExecutionControlError } from '../lib/command-execution-control-error.js';
+import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
 import {
   type AgentHandoffPreparation,
   type AgentHandoffService,
@@ -43,6 +44,7 @@ export async function prepareAgentHandoffCommand(input: {
     'ownsExecution' | 'readChatExecutionControl'
   >;
 }): Promise<{
+  readonly target: ResolvedAgentHandoffTarget;
   readonly options: RunAgentTurnOptions;
   readonly preparation: AgentHandoffPreparation;
 }> {
@@ -66,6 +68,7 @@ export async function prepareAgentHandoffCommand(input: {
     );
   }
   return {
+    target,
     options: resolvedRunOptions(target),
     preparation: input.service.createPreparation({
       chatId: input.chatId,

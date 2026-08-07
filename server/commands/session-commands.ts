@@ -85,6 +85,9 @@ export class SessionCommands {
         service: this.deps.handoffs,
         execution: this.deps.queue,
       });
+      await this.support.assertAttachmentsSupported({
+        ...handoffCommand.target, attachments: input.images ?? [],
+      });
       normalizedInput.options = handoffCommand.options;
       const result = await this.support.submitHttpRun(
         normalizedInput,
