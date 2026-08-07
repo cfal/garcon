@@ -67,6 +67,100 @@ describe('legacy carryover migration', () => {
     ]);
   });
 
+  it('promotes a committed staged transfer and retains its source cleanup', async () => {
+    const stable = segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')], {
+      target: { agentId: 'claude', model: 'opus' },
+    });
+    const transferred = segment('claude', 'opus', [new UserMessage(TIMESTAMP, 'second')], {
+      target: { agentId: 'pi', model: 'kimi' },
+    });
+    const target = {
+      ...legacyEntry('pi', 'kimi'),
+      agentSessionId: null,
+      nativeSession: null,
+    };
+    await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
+      version: 3,
+      sessions: { [CHAT_ID]: target },
+    }));
+    await fs.writeFile(path.join(workspaceDir, 'chat-carryover.json'), JSON.stringify({
+      version: 4,
+      chats: {
+        [CHAT_ID]: {
+          revision: 1,
+          segments: [stable],
+          staged: {
+            targetEpoch: target.agentOwnershipEpoch,
+            ownerId: 'pi',
+            revision: 2,
+            segments: [stable, transferred],
+          },
+        },
+      },
+    }));
+    await fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), JSON.stringify({
+      version: 1,
+      intents: [{
+        id: 'legacy-transfer',
+        kind: 'transfer',
+        chatId: CHAT_ID,
+        oldReference: {
+          chatId: CHAT_ID,
+          agentId: 'claude',
+          agentSessionId: 'claude-session',
+          projectPath: '/workspace/project',
+          model: 'opus',
+          nativeSession: null,
+          carryOverRevision: 'carry-v1:1',
+          settings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+        },
+        oldEpoch: 'claude-epoch',
+        targetAgentId: 'pi',
+        targetEpoch: target.agentOwnershipEpoch,
+        createdAt: TIMESTAMP,
+      }],
+    }));
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    const registry = await readJson('chats.json');
+    const migrated = registry.sessions[CHAT_ID];
+    const store = new CarryOverTranscriptStore({ workspaceDir });
+    await store.initialize();
+    expect(await store.loadAll(migrated.carryOverHeadId, {
+      agentId: 'pi',
+      model: 'kimi',
+    })).toEqual([
+      expect.objectContaining({ type: 'user-message', content: 'first' }),
+      expect.objectContaining({
+        type: 'agent-switch',
+        fromAgentId: 'codex',
+        toAgentId: 'claude',
+      }),
+      expect.objectContaining({ type: 'user-message', content: 'second' }),
+      expect.objectContaining({
+        type: 'agent-switch',
+        fromAgentId: 'claude',
+        toAgentId: 'pi',
+      }),
+    ]);
+    expect(await readJson('agent-ownership-journal.json')).toEqual({
+      version: 2,
+      ownershipIntents: [],
+      transferCleanup: [expect.objectContaining({
+        operationId: 'legacy-transfer',
+        chatId: CHAT_ID,
+        status: 'pending',
+        attempts: 0,
+        source: expect.objectContaining({
+          agentId: 'claude',
+          agentSessionId: 'claude-session',
+          nativeSeedReceipt: null,
+        }),
+      })],
+    });
+  });
+
   it('resumes after the registry commit and before the ownership-journal commit', async () => {
     await writeLegacyWorkspace({
       segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
