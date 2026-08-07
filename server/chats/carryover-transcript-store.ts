@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { AgentSwitchMessage } from '../../common/chat-types.js';
+import { DomainError } from '../lib/domain-error.js';
 import { writeJsonFileAtomic, syncDirectory } from '../lib/json-file-store.js';
 import {
   CarryOverPageIntegrityError,
@@ -27,7 +28,6 @@ const DEFAULT_MAX_NODE_DEPTH = 10_000;
 const DEFAULT_MANIFEST_CACHE_SIZE = 256;
 
 export type CarryOverTranscriptErrorCode =
-  | 'CARRYOVER_HISTORY_UNAVAILABLE'
   | 'CARRYOVER_NODE_COLLISION'
   | 'CARRYOVER_INVALID_CUTOFF';
 
@@ -39,6 +39,19 @@ export class CarryOverTranscriptError extends Error {
   ) {
     super(message, options);
     this.name = 'CarryOverTranscriptError';
+  }
+}
+
+export class CarryOverHistoryUnavailableError extends DomainError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'CARRYOVER_HISTORY_UNAVAILABLE',
+      'Archived chat history is unavailable.',
+      422,
+      false,
+      options,
+    );
+    this.name = 'CarryOverHistoryUnavailableError';
   }
 }
 
@@ -523,10 +536,9 @@ export class CarryOverTranscriptStore {
       const source = await this.#readManifest(node.sourceNodeId);
       if (source.kind !== 'materialized') {
         this.#degradedNodes.add(node.id);
-        throw new CarryOverTranscriptError(
-          'CARRYOVER_HISTORY_UNAVAILABLE',
-          'Carryover prefix source is not materialized',
-        );
+        throw new CarryOverHistoryUnavailableError({
+          cause: new Error('Carryover prefix source is not materialized'),
+        });
       }
     return source;
   }
@@ -545,11 +557,7 @@ export class CarryOverTranscriptStore {
           node = parseCarryOverNode(JSON.parse(raw), id);
         } catch (error) {
           this.#degradedNodes.add(id);
-          throw new CarryOverTranscriptError(
-            'CARRYOVER_HISTORY_UNAVAILABLE',
-            `Carryover manifest ${id} is invalid`,
-            { cause: error },
-          );
+          throw new CarryOverHistoryUnavailableError({ cause: error });
         }
       this.#manifestCache.set(id, node);
       while (this.#manifestCache.size > this.#manifestCacheSize) {
@@ -730,14 +738,10 @@ function requireNodeId(value: string): string {
   return value.toLowerCase();
 }
 
-function asUnavailable(error: unknown): CarryOverTranscriptError {
-  return error instanceof CarryOverTranscriptError
+function asUnavailable(error: unknown): CarryOverHistoryUnavailableError {
+  return error instanceof CarryOverHistoryUnavailableError
     ? error
-    : new CarryOverTranscriptError(
-        'CARRYOVER_HISTORY_UNAVAILABLE',
-        error instanceof Error ? error.message : String(error),
-        { cause: error },
-      );
+    : new CarryOverHistoryUnavailableError({ cause: error });
 }
 
 function throwUnavailableUnlessAborted(error: unknown): never {

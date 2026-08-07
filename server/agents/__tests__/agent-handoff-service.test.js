@@ -288,6 +288,50 @@ describe('AgentHandoffService', () => {
     expect(commitHandoff).not.toHaveBeenCalled();
   });
 
+  it('rejects quarantined history before resolving or preparing a handoff', async () => {
+    const current = {
+      ...sourceChat(),
+      carryOverMigrationQuarantine: {
+        artifactId: 'legacy-artifact',
+        errorCode: 'INVALID_CARRYOVER_ENTRY',
+      },
+    };
+    const beginHandoff = mock(async () => { throw new Error('unexpected begin'); });
+    const service = createService({
+      registry: { getChat: () => current },
+      carryOver,
+      ownership: {
+        findHandoff: () => null,
+        beginHandoff,
+        commitHandoff: mock(async () => {}),
+        compensateHandoff: mock(async () => {}),
+      },
+      ...targetResolutionDeps(),
+    });
+
+    await expect(service.resolveTarget({
+      chat: current,
+      handoff: handoff(),
+    })).rejects.toMatchObject({
+      code: 'CARRYOVER_HISTORY_UNAVAILABLE',
+      status: 422,
+      retryable: false,
+    });
+
+    const preparation = service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-quarantined',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+    });
+    await expect(preparation.prepare(context())).rejects.toMatchObject({
+      code: 'CARRYOVER_HISTORY_UNAVAILABLE',
+      status: 422,
+    });
+    expect(beginHandoff).not.toHaveBeenCalled();
+  });
+
   it('requires an explicit target bypass mode under the CLI fallback policy', async () => {
     const current = sourceChat();
     const service = createService({

@@ -134,6 +134,7 @@ export interface AgentForkRequest extends AgentExecutionContext {
   readonly source: AgentChatReference;
   readonly point: {
     readonly messageSequence: number;
+    readonly archivedMessageCount: number;
     readonly sourceRevision: { readonly nativePrefix: string; readonly carryOver: string };
   } | null;
 }

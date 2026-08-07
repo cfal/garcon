@@ -9,7 +9,6 @@ import {
   type AgentForkRequest,
   type AgentForkOutcome,
   type AgentForking,
-  type AgentHost,
   type AgentStartedSession,
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
@@ -24,7 +23,6 @@ import {
 } from './fork-jsonl.js';
 
 export interface JsonlForkingOptions {
-  readonly host: Pick<AgentHost, 'carryOver'>;
   readonly supportsWhileRunning: boolean;
   readonly transcript: Pick<AgentTranscript, 'load' | 'resolveNativeSession'>;
   readonly nativeSessions: PathNativeSessionCodec;
@@ -99,18 +97,22 @@ async function forkJsonlAtPoint(
   }
   const sourceSnapshot = request.point ? await snapshotJsonlSource(sourcePath) : undefined;
   if (request.point) {
-    const carryOver = await options.host.carryOver.load({
-      chatId: request.source.chatId,
-      expectedRevision: request.point.sourceRevision.carryOver,
-      currentAgentId: request.source.agentId,
-      currentModel: request.source.model,
-      signal: request.admission.signal,
-    });
+    if (
+      !Number.isSafeInteger(request.point.archivedMessageCount)
+      || request.point.archivedMessageCount < 0
+      || request.point.archivedMessageCount > request.point.messageSequence
+    ) {
+      throw new AgentIntegrationError(
+        'TRANSCRIPT_UNAVAILABLE',
+        'Fork carry-over count is invalid',
+        false,
+      );
+    }
     const native = await options.transcript.load({
       chat: request.source,
       signal: request.admission.signal,
     });
-    nativeSequence = Math.max(0, request.point.messageSequence - carryOver.messages.length);
+    nativeSequence = request.point.messageSequence - request.point.archivedMessageCount;
     if (nativeSequence > native.messages.length) {
       throw new AgentIntegrationError(
         'TRANSCRIPT_UNAVAILABLE',

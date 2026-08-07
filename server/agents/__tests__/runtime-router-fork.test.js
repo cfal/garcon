@@ -112,6 +112,7 @@ describe('AgentRuntimeRouter forks', () => {
     expect(fork).toHaveBeenCalledWith(expect.objectContaining({
       point: {
         messageSequence: 1,
+        archivedMessageCount: 0,
         sourceRevision: {
           nativePrefix: computeAgentTranscriptRevisions(messages, 1).prefix,
           carryOver: 'carry-1',

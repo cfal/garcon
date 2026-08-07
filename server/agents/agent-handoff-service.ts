@@ -57,6 +57,7 @@ export class AgentHandoffService {
         409,
       );
     }
+    assertCarryOverAvailable(input.chat);
     const requested = input.handoff.target;
     if (requested.agentId === input.chat.agentId) {
       throw new DomainError(
@@ -179,6 +180,7 @@ export class AgentHandoffService {
       operation: 'agent-handoff',
       prepare: async (context) => {
         try {
+          assertCarryOverAvailable(sourceSnapshot);
           const existing = this.deps.ownership.findHandoff(input.chatId, input.clientRequestId);
           if (existing) {
             if (existing.submittedTargetHash !== submittedTargetHash) {
@@ -440,15 +442,22 @@ function assertSupported(values: readonly string[], value: string, label: string
   }
 }
 
+function assertCarryOverAvailable(entry: ChatRegistryEntry): void {
+  if (!entry.carryOverMigrationQuarantine) return;
+  throw new DomainError(
+    'CARRYOVER_HISTORY_UNAVAILABLE',
+    'Archived chat history is unavailable.',
+    422,
+    false,
+  );
+}
+
 function mapCarryOverError(error: unknown): unknown {
-  if (
-    error instanceof CarryOverTranscriptError
-    && error.code === 'CARRYOVER_HISTORY_UNAVAILABLE'
-  ) {
+  if (error instanceof CarryOverTranscriptError) {
     return new DomainError(
-      'CARRYOVER_HISTORY_UNAVAILABLE',
-      'The archived chat history is unavailable.',
-      422,
+      'INTERNAL_ERROR',
+      'The archived chat history could not be prepared.',
+      500,
       false,
       { cause: error },
     );

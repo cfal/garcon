@@ -19,7 +19,7 @@ import { PendingUserInputService } from '../../chats/pending-user-input-service.
 import { ChatNativeReloader } from '../../chats/chat-native-reload.js';
 import { ChatProcessErrorRecovery } from '../../chats/chat-process-error-recovery.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
-import { DomainError } from '../../lib/domain-error.js';
+import { CarryOverHistoryUnavailableError } from '../../chats/carryover-transcript-store.ts';
 import {
   historyPage,
   snapshotLoader,
@@ -182,12 +182,9 @@ describe('GET /api/v1/chats/messages', () => {
     const { pendingInputs, routes } = createRoutesFixture({
       chatViews: {
         getOrCreatePage: mock(async () => {
-          throw new DomainError(
-            'CARRYOVER_HISTORY_UNAVAILABLE',
-            'private storage detail',
-            422,
-            false,
-          );
+          throw new CarryOverHistoryUnavailableError({
+            cause: new Error('private storage detail'),
+          });
         }),
         reconcileNativeSnapshot: mock(async () => undefined),
       },

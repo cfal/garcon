@@ -1,5 +1,4 @@
 import type { AgentCredentialReference } from '@garcon/common/agent-execution';
-import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject, JsonValue } from '@garcon/common/json';
 
 export interface AgentHost {
@@ -8,7 +7,6 @@ export interface AgentHost {
   readonly storage: AgentScopedStorage;
   readonly environment: AgentEnvironmentReader;
   readonly apiProviders: AgentApiProviderReader;
-  readonly carryOver: AgentCarryOverReader;
 }
 
 export interface AgentHostFactory {
@@ -47,16 +45,6 @@ export interface AgentApiProviderReader {
 export interface AgentResolvedCredential {
   readonly kind: string;
   readonly value: string;
-}
-
-export interface AgentCarryOverReader {
-  load(request: {
-    readonly chatId: string;
-    readonly expectedRevision: string;
-    readonly currentAgentId: string;
-    readonly currentModel: string;
-    readonly signal: AbortSignal;
-  }): Promise<{ readonly revision: string; readonly messages: readonly ChatMessage[] }>;
 }
 
 export interface AgentMigrationStore {

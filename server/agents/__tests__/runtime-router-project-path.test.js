@@ -51,7 +51,6 @@ function makeRouter(overrides = {}) {
     endpointResolver: {},
     events: {},
     getCarryOverRevision: () => 'carry-1',
-    loadCarryOver: () => [],
   });
 
   return { entry, preparation, prepareProjectPathUpdate, router };

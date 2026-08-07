@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import { writeJsonFileAtomic } from '../../lib/json-file-store.js';
 import {
-  CarryOverTranscriptError,
+  CarryOverHistoryUnavailableError,
   CarryOverTranscriptStore,
 } from '../carryover-transcript-store.ts';
 import { decodeCarryOverPage } from '../carryover-page-codec.ts';
@@ -188,7 +188,7 @@ describe('CarryOverTranscriptStore', () => {
     );
 
     await expect(store.loadAll(FIRST, { agentId: 'b', model: 'two' }))
-      .rejects.toBeInstanceOf(CarryOverTranscriptError);
+      .rejects.toBeInstanceOf(CarryOverHistoryUnavailableError);
     await expect(store.assertReachableForHandoff(FIRST))
       .rejects.toMatchObject({ code: 'CARRYOVER_HISTORY_UNAVAILABLE' });
   });

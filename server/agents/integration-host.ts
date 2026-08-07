@@ -12,7 +12,6 @@ import {
 import path from 'node:path';
 import type {
   AgentApiProviderReader,
-  AgentCarryOverReader,
   AgentEnvironmentReader,
   AgentHost,
   AgentHostFactory,
@@ -23,7 +22,6 @@ import type {
 } from '@garcon/server-agent-interface';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { AgentCredentialReference } from '@garcon/common/agent-execution';
-import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import { createLogger } from '../lib/log.js';
 
@@ -37,14 +35,6 @@ export interface IntegrationHostFactoryOptions {
     readonly reference: AgentCredentialReference;
     readonly signal: AbortSignal;
   }) => Promise<AgentResolvedCredential | null>;
-  readonly loadCarryOver: (request: {
-    readonly agentId: string;
-    readonly chatId: string;
-    readonly expectedRevision: string;
-    readonly currentAgentId: string;
-    readonly currentModel: string;
-    readonly signal: AbortSignal;
-  }) => Promise<{ readonly revision: string; readonly messages: readonly ChatMessage[] }>;
   readonly readEnvironment?: (name: string) => string | undefined;
   readonly loggerFactory?: (agentId: string) => AgentLogger;
 }
@@ -280,16 +270,12 @@ export class IntegrationHostFactory implements AgentHostFactory {
         signal,
       }),
     };
-    const carryOver: AgentCarryOverReader = {
-      load: (request) => this.#options.loadCarryOver({ agentId, ...request }),
-    };
     const host: AgentHost = Object.freeze({
       agentId,
       logger: this.#options.loggerFactory?.(agentId) ?? defaultLogger(agentId),
       storage: new ScopedStorage(this.#options.workspaceDir, agentId),
       environment,
       apiProviders,
-      carryOver,
     });
     this.#hosts.set(agentId, { host, environment });
     return host;

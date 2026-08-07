@@ -33,9 +33,6 @@ describe('resolveAgentEndpoint', () => {
       },
       environment: { get: () => undefined },
       apiProviders: { resolveCredential },
-      carryOver: {
-        load: async () => ({ revision: 'empty', messages: [] }),
-      },
     } satisfies AgentHost;
     const result = await resolveAgentEndpoint(
       host,

@@ -90,13 +90,6 @@ describe('Claude JSONL forking', () => {
         return { messages, revision: computeAgentTranscriptRevision(messages) };
       },
     };
-    const host = {
-      carryOver: {
-        async load() {
-          return { revision: '', messages: [] };
-        },
-      },
-    };
     const sourceNativeSession = nativeSessions.encode({
       path: sourcePath,
       agentSessionId: sourceAgentSessionId,
@@ -135,7 +128,6 @@ describe('Claude JSONL forking', () => {
       point: null,
     };
     const forking = createJsonlForking({
-      host,
       supportsWhileRunning: true,
       transcript,
       nativeSessions,
@@ -202,13 +194,6 @@ describe('Claude JSONL forking', () => {
     });
     const settings = { ownerId: 'claude', schemaVersion: 1, values: {} };
     const forking = createJsonlForking({
-      host: {
-        carryOver: {
-          async load() {
-            return { revision: '', messages: [] };
-          },
-        },
-      },
       supportsWhileRunning: true,
       transcript: {
         async resolveNativeSession({ chat }) {

@@ -204,6 +204,75 @@ describe('Codex native transcript path preservation', () => {
     );
   }, 15_000);
 
+  test('rejects a handoff when migrated history is quarantined', async () => {
+    const chatId = String(Date.now() * 1_000 + 4);
+    const threadId = randomUUID();
+    let nativePath = '';
+
+    await withIntegrationFixture(
+      'codex-quarantined-carryover-handoff',
+      async (fixture) => {
+        const before = (await fixture.client.listChats()).sessions.find(
+          (chat) => chat.id === chatId,
+        );
+        if (!before) throw new Error('Quarantined chat is missing');
+        const nativeBefore = await readNativeSession(fixture.dirs.workspace, chatId);
+
+        const failure = await captureApiError(fixture.client.handoffDirectChat({
+          chatId,
+          content: 'do not discard quarantined history',
+          agent: fixture.directAgents.openAi,
+        }));
+        expect(failure).toMatchObject({
+          status: 422,
+          body: {
+            success: false,
+            error: 'Archived chat history is unavailable.',
+            errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+            retryable: false,
+          },
+        });
+
+        const after = (await fixture.client.listChats()).sessions.find(
+          (chat) => chat.id === chatId,
+        );
+        expect(after).toMatchObject({
+          agentId: before.agentId,
+          agentOwnershipEpoch: before.agentOwnershipEpoch,
+        });
+        await expect(readNativeSession(fixture.dirs.workspace, chatId)).resolves.toEqual(
+          nativeBefore,
+        );
+        await expect(readFile(nativePath, 'utf8')).resolves.toContain('quarantined-native');
+      },
+      {
+        serverEnvironment: codexServerEnvironment(),
+        async prepareWorkspace(directories) {
+          nativePath = await writeCodexTranscript({
+            home: directories.home,
+            projectPath: directories.project,
+            threadId,
+            userContent: 'quarantined-native',
+            assistantContent: 'quarantined-answer',
+          });
+          await seedWorkspace({
+            workspace: directories.workspace,
+            chatId,
+            threadId,
+            nativePath,
+            projectPath: directories.project,
+            carryUser: 'quarantined-carry',
+            carryAssistant: 'quarantined-carry-answer',
+            carryOverMigrationQuarantine: {
+              artifactId: randomUUID(),
+              errorCode: 'LEGACY_CHAT_INVALID',
+            },
+          });
+        },
+      },
+    );
+  }, 15_000);
+
   test('starts with one discovery snapshot for many preserved pathless chats', async () => {
     const chatIds = Array.from(
       { length: 100 },
@@ -415,6 +484,10 @@ async function seedWorkspace(input: {
   projectPath: string;
   carryUser: string;
   carryAssistant: string;
+  carryOverMigrationQuarantine?: {
+    artifactId: string;
+    errorCode: string;
+  };
 }): Promise<void> {
   await writeFile(
     join(input.workspace, 'workspace-version.json'),
@@ -450,7 +523,7 @@ async function seedWorkspace(input: {
           thinkingMode: 'none',
           carryOverHeadId: null,
           nativeSeedReceipt: null,
-          carryOverMigrationQuarantine: null,
+          carryOverMigrationQuarantine: input.carryOverMigrationQuarantine ?? null,
         },
       },
     }),

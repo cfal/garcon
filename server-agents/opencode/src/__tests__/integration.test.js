@@ -17,7 +17,6 @@ function createHost() {
     },
     environment: { get: mock(() => undefined) },
     apiProviders: { resolveCredential: mock(() => Promise.resolve(null)) },
-    carryOver: { load: mock(() => Promise.reject(new Error('not used'))) },
   };
 }
 

@@ -121,7 +121,6 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       },
     };
     this.forking = createJsonlForking({
-      host,
       supportsWhileRunning: false,
       transcript: this.transcript,
       nativeSessions,

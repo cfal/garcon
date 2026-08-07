@@ -127,7 +127,6 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       },
     };
     this.forking = createJsonlForking({
-      host,
       supportsWhileRunning: false,
       transcript: this.transcript,
       nativeSessions,

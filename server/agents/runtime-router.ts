@@ -482,7 +482,7 @@ export class AgentRuntimeRouter {
         integration,
         args.sourceChatId,
         source,
-          this.#getCarryOverRevision(source),
+        this.#getCarryOverRevision(source),
       );
       const sourceSnapshot = args.messageSequence
         ? await integration.transcript.load({
@@ -490,8 +490,8 @@ export class AgentRuntimeRouter {
             signal: new AbortController().signal,
           })
         : null;
-        const carryOverMessageCount = args.messageSequence
-          ? await this.#getCarryOverMessageCount(source)
+      const carryOverMessageCount = args.messageSequence
+        ? await this.#getCarryOverMessageCount(source)
         : 0;
       if (args.messageSequence) {
         const messageCount = carryOverMessageCount + (sourceSnapshot?.messages.length ?? 0);
@@ -514,6 +514,7 @@ export class AgentRuntimeRouter {
         source: sourceReference,
         point: args.messageSequence ? {
           messageSequence: args.messageSequence,
+          archivedMessageCount: carryOverMessageCount,
           sourceRevision: {
             nativePrefix: nativePrefixRevision!,
             carryOver: sourceReference.carryOverRevision,
@@ -524,9 +525,9 @@ export class AgentRuntimeRouter {
       return {
         kind: 'materialized',
         session: {
-            agentSessionId: result.session.agentSessionId,
-            nativeSession: result.session.nativeSession,
-            nativeSeedReceipt: result.session.nativeSeedReceipt,
+          agentSessionId: result.session.agentSessionId,
+          nativeSession: result.session.nativeSession,
+          nativeSeedReceipt: result.session.nativeSeedReceipt,
         },
       };
     } catch (error) {

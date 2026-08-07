@@ -29,7 +29,6 @@ function host(): AgentHost {
     },
     environment: { get: () => undefined },
     apiProviders: { resolveCredential: async () => null },
-    carryOver: { load: async () => ({ revision: 'empty', messages: [] }) },
   };
 }
 

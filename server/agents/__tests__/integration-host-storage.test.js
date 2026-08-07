@@ -13,7 +13,6 @@ async function createStorage() {
   const factory = new IntegrationHostFactory({
     workspaceDir,
     resolveCredential: async () => null,
-    loadCarryOver: async ({ expectedRevision }) => ({ revision: expectedRevision, messages: [] }),
     loggerFactory: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
   });
   return { storage: factory.forAgent('alpha').storage, workspaceDir };

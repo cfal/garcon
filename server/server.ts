@@ -74,7 +74,6 @@ import {
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { ChatGenerationResetMessage, WsFaultMessage } from '../common/ws-events.ts';
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
@@ -83,7 +82,10 @@ import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
-import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
+import {
+  CarryOverHistoryUnavailableError,
+  CarryOverTranscriptStore,
+} from './chats/carryover-transcript-store.js';
 import {
   finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
@@ -196,7 +198,6 @@ export async function startServer(): Promise<void> {
       onNodeCommitted: () => markCarryOverMigrationRollbackUnsafe(workspaceDir),
     });
     await carryOver.initialize();
-    let carryOverRegistry: ChatRegistry | null = null;
 
     const integrationHostFactory = new IntegrationHostFactory({
       workspaceDir,
@@ -205,32 +206,6 @@ export async function startServer(): Promise<void> {
         const resolved = apiProviderStore.getEndpoint(reference.endpointId);
         if (!resolved || resolved.apiProvider.id !== reference.apiProviderId) return null;
         return { kind: 'api-key', value: resolved.endpoint.apiKey };
-      },
-      async loadCarryOver(request) {
-        request.signal.throwIfAborted();
-        const entry = carryOverRegistry?.getChat(request.chatId);
-        if (!entry) {
-          throw new AgentIntegrationError(
-            'SOURCE_REVISION_CHANGED',
-            `Carry-over source is unavailable for chat ${request.chatId}`,
-            true,
-          );
-        }
-        const revision = carryOver.revision(entry.carryOverHeadId);
-        if (revision !== request.expectedRevision) {
-          throw new AgentIntegrationError(
-            'SOURCE_REVISION_CHANGED',
-            `Carry-over revision changed for chat ${request.chatId}`,
-            true,
-          );
-        }
-        return {
-          revision,
-          messages: await carryOver.loadAll(entry.carryOverHeadId, {
-            agentId: request.currentAgentId,
-            model: request.currentModel,
-          }),
-        };
       },
     });
     const integrationRegistry = new IntegrationRegistry({
@@ -254,7 +229,6 @@ export async function startServer(): Promise<void> {
       migrateLegacyCarryOverWorkspace(workspaceDir)
     ));
     await chatRegistry.init();
-    carryOverRegistry = chatRegistry;
     await settings.init();
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
@@ -294,7 +268,7 @@ export async function startServer(): Promise<void> {
       getCarryOverRevision: (entry) => carryOver.revision(entry.carryOverHeadId ?? null),
       async loadCarriedContext(entry, signal) {
         if (entry.carryOverMigrationQuarantine) {
-          throw new Error('Archived chat history is unavailable');
+          throw new CarryOverHistoryUnavailableError();
         }
         if (!entry.carryOverHeadId) return null;
         const messages = await carryOver.loadTailForSeed({

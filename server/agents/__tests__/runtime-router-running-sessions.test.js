@@ -27,7 +27,6 @@ function makeRouter(providerSessions, mappings = {}) {
     endpointResolver: {},
     events: {},
     getCarryOverRevision: () => 'carry-1',
-    loadCarryOver: () => [],
   });
 }
 

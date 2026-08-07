@@ -702,7 +702,10 @@ export class TranscriptSearchService {
   ): void {
     if (lifecycleEpoch !== this.#indexer.epoch || !this.#indexer.available) return;
     const typedFailure = error instanceof TranscriptSearchCarryOverError ? error.failure : null;
-    const code = typedFailure?.code
+    const historyUnavailable = hasErrorCode(error, 'CARRYOVER_HISTORY_UNAVAILABLE');
+    const code = historyUnavailable
+      ? 'CARRY_OVER_UNAVAILABLE'
+      : typedFailure?.code
       ?? (error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)
         ? error.message
         : 'CARRY_OVER_UNAVAILABLE');
@@ -715,7 +718,9 @@ export class TranscriptSearchService {
       messages: [],
       done: true,
       code,
-      retryable: typedFailure?.retryable ?? code !== 'CARRY_OVER_MESSAGE_TOO_LARGE',
+      retryable: historyUnavailable
+        ? false
+        : typedFailure?.retryable ?? code !== 'CARRY_OVER_MESSAGE_TOO_LARGE',
     });
   }
 
@@ -890,6 +895,13 @@ export async function cleanupObsoleteSearchArtifacts(
       logger.warn('Obsolete transcript search cleanup failed.', { code: 'SEARCH_CLEANUP_FAILED' });
     }
   }));
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === code;
 }
 
 function boundedFrames<T>(

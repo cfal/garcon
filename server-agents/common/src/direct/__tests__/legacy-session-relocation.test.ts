@@ -33,9 +33,6 @@ function createHost(
     },
     environment: { get: () => undefined },
     apiProviders: { resolveCredential: async () => null },
-    carryOver: {
-      load: async ({ expectedRevision }) => ({ revision: expectedRevision, messages: [] }),
-    },
   } satisfies AgentHost;
   return { host, info };
 }

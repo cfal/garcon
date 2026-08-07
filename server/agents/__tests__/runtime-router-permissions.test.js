@@ -17,7 +17,6 @@ function makeRouter(execution) {
     endpointResolver: {},
     events: {},
     getCarryOverRevision: () => 'carry-1',
-    loadCarryOver: () => [],
   });
 }
 

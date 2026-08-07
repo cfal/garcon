@@ -91,7 +91,6 @@ function hostFactory(workspaceDir) {
   return new IntegrationHostFactory({
     workspaceDir,
     resolveCredential: async () => null,
-    loadCarryOver: async ({ expectedRevision }) => ({ revision: expectedRevision, messages: [] }),
     loggerFactory: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
     readEnvironment: (name) => name === 'ALPHA_BIN' ? '/bin/alpha' : undefined,
   });

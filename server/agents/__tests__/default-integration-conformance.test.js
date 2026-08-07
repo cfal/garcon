@@ -25,7 +25,6 @@ describe('default agent integration conformance', () => {
     const hostFactory = new IntegrationHostFactory({
       workspaceDir,
       resolveCredential: async () => null,
-      loadCarryOver: async ({ expectedRevision }) => ({ revision: expectedRevision, messages: [] }),
       readEnvironment: () => undefined,
       loggerFactory: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
     });
