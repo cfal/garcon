@@ -491,7 +491,7 @@ async function seedWorkspace(input: {
 }): Promise<void> {
   await writeFile(
     join(input.workspace, 'workspace-version.json'),
-    JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
+    JSON.stringify({ version: 4 }),
   );
   await writeFile(
     join(input.workspace, 'chats.json'),

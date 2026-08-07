@@ -360,7 +360,7 @@ async function prepareEmptyChat(
     JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
   );
   await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-    version: 4,
+    version: 5,
     sessions: {
       [chatId]: {
         agentId,
@@ -378,7 +378,7 @@ async function prepareEmptyChat(
         lastReadAt: null,
         permissionMode: 'bypassPermissions',
         thinkingMode: 'low',
-        carryOverHeadId: null,
+        carryOverSegments: [],
         nativeSeedReceipt: null,
         carryOverMigrationQuarantine: null,
       },

@@ -3,7 +3,7 @@ import { assistantContents, userContents } from '../../support/chat-assertions.j
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('cross-provider fork lifecycle', () => {
-  test('shares linked handoff history across repeated whole-chat forks', async () => {
+  test('shares direct handoff history across repeated whole-chat forks', async () => {
     await withIntegrationFixture('cross-provider-fork', async (fixture) => {
       const sourceChatId = fixture.newChatId();
       const first = await fixture.client.startDirectChat({
@@ -23,7 +23,7 @@ describe('cross-provider fork lifecycle', () => {
       await fixture.client.waitForTurnTerminal(sourceChatId, handoff.turnId);
       const handoffRequest = fixture.fakeProviders.anthropic.requests()[0];
       expect(handoffRequest.lastUserText).toContain('anthropic-handoff-turn');
-      expect(occurrences(handoffRequest.lastUserText, '<carried-context version="1"')).toBe(1);
+      expect(occurrences(handoffRequest.lastUserText, '<carried-context version="2">')).toBe(1);
 
       const targetChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });

@@ -27,31 +27,43 @@ describe('carryover bootstrap migration', () => {
       async (fixture) => {
         const firstRegistry = await readJson<RegistryFile>(fixture, 'chats.json');
         const firstEntry = firstRegistry.sessions[CHAT_ID];
-        if (!firstEntry?.carryOverHeadId) throw new Error('Migrated chat has no carryover head');
-        const migratedHead = firstEntry.carryOverHeadId;
+        if (!firstEntry) throw new Error('Migrated chat is missing');
+        expect(firstEntry.carryOverSegments).toHaveLength(2);
+        const migratedSegments = firstEntry.carryOverSegments;
 
-        expect(firstRegistry.version).toBe(4);
+        expect(firstRegistry.version).toBe(5);
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
-          version: 4,
+          version: 5,
         });
         expect(await readJson<{
           version: number;
           ownershipIntents: unknown[];
           transferCleanup: unknown[];
         }>(fixture, 'agent-ownership-journal.json')).toEqual({
-          version: 2,
+          version: 3,
           ownershipIntents: [],
           transferCleanup: [],
         });
         const firstMarker = await readJson<MigrationMarker>(
           fixture,
-          'carryover-transcripts/migration-v1.json',
+          'carryover-transcripts/migration-v2.json',
         );
         expect(firstMarker).toMatchObject({
           phase: 'complete',
-          nodeCount: 2,
+          segmentCount: 2,
           rollbackSafe: true,
         });
+        for (const ref of migratedSegments) {
+          const index = await readJson<Record<string, unknown>>(
+            fixture,
+            `carryover-transcripts/segments/${ref.id}/segment.json`,
+          );
+          expect(index).toMatchObject({ id: ref.id, messageCount: 2 });
+          expect(index).not.toHaveProperty('parentId');
+          expect(index).not.toHaveProperty('sourceNodeId');
+          expect(index).not.toHaveProperty('agentId');
+          expect(index).not.toHaveProperty('model');
+        }
         expect(await Bun.file(join(fixture.dirs.workspace, 'chat-carryover.json')).exists())
           .toBe(false);
         expect(await migratedCarryOverFiles(fixture)).toHaveLength(1);
@@ -62,14 +74,14 @@ describe('carryover bootstrap migration', () => {
         await fixture.restartGarcon();
 
         const restartedRegistry = await readJson<RegistryFile>(fixture, 'chats.json');
-        expect(restartedRegistry.sessions[CHAT_ID]?.carryOverHeadId).toBe(migratedHead);
+        expect(restartedRegistry.sessions[CHAT_ID]?.carryOverSegments).toEqual(migratedSegments);
         const finalizedMarker = await readJson<MigrationMarker>(
           fixture,
-          'carryover-transcripts/migration-v1.json',
+          'carryover-transcripts/migration-v2.json',
         );
         expect(finalizedMarker).toMatchObject({
           phase: 'complete',
-          nodeCount: 2,
+          segmentCount: 2,
           rollbackSafe: false,
         });
         expect(await migratedCarryOverFiles(fixture)).toEqual([]);
@@ -83,12 +95,20 @@ describe('carryover bootstrap migration', () => {
 
 interface RegistryFile {
   readonly version: number;
-  readonly sessions: Record<string, { readonly carryOverHeadId?: string | null }>;
+  readonly sessions: Record<string, {
+    readonly carryOverSegments: readonly {
+      readonly id: string;
+      readonly agentId: string;
+      readonly model: string;
+      readonly storedMessageCount: number;
+      readonly visibleMessageCount: number;
+    }[];
+  }>;
 }
 
 interface MigrationMarker {
   readonly phase: string;
-  readonly nodeCount: number;
+  readonly segmentCount: number;
   readonly rollbackSafe: boolean;
 }
 
@@ -191,7 +211,7 @@ async function migratedCarryOverFiles(
   fixture: { readonly dirs: IntegrationDirectories },
 ): Promise<string[]> {
   return (await readdir(fixture.dirs.workspace)).filter((file) => (
-    file.startsWith('chat-carryover.v4.migrated.')
+    file.startsWith('chat-carryover.v5.migrated.')
   ));
 }
 

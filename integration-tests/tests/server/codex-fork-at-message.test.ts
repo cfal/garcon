@@ -302,7 +302,7 @@ describe('Codex fork at message', () => {
           JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
         );
         await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-          version: 4,
+          version: 5,
           sessions: {
             [sourceChatId]: {
               agentId: 'codex',
@@ -327,7 +327,7 @@ describe('Codex fork at message', () => {
               lastReadAt: null,
               permissionMode: 'default',
               thinkingMode: 'none',
-              carryOverHeadId: null,
+              carryOverSegments: [],
               nativeSeedReceipt: null,
               carryOverMigrationQuarantine: null,
             },
