@@ -10,6 +10,10 @@
 	} from '$lib/workspace/transient-layers.svelte';
 	import type { GlobalShortcutOverrides } from '$lib/workspace/global-shortcuts.js';
 	import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import {
+		managedWorkspaceScrollRegion,
+		type WorkspaceHalfPageDirection,
+	} from '$lib/workspace/workspace-scroll-region.js';
 
 	interface KeyboardShortcutsHostProps {
 		appShell: {
@@ -33,6 +37,9 @@
 		onToggleMainSidebarFocus?: () => void;
 		onTransientEscape?: () => void;
 		onSurfaceEscape?: () => void;
+		onPrimaryScroll?: (direction: WorkspaceHalfPageDirection) => void;
+		onContextualScroll?: (direction: WorkspaceHalfPageDirection) => void;
+		onTransientScroll?: (direction: WorkspaceHalfPageDirection) => void;
 		globalShortcuts?: GlobalShortcutOverrides;
 	}
 
@@ -49,9 +56,22 @@
 		onToggleMainSidebarFocus = () => undefined,
 		onTransientEscape = () => undefined,
 		onSurfaceEscape = () => undefined,
+		onPrimaryScroll,
+		onContextualScroll,
+		onTransientScroll,
 		globalShortcuts = {},
 	}: KeyboardShortcutsHostProps = $props();
 	let transientElement = $state<HTMLElement | null>(null);
+	const primaryScrollRegion = managedWorkspaceScrollRegion('primary', (_element, direction) =>
+		onPrimaryScroll?.(direction),
+	);
+	const contextualScrollRegion = managedWorkspaceScrollRegion(
+		'contextual',
+		(_element, direction) => onContextualScroll?.(direction),
+	);
+	const transientScrollRegion = managedWorkspaceScrollRegion('primary', (_element, direction) =>
+		onTransientScroll?.(direction),
+	);
 
 	const appShellPort = {
 		get openSidebarSearch() {
@@ -151,6 +171,33 @@
 
 <KeyboardShortcuts {onToggleCommandMenu} />
 
+{#if onPrimaryScroll || onContextualScroll}
+	<div
+		data-workspace-chat-list={focusOwner === 'chat-list' ? '' : undefined}
+		data-workspace-surface-id={focusOwner === 'chat'
+			? 'singleton:chat'
+			: focusOwner === 'file'
+				? 'file:file-session'
+				: undefined}
+	>
+		<button type="button" aria-label="Surface toolbar">Toolbar</button>
+		{#if onPrimaryScroll}
+			<div {@attach primaryScrollRegion}>
+				<button type="button" aria-label="Primary scroll region">Primary</button>
+				{#if focusOwner === 'file'}
+					<textarea aria-label="File editor input"></textarea>
+				{/if}
+			</div>
+		{/if}
+		{#if onContextualScroll}
+			<div {@attach contextualScrollRegion}>
+				<button type="button" aria-label="Contextual scroll region">Contextual</button>
+				<span data-testid="contextual-content">Content</span>
+			</div>
+		{/if}
+	</div>
+{/if}
+
 {#if focusOwner === 'terminal'}
 	<div data-workspace-surface-id="terminal:one">
 		<input aria-label="Terminal input" />
@@ -163,6 +210,10 @@
 		data-workspace-surface-id={transientSurface ? 'file:file-session' : undefined}
 		role={transientKind === 'menu' ? 'menu' : transientKind === 'popover' ? 'region' : 'dialog'}
 	>
+		<button type="button" aria-label="Transient toolbar">Toolbar</button>
 		<input aria-label="Transient input" />
+		{#if onTransientScroll}
+			<div aria-label="Transient scroll region" {@attach transientScrollRegion}>Transient</div>
+		{/if}
 	</div>
 {/if}

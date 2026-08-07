@@ -4,13 +4,22 @@ import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import type { FocusOwner } from './surface-types.js';
 import {
 	getEffectiveGlobalShortcut,
 	globalShortcutMatchesEvent,
 	type GlobalShortcutId,
 } from './global-shortcuts.js';
+import {
+	closestWorkspaceScrollRegion,
+	scrollWorkspaceRegion,
+	WORKSPACE_SCROLL_REGION_SELECTOR,
+	workspaceScrollRegionRole,
+	type WorkspaceHalfPageDirection,
+} from './workspace-scroll-region.js';
 
 export type WorkspaceSurfaceShortcutHandler = (event: KeyboardEvent) => boolean;
+type WorkspaceScrollInteraction = 'focus' | 'pointer' | 'wheel';
 
 interface WorkspaceShortcutDeps {
 	workspace: WorkspaceCoordinator;
@@ -24,6 +33,8 @@ interface WorkspaceShortcutDeps {
 export class WorkspaceShortcutDispatcher {
 	readonly #handlers = new Map<string, Set<WorkspaceSurfaceShortcutHandler>>();
 	#toggleCommandMenu: (() => void) | null = null;
+	#lastInteractedScrollRegion: HTMLElement | null = null;
+	#pendingPointerFocus: { region: HTMLElement } | null = null;
 
 	constructor(private readonly deps: WorkspaceShortcutDeps) {}
 
@@ -44,6 +55,32 @@ export class WorkspaceShortcutDispatcher {
 		};
 	}
 
+	noteScrollRegionInteraction(
+		target: EventTarget | null,
+		interaction: WorkspaceScrollInteraction,
+	): void {
+		const region = closestWorkspaceScrollRegion(target);
+		const availableRegion = region && this.#isScrollRegionAvailable(region) ? region : null;
+		if (interaction === 'focus') {
+			const pendingPointerFocus = this.#pendingPointerFocus;
+			this.#pendingPointerFocus = null;
+			if (
+				!availableRegion &&
+				pendingPointerFocus &&
+				target instanceof Node &&
+				target.contains(pendingPointerFocus.region)
+			) {
+				return;
+			}
+		}
+		if (interaction === 'pointer') {
+			this.#pendingPointerFocus = availableRegion ? { region: availableRegion } : null;
+		} else if (interaction === 'wheel') {
+			this.#pendingPointerFocus = null;
+		}
+		this.#lastInteractedScrollRegion = availableRegion;
+	}
+
 	handle(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
 		if (event.key === 'Escape' && this.deps.transients.handleEscape(event)) return;
@@ -58,6 +95,10 @@ export class WorkspaceShortcutDispatcher {
 			return;
 		}
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
+		const ownerDescriptor =
+			owner.kind === 'surface' || owner.kind === 'host-chrome'
+				? this.deps.workspace.layout.surface(owner.surfaceId)
+				: null;
 		const terminalOwnsInput =
 			explicitOwner?.kind === 'surface' &&
 			this.deps.workspace.isSurfacePresented(explicitOwner.surfaceId) &&
@@ -75,6 +116,24 @@ export class WorkspaceShortcutDispatcher {
 		if (matches('new-chat') && !terminalOwnsInput) {
 			event.preventDefault();
 			this.deps.appShell.requestNewChat();
+			return;
+		}
+		const halfPageDirection: WorkspaceHalfPageDirection | null = matches('scroll-half-page-up')
+			? 'earlier'
+			: matches('scroll-half-page-down')
+				? 'later'
+				: null;
+		if (halfPageDirection) {
+			// Terminal input is the sole exception; editable targets still use workspace scrolling.
+			if (ownerDescriptor?.type === 'terminal') return;
+			event.preventDefault();
+			event.stopPropagation();
+			this.#scrollHalfPage(
+				owner,
+				event.target,
+				halfPageDirection,
+				this.deps.transients.makesMainInert,
+			);
 			return;
 		}
 		if (matches('toggle-main-sidebar-focus')) {
@@ -142,12 +201,59 @@ export class WorkspaceShortcutDispatcher {
 		} else if (matches('delete-chat')) {
 			event.preventDefault();
 			this.deps.appShell.requestDeleteSelectedChat();
-		} else if (matches('scroll-half-page-up') || matches('scroll-half-page-down')) {
-			event.preventDefault();
 		}
 	}
 
-	#ownerForTarget(target: EventTarget | null) {
+	#scrollHalfPage(
+		owner: FocusOwner,
+		target: EventTarget | null,
+		direction: WorkspaceHalfPageDirection,
+		restrictToTopModal: boolean,
+	): void {
+		const directRegion = closestWorkspaceScrollRegion(target);
+		if (
+			directRegion &&
+			this.#isScrollRegionAvailable(directRegion) &&
+			this.#ownersMatch(owner, this.#ownerForTarget(directRegion)) &&
+			(!restrictToTopModal || this.deps.transients.ownsTopModalTarget(directRegion))
+		) {
+			scrollWorkspaceRegion(directRegion, direction);
+			return;
+		}
+		if (typeof document === 'undefined') return;
+		const regions = Array.from(
+			document.querySelectorAll<HTMLElement>(WORKSPACE_SCROLL_REGION_SELECTOR),
+		).filter(
+			(region) =>
+				this.#isScrollRegionAvailable(region) &&
+				this.#ownersMatch(owner, this.#ownerForTarget(region)) &&
+				(!restrictToTopModal || this.deps.transients.ownsTopModalTarget(region)),
+		);
+		const lastRegion = this.#lastInteractedScrollRegion;
+		const region =
+			(lastRegion && regions.includes(lastRegion) ? lastRegion : null) ??
+			regions.find((candidate) => workspaceScrollRegionRole(candidate) === 'primary') ??
+			regions[0];
+		if (region) scrollWorkspaceRegion(region, direction);
+	}
+
+	#isScrollRegionAvailable(element: HTMLElement): boolean {
+		return (
+			element.isConnected &&
+			workspaceScrollRegionRole(element) !== null &&
+			!element.closest('[inert], [aria-hidden="true"]')
+		);
+	}
+
+	#ownersMatch(owner: FocusOwner, candidate: FocusOwner | null): boolean {
+		if (!candidate) return false;
+		if (owner.kind === 'chat-list' || candidate.kind === 'chat-list') {
+			return owner.kind === 'chat-list' && candidate.kind === 'chat-list';
+		}
+		return owner.surfaceId === candidate.surfaceId;
+	}
+
+	#ownerForTarget(target: EventTarget | null): FocusOwner | null {
 		if (target instanceof Element) {
 			const surface = target.closest<HTMLElement>('[data-workspace-surface-id]');
 			if (surface?.dataset.workspaceSurfaceId) {
