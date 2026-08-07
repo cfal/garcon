@@ -623,7 +623,18 @@ function makeService(overrides = {}) {
             agentSessionId: null,
             nativeSession: null,
             nativeSeedReceipt: null,
-            carryOverHeadId: 'handoff-head',
+            carryOverSegments: [{
+              id: '11111111-1111-4111-8111-111111111111',
+              agentId: current.agentId,
+              model: current.model,
+              capturedAt: '2026-08-07T00:00:00.000Z',
+              storedMessageCount: 1,
+              visibleMessageCount: 1,
+              trailingHandoff: {
+                agentId: input.target.agentId,
+                model: input.target.model,
+              },
+            }],
             agentOwnershipEpoch: `${current.agentOwnershipEpoch}:handoff`,
           });
         }),
@@ -1783,7 +1794,10 @@ describe('ChatCommandService', () => {
     expect(sessions.get(SOURCE_CHAT_ID)).toMatchObject({
       agentId: 'codex',
       agentSessionId: null,
-      carryOverHeadId: 'handoff-head',
+      carryOverSegments: [expect.objectContaining({
+        id: '11111111-1111-4111-8111-111111111111',
+        agentId: 'claude',
+      })],
       agentOwnershipEpoch: 'epoch-1:handoff',
     });
     expect(handoffs.resolveTarget).toHaveBeenCalledTimes(1);

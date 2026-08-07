@@ -12,7 +12,7 @@ import type {
 import { serializeCompositeTranscriptRevision } from './composite-transcript-revision.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 
-export class LinkedChatTranscriptReader {
+export class OrderedChatTranscriptReader {
   constructor(private readonly deps: {
     readonly registry: IChatRegistry;
     readonly agents: {
@@ -128,11 +128,14 @@ export class LinkedChatTranscriptReader {
       };
     }
     const [archivedLogicalCount, native] = await Promise.all([
-      this.deps.carryOver.logicalMessageCount(entry.carryOverHeadId),
+      this.deps.carryOver.logicalMessageCount(entry.carryOverSegments),
       this.#loadCurrentNativeSnapshot(entry, chatId),
     ]);
     this.#assertEntryUnchanged(chatId, entry);
-    const carryOverRevision = this.deps.carryOver.revision(entry.carryOverHeadId);
+    const carryOverRevision = this.deps.carryOver.revision(
+      entry.carryOverSegments,
+      entry.carryOverMigrationQuarantine,
+    );
     return {
       messages: native.messages,
       compositeRevision: serializeCompositeTranscriptRevision({
@@ -183,10 +186,7 @@ export class LinkedChatTranscriptReader {
     const entry = this.#requireReadableEntry(chatId);
     if (!entry) return emptySnapshot();
     const [archived, native] = await Promise.all([
-      this.deps.carryOver.loadAll(entry.carryOverHeadId, {
-        agentId: entry.agentId,
-        model: entry.model,
-      }),
+      this.deps.carryOver.loadAll(entry.carryOverSegments),
       this.#loadCurrentNativeSnapshot(entry, chatId),
     ]);
     this.#assertEntryUnchanged(chatId, entry);
@@ -199,7 +199,7 @@ export class LinkedChatTranscriptReader {
     const boundedLimit = Math.max(0, Math.trunc(limit));
     const boundedOffset = Math.max(0, Math.trunc(offset));
     const [archivedCount, native] = await Promise.all([
-      this.deps.carryOver.logicalMessageCount(entry.carryOverHeadId),
+      this.deps.carryOver.logicalMessageCount(entry.carryOverSegments),
       this.loadNativeWindow({
         chatId,
         limit: boundedLimit,
@@ -218,8 +218,7 @@ export class LinkedChatTranscriptReader {
     const archivedEnd = Math.min(end, archivedCount);
     if (start < archivedEnd) {
       const page = await this.deps.carryOver.loadPage({
-        headId: entry.carryOverHeadId,
-        current: { agentId: entry.agentId, model: entry.model },
+        refs: entry.carryOverSegments,
         offset: start,
         limit: archivedEnd - start,
       });
@@ -227,7 +226,10 @@ export class LinkedChatTranscriptReader {
     }
     messages.push(...nativeMessages);
     this.#assertEntryUnchanged(chatId, entry);
-    const carryOverRevision = this.deps.carryOver.revision(entry.carryOverHeadId);
+    const carryOverRevision = this.deps.carryOver.revision(
+      entry.carryOverSegments,
+      entry.carryOverMigrationQuarantine,
+    );
     return {
       messages,
       total,
@@ -248,7 +250,7 @@ export class LinkedChatTranscriptReader {
   async archivedMessageCount(chatId: string): Promise<number> {
     const entry = this.#requireReadableEntry(chatId);
     return entry
-      ? this.deps.carryOver.logicalMessageCount(entry.carryOverHeadId)
+      ? this.deps.carryOver.logicalMessageCount(entry.carryOverSegments)
       : 0;
   }
 
@@ -276,7 +278,10 @@ export class LinkedChatTranscriptReader {
     native: ChatMessage[],
     nativeRevision: string,
   ): ChatTranscriptSnapshot {
-    const carryOverRevision = this.deps.carryOver.revision(entry.carryOverHeadId);
+    const carryOverRevision = this.deps.carryOver.revision(
+      entry.carryOverSegments,
+      entry.carryOverMigrationQuarantine,
+    );
     return {
       messages: [...archived, ...native],
       nativeMessages: native,
@@ -297,7 +302,13 @@ export class LinkedChatTranscriptReader {
     if (!current
         || current.agentOwnershipEpoch !== expected.agentOwnershipEpoch
         || current.agentSessionId !== expected.agentSessionId
-        || current.carryOverHeadId !== expected.carryOverHeadId) {
+        || this.deps.carryOver.revision(
+          current.carryOverSegments,
+          current.carryOverMigrationQuarantine,
+        ) !== this.deps.carryOver.revision(
+          expected.carryOverSegments,
+          expected.carryOverMigrationQuarantine,
+        )) {
       throw new DomainError(
         'SOURCE_REVISION_CHANGED',
         'Chat ownership changed while its transcript was loading.',

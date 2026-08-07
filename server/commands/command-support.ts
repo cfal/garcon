@@ -75,7 +75,7 @@ export interface MetadataDep {
 
 export type CarryOverDep = Pick<
   CarryOverTranscriptStore,
-  'assertReachableForHandoff' | 'logicalMessageCount' | 'preparePrefix' | 'resolveCutoff'
+  'assertAvailable' | 'logicalMessageCount' | 'resolveCutoff'
 >;
 
 export type PendingInputsDep = Pick<

@@ -44,14 +44,14 @@ function persistedEntry(overrides = {}) {
     lastReadAt: null,
     permissionMode: 'default',
     thinkingMode: 'none',
-    carryOverHeadId: null,
+    carryOverSegments: [],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
     ...overrides,
   };
 }
 
-async function writeRegistry(sessions, version = 4) {
+async function writeRegistry(sessions, version = 5) {
   await fs.writeFile(path.join(tempDir, 'chats.json'), JSON.stringify({ version, sessions }));
 }
 
@@ -138,7 +138,7 @@ describe('ChatRegistry', () => {
     }, { flush: true });
 
     const persisted = JSON.parse(await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8'));
-    expect(persisted.version).toBe(4);
+    expect(persisted.version).toBe(5);
     expect(persisted.sessions[CHAT_ID]).toMatchObject({
       agentSessionId: 'native-1',
       nativeSession: nativeSession('test', { id: 'native-1' }),
@@ -207,7 +207,7 @@ describe('ChatRegistry', () => {
     expect(removed).toHaveBeenCalledWith(CHAT_ID, 'user-deletion');
   });
 
-  it('loads a strict version-four registry and rebuilds its native ID index', async () => {
+  it('loads a strict version-five registry and rebuilds its native ID index', async () => {
     await registry.flush();
     await writeRegistry({ [CHAT_ID]: persistedEntry() });
     registry = new ChatRegistry(tempDir);
@@ -216,6 +216,50 @@ describe('ChatRegistry', () => {
 
     expect(registry.getChat(CHAT_ID)).toEqual(persistedEntry());
     expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('strictly parses and freezes ordered carryover references', async () => {
+    const segment = {
+      id: '11111111-1111-4111-8111-111111111111',
+      agentId: 'test',
+      model: 'model-a',
+      capturedAt: '2026-08-07T12:00:00.000Z',
+      storedMessageCount: 2,
+      visibleMessageCount: 1,
+      trailingHandoff: { agentId: 'other', model: 'model-b' },
+    };
+    await registry.flush();
+    await writeRegistry({ [CHAT_ID]: persistedEntry({ carryOverSegments: [segment] }) });
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+
+    const entry = registry.getChat(CHAT_ID);
+    expect(entry.carryOverSegments).toEqual([segment]);
+    expect(Object.isFrozen(entry.carryOverSegments)).toBeTrue();
+    expect(Object.isFrozen(entry.carryOverSegments[0])).toBeTrue();
+    expect(Object.isFrozen(entry.carryOverSegments[0].trailingHandoff)).toBeTrue();
+    expect(() => entry.carryOverSegments.push(segment)).toThrow();
+  });
+
+  it('rejects duplicate, empty, and out-of-range carryover references', async () => {
+    const segment = {
+      id: '11111111-1111-4111-8111-111111111111',
+      agentId: 'test',
+      model: '',
+      capturedAt: '2026-08-07T12:00:00.000Z',
+      storedMessageCount: 1,
+      visibleMessageCount: 1,
+      trailingHandoff: null,
+    };
+    for (const carryOverSegments of [
+      [segment, segment],
+      [{ ...segment, storedMessageCount: 0, visibleMessageCount: 0 }],
+      [{ ...segment, visibleMessageCount: 2 }],
+    ]) {
+      await writeRegistry({ [CHAT_ID]: persistedEntry({ carryOverSegments }) });
+      registry = new ChatRegistry(tempDir);
+      await expect(registry.init()).rejects.toThrow();
+    }
   });
 
   it('rejects malformed ownership, settings, and native-session records', async () => {

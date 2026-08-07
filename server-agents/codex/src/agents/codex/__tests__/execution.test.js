@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
-import { renderCarriedContextPrefix } from '@garcon/common/transcript-seed';
+import { renderCarriedContext } from '@garcon/common/transcript-seed';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { AgentEventBus } from '../../../../../../server/agents/event-bus.ts';
@@ -185,14 +185,13 @@ describe('CodexExecution', () => {
       createPathNativeSessionCodec('codex'),
       createConfig(),
     );
-    const headId = '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e';
-    const prefix = renderCarriedContextPrefix(headId, [
+    const prefix = renderCarriedContext([
       new UserMessage('2026-07-19T00:00:00.000Z', 'earlier'),
-    ]);
+    ]).prefix;
 
     const started = await execution.start(startRequest({
       prompt: '/goal ship the migration',
-      carriedContext: { headId, prefix },
+      carriedContext: { prefix },
     }));
 
     expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
@@ -201,9 +200,9 @@ describe('CodexExecution', () => {
       codexSeedContext: prefix,
     }));
     expect(started.nativeSeedReceipt).toMatchObject({
-      headId,
       agentSessionId: 'thread-1',
       placement: 'provider-context',
+      format: 'v2-xml',
       codeUnitLength: prefix.length,
     });
   });

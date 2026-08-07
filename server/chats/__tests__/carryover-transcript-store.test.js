@@ -2,26 +2,27 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
-import { writeJsonFileAtomic } from '../../lib/json-file-store.js';
+import {
+  AgentSwitchMessage,
+  AssistantMessage,
+  UserMessage,
+} from '@garcon/common/chat-types';
 import {
   CarryOverHistoryUnavailableError,
   CarryOverTranscriptStore,
-} from '../carryover-transcript-store.ts';
-import { decodeCarryOverPage } from '../carryover-page-codec.ts';
+} from '../carryover-transcript-store.js';
 
-const FIRST = '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e';
-const SECOND = 'd5f2380b-6228-49f5-8484-b2d7e16380ab';
-const PREFIX = 'b74d65dc-54b0-49eb-a67f-8178f31fe72c';
-const OPERATION = 'operation:test';
-const TIMESTAMP = '2026-01-01T00:00:00.000Z';
+const FIRST = '11111111-1111-4111-8111-111111111111';
+const SECOND = '22222222-2222-4222-8222-222222222222';
+const EMPTY = '33333333-3333-4333-8333-333333333333';
+const TIME = '2026-08-07T12:00:00.000Z';
 
 describe('CarryOverTranscriptStore', () => {
   let workspaceDir;
   let store;
 
   beforeEach(async () => {
-    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-linked-carryover-'));
+    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'carryover-segments-'));
     store = new CarryOverTranscriptStore({ workspaceDir });
     await store.initialize();
   });
@@ -30,313 +31,163 @@ describe('CarryOverTranscriptStore', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('writes immutable paged nodes and reads chronological boundaries', async () => {
-    const firstMessages = Array.from(
-      { length: 257 },
-      (_, index) => new UserMessage(TIMESTAMP, `first ${index}`),
-    );
-    await commitMaterialized(store, {
-      id: FIRST,
-      parentId: null,
-      agentId: 'codex',
-      model: 'gpt',
-      targetAgentId: 'claude',
-      targetModel: 'opus',
-      messages: firstMessages,
-    });
-    await commitMaterialized(store, {
-      id: SECOND,
-      parentId: FIRST,
-      agentId: 'claude',
-      model: 'opus',
-      targetAgentId: 'pi',
-      targetModel: 'kimi',
-      messages: [new AssistantMessage(TIMESTAMP, 'second')],
-    });
+  it('writes independent immutable segments and renders explicit boundaries in array order', async () => {
+    const firstMessages = [
+      new UserMessage(TIME, 'question A'),
+      new AssistantMessage(TIME, 'answer A'),
+    ];
+    const secondMessages = [new UserMessage(TIME, 'question B')];
+    await commit(store, FIRST, firstMessages);
+    await commit(store, SECOND, secondMessages);
+    const refs = [
+      ref(FIRST, 'a', 'model-a', firstMessages.length, { agentId: 'b', model: 'model-b' }),
+      ref(SECOND, 'b', 'model-b', secondMessages.length, { agentId: 'c', model: 'model-c' }),
+    ];
 
-    const firstManifest = await store.readManifest(FIRST);
-    expect(firstManifest.kind).toBe('materialized');
-    expect(firstManifest.pages).toHaveLength(2);
-    expect(await store.logicalMessageCount(SECOND)).toBe(260);
-
-    const all = await store.loadAll(SECOND, { agentId: 'pi', model: 'kimi' });
-    expect(all).toHaveLength(260);
-    expect(all[257]).toMatchObject({
-      type: 'agent-switch',
-      fromAgentId: 'codex',
-      toAgentId: 'claude',
-    });
-    expect(all.at(-1)).toMatchObject({
-      type: 'agent-switch',
-      fromAgentId: 'claude',
-      toAgentId: 'pi',
-    });
-    expect(store.revision(SECOND)).toBe(`carry-v2:${SECOND}`);
-  });
-
-  it('loads bounded pages without changing logical sequence positions', async () => {
-    await commitMaterialized(store, {
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [
-        new UserMessage(TIMESTAMP, 'one'),
-        new AssistantMessage(TIMESTAMP, 'two'),
-        new UserMessage(TIMESTAMP, 'three'),
-      ],
-    });
-
-    const page = await store.loadPage({
-      headId: FIRST,
-      current: { agentId: 'b', model: 'two' },
-      offset: 1,
-      limit: 2,
-    });
-    expect(page.messages.map((message) => message.content)).toEqual(['two', 'three']);
-    expect(page).toMatchObject({ total: 4, offset: 1, limit: 2, hasMore: true });
-  });
-
-  it('preserves a handoff boundary for an empty provider segment', async () => {
-    await commitMaterialized(store, {
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [],
-    });
-
-    const manifest = await store.readManifest(FIRST);
-    expect(manifest).toMatchObject({ messageCount: 0, pages: [] });
-    expect(await store.logicalMessageCount(FIRST)).toBe(1);
-    expect(await store.loadAll(FIRST, { agentId: 'b', model: 'two' })).toEqual([
-      expect.objectContaining({
-        type: 'agent-switch',
-        fromAgentId: 'a',
-        toAgentId: 'b',
-      }),
+    const messages = await store.loadAll(refs);
+    expect(messages.map((message) => message.type)).toEqual([
+      'user-message',
+      'assistant-message',
+      'agent-switch',
+      'user-message',
+      'agent-switch',
     ]);
-    expect(await store.resolveCutoff(FIRST, 1)).toEqual({ kind: 'reuse', headId: FIRST });
+    expect(messages[2]).toEqual(new AgentSwitchMessage(TIME, 'a', 'b', 'model-a', 'model-b'));
+    expect(messages[4]).toEqual(new AgentSwitchMessage(TIME, 'b', 'c', 'model-b', 'model-c'));
+    expect(store.logicalMessageCount(refs)).toBe(5);
+    expect(store.revision(refs)).toStartWith('carry-v5:');
+
+    const firstIndex = await store.readIndex(FIRST);
+    expect(firstIndex).toMatchObject({ id: FIRST, messageCount: 2, messageSchemaVersion: 1 });
+    expect(firstIndex).not.toHaveProperty('parentId');
+    expect(firstIndex).not.toHaveProperty('agentId');
+    expect(firstIndex).not.toHaveProperty('model');
+    expect(firstIndex).not.toHaveProperty('sourceNodeId');
   });
 
-  it('allows one oversized message in its own page', async () => {
-    await commitMaterialized(store, {
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [new UserMessage(TIMESTAMP, 'x'.repeat(1024 * 1024 + 20))],
-    });
-    const manifest = await store.readManifest(FIRST);
-    expect(manifest.pages).toHaveLength(1);
-    expect((await store.loadAll(FIRST, { agentId: 'b', model: 'two' }))[0].content.length)
-      .toBe(1024 * 1024 + 20);
+  it('loads bounded logical pages across payload and boundary positions', async () => {
+    await commit(store, FIRST, [
+      new UserMessage(TIME, 'one'),
+      new AssistantMessage(TIME, 'two'),
+      new UserMessage(TIME, 'three'),
+    ]);
+    const refs = [ref(FIRST, 'a', 'one', 3, { agentId: 'b', model: 'two' })];
+    const page = await store.loadPage({ refs, offset: 1, limit: 2 });
+    expect(page.messages.map((message) => message.type)).toEqual(['assistant-message', 'user-message']);
+    const boundary = await store.loadPage({ refs, offset: 3, limit: 1 });
+    expect(boundary.messages[0]).toBeInstanceOf(AgentSwitchMessage);
+    expect(boundary.total).toBe(4);
   });
 
-  it('creates no-boundary prefix nodes for exact historical cutoffs', async () => {
-    await commitMaterialized(store, {
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [
-        new UserMessage(TIMESTAMP, 'one'),
-        new UserMessage(TIMESTAMP, 'two'),
-        new UserMessage(TIMESTAMP, 'three'),
-      ],
-    });
-    expect(await store.resolveCutoff(FIRST, 2)).toEqual({
-      kind: 'prefix', sourceNodeId: FIRST, messageCount: 2,
-    });
-    const prepared = await store.preparePrefix({
-      operationId: OPERATION,
-      id: PREFIX,
-      sourceNodeId: FIRST,
-      messageCount: 2,
-    });
-    await prepared.commit();
-    prepared.releaseRoot();
-
-    const messages = await store.loadAll(PREFIX, { agentId: 'b', model: 'two' });
-    expect(messages.map((message) => message.content)).toEqual(['one', 'two']);
-    expect(messages.every((message) => message.type !== 'agent-switch')).toBeTrue();
-    expect(await store.resolveCutoff(FIRST, 4)).toEqual({ kind: 'reuse', headId: FIRST });
+  it('represents an empty provider era without creating an artifact directory', async () => {
+    const refs = [{
+      id: EMPTY,
+      agentId: 'b',
+      model: 'model-b',
+      capturedAt: TIME,
+      storedMessageCount: 0,
+      visibleMessageCount: 0,
+      trailingHandoff: { agentId: 'c', model: 'model-c' },
+    }];
+    expect(await store.loadAll(refs)).toEqual([
+      new AgentSwitchMessage(TIME, 'b', 'c', 'model-b', 'model-c'),
+    ]);
+    await expect(fs.stat(segmentDir(workspaceDir, EMPTY))).rejects.toMatchObject({ code: 'ENOENT' });
+    await store.assertAvailable(refs);
   });
 
-  it('detects corrupt pages and remembers degraded nodes during preflight', async () => {
-    await commitMaterialized(store, {
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [new UserMessage(TIMESTAMP, 'one')],
-    });
-    const manifest = await store.readManifest(FIRST);
-    await fs.writeFile(
-      path.join(workspaceDir, 'carryover-transcripts', 'nodes', FIRST, manifest.pages[0].file),
-      Buffer.from('not brotli'),
-    );
+  it('creates point-fork cutoffs by slicing refs without writing transcript bytes', async () => {
+    await commit(store, FIRST, [
+      new UserMessage(TIME, 'one'),
+      new AssistantMessage(TIME, 'two'),
+      new UserMessage(TIME, 'three'),
+    ]);
+    const refs = [ref(FIRST, 'a', 'one', 3, { agentId: 'b', model: 'two' })];
 
-    await expect(store.loadAll(FIRST, { agentId: 'b', model: 'two' }))
-      .rejects.toBeInstanceOf(CarryOverHistoryUnavailableError);
-    await expect(store.assertReachableForHandoff(FIRST))
-      .rejects.toMatchObject({ code: 'CARRYOVER_HISTORY_UNAVAILABLE' });
+    const inside = store.resolveCutoff(refs, 2);
+    expect(inside).toEqual([{ ...refs[0], visibleMessageCount: 2, trailingHandoff: null }]);
+    expect(await store.loadAll(inside)).toHaveLength(2);
+    expect(store.resolveCutoff(refs, 4)).toEqual(refs);
+    expect(await fs.readdir(path.join(workspaceDir, 'carryover-transcripts', 'segments')))
+      .toEqual([FIRST]);
   });
 
-  it('rejects missing references, cycles, unsafe page paths, and aborted reads', async () => {
-    const nodeDir = path.join(workspaceDir, 'carryover-transcripts', 'nodes', FIRST);
-    await fs.mkdir(nodeDir, { recursive: true });
-    await writeJsonFileAtomic(path.join(nodeDir, 'manifest.json'), {
-      version: 1,
-      kind: 'prefix',
-      id: FIRST,
-      parentId: SECOND,
-      createdAt: TIMESTAMP,
-      sourceNodeId: SECOND,
-      messageCount: 1,
-      source: { agentId: 'a', model: 'one', nativeSessionId: null, nativeRevision: 'r1' },
-    });
-    await expect(store.assertReachableForHandoff(FIRST))
-      .rejects.toMatchObject({ code: 'CARRYOVER_HISTORY_UNAVAILABLE' });
+  it('places an oversized message in one valid page', async () => {
+    await commit(store, FIRST, [new UserMessage(TIME, 'x'.repeat(1_200_000))]);
+    const index = await store.readIndex(FIRST);
+    expect(index.pages).toHaveLength(1);
+    expect((await store.loadAll([ref(FIRST, 'a', 'm', 1, null)]))[0].content)
+      .toHaveLength(1_200_000);
+  });
 
+  it('detects corruption while treating cancellation as ordinary control flow', async () => {
+    await commit(store, FIRST, [new UserMessage(TIME, 'one')]);
+    const refs = [ref(FIRST, 'a', 'm', 1, null)];
     const controller = new AbortController();
     controller.abort();
-    await expect(store.logicalMessageCount(FIRST, controller.signal)).rejects.toThrow();
-  });
-
-  it('keeps prepared nodes rooted until their durable owner releases them', async () => {
-    const prepared = await store.prepareMaterialized(materializedRequest({
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [new UserMessage(TIMESTAMP, 'one')],
-    }));
-    expect(store.writerRoots()).toContain(FIRST);
-    await prepared.commit();
-    expect(store.writerRoots()).toContain(FIRST);
-    prepared.releaseRoot();
-    expect(store.writerRoots()).not.toContain(FIRST);
-  });
-
-  it('runs the durable migration fence before a committed node is released', async () => {
-    let fenced = 0;
-    const fencedStore = new CarryOverTranscriptStore({
-      workspaceDir,
-      async onNodeCommitted() {
-        fenced += 1;
-      },
-    });
-    await fencedStore.initialize();
-    const prepared = await fencedStore.prepareMaterialized(materializedRequest({
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [new UserMessage(TIMESTAMP, 'one')],
-    }));
-
-    await prepared.commit();
-
-    expect(fenced).toBe(1);
-    expect(fencedStore.writerRoots()).toContain(FIRST);
-    prepared.releaseRoot();
-  });
-
-  it('keeps a node compensatable when its durable migration fence fails', async () => {
-    const fencedStore = new CarryOverTranscriptStore({
-      workspaceDir,
-      onNodeCommitted: () => Promise.reject(new Error('migration marker write failed')),
-    });
-    await fencedStore.initialize();
-    const prepared = await fencedStore.prepareMaterialized(materializedRequest({
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [new UserMessage(TIMESTAMP, 'one')],
-    }));
-
-    await expect(prepared.commit()).rejects.toThrow('migration marker write failed');
-    await prepared.discard();
-
-    await expect(fs.stat(path.join(
-      workspaceDir,
-      'carryover-transcripts',
-      'nodes',
-      FIRST,
-    ))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('does not remember a cancelled page read as node corruption', async () => {
-    await commitMaterialized(store, {
-      id: FIRST,
-      parentId: null,
-      agentId: 'a',
-      model: 'one',
-      targetAgentId: 'b',
-      targetModel: 'two',
-      messages: [new UserMessage(TIMESTAMP, 'one')],
-    });
-    let cancelNextRead = true;
-    const reader = new CarryOverTranscriptStore({
-      workspaceDir,
-      async decodePage(...args) {
-        if (cancelNextRead) {
-          cancelNextRead = false;
-          throw new DOMException('Aborted', 'AbortError');
-        }
-        return decodeCarryOverPage(...args);
-      },
-    });
-    await reader.initialize();
-
-    await expect(reader.loadAll(FIRST, { agentId: 'b', model: 'two' }))
+    await expect(store.loadPage({ refs, offset: 0, limit: 1, signal: controller.signal }))
       .rejects.toMatchObject({ name: 'AbortError' });
-    await expect(reader.assertReachableForHandoff(FIRST)).resolves.toBeUndefined();
-    expect(await reader.loadAll(FIRST, { agentId: 'b', model: 'two' }))
-      .toHaveLength(2);
+    expect(await store.loadAll(refs)).toHaveLength(1);
+
+    const index = await store.readIndex(FIRST);
+    const pagePath = path.join(segmentDir(workspaceDir, FIRST), index.pages[0].file);
+    const bytes = await fs.readFile(pagePath);
+    bytes[Math.floor(bytes.length / 2)] ^= 0xff;
+    await fs.writeFile(pagePath, bytes);
+    await expect(store.loadAll(refs)).rejects.toBeInstanceOf(CarryOverHistoryUnavailableError);
+    await expect(store.assertAvailable(refs)).rejects.toBeInstanceOf(CarryOverHistoryUnavailableError);
+  });
+
+  it('keeps writer roots until release and sweeps only direct unreferenced IDs', async () => {
+    const prepared = await store.prepareSegment({
+      operationId: 'writer',
+      id: FIRST,
+      seedSanitation: 'not-applicable',
+      messages: [new UserMessage(TIME, 'one')],
+    });
+    await prepared.commit();
+    expect(store.writerRoots()).toContain(FIRST);
+    expect((await store.sweep(new Set())).removedSegmentCount).toBe(0);
+    prepared.releaseRoot();
+    expect((await store.sweep(new Set())).removedSegmentCount).toBe(1);
+    await expect(fs.stat(segmentDir(workspaceDir, FIRST))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reuses an identical deterministic artifact and rejects a content collision', async () => {
+    await commit(store, FIRST, [new UserMessage(TIME, 'same')]);
+    const reused = await commit(store, FIRST, [new UserMessage(TIME, 'same')]);
+    await reused.discard();
+    expect(await store.loadAll([ref(FIRST, 'a', 'm', 1, null)]))
+      .toEqual([new UserMessage(TIME, 'same')]);
+    await expect(commit(store, FIRST, [new UserMessage(TIME, 'different')]))
+      .rejects.toMatchObject({ code: 'CARRYOVER_SEGMENT_COLLISION' });
   });
 });
 
-async function commitMaterialized(store, input) {
-  const prepared = await store.prepareMaterialized(materializedRequest(input));
+async function commit(store, id, messages) {
+  const prepared = await store.prepareSegment({
+    operationId: `operation:${id}`,
+    id,
+    seedSanitation: 'not-applicable',
+    messages,
+  });
   await prepared.commit();
   prepared.releaseRoot();
+  return prepared;
 }
 
-function materializedRequest(input) {
+function ref(id, agentId, model, count, trailingHandoff) {
   return {
-    operationId: OPERATION,
-    id: input.id,
-    parentId: input.parentId,
-    source: {
-      agentId: input.agentId,
-      model: input.model,
-      nativeSessionId: `${input.agentId}-session`,
-      nativeRevision: `${input.id}-revision`,
-    },
-    boundary: {
-      kind: 'handoff',
-      targetAtCapture: { agentId: input.targetAgentId, model: input.targetModel },
-    },
-    seedSanitation: 'not-applicable',
-    messages: input.messages,
+    id,
+    agentId,
+    model,
+    capturedAt: TIME,
+    storedMessageCount: count,
+    visibleMessageCount: count,
+    trailingHandoff,
   };
+}
+
+function segmentDir(workspaceDir, id) {
+  return path.join(workspaceDir, 'carryover-transcripts', 'segments', id);
 }

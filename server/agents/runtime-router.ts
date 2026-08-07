@@ -23,6 +23,7 @@ import {
   type ThinkingMode,
 } from '../../common/chat-modes.js';
 import type { IChatRegistry } from '../chats/store.js';
+import { emptyEraId, reconcileArchivedTail } from '../chats/carryover-segments.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import { getMaxSessions } from '../config.js';
@@ -156,6 +157,12 @@ export class AgentRuntimeRouter {
           request.carriedContext,
           started.agentSessionId,
         );
+        const carryOverSegments = reconcileArchivedTail(
+          entry.carryOverSegments ?? [],
+          { agentId: entry.agentId, model: selection.model },
+          () => emptyEraId(chatId, started!.agentSessionId),
+          new Date().toISOString(),
+        );
         const updated = await this.#registry.updateChat(chatId, {
         agentSessionId: started.agentSessionId,
         nativeSession: started.nativeSession,
@@ -164,6 +171,7 @@ export class AgentRuntimeRouter {
         modelEndpointId: selection.endpointId,
           modelProtocol: selection.protocol,
           nativeSeedReceipt,
+          carryOverSegments,
       }, { flush: true });
       if (!updated) throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     } catch (error) {
@@ -717,7 +725,6 @@ function validateStartedReceipt(
   }
   if (!receipt) throw new Error('Agent did not return a receipt for carried context');
   const expected = createNativeSeedReceipt({
-    headId: carriedContext.headId,
     agentSessionId,
     placement: receipt.placement,
     prefix: carriedContext.prefix,

@@ -12,23 +12,28 @@ import {
   writeEncodedCarryOverPage,
 } from './carryover-page-codec.js';
 import {
-  CARRYOVER_NODE_VERSION,
-  isCarryOverNodeId,
-  parseCarryOverNode,
-  type CarryOverBoundaryDescriptor,
-  type CarryOverNode,
-  type CarryOverSourceDescriptor,
-  type CarryOverTargetDescriptor,
-  type MaterializedCarryOverNode,
-  type PrefixCarryOverNode,
+  CARRYOVER_MESSAGE_SCHEMA_VERSION,
+  CARRYOVER_SEGMENT_VERSION,
+  isCarryOverSegmentId,
+  parseCarryOverSegmentIndex,
+  type CarryOverSegmentIndex,
   type SeedSanitationOutcome,
-} from './carryover-node-types.js';
+} from './carryover-segment-types.js';
+import {
+  archivedLogicalCount,
+  assertSegmentBinding,
+  carryOverLayout,
+  carryOverRevision,
+} from './carryover-segments.js';
+import type {
+  CarryOverMigrationQuarantine,
+  CarryOverSegmentRef,
+} from './store.js';
 
-const DEFAULT_MAX_NODE_DEPTH = 10_000;
-const DEFAULT_MANIFEST_CACHE_SIZE = 256;
+const DEFAULT_INDEX_CACHE_SIZE = 256;
 
 export type CarryOverTranscriptErrorCode =
-  | 'CARRYOVER_NODE_COLLISION'
+  | 'CARRYOVER_SEGMENT_COLLISION'
   | 'CARRYOVER_INVALID_CUTOFF';
 
 export class CarryOverTranscriptError extends Error {
@@ -55,30 +60,18 @@ export class CarryOverHistoryUnavailableError extends DomainError {
   }
 }
 
-export interface PrepareMaterializedNodeRequest {
+export interface PrepareCarryOverSegmentRequest {
   readonly operationId: string;
   readonly id: string;
-  readonly parentId: string | null;
-  readonly source: CarryOverSourceDescriptor;
-  readonly boundary: CarryOverBoundaryDescriptor | null;
   readonly seedSanitation: SeedSanitationOutcome;
   readonly messages: readonly ChatMessage[];
   readonly signal?: AbortSignal;
-  readonly createdAt?: string;
 }
 
-export interface PreparePrefixNodeRequest {
-  readonly operationId: string;
-  readonly id: string;
-  readonly sourceNodeId: string;
-  readonly messageCount: number;
-  readonly signal?: AbortSignal;
-  readonly createdAt?: string;
-}
-
-export interface PreparedCarryOverNode {
+export interface PreparedCarryOverSegment {
   readonly id: string;
   readonly messageCount: number;
+  readonly canonicalMessagesSha256: string;
   commit(): Promise<void>;
   discard(): Promise<void>;
   releaseRoot(): void;
@@ -94,81 +87,73 @@ export interface CarryOverTranscriptPage {
 }
 
 export interface CarryOverSweepResult {
-  readonly reachableNodeCount: number;
-  readonly unreachableNodeCount: number;
-  readonly removedNodeCount: number;
+  readonly reachableSegmentCount: number;
+  readonly unreachableSegmentCount: number;
+  readonly removedSegmentCount: number;
   readonly compressedBytes: number;
   readonly declaredUncompressedBytes: number;
   readonly durationMs: number;
 }
 
-export type CarryOverCutoff =
-  | { readonly kind: 'reuse'; readonly headId: string | null }
-  | { readonly kind: 'prefix'; readonly sourceNodeId: string; readonly messageCount: number };
-
-interface LogicalNode {
-  readonly node: CarryOverNode;
-  readonly startSequence: number;
-  readonly payloadEndSequence: number;
-  readonly boundarySequence: number | null;
-}
-
 export class CarryOverTranscriptStore {
   readonly #rootDir: string;
-  readonly #nodesDir: string;
+  readonly #segmentsDir: string;
   readonly #tmpDir: string;
   readonly #trashDir: string;
-  readonly #maxNodeDepth: number;
-  readonly #manifestCacheSize: number;
-  readonly #manifestCache = new Map<string, CarryOverNode>();
-  readonly #degradedNodes = new Set<string>();
+  readonly #indexCacheSize: number;
+  readonly #indexCache = new Map<string, CarryOverSegmentIndex>();
+  readonly #degradedSegments = new Set<string>();
   readonly #writerRoots = new Set<string>();
   readonly #decodePage: typeof decodeCarryOverPage;
-  readonly #onNodeCommitted: (() => Promise<void>) | null;
+  readonly #onSegmentCommitted: (() => Promise<void>) | null;
   #gcPromise: Promise<void> = Promise.resolve();
-  #nodeCommitPromise: Promise<void> = Promise.resolve();
+  #segmentCommitPromise: Promise<void> = Promise.resolve();
 
   constructor(options: {
     readonly workspaceDir: string;
-    readonly maxNodeDepth?: number;
-    readonly manifestCacheSize?: number;
+    readonly indexCacheSize?: number;
     readonly decodePage?: typeof decodeCarryOverPage;
-    readonly onNodeCommitted?: () => Promise<void>;
+    readonly onSegmentCommitted?: () => Promise<void>;
   }) {
     this.#rootDir = path.join(options.workspaceDir, 'carryover-transcripts');
-    this.#nodesDir = path.join(this.#rootDir, 'nodes');
+    this.#segmentsDir = path.join(this.#rootDir, 'segments');
     this.#tmpDir = path.join(this.#rootDir, 'tmp');
     this.#trashDir = path.join(this.#rootDir, 'trash');
-    this.#maxNodeDepth = options.maxNodeDepth ?? DEFAULT_MAX_NODE_DEPTH;
-    this.#manifestCacheSize = options.manifestCacheSize ?? DEFAULT_MANIFEST_CACHE_SIZE;
+    this.#indexCacheSize = options.indexCacheSize ?? DEFAULT_INDEX_CACHE_SIZE;
     this.#decodePage = options.decodePage ?? decodeCarryOverPage;
-    this.#onNodeCommitted = options.onNodeCommitted ?? null;
+    this.#onSegmentCommitted = options.onSegmentCommitted ?? null;
   }
 
   async initialize(): Promise<void> {
     await Promise.all([
-      fs.mkdir(this.#nodesDir, { recursive: true, mode: 0o700 }),
+      fs.mkdir(this.#segmentsDir, { recursive: true, mode: 0o700 }),
       fs.mkdir(this.#tmpDir, { recursive: true, mode: 0o700 }),
       fs.mkdir(this.#trashDir, { recursive: true, mode: 0o700 }),
+      fs.mkdir(path.join(this.#rootDir, 'quarantine'), { recursive: true, mode: 0o700 }),
     ]);
   }
 
-  revision(headId: string | null): string {
-    return headId ? `carry-v2:${headId}` : 'carry-v1:0';
+  revision(
+    refs: readonly CarryOverSegmentRef[],
+    quarantine: CarryOverMigrationQuarantine | null = null,
+  ): string {
+    return carryOverRevision(refs, quarantine);
   }
 
   writerRoots(): ReadonlySet<string> {
     return new Set(this.#writerRoots);
   }
 
-  async cleanupTemporary(retainedNodeIds: ReadonlySet<string>): Promise<number> {
+  async cleanupTemporary(retainedSegmentIds: ReadonlySet<string>): Promise<number> {
     let removed = 0;
     for (const entry of await fs.readdir(this.#tmpDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const operationDir = path.join(this.#tmpDir, entry.name);
       const children = await fs.readdir(operationDir, { withFileTypes: true }).catch(() => []);
       const retained = children.some((child) => (
-        child.isDirectory() && isCarryOverNodeId(child.name) && retainedNodeIds.has(child.name)
+        child.isDirectory()
+        && isCarryOverSegmentId(child.name)
+        && retainedSegmentIds.has(child.name)
       ));
       if (retained) continue;
       await fs.rm(operationDir, { recursive: true, force: true });
@@ -186,16 +171,15 @@ export class CarryOverTranscriptStore {
     return operation;
   }
 
-  async prepareMaterialized(request: PrepareMaterializedNodeRequest): Promise<PreparedCarryOverNode> {
+  async prepareSegment(
+    request: PrepareCarryOverSegmentRequest,
+  ): Promise<PreparedCarryOverSegment> {
     request.signal?.throwIfAborted();
-    const id = requireNodeId(request.id);
-    const parentId = request.parentId === null ? null : requireNodeId(request.parentId);
-    if (request.messages.length === 0 && request.boundary === null) {
-      throw new Error('Materialized carryover nodes must contain messages or a boundary');
+    const id = requireSegmentId(request.id);
+    if (request.messages.length === 0) {
+      throw new Error('Carryover segment must contain at least one message');
     }
-    if (parentId) await this.assertReachableForHandoff(parentId, request.signal);
-
-    const preparedDir = this.#preparedNodeDir(request.operationId, id);
+    const preparedDir = this.#preparedSegmentDir(request.operationId, id);
     await fs.rm(preparedDir, { recursive: true, force: true });
     await fs.mkdir(path.join(preparedDir, 'pages'), { recursive: true, mode: 0o700 });
     this.#writerRoots.add(id);
@@ -206,22 +190,19 @@ export class CarryOverTranscriptStore {
         await writeEncodedCarryOverPage(path.join(preparedDir, page.descriptor.file), page);
       }
       await syncDirectory(path.join(preparedDir, 'pages'));
-      const manifest: MaterializedCarryOverNode = {
-        version: CARRYOVER_NODE_VERSION,
-        kind: 'materialized',
+      const index: CarryOverSegmentIndex = {
+        version: CARRYOVER_SEGMENT_VERSION,
+        messageSchemaVersion: CARRYOVER_MESSAGE_SCHEMA_VERSION,
         id,
-        parentId,
-        createdAt: request.createdAt ?? new Date().toISOString(),
-        source: request.source,
-        boundary: request.boundary,
         seedSanitation: request.seedSanitation,
         messageCount: request.messages.length,
+        canonicalMessagesSha256: canonicalMessagesDigest(request.messages),
         pages: pages.map((page) => page.descriptor),
       };
-      parseCarryOverNode(manifest, id);
-      await writeJsonFileAtomic(path.join(preparedDir, 'manifest.json'), manifest, { mode: 0o600 });
+      parseCarryOverSegmentIndex(index, id);
+      await writeJsonFileAtomic(path.join(preparedDir, 'segment.json'), index, { mode: 0o600 });
       await syncDirectory(preparedDir);
-      return this.#preparedHandle(request.operationId, manifest, preparedDir);
+      return this.#preparedHandle(request.operationId, index, preparedDir);
     } catch (error) {
       this.#writerRoots.delete(id);
       await fs.rm(preparedDir, { recursive: true, force: true }).catch(() => undefined);
@@ -229,114 +210,62 @@ export class CarryOverTranscriptStore {
     }
   }
 
-  async preparePrefix(request: PreparePrefixNodeRequest): Promise<PreparedCarryOverNode> {
-    request.signal?.throwIfAborted();
-    const id = requireNodeId(request.id);
-    const sourceId = requireNodeId(request.sourceNodeId);
-    const sourceCandidate = await this.#readManifest(sourceId);
-    const materialized = sourceCandidate.kind === 'materialized'
-      ? sourceCandidate
-      : await this.#readMaterializedPrefixSource(sourceCandidate);
-    const maximum = sourceCandidate.kind === 'prefix'
-      ? Math.min(sourceCandidate.messageCount, materialized.messageCount)
-      : materialized.messageCount;
-    if (!Number.isSafeInteger(request.messageCount) || request.messageCount < 1 || request.messageCount > maximum) {
-      throw new CarryOverTranscriptError('CARRYOVER_INVALID_CUTOFF', 'Carryover prefix cutoff is outside its source');
-    }
-    if (materialized.parentId) await this.assertReachableForHandoff(materialized.parentId, request.signal);
-
-    const preparedDir = this.#preparedNodeDir(request.operationId, id);
-    await fs.rm(preparedDir, { recursive: true, force: true });
-    await fs.mkdir(preparedDir, { recursive: true, mode: 0o700 });
-    this.#writerRoots.add(id);
-    const manifest: PrefixCarryOverNode = {
-      version: CARRYOVER_NODE_VERSION,
-      kind: 'prefix',
-      id,
-      parentId: materialized.parentId,
-      createdAt: request.createdAt ?? new Date().toISOString(),
-      sourceNodeId: materialized.id,
-      messageCount: request.messageCount,
-      source: materialized.source,
-    };
+  async assertAvailable(
+    refs: readonly CarryOverSegmentRef[],
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
-      parseCarryOverNode(manifest, id);
-      await writeJsonFileAtomic(path.join(preparedDir, 'manifest.json'), manifest, { mode: 0o600 });
-      await syncDirectory(preparedDir);
-      return this.#preparedHandle(request.operationId, manifest, preparedDir);
-    } catch (error) {
-      this.#writerRoots.delete(id);
-      await fs.rm(preparedDir, { recursive: true, force: true }).catch(() => undefined);
-      throw error;
-    }
-  }
-
-  async assertReachableForHandoff(headId: string | null, signal?: AbortSignal): Promise<void> {
-    if (!headId) return;
-    try {
-      const chain = await this.#loadChain(headId, signal);
-      for (const node of chain) {
+      for (const ref of refs) {
         signal?.throwIfAborted();
-        if (this.#degradedNodes.has(node.id)) throw new Error(`Carryover node ${node.id} is degraded`);
-        if (node.kind === 'prefix') {
-          const source = await this.#readMaterializedPrefixSource(node);
-          if (source.parentId !== node.parentId || node.messageCount > source.messageCount) {
-            throw new Error(`Carryover prefix ${node.id} is inconsistent with its source`);
-          }
-          await this.#statPages(source, signal);
-        } else {
-          await this.#statPages(node, signal);
+        if (ref.storedMessageCount === 0) continue;
+        if (this.#degradedSegments.has(ref.id)) {
+          throw new Error(`Carryover segment ${ref.id} is degraded`);
         }
+        const index = await this.#readIndex(ref.id);
+        assertSegmentBinding(ref, index);
+        await this.#statPages(index, signal);
       }
-      } catch (error) {
-        throwUnavailableUnlessAborted(error);
+    } catch (error) {
+      throwUnavailableUnlessAborted(error);
     }
   }
 
-  async logicalMessageCount(headId: string | null, signal?: AbortSignal): Promise<number> {
-    if (!headId) return 0;
-    const layout = await this.#logicalLayout(headId, signal);
-    const last = layout.at(-1);
-    return last?.boundarySequence ?? last?.payloadEndSequence ?? 0;
+  logicalMessageCount(refs: readonly CarryOverSegmentRef[]): number {
+    return archivedLogicalCount(refs);
   }
 
   async loadAll(
-    headId: string | null,
-    current: CarryOverTargetDescriptor,
+    refs: readonly CarryOverSegmentRef[],
     signal?: AbortSignal,
   ): Promise<ChatMessage[]> {
-    if (!headId) return [];
-    const total = await this.logicalMessageCount(headId, signal);
-    return [...(await this.loadPage({ headId, current, offset: 0, limit: total, signal })).messages];
+    const total = archivedLogicalCount(refs);
+    return [...(await this.loadPage({ refs, offset: 0, limit: total, signal })).messages];
   }
 
   async loadPage(input: {
-    readonly headId: string | null;
-    readonly current: CarryOverTargetDescriptor;
+    readonly refs: readonly CarryOverSegmentRef[];
     readonly offset: number;
     readonly limit: number;
     readonly signal?: AbortSignal;
   }): Promise<CarryOverTranscriptPage> {
     const offset = Math.max(0, Math.trunc(input.offset));
     const limit = Math.max(0, Math.trunc(input.limit));
-    if (!input.headId || limit === 0) {
-      const total = input.headId ? await this.logicalMessageCount(input.headId, input.signal) : 0;
-      return { messages: [], total, offset, limit, hasMore: offset < total, revision: this.revision(input.headId) };
+    const total = archivedLogicalCount(input.refs);
+    const revision = carryOverRevision(input.refs);
+    if (limit === 0 || input.refs.length === 0) {
+      return { messages: [], total, offset, limit, hasMore: offset < total, revision };
     }
-    const layout = await this.#logicalLayout(input.headId, input.signal);
-    const last = layout.at(-1);
-    const total = last?.boundarySequence ?? last?.payloadEndSequence ?? 0;
     const firstSequence = offset + 1;
     const lastSequence = Math.min(total, offset + limit);
     const messages: ChatMessage[] = [];
     if (firstSequence <= lastSequence) {
-      for (const [index, item] of layout.entries()) {
+      for (const item of carryOverLayout(input.refs)) {
         input.signal?.throwIfAborted();
         const payloadStart = Math.max(firstSequence, item.startSequence);
         const payloadEnd = Math.min(lastSequence, item.payloadEndSequence);
         if (payloadStart <= payloadEnd) {
-          messages.push(...await this.#readNodeRange(
-            item.node,
+          messages.push(...await this.#readSegmentRange(
+            item.ref,
             payloadStart - item.startSequence,
             payloadEnd - payloadStart + 1,
             input.signal,
@@ -347,12 +276,12 @@ export class CarryOverTranscriptStore {
           && item.boundarySequence >= firstSequence
           && item.boundarySequence <= lastSequence
         ) {
-          const target = layout[index + 1]?.node.source ?? input.current;
+          const target = item.ref.trailingHandoff!;
           messages.push(new AgentSwitchMessage(
-            item.node.createdAt,
-            item.node.source.agentId,
+            item.ref.capturedAt,
+            item.ref.agentId,
             target.agentId,
-            item.node.source.model,
+            item.ref.model,
             target.model,
           ));
         }
@@ -364,23 +293,21 @@ export class CarryOverTranscriptStore {
       offset,
       limit,
       hasMore: offset + messages.length < total,
-      revision: this.revision(input.headId),
+      revision,
     };
   }
 
   async loadTailForSeed(input: {
-    readonly headId: string | null;
-    readonly current: CarryOverTargetDescriptor;
+    readonly refs: readonly CarryOverSegmentRef[];
     readonly maxMessages?: number;
     readonly maxBytes?: number;
     readonly signal?: AbortSignal;
   }): Promise<ChatMessage[]> {
-    if (!input.headId) return [];
-    const total = await this.logicalMessageCount(input.headId, input.signal);
+    const total = archivedLogicalCount(input.refs);
+    if (total === 0) return [];
     const maxMessages = Math.max(1, input.maxMessages ?? 512);
     const page = await this.loadPage({
-      headId: input.headId,
-      current: input.current,
+      refs: input.refs,
       offset: Math.max(0, total - maxMessages),
       limit: Math.min(total, maxMessages),
       signal: input.signal,
@@ -399,22 +326,19 @@ export class CarryOverTranscriptStore {
   }
 
   async *stream(input: {
-    readonly headId: string | null;
-    readonly current: CarryOverTargetDescriptor;
+    readonly refs: readonly CarryOverSegmentRef[];
     readonly maxMessagesPerBatch: number;
     readonly signal?: AbortSignal;
   }): AsyncIterable<readonly ChatMessage[]> {
-    if (!input.headId) return;
     if (!Number.isSafeInteger(input.maxMessagesPerBatch) || input.maxMessagesPerBatch < 1) {
       throw new Error('Carryover stream batch size must be positive');
     }
-    const total = await this.logicalMessageCount(input.headId, input.signal);
+    const total = archivedLogicalCount(input.refs);
     let offset = 0;
     while (offset < total) {
       input.signal?.throwIfAborted();
       const page = await this.loadPage({
-        headId: input.headId,
-        current: input.current,
+        refs: input.refs,
         offset,
         limit: input.maxMessagesPerBatch,
         signal: input.signal,
@@ -425,95 +349,79 @@ export class CarryOverTranscriptStore {
     }
   }
 
-  async resolveCutoff(
-    headId: string | null,
+  resolveCutoff(
+    refs: readonly CarryOverSegmentRef[],
     inclusiveSequence: number,
-    signal?: AbortSignal,
-  ): Promise<CarryOverCutoff> {
-    if (!headId || inclusiveSequence <= 0) return { kind: 'reuse', headId: null };
-    const layout = await this.#logicalLayout(headId, signal);
-    for (const item of layout) {
-      if (inclusiveSequence < item.startSequence) {
-        const priorIndex = layout.indexOf(item) - 1;
-        return { kind: 'reuse', headId: priorIndex >= 0 ? layout[priorIndex].node.id : null };
-      }
+  ): readonly CarryOverSegmentRef[] {
+    if (inclusiveSequence <= 0) return [];
+    const layout = carryOverLayout(refs);
+    for (const [index, item] of layout.entries()) {
+      if (inclusiveSequence < item.startSequence) return refs.slice(0, index);
       if (inclusiveSequence <= item.payloadEndSequence) {
-        const count = inclusiveSequence - item.startSequence + 1;
-        if (count === item.node.messageCount && item.boundarySequence === null) {
-          return { kind: 'reuse', headId: item.node.id };
-        }
-        return {
-          kind: 'prefix',
-          sourceNodeId: item.node.kind === 'prefix' ? item.node.sourceNodeId : item.node.id,
-          messageCount: count,
-        };
+        const visibleMessageCount = inclusiveSequence - item.startSequence + 1;
+        return [
+          ...refs.slice(0, index),
+          { ...item.ref, visibleMessageCount, trailingHandoff: null },
+        ];
       }
-      if (item.boundarySequence === inclusiveSequence) return { kind: 'reuse', headId: item.node.id };
+      if (item.boundarySequence === inclusiveSequence) return refs.slice(0, index + 1);
     }
-    return { kind: 'reuse', headId };
+    return refs.slice();
   }
 
-  async readManifest(id: string): Promise<CarryOverNode> {
-    return this.#readManifest(requireNodeId(id));
+  async readIndex(id: string): Promise<CarryOverSegmentIndex> {
+    return this.#readIndex(requireSegmentId(id));
   }
 
-  async #logicalLayout(headId: string, signal?: AbortSignal): Promise<LogicalNode[]> {
-    const chain = await this.#loadChain(headId, signal);
-    let sequence = 1;
-    return chain.map((node) => {
-      const startSequence = sequence;
-      const payloadEndSequence = sequence + node.messageCount - 1;
-      const boundarySequence = node.kind === 'materialized' && node.boundary
-        ? payloadEndSequence + 1
-        : null;
-      sequence = (boundarySequence ?? payloadEndSequence) + 1;
-      return { node, startSequence, payloadEndSequence, boundarySequence };
-    });
-  }
-
-  async #loadChain(headId: string, signal?: AbortSignal): Promise<CarryOverNode[]> {
-    const visited = new Set<string>();
-    const reversed: CarryOverNode[] = [];
-    let cursor: string | null = requireNodeId(headId);
-    while (cursor) {
+  async verifySegment(ref: CarryOverSegmentRef, signal?: AbortSignal): Promise<void> {
+    if (ref.storedMessageCount === 0) return;
+    const index = await this.#readIndex(ref.id);
+    assertSegmentBinding(ref, index);
+    const digest = crypto.createHash('sha256');
+    digest.update('[');
+    let count = 0;
+    for (const descriptor of index.pages) {
       signal?.throwIfAborted();
-      if (visited.has(cursor)) throw new Error(`Carryover history cycle at ${cursor}`);
-      if (visited.size >= this.#maxNodeDepth) throw new Error('Carryover history exceeds maximum depth');
-      visited.add(cursor);
-      const node = await this.#readManifest(cursor);
-      if (node.kind === 'prefix') {
-        const source = await this.#readMaterializedPrefixSource(node);
-        if (source.parentId !== node.parentId || node.messageCount > source.messageCount) {
-          throw new Error(`Carryover prefix ${node.id} is inconsistent with its source`);
-        }
+      const page = await this.#decodePage(
+        path.join(this.#segmentDir(index.id), descriptor.file),
+        descriptor,
+        signal,
+      );
+      for (const message of page) {
+        if (count > 0) digest.update(',');
+        digest.update(JSON.stringify(message));
+        count += 1;
       }
-      reversed.push(node);
-      cursor = node.parentId;
     }
-    return reversed.reverse();
+    digest.update(']');
+    if (count !== index.messageCount || digest.digest('hex') !== index.canonicalMessagesSha256) {
+      this.#degradedSegments.add(ref.id);
+      throw new CarryOverHistoryUnavailableError({
+        cause: new Error(`Carryover segment ${ref.id} canonical digest mismatch`),
+      });
+    }
   }
 
-  async #readNodeRange(
-    node: CarryOverNode,
+  async #readSegmentRange(
+    ref: CarryOverSegmentRef,
     start: number,
     count: number,
     signal?: AbortSignal,
   ): Promise<ChatMessage[]> {
-    const materialized = node.kind === 'materialized'
-      ? node
-      : await this.#readMaterializedPrefixSource(node);
-    const maximum = node.kind === 'prefix' ? node.messageCount : materialized.messageCount;
-    const end = Math.min(maximum, start + count);
+    if (ref.storedMessageCount === 0) return [];
+    const end = Math.min(ref.visibleMessageCount, start + count);
     if (start < 0 || start >= end) return [];
     const messages: ChatMessage[] = [];
     try {
-      for (const descriptor of materialized.pages) {
+      const index = await this.#readIndex(ref.id);
+      assertSegmentBinding(ref, index);
+      for (const descriptor of index.pages) {
         signal?.throwIfAborted();
         const pageStart = descriptor.firstSequence;
         const pageEnd = pageStart + descriptor.messageCount;
         if (pageEnd <= start || pageStart >= end) continue;
-          const page = await this.#decodePage(
-          path.join(this.#nodeDir(materialized.id), descriptor.file),
+        const page = await this.#decodePage(
+          path.join(this.#segmentDir(index.id), descriptor.file),
           descriptor,
           signal,
         );
@@ -522,138 +430,137 @@ export class CarryOverTranscriptStore {
           Math.min(page.length, end - pageStart),
         ));
       }
-      if (messages.length !== end - start) throw new Error('Carryover page range is incomplete');
+      if (messages.length !== end - start) {
+        throw new CarryOverPageIntegrityError('Carryover page range is incomplete');
+      }
       return messages;
-      } catch (error) {
-        if (error instanceof CarryOverPageIntegrityError) {
-          this.#degradedNodes.add(materialized.id);
-        }
-        throwUnavailableUnlessAborted(error);
+    } catch (error) {
+      if (error instanceof CarryOverPageIntegrityError) this.#degradedSegments.add(ref.id);
+      throwUnavailableUnlessAborted(error);
     }
   }
 
-  async #readMaterializedPrefixSource(node: PrefixCarryOverNode): Promise<MaterializedCarryOverNode> {
-      const source = await this.#readManifest(node.sourceNodeId);
-      if (source.kind !== 'materialized') {
-        this.#degradedNodes.add(node.id);
-        throw new CarryOverHistoryUnavailableError({
-          cause: new Error('Carryover prefix source is not materialized'),
-        });
-      }
-    return source;
-  }
-
-  async #readManifest(id: string): Promise<CarryOverNode> {
-    const cached = this.#manifestCache.get(id);
+  async #readIndex(id: string): Promise<CarryOverSegmentIndex> {
+    const cached = this.#indexCache.get(id);
     if (cached) {
-      this.#manifestCache.delete(id);
-      this.#manifestCache.set(id, cached);
+      this.#indexCache.delete(id);
+      this.#indexCache.set(id, cached);
       return cached;
     }
     try {
-        const raw = await fs.readFile(path.join(this.#nodeDir(id), 'manifest.json'), 'utf8');
-        let node: CarryOverNode;
-        try {
-          node = parseCarryOverNode(JSON.parse(raw), id);
-        } catch (error) {
-          this.#degradedNodes.add(id);
-          throw new CarryOverHistoryUnavailableError({ cause: error });
-        }
-      this.#manifestCache.set(id, node);
-      while (this.#manifestCache.size > this.#manifestCacheSize) {
-        const oldest = this.#manifestCache.keys().next().value;
-        if (oldest === undefined) break;
-        this.#manifestCache.delete(oldest);
-      }
-      return node;
+      const raw = await fs.readFile(path.join(this.#segmentDir(id), 'segment.json'), 'utf8');
+      let index: CarryOverSegmentIndex;
+      try {
+        index = parseCarryOverSegmentIndex(JSON.parse(raw), id);
       } catch (error) {
-        throwUnavailableUnlessAborted(error);
+        this.#degradedSegments.add(id);
+        throw new CarryOverHistoryUnavailableError({ cause: error });
+      }
+      this.#indexCache.set(id, index);
+      while (this.#indexCache.size > this.#indexCacheSize) {
+        const oldest = this.#indexCache.keys().next().value;
+        if (oldest === undefined) break;
+        this.#indexCache.delete(oldest);
+      }
+      return index;
+    } catch (error) {
+      throwUnavailableUnlessAborted(error);
     }
   }
 
-  async #statPages(node: MaterializedCarryOverNode, signal?: AbortSignal): Promise<void> {
-    for (const descriptor of node.pages) {
+  async #statPages(index: CarryOverSegmentIndex, signal?: AbortSignal): Promise<void> {
+    for (const descriptor of index.pages) {
       signal?.throwIfAborted();
-      const stat = await fs.stat(path.join(this.#nodeDir(node.id), descriptor.file));
+      const stat = await fs.stat(path.join(this.#segmentDir(index.id), descriptor.file));
       if (!stat.isFile() || stat.size !== descriptor.compressedBytes) {
-        this.#degradedNodes.add(node.id);
-        throw new Error(`Carryover page metadata mismatch in ${node.id}`);
+        this.#degradedSegments.add(index.id);
+        throw new Error(`Carryover page metadata mismatch in ${index.id}`);
       }
     }
   }
 
   #preparedHandle(
     operationId: string,
-    manifest: CarryOverNode,
+    index: CarryOverSegmentIndex,
     preparedDir: string,
-  ): PreparedCarryOverNode {
+  ): PreparedCarryOverSegment {
     let committed = false;
+    let installed = false;
     let released = false;
     return {
-      id: manifest.id,
-      messageCount: manifest.messageCount,
+      id: index.id,
+      messageCount: index.messageCount,
+      canonicalMessagesSha256: index.canonicalMessagesSha256,
       commit: async () => {
         if (committed) return;
-        const finalDir = this.#nodeDir(manifest.id);
+        const finalDir = this.#segmentDir(index.id);
         try {
           await fs.rename(preparedDir, finalDir);
-          await syncDirectory(this.#nodesDir);
+          installed = true;
+          await syncDirectory(this.#segmentsDir);
         } catch (error) {
           const code = (error as NodeJS.ErrnoException).code;
           if (code !== 'EEXIST' && code !== 'ENOTEMPTY') throw error;
-          await this.#assertIdempotentCollision(finalDir, manifest);
+          await this.#assertIdempotentCollision(finalDir, index);
           await fs.rm(preparedDir, { recursive: true, force: true });
         }
         committed = true;
-        this.#manifestCache.set(manifest.id, manifest);
+        this.#indexCache.set(index.id, index);
         await this.#removeEmptyOperationDir(operationId);
-        await this.#recordNodeCommitted();
+        await this.#recordSegmentCommitted();
       },
       discard: async () => {
         if (released) return;
         await fs.rm(preparedDir, { recursive: true, force: true });
-        if (committed) {
-          await fs.rm(this.#nodeDir(manifest.id), { recursive: true, force: true });
-          this.#manifestCache.delete(manifest.id);
-          this.#degradedNodes.delete(manifest.id);
-          await syncDirectory(this.#nodesDir);
+        if (committed && installed) {
+          await fs.rm(this.#segmentDir(index.id), { recursive: true, force: true });
+          this.#indexCache.delete(index.id);
+          this.#degradedSegments.delete(index.id);
+          await syncDirectory(this.#segmentsDir);
         }
-        this.#writerRoots.delete(manifest.id);
+        this.#writerRoots.delete(index.id);
         released = true;
         await this.#removeEmptyOperationDir(operationId);
       },
       releaseRoot: () => {
-        this.#writerRoots.delete(manifest.id);
+        this.#writerRoots.delete(index.id);
         released = true;
       },
     };
   }
 
-  #recordNodeCommitted(): Promise<void> {
-    if (!this.#onNodeCommitted) return Promise.resolve();
-    const operation = this.#nodeCommitPromise
+  #recordSegmentCommitted(): Promise<void> {
+    if (!this.#onSegmentCommitted) return Promise.resolve();
+    const operation = this.#segmentCommitPromise
       .catch(() => undefined)
-      .then(this.#onNodeCommitted);
-    this.#nodeCommitPromise = operation.then(() => undefined, () => undefined);
+      .then(this.#onSegmentCommitted);
+    this.#segmentCommitPromise = operation.then(() => undefined, () => undefined);
     return operation;
   }
 
-  async #assertIdempotentCollision(finalDir: string, expected: CarryOverNode): Promise<void> {
+  async #assertIdempotentCollision(
+    finalDir: string,
+    expected: CarryOverSegmentIndex,
+  ): Promise<void> {
     try {
-      const actual = parseCarryOverNode(
-        JSON.parse(await fs.readFile(path.join(finalDir, 'manifest.json'), 'utf8')),
+      const actual = parseCarryOverSegmentIndex(
+        JSON.parse(await fs.readFile(path.join(finalDir, 'segment.json'), 'utf8')),
         expected.id,
       );
-      if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Manifest differs');
-      if (actual.kind === 'materialized') {
-        for (const page of actual.pages) {
-          await decodeCarryOverPage(path.join(finalDir, page.file), page);
-        }
-      }
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Index differs');
+      await this.verifySegment({
+        id: actual.id,
+        agentId: 'collision-check',
+        model: '',
+        capturedAt: new Date(0).toISOString(),
+        storedMessageCount: actual.messageCount,
+        visibleMessageCount: actual.messageCount,
+        trailingHandoff: null,
+      });
     } catch (error) {
       throw new CarryOverTranscriptError(
-        'CARRYOVER_NODE_COLLISION',
-        `Carryover node ${expected.id} already exists with different content`,
+        'CARRYOVER_SEGMENT_COLLISION',
+        `Carryover segment ${expected.id} already exists with different content`,
         { cause: error },
       );
     }
@@ -661,54 +568,48 @@ export class CarryOverTranscriptStore {
 
   async #sweepNow(roots: ReadonlySet<string>): Promise<CarryOverSweepResult> {
     const startedAt = Date.now();
-    const reachable = new Set<string>();
-    const pending = new Set<string>([...roots, ...this.#writerRoots].map(requireNodeId));
+    const reachable = new Set([...roots, ...this.#writerRoots].map(requireSegmentId));
     let compressedBytes = 0;
     let declaredUncompressedBytes = 0;
-    while (pending.size > 0) {
-      const id = pending.values().next().value;
-      if (id === undefined) break;
-      pending.delete(id);
-      if (reachable.has(id)) continue;
-      const node = await this.#readManifest(id);
-      reachable.add(id);
-      if (node.parentId) pending.add(node.parentId);
-      if (node.kind === 'prefix') pending.add(node.sourceNodeId);
-      else {
-        compressedBytes += node.pages.reduce((total, page) => total + page.compressedBytes, 0);
-        declaredUncompressedBytes += node.pages.reduce(
+    for (const id of reachable) {
+      try {
+        const index = await this.#readIndex(id);
+        compressedBytes += index.pages.reduce((total, page) => total + page.compressedBytes, 0);
+        declaredUncompressedBytes += index.pages.reduce(
           (total, page) => total + page.uncompressedBytes,
           0,
         );
+      } catch {
+        // A corrupt root must not prevent unrelated unreachable artifacts from being reclaimed.
       }
     }
 
-    const candidates = (await fs.readdir(this.#nodesDir, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory() && isCarryOverNodeId(entry.name))
-      .map((entry) => entry.name.toLowerCase())
+    const candidates = (await fs.readdir(this.#segmentsDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && isCarryOverSegmentId(entry.name))
+      .map((entry) => entry.name)
       .filter((id) => !reachable.has(id));
-    let removedNodeCount = 0;
+    let removedSegmentCount = 0;
     for (const id of candidates) {
       if (this.#writerRoots.has(id)) continue;
       const trashPath = path.join(this.#trashDir, `${id}-${crypto.randomUUID()}`);
       try {
-        await fs.rename(this.#nodeDir(id), trashPath);
+        await fs.rename(this.#segmentDir(id), trashPath);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
         throw error;
       }
-      this.#manifestCache.delete(id);
-      this.#degradedNodes.delete(id);
+      this.#indexCache.delete(id);
+      this.#degradedSegments.delete(id);
       await fs.rm(trashPath, { recursive: true, force: true });
-      removedNodeCount += 1;
+      removedSegmentCount += 1;
     }
-    if (removedNodeCount > 0) {
-      await Promise.all([syncDirectory(this.#nodesDir), syncDirectory(this.#trashDir)]);
+    if (removedSegmentCount > 0) {
+      await Promise.all([syncDirectory(this.#segmentsDir), syncDirectory(this.#trashDir)]);
     }
     return {
-      reachableNodeCount: reachable.size,
-      unreachableNodeCount: candidates.length,
-      removedNodeCount,
+      reachableSegmentCount: reachable.size,
+      unreachableSegmentCount: candidates.length,
+      removedSegmentCount,
       compressedBytes,
       declaredUncompressedBytes,
       durationMs: Date.now() - startedAt,
@@ -719,7 +620,7 @@ export class CarryOverTranscriptStore {
     await fs.rmdir(this.#operationDir(operationId)).catch(() => undefined);
   }
 
-  #preparedNodeDir(operationId: string, id: string): string {
+  #preparedSegmentDir(operationId: string, id: string): string {
     return path.join(this.#operationDir(operationId), id);
   }
 
@@ -728,14 +629,25 @@ export class CarryOverTranscriptStore {
     return path.join(this.#tmpDir, key);
   }
 
-  #nodeDir(id: string): string {
-    return path.join(this.#nodesDir, id);
+  #segmentDir(id: string): string {
+    return path.join(this.#segmentsDir, id);
   }
 }
 
-function requireNodeId(value: string): string {
-  if (!isCarryOverNodeId(value)) throw new Error('Carryover node ID must be a UUID');
-  return value.toLowerCase();
+function canonicalMessagesDigest(messages: readonly ChatMessage[]): string {
+  const digest = crypto.createHash('sha256');
+  digest.update('[');
+  for (const [index, message] of messages.entries()) {
+    if (index > 0) digest.update(',');
+    digest.update(JSON.stringify(message));
+  }
+  digest.update(']');
+  return digest.digest('hex');
+}
+
+function requireSegmentId(value: string): string {
+  if (!isCarryOverSegmentId(value)) throw new Error('Carryover segment ID must be a lowercase UUID');
+  return value;
 }
 
 function asUnavailable(error: unknown): CarryOverHistoryUnavailableError {

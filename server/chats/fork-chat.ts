@@ -8,7 +8,6 @@ import { extractFirstLine } from '../lib/text.js';
 import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
 import type {
   CarryOverTranscriptStore,
-  PreparedCarryOverNode,
 } from './carryover-transcript-store.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
@@ -31,7 +30,7 @@ interface ForkChatMetadata {
 
 type ForkChatCarryOver = Pick<
   CarryOverTranscriptStore,
-  'assertReachableForHandoff' | 'logicalMessageCount' | 'preparePrefix' | 'resolveCutoff'
+  'assertAvailable' | 'logicalMessageCount' | 'resolveCutoff'
 >;
 
 interface ForkChatInput {
@@ -110,33 +109,19 @@ export async function forkChatFileCopy({
   const startedAt = Date.now();
   const sourceAgentSessionId = sourceSession.agentSessionId;
   const targetEpoch = crypto.randomUUID();
-  const sourceHeadId = sourceSession.carryOverHeadId;
-  await carryOver.assertReachableForHandoff(sourceHeadId);
-  const sourceArchivedCount = await carryOver.logicalMessageCount(sourceHeadId);
+  const sourceSegments = sourceSession.carryOverSegments;
+  await carryOver.assertAvailable(sourceSegments);
+  const sourceArchivedCount = carryOver.logicalMessageCount(sourceSegments);
   let selectedArchivedCount = sourceArchivedCount;
-  let targetHeadId = sourceHeadId;
-  let preparedPrefix: PreparedCarryOverNode | null = null;
+  let targetSegments = sourceSegments;
   if (upToSequence !== undefined && upToSequence <= sourceArchivedCount) {
     selectedArchivedCount = upToSequence;
-    const cutoff = await carryOver.resolveCutoff(sourceHeadId, upToSequence);
-    if (cutoff.kind === 'reuse') {
-      targetHeadId = cutoff.headId;
-    } else {
-      preparedPrefix = await carryOver.preparePrefix({
-        operationId: `fork:${targetChatId}`,
-        id: crypto.randomUUID(),
-        sourceNodeId: cutoff.sourceNodeId,
-        messageCount: cutoff.messageCount,
-      });
-      await preparedPrefix.commit();
-      targetHeadId = preparedPrefix.id;
-    }
+    targetSegments = carryOver.resolveCutoff(sourceSegments, upToSequence);
   }
   const selectedNativeCount = upToSequence === undefined
     ? null
     : upToSequence - selectedArchivedCount;
   if (selectedNativeCount !== null && selectedNativeCount > 0 && !sourceAgentSessionId) {
-    await preparedPrefix?.discard();
     throw new DomainError(
       'TRANSCRIPT_UNAVAILABLE',
       'Fork message is outside the source transcript',
@@ -156,11 +141,9 @@ export async function forkChatFileCopy({
       });
     }
   } catch (error) {
-    await preparedPrefix?.discard();
     throw error;
   }
   if (needsNativeFork && !forkOutcome) {
-    await preparedPrefix?.discard();
     throw new Error(`Failed to create fork target for chat ${targetChatId}`);
   }
   if (
@@ -168,7 +151,6 @@ export async function forkChatFileCopy({
     && (getViewCursor(sourceChatId)?.lastSeq ?? 0)
       > selectedArchivedCount
   ) {
-    await preparedPrefix?.discard();
     // Empty-snapshot forks succeed only when the user cannot see anything the child would lose;
     // otherwise the provider transcript is still flushing and the fork is retryable.
     throw new CommandValidationError(
@@ -180,10 +162,9 @@ export async function forkChatFileCopy({
   }
   const nativeFork = forkOutcome?.kind === 'materialized' ? forkOutcome.session : null;
   try {
-    validateForkedSeedReceipt(sourceSession, nativeFork, targetHeadId);
+    validateForkedSeedReceipt(sourceSession, nativeFork);
   } catch (error) {
     const cleanupErrors = await discardForkResources(
-      preparedPrefix,
       nativeFork,
       sourceSession.agentId,
       discardForkedAgentSession,
@@ -213,13 +194,12 @@ export async function forkChatFileCopy({
       permissionMode: sourceSession.permissionMode,
       thinkingMode: sourceSession.thinkingMode,
       agentSettingsById: { ...sourceSession.agentSettingsById },
-      carryOverHeadId: targetHeadId,
+      carryOverSegments: targetSegments,
       nativeSeedReceipt: nativeFork?.nativeSeedReceipt ?? null,
       carryOverMigrationQuarantine: sourceSession.carryOverMigrationQuarantine,
     });
   } catch (error) {
     const cleanupErrors = await discardForkResources(
-      preparedPrefix,
       nativeFork,
       sourceSession.agentId,
       discardForkedAgentSession,
@@ -230,7 +210,6 @@ export async function forkChatFileCopy({
   if (!created) {
     const error = new Error(`Chat ID collision: ${targetChatId}`);
     const cleanupErrors = await discardForkResources(
-      preparedPrefix,
       nativeFork,
       sourceSession.agentId,
       discardForkedAgentSession,
@@ -256,13 +235,6 @@ export async function forkChatFileCopy({
       });
     } catch (error) {
       cleanupErrors.push(error);
-    }
-    if (cleanupErrors.length === 0 && preparedPrefix) {
-      try {
-        await preparedPrefix.discard();
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
     }
     if (nativeFork) {
       try {
@@ -290,7 +262,6 @@ export async function forkChatFileCopy({
     const sourceMeta = metadata.getChatMetadata(sourceChatId);
     if (sourceMeta?.firstMessage) metadata.addNewChatMetadata(targetChatId, sourceMeta.firstMessage);
     await settings.setSessionName(targetChatId, forkTitle);
-    preparedPrefix?.releaseRoot();
   } catch (error) {
     try {
       await rollback();
@@ -321,13 +292,11 @@ export async function forkChatFileCopy({
 }
 
 async function discardForkResources(
-  preparedPrefix: PreparedCarryOverNode | null,
   nativeFork: StartedAgentSession | null,
   agentId: string,
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>,
 ): Promise<unknown[]> {
   const cleanups: Promise<void>[] = [];
-  if (preparedPrefix) cleanups.push(preparedPrefix.discard());
   if (nativeFork) cleanups.push(discardForkedAgentSession(agentId, nativeFork));
   return (await Promise.allSettled(cleanups)).flatMap((result) => (
     result.status === 'rejected' ? [result.reason] : []
@@ -337,7 +306,6 @@ async function discardForkResources(
 function validateForkedSeedReceipt(
   source: ChatRegistryEntry,
   target: StartedAgentSession | null,
-  targetHeadId: string | null,
 ): void {
   const receipt = target?.nativeSeedReceipt ?? null;
   if (!receipt) return;
@@ -348,7 +316,7 @@ function validateForkedSeedReceipt(
     ...source.nativeSeedReceipt,
     agentSessionId: target.agentSessionId,
   };
-  if (targetHeadId !== expected.headId || JSON.stringify(receipt) !== JSON.stringify(expected)) {
+  if (JSON.stringify(receipt) !== JSON.stringify(expected)) {
     throw new Error('Forked agent returned an invalid carried-context receipt');
   }
 }

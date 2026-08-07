@@ -209,7 +209,6 @@ describe('createJsonlForking message validation', () => {
     const fixture = await createFixture();
     const prefix = 'first';
     const receipt = createNativeSeedReceipt({
-      headId: '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e',
       agentSessionId: sourceAgentSessionId,
       placement: 'user-prefix',
       prefix,

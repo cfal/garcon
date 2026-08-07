@@ -124,7 +124,6 @@ export function validateCatalogEntry(entry: TranscriptSearchCatalogEntry): void 
   if ((entry.nativeSeedReceipt === null) !== (parsedReceipt === null)
       || (parsedReceipt && (
         parsedReceipt.agentSessionId !== entry.agentSessionId
-        || entry.carryOverRevision !== `carry-v2:${parsedReceipt.headId}`
         || JSON.stringify(parsedReceipt) !== JSON.stringify(entry.nativeSeedReceipt)
       ))) {
     throw new Error('INVALID_CATALOG_ENTRY');

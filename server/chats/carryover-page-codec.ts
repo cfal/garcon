@@ -8,7 +8,7 @@ import {
 } from 'node:zlib';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { parseChatMessages } from '../../common/chat-types.js';
-import type { CarryOverPageDescriptor } from './carryover-node-types.js';
+import type { CarryOverPageDescriptor } from './carryover-segment-types.js';
 
 export const CARRYOVER_PAGE_MAX_MESSAGES = 256;
 export const CARRYOVER_PAGE_TARGET_BYTES = 1024 * 1024;
@@ -87,6 +87,12 @@ export async function decodeCarryOverPage(
 
   const source = createReadStream(filePath);
   const decompressor = createBrotliDecompress();
+  let sourceFailure: unknown = null;
+  const forwardSourceFailure = (error: unknown) => {
+    sourceFailure = error;
+    decompressor.destroy(error instanceof Error ? error : new Error(String(error)));
+  };
+  source.once('error', forwardSourceFailure);
   const abort = () => {
     const error = signal?.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError');
     // The iterator observes the decompressor; the piped source has no error consumer.
@@ -110,15 +116,14 @@ export async function decodeCarryOverPage(
       }
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) throw error;
+      if (error === sourceFailure) throw error;
       if (error instanceof CarryOverPageIntegrityError) throw error;
-      if (isCompressionDataError(error)) {
-        throw new CarryOverPageIntegrityError('Carryover page cannot be decompressed', { cause: error });
-      }
-      throw error;
+      throw new CarryOverPageIntegrityError('Carryover page cannot be decompressed', { cause: error });
     }
     signal?.throwIfAborted();
   } finally {
     signal?.removeEventListener('abort', abort);
+    source.removeListener('error', forwardSourceFailure);
     source.destroy();
     decompressor.destroy();
   }
@@ -174,14 +179,4 @@ function digest(bytes: Buffer): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
-}
-
-function isCompressionDataError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === 'object'
-    && 'code' in error
-    && typeof error.code === 'string'
-    && error.code.startsWith('Z_'),
-  );
 }

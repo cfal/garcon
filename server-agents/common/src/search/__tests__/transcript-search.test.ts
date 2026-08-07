@@ -159,19 +159,17 @@ describe('TranscriptSearchService', () => {
 
   it('rebuilds when a receipt appears and removes only its exact carried-context prefix', async () => {
     const root = await workspace();
-    const headId = '11111111-1111-4111-8111-111111111111';
-    const prefix = '<carried-context version="1" id="11111111-1111-4111-8111-111111111111">\nseedonlytoken\n</carried-context>\n\n';
+    const prefix = '<carried-context version="2">\n<transcript><user>seedonlytoken</user></transcript>\n</carried-context>\n\n';
     const native = [new UserMessage(timestamp, `${prefix}realprompttoken`)];
     const service = createService(root, {
       one: [new AssistantMessage(timestamp, 'archivedtoken')],
     });
     await enable(service);
-    const initial = entry('one', 'r1', native, `carry-v2:${headId}`);
+    const initial = entry('one', 'r1', native, `carry-v5:${'a'.repeat(64)}`);
     await service.reconcile(snapshot(service, 1, [initial]));
     await waitForSearch(service, 'seedonlytoken', ['one']);
 
     const receipt = createNativeSeedReceipt({
-      headId,
       agentSessionId: 'native-one',
       placement: 'user-prefix',
       prefix,

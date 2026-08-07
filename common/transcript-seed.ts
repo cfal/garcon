@@ -4,27 +4,25 @@ import { UserMessage, isToolUseMessage } from './chat-types.js';
 
 export const SEED_CONTEXT_OPEN = '<carried-context>';
 export const SEED_CONTEXT_CLOSE = '</carried-context>';
-export const CARRIED_CONTEXT_VERSION = 1 as const;
+export const CARRIED_CONTEXT_VERSION = 2 as const;
 
 const CARRIED_CONTEXT_OPEN_PREFIX = '<carried-context';
 const CARRIED_CONTEXT_PREAMBLE =
   'Previous conversation context follows. Continue from it without repeating it.';
-
 const DEFAULT_MAX_CHARS = 12_000;
-const TRUNCATION_MARKER = '[earlier turns truncated]';
 const TOOL_SUMMARY_MAX_CHARS = 200;
+const MESSAGE_PROJECTION_MAX_CHARS = 4_000;
+const TRUNCATION_ELEMENT = '    <earlier-turns-truncated/>';
 
 export interface NativeSeedReceipt {
-  readonly headId: string;
   readonly agentSessionId: string;
   readonly placement: 'user-prefix' | 'provider-context';
-  readonly format: 'v1-marker' | 'legacy-v0';
+  readonly format: 'v2-xml' | 'v1-marker' | 'legacy-v0';
   readonly codeUnitLength: number;
   readonly sha256: string;
 }
 
 export interface CarriedContext {
-  readonly headId: string;
   readonly prefix: string;
 }
 
@@ -35,43 +33,67 @@ export type SanitizeCarriedContextResult =
   | {
       readonly kind: 'mismatch';
       readonly messages: readonly ChatMessage[];
-      readonly claimedHeadId: string | null;
       readonly reason: string;
     };
 
-export function renderCarriedContextPrefix(
-  headId: string,
+export function renderCarriedContext(
   messages: readonly ChatMessage[],
-  options: { maxChars?: number; fromAgentLabel?: string } = {},
-): string {
-  if (!isUuid(headId)) throw new Error('Carried-context head ID must be a UUID');
-  const projection = renderTranscriptProjection([...messages], options)
-    .replaceAll(SEED_CONTEXT_CLOSE, '&lt;/carried-context&gt;');
-  return [
-    `<carried-context version="${CARRIED_CONTEXT_VERSION}" id="${headId}">`,
-    CARRIED_CONTEXT_PREAMBLE,
-    '',
-    projection,
-    SEED_CONTEXT_CLOSE,
-    '',
-    '',
+  options: { readonly maxChars?: number } = {},
+): CarriedContext | null {
+  const projected = messages.filter(isProjectableMessage);
+  if (projected.length === 0) return null;
+
+  const opening = [
+    `<carried-context version="${CARRIED_CONTEXT_VERSION}">`,
+    `  <instructions>${CARRIED_CONTEXT_PREAMBLE}</instructions>`,
+    '  <transcript>',
   ].join('\n');
+  const closing = '  </transcript>\n</carried-context>\n\n';
+  const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
+  const unlimited = maxChars <= 0;
+  const fullElements = projected.map((message) => renderMessageElement(message));
+  const full = `${opening}\n${fullElements.join('\n')}\n${closing}`;
+  if (unlimited || full.length <= maxChars) return { prefix: full };
+
+  const truncatedMinimum = `${opening}\n${TRUNCATION_ELEMENT}\n${closing}`;
+  if (truncatedMinimum.length > maxChars) {
+    throw new RangeError(`Carried-context budget must be at least ${truncatedMinimum.length} characters`);
+  }
+
+  const available = Math.max(0, maxChars - opening.length - closing.length - 2);
+  const selected: string[] = [];
+  let used = TRUNCATION_ELEMENT.length;
+  for (let index = projected.length - 1; index >= 0; index -= 1) {
+    const separator = selected.length > 0 ? 1 : 0;
+    const element = fullElements[index];
+    if (used + separator + element.length <= available) {
+      selected.unshift(element);
+      used += separator + element.length;
+      continue;
+    }
+    if (selected.length === 0) {
+      const remaining = available - used - separator;
+      const fitted = renderMessageElement(projected[index], remaining);
+      if (fitted) selected.unshift(fitted);
+    }
+    break;
+  }
+  return {
+    prefix: `${opening}\n${[TRUNCATION_ELEMENT, ...selected].join('\n')}\n${closing}`,
+  };
 }
 
 export function createNativeSeedReceipt(input: {
-  readonly headId: string;
   readonly agentSessionId: string;
   readonly placement: NativeSeedReceipt['placement'];
   readonly prefix: string;
   readonly format?: NativeSeedReceipt['format'];
 }): NativeSeedReceipt {
-  if (!isUuid(input.headId)) throw new Error('Native seed receipt head ID must be a UUID');
   if (!input.agentSessionId) throw new Error('Native seed receipt session ID is required');
   return {
-    headId: input.headId,
     agentSessionId: input.agentSessionId,
     placement: input.placement,
-    format: input.format ?? 'v1-marker',
+    format: input.format ?? 'v2-xml',
     codeUnitLength: input.prefix.length,
     sha256: sha256(input.prefix),
   };
@@ -84,7 +106,6 @@ export function receiptForCarriedContext(
 ): NativeSeedReceipt | null {
   return carriedContext
     ? createNativeSeedReceipt({
-        headId: carriedContext.headId,
         agentSessionId,
         placement,
         prefix: carriedContext.prefix,
@@ -121,14 +142,16 @@ export function retargetNativeSeedReceiptIfPreserved(
 export function parseNativeSeedReceipt(value: unknown): NativeSeedReceipt | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const receipt = value as Record<string, unknown>;
-  if (!isUuid(receipt.headId)) return null;
   if (typeof receipt.agentSessionId !== 'string' || !receipt.agentSessionId) return null;
   if (receipt.placement !== 'user-prefix' && receipt.placement !== 'provider-context') return null;
-  if (receipt.format !== 'v1-marker' && receipt.format !== 'legacy-v0') return null;
+  if (
+    receipt.format !== 'v2-xml'
+    && receipt.format !== 'v1-marker'
+    && receipt.format !== 'legacy-v0'
+  ) return null;
   if (!Number.isSafeInteger(receipt.codeUnitLength) || Number(receipt.codeUnitLength) < 0) return null;
   if (typeof receipt.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.sha256)) return null;
   return {
-    headId: receipt.headId,
     agentSessionId: receipt.agentSessionId,
     placement: receipt.placement,
     format: receipt.format,
@@ -145,7 +168,7 @@ export function sanitizeRecordedCarriedContext(input: {
   const { messages, receipt } = input;
   if (!receipt) return { kind: 'not-applicable', messages };
   if (!input.agentSessionId || receipt.agentSessionId !== input.agentSessionId) {
-    return mismatch(messages, null, 'Seed receipt does not name the current native session');
+    return mismatch(messages, 'Seed receipt does not name the current native session');
   }
   if (receipt.placement === 'provider-context') return { kind: 'not-applicable', messages };
 
@@ -164,44 +187,26 @@ export function sanitizeRecordedCarriedContext(input: {
     return { kind: 'stripped-exact', messages: next };
   }
 
-  // Legacy receipts are migration-only exact hashes and never enable marker heuristics.
-  if (receipt.format === 'legacy-v0') return { kind: 'absent', messages };
-  if (!original.content.startsWith(CARRIED_CONTEXT_OPEN_PREFIX)) {
-    return { kind: 'absent', messages };
-  }
-
-  const marker = parseAnchoredCarriedContextMarker(original.content);
-  if (!marker) return mismatch(messages, null, 'Recorded carried-context marker is malformed');
-  if (marker.headId !== receipt.headId) {
-    return mismatch(messages, marker.headId, 'Recorded carried-context marker names another head');
+  if (receipt.format !== 'legacy-v0' && original.content.startsWith(CARRIED_CONTEXT_OPEN_PREFIX)) {
+    return mismatch(messages, 'Recorded carried-context XML was rewritten');
   }
   return { kind: 'absent', messages };
 }
 
+// Retains the pre-v2 helpers only for importing legacy provider transcripts.
 export function renderTranscriptSeed(
   messages: ChatMessage[],
   options: { maxChars?: number; fromAgentLabel?: string } = {},
 ): string {
-  const projection = renderTranscriptProjection(messages, options);
-  if (!projection) return '';
-  const [preamble, ...lines] = projection.split('\n');
-  return [preamble, SEED_CONTEXT_OPEN, ...lines, SEED_CONTEXT_CLOSE].join('\n');
-}
-
-function renderTranscriptProjection(
-  messages: ChatMessage[],
-  options: { maxChars?: number; fromAgentLabel?: string } = {},
-): string {
-  const lines = messages.map(renderMessageLine).filter(Boolean);
+  const lines = messages.map(renderLegacyMessageLine).filter(Boolean);
   if (lines.length === 0) return '';
   const preamble = `The following is a prior conversation with ${options.fromAgentLabel || 'another assistant'}. Continue it.`;
-  const { kept, truncated } = capToMostRecent(
-    lines,
-    options.maxChars ?? DEFAULT_MAX_CHARS,
-  );
+  const { kept, truncated } = capLegacyLines(lines, options.maxChars ?? DEFAULT_MAX_CHARS);
   return [
     preamble,
-    ...(truncated ? [TRUNCATION_MARKER, ...kept] : kept),
+    SEED_CONTEXT_OPEN,
+    ...(truncated ? ['[earlier turns truncated]', ...kept] : kept),
+    SEED_CONTEXT_CLOSE,
   ].join('\n');
 }
 
@@ -209,9 +214,7 @@ export function stripTranscriptSeed(userText: string): string {
   const openIndex = userText.indexOf(SEED_CONTEXT_OPEN);
   if (openIndex === -1) return userText;
   const prefix = userText.slice(0, openIndex);
-  if (prefix.trim().length > 0 && !prefix.trimEnd().endsWith('Continue it.')) {
-    return userText;
-  }
+  if (prefix.trim().length > 0 && !prefix.trimEnd().endsWith('Continue it.')) return userText;
   const closeIndex = userText.indexOf(SEED_CONTEXT_CLOSE, openIndex);
   if (closeIndex === -1) return userText;
   return userText.slice(closeIndex + SEED_CONTEXT_CLOSE.length).replace(/^\s+/, '');
@@ -224,48 +227,88 @@ export function stripFirstUserSeed(messages: ChatMessage[]): ChatMessage[] {
   const stripped = stripTranscriptSeed(original.content);
   if (stripped === original.content) return messages;
   const next = messages.slice();
-  next[index] = new UserMessage(
-    original.timestamp,
-    stripped,
-    original.images,
-    original.metadata,
-  );
+  next[index] = new UserMessage(original.timestamp, stripped, original.images, original.metadata);
   return next;
 }
 
-function capToMostRecent(
-  lines: string[],
-  maxChars: number,
-): { kept: string[]; truncated: boolean } {
+function isProjectableMessage(message: ChatMessage): boolean {
+  return message.type === 'user-message'
+    || message.type === 'assistant-message'
+    || message.type === 'tool-result'
+    || isToolUseMessage(message);
+}
+
+function renderMessageElement(message: ChatMessage, maximum = Number.POSITIVE_INFINITY): string {
+  if (isToolUseMessage(message)) {
+    return fitElement(
+      '    <assistant><tool-use>',
+      `${toolName(message)}: ${toolSummary(message)}`,
+      '</tool-use></assistant>',
+      maximum,
+    );
+  }
+  switch (message.type) {
+    case 'user-message':
+      return fitElement('    <user>', boundedCollapse(message.content), '</user>', maximum);
+    case 'assistant-message':
+      return fitElement('    <assistant>', boundedCollapse(message.content), '</assistant>', maximum);
+    case 'tool-result':
+      return fitElement(
+        '    <tool-result>',
+        truncate(boundedCollapse(stringifyToolResult(message.content)), TOOL_SUMMARY_MAX_CHARS),
+        '</tool-result>',
+        maximum,
+      );
+    default:
+      return '';
+  }
+}
+
+function fitElement(open: string, content: string, close: string, maximum: number): string {
+  const overhead = open.length + close.length;
+  if (maximum < overhead) return '';
+  const escaped = escapeXml(content);
+  if (overhead + escaped.length <= maximum) return `${open}${escaped}${close}`;
+  const suffix = '...';
+  if (maximum < overhead + suffix.length) return '';
+  const codePoints = Array.from(content);
+  let low = 0;
+  let high = codePoints.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const candidate = escapeXml(codePoints.slice(0, middle).join(''));
+    if (overhead + candidate.length + suffix.length <= maximum) low = middle;
+    else high = middle - 1;
+  }
+  return `${open}${escapeXml(codePoints.slice(0, low).join(''))}${suffix}${close}`;
+}
+
+function escapeXml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+function renderLegacyMessageLine(message: ChatMessage): string {
+  if (isToolUseMessage(message)) return `Assistant used ${toolName(message)}: ${toolSummary(message)}`;
+  switch (message.type) {
+    case 'user-message': return `User: ${boundedCollapse(message.content)}`;
+    case 'assistant-message': return `Assistant: ${boundedCollapse(message.content)}`;
+    case 'tool-result': return `Tool result: ${boundedCollapse(stringifyToolResult(message.content))}`;
+    default: return '';
+  }
+}
+
+function capLegacyLines(lines: string[], maxChars: number): { kept: string[]; truncated: boolean } {
   if (maxChars <= 0) return { kept: lines, truncated: false };
   const kept: string[] = [];
   let total = 0;
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index];
     const cost = line.length + (kept.length > 0 ? 1 : 0);
-    if (total + cost > maxChars && kept.length > 0) {
-      return { kept, truncated: true };
-    }
+    if (total + cost > maxChars && kept.length > 0) return { kept, truncated: true };
     kept.unshift(line);
     total += cost;
   }
   return { kept, truncated: false };
-}
-
-function renderMessageLine(message: ChatMessage): string {
-  if (isToolUseMessage(message)) {
-    return `Assistant used ${toolName(message)}: ${toolSummary(message)}`;
-  }
-  switch (message.type) {
-    case 'user-message':
-      return `User: ${collapse(message.content)}`;
-    case 'assistant-message':
-      return `Assistant: ${collapse(message.content)}`;
-    case 'tool-result':
-      return `Tool result: ${collapse(stringifyToolResult(message.content))}`;
-    default:
-      return '';
-  }
 }
 
 function toolName(message: ToolUseChatMessage): string {
@@ -273,38 +316,26 @@ function toolName(message: ToolUseChatMessage): string {
 }
 
 function toolSummary(message: ToolUseChatMessage): string {
-  return truncate(collapse(extractToolDetail(message)), TOOL_SUMMARY_MAX_CHARS);
+  return truncate(boundedCollapse(extractToolDetail(message)), TOOL_SUMMARY_MAX_CHARS);
 }
 
 function extractToolDetail(message: ToolUseChatMessage): string {
   switch (message.type) {
-    case 'bash-tool-use':
-      return message.description || message.command;
+    case 'bash-tool-use': return message.description || message.command;
     case 'read-tool-use':
-    case 'write-tool-use':
-      return message.filePath;
+    case 'write-tool-use': return message.filePath;
     case 'edit-tool-use':
-    case 'apply-patch-tool-use':
-      return message.filePath ?? '';
-    case 'list-tool-use':
-      return message.path ?? '';
+    case 'apply-patch-tool-use': return message.filePath ?? '';
+    case 'list-tool-use': return message.path ?? '';
     case 'grep-tool-use':
-    case 'glob-tool-use':
-      return message.pattern ?? '';
-    case 'web-search-tool-use':
-      return message.query;
-    case 'web-fetch-tool-use':
-      return message.url;
-    case 'task-tool-use':
-      return message.description || message.prompt || message.subagentType || '';
-    case 'external-tool-use':
-      return message.name;
-    case 'mcp-tool-use':
-      return `${message.server}/${message.tool}`;
-    case 'unknown-tool-use':
-      return message.rawName;
-    default:
-      return '';
+    case 'glob-tool-use': return message.pattern ?? '';
+    case 'web-search-tool-use': return message.query;
+    case 'web-fetch-tool-use': return message.url;
+    case 'task-tool-use': return message.description || message.prompt || message.subagentType || '';
+    case 'external-tool-use': return message.name;
+    case 'mcp-tool-use': return `${message.server}/${message.tool}`;
+    case 'unknown-tool-use': return message.rawName;
+    default: return '';
   }
 }
 
@@ -318,33 +349,19 @@ function stringifyToolResult(content: Record<string, unknown>): string {
   }
 }
 
-function collapse(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+function boundedCollapse(value: string): string {
+  return value.slice(0, MESSAGE_PROJECTION_MAX_CHARS * 2).replace(/\s+/g, ' ').trim();
 }
 
 function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}...`;
 }
 
-function parseAnchoredCarriedContextMarker(value: string): { headId: string } | null {
-  const end = value.indexOf('\n');
-  if (end === -1) return null;
-  const match = /^<carried-context version="1" id="([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})">$/i
-    .exec(value.slice(0, end));
-  return match ? { headId: match[1].toLowerCase() } : null;
-}
-
 function mismatch(
   messages: readonly ChatMessage[],
-  claimedHeadId: string | null,
   reason: string,
 ): SanitizeCarriedContextResult {
-  return { kind: 'mismatch', messages, claimedHeadId, reason };
-}
-
-function isUuid(value: unknown): value is string {
-  return typeof value === 'string'
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  return { kind: 'mismatch', messages, reason };
 }
 
 function sha256(value: string): string {

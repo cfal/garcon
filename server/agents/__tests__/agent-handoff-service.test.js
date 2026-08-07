@@ -6,6 +6,7 @@ import path from 'node:path';
 import { UserMessage } from '../../../common/chat-types.js';
 import { AgentHandoffService } from '../agent-handoff-service.ts';
 import { CarryOverTranscriptStore } from '../../chats/carryover-transcript-store.ts';
+import { carryOverRevision } from '../../chats/carryover-segments.ts';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 
@@ -19,7 +20,7 @@ function sourceChat() {
     agentSessionId: 'source-session',
     nativeSession: null,
     nativeSeedReceipt: null,
-    carryOverHeadId: null,
+    carryOverSegments: [],
     carryOverMigrationQuarantine: null,
     agentOwnershipEpoch: 'source-epoch',
     agentSettingsById: { 'source-agent': envelope('source-agent') },
@@ -91,14 +92,14 @@ describe('AgentHandoffService', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('preserves a committed node when the journal fails after mutating the live registry entry', async () => {
+  it('preserves a committed segment when the journal fails after mutating the live registry entry', async () => {
     const current = sourceChat();
     const registry = { getChat: () => current };
-    let targetHeadId;
+    let targetSegments;
     const ownership = {
       findHandoff: () => null,
       beginHandoff: mock(async (input) => {
-        targetHeadId = input.targetHistoryHeadId;
+        targetSegments = input.targetCarryOverSegments;
         return handoffIntent(input, 'target-epoch');
       }),
       commitHandoff: mock(async () => {
@@ -106,7 +107,7 @@ describe('AgentHandoffService', () => {
           agentId: 'target-agent',
           agentOwnershipEpoch: 'target-epoch',
           agentSessionId: null,
-          carryOverHeadId: targetHeadId,
+          carryOverSegments: targetSegments,
         });
         throw new Error('journal follow-up write failed');
       }),
@@ -127,15 +128,17 @@ describe('AgentHandoffService', () => {
     expect(current).toMatchObject({
       agentId: 'target-agent',
       agentOwnershipEpoch: 'target-epoch',
-      carryOverHeadId: targetHeadId,
+      carryOverSegments: targetSegments,
     });
-    await expect(carryOver.readManifest(targetHeadId)).resolves.toMatchObject({ id: targetHeadId });
+    await expect(carryOver.readIndex(targetSegments[0].id)).resolves.toMatchObject({
+      id: targetSegments[0].id,
+    });
   });
 
   it('detects source ownership changes after native capture with a stable snapshot fence', async () => {
     const current = sourceChat();
     const registry = { getChat: () => current };
-    const beginHandoff = mock(async () => { throw new Error('unexpected begin'); });
+    const beginHandoff = mock(async (input) => handoffIntent(input, 'target-epoch'));
     const settledCapture = {
       loadStable: mock(async () => {
         current.agentOwnershipEpoch = 'new-owner-epoch';
@@ -170,32 +173,31 @@ describe('AgentHandoffService', () => {
       status: 409,
     });
     await preparation.compensate();
-    expect(beginHandoff).not.toHaveBeenCalled();
+    expect(beginHandoff).toHaveBeenCalledTimes(1);
+    expect(await segmentDirectories(workspaceDir)).toEqual([]);
   });
 
-  it('resumes an existing prepared intent without recapturing or writing another node', async () => {
+  it('resumes an existing prepared intent without recapturing or writing another segment', async () => {
     const current = sourceChat();
     const registry = { getChat: () => current };
-    const nodeId = '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e';
-    const prepared = await carryOver.prepareMaterialized({
+    const segmentId = '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e';
+    const prepared = await carryOver.prepareSegment({
       operationId: 'existing-operation',
-      id: nodeId,
-      parentId: null,
-      source: {
-        agentId: 'source-agent',
-        model: 'source-model',
-        nativeSessionId: 'source-session',
-        nativeRevision: 'native-r1',
-      },
-      boundary: {
-        kind: 'handoff',
-        targetAtCapture: { agentId: 'target-agent', model: 'target-model' },
-      },
+      id: segmentId,
       seedSanitation: 'not-applicable',
       messages: [new UserMessage(timestamp, 'captured')],
     });
     await prepared.commit();
     prepared.releaseRoot();
+    const targetSegments = [{
+      id: segmentId,
+      agentId: 'source-agent',
+      model: 'source-model',
+      capturedAt: timestamp,
+      storedMessageCount: 1,
+      visibleMessageCount: 1,
+      trailingHandoff: { agentId: 'target-agent', model: 'target-model' },
+    }];
     const existing = handoffIntent({
       operationId: 'existing-operation',
       clientRequestId: 'request-1',
@@ -203,8 +205,7 @@ describe('AgentHandoffService', () => {
       chatId: 'chat',
       source: current,
       target: target(),
-      targetHistoryHeadId: nodeId,
-      preparedNodeId: nodeId,
+      targetCarryOverSegments: targetSegments,
     }, 'target-epoch');
     const settledCapture = {
       loadStable: mock(async () => { throw new Error('unexpected capture'); }),
@@ -215,7 +216,7 @@ describe('AgentHandoffService', () => {
         agentId: 'target-agent',
         agentOwnershipEpoch: 'target-epoch',
         agentSessionId: null,
-        carryOverHeadId: nodeId,
+        carryOverSegments: targetSegments,
       });
     });
     const service = createService({
@@ -241,7 +242,7 @@ describe('AgentHandoffService', () => {
 
     expect(settledCapture.loadStable).not.toHaveBeenCalled();
     expect(commitHandoff).toHaveBeenCalledWith('existing-operation', expect.any(Function));
-    expect(await nodeDirectories(workspaceDir)).toEqual([nodeId]);
+    expect(await segmentDirectories(workspaceDir)).toEqual([segmentId]);
   });
 
   it('rejects a resumed request whose submitted handoff target differs', async () => {
@@ -254,8 +255,7 @@ describe('AgentHandoffService', () => {
       chatId: 'chat',
       source: current,
       target: target(),
-      targetHistoryHeadId: null,
-      preparedNodeId: null,
+      targetCarryOverSegments: [],
     }, 'target-epoch');
     const commitHandoff = mock(async () => {});
     const service = createService({
@@ -453,28 +453,30 @@ function targetResolutionDeps({ permissionModes = ['default'] } = {}) {
 
 function handoffIntent(input, targetEpoch) {
   return {
-    version: 2,
+    version: 3,
     operationId: input.operationId,
     clientRequestId: input.clientRequestId,
     submittedTargetHash: input.submittedTargetHash,
     kind: 'handoff',
     chatId: input.chatId,
-    phase: 'node-prepared',
+    phase: 'segment-prepared',
     source: {
       agentId: input.source.agentId,
       model: input.source.model,
       sessionId: input.source.agentSessionId,
       agentOwnershipEpoch: input.source.agentOwnershipEpoch,
-      historyHeadId: input.source.carryOverHeadId,
+      carryOverRevision: carryOverRevision(
+        input.source.carryOverSegments,
+        input.source.carryOverMigrationQuarantine,
+      ),
       nativeSeedReceipt: input.source.nativeSeedReceipt,
       reference: {},
     },
     target: {
       execution: input.target,
       agentOwnershipEpoch: targetEpoch,
-      historyHeadId: input.targetHistoryHeadId,
+      carryOverSegments: input.targetCarryOverSegments,
     },
-    preparedNodeId: input.preparedNodeId,
     createdAt: timestamp,
   };
 }
@@ -493,6 +495,6 @@ function stableStringify(value) {
     .join(',')}}`;
 }
 
-async function nodeDirectories(workspaceDir) {
-  return (await fs.readdir(path.join(workspaceDir, 'carryover-transcripts', 'nodes'))).sort();
+async function segmentDirectories(workspaceDir) {
+  return (await fs.readdir(path.join(workspaceDir, 'carryover-transcripts', 'segments'))).sort();
 }

@@ -34,71 +34,73 @@ describe('CarryOverGarbageCollector', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('keeps a shared chain until its final chat root is deleted', async () => {
-    await commitNode(FIRST, null);
-    await commitNode(SECOND, FIRST);
+  it('keeps shared segments until their final chat root is deleted', async () => {
+    await commitSegment(FIRST);
+    await commitSegment(SECOND);
+    const refs = [segmentRef(FIRST), segmentRef(SECOND)];
     sessions = {
-      source: { carryOverHeadId: SECOND },
-      fork: { carryOverHeadId: SECOND },
+      source: { carryOverSegments: refs },
+      fork: { carryOverSegments: refs },
     };
 
     await collector.initialize();
     delete sessions.source;
     await collector.sweep();
-    await expect(nodeStat(FIRST)).resolves.toBeDefined();
-    await expect(nodeStat(SECOND)).resolves.toBeDefined();
+    await expect(segmentStat(FIRST)).resolves.toBeDefined();
+    await expect(segmentStat(SECOND)).resolves.toBeDefined();
 
     delete sessions.fork;
     await collector.sweep();
-    await expect(nodeStat(FIRST)).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(nodeStat(SECOND)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(segmentStat(FIRST)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(segmentStat(SECOND)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('retains journal roots and in-process writer roots during a sweep', async () => {
-    await commitNode(FIRST, null);
+    await commitSegment(FIRST);
     journalRoots.add(FIRST);
     await collector.sweep();
-    await expect(nodeStat(FIRST)).resolves.toBeDefined();
+    await expect(segmentStat(FIRST)).resolves.toBeDefined();
 
     journalRoots.clear();
-    const prepared = await prepareNode(SECOND, null);
+    const prepared = await prepareSegment(SECOND);
     await prepared.commit();
     await collector.sweep();
-    await expect(nodeStat(SECOND)).resolves.toBeDefined();
+    await expect(segmentStat(SECOND)).resolves.toBeDefined();
 
     prepared.releaseRoot();
     await collector.sweep();
-    await expect(nodeStat(FIRST)).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(nodeStat(SECOND)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(segmentStat(FIRST)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(segmentStat(SECOND)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  async function prepareNode(id, parentId) {
-    return store.prepareMaterialized({
+  async function prepareSegment(id) {
+    return store.prepareSegment({
       operationId: `operation:${id}`,
       id,
-      parentId,
-      source: {
-        agentId: 'codex',
-        model: 'gpt',
-        nativeSessionId: 'session',
-        nativeRevision: `revision:${id}`,
-      },
-      boundary: {
-        kind: 'handoff',
-        targetAtCapture: { agentId: 'claude', model: 'opus' },
-      },
       seedSanitation: 'not-applicable',
       messages: [new UserMessage(TIMESTAMP, id)],
     });
   }
 
-  async function commitNode(id, parentId) {
-    const prepared = await prepareNode(id, parentId);
+  async function commitSegment(id) {
+    const prepared = await prepareSegment(id);
     await prepared.commit();
     prepared.releaseRoot();
   }
 
-  function nodeStat(id) {
-    return fs.stat(path.join(workspaceDir, 'carryover-transcripts', 'nodes', id));
+  function segmentStat(id) {
+    return fs.stat(path.join(workspaceDir, 'carryover-transcripts', 'segments', id));
   }
 });
+
+function segmentRef(id) {
+  return {
+    id,
+    agentId: 'codex',
+    model: 'gpt',
+    capturedAt: TIMESTAMP,
+    storedMessageCount: 1,
+    visibleMessageCount: 1,
+    trailingHandoff: { agentId: 'claude', model: 'opus' },
+  };
+}

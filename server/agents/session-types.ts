@@ -11,6 +11,7 @@ import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentCommandImage } from '@garcon/common/ws-requests';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import type { CarryOverSegmentRef } from '../chats/store.js';
 
 export type { AgentCommandImage, PermissionMode, ThinkingMode };
 export type AgentName = string;
@@ -94,7 +95,7 @@ export interface AgentChatEntry {
   nativeSession?: AgentNativeSessionRef | null;
   agentOwnershipEpoch?: string;
   nativeSeedReceipt?: NativeSeedReceipt | null;
-  carryOverHeadId?: string | null;
+  carryOverSegments?: readonly CarryOverSegmentRef[];
   carryOverMigrationQuarantine?: { artifactId: string; errorCode: string } | null;
 }
 

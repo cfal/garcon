@@ -272,6 +272,7 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       modelEndpointId: null,
       modelProtocol: null,
       nativeSeedReceipt: null,
+      carryOverSegments: [],
     }, { flush: true });
   });
 

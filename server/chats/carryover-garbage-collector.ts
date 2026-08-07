@@ -42,7 +42,9 @@ export class CarryOverGarbageCollector {
   #roots(): ReadonlySet<string> {
     const roots = new Set(this.deps.journal.roots());
     for (const entry of Object.values(this.deps.registry.listAllChats())) {
-      if (entry.carryOverHeadId) roots.add(entry.carryOverHeadId);
+      for (const ref of entry.carryOverSegments) {
+        if (ref.storedMessageCount > 0) roots.add(ref.id);
+      }
     }
     return roots;
   }

@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   AgentOwnershipJournal,
-  emptyOwnershipJournalV2,
+  emptyOwnershipJournalV3,
 } from '../agent-ownership-journal.js';
+import { carryOverRevision } from '../carryover-segments.js';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 
@@ -23,7 +24,7 @@ function chat(agentId = 'source-agent', overrides = {}) {
       value: { id: `${agentId}-session` },
     },
     nativeSeedReceipt: null,
-    carryOverHeadId: null,
+    carryOverSegments: [],
     carryOverMigrationQuarantine: null,
     agentOwnershipEpoch: `${agentId}-epoch`,
     agentSettingsById: { [agentId]: envelope(agentId) },
@@ -104,8 +105,7 @@ function begin(journal, registry, overrides = {}) {
     chatId: 'chat',
     source: registry.getChat('chat'),
     target: target(),
-    targetHistoryHeadId: '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e',
-    preparedNodeId: '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e',
+    targetCarryOverSegments: [segmentRef()],
     ...overrides,
   });
 }
@@ -137,7 +137,7 @@ describe('AgentOwnershipJournal', () => {
 
     expect(updated).toMatchObject({
       agentId: 'target-agent',
-      carryOverHeadId: intent.target.historyHeadId,
+      carryOverSegments: intent.target.carryOverSegments,
       agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
       agentSessionId: null,
       nativeSeedReceipt: null,
@@ -148,7 +148,7 @@ describe('AgentOwnershipJournal', () => {
       reason: 'transferred',
       chat: { agentId: 'source-agent', agentSessionId: 'source-agent-session' },
     });
-    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV2());
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
   });
 
   it('keeps source ownership when the registry commit fails', async () => {
@@ -169,7 +169,7 @@ describe('AgentOwnershipJournal', () => {
 
     expect(registry.getChat('chat').agentId).toBe('source-agent');
     expect(release).not.toHaveBeenCalled();
-    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV2());
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
   });
 
   it('serializes deletion behind an in-flight transfer release', async () => {
@@ -204,14 +204,14 @@ describe('AgentOwnershipJournal', () => {
 
     expect(registry.getChat('chat')).toBeNull();
     expect(releases.map((request) => request.reason)).toEqual(['transferred', 'deleted']);
-    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV2());
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
   });
 
   it('retains delete cleanup without blocking startup when release fails', async () => {
     const registry = createRegistry({});
     const reference = referenceFor('source-agent');
     await fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), JSON.stringify({
-      version: 2,
+      version: 3,
       ownershipIntents: [{
         version: 2,
         operationId: 'delete:chat',
@@ -245,7 +245,7 @@ describe('AgentOwnershipJournal', () => {
     const registry = createRegistry({});
     const reference = referenceFor('removed-agent');
     await fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), JSON.stringify({
-      version: 2,
+      version: 3,
       ownershipIntents: [{
         version: 2,
         operationId: 'delete:chat',
@@ -274,7 +274,7 @@ describe('AgentOwnershipJournal', () => {
     const registry = createRegistry({ chat: chat() });
     const inconsistent = persistedHandoff({ phase: 'registry-committed' });
     await writeJournal(workspaceDir, {
-      version: 2,
+      version: 3,
       ownershipIntents: [inconsistent],
       transferCleanup: [],
     });
@@ -295,11 +295,11 @@ describe('AgentOwnershipJournal', () => {
     const registry = createRegistry({
       chat: chat('target-agent', {
         agentOwnershipEpoch: 'newer-epoch',
-        carryOverHeadId: 'd5f2380b-6228-49f5-8484-b2d7e16380ab',
+        carryOverSegments: [segmentRef({ id: 'd5f2380b-6228-49f5-8484-b2d7e16380ab' })],
       }),
     });
     await writeJournal(workspaceDir, {
-      version: 2,
+      version: 3,
       ownershipIntents: [persistedHandoff()],
       transferCleanup: [],
     });
@@ -316,18 +316,17 @@ describe('AgentOwnershipJournal', () => {
 
   it('rejects malformed handoff records before recovery dereferences them', async () => {
     await writeJournal(workspaceDir, {
-      version: 2,
+      version: 3,
       ownershipIntents: [{
-        version: 2,
+        version: 3,
         operationId: 'handoff:malformed',
         clientRequestId: 'request-malformed',
         submittedTargetHash: 'a'.repeat(64),
         kind: 'handoff',
         chatId: 'chat',
-        phase: 'node-prepared',
+        phase: 'segment-prepared',
         source: {},
         target: {},
-        preparedNodeId: null,
         createdAt: timestamp,
       }],
       transferCleanup: [],
@@ -345,29 +344,44 @@ describe('AgentOwnershipJournal', () => {
 function persistedHandoff(overrides = {}) {
   const source = chat();
   return {
-    version: 2,
+    version: 3,
     operationId: 'handoff:request-1',
     clientRequestId: 'request-1',
     submittedTargetHash: 'a'.repeat(64),
     kind: 'handoff',
     chatId: 'chat',
-    phase: 'node-prepared',
+    phase: 'segment-prepared',
     source: {
       agentId: source.agentId,
       model: source.model,
       sessionId: source.agentSessionId,
       agentOwnershipEpoch: source.agentOwnershipEpoch,
-      historyHeadId: source.carryOverHeadId,
+      carryOverRevision: carryOverRevision(
+        source.carryOverSegments,
+        source.carryOverMigrationQuarantine,
+      ),
       nativeSeedReceipt: source.nativeSeedReceipt,
       reference: referenceFor('source-agent'),
     },
     target: {
       execution: target(),
       agentOwnershipEpoch: 'target-epoch',
-      historyHeadId: '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e',
+      carryOverSegments: [segmentRef()],
     },
-    preparedNodeId: '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e',
     createdAt: timestamp,
+    ...overrides,
+  };
+}
+
+function segmentRef(overrides = {}) {
+  return {
+    id: '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e',
+    agentId: 'source-agent',
+    model: 'source-agent-model',
+    capturedAt: timestamp,
+    storedMessageCount: 1,
+    visibleMessageCount: 1,
+    trailingHandoff: { agentId: 'target-agent', model: 'target-agent-model' },
     ...overrides,
   };
 }

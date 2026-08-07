@@ -4,7 +4,6 @@ import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { forkChatFileCopy } from '../fork-chat.js';
 
 const HEAD_ID = '11111111-1111-4111-8111-111111111111';
-const PREFIX_ID = '22222222-2222-4222-8222-222222222222';
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 
 function sourceSession(overrides = {}) {
@@ -26,20 +25,10 @@ function sourceSession(overrides = {}) {
     tags: ['review'],
     permissionMode: 'acceptEdits',
     thinkingMode: 'high',
-    carryOverHeadId: null,
+    carryOverSegments: [],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
     ...overrides,
-  };
-}
-
-function makePreparedPrefix() {
-  return {
-    id: PREFIX_ID,
-    messageCount: 2,
-    commit: mock(async () => undefined),
-    discard: mock(async () => undefined),
-    releaseRoot: mock(() => undefined),
   };
 }
 
@@ -73,12 +62,10 @@ function makeDeps(overrides = {}) {
     getChatMetadata: mock(() => ({ firstMessage: 'First prompt' })),
     addNewChatMetadata: mock(() => undefined),
   };
-  const preparedPrefix = overrides.preparedPrefix ?? makePreparedPrefix();
   const carryOver = {
-    assertReachableForHandoff: mock(async () => undefined),
-    logicalMessageCount: mock(async () => 0),
-    resolveCutoff: mock(async (headId) => ({ kind: 'reuse', headId })),
-    preparePrefix: mock(async () => preparedPrefix),
+    assertAvailable: mock(async () => undefined),
+    logicalMessageCount: mock(() => 0),
+    resolveCutoff: mock((refs) => refs),
     ...overrides.carryOver,
   };
   const ownership = overrides.ownership ?? {
@@ -106,20 +93,20 @@ function makeDeps(overrides = {}) {
     getViewCursor,
     forkAgentSession,
     discardForkedAgentSession,
-    preparedPrefix,
     sessions,
   };
 }
 
 describe('forkChatFileCopy', () => {
-  it('shares a whole archived head without creating pages or a provider session', async () => {
+  it('shares whole archived segments without creating pages or a provider session', async () => {
+    const refs = [segmentRef()];
     const deps = makeDeps({
       source: sourceSession({
         agentSessionId: null,
         nativeSession: null,
-        carryOverHeadId: HEAD_ID,
+        carryOverSegments: refs,
       }),
-      carryOver: { logicalMessageCount: mock(async () => 3) },
+      carryOver: { logicalMessageCount: mock(() => 3) },
     });
 
     const result = await forkChatFileCopy({
@@ -131,26 +118,27 @@ describe('forkChatFileCopy', () => {
 
     expect(result.agentSessionId).toBeNull();
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
-    expect(deps.carryOver.preparePrefix).not.toHaveBeenCalled();
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentSessionId: null,
       nativeSession: null,
-      carryOverHeadId: HEAD_ID,
+      carryOverSegments: refs,
       agentOwnershipEpoch: expect.any(String),
     });
   });
 
-  it('creates an immutable prefix for a point inside archived history', async () => {
+  it('slices references for a point inside archived history without writing a prefix artifact', async () => {
     const quarantine = { artifactId: 'legacy', errorCode: 'INVALID_CARRYOVER_ENTRY' };
+    const refs = [segmentRef({ storedMessageCount: 4, visibleMessageCount: 4 })];
+    const selected = [segmentRef({
+      storedMessageCount: 4,
+      visibleMessageCount: 2,
+      trailingHandoff: null,
+    })];
     const deps = makeDeps({
-      source: sourceSession({ carryOverHeadId: HEAD_ID, carryOverMigrationQuarantine: quarantine }),
+      source: sourceSession({ carryOverSegments: refs, carryOverMigrationQuarantine: quarantine }),
       carryOver: {
-        logicalMessageCount: mock(async () => 4),
-        resolveCutoff: mock(async () => ({
-          kind: 'prefix',
-          sourceNodeId: HEAD_ID,
-          messageCount: 2,
-        })),
+        logicalMessageCount: mock(() => 4),
+        resolveCutoff: mock(() => selected),
       },
     });
 
@@ -164,18 +152,16 @@ describe('forkChatFileCopy', () => {
 
     expect(result.agentSessionId).toBeNull();
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
-    expect(deps.preparedPrefix.commit).toHaveBeenCalledOnce();
-    expect(deps.preparedPrefix.releaseRoot).toHaveBeenCalledOnce();
     expect(deps.sessions.get('target-chat')).toMatchObject({
-      carryOverHeadId: PREFIX_ID,
+      carryOverSegments: selected,
       carryOverMigrationQuarantine: quarantine,
     });
   });
 
   it('keeps a lazy whole child when an unmaterialized fork loses no visible native messages', async () => {
     const deps = makeDeps({
-      source: sourceSession({ carryOverHeadId: HEAD_ID }),
-      carryOver: { logicalMessageCount: mock(async () => 2) },
+      source: sourceSession({ carryOverSegments: [segmentRef()] }),
+      carryOver: { logicalMessageCount: mock(() => 2) },
       getViewCursor: mock(() => ({ lastSeq: 2 })),
       forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
     });
@@ -191,7 +177,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentSessionId: null,
       nativeSession: null,
-      carryOverHeadId: HEAD_ID,
+      carryOverSegments: [segmentRef()],
     });
   });
 
@@ -220,9 +206,9 @@ describe('forkChatFileCopy', () => {
       source: sourceSession({
         agentSessionId: null,
         nativeSession: null,
-        carryOverHeadId: HEAD_ID,
+        carryOverSegments: [segmentRef()],
       }),
-      carryOver: { logicalMessageCount: mock(async () => 2) },
+      carryOver: { logicalMessageCount: mock(() => 2) },
     });
 
     await expect(forkChatFileCopy({
@@ -238,8 +224,8 @@ describe('forkChatFileCopy', () => {
 
   it('translates a combined point into a native provider fork and preserves settings', async () => {
     const deps = makeDeps({
-      source: sourceSession({ carryOverHeadId: HEAD_ID }),
-      carryOver: { logicalMessageCount: mock(async () => 2) },
+      source: sourceSession({ carryOverSegments: [segmentRef()] }),
+      carryOver: { logicalMessageCount: mock(() => 2) },
     });
 
     const result = await forkChatFileCopy({
@@ -265,7 +251,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentId: 'test',
       agentSessionId: 'target-native',
-      carryOverHeadId: HEAD_ID,
+      carryOverSegments: [segmentRef()],
       model: 'model-a',
       permissionMode: 'acceptEdits',
       thinkingMode: 'high',
@@ -278,15 +264,14 @@ describe('forkChatFileCopy', () => {
 
   it('retargets and persists an exact provider seed receipt', async () => {
     const sourceReceipt = createNativeSeedReceipt({
-      headId: HEAD_ID,
       agentSessionId: 'source-native',
       placement: 'user-prefix',
       prefix: 'seed',
     });
     const targetReceipt = { ...sourceReceipt, agentSessionId: 'target-native' };
     const deps = makeDeps({
-      source: sourceSession({ carryOverHeadId: HEAD_ID, nativeSeedReceipt: sourceReceipt }),
-      carryOver: { logicalMessageCount: mock(async () => 2) },
+      source: sourceSession({ carryOverSegments: [segmentRef()], nativeSeedReceipt: sourceReceipt }),
+      carryOver: { logicalMessageCount: mock(() => 2) },
       forkAgentSession: mock(async () => ({
         kind: 'materialized',
         session: {
@@ -309,13 +294,12 @@ describe('forkChatFileCopy', () => {
 
   it('rejects and discards a fork with an invalid provider seed receipt', async () => {
     const sourceReceipt = createNativeSeedReceipt({
-      headId: HEAD_ID,
       agentSessionId: 'source-native',
       placement: 'user-prefix',
       prefix: 'seed',
     });
     const deps = makeDeps({
-      source: sourceSession({ carryOverHeadId: HEAD_ID, nativeSeedReceipt: sourceReceipt }),
+      source: sourceSession({ carryOverSegments: [segmentRef()], nativeSeedReceipt: sourceReceipt }),
       forkAgentSession: mock(async () => ({
         kind: 'materialized',
         session: {
@@ -351,17 +335,14 @@ describe('forkChatFileCopy', () => {
     expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
   });
 
-  it('discards a prepared prefix when target setup fails', async () => {
+  it('rolls back a point-fork target when target setup fails', async () => {
     const failure = new Error('settings failed');
+    const selected = [segmentRef({ visibleMessageCount: 2, trailingHandoff: null })];
     const deps = makeDeps({
-      source: sourceSession({ carryOverHeadId: HEAD_ID }),
+      source: sourceSession({ carryOverSegments: [segmentRef()] }),
       carryOver: {
-        logicalMessageCount: mock(async () => 4),
-        resolveCutoff: mock(async () => ({
-          kind: 'prefix',
-          sourceNodeId: HEAD_ID,
-          messageCount: 2,
-        })),
+        logicalMessageCount: mock(() => 4),
+        resolveCutoff: mock(() => selected),
       },
       settings: { setSessionName: mock(async () => { throw failure; }) },
     });
@@ -375,7 +356,6 @@ describe('forkChatFileCopy', () => {
     })).rejects.toBe(failure);
 
     expect(deps.ownership.delete).toHaveBeenCalledWith('target-chat');
-    expect(deps.preparedPrefix.discard).toHaveBeenCalledOnce();
   });
 
   it('uses and advances the persisted source fork ordinal', async () => {
@@ -412,3 +392,16 @@ describe('forkChatFileCopy', () => {
     expect(deps.settings.removeSessionName).toHaveBeenCalledOnce();
   });
 });
+
+function segmentRef(overrides = {}) {
+  return {
+    id: HEAD_ID,
+    agentId: 'test',
+    model: 'model-a',
+    capturedAt: '2026-08-07T12:00:00.000Z',
+    storedMessageCount: 2,
+    visibleMessageCount: 2,
+    trailingHandoff: { agentId: 'other', model: 'model-b' },
+    ...overrides,
+  };
+}

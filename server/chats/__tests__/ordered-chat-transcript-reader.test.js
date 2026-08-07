@@ -1,10 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.js';
 import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
-import { LinkedChatTranscriptReader } from '../linked-chat-transcript-reader.js';
+import { OrderedChatTranscriptReader } from '../ordered-chat-transcript-reader.js';
 
 const timestamp = '2026-08-07T00:00:00.000Z';
-const headId = '11111111-1111-4111-8111-111111111111';
+const segmentId = '11111111-1111-4111-8111-111111111111';
 
 function user(content) {
   return new UserMessage(timestamp, content);
@@ -22,7 +22,15 @@ function chat(overrides = {}) {
     model: 'model-1',
     permissionMode: 'default',
     thinkingMode: 'none',
-    carryOverHeadId: headId,
+    carryOverSegments: [{
+      id: segmentId,
+      agentId: 'codex',
+      model: 'model-0',
+      capturedAt: timestamp,
+      storedMessageCount: 3,
+      visibleMessageCount: 3,
+      trailingHandoff: { agentId: 'claude', model: 'model-1' },
+    }],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
     ...overrides,
@@ -53,14 +61,14 @@ function fixture(options = {}) {
     nativePage(native, limit, offset)
   ));
   const loadNativeSnapshot = mock(async () => ({ messages: native, revision: 'native-r1' }));
-  const reader = new LinkedChatTranscriptReader({
+  const reader = new OrderedChatTranscriptReader({
     registry: { getChat: () => entry },
     agents: {
       loadTranscriptSnapshot: loadNativeSnapshot,
       loadMessagePage: loadNativePage,
     },
     carryOver: {
-      revision: (head) => head ? `carry-v2:${head}` : 'carry-v1:0',
+      revision: (refs) => refs.length > 0 ? `carry-v5:${refs[0].id}` : 'carry-v1:0',
       logicalMessageCount: async () => archived.length,
       loadAll: async () => archived,
       loadPage: loadArchivedPage,
@@ -77,7 +85,7 @@ function fixture(options = {}) {
   };
 }
 
-describe('LinkedChatTranscriptReader', () => {
+describe('OrderedChatTranscriptReader', () => {
   it('keeps native paging enabled while translating composite offsets', async () => {
     const { reader, loadArchivedPage, loadNativePage, loadNativeSnapshot } = fixture();
 
@@ -135,10 +143,10 @@ describe('LinkedChatTranscriptReader', () => {
   });
 
   it('sanitizes only the native window that reaches the first recorded prompt', async () => {
-    const prefix = `<carried-context version="1" id="${headId}">\nsummary\n</carried-context>\n\n`;
+    const prefix = '<carried-context version="2">\n  <instructions>Prior context</instructions>\n'
+      + '  <transcript>\n    <user>summary</user>\n  </transcript>\n</carried-context>\n\n';
     const entry = chat({
       nativeSeedReceipt: createNativeSeedReceipt({
-        headId,
         agentSessionId: 'native-1',
         placement: 'user-prefix',
         prefix,

@@ -4,7 +4,7 @@ import type {
 } from '../../common/chat-command-contracts.js';
 import type { AgentCatalogEntry } from '../../common/agents.js';
 import {
-  renderCarriedContextPrefix,
+  renderCarriedContext,
   sanitizeRecordedCarriedContext,
 } from '../../common/transcript-seed.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
@@ -13,9 +13,19 @@ import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js'
 import {
   CarryOverTranscriptError,
   type CarryOverTranscriptStore,
-  type PreparedCarryOverNode,
+  type PreparedCarryOverSegment,
 } from '../chats/carryover-transcript-store.js';
-import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
+import type {
+  CarryOverSegmentRef,
+  ChatRegistryEntry,
+  IChatRegistry,
+} from '../chats/store.js';
+import {
+  carryOverRevision,
+  emptyEraId,
+  handoffSegmentId,
+  reconcileArchivedTail,
+} from '../chats/carryover-segments.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import type { IntegrationRegistry } from './integration-registry.js';
@@ -171,7 +181,7 @@ export class AgentHandoffService {
     const submittedTargetHash = handoffTargetHash(input.handoff);
     const sourceSnapshot = cloneRegistryEntry(input.source);
     const sourceFence = ownershipFence(sourceSnapshot);
-    let preparedNode: PreparedCarryOverNode | null = null;
+    let preparedSegment: PreparedCarryOverSegment | null = null;
     let intentStarted = false;
     let registryCommitted = false;
     let targetFence: OwnershipFence | null = null;
@@ -195,22 +205,18 @@ export class AgentHandoffService {
               agentId: existing.target.execution.agentId,
               agentOwnershipEpoch: existing.target.agentOwnershipEpoch,
               agentSessionId: null,
-              carryOverHeadId: existing.target.historyHeadId,
+              carryOverRevision: carryOverRevision(existing.target.carryOverSegments),
             };
-            await this.deps.carryOver.assertReachableForHandoff(
-              existing.target.historyHeadId,
+            await this.deps.carryOver.assertAvailable(
+              existing.target.carryOverSegments,
               context.signal,
             );
-            if (existing.target.historyHeadId) {
+            if (existing.target.carryOverSegments.length > 0) {
               const tail = await this.deps.carryOver.loadTailForSeed({
-                headId: existing.target.historyHeadId,
-                current: {
-                  agentId: existing.target.execution.agentId,
-                  model: existing.target.execution.model,
-                },
+                refs: existing.target.carryOverSegments,
                 signal: context.signal,
               });
-              renderCarriedContextPrefix(existing.target.historyHeadId, tail);
+              renderCarriedContext(tail);
             }
             context.assertAdmissionActive();
             await this.deps.ownership.commitHandoff(
@@ -232,15 +238,18 @@ export class AgentHandoffService {
               422,
             );
           }
-          await this.deps.carryOver.assertReachableForHandoff(
-            source.carryOverHeadId,
+          await this.deps.carryOver.assertAvailable(
+            source.carryOverSegments,
             context.signal,
           );
           const reference = toAgentChatReference(
             integration,
             input.chatId,
             source,
-            this.deps.carryOver.revision(source.carryOverHeadId),
+            this.deps.carryOver.revision(
+              source.carryOverSegments,
+              source.carryOverMigrationQuarantine,
+            ),
           );
           const snapshot = source.agentSessionId
             ? await this.deps.settledCapture.loadStable({
@@ -263,42 +272,78 @@ export class AgentHandoffService {
             );
           }
 
-          let targetHeadId = source.carryOverHeadId;
+          const capturedAt = new Date().toISOString();
+          let targetSegments = reconcileArchivedTail(
+            source.carryOverSegments,
+            { agentId: source.agentId, model: source.model },
+            () => emptyEraId(input.chatId, operationId),
+            capturedAt,
+          );
+          const segmentId = handoffSegmentId(input.chatId, input.clientRequestId);
           if (sanitized.messages.length > 0) {
-            const nodeId = crypto.randomUUID();
-            preparedNode = await this.deps.carryOver.prepareMaterialized({
+            preparedSegment = await this.deps.carryOver.prepareSegment({
               operationId,
-              id: nodeId,
-              parentId: source.carryOverHeadId,
-              source: {
-                agentId: source.agentId,
-                model: source.model,
-                nativeSessionId: source.agentSessionId,
-                nativeRevision: snapshot!.revision,
-              },
-              boundary: {
-                kind: 'handoff',
-                targetAtCapture: {
-                  agentId: input.target.agentId,
-                  model: input.target.model,
-                },
-              },
+              id: segmentId,
               seedSanitation: sanitized.kind,
               messages: sanitized.messages,
               signal: context.signal,
             });
-            await preparedNode.commit();
-            targetHeadId = preparedNode.id;
+            await preparedSegment.commit();
+            const ref: CarryOverSegmentRef = {
+              id: preparedSegment.id,
+              agentId: source.agentId,
+              model: source.model,
+              capturedAt,
+              storedMessageCount: preparedSegment.messageCount,
+              visibleMessageCount: preparedSegment.messageCount,
+              trailingHandoff: {
+                agentId: input.target.agentId,
+                model: input.target.model,
+              },
+            };
+            targetSegments = [...targetSegments, ref];
+            await this.deps.carryOver.verifySegment(ref, context.signal);
+          } else if (source.agentSessionId || targetSegments.length > 0) {
+            targetSegments = [
+              ...targetSegments,
+              {
+                id: segmentId,
+                agentId: source.agentId,
+                model: source.model,
+                capturedAt,
+                storedMessageCount: 0,
+                visibleMessageCount: 0,
+                trailingHandoff: {
+                  agentId: input.target.agentId,
+                  model: input.target.model,
+                },
+              },
+            ];
           }
 
-          if (targetHeadId) {
+          if (targetSegments.length > 0) {
             const tail = await this.deps.carryOver.loadTailForSeed({
-              headId: targetHeadId,
-              current: { agentId: input.target.agentId, model: input.target.model },
+              refs: targetSegments,
               signal: context.signal,
             });
-            renderCarriedContextPrefix(targetHeadId, tail);
+            renderCarriedContext(tail);
           }
+          const intent = await this.deps.ownership.beginHandoff({
+            operationId,
+            clientRequestId: input.clientRequestId,
+            submittedTargetHash,
+            chatId: input.chatId,
+            source,
+            target: input.target,
+            targetCarryOverSegments: targetSegments,
+          });
+          targetFence = {
+            agentId: intent.target.execution.agentId,
+            agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
+            agentSessionId: null,
+            carryOverRevision: carryOverRevision(intent.target.carryOverSegments),
+          };
+          intentStarted = true;
           if (snapshot) {
             await this.deps.settledCapture.assertRevision({
               integration,
@@ -308,27 +353,10 @@ export class AgentHandoffService {
             });
           }
           this.#requireUnchangedSource(input.chatId, sourceFence);
-          const intent = await this.deps.ownership.beginHandoff({
-            operationId,
-            clientRequestId: input.clientRequestId,
-            submittedTargetHash,
-            chatId: input.chatId,
-            source,
-            target: input.target,
-            targetHistoryHeadId: targetHeadId,
-            preparedNodeId: preparedNode?.id ?? null,
-          });
-          targetFence = {
-            agentId: intent.target.execution.agentId,
-            agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
-            agentSessionId: null,
-            carryOverHeadId: intent.target.historyHeadId,
-          };
-          intentStarted = true;
           context.assertAdmissionActive();
           await this.deps.ownership.commitHandoff(operationId, context.assertAdmissionActive);
           registryCommitted = true;
-          preparedNode?.releaseRoot();
+          preparedSegment?.releaseRoot();
           await this.#notifyCommitted(input.chatId);
         } catch (error) {
           throw mapCarryOverError(error);
@@ -336,17 +364,17 @@ export class AgentHandoffService {
       },
       compensate: async () => {
         if (registryCommitted) {
-          preparedNode?.releaseRoot();
+          preparedSegment?.releaseRoot();
           return;
         }
         if (intentStarted) await this.deps.ownership.compensateHandoff(operationId);
         const current = this.deps.registry.getChat(input.chatId);
         if (targetFence && matchesOwnershipFence(current, targetFence)) {
           registryCommitted = true;
-          preparedNode?.releaseRoot();
+          preparedSegment?.releaseRoot();
           return;
         }
-        await preparedNode?.discard();
+        await preparedSegment?.discard();
       },
     };
   }
@@ -379,7 +407,7 @@ interface OwnershipFence {
   readonly agentId: string;
   readonly agentOwnershipEpoch: string;
   readonly agentSessionId: string | null;
-  readonly carryOverHeadId: string | null;
+  readonly carryOverRevision: string;
 }
 
 function ownershipFence(entry: ChatRegistryEntry): OwnershipFence {
@@ -387,7 +415,10 @@ function ownershipFence(entry: ChatRegistryEntry): OwnershipFence {
     agentId: entry.agentId,
     agentOwnershipEpoch: entry.agentOwnershipEpoch,
     agentSessionId: entry.agentSessionId,
-    carryOverHeadId: entry.carryOverHeadId,
+    carryOverRevision: carryOverRevision(
+      entry.carryOverSegments,
+      entry.carryOverMigrationQuarantine,
+    ),
   };
 }
 
@@ -398,7 +429,10 @@ function matchesOwnershipFence(
   return entry?.agentId === expected.agentId
     && entry.agentOwnershipEpoch === expected.agentOwnershipEpoch
     && entry.agentSessionId === expected.agentSessionId
-    && entry.carryOverHeadId === expected.carryOverHeadId;
+    && carryOverRevision(
+      entry.carryOverSegments,
+      entry.carryOverMigrationQuarantine,
+    ) === expected.carryOverRevision;
 }
 
 function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
