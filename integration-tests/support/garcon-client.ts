@@ -11,10 +11,9 @@ import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
   AgentStopResponse,
+	AgentTurnCommandResponse,
   GoalControlCommandRequest,
   GoalControlCommandResponse,
-  AgentModelPatchRequest,
-  AgentModelPatchResponse,
   CommandAcceptedResponse,
   ForkChatCommandRequest,
   ForkChatResponse,
@@ -134,6 +133,10 @@ export interface DirectRunInput {
   agent: ConfiguredDirectTestAgent;
   clientRequestId?: string;
   clientMessageId?: string;
+}
+
+export interface DirectHandoffInput extends DirectRunInput {
+  expectedAgentOwnershipEpoch?: string;
 }
 
 export interface ChatMessagesPage {
@@ -530,12 +533,39 @@ export class GarconTestClient {
     };
   }
 
-  runChat(request: AgentRunCommandRequest): Promise<CommandAcceptedResponse> {
-    return this.post<CommandAcceptedResponse>('/api/v1/chats/run', request);
+  runChat(request: AgentRunCommandRequest): Promise<AgentTurnCommandResponse> {
+    return this.post<AgentTurnCommandResponse>('/api/v1/chats/run', request);
   }
 
   runDirectChat(input: DirectRunInput): Promise<CommandAcceptedResponse> {
     return this.runChat(this.directRunRequest(input));
+  }
+
+  async handoffDirectChat(input: DirectHandoffInput): Promise<AgentTurnCommandResponse> {
+    const expectedAgentOwnershipEpoch = input.expectedAgentOwnershipEpoch
+      ?? (await this.listChats()).sessions.find((chat) => chat.id === input.chatId)?.agentOwnershipEpoch;
+    if (!expectedAgentOwnershipEpoch) {
+      throw new Error(`Chat ${input.chatId} has no ownership epoch for an agent handoff`);
+    }
+    return this.runChat({
+      clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
+      clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
+      chatId: input.chatId,
+      command: input.content,
+      handoff: {
+        expectedAgentOwnershipEpoch,
+        target: {
+          agentId: input.agent.agentId,
+          model: input.agent.provider.model,
+          apiProviderId: input.agent.provider.providerId,
+          modelEndpointId: input.agent.provider.endpointId,
+          modelProtocol: input.agent.provider.protocol,
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          agentSettings: input.agent.agentSettings,
+        },
+      },
+    });
   }
 
   directRunRequest(input: DirectRunInput): AgentRunCommandRequest {
@@ -569,10 +599,6 @@ export class GarconTestClient {
       '/api/v1/chats/permissions/decision',
       request,
     );
-  }
-
-  switchAgentModel(request: AgentModelPatchRequest): Promise<AgentModelPatchResponse> {
-    return this.patch<AgentModelPatchResponse>('/api/v1/chats/agent-model', request);
   }
 
   updateProjectPath(request: ProjectPathPatchRequest): Promise<ProjectPathPatchResponse> {

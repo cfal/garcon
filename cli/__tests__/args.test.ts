@@ -345,6 +345,32 @@ describe('parseCliArgs', () => {
     });
   });
 
+  test('parses a fenced accept-native history repair', () => {
+    expect(parseCliArgs([
+      '--workspace', 'work',
+      'repair-history', 'accept-native', CHAT_ID,
+      '--expected-head', '11111111-1111-4111-8111-111111111111',
+      '--expected-epoch', 'epoch-1',
+    ], ENV)).toEqual({
+      kind: 'repair-history',
+      action: 'accept-native',
+      workspace: 'work',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      expectedHeadId: '11111111-1111-4111-8111-111111111111',
+      expectedAgentOwnershipEpoch: 'epoch-1',
+    });
+  });
+
+  test.each([
+    ['repair-history', 'accept-native', CHAT_ID],
+    ['repair-history', 'accept-native', CHAT_ID, '--expected-head', 'head'],
+    ['repair-history', 'accept-native', CHAT_ID, '--expected-epoch', 'epoch'],
+    ['repair-history', 'unknown', CHAT_ID, '--expected-head', 'head', '--expected-epoch', 'epoch'],
+  ])('rejects an incomplete history repair: %j', (...args) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow('repair-history requires');
+  });
+
   test('treats -- send-async and -- stop as new-chat prompts', () => {
     expect(parseCliArgs([
       '--agent', 'codex',

@@ -32,21 +32,26 @@ describe('Codex native transcript path preservation', () => {
         const catalog = await fixture.client.listAgentCatalog();
         const codex = catalog.agents.find((agent) => agent.id === 'codex');
         if (!codex) throw new Error('Codex integration is missing from the agent catalog');
-        await fixture.client.switchAgentModel({
-          chatId: sourceChatId,
-          agentId: codex.id,
-          model: codex.defaultModel,
-        });
+        const sourceBeforeHandoff = (await fixture.client.listChats()).sessions.find(
+          (chat) => chat.id === sourceChatId,
+        );
+        if (!sourceBeforeHandoff) throw new Error('Source chat disappeared before handoff');
 
         const codexTurn = await fixture.client.runChat({
           clientRequestId: randomUUID(),
           clientMessageId: randomUUID(),
           chatId: sourceChatId,
           command: codexMarker,
-          permissionMode: 'default',
-          thinkingMode: 'none',
-          agentSettings: codex.defaultSettings,
-          model: codex.defaultModel,
+          handoff: {
+            expectedAgentOwnershipEpoch: sourceBeforeHandoff.agentOwnershipEpoch,
+            target: {
+              agentId: codex.id,
+              model: codex.defaultModel,
+              permissionMode: 'default',
+              thinkingMode: 'none',
+              agentSettings: codex.defaultSettings,
+            },
+          },
         });
         const codexTerminal = await fixture.client.waitForTurnTerminal(
           sourceChatId,
@@ -152,13 +157,10 @@ describe('Codex native transcript path preservation', () => {
         });
 
         const target = fixture.directAgents.openAi;
-        const switchFailure = await captureApiError(fixture.client.switchAgentModel({
+        const switchFailure = await captureApiError(fixture.client.handoffDirectChat({
           chatId,
-          agentId: target.agentId,
-          model: target.provider.model,
-          apiProviderId: target.provider.providerId,
-          modelEndpointId: target.provider.endpointId,
-          modelProtocol: target.provider.protocol,
+          content: 'attempt handoff from unavailable history',
+          agent: target,
         }));
         expect(switchFailure).toMatchObject({
           status: 503,

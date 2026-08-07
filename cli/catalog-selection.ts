@@ -15,6 +15,7 @@ import {
 } from '@garcon/common/execution-defaults';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
+import type { AgentHandoffTarget } from '@garcon/common/chat-command-contracts';
 import { CliError } from './errors.js';
 
 export interface RequestedModelSelection {
@@ -67,6 +68,8 @@ export function requireCatalogAgent(
     || !raw.supportedThinkingModes.every(isThinkingMode)
     || !Array.isArray(raw.supportedProtocols)
     || !raw.supportedProtocols.every(isApiProtocol)
+    || typeof raw.defaultModel !== 'string'
+    || raw.defaultModel.length === 0
     || typeof raw.acceptsApiProviderEndpoints !== 'boolean'
     || typeof raw.requiresStrictModelDiscovery !== 'boolean'
     || !defaultSettings
@@ -290,6 +293,48 @@ export function resolveStartSelection(
   return {
     ...resolveModelSelection(catalog, requested.agentId, requested),
     permissionMode,
+    thinkingMode,
+    agentSettings,
+  };
+}
+
+export function resolveHandoffSelection(
+  catalog: ModelCatalogResponse,
+  settings: RemoteSettingsSnapshot,
+  requested: {
+    agentId: string;
+    model?: string;
+    providerId?: string;
+    endpointId?: string;
+    permissionMode?: PermissionMode;
+    thinkingMode?: ThinkingMode;
+  },
+): AgentHandoffTarget {
+  const agent = requireCatalogAgent(catalog, requested.agentId);
+  const defaults = executionDefaultsForAgent(settings.executionDefaults, requested.agentId);
+  const thinkingMode = strictThinkingMode(
+    requested.thinkingMode,
+    agent,
+    defaults.thinkingMode,
+  );
+  if (requested.permissionMode !== undefined) {
+    strictPermissionMode(requested.permissionMode, agent, 'default');
+  }
+  const agentSettings = normalizeAgentSettings(
+    requested.agentId,
+    defaults.agentSettingsById[requested.agentId],
+    agent.defaultSettings,
+  );
+  return {
+    agentId: requested.agentId,
+    ...resolveModelSelection(catalog, requested.agentId, {
+      model: requested.model ?? agent.defaultModel,
+      providerId: requested.providerId,
+      endpointId: requested.endpointId,
+    }),
+    ...(requested.permissionMode === undefined
+      ? {}
+      : { permissionMode: requested.permissionMode }),
     thinkingMode,
     agentSettings,
   };

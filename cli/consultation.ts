@@ -14,6 +14,7 @@ import { normalizeTags } from '@garcon/common/tags';
 import type { CliInvocation } from './args.js';
 import {
   resolveModelSelection,
+  resolveHandoffSelection,
   resolveStartSelection,
   validateExplicitModes,
 } from './catalog-selection.js';
@@ -59,6 +60,9 @@ function requireResumeChat(sessions: readonly ChatListEntry[], chatId: string): 
   const chat = sessions.find((entry) => entry?.id === chatId);
   if (!chat || typeof chat.agentId !== 'string' || chat.agentId.length === 0) {
     throw new CliError('resume admission', `chat not found: ${chatId}`, 2);
+  }
+  if (typeof chat.agentOwnershipEpoch !== 'string' || chat.agentOwnershipEpoch.length === 0) {
+    throw new CliError('resume admission', `chat ${chatId} has no ownership epoch`, 3);
   }
   return chat;
 }
@@ -125,27 +129,41 @@ async function submitResume(
     clientMessageId: createId(),
     chatId: invocation.chatId,
     command: prompt,
-    ...(invocation.agentId === undefined ? {} : { expectedAgentId: invocation.agentId }),
     ...(tagsToAdd === undefined ? {} : { tagsToAdd }),
     permissionFallbackPolicy: 'require-explicit-bypass',
   };
   const needsCatalog = invocation.model !== undefined
     || invocation.permissionMode !== undefined
     || invocation.thinkingMode !== undefined;
-  if (needsCatalog) {
-    const chats = await client.listChats(signal);
-    const chat = requireResumeChat(chats.sessions, invocation.chatId);
-    if (invocation.agentId !== undefined && invocation.agentId !== chat.agentId) {
-      throw new CliError(
-        'resume admission',
-        `chat ${invocation.chatId} belongs to ${chat.agentId}, not ${invocation.agentId}`,
-        2,
-      );
-    }
-    const catalog = await client.getModelCatalog(chat.agentId, signal);
-    validateExplicitModes(catalog, chat.agentId, invocation);
+  let chat: ChatListEntry | undefined;
+  if (invocation.agentId !== undefined || needsCatalog) {
+    chat = requireResumeChat((await client.listChats(signal)).sessions, invocation.chatId);
+  }
+  if (invocation.agentId !== undefined && invocation.agentId !== chat?.agentId) {
+    const [catalog, settings] = await Promise.all([
+      client.getModelCatalog(invocation.agentId, signal),
+      client.getSettings(signal),
+    ]);
+    request.handoff = {
+      target: resolveHandoffSelection(catalog, settings, {
+        agentId: invocation.agentId,
+        model: invocation.model,
+        providerId: invocation.providerId,
+        endpointId: invocation.endpointId,
+        permissionMode: invocation.permissionMode,
+        thinkingMode: invocation.thinkingMode,
+      }),
+      expectedAgentOwnershipEpoch: chat!.agentOwnershipEpoch,
+    };
+  } else {
+    if (invocation.agentId !== undefined) request.expectedAgentId = invocation.agentId;
+  }
+  if (needsCatalog && !request.handoff) {
+    const owner = chat!;
+    const catalog = await client.getModelCatalog(owner.agentId, signal);
+    validateExplicitModes(catalog, owner.agentId, invocation);
     if (invocation.model !== undefined) {
-      Object.assign(request, resolveModelSelection(catalog, chat.agentId, {
+      Object.assign(request, resolveModelSelection(catalog, owner.agentId, {
         model: invocation.model,
         providerId: invocation.providerId,
         endpointId: invocation.endpointId,

@@ -3,7 +3,7 @@ import { assistantContents, userContents } from '../../support/chat-assertions.j
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('cross-provider fork lifecycle', () => {
-  test('forks durable carry-over before the target provider materializes', async () => {
+  test('shares linked handoff history across repeated whole-chat forks', async () => {
     await withIntegrationFixture('cross-provider-fork', async (fixture) => {
       const sourceChatId = fixture.newChatId();
       const first = await fixture.client.startDirectChat({
@@ -15,14 +15,16 @@ describe('cross-provider fork lifecycle', () => {
       await fixture.client.waitForTurnTerminal(sourceChatId, first.turnId);
 
       const anthropic = fixture.directAgents.anthropic;
-      await fixture.client.switchAgentModel({
+      const handoff = await fixture.client.handoffDirectChat({
         chatId: sourceChatId,
-        agentId: anthropic.agentId,
-        model: anthropic.provider.model,
-        apiProviderId: anthropic.provider.providerId,
-        modelEndpointId: anthropic.provider.endpointId,
-        modelProtocol: anthropic.provider.protocol,
+        content: 'anthropic-handoff-turn',
+        agent: anthropic,
       });
+      await fixture.client.waitForTurnTerminal(sourceChatId, handoff.turnId);
+      const handoffRequest = fixture.fakeProviders.anthropic.requests()[0];
+      expect(handoffRequest.lastUserText).toContain('anthropic-handoff-turn');
+      expect(occurrences(handoffRequest.lastUserText, '<carried-context version="1"')).toBe(1);
+
       const targetChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });
       const reforkedChatId = fixture.newChatId();
@@ -35,13 +37,6 @@ describe('cross-provider fork lifecycle', () => {
         agent: anthropic,
       });
       await fixture.client.waitForTurnTerminal(reforkedChatId, targetTurn.turnId);
-      const targetRequest = fixture.fakeProviders.anthropic.requests()[0];
-      expect(targetRequest.body.messages).toEqual([
-        { role: 'user', content: targetRequest.lastUserText },
-      ]);
-      expect(targetRequest.lastUserText).toContain('anthropic-target-turn');
-      expect(occurrences(targetRequest.lastUserText, '<carried-context>')).toBe(1);
-      expect(occurrences(targetRequest.lastUserText, 'openai-source-turn')).toBe(2);
 
       const sourceTurn = await fixture.client.runDirectChat({
         chatId: sourceChatId,
@@ -49,18 +44,19 @@ describe('cross-provider fork lifecycle', () => {
         agent: anthropic,
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, sourceTurn.turnId);
-      const sourceRequest = fixture.fakeProviders.anthropic.requests()[1];
+      const sourceRequest = fixture.fakeProviders.anthropic.requests().at(-1)!;
       expect(sourceRequest.lastUserText).toContain('anthropic-source-turn');
       expect(sourceRequest.lastUserText).not.toContain('anthropic-target-turn');
-      expect(occurrences(sourceRequest.lastUserText, 'openai-source-turn')).toBe(2);
 
       const target = await fixture.client.getMessages(reforkedChatId);
       expect(userContents(target.messages)).toEqual([
         'openai-source-turn',
+        'anthropic-handoff-turn',
         'anthropic-target-turn',
       ]);
       expect(assistantContents(target.messages)).toEqual([
         'echo:openai-source-turn',
+        expect.stringContaining('anthropic-handoff-turn'),
         expect.stringContaining('anthropic-target-turn'),
       ]);
     });

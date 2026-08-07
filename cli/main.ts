@@ -10,6 +10,7 @@ import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
 import { GarconClient } from './garcon-client.js';
 import { createCliOutput, type CliOutput } from './output.js';
+import { repairChatHistory } from './repair-history.js';
 
 export interface MainOptions {
   signal?: AbortSignal;
@@ -130,6 +131,11 @@ export async function main(
     if (command.kind === 'status') {
       const client = await connectedClient(command, options);
       await runChatStatus(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'repair-history') {
+      const client = await connectedClient(command, options);
+      await repairChatHistory(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'stop') {

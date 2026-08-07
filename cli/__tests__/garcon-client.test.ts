@@ -180,6 +180,44 @@ describe('GarconClient', () => {
     expect(redirect).toBe('error');
   });
 
+  test('submits a fenced native-history repair to the maintenance endpoint', async () => {
+    let observed: { url: string; method: string | undefined; body: unknown } | undefined;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        observed = {
+          url: String(input),
+          method: init?.method,
+          body: JSON.parse(String(init?.body)),
+        };
+        return Response.json({
+          success: true,
+          action: 'accept-native',
+          chatId: runRequest.chatId,
+          receiptCleared: true,
+        });
+      },
+    });
+
+    await expect(client.repairHistory({
+      action: 'accept-native',
+      chatId: runRequest.chatId,
+      expectedHeadId: '11111111-1111-4111-8111-111111111111',
+      expectedAgentOwnershipEpoch: 'epoch-1',
+    })).resolves.toMatchObject({ receiptCleared: true });
+
+    expect(observed).toEqual({
+      url: `${connection.baseUrl}/api/v1/chats/repair-history`,
+      method: 'POST',
+      body: {
+        action: 'accept-native',
+        chatId: runRequest.chatId,
+        expectedHeadId: '11111111-1111-4111-8111-111111111111',
+        expectedAgentOwnershipEpoch: 'epoch-1',
+      },
+    });
+  });
+
   test('updates a chat title through the existing workspace API', async () => {
     let request: { url: string; method: string | undefined; body: string } | undefined;
     const client = new GarconClient({

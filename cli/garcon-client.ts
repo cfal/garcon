@@ -6,6 +6,8 @@ import type {
   AgentStopResponse,
   AgentTurnCommandResponse,
   CommandAcceptedResponse,
+  RepairHistoryAcceptNativeRequest,
+  RepairHistoryAcceptNativeResponse,
   StartChatCommandRequest,
   SteerCommandRequest,
   SteerCommandResponse,
@@ -29,6 +31,7 @@ import { CliError, type CliErrorPhase } from './errors.js';
 import { probeRuntime, type RuntimeConnection } from './discovery.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const HANDOFF_REQUEST_TIMEOUT_MS = 10 * 60_000;
 const SUBMISSION_ATTEMPTS = 3;
 const MAX_RETRY_AFTER_MS = 5_000;
 
@@ -276,7 +279,14 @@ export class GarconClient {
   }
 
   runChat(request: AgentRunCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
-    return this.#submitTurn('/api/v1/chats/run', 'agent-run', request, signal, isAmbiguousSubmissionError);
+    return this.#submitTurn(
+      '/api/v1/chats/run',
+      'agent-run',
+      request,
+      signal,
+      isAmbiguousSubmissionError,
+      request.handoff ? HANDOFF_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+    );
   }
 
   steerChat(request: SteerCommandRequest, signal?: AbortSignal): Promise<SteerCommandResponse> {
@@ -310,6 +320,34 @@ export class GarconClient {
     if (response?.success !== true) {
       throw new CliError('title update', 'server returned an invalid title update response', 3);
     }
+  }
+
+  async repairHistory(
+    request: RepairHistoryAcceptNativeRequest,
+    signal?: AbortSignal,
+  ): Promise<RepairHistoryAcceptNativeResponse> {
+    const value = await this.#request(
+      'submission',
+      'POST',
+      '/api/v1/chats/repair-history',
+      request,
+      signal,
+    );
+    const response = record(value);
+    if (
+      response?.success !== true
+      || response.action !== request.action
+      || response.chatId !== request.chatId
+      || typeof response.receiptCleared !== 'boolean'
+    ) {
+      throw new CliError('submission', 'server returned an invalid history repair response', 3);
+    }
+    return {
+      success: true,
+      action: 'accept-native',
+      chatId: request.chatId,
+      receiptCleared: response.receiptCleared,
+    };
   }
 
   async getTurnReceipt(chatId: string, turnId: string, signal?: AbortSignal): Promise<AgentTurnReceipt> {
@@ -346,6 +384,7 @@ export class GarconClient {
     request: StartChatCommandRequest | AgentRunCommandRequest | SteerCommandRequest,
     signal: AbortSignal | undefined,
     ambiguous: (error: unknown) => boolean,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<AgentTurnCommandResponse> {
     return this.#submitCorrelated({
       route,
@@ -354,6 +393,7 @@ export class GarconClient {
       parse: parseAcceptedResponse,
       ambiguityDescription: `the command for chat ${request.chatId}`,
       ambiguous,
+      timeoutMs,
     }, signal);
   }
 
@@ -368,6 +408,7 @@ export class GarconClient {
       parse: (value: unknown) => TResponse;
       ambiguityDescription: string;
       ambiguous?: (error: unknown) => boolean;
+      timeoutMs?: number;
     },
     signal?: AbortSignal,
   ): Promise<TResponse> {
@@ -375,7 +416,14 @@ export class GarconClient {
     for (let attempt = 0; attempt < SUBMISSION_ATTEMPTS; attempt += 1) {
       try {
         const accepted = options.parse(
-          await this.#request('submission', 'POST', options.route, options.request, signal),
+          await this.#request(
+            'submission',
+            'POST',
+            options.route,
+            options.request,
+            signal,
+            options.timeoutMs,
+          ),
         );
         if (
           accepted.commandType !== options.commandType
@@ -426,8 +474,9 @@ export class GarconClient {
     route: string,
     body: unknown,
     signal?: AbortSignal,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<unknown> {
-    const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     let response: Response;
     try {

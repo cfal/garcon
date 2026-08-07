@@ -215,7 +215,9 @@ describe('runConsultation', () => {
 
   test('validates resume overrides against the persisted agent catalog', async () => {
     const chats = {
-      sessions: [{ id: CHAT_ID, agentId: 'codex' }], total: 1, lastSelectedChatId: null,
+      sessions: [{ id: CHAT_ID, agentId: 'codex', agentOwnershipEpoch: 'epoch-1' }],
+      total: 1,
+      lastSelectedChatId: null,
     } as ChatListResponse;
     const testClient = client({ async listChats() { return chats; } });
     const invocation: CliInvocation = {
@@ -231,6 +233,58 @@ describe('runConsultation', () => {
       modelProtocol: null, permissionMode: 'plan', thinkingMode: 'high',
     });
     expect(testClient.runs[0]).not.toHaveProperty('tagsToAdd');
+  });
+
+  test('uses expectedAgentId when the explicit resume agent still owns the chat', async () => {
+    const chats = {
+      sessions: [{ id: CHAT_ID, agentId: 'codex', agentOwnershipEpoch: 'epoch-1' }],
+      total: 1,
+      lastSelectedChatId: null,
+    } as ChatListResponse;
+    const testClient = client({ async listChats() { return chats; } });
+
+    await runConsultation({
+      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      agentId: 'codex', prompt: 'Continue', readsPromptFromStdin: false,
+    }, 'Continue', testClient, output(), undefined, { createId: () => 'request' });
+
+    expect(testClient.runs[0]).toMatchObject({ expectedAgentId: 'codex' });
+    expect(testClient.runs[0]).not.toHaveProperty('handoff');
+  });
+
+  test('submits an explicit cross-agent resume as one fenced handoff', async () => {
+    const chats = {
+      sessions: [{ id: CHAT_ID, agentId: 'claude', agentOwnershipEpoch: 'epoch-7' }],
+      total: 1,
+      lastSelectedChatId: null,
+    } as ChatListResponse;
+    const testClient = client({ async listChats() { return chats; } });
+
+    await runConsultation({
+      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      agentId: 'codex', prompt: 'Continue with Codex', readsPromptFromStdin: false,
+    }, 'Continue with Codex', testClient, output(), undefined, { createId: () => 'request' });
+
+    expect(testClient.runs[0]).toMatchObject({
+      clientRequestId: 'request',
+      chatId: CHAT_ID,
+      command: 'Continue with Codex',
+      permissionFallbackPolicy: 'require-explicit-bypass',
+      handoff: {
+        expectedAgentOwnershipEpoch: 'epoch-7',
+        target: {
+          agentId: 'codex',
+          model: 'gpt-5.4',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+          thinkingMode: 'high',
+          agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+        },
+      },
+    });
+    expect(testClient.runs[0].handoff?.target).not.toHaveProperty('permissionMode');
+    expect(testClient.runs[0]).not.toHaveProperty('expectedAgentId');
   });
 
   test('never prints partial text from a failed turn', async () => {
