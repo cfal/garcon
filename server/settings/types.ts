@@ -13,11 +13,13 @@ import type {
   ChatTitleUiSettings,
   CommitMessageUiSettings,
   TranscriptSearchFeatureSettings,
+  AgentSwitchCompactionUiSettings,
 } from '../../common/settings.js';
 
 export interface UiSettings {
   pinnedInsertPosition?: 'top' | 'bottom';
   chatTitle?: ChatTitleUiSettings;
+  agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;
   appIdentity?: AppIdentityUiSettings;
   [key: string]: unknown;

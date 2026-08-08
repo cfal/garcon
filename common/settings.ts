@@ -38,6 +38,12 @@ export interface CommitMessageUiSettings extends GenerationSelectionUiSettings {
   useCommonDirPrefix?: boolean;
 }
 
+// Names the model that compacts a carried-over transcript when a chat hands off
+// to another agent, or continues in a new chat through `/handoff`.
+export interface AgentSwitchCompactionUiSettings extends GenerationSelectionUiSettings {
+  enabled?: boolean;
+}
+
 export interface TelegramNotificationSettings {
   enabled?: boolean;
 }
@@ -60,6 +66,7 @@ export interface RemoteTelegramStatus {
 export interface RemoteUiSettings {
   pinnedInsertPosition?: PinnedInsertPosition;
   chatTitle?: ChatTitleUiSettings;
+  agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;
   appIdentity?: AppIdentityUiSettings;
   notifications?: {
@@ -81,6 +88,9 @@ type EffectiveCommitMessageExtras = EffectiveGenerationSelection & {
 export interface RemoteUiEffectiveSettings {
   chatTitle?: Required<Pick<ChatTitleUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveGenerationSelection;
+  agentSwitchCompaction?: Required<
+    Pick<AgentSwitchCompactionUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>
+  > & EffectiveGenerationSelection;
   commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveCommitMessageExtras;
 }
@@ -198,6 +208,19 @@ export function normalizeChatTitleUiSettings(value: unknown): ChatTitleUiSetting
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+export function normalizeAgentSwitchCompactionUiSettings(
+  value: unknown,
+): AgentSwitchCompactionUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+
+  const normalized: AgentSwitchCompactionUiSettings = {
+    ...normalizeGenerationSelection(raw),
+  };
+  if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 export function normalizeCommitMessageUiSettings(
   value: unknown,
 ): CommitMessageUiSettings | undefined {
@@ -262,6 +285,25 @@ function normalizeChatTitleUiEffectiveSettings(
   return normalized;
 }
 
+function normalizeAgentSwitchCompactionUiEffectiveSettings(
+  value: unknown,
+): RemoteUiEffectiveSettings['agentSwitchCompaction'] | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  if (typeof raw.enabled !== 'boolean') return undefined;
+  if (!isAgentId(raw.agentId)) return undefined;
+  if (typeof raw.model !== 'string') return undefined;
+
+  const normalized: NonNullable<RemoteUiEffectiveSettings['agentSwitchCompaction']> = {
+    enabled: raw.enabled,
+    agentId: raw.agentId,
+    model: raw.model,
+    thinkingMode: normalizeThinkingMode(raw.thinkingMode),
+  };
+  normalizeEffectiveGenerationSelection(raw, normalized);
+  return normalized;
+}
+
 function normalizeCommitMessageUiEffectiveSettings(
   value: unknown,
 ): RemoteUiEffectiveSettings['commitMessage'] | undefined {
@@ -290,6 +332,9 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
 
   const chatTitle = normalizeChatTitleUiSettings(raw.chatTitle);
   if (chatTitle) normalized.chatTitle = chatTitle;
+
+  const agentSwitchCompaction = normalizeAgentSwitchCompactionUiSettings(raw.agentSwitchCompaction);
+  if (agentSwitchCompaction) normalized.agentSwitchCompaction = agentSwitchCompaction;
 
   const commitMessage = normalizeCommitMessageUiSettings(raw.commitMessage);
   if (commitMessage) normalized.commitMessage = commitMessage;
@@ -321,6 +366,9 @@ function normalizeRemoteUiEffectiveSettings(value: unknown): RemoteUiEffectiveSe
   const normalized: RemoteUiEffectiveSettings = {};
   const chatTitle = normalizeChatTitleUiEffectiveSettings(raw.chatTitle);
   if (chatTitle) normalized.chatTitle = chatTitle;
+
+  const compaction = normalizeAgentSwitchCompactionUiEffectiveSettings(raw.agentSwitchCompaction);
+  if (compaction) normalized.agentSwitchCompaction = compaction;
 
   const commitMessage = normalizeCommitMessageUiEffectiveSettings(raw.commitMessage);
   if (commitMessage) normalized.commitMessage = commitMessage;

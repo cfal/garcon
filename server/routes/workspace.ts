@@ -15,6 +15,7 @@ import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   DEFAULT_REMOTE_FEATURE_SETTINGS,
+  normalizeAgentSwitchCompactionUiSettings,
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
   type RemoteSettingsSnapshot,
@@ -82,15 +83,20 @@ export async function buildRemoteSettingsSnapshot({
   const pinnedChatIds = settingsSource.pinnedChatIds;
   const recentAgentSettings = settingsSource.recentAgentSettings;
   const executionDefaults = settingsSource.executionDefaults;
-  const [chatTitleContext, commitMessageContext] = await resolveGenerationContextsForSelections(
-    agents,
-    [ui?.chatTitle, ui?.commitMessage],
-  );
+  const [chatTitleContext, compactionContext, commitMessageContext] =
+    await resolveGenerationContextsForSelections(
+      agents,
+      [ui?.chatTitle, ui?.agentSwitchCompaction, ui?.commitMessage],
+    );
 
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
       ...chatTitleContext,
+    }),
+    agentSwitchCompaction: resolveEffectiveGenerationUiConfig({
+      persisted: asPlainObject(ui?.agentSwitchCompaction),
+      ...compactionContext,
     }),
     commitMessage: resolveCommitMessageUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
@@ -162,6 +168,11 @@ export default function createWorkspaceRoutes(
       const chatTitle = normalizeChatTitleUiSettings(patch.chatTitle);
       if (chatTitle) patch.chatTitle = chatTitle;
       else delete patch.chatTitle;
+    }
+    if ('agentSwitchCompaction' in patch) {
+      const compaction = normalizeAgentSwitchCompactionUiSettings(patch.agentSwitchCompaction);
+      if (compaction) patch.agentSwitchCompaction = compaction;
+      else delete patch.agentSwitchCompaction;
     }
     if ('commitMessage' in patch) {
       const commitMessage = normalizeCommitMessageUiSettings(patch.commitMessage);
