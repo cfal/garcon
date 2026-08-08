@@ -277,7 +277,7 @@ export async function startServer(): Promise<void> {
         }
         const refs = entry.carryOverSegments ?? [];
         if (refs.length === 0) return null;
-        const messages = await carryOver.loadTailForSeed({
+        const messages = await carryOver.loadProjectionSource({
           refs,
           signal,
         });

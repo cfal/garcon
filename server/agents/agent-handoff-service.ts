@@ -212,7 +212,7 @@ export class AgentHandoffService {
               context.signal,
             );
             if (existing.target.carryOverSegments.length > 0) {
-              const tail = await this.deps.carryOver.loadTailForSeed({
+              const tail = await this.deps.carryOver.loadProjectionSource({
                 refs: existing.target.carryOverSegments,
                 signal: context.signal,
               });
@@ -322,7 +322,7 @@ export class AgentHandoffService {
           }
 
           if (targetSegments.length > 0) {
-            const tail = await this.deps.carryOver.loadTailForSeed({
+            const tail = await this.deps.carryOver.loadProjectionSource({
               refs: targetSegments,
               signal: context.signal,
             });

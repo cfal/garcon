@@ -297,32 +297,34 @@ export class CarryOverTranscriptStore {
     };
   }
 
-  async loadTailForSeed(input: {
+  // Returns the whole archive for the projection ladder, which selects by message
+  // class rather than recency and therefore needs to see every turn. A tail cannot
+  // serve it: on tool-heavy chats a five-hundred message window held two of
+  // seventy-one user turns, so the asks were gone before any budget applied.
+  // Streams in pages and drops from the oldest end only when the byte guard trips.
+  async loadProjectionSource(input: {
     readonly refs: readonly CarryOverSegmentRef[];
-    readonly maxMessages?: number;
     readonly maxBytes?: number;
     readonly signal?: AbortSignal;
   }): Promise<ChatMessage[]> {
-    const total = archivedLogicalCount(input.refs);
-    if (total === 0) return [];
-    const maxMessages = Math.max(1, input.maxMessages ?? 512);
-    const page = await this.loadPage({
-      refs: input.refs,
-      offset: Math.max(0, total - maxMessages),
-      limit: Math.min(total, maxMessages),
-      signal: input.signal,
-    });
-    const maxBytes = input.maxBytes ?? 4 * 1024 * 1024;
-    const result: ChatMessage[] = [];
+    if (archivedLogicalCount(input.refs) === 0) return [];
+    const maxBytes = input.maxBytes ?? 64 * 1024 * 1024;
+    const collected: ChatMessage[] = [];
     let bytes = 2;
-    for (let index = page.messages.length - 1; index >= 0; index -= 1) {
-      const message = page.messages[index];
-      const cost = Buffer.byteLength(JSON.stringify(message), 'utf8') + (result.length > 0 ? 1 : 0);
-      if (result.length > 0 && bytes + cost > maxBytes) break;
-      result.unshift(message);
-      bytes += cost;
+    for await (const batch of this.stream({
+      refs: input.refs,
+      maxMessagesPerBatch: 512,
+      signal: input.signal,
+    })) {
+      for (const message of batch) {
+        bytes += Buffer.byteLength(JSON.stringify(message), 'utf8') + 1;
+        collected.push(message);
+      }
+      while (bytes > maxBytes && collected.length > 1) {
+        bytes -= Buffer.byteLength(JSON.stringify(collected.shift()), 'utf8') + 1;
+      }
     }
-    return result;
+    return collected;
   }
 
   async *stream(input: {

@@ -162,6 +162,41 @@ describe('CarryOverTranscriptStore', () => {
     await expect(commit(store, FIRST, [new UserMessage(TIME, 'different')]))
       .rejects.toMatchObject({ code: 'CARRYOVER_SEGMENT_COLLISION' });
   });
+
+  it('loads the whole archive in order for projection', async () => {
+    const first = [new UserMessage(TIME, 'the original request')];
+    for (let index = 0; index < 40; index += 1) {
+      first.push(new AssistantMessage(TIME, `step ${index}`));
+    }
+    const second = [new UserMessage(TIME, 'the latest request')];
+    await commit(store, FIRST, first);
+    await commit(store, SECOND, second);
+    const refs = [
+      ref(FIRST, 'a', 'model-a', first.length, { agentId: 'b', model: 'model-b' }),
+      ref(SECOND, 'b', 'model-b', second.length, null),
+    ];
+
+    const source = await store.loadProjectionSource({ refs });
+
+    // Every turn crosses the segment boundary, including the agent-switch marker.
+    expect(source).toHaveLength(first.length + second.length + 1);
+    expect(source[0]).toEqual(new UserMessage(TIME, 'the original request'));
+    expect(source.at(-1)).toEqual(new UserMessage(TIME, 'the latest request'));
+    expect(source.filter((message) => message.type === 'user-message')).toHaveLength(2);
+  });
+
+  it('drops the oldest messages when the projection byte guard trips', async () => {
+    const messages = Array.from({ length: 30 }, (_, index) => (
+      new AssistantMessage(TIME, `payload ${index} ${'x'.repeat(200)}`)
+    ));
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 2_000 });
+
+    expect(source.length).toBeLessThan(messages.length);
+    expect(source.at(-1)).toEqual(messages.at(-1));
+  });
 });
 
 async function commit(store, id, messages) {
