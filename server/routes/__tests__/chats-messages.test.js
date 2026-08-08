@@ -129,6 +129,7 @@ function createRoutesFixture(overrides = {}) {
   const commandLedger = createRouteCommandLedger('chats-messages');
   const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
   const searchIndex = overrides.searchIndex;
+  const notifyHistoryChanged = overrides.notifyHistoryChanged ?? mock(() => undefined);
   const routes = createChatRoutes({
     registry,
     settings,
@@ -151,9 +152,17 @@ function createRoutesFixture(overrides = {}) {
       chatListProjector,
     }),
     ...(searchIndex === undefined ? {} : { searchIndex }),
+    notifyHistoryChanged,
   });
 
-  return { chatViews, pendingInputs, registry, routes, searchIndex };
+  return {
+    chatViews,
+    pendingInputs,
+    registry,
+    routes,
+    searchIndex,
+    notifyHistoryChanged,
+  };
 }
 
 describe('GET /api/v1/chats/messages', () => {
@@ -442,7 +451,7 @@ describe('POST /api/v1/chats/repair-history', () => {
       listAllChats: mock(() => ({})),
     };
     const searchIndex = { catalogMayHaveChanged: mock(() => undefined) };
-    const { routes } = createRoutesFixture({ registry, searchIndex });
+    const { notifyHistoryChanged, routes } = createRoutesFixture({ registry, searchIndex });
     const input = request({
       action: 'accept-native',
       chatId,
@@ -465,6 +474,7 @@ describe('POST /api/v1/chats/repair-history', () => {
       { flush: true },
     );
     expect(searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith(chatId);
+    expect(notifyHistoryChanged).toHaveBeenCalledWith(chatId);
   });
 
   it('rejects a stale carryover revision or ownership epoch without mutation', async () => {

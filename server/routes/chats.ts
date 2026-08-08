@@ -66,7 +66,10 @@ import type {
   CompleteChatHistoryResponse,
   DegradedChatHistoryResponse,
 } from '../../common/chat-view.js';
-import { carryOverRevision } from '../chats/carryover-segments.js';
+import {
+  archivedLogicalCount,
+  carryOverRevision,
+} from '../chats/carryover-segments.js';
 
 const logger = createLogger('routes:chats');
 const MAX_SEARCH_QUERY_CHARS = 4_096;
@@ -391,6 +394,7 @@ interface ChatRouteDeps {
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   searchIndex?: ChatSearchDep;
+  notifyHistoryChanged?: (chatId: string) => void;
   lastSelectedChat?: LastSelectedChatState;
 }
 
@@ -407,6 +411,7 @@ export default function createChatRoutes({
   commandService,
   chatListProjector,
   searchIndex,
+  notifyHistoryChanged,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
@@ -557,6 +562,7 @@ export default function createChatRoutes({
         );
         if (!updated) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
         searchIndex?.catalogMayHaveChanged(input.chatId);
+        notifyHistoryChanged?.(input.chatId);
       }
       logger.warn('history repair accepted the current native transcript', {
         chatId: input.chatId,
@@ -706,16 +712,23 @@ export default function createChatRoutes({
         lastActivityAt: meta?.lastActivity || null,
         agentSessionId: session.agentSessionId || null,
         transcriptSource: await agents.describeTranscriptSource(session, chatId),
-        carryOverSegments: session.carryOverSegments.map((ref) => ({
-          id: ref.id,
-          agentId: ref.agentId,
-          model: ref.model,
-          capturedAt: ref.capturedAt,
-          storedMessageCount: ref.storedMessageCount,
-          visibleMessageCount: ref.visibleMessageCount,
-          truncated: ref.visibleMessageCount < ref.storedMessageCount,
-          trailingHandoff: ref.trailingHandoff ? { ...ref.trailingHandoff } : null,
-        })),
+        carryOver: {
+          revision: carryOverRevision(
+            session.carryOverSegments,
+            session.carryOverMigrationQuarantine,
+          ),
+          archivedMessageCount: archivedLogicalCount(session.carryOverSegments),
+          segments: session.carryOverSegments.map((ref) => ({
+            id: ref.id,
+            agentId: ref.agentId,
+            model: ref.model,
+            capturedAt: ref.capturedAt,
+            storedMessageCount: ref.storedMessageCount,
+            visibleMessageCount: ref.visibleMessageCount,
+            truncated: ref.visibleMessageCount < ref.storedMessageCount,
+            trailingHandoff: ref.trailingHandoff ? { ...ref.trailingHandoff } : null,
+          })),
+        },
       };
       return Response.json(response);
     } catch (error: unknown) {

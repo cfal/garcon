@@ -59,6 +59,8 @@ describe('main', () => {
             id: CHAT_ID,
             title: 'Review',
             agentId: 'codex',
+            agentOwnershipEpoch: 'epoch-1',
+            carryOverRevision: 'carry-v1:0',
             model: null,
             apiProviderId: null,
             modelEndpointId: null,

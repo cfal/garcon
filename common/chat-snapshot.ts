@@ -25,6 +25,8 @@ export interface ChatSnapshotChat {
   id: string;
   title: string;
   agentId: string;
+  agentOwnershipEpoch: string;
+  carryOverRevision: string;
   model: string | null;
   apiProviderId: string | null;
   modelEndpointId: string | null;
@@ -142,6 +144,11 @@ function parseChat(value: unknown): ChatSnapshotChat {
     id,
     title: requiredString(raw.title, 'chat.title'),
     agentId: requiredString(raw.agentId, 'chat.agentId'),
+    agentOwnershipEpoch: requiredString(
+      raw.agentOwnershipEpoch,
+      'chat.agentOwnershipEpoch',
+    ),
+    carryOverRevision: requiredString(raw.carryOverRevision, 'chat.carryOverRevision'),
     model: nullableString(raw.model, 'chat.model'),
     apiProviderId: nullableString(raw.apiProviderId, 'chat.apiProviderId'),
     modelEndpointId: nullableString(raw.modelEndpointId, 'chat.modelEndpointId'),

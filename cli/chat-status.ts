@@ -50,6 +50,8 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
     `observed at: ${snapshot.observedAt}`,
     `title: ${snapshot.chat.title}`,
     `agent: ${snapshot.chat.agentId}`,
+    `ownership epoch: ${snapshot.chat.agentOwnershipEpoch}`,
+    `carryover revision: ${snapshot.chat.carryOverRevision}`,
   ];
   if (snapshot.chat.model !== null) lines.push(`model: ${snapshot.chat.model}`);
   if (snapshot.chat.apiProviderId !== null) {

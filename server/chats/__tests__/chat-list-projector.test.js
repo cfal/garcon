@@ -17,6 +17,8 @@ function makeSession(overrides = {}) {
     model: 'opus',
     permissionMode: 'default',
     thinkingMode: 'none',
+    carryOverSegments: [],
+    carryOverMigrationQuarantine: null,
     ...overrides,
   };
 }
@@ -112,6 +114,8 @@ describe('ChatListProjector', () => {
       chat: {
         id: CHAT_ID,
         agentId: 'claude',
+        agentOwnershipEpoch: 'epoch-1',
+        carryOverRevision: 'carry-v1:0',
         model: 'opus',
         apiProviderId: null,
         modelEndpointId: null,

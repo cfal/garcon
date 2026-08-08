@@ -67,6 +67,7 @@ export default function createAllRoutes({
   transcriptSearchSettings,
   runtimeState,
   commandLedger,
+  notifyHistoryChanged,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -92,6 +93,7 @@ export default function createAllRoutes({
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
   runtimeState: ServerRuntimeState;
   commandLedger: CommandLedger;
+  notifyHistoryChanged: (chatId: string) => void;
 }): RouteMap {
   return {
     ...createRuntimeRoutes(runtimeState),
@@ -120,6 +122,7 @@ export default function createAllRoutes({
       chatListProjector,
       lastSelectedChat,
       searchIndex,
+      notifyHistoryChanged,
     }),
     ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
     ...createFilesRoutes(registry),

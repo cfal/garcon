@@ -11,6 +11,7 @@ import type { ChatMetadata } from './metadata-store.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { PathCache, ProjectPathStatus } from './path-cache.js';
 import { extractFirstLine } from '../lib/text.js';
+import { carryOverRevision } from './carryover-segments.js';
 
 interface ChatListProjectorSettings {
   getPinnedChatIds(): string[];
@@ -122,6 +123,11 @@ export class ChatListProjector {
       chat: {
         id: chatId,
         agentId: session.agentId,
+        agentOwnershipEpoch: session.agentOwnershipEpoch,
+        carryOverRevision: carryOverRevision(
+          session.carryOverSegments,
+          session.carryOverMigrationQuarantine,
+        ),
         model: session.model || null,
         apiProviderId: session.apiProviderId ?? null,
         modelEndpointId: session.modelEndpointId ?? null,

@@ -21,6 +21,8 @@ function snapshot(overrides = {}) {
       modelProtocol: null,
       permissionMode: 'acceptEdits',
       thinkingMode: 'high',
+      agentOwnershipEpoch: 'epoch-1',
+      carryOverRevision: 'carry-v1:0',
       projectPath: '/work/project',
       tags: ['cli', 'review'],
       activity: { createdAt: TIMESTAMP, lastActivityAt: TIMESTAMP },
@@ -137,6 +139,14 @@ describe('chat snapshot contract', () => {
     ['protocol', (value) => ({
       ...value,
       chat: { ...value.chat, modelProtocol: 'invalid' },
+    })],
+    ['ownership epoch', (value) => ({
+      ...value,
+      chat: { ...value.chat, agentOwnershipEpoch: '' },
+    })],
+    ['carryover revision', (value) => ({
+      ...value,
+      chat: { ...value.chat, carryOverRevision: null },
     })],
     ['timestamp', (value) => ({ ...value, observedAt: 'not-a-time' })],
   ])('rejects invalid %s data', (_label, mutate) => {

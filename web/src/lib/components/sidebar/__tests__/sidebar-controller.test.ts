@@ -145,7 +145,11 @@ describe('SidebarController', () => {
 				lastActivityAt: '2025-01-02',
 				agentSessionId: 'agent-session-1',
 				transcriptSource: null,
-				carryOverSegments: [],
+				carryOver: {
+					revision: 'carry-v1:0',
+					archivedMessageCount: 0,
+					segments: [],
+				},
 			};
 			mockGetChatDetails.mockResolvedValue(details);
 

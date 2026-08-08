@@ -27,6 +27,8 @@ function fixture(overrides = {}) {
           id: CHAT_ID,
           title: 'Implement validation',
           agentId: 'codex',
+          agentOwnershipEpoch: 'epoch-1',
+          carryOverRevision: 'carry-v1:0',
           model: 'gpt-5.4',
           apiProviderId: null,
           modelEndpointId: null,

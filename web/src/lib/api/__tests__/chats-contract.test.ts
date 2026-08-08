@@ -217,7 +217,11 @@ describe('chats API contract', () => {
 			lastActivityAt: '2026-02-21T11:00:00.000Z',
 			agentSessionId: 'thread-abc',
 			transcriptSource: null,
-			carryOverSegments: [],
+			carryOver: {
+				revision: 'carry-v1:0',
+				archivedMessageCount: 0,
+				segments: [],
+			},
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 

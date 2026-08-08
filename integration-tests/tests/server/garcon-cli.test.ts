@@ -434,6 +434,8 @@ describe('garcon-cli', () => {
           id: handle.chatId,
           projectPath: fixture.dirs.project,
           tags: ['cli'],
+          agentOwnershipEpoch: expect.any(String),
+          carryOverRevision: expect.stringMatching(/^carry-v(?:1:0|5:)/),
         },
         processingPhase: 'running',
         control: { serverInstanceId: expect.any(String) },

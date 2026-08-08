@@ -69,6 +69,7 @@ Options:
 
 Use a single - as the prompt to read UTF-8 text from stdin.
 Use -- before a positional prompt whose first word is list, send-async, stop, repair-history, status, or wait.
+Use status <chat-id> to obtain the carryover revision and ownership epoch for history repair.
 The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
