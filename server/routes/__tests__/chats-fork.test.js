@@ -230,6 +230,13 @@ describe('POST /api/v1/chats/fork', () => {
           'test-agent': { ownerId: 'test-agent', schemaVersion: 1, values: {} },
         },
         projectPath: '/proj',
+        tags: [],
+        model: '',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        carryOverSegments: [],
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
       };
       if (id === TARGET_CHAT_ID) return forkedChat;
       return null;
@@ -254,6 +261,11 @@ describe('POST /api/v1/chats/fork', () => {
         projectPath: '/proj',
         model: '',
         tags: [],
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        carryOverSegments: [],
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
       });
       return {
         sourceChatId: SOURCE_CHAT_ID,

@@ -100,6 +100,9 @@ function chatEntry(projectPath = '/proj') {
       value: { id: 'test-session' },
     },
     agentOwnershipEpoch: 'epoch-1',
+    carryOverSegments: [],
+    nativeSeedReceipt: null,
+    carryOverMigrationQuarantine: null,
     agentSettingsById: {
       'test-agent': {
         ownerId: 'test-agent',

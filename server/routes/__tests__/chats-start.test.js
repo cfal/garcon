@@ -35,7 +35,12 @@ const normalChatIds = [];
 const registry = {
   getChat: mock((chatId) => testChats.get(chatId)),
   addChat: mock((chat) => {
-    testChats.set(chat.id, chat);
+    testChats.set(chat.id, {
+      carryOverSegments: [],
+      nativeSeedReceipt: null,
+      carryOverMigrationQuarantine: null,
+      ...chat,
+    });
     return true;
   }),
   updateChat: mock(() => undefined),
