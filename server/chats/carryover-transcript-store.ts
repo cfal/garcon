@@ -163,10 +163,10 @@ export class CarryOverTranscriptStore {
     return removed;
   }
 
-  sweep(roots: ReadonlySet<string>): Promise<CarryOverSweepResult> {
+  sweep(roots: () => ReadonlySet<string>): Promise<CarryOverSweepResult> {
     const operation = this.#gcPromise
       .catch(() => undefined)
-      .then(() => this.#sweepNow(roots));
+      .then(() => this.#sweepNow(roots()));
     this.#gcPromise = operation.then(() => undefined, () => undefined);
     return operation;
   }

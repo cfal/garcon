@@ -73,6 +73,18 @@ describe('CarryOverGarbageCollector', () => {
     await expect(segmentStat(SECOND)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('evaluates durable roots when a serialized sweep begins', async () => {
+    const prepared = await prepareSegment(FIRST);
+    await prepared.commit();
+
+    const sweep = collector.sweep();
+    sessions = { source: { carryOverSegments: [segmentRef(FIRST)] } };
+    prepared.releaseRoot();
+
+    await sweep;
+    await expect(segmentStat(FIRST)).resolves.toBeDefined();
+  });
+
   async function prepareSegment(id) {
     return store.prepareSegment({
       operationId: `operation:${id}`,

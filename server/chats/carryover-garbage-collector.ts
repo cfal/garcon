@@ -17,7 +17,7 @@ export class CarryOverGarbageCollector {
   async initialize(): Promise<void> {
     const roots = this.#roots();
     const removedTemporaryDirectories = await this.deps.store.cleanupTemporary(roots);
-    const result = await this.deps.store.sweep(roots);
+    const result = await this.deps.store.sweep(() => this.#roots());
     logger.info('startup sweep complete', { ...result, removedTemporaryDirectories });
   }
 
@@ -35,7 +35,7 @@ export class CarryOverGarbageCollector {
   }
 
   async sweep(): Promise<void> {
-    const result = await this.deps.store.sweep(this.#roots());
+    const result = await this.deps.store.sweep(() => this.#roots());
     logger.info('sweep complete', result);
   }
 

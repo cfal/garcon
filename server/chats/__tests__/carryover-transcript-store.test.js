@@ -147,9 +147,9 @@ describe('CarryOverTranscriptStore', () => {
     });
     await prepared.commit();
     expect(store.writerRoots()).toContain(FIRST);
-    expect((await store.sweep(new Set())).removedSegmentCount).toBe(0);
+    expect((await store.sweep(() => new Set())).removedSegmentCount).toBe(0);
     prepared.releaseRoot();
-    expect((await store.sweep(new Set())).removedSegmentCount).toBe(1);
+    expect((await store.sweep(() => new Set())).removedSegmentCount).toBe(1);
     await expect(fs.stat(segmentDir(workspaceDir, FIRST))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
