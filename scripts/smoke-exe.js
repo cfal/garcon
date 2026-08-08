@@ -231,7 +231,7 @@ async function run() {
       message: { role: 'user', content: 'embeddedworkertoken' },
     })}\n`);
     await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
-      version: 4,
+      version: 5,
       sessions: {
         [SMOKE_CHAT_ID]: {
           agentId: 'claude',
@@ -244,7 +244,7 @@ async function run() {
             },
           },
           agentOwnershipEpoch: 'smoke-ownership-epoch',
-          carryOverHeadId: null,
+          carryOverSegments: [],
           nativeSeedReceipt: null,
           carryOverMigrationQuarantine: null,
           agentSettingsById: {
