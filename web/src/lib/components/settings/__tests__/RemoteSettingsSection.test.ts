@@ -279,7 +279,13 @@ describe('RemoteSettingsSection', () => {
 		render(RemoteSettingsSectionTestHost);
 
 		const chatTitle = screen.getByText('Automatically generate chat titles');
+		const compactionToggle = screen.getByText('Enable agent switch compaction');
 		const commitModel = screen.getByText('Commit message model');
+		// The compaction card sits above the commit-message card.
+		expect(
+			compactionToggle.compareDocumentPosition(commitModel)
+				& Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		expect(
 			chatTitle.compareDocumentPosition(commitModel) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
