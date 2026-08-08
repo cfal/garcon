@@ -26,9 +26,21 @@ import {
   lowerBoundBySeq,
   revisionsMatch,
 } from './chat-view-sequence.js';
+import type {
+  AppendedChatViewMessages,
+  ChatHistoryPage,
+  ChatTranscriptSnapshot,
+  ChatViewLoader,
+} from './chat-view-contracts.js';
 import { ChatRunningError } from './errors.js';
 
 export { lowerBoundBySeq } from './chat-view-sequence.js';
+export type {
+  AppendedChatViewMessages,
+  ChatHistoryPage,
+  ChatTranscriptSnapshot,
+  ChatViewLoader,
+} from './chat-view-contracts.js';
 
 const logger = createLogger('chat-view');
 
@@ -41,41 +53,7 @@ export interface ChatViewStoreOptions {
   now?: () => number;
 }
 
-export interface ChatHistoryPage {
-  messages: ChatMessage[];
-  total: number;
-  hasMore: boolean;
-  offset: number;
-  limit: number;
-  compositeRevision: string;
-  carryOverRevision: string;
-  agentOwnershipEpoch: string;
-  archivedLogicalCount: number;
-}
-
-export interface ChatTranscriptSnapshot {
-  readonly messages: ChatMessage[];
-  readonly nativeMessages: ChatMessage[];
-  readonly compositeRevision: string;
-  readonly carryOverRevision: string;
-  readonly agentOwnershipEpoch: string;
-  readonly archivedLogicalCount: number;
-  readonly nativePrefixDigest: string;
-}
-
 export type { NativeSnapshotReconciliation } from './chat-view-native-reconciliation.js';
-
-export interface ChatViewLoader {
-  loadAll(): Promise<ChatTranscriptSnapshot>;
-  loadPage?(limit: number, offset: number): Promise<ChatHistoryPage | null>;
-}
-
-export interface AppendedChatViewMessages {
-  generationId: string;
-  messages: ChatViewMessage[];
-  lastSeq: number;
-  skipped?: boolean;
-}
 
 type MissingHistoryRequest =
   | { kind: 'page'; limit: number; offset: number }
