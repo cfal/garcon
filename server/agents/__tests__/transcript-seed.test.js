@@ -69,6 +69,18 @@ describe('transcript seed contract', () => {
     ], { maxChars: 1 })).toThrow('Carried-context budget must be at least');
   });
 
+  test('never exceeds any accepted carried-context budget', () => {
+    const messages = [
+      new UserMessage(TIME, 'old '.repeat(2_000)),
+      new AssistantMessage(TIME, 'new '.repeat(2_000)),
+    ];
+
+    for (let maxChars = 221; maxChars <= 500; maxChars += 1) {
+      expect(renderCarriedContext(messages, { maxChars }).prefix.length)
+        .toBeLessThanOrEqual(maxChars);
+    }
+  });
+
   test('strips only the exact receipt-bound prefix for the current session', () => {
     const prefix = renderCarriedContext([new UserMessage(TIME, 'prior')]).prefix;
     const receipt = createNativeSeedReceipt({

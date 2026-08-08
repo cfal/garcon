@@ -64,7 +64,7 @@ export function renderCarriedContext(
   const selected: string[] = [];
   let used = TRUNCATION_ELEMENT.length;
   for (let index = projected.length - 1; index >= 0; index -= 1) {
-    const separator = selected.length > 0 ? 1 : 0;
+    const separator = 1;
     const element = fullElements[index];
     if (used + separator + element.length <= available) {
       selected.unshift(element);
