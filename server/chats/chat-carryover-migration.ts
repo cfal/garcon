@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
-import v8 from 'node:v8';
+import { pipeline } from 'node:stream/promises';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { AgentSwitchMessage, UserMessage } from '../../common/chat-types.js';
 import {
@@ -11,6 +11,7 @@ import {
 import { isRecord } from '../../common/json.js';
 import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import type { AgentOwnershipJournalFileV3 } from './agent-ownership-journal.js';
+import { assertMigrationCapacity } from './carryover-migration-budget.js';
 import { CarryOverTranscriptStore } from './carryover-transcript-store.js';
 import { readChatRegistryVersion, readLegacyChatRegistryV3 } from './legacy-chat-registry-v3.js';
 import {
@@ -19,11 +20,13 @@ import {
   activeLegacySegments,
   convertLinkedHistory,
   migrateLegacyOwnershipJournal,
+  migratedTranscriptMatches,
   migrateV4Receipt,
   parseLegacyCarryOverFile,
 } from './legacy-carryover-import.js';
 import { parseCarryOverSegmentRefs, type CarryOverSegmentRef } from './store.js';
 
+const EMPTY_FILE_SHA256 = crypto.createHash('sha256').digest('hex');
 const MIGRATION_MARKER_VERSION = 2 as const;
 const MIGRATION_MARKER_FILE = 'carryover-transcripts/migration-v2.json';
 const LEGACY_CARRYOVER_FILE = 'chat-carryover.json';
@@ -87,13 +90,13 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
       ? await directorySize(path.join(workspaceDir, 'carryover-transcripts', 'nodes'))
       : 0);
   await assertMigrationCapacity(workspaceDir, sourceBytes);
-  const [registryBytes, carryOverBytes, journalBytes] = await Promise.all([
+  const [registryBytes, sourceCarryOverSha256, journalBytes] = await Promise.all([
     fs.readFile(registryPath),
-    readOptionalFile(carryOverPath),
+    digestFile(carryOverPath),
     readOptionalFile(journalPath),
   ]);
   const sourceDigests = {
-    sourceCarryOverSha256: digest(carryOverBytes),
+    sourceCarryOverSha256,
     sourceRegistrySha256: digest(registryBytes),
     sourceJournalSha256: digest(journalBytes),
   };
@@ -125,9 +128,12 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   if (registryVersion === 3) {
     const legacyRegistry = await readLegacyChatRegistryV3(workspaceDir);
     if (!legacyRegistry) return;
-    const rawCarryOver = parseLegacyCarryOverFile(carryOverBytes);
+    // Parses in a temporary scope so the source bytes are collectable once the
+    // chat map exists, and drops each chat's raw messages as it is converted.
+    const rawCarryOver = parseLegacyCarryOverFile(await readOptionalFile(carryOverPath));
     for (const [chatId, entry] of Object.entries(legacyRegistry.sessions)) {
       const rawCarryOverEntry = rawCarryOver.get(chatId);
+      rawCarryOver.delete(chatId);
       try {
         const converted = await convertLegacySegments({
           chatId,
@@ -342,8 +348,8 @@ async function resumeCommittedMigration(
   const targetRegistry = parseTargetRegistry(registryBytes);
   await validateMigratedRoots(workspaceDir, targetRegistry.sessions, marker);
 
-  const legacyCarryOver = await readOptionalFile(path.join(workspaceDir, LEGACY_CARRYOVER_FILE));
-  if (legacyCarryOver.byteLength > 0 && digest(legacyCarryOver) !== marker.sourceCarryOverSha256) {
+  const legacyDigest = await digestFile(path.join(workspaceDir, LEGACY_CARRYOVER_FILE));
+  if (legacyDigest !== EMPTY_FILE_SHA256 && legacyDigest !== marker.sourceCarryOverSha256) {
     throw new Error('Legacy carryover source changed after registry commit');
   }
 
@@ -479,8 +485,7 @@ async function convertLegacySegments(input: {
   }
 
   await input.store.assertAvailable(refs);
-  const migrated = await input.store.loadAll(refs);
-  if (canonicalMessages(migrated) !== canonicalMessages(rendered)) {
+  if (!await migratedTranscriptMatches(input.store, refs, rendered)) {
     throw new Error(`Migrated carryover transcript differs for chat ${input.chatId}`);
   }
   if (rendered.length > 0 && refs.length === 0) {
@@ -532,20 +537,14 @@ function stripExactLegacyPrefix(
   return { messages: next, stripped: true };
 }
 
-async function assertMigrationCapacity(workspaceDir: string, sourceBytes: number): Promise<void> {
-  if (sourceBytes === 0) return;
-  const requiredDisk = Math.ceil(sourceBytes * 2.5) + 64 * 1024 * 1024;
-  const disk = await fs.statfs(workspaceDir);
-  const availableDisk = Number(disk.bavail) * Number(disk.bsize);
-  if (availableDisk < requiredDisk) {
-    throw new Error(`Carryover migration requires at least ${requiredDisk} free bytes`);
+async function digestFile(filePath: string): Promise<string> {
+  const hash = crypto.createHash('sha256');
+  try {
+    await pipeline(createReadStream(filePath), hash);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  const heap = v8.getHeapStatistics();
-  const availableHeap = heap.heap_size_limit - heap.used_heap_size;
-  const requiredHeap = sourceBytes * 3;
-  if (availableHeap < requiredHeap) {
-    throw new Error(`Carryover migration requires at least ${requiredHeap} bytes of available heap`);
-  }
+  return hash.digest('hex');
 }
 
 async function directorySize(directory: string): Promise<number> {
@@ -867,7 +866,9 @@ async function validateMigratedRoots(
     }
     const refs = parseCarryOverSegmentRefs(entry.carryOverSegments);
     await store.assertAvailable(refs);
-    await store.loadAll(refs);
+    // Decodes every page to prove the committed segments are readable, discarding
+    // each batch so a large chat cannot dominate startup memory.
+    for await (const _batch of store.stream({ refs, maxMessagesPerBatch: 256 })) void _batch;
     for (const ref of refs) if (ref.storedMessageCount > 0) ids.add(ref.id);
   }
   const summary = segmentSummary(sessions);
@@ -903,10 +904,6 @@ function timestampValue(value: unknown, field: string): string {
 function nonNegativeInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error(`Invalid ${field}`);
   return Number(value);
-}
-
-function canonicalMessages(messages: readonly ChatMessage[]): string {
-  return JSON.stringify(messages);
 }
 
 function isQuarantinableMigrationError(error: unknown): boolean {
@@ -947,21 +944,6 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
-function stringValue(value: unknown, field: string): string {
-  if (typeof value !== 'string') throw new Error(`Invalid ${field}`);
-  return value;
-}
-
 function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
-}
-
-function isFileSystemError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === 'object'
-    && 'code' in error
-    && typeof error.code === 'string'
-    && /^E[A-Z]+/.test(error.code),
-  );
 }

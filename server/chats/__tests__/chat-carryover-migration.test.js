@@ -5,12 +5,14 @@ import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import { CarryOverTranscriptStore } from '../carryover-transcript-store.ts';
 import { encodeCarryOverPages } from '../carryover-page-codec.ts';
+import { assertMigrationBudget } from '../carryover-migration-budget.ts';
 import {
   finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
   rollbackLegacyCarryOverMigration,
 } from '../chat-carryover-migration.ts';
+import { migratedTranscriptMatches } from '../legacy-carryover-import.ts';
 
 const CHAT_ID = '1786077000000001';
 const TIMESTAMP = '2026-01-01T00:00:00.000Z';
@@ -389,6 +391,36 @@ describe('legacy carryover migration', () => {
       .rejects.toThrow('unsafe after new-format history was created');
   });
 
+  it('rejects transcripts that differ from the committed segments', async () => {
+    await writeLegacyWorkspace({
+      segments: [
+        segment('codex', 'gpt', [
+          new UserMessage(TIMESTAMP, 'first'),
+          new AssistantMessage(TIMESTAMP, 'second'),
+        ], { target: { agentId: 'claude', model: 'opus' } }),
+      ],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    const refs = (await readJson('chats.json')).sessions[CHAT_ID].carryOverSegments;
+    const store = new CarryOverTranscriptStore({ workspaceDir });
+    await store.initialize();
+    const committed = await store.loadAll(refs);
+
+    expect(await migratedTranscriptMatches(store, refs, committed)).toBe(true);
+    expect(await migratedTranscriptMatches(store, refs, committed.slice(0, -1))).toBe(false);
+    expect(await migratedTranscriptMatches(store, refs, [
+      ...committed,
+      new UserMessage(TIMESTAMP, 'extra'),
+    ])).toBe(false);
+    expect(await migratedTranscriptMatches(store, refs, [
+      new UserMessage(TIMESTAMP, 'changed'),
+      ...committed.slice(1),
+    ])).toBe(false);
+  });
+
   async function writeWorkspaceVersion(version) {
     await fs.writeFile(
       path.join(workspaceDir, 'workspace-version.json'),
@@ -439,6 +471,44 @@ describe('legacy carryover migration', () => {
   function readJson(relativePath) {
     return fs.readFile(path.join(workspaceDir, relativePath), 'utf8').then(JSON.parse);
   }
+});
+
+describe('carryover migration budget', () => {
+  const ample = { availableDisk: 64 * 1024 ** 3, availableMemory: 64 * 1024 ** 3 };
+
+  it('accepts a source that the retired heap probe would have rejected', () => {
+    // Bun reports a ~350MB heap limit at startup, which refused every legacy file
+    // over ~120MB even on hosts with tens of gigabytes free.
+    expect(() => assertMigrationBudget({
+      sourceBytes: 218 * 1024 ** 2,
+      availableDisk: 8 * 1024 ** 3,
+      availableMemory: 2 * 1024 ** 3,
+    })).not.toThrow();
+  });
+
+  it('skips both budgets when there is no legacy source', () => {
+    expect(() => assertMigrationBudget({
+      sourceBytes: 0,
+      availableDisk: 0,
+      availableMemory: 0,
+    })).not.toThrow();
+  });
+
+  it('refuses when free disk cannot hold the converted store', () => {
+    expect(() => assertMigrationBudget({
+      ...ample,
+      sourceBytes: 100 * 1024 ** 2,
+      availableDisk: 100 * 1024 ** 2,
+    })).toThrow('free bytes');
+  });
+
+  it('refuses when free memory cannot hold the parse', () => {
+    expect(() => assertMigrationBudget({
+      ...ample,
+      sourceBytes: 100 * 1024 ** 2,
+      availableMemory: 700 * 1024 ** 2,
+    })).toThrow('bytes of free memory');
+  });
 });
 
 function segment(agentId, model, messages, options = {}) {

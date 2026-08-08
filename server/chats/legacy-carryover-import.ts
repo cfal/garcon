@@ -37,6 +37,30 @@ export class LegacyCarryOverDataError extends Error {
   }
 }
 
+const VERIFICATION_BATCH_SIZE = 256;
+
+// Compares the committed segments against the transcript the migration expected
+// to render without materializing a second copy of either side, which keeps peak
+// memory proportional to one batch rather than to the largest chat.
+export async function migratedTranscriptMatches(
+  store: CarryOverTranscriptStore,
+  refs: readonly CarryOverSegmentRef[],
+  expected: readonly ChatMessage[],
+): Promise<boolean> {
+  let index = 0;
+  for await (const batch of store.stream({
+    refs,
+    maxMessagesPerBatch: VERIFICATION_BATCH_SIZE,
+  })) {
+    for (const message of batch) {
+      if (index >= expected.length) return false;
+      if (JSON.stringify(message) !== JSON.stringify(expected[index])) return false;
+      index += 1;
+    }
+  }
+  return index === expected.length;
+}
+
 export function parseLegacyCarryOverFile(bytes: Buffer): Map<string, unknown> {
   if (bytes.byteLength === 0) return new Map();
   const parsed: unknown = JSON.parse(bytes.toString('utf8'));
@@ -129,8 +153,7 @@ export async function convertLinkedHistory(input: {
     }
   }
   await input.store.assertAvailable(refs);
-  const migrated = await input.store.loadAll(refs);
-  if (JSON.stringify(migrated) !== JSON.stringify(logical)) {
+  if (!await migratedTranscriptMatches(input.store, refs, logical)) {
     throw new LegacyCarryOverDataError(
       `Migrated linked carryover transcript differs for chat ${input.chatId}`,
     );
