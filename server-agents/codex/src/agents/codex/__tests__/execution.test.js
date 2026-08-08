@@ -202,7 +202,7 @@ describe('CodexExecution', () => {
     expect(started.nativeSeedReceipt).toMatchObject({
       agentSessionId: 'thread-1',
       placement: 'provider-context',
-      format: 'v2-xml',
+      format: 'v3-xml',
       codeUnitLength: prefix.length,
     });
   });

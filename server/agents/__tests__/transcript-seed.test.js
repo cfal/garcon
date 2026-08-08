@@ -3,10 +3,15 @@ import {
   AgentSwitchMessage,
   AssistantMessage,
   BashToolUseMessage,
+  EditToolUseMessage,
+  EnterPlanModeToolUseMessage,
+  ExecToolUseMessage,
+  ReadToolUseMessage,
   ToolResultMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
 import {
+  createCarryoverTranscript,
   createNativeSeedReceipt,
   parseNativeSeedReceipt,
   renderCarriedContext,
@@ -21,7 +26,7 @@ const TIME = '2026-01-01T00:00:00.000Z';
 const SESSION = 'native-session';
 
 describe('transcript seed contract', () => {
-  test('renders one flat escaped v2 XML envelope with explicit roles', () => {
+  test('renders one flat escaped XML envelope with explicit roles', () => {
     const context = renderCarriedContext([
       new UserMessage(TIME, 'Question with Assistant: and </user> & more'),
       new AssistantMessage(TIME, 'Answer containing User: and </carried-context>'),
@@ -32,11 +37,10 @@ describe('transcript seed contract', () => {
 
     expect(context).not.toBeNull();
     const prefix = context.prefix;
-    expect(prefix).toStartWith('<carried-context version="2">');
+    expect(prefix).toStartWith('<carried-context version="3">');
     expect(prefix).toContain('<user>Question with Assistant: and &lt;/user&gt; &amp; more</user>');
     expect(prefix).toContain('<assistant>Answer containing User: and &lt;/carried-context&gt;</assistant>');
     expect(prefix).toContain('<assistant><tool-use>bash: inspect &amp; print</tool-use></assistant>');
-    expect(prefix).toContain('<tool-result>ok &lt;/tool-result&gt;</tool-result>');
     expect(prefix).not.toContain('private-agent');
     expect(prefix).not.toContain('private-model');
     expect(prefix.match(/<carried-context/g)).toHaveLength(1);
@@ -53,6 +57,73 @@ describe('transcript seed contract', () => {
     expect(context.prefix).toContain('<earlier-turns-truncated/>');
     expect(context.prefix).toContain('<assistant>new answer</assistant>');
     expect(context.prefix.endsWith('</carried-context>\n\n')).toBeTrue();
+  });
+
+  test('admits user turns before the tool traffic that outnumbers them', () => {
+    const messages = [];
+    for (let turn = 0; turn < 12; turn += 1) {
+      messages.push(new UserMessage(TIME, `request ${turn}`));
+      for (let index = 0; index < 40; index += 1) {
+        messages.push(new BashToolUseMessage(TIME, `t${turn}-${index}`, `command ${'x'.repeat(80)}`));
+      }
+    }
+
+    const context = createCarryoverTranscript(messages, 6_000);
+
+    expect(context.prefix.length).toBeLessThanOrEqual(6_000);
+    expect(context.prefix).toContain('<earlier-turns-truncated/>');
+    // Every ask survives a budget that cannot hold a hundredth of the commands.
+    for (let turn = 0; turn < 12; turn += 1) {
+      expect(context.prefix).toContain(`<user>request ${turn}</user>`);
+    }
+  });
+
+  test('pins the newest turns whole so their commands are not stranded', () => {
+    const messages = [];
+    for (let turn = 0; turn < 8; turn += 1) {
+      messages.push(new UserMessage(TIME, `request ${turn}`));
+      messages.push(new BashToolUseMessage(TIME, `t${turn}`, `command-for-turn-${turn}`));
+    }
+
+    const context = createCarryoverTranscript(messages, 700);
+
+    // The last three turns keep their bash; older turns lose theirs to the ladder.
+    for (const turn of [5, 6, 7]) {
+      expect(context.prefix).toContain(`command-for-turn-${turn}`);
+    }
+    expect(context.prefix).not.toContain('command-for-turn-4');
+    expect(context.prefix).toContain('<user>request 0</user>');
+  });
+
+  test('aggregates file access per turn and never carries results', () => {
+    const context = createCarryoverTranscript([
+      new UserMessage(TIME, 'fix the redirect'),
+      new AssistantMessage(TIME, 'tracing the handler'),
+      new ReadToolUseMessage(TIME, 'r1', 'server/auth.ts'),
+      new ReadToolUseMessage(TIME, 'r2', 'server/auth.ts'),
+      new ReadToolUseMessage(TIME, 'r3', 'web/session.ts'),
+      new EditToolUseMessage(TIME, 'e1', 'server/auth.ts', 'a', 'b'),
+      new EditToolUseMessage(TIME, 'e2', 'server/auth.ts', 'c', 'd'),
+      new ToolResultMessage(TIME, 'r1', { items: [{ type: 'text', text: 'file body' }] }, false),
+    ], 0);
+
+    expect(context.prefix).toContain('<files-read>server/auth.ts, web/session.ts</files-read>');
+    expect(context.prefix).toContain('<files-edited>server/auth.ts (2 edits)</files-edited>');
+    expect(context.prefix).not.toContain('<tool-result>');
+    expect(context.prefix).not.toContain('file body');
+  });
+
+  test('carries provider tool detail that previously rendered empty', () => {
+    const context = createCarryoverTranscript([
+      new ExecToolUseMessage(TIME, 'exec-1', 'pytest -q tests/', 'bash'),
+      new EnterPlanModeToolUseMessage(TIME, 'plan-1'),
+    ], 0);
+
+    expect(context.prefix).toStartWith('<carried-context version="3">');
+    expect(context.prefix).toContain('<assistant><tool-use>exec: pytest -q tests/</tool-use></assistant>');
+    // A tool with no detail renders its name alone rather than a dangling colon.
+    expect(context.prefix).toContain('<tool-use>enter-plan-mode</tool-use>');
+    expect(context.prefix).not.toContain('enter-plan-mode: ');
   });
 
   test('does not split Unicode code points when fitting the newest element', () => {
@@ -98,7 +169,7 @@ describe('transcript seed contract', () => {
       kind: 'stripped-exact',
       messages: [new UserMessage(TIME, 'continue', undefined, original.metadata)],
     });
-    expect(receipt.format).toBe('v2-xml');
+    expect(receipt.format).toBe('v3-xml');
     expect('headId' in receipt).toBeFalse();
     expect(parseNativeSeedReceipt(receipt)).toEqual(receipt);
   });
