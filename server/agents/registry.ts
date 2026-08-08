@@ -149,7 +149,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     integrations: IntegrationRegistry;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
-    loadCarriedContext(entry: AgentChatEntry, signal?: AbortSignal): Promise<CarriedContext | null>;
+    loadCarriedContext(
+      chatId: string,
+      entry: AgentChatEntry,
+      signal?: AbortSignal,
+    ): Promise<CarriedContext | null>;
     getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;

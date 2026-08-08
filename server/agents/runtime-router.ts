@@ -54,7 +54,11 @@ export interface AgentRuntimeRouterOptions {
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
   getCarryOverRevision(entry: AgentChatEntry): string;
-  loadCarriedContext(entry: AgentChatEntry, signal?: AbortSignal): Promise<CarriedContext | null>;
+  loadCarriedContext(
+    chatId: string,
+    entry: AgentChatEntry,
+    signal?: AbortSignal,
+  ): Promise<CarriedContext | null>;
   getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
   onCarryOverChanged?: (chatId: string) => void | Promise<void>;
 }
@@ -80,6 +84,7 @@ export class AgentRuntimeRouter {
   readonly #events: AgentEventBus;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly #loadCarriedContext: (
+    chatId: string,
     entry: AgentChatEntry,
     signal?: AbortSignal,
   ) => Promise<CarriedContext | null>;
@@ -214,6 +219,7 @@ export class AgentRuntimeRouter {
     const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
       if (!entry.agentSessionId) {
         const carriedContext = await this.#loadCarriedContext(
+          chatId,
           entry,
           opts.executionAdmission?.signal,
         );
