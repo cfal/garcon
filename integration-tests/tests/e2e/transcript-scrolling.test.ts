@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Page } from "puppeteer-core";
 import { withE2eFixture, type E2eFixture } from "../../support/e2e-fixture.js";
+import type { ConfiguredDirectTestAgent } from "../../support/garcon-client.js";
 import { SpaDriver } from "../../support/spa-driver.js";
 
 const FEED_SELECTOR = "[data-chat-scroll-viewport]";
@@ -112,7 +113,10 @@ async function pageRequestCount(page: Page): Promise<number> {
   );
 }
 
-async function requestEarlierPageByScroll(page: Page): Promise<void> {
+async function requestEarlierPageByScroll(
+  page: Page,
+  expectedRequestCount = 1,
+): Promise<void> {
   await page.$eval(FEED_SELECTOR, (feedElement) => {
     const feed = feedElement as HTMLElement;
     // Reports keyboard intent before applying its scroll; Lightpanda clamps the
@@ -123,13 +127,44 @@ async function requestEarlierPageByScroll(page: Page): Promise<void> {
     feed.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
   await page.waitForFunction(
-    () =>
+    (expectedCount) =>
       (
         globalThis as typeof globalThis & {
           __transcriptPageRequestGate?: { requestCount: number };
         }
-      ).__transcriptPageRequestGate?.requestCount === 1,
+      ).__transcriptPageRequestGate?.requestCount === expectedCount,
     { timeout: 20_000 },
+    expectedRequestCount,
+  );
+}
+
+async function waitForFinishedTurn(
+  fixture: E2eFixture,
+  chatId: string,
+  turnId: string,
+): Promise<void> {
+  expect((await fixture.integration.client.waitForTurnTerminal(chatId, turnId)).type).toBe(
+    "agent-run-finished",
+  );
+}
+
+async function runDirectTurns(
+  fixture: E2eFixture,
+  chatId: string,
+  agent: ConfiguredDirectTestAgent,
+  contents: readonly string[],
+): Promise<void> {
+  for (const content of contents) {
+    const accepted = await fixture.integration.client.runDirectChat({ chatId, content, agent });
+    if (!accepted.turnId) throw new Error(`Turn ${content} was accepted without an ID`);
+    await waitForFinishedTurn(fixture, chatId, accepted.turnId);
+  }
+}
+
+function eraMarkers(era: string, count = 18): string[] {
+  return Array.from(
+    { length: count },
+    (_, index) => `carryover-ui-${era}-${String(index).padStart(2, "0")}`,
   );
 }
 
@@ -231,4 +266,90 @@ describe("Lightpanda transcript scrolling", () => {
       fixture.assertNoBrowserErrors();
     });
   });
+
+  test("loads complete repeated-handoff history across archived and native pages", async () => {
+    await withE2eFixture("repeated-agent-handoff-history", async (fixture) => {
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      const chatId = fixture.integration.newChatId();
+      const agentA = fixture.integration.directAgents.openAi;
+      const agentB = fixture.integration.directAgents.anthropic;
+      const firstEra = eraMarkers("a");
+      const secondEra = eraMarkers("b");
+      const thirdEra = eraMarkers("a-return");
+      const expectedUsers = [...firstEra, ...secondEra, ...thirdEra];
+
+      const started = await fixture.integration.client.startDirectChat({
+        chatId,
+        content: firstEra[0]!,
+        projectPath: fixture.integration.dirs.project,
+        agent: agentA,
+      });
+      await waitForFinishedTurn(fixture, chatId, started.turnId);
+      await runDirectTurns(fixture, chatId, agentA, firstEra.slice(1));
+
+      const firstHandoffResponse = fixture.integration.fakeProviders.anthropic.holdNext({
+        model: agentB.provider.model,
+      });
+      const firstHandoff = await fixture.integration.client.handoffDirectChat({
+        chatId,
+        content: secondEra[0]!,
+        agent: agentB,
+      });
+      await firstHandoffResponse.received;
+      expect(firstHandoffResponse.releaseText(`echo:${secondEra[0]}`)).toBe(true);
+      await waitForFinishedTurn(fixture, chatId, firstHandoff.turnId);
+      await runDirectTurns(fixture, chatId, agentB, secondEra.slice(1));
+
+      const secondHandoffResponse = fixture.integration.fakeProviders.openAi.holdNext({
+        model: agentA.provider.model,
+      });
+      const secondHandoff = await fixture.integration.client.handoffDirectChat({
+        chatId,
+        content: thirdEra[0]!,
+        agent: agentA,
+      });
+      await secondHandoffResponse.received;
+      expect(secondHandoffResponse.releaseText(`echo:${thirdEra[0]}`)).toBe(true);
+      await waitForFinishedTurn(fixture, chatId, secondHandoff.turnId);
+      await runDirectTurns(fixture, chatId, agentA, thirdEra.slice(1));
+
+      await fixture.integration.restartGarcon();
+      await fixture.page.setViewport({ width: 1_280, height: 800 });
+      await app.openChat(chatId);
+      await fixture.waitForSpaWebSocket();
+      await waitForModelCount(fixture.page, 50);
+      await waitForTranscriptIdle(fixture.page);
+      await installPageRequestGate(fixture.page);
+
+      const initial = await virtualTranscriptSnapshot(fixture.page);
+      expect(initial.modelCount).toBeGreaterThanOrEqual(50);
+      await app.waitForExactTextCount(`echo:${thirdEra.at(-1)}`, 1);
+
+      await requestEarlierPageByScroll(fixture.page, 1);
+      await waitForModelCount(fixture.page, initial.modelCount + 50);
+      await waitForTranscriptIdle(fixture.page);
+      await requestEarlierPageByScroll(fixture.page, 2);
+      await waitForModelCount(fixture.page, initial.modelCount + 60);
+      await waitForTranscriptIdle(fixture.page);
+
+      const loaded = await virtualTranscriptSnapshot(fixture.page);
+      expect(loaded.modelCount).toBe(initial.modelCount + 60);
+      expect(loaded.modelCount - (initial.modelCount - 50)).toBe(expectedUsers.length * 2 + 2);
+      expect(loaded.mountedCount).toBeLessThan(loaded.modelCount);
+      expect(await pageRequestCount(fixture.page)).toBe(2);
+
+      await app.clickButton("Workspace actions");
+      await app.clickMenuItem("Jump to user message");
+      await app.waitForText("User messages");
+      const navigatorRows = await app.userMessageNavigatorRows();
+      expect(navigatorRows).toEqual([...expectedUsers].reverse());
+      expect(navigatorRows.some((row) => row.includes("<carried-context"))).toBe(false);
+
+      await app.clickUserMessageNavigatorRowContaining(firstEra[0]!);
+      await app.waitForTextAbsent("User messages");
+      await app.waitForExactTextCount(firstEra[0]!, 1);
+      await app.waitForExactTextCount(`echo:${firstEra[0]}`, 1);
+      fixture.assertNoBrowserErrors();
+    });
+  }, 60_000);
 });
