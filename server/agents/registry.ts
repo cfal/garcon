@@ -151,6 +151,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     getCarryOverRevision(entry: AgentChatEntry): string;
     loadCarriedContext(entry: AgentChatEntry, signal?: AbortSignal): Promise<CarriedContext | null>;
     getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
+    onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;
   }) {
     this.#registry = args.registry;
@@ -169,6 +170,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       getCarryOverRevision: args.getCarryOverRevision,
         loadCarriedContext: args.loadCarriedContext,
         getCarryOverMessageCount: args.getCarryOverMessageCount,
+      onCarryOverChanged: args.onCarryOverChanged,
     });
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,

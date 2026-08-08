@@ -94,6 +94,7 @@ export interface ServerEventWiringDeps {
 
 export interface ServerEventWiring {
   notifyAgentHandoff(chatId: string): void;
+  notifyTranscriptCompositionChanged(chatId: string): void;
   waitForIdle(): Promise<void>;
 }
 
@@ -202,6 +203,12 @@ export function wireServerEvents({
         0,
       ));
     });
+  }
+
+  function notifyTranscriptCompositionChanged(chatId: string): void {
+    if (!chatExists(chatId)) return;
+    idleReconciler.noteHistoryChanged(chatId);
+    markSearchCatalogDirty(chatId);
   }
 
   scheduledPrompts.onInvalidated((reason) => {
@@ -395,6 +402,7 @@ export function wireServerEvents({
   ): Promise<void> {
     await settleExecutionCommand(chatId, turnMetadata, 'failed', agentErrorMessage);
     await reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
+    await idleReconciler.ensureHistoryChangeReconciled(chatId);
     broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
     await markPublicTurnTerminal(chatId, turnMetadata);
   }
@@ -412,6 +420,7 @@ export function wireServerEvents({
       pendingInputs.markFailed(chatId, options.clientRequestId);
     }
     await pendingInputs.reconcileNativeHistory(chatId);
+    await idleReconciler.ensureHistoryChangeReconciled(chatId);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
     await markPublicTurnTerminal(chatId, options);
   }
@@ -533,6 +542,7 @@ export function wireServerEvents({
       if (queuedFinalization && await queuedFinalization !== 'committed') return;
       await settleExecutionCommand(chatId, turnMetadata, 'finished');
       if (!expectedAbort) await pendingInputs.reconcileNativeHistory(chatId);
+      await idleReconciler.ensureHistoryChangeReconciled(chatId);
       if (!chatExists(chatId)) return;
       broadcast(
         new AgentRunFinishedMessage(
@@ -567,8 +577,10 @@ export function wireServerEvents({
       return;
     }
     if (expectedAbort) {
-      scheduleChatTask(chatId, 'server-events: interrupted command settlement failed', () =>
-        settleExecutionCommand(chatId, turnMetadata, 'finished'));
+      scheduleChatTask(chatId, 'server-events: interrupted command settlement failed', async () => {
+        await settleExecutionCommand(chatId, turnMetadata, 'finished');
+        await idleReconciler.ensureHistoryChangeReconciled(chatId);
+      });
       queue.checkChatIdle(chatId).catch((err) => {
         logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
@@ -768,5 +780,5 @@ export function wireServerEvents({
     if (turn) agentRegistry.settleTurn(chatId, turn);
   });
 
-  return { notifyAgentHandoff, waitForIdle };
+  return { notifyAgentHandoff, notifyTranscriptCompositionChanged, waitForIdle };
 }

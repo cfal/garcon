@@ -1,7 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { IdleNativeReconciler } from '../idle-native-reconciler.ts';
 import { ChatRunningError } from '../errors.ts';
-import { nativeReconciliation } from './chat-transcript-test-helpers.js';
+import {
+  nativeReconciliation,
+  transcriptSnapshot,
+} from './chat-transcript-test-helpers.js';
 import { AssistantMessage } from '../../../common/chat-types.js';
 
 const CHAT_ID = 'chat-1';
@@ -17,10 +20,14 @@ function harness(overrides = {}) {
     reconcileNativeSnapshot: mock(async () => {
       state.cursor = { generationId: 'gen-2', lastSeq: 2 };
     }),
+    reconcileFullSnapshot: mock(async () => {
+      state.cursor = { generationId: 'gen-3', lastSeq: 3 };
+    }),
     ...overrides.views,
   };
   const source = {
     loadNativeSnapshot: mock(async () => nativeReconciliation([])),
+    loadFullSnapshot: mock(async () => transcriptSnapshot([])),
     ...overrides.source,
   };
   const resets = [];
@@ -59,6 +66,40 @@ describe('IdleNativeReconciler', () => {
 
     expect(views.reconcileNativeSnapshot).toHaveBeenCalledTimes(1);
     expect(resets).toEqual([]);
+  });
+
+  it('rebuilds the full transcript after its archived composition changes', async () => {
+    const { reconciler, views, source, resets } = harness();
+    reconciler.noteHistoryChanged(CHAT_ID);
+
+    await reconciler.ensureHistoryChangeReconciled(CHAT_ID);
+
+    expect(source.loadFullSnapshot).toHaveBeenCalledTimes(2);
+    expect(source.loadNativeSnapshot).not.toHaveBeenCalled();
+    expect(views.reconcileFullSnapshot).toHaveBeenCalledTimes(1);
+    expect(views.reconcileNativeSnapshot).not.toHaveBeenCalled();
+    expect(resets).toEqual([{ chatId: CHAT_ID, generationId: 'gen-3', lastSeq: 3 }]);
+  });
+
+  it('retains a changed-history request until two full snapshots agree', async () => {
+    let read = 0;
+    const { reconciler, views } = harness({
+      source: {
+        loadFullSnapshot: mock(async () => {
+          read += 1;
+          return transcriptSnapshot(
+            read === 1 ? [] : [new AssistantMessage(TS, 'settled')],
+          );
+        }),
+      },
+    });
+    reconciler.noteHistoryChanged(CHAT_ID);
+
+    await reconciler.ensureHistoryChangeReconciled(CHAT_ID);
+    expect(views.reconcileFullSnapshot).not.toHaveBeenCalled();
+
+    await reconciler.ensureHistoryChangeReconciled(CHAT_ID);
+    expect(views.reconcileFullSnapshot).toHaveBeenCalledTimes(1);
   });
 
   it('declines while a turn owns the chat', async () => {

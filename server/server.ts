@@ -262,6 +262,7 @@ export async function startServer(): Promise<void> {
     const chatMutationLock = new KeyedPromiseLock();
 
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
+    let eventWiring: ServerEventWiring | null = null;
     const agentRegistry = new AgentRegistry({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -285,6 +286,9 @@ export async function startServer(): Promise<void> {
       getCarryOverMessageCount: async (entry) => (
         carryOver.logicalMessageCount(entry.carryOverSegments ?? [])
       ),
+      onCarryOverChanged(chatId) {
+        eventWiring?.notifyTranscriptCompositionChanged(chatId);
+      },
       chatMutationLock,
     });
 
@@ -456,7 +460,6 @@ export async function startServer(): Promise<void> {
       },
     };
     const pendingInputs = new PendingUserInputService(chatMessageReader);
-    let eventWiring: ServerEventWiring | null = null;
     const handoffs = new AgentHandoffService({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -487,7 +490,10 @@ export async function startServer(): Promise<void> {
     executionCoordinator = queue;
     const idleReconciler = new IdleNativeReconciler({
       views: chatViews,
-      source: { loadNativeSnapshot: (chatId) => transcripts.loadNativeReconciliation(chatId) },
+      source: {
+        loadNativeSnapshot: (chatId) => transcripts.loadNativeReconciliation(chatId),
+        loadFullSnapshot: (chatId) => transcripts.loadAll(chatId),
+      },
       ownsExecution,
       onGenerationReset: (chatId, generationId, lastSeq) => {
         if (!webSocketPublisher) return;
@@ -630,6 +636,9 @@ export async function startServer(): Promise<void> {
       transcriptSearchSettings,
       runtimeState,
       commandLedger,
+      notifyHistoryChanged(chatId) {
+        eventWiring?.notifyTranscriptCompositionChanged(chatId);
+      },
     });
 
     const chatHandler = new ChatHandler({

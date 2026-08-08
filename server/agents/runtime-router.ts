@@ -56,6 +56,7 @@ export interface AgentRuntimeRouterOptions {
   getCarryOverRevision(entry: AgentChatEntry): string;
   loadCarriedContext(entry: AgentChatEntry, signal?: AbortSignal): Promise<CarriedContext | null>;
   getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
+  onCarryOverChanged?: (chatId: string) => void | Promise<void>;
 }
 
 export interface RunSingleQueryOptions {
@@ -86,6 +87,7 @@ export class AgentRuntimeRouter {
     entry: AgentChatEntry,
     signal?: AbortSignal,
   ) => Promise<number>;
+  readonly #onCarryOverChanged: (chatId: string) => void | Promise<void>;
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
@@ -95,6 +97,7 @@ export class AgentRuntimeRouter {
     this.#getCarryOverRevision = options.getCarryOverRevision;
     this.#loadCarriedContext = options.loadCarriedContext;
     this.#getCarryOverMessageCount = options.getCarryOverMessageCount;
+    this.#onCarryOverChanged = options.onCarryOverChanged ?? (() => undefined);
   }
 
   async startSession(chatId: string, prompt: string, opts: {
@@ -163,6 +166,7 @@ export class AgentRuntimeRouter {
           () => emptyEraId(chatId, started!.agentSessionId),
           new Date().toISOString(),
         );
+        const carryOverChanged = carryOverSegments !== entry.carryOverSegments;
         const updated = await this.#registry.updateChat(chatId, {
         agentSessionId: started.agentSessionId,
         nativeSession: started.nativeSession,
@@ -174,6 +178,7 @@ export class AgentRuntimeRouter {
           carryOverSegments,
       }, { flush: true });
       if (!updated) throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
+      if (carryOverChanged) await this.#notifyCarryOverChanged(chatId);
     } catch (error) {
       this.#events.clearTurn(chatId);
       if (started) {
@@ -185,6 +190,17 @@ export class AgentRuntimeRouter {
         });
       }
       throw error;
+    }
+  }
+
+  async #notifyCarryOverChanged(chatId: string): Promise<void> {
+    try {
+      await this.#onCarryOverChanged(chatId);
+    } catch (error) {
+      logger.warn('Post-session carryover invalidation failed', {
+        chatId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

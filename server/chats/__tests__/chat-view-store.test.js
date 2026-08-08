@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { ChatViewStore } from '../chat-view-store.js';
 import {
+  AgentSwitchMessage,
   AssistantMessage,
   CompactionMessage,
   ErrorMessage,
@@ -12,6 +13,7 @@ import {
   nativeReconciliation,
   pagedTranscriptLoader,
   snapshotLoader,
+  transcriptSnapshot,
   transcriptLoader,
 } from './chat-transcript-test-helpers.js';
 
@@ -187,6 +189,45 @@ describe('ChatViewStore', () => {
       upstreamRequestId: 'provider-request-1',
       deliveryStatus: 'accepted',
     });
+  });
+
+  it('rebuilds a generation when archived tail reconciliation shifts native messages', async () => {
+    const store = new ChatViewStore(() => false);
+    const archived = user('archived');
+    const liveUser = user('continued', { clientRequestId: 'request-1' });
+    const liveAssistant = assistant('answer');
+    const initial = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      {
+        loadAll: async () => transcriptSnapshot([archived], {
+          archivedLogicalCount: 1,
+          carryOverRevision: 'carry-old',
+          nativeMessages: [],
+        }),
+      },
+      [liveUser, liveAssistant],
+    );
+    const boundary = new AgentSwitchMessage(TS, 'agent-a', 'agent-b');
+
+    await store.reconcileFullSnapshot('chat-1', transcriptSnapshot([
+      archived,
+      boundary,
+      liveUser,
+      liveAssistant,
+    ], {
+      archivedLogicalCount: 2,
+      carryOverRevision: 'carry-new',
+      nativeMessages: [liveUser, liveAssistant],
+    }));
+
+    const page = store.readPage('chat-1', 20);
+    expect(page.generationId).not.toBe(initial.generationId);
+    expect(page.messages.map(({ seq, message }) => [seq, message.type])).toEqual([
+      [1, 'user-message'],
+      [2, 'agent-switch'],
+      [3, 'user-message'],
+      [4, 'assistant-message'],
+    ]);
   });
 
   it('keeps identical native and live text without a shared identity', async () => {

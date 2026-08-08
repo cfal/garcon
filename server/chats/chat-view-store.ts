@@ -188,6 +188,16 @@ export class ChatViewStore {
     });
   }
 
+  async reconcileFullSnapshot(
+    chatId: string,
+    input: ChatTranscriptSnapshot,
+  ): Promise<void> {
+    await this.#withChat(chatId, async () => {
+      if (this.#isChatActive(chatId)) throw new ChatRunningError(chatId);
+      this.#reconcileFullView(chatId, input);
+    });
+  }
+
   async getOrCreatePage(
     chatId: string,
     loader: ChatViewLoader,

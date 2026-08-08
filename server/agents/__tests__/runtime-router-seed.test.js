@@ -113,6 +113,7 @@ function makeRouter(overrides = {}) {
     })),
     resolveEndpointReference: mock(() => null),
   };
+  const onCarryOverChanged = overrides.onCarryOverChanged ?? mock(() => undefined);
   const router = new AgentRuntimeRouter({
     registry,
     directory: {
@@ -125,6 +126,7 @@ function makeRouter(overrides = {}) {
     getCarryOverRevision: () => 'carry-1',
     loadCarriedContext: async () => carriedContext,
     getCarryOverMessageCount: async () => 1,
+    onCarryOverChanged,
   });
   return {
     router,
@@ -138,6 +140,7 @@ function makeRouter(overrides = {}) {
     events,
     carriedContext,
     endpointResolver,
+    onCarryOverChanged,
   };
 }
 
@@ -274,6 +277,31 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       nativeSeedReceipt: null,
       carryOverSegments: [],
     }, { flush: true });
+  });
+
+  it('invalidates cached history after reconciling an archived point-fork tail', async () => {
+    const archivedRef = {
+      id: '22222222-2222-4222-8222-222222222222',
+      agentId: 'other',
+      model: 'old-model',
+      capturedAt: '2026-01-01T00:00:00.000Z',
+      storedMessageCount: 1,
+      visibleMessageCount: 1,
+      trailingHandoff: null,
+    };
+    const { router, registry, onCarryOverChanged } = makeRouter({
+      entry: { carryOverSegments: [archivedRef] },
+    });
+
+    await router.startSession('chat-1', 'continue point fork', { turnId: 'turn-1' });
+
+    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
+      carryOverSegments: [{
+        ...archivedRef,
+        trailingHandoff: { agentId: 'test', model: 'model-a' },
+      }],
+    }), { flush: true });
+    expect(onCarryOverChanged).toHaveBeenCalledWith('chat-1');
   });
 
   it('does not invoke an integration after execution admission closes', async () => {

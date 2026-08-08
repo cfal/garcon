@@ -77,6 +77,12 @@ function createWiringFixture(overrides = {}) {
     catalogMayHaveChanged: mock(() => undefined),
     deleteChat: mock(() => undefined),
   };
+  const idleReconciler = {
+    noteIdle: mock(() => undefined),
+    noteHistoryChanged: mock(() => undefined),
+    ensureHistoryChangeReconciled: mock(async () => undefined),
+    ...overrides.idleReconciler,
+  };
   const chatRegistry = {
     getChat: mock(() => ({})),
     onChatAdded: noOpSubscription,
@@ -99,6 +105,7 @@ function createWiringFixture(overrides = {}) {
     processing: overrides.processing ?? { phase: mock(() => null) },
     metadata,
     chatViews,
+    idleReconciler,
     chatNativeReloader: overrides.chatNativeReloader ?? {
       reloadFromNative: mock(async () => ({
         generationId: 'generation-2',
@@ -127,6 +134,7 @@ function createWiringFixture(overrides = {}) {
     chatViews,
     commandLedger,
     searchIndex,
+    idleReconciler,
   };
 }
 
@@ -211,6 +219,15 @@ describe('server event wiring', () => {
         lastSeq: 0,
       },
     ]);
+  });
+
+  it('defers transcript composition changes to settled-history reconciliation', () => {
+    const fixture = createWiringFixture();
+
+    fixture.wiring.notifyTranscriptCompositionChanged('chat-1');
+
+    expect(fixture.idleReconciler.noteHistoryChanged).toHaveBeenCalledWith('chat-1');
+    expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
   });
 
   it('publishes canonical processing phases before the Stop outcome', async () => {
@@ -360,6 +377,31 @@ describe('server event wiring', () => {
       'turn-1',
       undefined,
     );
+  });
+
+  it('settles a pending transcript composition change before publishing turn completion', async () => {
+    const published = [];
+    const reconciliation = deferred();
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+      idleReconciler: {
+        ensureHistoryChangeReconciled: mock(() => reconciliation.promise),
+      },
+    });
+
+    fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(published.some((message) => message.type === 'agent-run-finished')).toBe(false);
+
+    reconciliation.resolve();
+    await fixture.wiring.waitForIdle();
+    expect(published).toContainEqual(expect.objectContaining({
+      type: 'agent-run-finished',
+      chatId: 'chat-1',
+      turnId: 'turn-1',
+    }));
   });
 
   it('makes recovered native output unavailable instead of reporting an empty success', async () => {
@@ -915,7 +957,12 @@ describe('server event wiring', () => {
       processing: { phase: mock(() => null) },
       metadata: {},
       chatViews: {},
-      idleReconciler: { noteIdle: () => undefined, ensureReconciled: async () => undefined },
+      idleReconciler: {
+        noteIdle: () => undefined,
+        noteHistoryChanged: () => undefined,
+        ensureReconciled: async () => undefined,
+        ensureHistoryChangeReconciled: async () => undefined,
+      },
       chatNativeReloader: {},
       pendingInputs,
       pendingRecovery: { waitForSettlements: mock(async () => undefined) },
@@ -1023,7 +1070,12 @@ describe('server event wiring', () => {
       processing: { phase: mock(() => null) },
       metadata: {},
       chatViews: { appendToCurrentOrProvisional: mock(async () => ({ messages: [] })) },
-      idleReconciler: { noteIdle: () => undefined, ensureReconciled: async () => undefined },
+      idleReconciler: {
+        noteIdle: () => undefined,
+        noteHistoryChanged: () => undefined,
+        ensureReconciled: async () => undefined,
+        ensureHistoryChangeReconciled: async () => undefined,
+      },
       chatNativeReloader: { reloadFromNative },
       pendingInputs,
       pendingRecovery: { waitForSettlements: mock(async () => undefined) },

@@ -366,6 +366,7 @@ describe('repeated agent handoff lifecycle', () => {
         switches: [
           [agentA.agentId, agentB.agentId],
           [agentB.agentId, agentA.agentId],
+          [agentA.agentId, agentB.agentId],
         ],
       });
 
@@ -381,6 +382,21 @@ describe('repeated agent handoff lifecycle', () => {
         expect.objectContaining({ id: thirdRef.id, visibleMessageCount: 2 }),
       ]);
       expect(await segmentIds(fixture)).toHaveLength(3);
+      await expectHistory(fixture, forkChatId, {
+        users: ['a-source', 'b-first', 'b-follow', 'a-return', 'fork-continuation'],
+        assistants: [
+          'echo:a-source',
+          bFirstAnswer,
+          'echo:b-follow',
+          'a-return-answer',
+          'fork-continuation-answer',
+        ],
+        switches: [
+          [agentA.agentId, agentB.agentId],
+          [agentB.agentId, agentA.agentId],
+          [agentA.agentId, agentB.agentId],
+        ],
+      });
 
       const sourceNativePath = requiredNativePath(
         await readRegistryEntry(fixture, sourceChatId),
