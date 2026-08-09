@@ -18,40 +18,111 @@ function transcript() {
   return messages;
 }
 
-function service({ enabled = true, respond } = {}) {
+function service({ enabled = true, respond, discovery = 'ok', selection } = {}) {
   const warnings = [];
+  const empty = discovery === 'empty';
+  const fail = () => {
+    throw new Error('provider unavailable');
+  };
   const instance = new CarryOverCompactionService({
     agents: {
-      getAgentAuthStatusMap: async () => ({ claude: { authenticated: true } }),
-      getAgentReadinessMap: async () => ({ claude: { ready: true } }),
-      getAgentCatalogEntries: async () => ([{
+      getAgentAuthStatusMap: async () => (discovery === 'throws'
+        ? fail()
+        : { claude: { authenticated: !empty } }),
+      getAgentReadinessMap: async () => (discovery === 'throws'
+        ? fail()
+        : { claude: { ready: !empty } }),
+      getAgentCatalogEntries: async () => (discovery === 'throws' ? fail() : (empty ? [] : [{
         id: 'claude',
         label: 'Claude',
         kind: 'agent',
         models: [{ id: 'haiku', label: 'Haiku' }],
-      }]),
+      }])),
       runSingleQuery: async (prompt) => respond(prompt),
     },
     getUiSettings: () => ({
       agentSwitchCompaction: enabled === null
         ? { agentId: 'claude', model: 'haiku' }
-        : { enabled, agentId: 'claude', model: 'haiku' },
+        : { enabled, ...(selection ?? { agentId: 'claude', model: 'haiku' }) },
     }),
     warn: (chatId, message) => warnings.push({ chatId, message }),
   });
   return { instance, warnings };
 }
 
-function run(instance, messages = transcript()) {
+function run(instance, messages = transcript(), signal) {
   return instance.carriedContextFor({
     chatId: 'chat-1',
     projectPath: '/workspace',
     messages,
     destination: DESTINATION,
+    ...(signal ? { signal } : {}),
   });
 }
 
+function deterministic(messages = transcript()) {
+  return createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS).prefix;
+}
+
 describe('carryover compaction', () => {
+  it('warns when it is enabled but no model can be resolved', async () => {
+    // Discovery turns provider failures into empty catalogs, so an operator who
+    // opted in would otherwise silently pay the full carryover cost.
+    const { instance, warnings } = service({
+      discovery: 'empty',
+      selection: {},
+      respond: async () => {
+        throw new Error('no model should be queried');
+      },
+    });
+
+    const context = await run(instance);
+
+    expect(context.prefix).toBe(deterministic());
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].chatId).toBe('chat-1');
+    expect(warnings[0].message).toContain('could not be resolved');
+  });
+
+  it('warns when discovery itself fails', async () => {
+    const { instance, warnings } = service({
+      discovery: 'throws',
+      selection: {},
+      respond: async () => {
+        throw new Error('no model should be queried');
+      },
+    });
+
+    const context = await run(instance);
+
+    expect(context.prefix).toBe(deterministic());
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('could not be resolved');
+  });
+
+  it('stays silent when the setting is off or the turn was abandoned', async () => {
+    const off = service({
+      enabled: false,
+      respond: async () => {
+        throw new Error('no model should be queried');
+      },
+    });
+    expect((await run(off.instance)).prefix).toBe(deterministic());
+    expect(off.warnings).toEqual([]);
+
+    const aborted = service({
+      discovery: 'empty',
+      selection: {},
+      respond: async () => {
+        throw new Error('no model should be queried');
+      },
+    });
+    expect((await run(aborted.instance, transcript(), AbortSignal.abort())).prefix)
+      .toBe(deterministic());
+    // Warning about a torn-down turn would notify a chat the user abandoned.
+    expect(aborted.warnings).toEqual([]);
+  });
+
   it('keeps the newest turns verbatim beside the summary', async () => {
     const { instance, warnings } = service({
       respond: async () => '<summary>objective: ship it</summary>',
@@ -88,7 +159,7 @@ describe('carryover compaction', () => {
     const context = await run(instance);
 
     expect(context.prefix.length).toBeLessThanOrEqual(CARRYOVER_INJECTION_MAX_CHARS);
-    if (warnings.length > 0) expect(warnings[0].message).toContain('over the');
+    if (warnings.length > 0) expect(warnings[0].message).toContain('too large to carry');
   });
 
   it('stays off until the setting is explicitly enabled', async () => {
@@ -126,7 +197,7 @@ describe('carryover compaction', () => {
     expect(context.prefix)
       .toBe(createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS).prefix);
     expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toContain('over the');
+    expect(warnings[0].message).toContain('too large to carry');
   });
 
   it('falls back and warns when the model returns no summary element', async () => {

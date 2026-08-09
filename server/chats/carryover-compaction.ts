@@ -69,6 +69,9 @@ export interface CarryOverCompactionInput {
   readonly signal?: AbortSignal;
 }
 
+// Distinguishes "the operator opted in but nothing resolved" from "switched off".
+const UNRESOLVED = Symbol('compaction-selection-unresolved');
+
 export class CarryOverCompactionService {
   constructor(private readonly deps: CarryOverCompactionDeps) {}
 
@@ -82,9 +85,17 @@ export class CarryOverCompactionService {
       selection = await this.#selection(generationSignal);
     } catch (error) {
       logger.warn('compaction model could not be resolved:', errorMessage(error));
+      this.#warnUnresolved(input, errorMessage(error));
       return direct();
     }
     if (!selection) return direct();
+    // Enabled but unresolvable is not the same as disabled. Discovery turns
+    // provider failures into empty catalogs, so an operator who opted in would
+    // otherwise pay the full carryover cost with no indication of why.
+    if (selection === UNRESOLVED) {
+      this.#warnUnresolved(input, 'no generation-capable agent and model could be resolved');
+      return direct();
+    }
 
     const boundary = spineStart(input.messages);
     const spine = input.messages.slice(boundary);
@@ -117,10 +128,15 @@ export class CarryOverCompactionService {
       const projected = createCarryoverTranscript(spine, CARRYOVER_INJECTION_MAX_CHARS, {
         summary: compacted,
       });
-      if (!projected || projected.prefix.length > CARRYOVER_INJECTION_MAX_CHARS) {
+      // A truncated summary counts as overflow. The assembler shortens it rather
+      // than letting it displace the spine, so the result always fits; without
+      // this the operator would never learn their compaction model is too
+      // verbose to carry.
+      if (!projected || projected.summaryTruncated
+        || projected.prefix.length > CARRYOVER_INJECTION_MAX_CHARS) {
         this.deps.warn(
           input.chatId,
-          `Agent-switch compaction produced ${projected?.prefix.length ?? 0} characters, over the ${CARRYOVER_INJECTION_MAX_CHARS} limit. The full transcript was carried over instead. Consider a different compaction model in Settings.`,
+          `Agent-switch compaction produced a summary too large to carry within the ${CARRYOVER_INJECTION_MAX_CHARS} character limit. The full transcript was carried over instead. Consider a different compaction model in Settings.`,
         );
         return direct();
       }
@@ -136,6 +152,16 @@ export class CarryOverCompactionService {
       );
       return direct();
     }
+  }
+
+  // A cancelled start already tore the turn down, so warning about it would put
+  // a failure notice in a chat the user abandoned.
+  #warnUnresolved(input: CarryOverCompactionInput, reason: string): void {
+    if (input.signal?.aborted) return;
+    this.deps.warn(
+      input.chatId,
+      `Agent-switch compaction is enabled but its model could not be resolved (${reason}). The full transcript was carried over instead. Choose a compaction model in Settings.`,
+    );
   }
 
   #validate(chatId: string, raw: string): string | null {
@@ -170,7 +196,7 @@ export class CarryOverCompactionService {
     if (!isRecord(persisted) || persisted.enabled !== true) return null;
     const context = await resolveGenerationContextForSelection(this.deps.agents, persisted, signal);
     const config = resolveEffectiveGenerationConfig({ persisted, ...context });
-    if (!config.enabled || !config.agentId || !config.model) return null;
+    if (!config.enabled || !config.agentId || !config.model) return UNRESOLVED;
     return config as typeof config & { agentId: string; model: string };
   }
 }

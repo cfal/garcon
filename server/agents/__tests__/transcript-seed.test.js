@@ -11,6 +11,7 @@ import {
   UserMessage,
 } from '@garcon/common/chat-types';
 import {
+  CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
   createNativeSeedReceipt,
   parseNativeSeedReceipt,
@@ -93,6 +94,28 @@ describe('transcript seed contract', () => {
     }
     expect(context.prefix).not.toContain('command-for-turn-4');
     expect(context.prefix).toContain('<user>request 0</user>');
+  });
+
+  test('never lets a summary crowd out the newest request', () => {
+    // The compaction path at its production ceiling. A verbose summary leaves
+    // room for the reserved oldest ask but not the newest one, and the result
+    // still fits under the cap, so nothing downstream can detect the loss.
+    const messages = [
+      new UserMessage(TIME, 'the original objective'),
+      new UserMessage(TIME, `second ${'s'.repeat(5_000)}`),
+      new UserMessage(TIME, `LATEST ${'n'.repeat(10_000)}`),
+    ];
+
+    const context = createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS, {
+      summary: 'x'.repeat(249_000),
+    });
+
+    expect(context.prefix.length).toBeLessThanOrEqual(CARRYOVER_INJECTION_MAX_CHARS);
+    // The request the next agent has to act on exists nowhere else.
+    expect(context.prefix).toContain('LATEST');
+    expect(context.prefix).toContain('the original objective');
+    // The summary is kept, just bounded by what the spine leaves behind.
+    expect(context.prefix).toContain('<summary>');
   });
 
   test('aggregates file access per turn and never carries results', () => {

@@ -60,6 +60,10 @@ interface ProjectedEntry {
 
 export interface CarriedContext {
   readonly prefix: string;
+  // Set when a supplied summary had to be shortened to protect the spine. The
+  // compaction caller treats it as an overflow and falls back rather than
+  // shipping a silently clipped account of the older history.
+  readonly summaryTruncated?: boolean;
 }
 
 export type SanitizeCarriedContextResult =
@@ -117,9 +121,30 @@ export function createCarryoverTranscript(
     throw new RangeError(`Carried-context budget must be at least ${truncatedMinimum.length} characters`);
   }
 
-  // The summary is never dropped: it is the only representation of everything
-  // older than the spine.
-  const available = Math.max(0, maxChars - opening.length - closing.length - 2 - lead.length);
+  // The newest request is the one thing the receiving agent cannot reconstruct
+  // from anything else, so room for it is reserved before the summary is
+  // measured. An unbounded summary otherwise lands under the ceiling while
+  // displacing the very instruction it was summarizing for, and because the
+  // result fits, no caller can detect the loss. The summary is still never
+  // dropped, only bounded by what the floor leaves behind.
+  const asksByAge = entries.filter((entry) => entry.level === 0);
+  const frame = opening.length + closing.length + 2 + TRUNCATION_ELEMENT.length + 1;
+  // Both ends of the ask range are reserved, matching what `admitLevel` already
+  // protects when no summary is present. A summary is a model's account of the
+  // older material and may omit the objective outright, so it does not stand in
+  // for either request.
+  const reserved = [...new Set([asksByAge.at(-1), asksByAge[0]])]
+    .reduce((total, ask) => total + (ask ? 1 + ask.text.length : 0), 0);
+  const fittedSummary = options.summary
+    ? fitElement(
+      '    <summary>',
+      collapseWhitespace(options.summary),
+      '</summary>',
+      Math.max(0, maxChars - frame - reserved),
+    )
+    : '';
+  const truncatedLead = fittedSummary ? `${fittedSummary}\n` : '';
+  const available = Math.max(0, maxChars - opening.length - closing.length - 2 - truncatedLead.length);
   const pinnedFrom = Math.max(0, turns.length - RECENT_TURNS_VERBATIM);
   const admitted = new Set<ProjectedEntry>();
   // The asks come first, ahead of even the pinned turns. They are the irreducible
@@ -145,7 +170,8 @@ export function createCarryoverTranscript(
     if (fitted) selected.push({ ...entries.at(-1)!, text: fitted });
   }
   return {
-    prefix: `${opening}\n${lead}${[TRUNCATION_ELEMENT, ...selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
+    prefix: `${opening}\n${truncatedLead}${[TRUNCATION_ELEMENT, ...selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
+    summaryTruncated: fittedSummary !== summaryElement,
   };
 }
 
@@ -202,10 +228,13 @@ function admitLevel(
   // The asks are the one class where the oldest entry is reserved before the
   // newest-first fill: a chat that outgrows the budget still states the
   // objective it started from, and the requests lost come from the middle.
-  const oldest = pinOldest ? candidates[0] : undefined;
-  if (oldest && total + 1 + oldest.text.length <= available) {
-    admitted.add(oldest);
-    total += 1 + oldest.text.length;
+  // The newest ask is reserved ahead of the oldest. Both are protected, but when
+  // only one fits it must be the request the next agent has to act on rather
+  // than the objective it started from.
+  for (const pin of pinOldest ? [candidates.at(-1), candidates[0]] : []) {
+    if (!pin || admitted.has(pin) || total + 1 + pin.text.length > available) continue;
+    admitted.add(pin);
+    total += 1 + pin.text.length;
   }
   for (let index = candidates.length - 1; index >= 0; index -= 1) {
     if (admitted.has(candidates[index])) continue;
