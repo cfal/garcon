@@ -228,9 +228,10 @@ export async function startServer(): Promise<void> {
       settleOwnershipIntents: async () => undefined,
     }));
     await workspaceMigrations.run('carryover-node-migration', async () => undefined);
-    await workspaceMigrations.run('carryover-segment-migration', () => (
-      migrateLegacyCarryOverWorkspace(workspaceDir)
-    ));
+    let carryOverRollbackResumed = false;
+    await workspaceMigrations.run('carryover-segment-migration', async () => {
+      carryOverRollbackResumed = await migrateLegacyCarryOverWorkspace(workspaceDir);
+    });
     await chatRegistry.init();
     await settings.init();
     const agentOwnership = new AgentOwnershipJournal({
@@ -247,7 +248,9 @@ export async function startServer(): Promise<void> {
     await carryOverGarbageCollector.initialize();
     chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
     await workspaceMigrations.finish();
-    if (workspaceMigrations.initialVersion >= 5) {
+    // A resumed rollback re-migrated this boot; keep its backups so the fresh
+    // marker's rollback window matches a first migration's.
+    if (workspaceMigrations.initialVersion >= 5 && !carryOverRollbackResumed) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
     const apiProviders = new ApiProviderService({

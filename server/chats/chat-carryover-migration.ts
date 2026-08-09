@@ -43,6 +43,14 @@ interface CarryOverMigrationMarkerBase {
   readonly startedAt: string;
 }
 
+interface CarryOverMigrationCommittedFields {
+  readonly targetRegistrySha256: string;
+  readonly segmentSummarySha256: string;
+  readonly segmentCount: number;
+  readonly completedAt: string;
+  readonly rollbackSafe: boolean;
+}
+
 type CarryOverMigrationMarker =
   | (CarryOverMigrationMarkerBase & { readonly phase: 'in-progress' })
   | (CarryOverMigrationMarkerBase & {
@@ -51,27 +59,45 @@ type CarryOverMigrationMarker =
       readonly segmentSummarySha256: string;
       readonly segmentCount: number;
     })
-  | (CarryOverMigrationMarkerBase & {
+  | (CarryOverMigrationMarkerBase & CarryOverMigrationCommittedFields & {
       readonly phase: 'complete';
-      readonly targetRegistrySha256: string;
-      readonly segmentSummarySha256: string;
-      readonly segmentCount: number;
-      readonly completedAt: string;
-      readonly rollbackSafe: boolean;
+    })
+  | (CarryOverMigrationMarkerBase & CarryOverMigrationCommittedFields & {
+      // Durable resume point for a rollback, written before the first restore
+      // so a crash mid-rollback is recognised and finished instead of leaving a
+      // mixed state that startup rejects.
+      readonly phase: 'rolling-back';
     });
 
-export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Promise<void> {
+export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Promise<boolean> {
+  let marker = await readMarker(workspaceDir);
+  let rollbackResumed = false;
+  const initialRegistryVersion = await readChatRegistryVersion(workspaceDir);
+  // A `rolling-back` marker marks an interrupted rollback; a `complete` marker
+  // beside a legacy registry is the same crash one step later, from a rollback
+  // that never wrote its resume marker. Both are finished here, after which the
+  // workspace is legacy again below and migrates forward on this same boot.
+  if (
+    marker
+    && (marker.phase === 'rolling-back'
+      || (marker.phase === 'complete'
+        && marker.rollbackSafe
+        && (initialRegistryVersion === 3 || initialRegistryVersion === 4)))
+  ) {
+    await restoreLegacyCarryOverState(workspaceDir, marker);
+    rollbackResumed = true;
+    marker = null;
+  }
   const registryVersion = await readChatRegistryVersion(workspaceDir);
-  if (registryVersion === null) return;
-  const marker = await readMarker(workspaceDir);
+  if (registryVersion === null) return rollbackResumed;
   const workspaceVersion = await readWorkspaceVersion(workspaceDir);
   if (registryVersion === 5) {
-    if (workspaceVersion !== null && workspaceVersion >= 5) return;
+    if (workspaceVersion !== null && workspaceVersion >= 5) return rollbackResumed;
     if (!marker || marker.phase === 'in-progress') {
       throw new Error('Schema-v5 chat registry has no committed carryover migration marker');
     }
     await resumeCommittedMigration(workspaceDir, marker);
-    return;
+    return rollbackResumed;
   }
   if (registryVersion !== 3 && registryVersion !== 4) {
     throw new Error(`Unsupported chat registry version: ${registryVersion}`);
@@ -127,7 +153,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   const migratedSegmentIds = new Set<string>();
   if (registryVersion === 3) {
     const legacyRegistry = await readLegacyChatRegistryV3(workspaceDir);
-    if (!legacyRegistry) return;
+    if (!legacyRegistry) return rollbackResumed;
     // Parses in a temporary scope so the source bytes are collectable once the
     // chat map exists, and drops each chat's raw messages as it is converted.
     const rawCarryOver = parseLegacyCarryOverFile(await readOptionalFile(carryOverPath));
@@ -241,6 +267,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
     rollbackSafe: true,
   });
   await archiveLegacyCarryOver(carryOverPath, startedAt);
+  return rollbackResumed;
 }
 
 export async function markCarryOverMigrationRollbackUnsafe(workspaceDir: string): Promise<void> {
@@ -285,13 +312,25 @@ export async function rollbackLegacyCarryOverMigration(
   const marker = await readMarker(workspaceDir);
   const registryVersion = await readChatRegistryVersion(workspaceDir);
   if ((registryVersion === 3 || registryVersion === 4) && !marker) return 'already-restored';
-  if (!marker || marker.phase !== 'complete') {
+  if (!marker || (marker.phase !== 'complete' && marker.phase !== 'rolling-back')) {
     throw new Error('No completed carryover migration is available to roll back');
   }
-  if (!marker.rollbackSafe) {
+  if (marker.phase === 'complete' && !marker.rollbackSafe) {
     throw new Error('Carryover migration rollback is unsafe after new-format history was created');
   }
+  return restoreLegacyCarryOverState(workspaceDir, marker);
+}
 
+// Restores the legacy registry, journal, carryover source, and workspace
+// version from the validated backups. The `rolling-back` phase is written
+// before the first restore, so a crash anywhere in the sequence leaves a
+// marker startup recognises, and every step is idempotent, so re-entering
+// from either this command or the next boot converges instead of rejecting a
+// half-restored workspace.
+async function restoreLegacyCarryOverState(
+  workspaceDir: string,
+  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' | 'rolling-back' }>,
+): Promise<'restored' | 'already-restored'> {
   const registryBackupPath = path.join(workspaceDir, registryBackupFile(marker));
   const registryBackup = await fs.readFile(registryBackupPath);
   if (digest(registryBackup) !== marker.sourceRegistrySha256) {
@@ -316,6 +355,7 @@ export async function rollbackLegacyCarryOverMigration(
     throw new Error('Current chat registry does not match the migration or its backup');
   }
 
+  await writeMarker(workspaceDir, { ...marker, phase: 'rolling-back' });
   await restoreOptionalFile(
     path.join(workspaceDir, LEGACY_CARRYOVER_FILE),
     legacyCarryOver,
@@ -623,7 +663,7 @@ function registryBackupFile(marker: CarryOverMigrationMarkerBase): string {
 
 async function readRollbackCarryOverSource(
   workspaceDir: string,
-  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' }>,
+  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' | 'rolling-back' }>,
 ): Promise<Buffer> {
   const candidates = [
     path.join(workspaceDir, LEGACY_CARRYOVER_FILE),
@@ -647,7 +687,7 @@ async function restoreOptionalFile(filePath: string, bytes: Buffer): Promise<voi
 
 async function removeMigratedCarryOverArchive(
   workspaceDir: string,
-  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' }>,
+  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' | 'rolling-back' }>,
 ): Promise<void> {
   await fs.rm(migratedCarryOverPath(workspaceDir, marker.startedAt), { force: true });
   await syncDirectory(workspaceDir);
@@ -655,7 +695,7 @@ async function removeMigratedCarryOverArchive(
 
 async function archiveRollbackMarker(
   workspaceDir: string,
-  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' }>,
+  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' | 'rolling-back' }>,
 ): Promise<void> {
   const markerPath = path.join(workspaceDir, MIGRATION_MARKER_FILE);
   const suffix = marker.completedAt.replaceAll(':', '').replaceAll('.', '');
@@ -737,7 +777,11 @@ function parseMigrationMarker(value: unknown): CarryOverMigrationMarker {
     startedAt: timestampValue(value.startedAt, 'migration start'),
   };
   if (value.phase === 'in-progress') return { ...base, phase: 'in-progress' };
-  if (value.phase !== 'ready-to-commit' && value.phase !== 'complete') {
+  if (
+    value.phase !== 'ready-to-commit'
+    && value.phase !== 'complete'
+    && value.phase !== 'rolling-back'
+  ) {
     throw new Error('Invalid carryover migration marker phase');
   }
   const committed = {
@@ -750,12 +794,11 @@ function parseMigrationMarker(value: unknown): CarryOverMigrationMarker {
   if (value.rollbackSafe !== true && value.rollbackSafe !== false) {
     throw new Error('Invalid carryover migration rollback state');
   }
-  return {
-    ...committed,
-    phase: 'complete',
-    completedAt: timestampValue(value.completedAt, 'migration completion'),
-    rollbackSafe: value.rollbackSafe,
-  };
+  const completedAt = timestampValue(value.completedAt, 'migration completion');
+  const rollbackSafe = value.rollbackSafe;
+  return value.phase === 'rolling-back'
+    ? { ...committed, phase: 'rolling-back', completedAt, rollbackSafe }
+    : { ...committed, phase: 'complete', completedAt, rollbackSafe };
 }
 
 function assertMarkerSources(
