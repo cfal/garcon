@@ -149,14 +149,19 @@ export class SelfHandoffCommands {
           created = false;
           // Undoes the list placement and name as well as the registry entry.
           // Leaving those behind would strand a named, ordered chat that no
-          // longer exists, which is what `rollbackForkTarget` avoids. Each step
-          // is independent so a failed removal does not suppress the rest.
-          await this.#bestEffort('removeChat', input.chatId, () =>
+          // longer exists, which is what `rollbackForkTarget` avoids. The name
+          // and placement only become stale once the chat is actually gone, so a
+          // failed removal keeps them: stripping them from a chat that survived
+          // would orphan it in the sidebar instead. The two are independent of
+          // each other so one failure does not suppress the other.
+          const removed = await this.#bestEffort('removeChat', input.chatId, () =>
             this.deps.chats.removeChat(input.chatId));
-          await this.#bestEffort('removeFromOrderLists', input.chatId, () =>
-            this.deps.settings.removeFromAllOrderLists(input.chatId));
-          await this.#bestEffort('removeSessionName', input.chatId, () =>
-            this.deps.settings.removeSessionName(input.chatId));
+          if (removed) {
+            await this.#bestEffort('removeFromOrderLists', input.chatId, () =>
+              this.deps.settings.removeFromAllOrderLists(input.chatId));
+            await this.#bestEffort('removeSessionName', input.chatId, () =>
+              this.deps.settings.removeSessionName(input.chatId));
+          }
           // Releases the writer root the failed preparation still holds; without
           // this every later sweep retains the segment for the process lifetime.
           // Not a discard: if removal failed the target is still a durable GC
@@ -240,11 +245,15 @@ export class SelfHandoffCommands {
     }
   }
 
-  async #bestEffort(step: string, chatId: string, run: () => unknown): Promise<void> {
+  // Reports whether the step completed, so callers can keep dependent cleanup
+  // consistent instead of undoing half of a state that is still live.
+  async #bestEffort(step: string, chatId: string, run: () => unknown): Promise<boolean> {
     try {
       await run();
+      return true;
     } catch (error) {
       logger.warn('failed to roll back continuation chat', { chatId, step, error });
+      return false;
     }
   }
 

@@ -221,8 +221,8 @@ describe('self handoff commands', () => {
     expect(captured.prepared.releaseRoot).toHaveBeenCalledTimes(1);
   });
 
-  it('finishes rolling back after one cleanup step fails', async () => {
-    const { commands, support, captured } = harness();
+  it('keeps a surviving target named rather than orphaning it', async () => {
+    const { commands, support, chats, captured } = harness();
     support.deps.chats.removeChat = mock(async () => {
       throw new Error('registry write failed');
     });
@@ -232,10 +232,27 @@ describe('self handoff commands', () => {
 
     await expect(commands.submitSelfHandoffRun(request())).rejects.toThrow('settings flush failed');
 
-    expect(support.deps.settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_ID);
-    expect(support.deps.settings.removeSessionName).toHaveBeenCalledWith(TARGET_ID);
+    // The chat outlived the rollback, so its name and placement are still live
+    // state; removing them would strand it in the sidebar with no title.
+    expect(chats.has(TARGET_ID)).toBeTrue();
+    expect(support.deps.settings.removeFromAllOrderLists).not.toHaveBeenCalled();
+    expect(support.deps.settings.removeSessionName).not.toHaveBeenCalled();
     // A failed cleanup step must not strand the lease either.
     expect(captured.prepared.releaseRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes clearing the name after the placement removal fails', async () => {
+    const { commands, support } = harness();
+    support.deps.settings.removeFromAllOrderLists = mock(async () => {
+      throw new Error('order list write failed');
+    });
+    support.deps.settings.ensureInNormal = mock(async () => {
+      throw new Error('settings flush failed');
+    });
+
+    await expect(commands.submitSelfHandoffRun(request())).rejects.toThrow('settings flush failed');
+
+    expect(support.deps.settings.removeSessionName).toHaveBeenCalledWith(TARGET_ID);
   });
 
   it('discards the prepared segment when it fails before registering', async () => {

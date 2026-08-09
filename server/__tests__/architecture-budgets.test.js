@@ -58,7 +58,10 @@ const MAX_LINES = 1000;
 // the target, releasing the writer-root lease a failed preparation still holds,
 // and rolling each cleanup step back independently. Trimming to the previous
 // ceiling is what produced this round's defects in the first place.
-const EXECUTION_FOOTPRINT_BUDGET = 9002;
+// Self-review of that rollback adds 4 lines: independent cleanup steps also had
+// to stay ordered, since stripping the name and list placement from a target
+// whose removal failed orphans a chat that is still live.
+const EXECUTION_FOOTPRINT_BUDGET = 9006;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
