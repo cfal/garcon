@@ -7,6 +7,7 @@ function transport(overrides: Partial<AcceptedInputTransport> = {}): AcceptedInp
 		start: vi.fn(),
 		run: vi.fn(),
 		fork: vi.fn(),
+		selfHandoff: vi.fn(),
 		enqueue: vi.fn(),
 		steer: vi.fn(),
 		steerQueuedEntry: vi.fn(),

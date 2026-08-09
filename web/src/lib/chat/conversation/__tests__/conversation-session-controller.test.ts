@@ -46,6 +46,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
+	selfHandoffRunChat: vi.fn(),
 	getChatExecutionControl: vi.fn(),
 	interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),

@@ -161,7 +161,10 @@ export interface ChatCommandServiceDeps {
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
-  handoffs: Pick<AgentHandoffService, 'resolveTarget' | 'createPreparation'>;
+  handoffs: Pick<
+    AgentHandoffService,
+    'resolveTarget' | 'createPreparation' | 'captureContinuationSegments'
+  >;
   chatMutationLock?: KeyedPromiseLock;
 }
 

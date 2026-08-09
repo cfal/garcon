@@ -37,7 +37,11 @@ const MAX_LINES = 1000;
 // Adversarial hardening adds 12 lines for bounded queue-entry identities and
 // non-throwing delivery-status publication diagnostics.
 // Response identity hardening adds one net line for control-free error authority.
-const EXECUTION_FOOTPRINT_BUDGET = 8782;
+// Same-agent continuation adds a separately reviewed 166 lines for the `/handoff`
+// command: source validation, era capture through the shared handoff path,
+// registration of a target with no provider session so it seeds itself from the
+// carryover projection, and compensation that discards the prepared segment.
+const EXECUTION_FOOTPRINT_BUDGET = 8948;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

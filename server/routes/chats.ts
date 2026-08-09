@@ -99,6 +99,9 @@ import {
   parseRepairHistoryAcceptNativeRequest,
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
+} from '../../common/chat-command-contracts.js';
+import { parseSelfHandoffRunCommandRequest } from '../../common/self-handoff-contracts.js';
+import {
   parsePermissionDecisionCommandRequest,
   parseProjectPathPatchRequest,
   parseQueueEntryCreateCommandRequest,
@@ -943,6 +946,21 @@ export default function createChatRoutes({
     }
   }
 
+  async function postSelfHandoffRunChat(body: unknown): Promise<Response> {
+    try {
+      const input = parseCommandRequest(parseSelfHandoffRunCommandRequest, body);
+      const images = validatedCommandAttachments(input.images);
+      const result = await commands.submitSelfHandoffRun({ ...input, images });
+
+      return Response.json(result, { status: 202 });
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function getRunningChats(): Promise<Response> {
     const response: RunningChatsResponse = {
       sessions: agents.getRunningSessions(),
@@ -1241,6 +1259,7 @@ export default function createChatRoutes({
     '/api/v1/chats/validate-start': { GET: validateStartPath },
     '/api/v1/chats/fork': { POST: withJsonBody(postForkChat) },
     '/api/v1/chats/fork-run': { POST: withJsonBody(postForkRunChat) },
+    '/api/v1/chats/handoff-run': { POST: withJsonBody(postSelfHandoffRunChat) },
     '/api/v1/chats/compact': { POST: withJsonBody(postCompactChat) },
     '/api/v1/chats/messages': { GET: getMessages },
     '/api/v1/chats/repair-history': { POST: withJsonBody(postRepairHistory) },

@@ -1,6 +1,7 @@
 import {
 	createQueuedInput,
 	forkRunChat,
+	selfHandoffRunChat,
 	runChat,
 	steerChat,
 	steerQueuedEntry,
@@ -8,6 +9,7 @@ import {
 	startChat,
 	type StartChatParams,
 } from '$lib/api/chats.js';
+import type { SelfHandoffRunCommandRequest } from '$shared/self-handoff-contracts';
 import type {
 	GoalControlCommandRequest,
 	GoalControlCommandResponse,
@@ -39,6 +41,7 @@ export interface AcceptedInputTransport {
 	start(request: StartChatParams): Promise<StartChatCommandResponse & { chat: ChatListEntry }>;
 	run(request: AgentRunCommandRequest): Promise<AgentTurnCommandResponse>;
 	fork(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse>;
+	selfHandoff(request: SelfHandoffRunCommandRequest): Promise<ForkRunCommandResponse>;
 	enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse>;
 	steer(request: SteerCommandRequest): Promise<SteerCommandResponse>;
 	steerQueuedEntry(request: QueueEntrySteerCommandRequest): Promise<QueueEntrySteerCommandResponse>;
@@ -49,6 +52,7 @@ const defaultTransport: AcceptedInputTransport = {
 	start: startChat,
 	run: runChat,
 	fork: forkRunChat,
+	selfHandoff: selfHandoffRunChat,
 	enqueue: createQueuedInput,
 	steer: steerChat,
 	steerQueuedEntry,
@@ -71,6 +75,10 @@ export class AcceptedInputSubmissionService {
 
 	fork(input: Omit<ForkRunCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
 		return this.#messageSubmission(input, (request) => this.transport.fork(request));
+	}
+
+	selfHandoff(input: Omit<SelfHandoffRunCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
+		return this.#messageSubmission(input, (request) => this.transport.selfHandoff(request));
 	}
 
 	enqueue(input: Omit<QueueEntryCreateCommandRequest, 'clientRequestId'>) {

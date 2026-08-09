@@ -200,6 +200,14 @@ export async function forkRunChat(params: ForkRunCommandRequest): Promise<ForkRu
 	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params);
 }
 
+import type { SelfHandoffRunCommandRequest } from '$shared/self-handoff-contracts';
+
+export async function selfHandoffRunChat(
+	params: SelfHandoffRunCommandRequest,
+): Promise<ForkRunCommandResponse> {
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/handoff-run', params);
+}
+
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
 	return withParsedStopOutcome(await apiPost<AgentStopResponse>('/api/v1/chats/stop', params));
 }
