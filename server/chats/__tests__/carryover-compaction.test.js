@@ -18,7 +18,7 @@ function transcript() {
   return messages;
 }
 
-function service({ enabled = true, respond }) {
+function service({ enabled = true, respond } = {}) {
   const warnings = [];
   const instance = new CarryOverCompactionService({
     agents: {
@@ -33,7 +33,9 @@ function service({ enabled = true, respond }) {
       runSingleQuery: async (prompt) => respond(prompt),
     },
     getUiSettings: () => ({
-      agentSwitchCompaction: { enabled, agentId: 'claude', model: 'haiku' },
+      agentSwitchCompaction: enabled === null
+        ? { agentId: 'claude', model: 'haiku' }
+        : { enabled, agentId: 'claude', model: 'haiku' },
     }),
     warn: (chatId, message) => warnings.push({ chatId, message }),
   });
@@ -63,6 +65,44 @@ describe('carryover compaction', () => {
     expect(context.prefix).toContain('<user>request 5</user>');
     expect(context.prefix).not.toContain('<user>request 4</user>');
     expect(warnings).toEqual([]);
+  });
+
+  it('renders one envelope so the rewritten-prefix guard can still anchor', async () => {
+    const { instance } = service({ respond: async () => '<summary>objective: ship it</summary>' });
+
+    const context = await run(instance);
+
+    // A bare <summary> beside a second <carried-context> root would escape
+    // sanitizeRecordedCarriedContext's startsWith('<carried-context') check.
+    expect(context.prefix).toStartWith('<carried-context version="3">');
+    expect(context.prefix.match(/<carried-context/g)).toHaveLength(1);
+    expect(context.prefix.indexOf('<summary>')).toBeGreaterThan(0);
+    expect(context.prefix.endsWith('</carried-context>\n\n')).toBeTrue();
+  });
+
+  it('holds the injection ceiling when the summary lands exactly on it', async () => {
+    const { instance, warnings } = service({
+      respond: async () => `<summary>${'x'.repeat(CARRYOVER_INJECTION_MAX_CHARS - 200)}</summary>`,
+    });
+
+    const context = await run(instance);
+
+    expect(context.prefix.length).toBeLessThanOrEqual(CARRYOVER_INJECTION_MAX_CHARS);
+    if (warnings.length > 0) expect(warnings[0].message).toContain('over the');
+  });
+
+  it('stays off until the setting is explicitly enabled', async () => {
+    let called = false;
+    const { instance } = service({
+      enabled: null,
+      respond: async () => { called = true; return '<summary>s</summary>'; },
+    });
+
+    await run(instance);
+
+    // `resolveEffectiveGenerationConfig` auto-enables generation whenever some
+    // agent resolves; compaction must not inherit that default.
+    expect(called).toBeFalse();
   });
 
   it('never sends the pinned turns to the model', async () => {

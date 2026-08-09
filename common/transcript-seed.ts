@@ -78,9 +78,12 @@ export type SanitizeCarriedContextResult =
 export function createCarryoverTranscript(
   messages: readonly ChatMessage[],
   maxChars: number,
+  options: { readonly summary?: string } = {},
 ): CarriedContext | null {
   const projected = messages.filter(isProjectableMessage);
-  if (projected.length === 0) return null;
+  // A summary with no surviving transcript is still worth carrying; it is the
+  // compacted history.
+  if (projected.length === 0 && !options.summary) return null;
 
   const opening = [
     `<carried-context version="${CARRIED_CONTEXT_VERSION}">`,
@@ -88,11 +91,25 @@ export function createCarryoverTranscript(
     '  <transcript>',
   ].join('\n');
   const closing = '  </transcript>\n</carried-context>\n\n';
+  // Rendered inside the same envelope as the transcript rather than beside it.
+  // A second root would escape `sanitizeRecordedCarriedContext`'s rewritten-
+  // envelope guard, which anchors on the prefix starting with `<carried-context`.
+  // Normalized but never clipped: the per-message bound exists to stop one chat
+  // message dominating the budget, and the summary *is* the compacted history,
+  // so the budget alone governs it. An oversized one leaves the prefix over the
+  // ceiling, which the compaction caller detects and falls back from.
+  const summaryElement = options.summary
+    ? fitElement('    <summary>', collapseWhitespace(options.summary), '</summary>', Number.POSITIVE_INFINITY)
+    : '';
+  const lead = summaryElement ? `${summaryElement}\n` : '';
   const turns = groupIntoTurns(projected);
   const entries = turns.flatMap((turn, index) => renderTurn(turn, index));
-  if (entries.length === 0) return null;
+  if (entries.length === 0 && !summaryElement) return null;
 
-  const full = `${opening}\n${entries.map((entry) => entry.text).join('\n')}\n${closing}`;
+  const body = entries.map((entry) => entry.text).join('\n');
+  const full = entries.length > 0
+    ? `${opening}\n${lead}${body}\n${closing}`
+    : `${opening}\n${summaryElement}\n${closing}`;
   if (maxChars <= 0 || full.length <= maxChars) return { prefix: full };
 
   const truncatedMinimum = `${opening}\n${TRUNCATION_ELEMENT}\n${closing}`;
@@ -100,13 +117,23 @@ export function createCarryoverTranscript(
     throw new RangeError(`Carried-context budget must be at least ${truncatedMinimum.length} characters`);
   }
 
-  const available = Math.max(0, maxChars - opening.length - closing.length - 2);
+  // The summary is never dropped: it is the only representation of everything
+  // older than the spine.
+  const available = Math.max(0, maxChars - opening.length - closing.length - 2 - lead.length);
   const pinnedFrom = Math.max(0, turns.length - RECENT_TURNS_VERBATIM);
   const admitted = new Set<ProjectedEntry>();
   // The asks come first, ahead of even the pinned turns. They are the irreducible
   // floor and they are cheap; a single recent turn carrying forty commands would
   // otherwise consume the whole budget and strand every request that produced it.
-  const asks = admitLevel(entries, 0, admitted, TRUNCATION_ELEMENT.length, available);
+  const asks = admitLevel(
+    entries,
+    0,
+    admitted,
+    TRUNCATION_ELEMENT.length,
+    available,
+    Number.POSITIVE_INFINITY,
+    true,
+  );
   const pinned = admitPinnedTurns(entries, pinnedFrom, turns.length, admitted, asks.used, available);
   // The ladder covers every turn the pin did not take, so a chat whose newest
   // turns are too large to pin still gets the rest of its history laddered.
@@ -118,7 +145,7 @@ export function createCarryoverTranscript(
     if (fitted) selected.push({ ...entries.at(-1)!, text: fitted });
   }
   return {
-    prefix: `${opening}\n${[TRUNCATION_ELEMENT, ...selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
+    prefix: `${opening}\n${lead}${[TRUNCATION_ELEMENT, ...selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
   };
 }
 
@@ -161,6 +188,7 @@ function admitLevel(
   used: number,
   available: number,
   turnLimit = Number.POSITIVE_INFINITY,
+  pinOldest = false,
 ): { readonly used: number; readonly complete: boolean } {
   const candidates = entries.filter((entry) => (
     entry.turn < turnLimit && entry.level === level && !admitted.has(entry)
@@ -171,7 +199,16 @@ function admitLevel(
     return { used: used + cost, complete: true };
   }
   let total = used;
+  // The asks are the one class where the oldest entry is reserved before the
+  // newest-first fill: a chat that outgrows the budget still states the
+  // objective it started from, and the requests lost come from the middle.
+  const oldest = pinOldest ? candidates[0] : undefined;
+  if (oldest && total + 1 + oldest.text.length <= available) {
+    admitted.add(oldest);
+    total += 1 + oldest.text.length;
+  }
   for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    if (admitted.has(candidates[index])) continue;
     const entryCost = 1 + candidates[index].text.length;
     if (total + entryCost > available) break;
     admitted.add(candidates[index]);
@@ -219,15 +256,22 @@ function renderTurn(turn: readonly ChatMessage[], turnIndex: number): ProjectedE
   const reads: string[] = [];
   const edits = new Map<string, number>();
   for (const message of turn) {
+    // A tool that names no path falls through to its own element rather than
+    // being aggregated into nothing: Codex reports file changes as a `changes[]`
+    // array with no top-level path, and swallowing those would lose the durable
+    // state this aggregation exists to carry.
     if (AGGREGATED_READS.has(message.type)) {
       const path = toolFilePath(message);
-      if (path && !reads.includes(path)) reads.push(path);
-      continue;
-    }
-    if (AGGREGATED_EDITS.has(message.type)) {
-      const path = toolFilePath(message);
-      if (path) edits.set(path, (edits.get(path) ?? 0) + 1);
-      continue;
+      if (path) {
+        if (!reads.includes(path)) reads.push(path);
+        continue;
+      }
+    } else if (AGGREGATED_EDITS.has(message.type)) {
+      const paths = editedPaths(message);
+      if (paths.length > 0) {
+        for (const path of paths) edits.set(path, (edits.get(path) ?? 0) + 1);
+        continue;
+      }
     }
     const text = renderMessageElement(message);
     if (text) {
@@ -265,6 +309,20 @@ function levelOf(type: string): number {
 
 function toolFilePath(message: ChatMessage): string {
   return 'filePath' in message && typeof message.filePath === 'string' ? message.filePath : '';
+}
+
+// Edits carry their paths one of two ways. Claude sets `filePath`; the Codex
+// app-server sets `changes[]` and leaves `filePath` undefined
+// (server-agents/codex/src/agents/codex/app-server/converter.ts).
+function editedPaths(message: ChatMessage): string[] {
+  const direct = toolFilePath(message);
+  if (direct) return [direct];
+  if (!('changes' in message) || !Array.isArray(message.changes)) return [];
+  return message.changes
+    .map((change) => (
+      change && typeof change.path === 'string' ? change.path : ''
+    ))
+    .filter(Boolean);
 }
 
 export function createNativeSeedReceipt(input: {
@@ -421,7 +479,7 @@ export function stripFirstUserSeed(messages: ChatMessage[]): ChatMessage[] {
 // file's contents at handoff time may already be stale. Their durable meaning is
 // normally restated in the assistant's next message, which the ladder admits
 // before any tool class.
-function isProjectableMessage(message: ChatMessage): boolean {
+export function isProjectableMessage(message: ChatMessage): boolean {
   return message.type === 'user-message'
     || message.type === 'assistant-message'
     || isToolUseMessage(message);
@@ -471,7 +529,9 @@ function escapeXml(value: string): string {
 }
 
 function renderLegacyMessageLine(message: ChatMessage): string {
-  if (isToolUseMessage(message)) return `Assistant used ${toolName(message)}: ${toolSummary(message)}`;
+  if (isToolUseMessage(message)) {
+    return `Assistant used ${toolName(message)}: ${legacyToolSummary(message)}`;
+  }
   switch (message.type) {
     case 'user-message': return `User: ${boundedCollapse(message.content)}`;
     case 'assistant-message': return `Assistant: ${boundedCollapse(message.content)}`;
@@ -500,6 +560,36 @@ function toolName(message: ToolUseChatMessage): string {
 
 function toolSummary(message: ToolUseChatMessage): string {
   return truncate(boundedCollapse(extractToolDetail(message)), TOOL_SUMMARY_MAX_CHARS);
+}
+
+// Frozen alongside `stringifyLegacyToolResult` and for the same reason: the
+// legacy renderer reproduces bytes older releases injected, and the v3 migration
+// hashes that output to strip a legacy seed. Teaching it the tool cases
+// `extractToolDetail` gained would change `Assistant used exec: ` into
+// `Assistant used exec: pytest -q tests/`, so an unmigrated workspace holding any
+// of those tools would fail its exact-prefix strip and archive a nested seed.
+function legacyToolSummary(message: ToolUseChatMessage): string {
+  return truncate(boundedCollapse(extractLegacyToolDetail(message)), TOOL_SUMMARY_MAX_CHARS);
+}
+
+function extractLegacyToolDetail(message: ToolUseChatMessage): string {
+  switch (message.type) {
+    case 'bash-tool-use': return message.description || message.command;
+    case 'read-tool-use':
+    case 'write-tool-use': return message.filePath;
+    case 'edit-tool-use':
+    case 'apply-patch-tool-use': return message.filePath ?? '';
+    case 'list-tool-use': return message.path ?? '';
+    case 'grep-tool-use':
+    case 'glob-tool-use': return message.pattern ?? '';
+    case 'web-search-tool-use': return message.query;
+    case 'web-fetch-tool-use': return message.url;
+    case 'task-tool-use': return message.description || message.prompt || message.subagentType || '';
+    case 'external-tool-use': return message.name;
+    case 'mcp-tool-use': return `${message.server}/${message.tool}`;
+    case 'unknown-tool-use': return message.rawName;
+    default: return '';
+  }
 }
 
 function extractToolDetail(message: ToolUseChatMessage): string {
@@ -576,6 +666,10 @@ function isTextItem(value: unknown): value is { readonly text: string } {
   return typeof value === 'object'
     && value !== null
     && typeof (value as { text?: unknown }).text === 'string';
+}
+
+function collapseWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function boundedCollapse(value: string): string {

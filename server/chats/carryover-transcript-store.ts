@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatMessage } from '../../common/chat-types.js';
+import { isProjectableMessage } from '../../common/transcript-seed.js';
 import { AgentSwitchMessage } from '../../common/chat-types.js';
 import { DomainError } from '../lib/domain-error.js';
 import { writeJsonFileAtomic, syncDirectory } from '../lib/json-file-store.js';
@@ -317,11 +318,21 @@ export class CarryOverTranscriptStore {
       signal: input.signal,
     })) {
       for (const message of batch) {
+        // Only messages the projection can actually render are admitted, so the
+        // byte guard is never spent on content that is discarded downstream.
+        // Tool results alone are 45% of a typical archive; counting them here
+        // let a large chat evict its whole conversation and hand off empty.
+        if (!isProjectableMessage(message)) continue;
         bytes += Buffer.byteLength(JSON.stringify(message), 'utf8') + 1;
         collected.push(message);
       }
       while (bytes > maxBytes && collected.length > 1) {
-        bytes -= Buffer.byteLength(JSON.stringify(collected.shift()), 'utf8') + 1;
+        // The asks are never evicted. They are the irreducible floor of a
+        // carried transcript and are tiny beside the tool traffic around them.
+        const index = collected.findIndex((message) => message.type !== 'user-message');
+        if (index === -1) break;
+        bytes -= Buffer.byteLength(JSON.stringify(collected[index]), 'utf8') + 1;
+        collected.splice(index, 1);
       }
     }
     return collected;

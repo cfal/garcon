@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   AgentSwitchMessage,
   AssistantMessage,
+  ToolResultMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
 import {
@@ -178,11 +179,46 @@ describe('CarryOverTranscriptStore', () => {
 
     const source = await store.loadProjectionSource({ refs });
 
-    // Every turn crosses the segment boundary, including the agent-switch marker.
-    expect(source).toHaveLength(first.length + second.length + 1);
+    // Every turn crosses the segment boundary. The agent-switch marker does not:
+    // the projection omits it, so the loader does not spend bytes carrying it.
+    expect(source).toHaveLength(first.length + second.length);
+    expect(source.some((message) => message.type === 'agent-switch')).toBeFalse();
     expect(source[0]).toEqual(new UserMessage(TIME, 'the original request'));
     expect(source.at(-1)).toEqual(new UserMessage(TIME, 'the latest request'));
     expect(source.filter((message) => message.type === 'user-message')).toHaveLength(2);
+  });
+
+  it('never lets discarded classes or the asks fall to the byte guard', async () => {
+    // Tool results are ~45% of a real archive and are never projected, so
+    // spending the guard on them let a large chat evict its whole conversation
+    // and hand off with no context at all.
+    const messages = [new UserMessage(TIME, 'the original request')];
+    for (let index = 0; index < 40; index += 1) {
+      messages.push(new ToolResultMessage(TIME, `t${index}`, { raw: 'y'.repeat(500) }, false));
+    }
+    messages.push(new AssistantMessage(TIME, 'the latest answer'));
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 2_000 });
+
+    expect(source.some((message) => message.type === 'tool-result')).toBeFalse();
+    expect(source[0]).toEqual(new UserMessage(TIME, 'the original request'));
+    expect(source.at(-1)).toEqual(new AssistantMessage(TIME, 'the latest answer'));
+  });
+
+  it('keeps the asks even when other projectable classes overflow the guard', async () => {
+    const messages = [new UserMessage(TIME, 'the original request')];
+    for (let index = 0; index < 60; index += 1) {
+      messages.push(new AssistantMessage(TIME, `step ${index} ${'x'.repeat(200)}`));
+    }
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 2_000 });
+
+    expect(source.length).toBeLessThan(messages.length);
+    expect(source.some((message) => message.content === 'the original request')).toBeTrue();
   });
 
   it('drops the oldest messages when the projection byte guard trips', async () => {

@@ -41,7 +41,15 @@ const MAX_LINES = 1000;
 // command: source validation, era capture through the shared handoff path,
 // registration of a target with no provider session so it seeds itself from the
 // carryover projection, and compensation that discards the prepared segment.
-const EXECUTION_FOOTPRINT_BUDGET = 8948;
+// Adversarial review adds 18 lines restoring safety this file's own pressure had
+// removed: rejecting a pre-existing target that is not this operation's own
+// earlier attempt, binding attachments to the idempotency payload, and re-raising
+// a recorded execution failure instead of a misleading projection error. Cutting
+// those to hit the previous ceiling is what let the defects in. A further 15
+// lines refuse a source whose first turn is still materializing and place the
+// continuation in the chat list with a name and metadata, both of which the
+// established fork path already did, and undo both when scheduling fails.
+const EXECUTION_FOOTPRINT_BUDGET = 8983;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

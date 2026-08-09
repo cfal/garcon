@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { CommandValidationError } from '../command-support.ts';
 import { SelfHandoffCommands } from '../self-handoff-commands.ts';
 
 const SOURCE_ID = '1786077000000001';
@@ -56,6 +57,18 @@ function harness({ source = sourceChat(), capture } = {}) {
         })),
       },
       handoffs: { captureContinuationSegments: mock(async () => captured) },
+      queue: { ownsExecution: mock(() => false) },
+      settings: {
+        ensureInNormal: mock(async () => undefined),
+        getChatName: mock(() => 'the source chat'),
+        setSessionName: mock(async () => undefined),
+        removeFromAllOrderLists: mock(async () => undefined),
+        removeSessionName: mock(async () => undefined),
+      },
+      metadata: {
+        getChatMetadata: mock(() => ({ firstMessage: 'the original ask' })),
+        addNewChatMetadata: mock(() => undefined),
+      },
     },
     assertContent: mock(() => undefined),
     requireChatId: (value) => value,
@@ -138,6 +151,94 @@ describe('self handoff commands', () => {
     });
     expect(captured.prepared.discard).toHaveBeenCalledTimes(1);
     expect(captured.prepared.releaseRoot).not.toHaveBeenCalled();
+  });
+
+  it('recreates and schedules after a retryable pre-schedule failure', async () => {
+    const { commands, support, added, scheduled } = harness();
+    support.deps.ledger.getRecord = mock(async () => ({
+      key: 'k',
+      chatId: TARGET_ID,
+      status: 'failed',
+      errorCode: 'PRE_SCHEDULE_FAILED',
+    }));
+
+    await commands.submitSelfHandoffRun(request());
+
+    // Compensation removed the target after the first attempt, so the retry has
+    // to build it again rather than report a completed duplicate.
+    expect(added).toHaveLength(1);
+    expect(scheduled).toHaveLength(1);
+    expect(support.throwRecordedExecutionFailure).not.toHaveBeenCalled();
+  });
+
+  it('re-raises a recorded execution failure instead of a projection error', async () => {
+    const { commands, support } = harness();
+    const recorded = { key: 'k', chatId: TARGET_ID, status: 'failed', errorCode: 'PROVIDER_FAILURE' };
+    support.deps.ledger.getRecord = mock(async () => recorded);
+    support.throwRecordedExecutionFailure = mock(() => {
+      throw new CommandValidationError('PROVIDER_FAILURE', 'the provider failed', 409);
+    });
+
+    await expect(commands.submitSelfHandoffRun(request())).rejects.toMatchObject({
+      code: 'PROVIDER_FAILURE',
+    });
+  });
+
+  it('refuses a pre-existing target that is not this operation attempt', async () => {
+    const { commands, chats } = harness();
+    chats.set(TARGET_ID, sourceChat({ agentId: 'codex' }));
+
+    await expect(commands.submitSelfHandoffRun(request())).rejects.toMatchObject({
+      code: 'IDEMPOTENCY_CONFLICT',
+    });
+  });
+
+  it('returns its own already-created target on a lost-response retry', async () => {
+    const { commands, support, chats, added } = harness();
+    chats.set(TARGET_ID, sourceChat());
+    support.deps.ledger.getRecord = mock(async () => ({
+      key: 'k', chatId: TARGET_ID, status: 'scheduled', turnId: 'turn-1',
+    }));
+    support.deps.ledger.accept = mock(async () => ({
+      kind: 'duplicate',
+      record: { key: 'k', chatId: TARGET_ID, status: 'scheduled', turnId: 'turn-1' },
+    }));
+
+    const response = await commands.submitSelfHandoffRun(request());
+
+    // Provenance is the ledger record, not its status: this retry must not
+    // conflict, and must not build a second continuation.
+    expect(response.chat.id).toBe(TARGET_ID);
+    expect(added).toHaveLength(0);
+  });
+
+  it('binds attachments to the idempotency payload', async () => {
+    const { commands, support } = harness();
+
+    await commands.submitSelfHandoffRun(request({ images: [{ data: 'a', mediaType: 'image/png' }] }));
+
+    expect(support.deps.ledger.accept.mock.calls[0][0].payload).toHaveProperty('images');
+  });
+
+  it('places the continuation in the chat list with a name and metadata', async () => {
+    const { commands, support } = harness();
+
+    await commands.submitSelfHandoffRun(request());
+
+    expect(support.deps.settings.ensureInNormal).toHaveBeenCalledWith(TARGET_ID);
+    expect(support.deps.settings.setSessionName).toHaveBeenCalledWith(TARGET_ID, 'the source chat');
+    expect(support.deps.metadata.addNewChatMetadata)
+      .toHaveBeenCalledWith(TARGET_ID, 'the original ask');
+  });
+
+  it('refuses any executing source, materializing or mid-turn', async () => {
+    const { commands, support, added } = harness();
+    support.deps.queue.ownsExecution = mock(() => true);
+
+    await expect(commands.submitSelfHandoffRun(request())).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+    });
+    expect(added).toHaveLength(0);
   });
 
   it('refuses a quarantined source rather than continuing empty history', async () => {

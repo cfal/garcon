@@ -218,6 +218,7 @@
 	"chat_notice_handoff_requires_message": "/handoff needs a message for the new chat.",
 	"chat_notice_handing_off_chat": "Continuing in a new chat...",
 	"chat_notice_failed_handoff": "Failed to hand off chat: {detail}",
+	"chat_notice_handoff_outcome_unconfirmed": "The handoff may have started. Check your chat list before trying again.",
 	"chat_notice_failed_deny_permission": "Failed to deny permission: {detail}",
 	"chat_notice_failed_fork_chat": "Failed to fork chat: {detail}",
 	"chat_notice_failed_pause_queue": "Failed to pause queue: {detail}",

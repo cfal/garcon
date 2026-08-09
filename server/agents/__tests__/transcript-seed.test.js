@@ -113,6 +113,47 @@ describe('transcript seed contract', () => {
     expect(context.prefix).not.toContain('file body');
   });
 
+  test('carries edits that name their paths only through changes', () => {
+    // The Codex app-server builds edits with no filePath and a changes array
+    // (server-agents/codex/src/agents/codex/app-server/converter.ts). These used
+    // to be aggregated into nothing and vanish from the projection entirely.
+    const context = createCarryoverTranscript([
+      new UserMessage(TIME, 'apply the patch'),
+      new EditToolUseMessage(TIME, 'e1', undefined, undefined, undefined, [
+        { path: '/repo/a.txt', kind: 'modify' },
+        { path: '/repo/b.txt', kind: 'add' },
+      ]),
+    ], 0);
+
+    expect(context.prefix).toContain('<files-edited>/repo/a.txt, /repo/b.txt</files-edited>');
+  });
+
+  test('renders an edit that names no path instead of dropping it', () => {
+    const context = createCarryoverTranscript([
+      new UserMessage(TIME, 'apply the patch'),
+      new EditToolUseMessage(TIME, 'e1', undefined, undefined, undefined, []),
+    ], 0);
+
+    expect(context.prefix).not.toContain('<files-edited>');
+    expect(context.prefix).toContain('<tool-use>edit</tool-use>');
+  });
+
+  test('keeps the first ask when the asks alone overflow the budget', () => {
+    const messages = [];
+    for (let turn = 0; turn < 8; turn += 1) {
+      messages.push(new UserMessage(TIME, `request ${turn} ${'x'.repeat(80)}`));
+    }
+
+    const context = createCarryoverTranscript(messages, 500);
+
+    expect(context.prefix.length).toBeLessThanOrEqual(500);
+    // The original objective and the newest request both survive; the middle
+    // requests are what get dropped.
+    expect(context.prefix).toContain('<user>request 0 ');
+    expect(context.prefix).toContain('<user>request 7 ');
+    expect(context.prefix).toContain('<earlier-turns-truncated/>');
+  });
+
   test('carries provider tool detail that previously rendered empty', () => {
     const context = createCarryoverTranscript([
       new ExecToolUseMessage(TIME, 'exec-1', 'pytest -q tests/', 'bash'),

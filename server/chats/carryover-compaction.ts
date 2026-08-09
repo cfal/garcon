@@ -19,6 +19,7 @@ import {
   createGenerationRequestSignal,
   GENERATION_PROVIDER_TIMEOUT_MS,
 } from '../settings/generation-limits.js';
+import { isRecord } from '../../common/json.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 
@@ -85,11 +86,9 @@ export class CarryOverCompactionService {
     }
     if (!selection) return direct();
 
-    const spine = input.messages.slice(spineStart(input.messages));
-    const older = input.messages.slice(0, spineStart(input.messages));
-    const spineText = createCarryoverTranscript(spine, CARRYOVER_INJECTION_MAX_CHARS)?.prefix ?? '';
-    if (spineText.length >= CARRYOVER_INJECTION_MAX_CHARS) return direct();
-
+    const boundary = spineStart(input.messages);
+    const spine = input.messages.slice(boundary);
+    const older = input.messages.slice(0, boundary);
     const assembled = createCarryoverTranscript(older, CARRYOVER_COMPACTION_INPUT_MAX_CHARS);
     if (!assembled) return direct();
 
@@ -110,11 +109,27 @@ export class CarryOverCompactionService {
           signal: generationSignal,
         },
       );
-      const compacted = this.#validate(input.chatId, summary, spineText.length);
+      const compacted = this.#validate(input.chatId, summary);
       if (!compacted) return direct();
-      return { prefix: `${compacted}${spineText}` };
+      // The summary renders inside the same envelope as the spine, so the
+      // injection ceiling is enforced once, by the assembler, rather than split
+      // across two independently budgeted strings.
+      const projected = createCarryoverTranscript(spine, CARRYOVER_INJECTION_MAX_CHARS, {
+        summary: compacted,
+      });
+      if (!projected || projected.prefix.length > CARRYOVER_INJECTION_MAX_CHARS) {
+        this.deps.warn(
+          input.chatId,
+          `Agent-switch compaction produced ${projected?.prefix.length ?? 0} characters, over the ${CARRYOVER_INJECTION_MAX_CHARS} limit. The full transcript was carried over instead. Consider a different compaction model in Settings.`,
+        );
+        return direct();
+      }
+      return projected;
     } catch (error) {
       logger.warn('compaction failed:', errorMessage(error));
+      // A cancelled start already tore the turn down; warning about it would put
+      // a failure notice in a chat the user abandoned.
+      if (input.signal?.aborted) return direct();
       this.deps.warn(
         input.chatId,
         `Agent-switch compaction failed (${errorMessage(error)}). The full transcript was carried over instead. Consider a different compaction model in Settings.`,
@@ -123,8 +138,7 @@ export class CarryOverCompactionService {
     }
   }
 
-  #validate(chatId: string, raw: string, spineLength: number): string | null {
-    const ceiling = CARRYOVER_INJECTION_MAX_CHARS - spineLength;
+  #validate(chatId: string, raw: string): string | null {
     const open = raw.indexOf(SUMMARY_OPEN);
     const close = raw.lastIndexOf(SUMMARY_CLOSE);
     if (open === -1 || close <= open) {
@@ -134,19 +148,26 @@ export class CarryOverCompactionService {
       );
       return null;
     }
-    const summary = raw.slice(open, close + SUMMARY_CLOSE.length);
-    if (summary.length > ceiling) {
+    // Returns the inner text; the assembler owns the element framing and the
+    // budget, so no separator or ceiling is applied here.
+    const inner = raw.slice(open + SUMMARY_OPEN.length, close).trim();
+    if (!inner) {
       this.deps.warn(
         chatId,
-        `Agent-switch compaction returned ${summary.length} characters, over the ${ceiling} limit. The full transcript was carried over instead. Consider a different compaction model in Settings.`,
+        'Agent-switch compaction returned an empty <summary>. The full transcript was carried over instead. Consider a different compaction model in Settings.',
       );
       return null;
     }
-    return `${summary}\n\n`;
+    return inner;
   }
 
   async #selection(signal: AbortSignal) {
     const persisted = this.deps.getUiSettings()?.agentSwitchCompaction;
+    // Requires an explicit opt-in rather than the effective `enabled`, which
+    // `resolveEffectiveGenerationConfig` turns on for any workspace where some
+    // agent happens to resolve. Chat titles can afford that default; issuing a
+    // half-megabyte one-shot query on every handoff cannot.
+    if (!isRecord(persisted) || persisted.enabled !== true) return null;
     const context = await resolveGenerationContextForSelection(this.deps.agents, persisted, signal);
     const config = resolveEffectiveGenerationConfig({ persisted, ...context });
     if (!config.enabled || !config.agentId || !config.model) return null;

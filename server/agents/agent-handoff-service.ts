@@ -133,18 +133,28 @@ export class AgentHandoffService {
         messages: sanitized.messages,
         signal: input.signal,
       });
-      await prepared.commit();
-      const ref: CarryOverSegmentRef = {
-        id: prepared.id,
-        agentId: source.agentId,
-        model: source.model,
-        capturedAt,
-        storedMessageCount: prepared.messageCount,
-        visibleMessageCount: prepared.messageCount,
-        trailingHandoff,
-      };
-      segments = [...segments, ref];
-      await this.deps.carryOver.verifySegment(ref, input.signal);
+      // Ownership of the handle only reaches the caller on success, so anything
+      // that throws between here and the return has to discard it itself. A
+      // committed-but-abandoned segment stays writer-rooted for the process
+      // lifetime, so it is never swept, and a retry deriving the same
+      // deterministic id then collides with it.
+      try {
+        await prepared.commit();
+        const ref: CarryOverSegmentRef = {
+          id: prepared.id,
+          agentId: source.agentId,
+          model: source.model,
+          capturedAt,
+          storedMessageCount: prepared.messageCount,
+          visibleMessageCount: prepared.messageCount,
+          trailingHandoff,
+        };
+        await this.deps.carryOver.verifySegment(ref, input.signal);
+        segments = [...segments, ref];
+      } catch (error) {
+        await prepared.discard().catch(() => undefined);
+        throw error;
+      }
     } else if (source.agentSessionId || segments.length > 0) {
       segments = [
         ...segments,

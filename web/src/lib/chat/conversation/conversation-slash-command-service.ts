@@ -580,12 +580,20 @@ export class ConversationSlashCommandService {
 			}
 			return 'accepted';
 		} catch (error) {
-			this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+			// An ambiguous transport outcome may have already created the target and
+			// started its turn. Restoring the composer and calling it a failure
+			// invites a resubmission that would produce a second continuation.
+			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+			if (!outcomeUnknown) {
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+			}
 			deps.chatState.appendLocalNotice(
 				'error',
-				m.chat_notice_failed_handoff({ detail: errorDetail(error) }),
+				outcomeUnknown
+					? m.chat_notice_handoff_outcome_unconfirmed()
+					: m.chat_notice_failed_handoff({ detail: errorDetail(error) }),
 			);
-			return 'rejected';
+			return outcomeUnknown ? 'unknown' : 'rejected';
 		}
 	}
 
