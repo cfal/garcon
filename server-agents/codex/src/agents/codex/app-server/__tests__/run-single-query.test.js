@@ -30,6 +30,20 @@ describe('Codex runSingleQuery', () => {
     }
   });
 
+  it('sandboxes every one-shot read-only regardless of permission mode', async () => {
+    // One-shot callers only turn text into text. The compaction prompt carries
+    // archived transcript content that is not trusted, so inheriting the chat's
+    // workspace-write default would let that text modify the project.
+    for (const permissionMode of ['default', 'acceptEdits', 'bypassPermissions']) {
+      spawnMock.mockClear();
+      await runSingleQuery('hello', { permissionMode, projectPath: '/workspace' });
+      const args = spawnMock.mock.calls[0][0];
+      expect(args[args.indexOf('--sandbox') + 1], permissionMode).toBe('read-only');
+      expect(args).not.toContain('danger-full-access');
+      expect(args).not.toContain('workspace-write');
+    }
+  });
+
   it('passes custom provider config and API key env to codex exec', async () => {
     const expectedCodexCommand = await resolveCodexCliCommand();
 

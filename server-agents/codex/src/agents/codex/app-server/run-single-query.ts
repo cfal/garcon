@@ -73,7 +73,13 @@ export async function runSingleQuery(prompt: string, options: CodexSingleQueryOp
 
   return withSingleQueryControl({ signal, timeoutMs }, async (querySignal) => {
     const workingDirectory = cwd || projectPath || process.cwd();
-    const { sandbox, approvalPolicy } = codexSandboxSettings(permissionMode);
+    // Every one-shot caller generates text from text: titles, commit messages,
+    // status summaries, model probes, transcript compaction. None needs to touch
+    // the workspace, and the compaction prompt carries archived transcript
+    // content that is not trusted, so the sandbox is pinned read-only rather than
+    // inheriting the chat's `workspace-write` default with approvals off.
+    const { approvalPolicy } = codexSandboxSettings(permissionMode);
+    const sandbox = 'read-only';
     const reasoningEffort = mapSingleQueryThinkingModeToCodexEffort(thinkingMode);
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-single-query-'));
