@@ -75,9 +75,17 @@ export class SelfHandoffCommands {
       this.support.throwRecordedExecutionFailure(priorRecord);
     }
     // An existing target is only acceptable when a ledger record proves this
-    // operation created it. Provenance is the record existing at all, not its
-    // status: a lost-202 retry legitimately finds its own target already
-    // scheduled or finished.
+    // operation got far enough to create it. Any record that reached preparation
+    // qualifies, whatever its later status, because a lost-202 retry legitimately
+    // finds its own target already scheduled or finished. A
+    // pre-schedule failure is the opposite proof. It settled before preparation
+    // ran, so it created nothing, and a target standing there now belongs to
+    // some other request that took the id in the interval. Treating it as
+    // provenance would schedule this prompt and its attachments into that
+    // unrelated chat. A target that instead survived failed compensation is
+    // refused here too; distinguishing the two needs durable provenance on the
+    // registry entry rather than inference from the ledger, and refusing is the
+    // safe side of that gap.
     //
     // This must precede `ledger.accept`. Accepting first and rejecting after
     // leaves an accepted record behind, and the identical retry then reads that
@@ -86,7 +94,7 @@ export class SelfHandoffCommands {
     // refused. Both chat mutation locks are held for the whole method, so
     // reading the registry here is safe.
     const targetExists = this.deps.chats.getChat(input.chatId) !== null;
-    if (targetExists && !priorRecord) {
+    if (targetExists && (!priorRecord || retryingPreScheduleFailure)) {
       throw new CommandValidationError(
         'IDEMPOTENCY_CONFLICT',
         `Session already exists: ${input.chatId}`,

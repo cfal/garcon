@@ -288,6 +288,26 @@ describe('self handoff commands', () => {
     expect(support.deps.ledger.accept).not.toHaveBeenCalled();
   });
 
+  it('refuses a target that appeared while a pre-schedule failure was pending', async () => {
+    const { commands, support, chats, scheduled } = harness();
+    // The record settled before preparation ran, so it created nothing. Another
+    // request took the id in the interval, and its chat is not this one's to use.
+    support.deps.ledger.getRecord = mock(async () => ({
+      key: 'k',
+      chatId: TARGET_ID,
+      turnId: 'turn-0',
+      status: 'failed',
+      errorCode: 'PRE_SCHEDULE_FAILED',
+    }));
+    chats.set(TARGET_ID, sourceChat({ agentId: 'codex' }));
+
+    await expect(commands.submitSelfHandoffRun(request()))
+      .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+
+    expect(scheduled).toHaveLength(0);
+    expect(support.deps.ledger.accept).not.toHaveBeenCalled();
+  });
+
   it('returns its own already-created target on a lost-response retry', async () => {
     const { commands, support, chats, added } = harness();
     chats.set(TARGET_ID, sourceChat());
