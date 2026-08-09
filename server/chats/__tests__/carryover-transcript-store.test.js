@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   AgentSwitchMessage,
   AssistantMessage,
+  BashToolUseMessage,
   ToolResultMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
@@ -220,6 +221,23 @@ describe('CarryOverTranscriptStore', () => {
 
     expect(source.length).toBeLessThan(messages.length);
     expect(source.some((message) => message.content === 'the original request')).toBeTrue();
+  });
+
+  it('evicts a sole oversized tool message rather than returning it', async () => {
+    // The trim loop used to stop at one remaining message, so a single large
+    // evictable payload passed straight through the ceiling.
+    const messages = [new BashToolUseMessage(TIME, 't0', 'x'.repeat(200_000))];
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 40_000 });
+
+    const bytes = source.reduce(
+      (total, message) => total + Buffer.byteLength(JSON.stringify(message), 'utf8') + 1,
+      2,
+    );
+    expect(bytes).toBeLessThanOrEqual(40_000);
+    expect(source).toHaveLength(0);
   });
 
   it('bounds oversized asks instead of letting them defeat the guard', async () => {

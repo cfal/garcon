@@ -333,10 +333,14 @@ export class CarryOverTranscriptStore {
         bytes += Buffer.byteLength(JSON.stringify(projected), 'utf8') + 1;
         collected.push(projected);
       }
-      while (bytes > maxBytes && collected.length > 1) {
+      while (bytes > maxBytes) {
         // The asks are never evicted. They are the irreducible floor of a
         // carried transcript and are tiny beside the tool traffic around them.
         const index = collected.findIndex((message) => message.type !== 'user-message');
+        // Only an all-ask remainder stops the trim, and the loop runs down to an
+        // empty collection rather than stopping at one message: a sole oversized
+        // tool payload is evictable and must be evicted, since tool bodies are
+        // not bounded by `boundProjectedMessage` the way bodies are.
         // Known ceiling: asks are bounded individually but not collectively, so a
         // chat with more than roughly `maxBytes / 8KB` of them still exceeds the
         // guard. Evicting asks is what this exists to prevent; raising the real
