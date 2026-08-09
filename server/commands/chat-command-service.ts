@@ -85,8 +85,8 @@ export class ChatCommandService {
     return this.#session.deleteChat(input);
   }
 
-  retryAbandonedTransferCleanups() {
-    return this.deps.ownership.retryAbandonedTransferCleanups();
+  retryRetainedTransferCleanups() {
+    return this.deps.ownership.retryRetainedTransferCleanups();
   }
 
   submitForkRun(input: SubmitForkRunInput) {

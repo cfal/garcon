@@ -122,7 +122,7 @@ export function createRouteCommandService({
         return true;
       },
       abandonedTransferCleanups: () => [],
-      retryAbandonedTransferCleanups: async () => ({ retried: [], abandoned: [] }),
+      retryRetainedTransferCleanups: async () => ({ retried: [], abandoned: [] }),
     },
     chatIds: new ChatIdAllocator(registry),
 	pathCache: pathCache ?? createRoutePathCache(),

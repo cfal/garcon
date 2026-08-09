@@ -368,7 +368,7 @@ describe('AgentOwnershipJournal', () => {
     // A failed maintenance retry keeps the reference rather than discarding
     // it, and reports the record as unresolved even though it is only pending:
     // the provider residue is still out there.
-    const failedRetry = await journal.retryAbandonedTransferCleanups();
+    const failedRetry = await journal.retryRetainedTransferCleanups();
     expect(failedRetry.retried).toHaveLength(1);
     expect(failedRetry.unresolved).toMatchObject([{ status: 'pending', attempts: 1 }]);
     expect(journal.abandonedTransferCleanups()).toHaveLength(0);
@@ -377,11 +377,13 @@ describe('AgentOwnershipJournal', () => {
       attempts: 1,
     }]);
 
+    // The same command stays usable after the provider is repaired: it selects
+    // the pending record the first call left behind and releases it.
     failing = false;
-    const retry = await journal.retryAbandonedTransferCleanups();
-    expect(retry.retried).toHaveLength(0);
+    const retry = await journal.retryRetainedTransferCleanups();
+    expect(retry.retried).toHaveLength(1);
     expect(retry.unresolved).toHaveLength(0);
-    await journal.drainTransferCleanup();
+    expect(release).toHaveBeenCalledTimes(5);
 
     expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
   });

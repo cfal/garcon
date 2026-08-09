@@ -544,7 +544,7 @@ export default function createChatRoutes({
     try {
       const input = parseCommandRequest(parseRepairHistoryRequest, body);
       if (input.action === 'retry-abandoned-release') {
-        const outcome = await commands.retryAbandonedTransferCleanups();
+        const outcome = await commands.retryRetainedTransferCleanups();
         const record = (cleanup: { chatId: string; source: { agentId: string }; lastErrorCode: string | null }) => ({
           chatId: cleanup.chatId,
           agentId: cleanup.source.agentId,

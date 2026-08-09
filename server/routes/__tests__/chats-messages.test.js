@@ -529,7 +529,7 @@ describe('POST /api/v1/chats/repair-history', () => {
     const ownership = {
       delete: mock(async () => true),
       abandonedTransferCleanups: mock(() => [unresolvedRecord]),
-      retryAbandonedTransferCleanups: mock(async () => ({
+      retryRetainedTransferCleanups: mock(async () => ({
         retried: [retriedRecord, unresolvedRecord],
         unresolved: [unresolvedRecord],
       })),
@@ -549,7 +549,7 @@ describe('POST /api/v1/chats/repair-history', () => {
       ],
       unresolved: [{ chatId: 'chat-b', agentId: 'codex', lastErrorCode: 'SOURCE_UNAVAILABLE' }],
     });
-    expect(ownership.retryAbandonedTransferCleanups).toHaveBeenCalledTimes(1);
+    expect(ownership.retryRetainedTransferCleanups).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an unknown repair-history action', async () => {

@@ -21,7 +21,7 @@ export async function repairChatHistory(
   if (command.action === 'retry-abandoned') {
     const result = await client.repairHistory({ action: 'retry-abandoned-release' }, signal);
     if (result.action !== 'retry-abandoned-release') return;
-    const lines = [`abandoned releases retried: ${result.retried.length}`];
+    const lines = [`transfer releases retried: ${result.retried.length}`];
     if (result.unresolved.length === 0) {
       lines.push('unresolved releases: none');
     } else {

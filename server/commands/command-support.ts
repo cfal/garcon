@@ -162,7 +162,7 @@ export interface ChatCommandServiceDeps {
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
   ownership: Pick<
     AgentOwnershipJournal,
-    'delete' | 'abandonedTransferCleanups' | 'retryAbandonedTransferCleanups'
+    'delete' | 'abandonedTransferCleanups' | 'retryRetainedTransferCleanups'
   >;
   handoffs: Pick<
     AgentHandoffService,
