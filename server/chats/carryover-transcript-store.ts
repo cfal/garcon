@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatMessage } from '../../common/chat-types.js';
-import { isProjectableMessage } from '../../common/transcript-seed.js';
+import { boundProjectedMessage, isProjectableMessage } from '../../common/transcript-seed.js';
 import { AgentSwitchMessage } from '../../common/chat-types.js';
 import { DomainError } from '../lib/domain-error.js';
 import { writeJsonFileAtomic, syncDirectory } from '../lib/json-file-store.js';
@@ -325,13 +325,22 @@ export class CarryOverTranscriptStore {
         // Tool results alone are 45% of a typical archive; counting them here
         // let a large chat evict its whole conversation and hand off empty.
         if (!isProjectableMessage(message)) continue;
-        bytes += Buffer.byteLength(JSON.stringify(message), 'utf8') + 1;
-        collected.push(message);
+        // Bounded to what the renderer will actually read before it is measured,
+        // so the guard counts projected size rather than payload size. Asks are
+        // never evicted below, so an unbounded one would otherwise stop the guard
+        // trimming at all and defeat the ceiling entirely.
+        const projected = boundProjectedMessage(message);
+        bytes += Buffer.byteLength(JSON.stringify(projected), 'utf8') + 1;
+        collected.push(projected);
       }
       while (bytes > maxBytes && collected.length > 1) {
         // The asks are never evicted. They are the irreducible floor of a
         // carried transcript and are tiny beside the tool traffic around them.
         const index = collected.findIndex((message) => message.type !== 'user-message');
+        // Known ceiling: asks are bounded individually but not collectively, so a
+        // chat with more than roughly `maxBytes / 8KB` of them still exceeds the
+        // guard. Evicting asks is what this exists to prevent; raising the real
+        // ceiling means paging the projection rather than holding it.
         if (index === -1) break;
         bytes -= Buffer.byteLength(JSON.stringify(collected[index]), 'utf8') + 1;
         collected.splice(index, 1);

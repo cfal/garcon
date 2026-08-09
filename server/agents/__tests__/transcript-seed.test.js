@@ -11,6 +11,7 @@ import {
   UserMessage,
 } from '@garcon/common/chat-types';
 import {
+  boundProjectedMessage,
   CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
   createNativeSeedReceipt,
@@ -94,6 +95,25 @@ describe('transcript seed contract', () => {
     }
     expect(context.prefix).not.toContain('command-for-turn-4');
     expect(context.prefix).toContain('<user>request 0</user>');
+  });
+
+  test('bounds a projected message to what the renderer reads', () => {
+    const long = new UserMessage(TIME, 'x'.repeat(50_000));
+    const bounded = boundProjectedMessage(long);
+
+    // Shorter than the original, and rendered identically, because the renderer
+    // never reads past its own cap.
+    expect(bounded.content.length).toBeLessThan(long.content.length);
+    expect(createCarryoverTranscript([bounded], 200_000))
+      .toEqual(createCarryoverTranscript([long], 200_000));
+
+    // Images are never projected, so they are dropped rather than carried.
+    const withImage = new UserMessage(TIME, 'look', [{ data: 'z'.repeat(1_000), mediaType: 'image/png' }]);
+    expect(boundProjectedMessage(withImage).images).toBeUndefined();
+
+    // Anything already inside the bound is returned untouched.
+    const small = new UserMessage(TIME, 'short ask');
+    expect(boundProjectedMessage(small)).toBe(small);
   });
 
   test('never lets a summary crowd out the newest request', () => {

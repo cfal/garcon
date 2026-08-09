@@ -8,6 +8,7 @@ import {
   ToolResultMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
+import { createCarryoverTranscript } from '@garcon/common/transcript-seed';
 import {
   CarryOverHistoryUnavailableError,
   CarryOverTranscriptStore,
@@ -219,6 +220,32 @@ describe('CarryOverTranscriptStore', () => {
 
     expect(source.length).toBeLessThan(messages.length);
     expect(source.some((message) => message.content === 'the original request')).toBeTrue();
+  });
+
+  it('bounds oversized asks instead of letting them defeat the guard', async () => {
+    // Asks are never evicted, so before they were bounded a single large one
+    // stopped the guard trimming at all and the ceiling meant nothing.
+    const messages = [
+      new UserMessage(TIME, `first ${'a'.repeat(200_000)}`),
+      new UserMessage(TIME, `second ${'b'.repeat(200_000)}`),
+    ];
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 40_000 });
+
+    // Every ask survives, and the retained bytes respect the ceiling.
+    expect(source).toHaveLength(2);
+    expect(source[0].content.startsWith('first ')).toBeTrue();
+    expect(source[1].content.startsWith('second ')).toBeTrue();
+    const bytes = source.reduce(
+      (total, message) => total + Buffer.byteLength(JSON.stringify(message), 'utf8') + 1,
+      2,
+    );
+    expect(bytes).toBeLessThanOrEqual(40_000);
+    // The projection renders identically to the untruncated messages.
+    expect(createCarryoverTranscript(source, 200_000))
+      .toEqual(createCarryoverTranscript(messages, 200_000));
   });
 
   it('drops the oldest messages when the projection byte guard trips', async () => {

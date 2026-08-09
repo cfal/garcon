@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { ChatMessage, TodoItem, ToolUseChatMessage } from './chat-types.js';
-import { UserMessage, isToolUseMessage } from './chat-types.js';
+import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 
 export const SEED_CONTEXT_OPEN = '<carried-context>';
 export const SEED_CONTEXT_CLOSE = '</carried-context>';
@@ -20,6 +20,9 @@ const CARRIED_CONTEXT_PREAMBLE =
 const LEGACY_SEED_MAX_CHARS = 12_000;
 const TOOL_SUMMARY_MAX_CHARS = 200;
 const MESSAGE_PROJECTION_MAX_CHARS = 4_000;
+// Collapsing whitespace can only shorten a body, so scanning twice the per-message
+// cap is enough to fill it.
+const PROJECTED_BODY_MAX_CHARS = MESSAGE_PROJECTION_MAX_CHARS * 2;
 const TRUNCATION_ELEMENT = '    <earlier-turns-truncated/>';
 // The newest turns are admitted whole, at every level, before the ladder runs.
 // The ladder admits by class, so without this the newest turn keeps its prose but
@@ -517,6 +520,29 @@ export function isProjectableMessage(message: ChatMessage): boolean {
     || isToolUseMessage(message);
 }
 
+// Returns a copy holding only what the projection can render. `boundedCollapse`
+// reads at most `MESSAGE_PROJECTION_MAX_CHARS * 2` code units of a body and the
+// renderer never looks at images, so discarding the rest cannot change a single
+// byte of output. The loader uses this to keep its byte guard a real bound: user
+// messages are deliberately never evicted, so without it one oversized ask
+// defeats the guard entirely.
+export function boundProjectedMessage(message: ChatMessage): ChatMessage {
+  if (message.type === 'user-message') {
+    if (message.content.length <= PROJECTED_BODY_MAX_CHARS && !message.images?.length) return message;
+    return new UserMessage(
+      message.timestamp,
+      message.content.slice(0, PROJECTED_BODY_MAX_CHARS),
+      undefined,
+      message.metadata,
+    );
+  }
+  if (message.type === 'assistant-message') {
+    if (message.content.length <= PROJECTED_BODY_MAX_CHARS) return message;
+    return new AssistantMessage(message.timestamp, message.content.slice(0, PROJECTED_BODY_MAX_CHARS));
+  }
+  return message;
+}
+
 function renderMessageElement(message: ChatMessage, maximum = Number.POSITIVE_INFINITY): string {
   if (isToolUseMessage(message)) {
     const detail = toolSummary(message);
@@ -714,7 +740,7 @@ function collapseWhitespace(value: string): string {
 }
 
 function boundedCollapse(value: string): string {
-  return value.slice(0, MESSAGE_PROJECTION_MAX_CHARS * 2).replace(/\s+/g, ' ').trim();
+  return value.slice(0, PROJECTED_BODY_MAX_CHARS).replace(/\s+/g, ' ').trim();
 }
 
 function truncate(value: string, maxChars: number): string {
