@@ -8,6 +8,7 @@ import type { CarriedContext } from '../../common/transcript-seed.js';
 import {
   CARRYOVER_COMPACTION_INPUT_MAX_CHARS,
   CARRYOVER_INJECTION_MAX_CHARS,
+  RECENT_TURNS_VERBATIM,
   createCarryoverTranscript,
 } from '../../common/transcript-seed.js';
 import type { AgentCatalogEntry } from '../../common/agents.js';
@@ -26,9 +27,6 @@ import { errorMessage } from '../lib/errors.js';
 const logger = createLogger('chats:carryover-compaction');
 const SUMMARY_OPEN = '<summary>';
 const SUMMARY_CLOSE = '</summary>';
-// Matches the pin in the projection ladder so the spine and the summary describe
-// disjoint halves of the transcript.
-const SPINE_TURNS = 3;
 
 export interface CarryOverCompactionAgents {
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
@@ -218,12 +216,14 @@ export class CarryOverCompactionService {
   }
 }
 
+// Splits on the same boundary the assembler pins, so the summary and the spine
+// describe disjoint halves of the transcript.
 function spineStart(messages: readonly ChatMessage[]): number {
   let boundaries = 0;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index].type !== 'user-message') continue;
     boundaries += 1;
-    if (boundaries === SPINE_TURNS) return index;
+    if (boundaries === RECENT_TURNS_VERBATIM) return index;
   }
   return 0;
 }

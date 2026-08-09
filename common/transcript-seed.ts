@@ -25,7 +25,10 @@ const TRUNCATION_ELEMENT = '    <earlier-turns-truncated/>';
 // The ladder admits by class, so without this the newest turn keeps its prose but
 // can lose the commands that went with it, leaving the working set uncompressed
 // yet incomplete.
-const RECENT_TURNS_VERBATIM = 3;
+// Exported so the compaction service splits the transcript on exactly the
+// boundary the assembler pins. Two independent copies would let a change to one
+// leave turns that were excluded from summarization to be laddered away instead.
+export const RECENT_TURNS_VERBATIM = 3;
 
 // Message classes admitted in order while the budget holds. Conversation first
 // because the asks are irreducible, then file activity because it is durable
