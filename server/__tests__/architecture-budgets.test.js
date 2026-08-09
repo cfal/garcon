@@ -49,7 +49,16 @@ const MAX_LINES = 1000;
 // lines refuse a source whose first turn is still materializing and place the
 // continuation in the chat list with a name and metadata, both of which the
 // established fork path already did, and undo both when scheduling fails.
-const EXECUTION_FOOTPRINT_BUDGET = 8983;
+// Maintenance retry of abandoned transfer releases adds 6 lines: a widened
+// ownership dependency type and the command-service pass-through the
+// repair-history route calls.
+// A second adversarial round adds 14 lines making self-handoff target creation
+// atomic: rejecting a colliding target before the ledger accepts it rather than
+// after, transferring compensation ownership at the moment `addChat` publishes
+// the target, releasing the writer-root lease a failed preparation still holds,
+// and rolling each cleanup step back independently. Trimming to the previous
+// ceiling is what produced this round's defects in the first place.
+const EXECUTION_FOOTPRINT_BUDGET = 9002;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

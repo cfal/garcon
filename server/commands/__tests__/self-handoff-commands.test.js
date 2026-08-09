@@ -79,7 +79,14 @@ function harness({ source = sourceChat(), capture } = {}) {
     projectCommandChat: mock(async (id) => ({ id })),
     scheduleAcceptedHttpRun: mock(async (_ledger, input, _ids, commandType, preparation) => {
       scheduled.push({ input, commandType });
-      await preparation.prepare({ signal: AbortSignal.timeout(5_000) });
+      try {
+        await preparation.prepare({ signal: AbortSignal.timeout(5_000) });
+      } catch (error) {
+        // Mirrors `accepted-input-handler`, which compensates a failed
+        // preparation before surfacing the failure.
+        await preparation.compensate();
+        throw error;
+      }
       return { status: 'accepted', turnId: 'turn-1' };
     }),
   };
@@ -191,6 +198,77 @@ describe('self handoff commands', () => {
     await expect(commands.submitSelfHandoffRun(request())).rejects.toMatchObject({
       code: 'IDEMPOTENCY_CONFLICT',
     });
+  });
+
+  it('rolls back a target that fails after it was registered', async () => {
+    const { commands, support, chats, captured } = harness();
+    // The window between `addChat` publishing the target and `#createContinuation`
+    // returning. Compensation has to cover it, or the failed handoff strands a
+    // half-built chat in the registry.
+    support.deps.settings.ensureInNormal = mock(async () => {
+      throw new Error('settings flush failed');
+    });
+
+    await expect(commands.submitSelfHandoffRun(request())).rejects.toThrow('settings flush failed');
+
+    expect(chats.has(TARGET_ID)).toBeFalse();
+    expect(support.deps.settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_ID);
+    expect(support.deps.settings.removeSessionName).toHaveBeenCalledWith(TARGET_ID);
+    // Discarding while the target still referenced the segment would have left
+    // the registry entry pointing at deleted pages. The writer root still has to
+    // go, or every later sweep retains the segment for the process lifetime.
+    expect(captured.prepared.discard).not.toHaveBeenCalled();
+    expect(captured.prepared.releaseRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes rolling back after one cleanup step fails', async () => {
+    const { commands, support, captured } = harness();
+    support.deps.chats.removeChat = mock(async () => {
+      throw new Error('registry write failed');
+    });
+    support.deps.settings.ensureInNormal = mock(async () => {
+      throw new Error('settings flush failed');
+    });
+
+    await expect(commands.submitSelfHandoffRun(request())).rejects.toThrow('settings flush failed');
+
+    expect(support.deps.settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_ID);
+    expect(support.deps.settings.removeSessionName).toHaveBeenCalledWith(TARGET_ID);
+    // A failed cleanup step must not strand the lease either.
+    expect(captured.prepared.releaseRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards the prepared segment when it fails before registering', async () => {
+    const { commands, captured, chats } = harness();
+    captured.assertUnchanged = mock(async () => {
+      throw new Error('source changed');
+    });
+
+    await expect(commands.submitSelfHandoffRun(request())).rejects.toThrow('source changed');
+
+    expect(captured.prepared.discard).toHaveBeenCalled();
+    expect(chats.has(TARGET_ID)).toBeFalse();
+  });
+
+  it('keeps refusing a colliding target when the identical request is retried', async () => {
+    const { commands, support, chats, scheduled } = harness();
+    chats.set(TARGET_ID, sourceChat({ agentId: 'codex' }));
+    // The ledger behaves for real: whatever the first call accepts is visible to
+    // the second. Accepting before the collision check would make the record its
+    // own provenance and let the retry schedule into the unrelated chat.
+    let stored;
+    support.deps.ledger.getRecord = mock(async () => stored);
+    support.deps.ledger.accept = mock(async (input) => {
+      stored = { key: 'k', chatId: input.chatId, turnId: input.turnId, status: 'accepted' };
+      return { kind: 'accepted', record: stored };
+    });
+
+    for (const attempt of [1, 2]) {
+      await expect(commands.submitSelfHandoffRun(request()), `attempt ${attempt}`)
+        .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    }
+    expect(scheduled).toHaveLength(0);
+    expect(support.deps.ledger.accept).not.toHaveBeenCalled();
   });
 
   it('returns its own already-created target on a lost-response retry', async () => {

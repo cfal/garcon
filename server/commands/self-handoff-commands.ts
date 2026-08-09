@@ -12,6 +12,7 @@
 import crypto from 'crypto';
 import type { ForkRunCommandResponse } from '../../common/chat-command-contracts.js';
 import type { SelfHandoffRunCommandRequest } from '../../common/self-handoff-contracts.js';
+import type { PreparedCarryOverSegment } from '../chats/carryover-transcript-store.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
@@ -73,6 +74,25 @@ export class SelfHandoffCommands {
     if (priorRecord && priorRecord.status !== 'accepted' && !retryingPreScheduleFailure) {
       this.support.throwRecordedExecutionFailure(priorRecord);
     }
+    // An existing target is only acceptable when a ledger record proves this
+    // operation created it. Provenance is the record existing at all, not its
+    // status: a lost-202 retry legitimately finds its own target already
+    // scheduled or finished.
+    //
+    // This must precede `ledger.accept`. Accepting first and rejecting after
+    // leaves an accepted record behind, and the identical retry then reads that
+    // record as its own provenance, skips creation because the target exists,
+    // and schedules the prompt into the unrelated chat the first call correctly
+    // refused. Both chat mutation locks are held for the whole method, so
+    // reading the registry here is safe.
+    const targetExists = this.deps.chats.getChat(input.chatId) !== null;
+    if (targetExists && !priorRecord) {
+      throw new CommandValidationError(
+        'IDEMPOTENCY_CONFLICT',
+        `Session already exists: ${input.chatId}`,
+        409,
+      );
+    }
     // `scheduleAcceptedHttpRun` owns conflict and duplicate handling, so accepting
     // the ledger entry is all this command needs to do with it. Images belong in
     // the payload because they change the dispatched turn; omitting them would
@@ -90,21 +110,10 @@ export class SelfHandoffCommands {
       },
       turnId,
     });
-    // An existing target is only acceptable when a ledger record proves this
-    // operation created it. Provenance is the record existing at all, not its
-    // status: a lost-202 retry legitimately finds its own target already
-    // scheduled or finished. Without the check, a fresh request would submit its
-    // prompt into an unrelated chat and report that as the continuation.
-    const targetExists = this.deps.chats.getChat(input.chatId) !== null;
-    if (targetExists && !priorRecord) {
-      throw new CommandValidationError(
-        'IDEMPOTENCY_CONFLICT',
-        `Session already exists: ${input.chatId}`,
-        409,
-      );
-    }
-
     let created = false;
+    // Held only while a failed preparation still owns the lease; `prepare` and
+    // `compensate` are the disjoint release sites.
+    let preparedSegment: PreparedCarryOverSegment | null = null;
     const result = await this.support.scheduleAcceptedHttpRun(
       ledger,
       {
@@ -123,25 +132,37 @@ export class SelfHandoffCommands {
         operation: 'fork-run',
         prepare: async (context) => {
           if (targetExists) return;
-          await this.#createContinuation(input, source, context.signal);
-          created = true;
+          // Both flags are set from inside, the moment `addChat` publishes the
+          // target, rather than after the call returns. Setting them here would
+          // skip compensation for a throw between registration and return.
+          await this.#createContinuation(input, source, context.signal, (prepared) => {
+            created = true;
+            preparedSegment = prepared;
+          });
+          // The target now durably references the segment, so the writer root
+          // that kept it alive during preparation can go.
+          preparedSegment?.releaseRoot();
+          preparedSegment = null;
         },
         compensate: async () => {
           if (!created) return;
           created = false;
-          try {
-            // Undoes the list placement and name as well as the registry entry.
-            // Leaving those behind would strand a named, ordered chat that no
-            // longer exists, which is what `rollbackForkTarget` avoids.
-            await this.deps.chats.removeChat(input.chatId);
-            await this.deps.settings.removeFromAllOrderLists(input.chatId);
-            await this.deps.settings.removeSessionName(input.chatId);
-          } catch (error) {
-            logger.warn('failed to remove continuation chat after failure', {
-              chatId: input.chatId,
-              error,
-            });
-          }
+          // Undoes the list placement and name as well as the registry entry.
+          // Leaving those behind would strand a named, ordered chat that no
+          // longer exists, which is what `rollbackForkTarget` avoids. Each step
+          // is independent so a failed removal does not suppress the rest.
+          await this.#bestEffort('removeChat', input.chatId, () =>
+            this.deps.chats.removeChat(input.chatId));
+          await this.#bestEffort('removeFromOrderLists', input.chatId, () =>
+            this.deps.settings.removeFromAllOrderLists(input.chatId));
+          await this.#bestEffort('removeSessionName', input.chatId, () =>
+            this.deps.settings.removeSessionName(input.chatId));
+          // Releases the writer root the failed preparation still holds; without
+          // this every later sweep retains the segment for the process lifetime.
+          // Not a discard: if removal failed the target is still a durable GC
+          // root, and if it succeeded the segment is now unreferenced.
+          preparedSegment?.releaseRoot();
+          preparedSegment = null;
         },
       },
     );
@@ -156,6 +177,7 @@ export class SelfHandoffCommands {
     input: SelfHandoffRunCommandRequest,
     source: ChatRegistryEntry,
     signal: AbortSignal,
+    onRegistered: (prepared: PreparedCarryOverSegment | null) => void,
   ): Promise<void> {
     const captured = await this.deps.handoffs.captureContinuationSegments({
       chatId: input.sourceChatId,
@@ -165,6 +187,7 @@ export class SelfHandoffCommands {
       clientRequestId: input.clientRequestId,
       signal,
     });
+    let registered = false;
     try {
       await captured.assertUnchanged(signal);
       const added = this.deps.chats.addChat({
@@ -194,6 +217,10 @@ export class SelfHandoffCommands {
           409,
         );
       }
+      // Ownership of the published target moves to `compensate` here. Every
+      // step below can throw, and only compensate can undo a registered chat.
+      registered = true;
+      onRegistered(captured.prepared);
       // Without this the continuation lands as an orphan in the chat list with
       // no name, unlike every other chat-creating path.
       await this.deps.settings.ensureInNormal(input.chatId);
@@ -203,10 +230,21 @@ export class SelfHandoffCommands {
       }
       const sourceName = this.deps.settings.getChatName(input.sourceChatId);
       if (sourceName) await this.deps.settings.setSessionName(input.chatId, sourceName);
-      captured.prepared?.releaseRoot();
     } catch (error) {
-      await captured.prepared?.discard();
+      // A registered target still references this segment, and compensate is
+      // what removes it; discarding here would leave a live registry entry
+      // pointing at deleted pages. Once the chat is gone the segment is
+      // unreferenced and the next sweep collects it.
+      if (!registered) await captured.prepared?.discard();
       throw error;
+    }
+  }
+
+  async #bestEffort(step: string, chatId: string, run: () => unknown): Promise<void> {
+    try {
+      await run();
+    } catch (error) {
+      logger.warn('failed to roll back continuation chat', { chatId, step, error });
     }
   }
 
