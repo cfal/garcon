@@ -1,10 +1,13 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
 import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
+import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type {
+  TranscriptSearchCatalogEntry,
   TranscriptSearchCatalogSnapshot,
   TranscriptSearchGeneration,
 } from './transcript-search-service.js';
+import { canonicalDigest } from './digest.js';
 
 export interface TranscriptIndexModuleRegistration {
   readonly agentId: string;
@@ -389,4 +392,22 @@ export function compareGeneration(
 ): number | null {
   if (left.epoch !== right.epoch) return null;
   return left.sequence - right.sequence;
+}
+
+// The receipt enters the descriptor only as its digest: the indexer persists
+// this hash, so the form is fixed, and the digest keeps it bounded. Host and
+// worker must hash the identical shape or every refresh event is dropped at
+// the comparison in the host.
+export function nativeSeedReceiptDigest(receipt: NativeSeedReceipt | null): string {
+  return canonicalDigest(receipt);
+}
+
+export function catalogSourceDescriptorHash(entry: TranscriptSearchCatalogEntry): string | null {
+  return entry.source.state === 'ready'
+    ? canonicalDigest({
+        source: entry.source.reference,
+        agentSessionId: entry.agentSessionId,
+        nativeSeedReceiptDigest: nativeSeedReceiptDigest(entry.nativeSeedReceipt),
+      })
+    : null;
 }

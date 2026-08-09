@@ -21,8 +21,12 @@ import type {
   ReaderRequest,
   TranscriptIndexModuleRegistration,
 } from './worker-protocol.js';
-import { compareGeneration, isIndexerEvent, isReaderEvent } from './worker-protocol.js';
-import { canonicalDigest } from './digest.js';
+import {
+  catalogSourceDescriptorHash,
+  compareGeneration,
+  isIndexerEvent,
+  isReaderEvent,
+} from './worker-protocol.js';
 import {
   SearchWorkerSupervisor,
   type WorkerRequestInput,
@@ -809,16 +813,6 @@ export class TranscriptSearchService {
     await this.#reader.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS);
     await this.#indexer.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS);
   }
-}
-
-function catalogSourceDescriptorHash(entry: TranscriptSearchCatalogEntry): string | null {
-  return entry.source.state === 'ready'
-    ? canonicalDigest({
-        source: entry.source.reference,
-        agentSessionId: entry.agentSessionId,
-        nativeSeedReceipt: entry.nativeSeedReceipt,
-      })
-    : null;
 }
 
 function workerEventError(event: IndexerEvent | ReaderEvent): Error | null {
