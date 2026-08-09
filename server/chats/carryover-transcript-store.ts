@@ -104,10 +104,12 @@ export class CarryOverTranscriptStore {
   readonly #indexCacheSize: number;
   readonly #indexCache = new Map<string, CarryOverSegmentIndex>();
   readonly #degradedSegments = new Set<string>();
-  readonly #writerRoots = new Set<string>();
+  readonly #writerRootCounts = new Map<string, number>();
   readonly #decodePage: typeof decodeCarryOverPage;
   readonly #onSegmentCommitted: (() => Promise<void>) | null;
   #gcPromise: Promise<void> = Promise.resolve();
+  // Serializes writer-root leases with the complete mark-and-delete sweep.
+  #rootStatePromise: Promise<void> = Promise.resolve();
   #segmentCommitPromise: Promise<void> = Promise.resolve();
 
   constructor(options: {
@@ -142,7 +144,7 @@ export class CarryOverTranscriptStore {
   }
 
   writerRoots(): ReadonlySet<string> {
-    return new Set(this.#writerRoots);
+    return new Set(this.#writerRootCounts.keys());
   }
 
   async cleanupTemporary(retainedSegmentIds: ReadonlySet<string>): Promise<number> {
@@ -167,7 +169,7 @@ export class CarryOverTranscriptStore {
   sweep(roots: () => ReadonlySet<string>): Promise<CarryOverSweepResult> {
     const operation = this.#gcPromise
       .catch(() => undefined)
-      .then(() => this.#sweepNow(roots()));
+      .then(() => this.#withStableWriterRoots(() => this.#sweepNow(roots())));
     this.#gcPromise = operation.then(() => undefined, () => undefined);
     return operation;
   }
@@ -181,10 +183,10 @@ export class CarryOverTranscriptStore {
       throw new Error('Carryover segment must contain at least one message');
     }
     const preparedDir = this.#preparedSegmentDir(request.operationId, id);
-    await fs.rm(preparedDir, { recursive: true, force: true });
-    await fs.mkdir(path.join(preparedDir, 'pages'), { recursive: true, mode: 0o700 });
-    this.#writerRoots.add(id);
+    await this.#mutateWriterRoots(() => this.#retainWriterRoot(id));
     try {
+      await fs.rm(preparedDir, { recursive: true, force: true });
+      await fs.mkdir(path.join(preparedDir, 'pages'), { recursive: true, mode: 0o700 });
       const pages = await encodeCarryOverPages(request.messages, request.signal);
       for (const page of pages) {
         request.signal?.throwIfAborted();
@@ -205,8 +207,8 @@ export class CarryOverTranscriptStore {
       await syncDirectory(preparedDir);
       return this.#preparedHandle(request.operationId, index, preparedDir);
     } catch (error) {
-      this.#writerRoots.delete(id);
       await fs.rm(preparedDir, { recursive: true, force: true }).catch(() => undefined);
+      await this.#mutateWriterRoots(() => this.#releaseWriterRoot(id));
       throw error;
     }
   }
@@ -531,15 +533,39 @@ export class CarryOverTranscriptStore {
           this.#degradedSegments.delete(index.id);
           await syncDirectory(this.#segmentsDir);
         }
-        this.#writerRoots.delete(index.id);
+        await this.#mutateWriterRoots(() => this.#releaseWriterRoot(index.id));
         released = true;
         await this.#removeEmptyOperationDir(operationId);
       },
       releaseRoot: () => {
-        this.#writerRoots.delete(index.id);
+        if (released) return;
         released = true;
+        void this.#mutateWriterRoots(() => this.#releaseWriterRoot(index.id));
       },
     };
+  }
+
+  #withStableWriterRoots<T>(operation: () => Promise<T>): Promise<T> {
+    return this.#mutateWriterRoots(operation);
+  }
+
+  #mutateWriterRoots<T>(mutation: () => T | Promise<T>): Promise<T> {
+    const operation = this.#rootStatePromise
+      .catch(() => undefined)
+      .then(mutation);
+    this.#rootStatePromise = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  #retainWriterRoot(id: string): void {
+    this.#writerRootCounts.set(id, (this.#writerRootCounts.get(id) ?? 0) + 1);
+  }
+
+  #releaseWriterRoot(id: string): void {
+    const count = this.#writerRootCounts.get(id);
+    if (count === undefined) return;
+    if (count === 1) this.#writerRootCounts.delete(id);
+    else this.#writerRootCounts.set(id, count - 1);
   }
 
   #recordSegmentCommitted(): Promise<void> {
@@ -581,7 +607,7 @@ export class CarryOverTranscriptStore {
 
   async #sweepNow(roots: ReadonlySet<string>): Promise<CarryOverSweepResult> {
     const startedAt = Date.now();
-    const reachable = new Set([...roots, ...this.#writerRoots].map(requireSegmentId));
+    const reachable = new Set([...roots, ...this.#writerRootCounts.keys()].map(requireSegmentId));
     let compressedBytes = 0;
     let declaredUncompressedBytes = 0;
     for (const id of reachable) {
@@ -603,7 +629,7 @@ export class CarryOverTranscriptStore {
       .filter((id) => !reachable.has(id));
     let removedSegmentCount = 0;
     for (const id of candidates) {
-      if (this.#writerRoots.has(id)) continue;
+      if (this.#writerRootCounts.has(id)) continue;
       const trashPath = path.join(this.#trashDir, `${id}-${crypto.randomUUID()}`);
       try {
         await fs.rename(this.#segmentDir(id), trashPath);
