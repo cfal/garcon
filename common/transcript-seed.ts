@@ -533,9 +533,9 @@ function renderLegacyMessageLine(message: ChatMessage): string {
     return `Assistant used ${toolName(message)}: ${legacyToolSummary(message)}`;
   }
   switch (message.type) {
-    case 'user-message': return `User: ${boundedCollapse(message.content)}`;
-    case 'assistant-message': return `Assistant: ${boundedCollapse(message.content)}`;
-    case 'tool-result': return `Tool result: ${boundedCollapse(stringifyLegacyToolResult(message.content))}`;
+    case 'user-message': return `User: ${legacyCollapse(message.content)}`;
+    case 'assistant-message': return `Assistant: ${legacyCollapse(message.content)}`;
+    case 'tool-result': return `Tool result: ${legacyCollapse(stringifyLegacyToolResult(message.content))}`;
     default: return '';
   }
 }
@@ -569,7 +569,7 @@ function toolSummary(message: ToolUseChatMessage): string {
 // `Assistant used exec: pytest -q tests/`, so an unmigrated workspace holding any
 // of those tools would fail its exact-prefix strip and archive a nested seed.
 function legacyToolSummary(message: ToolUseChatMessage): string {
-  return truncate(boundedCollapse(extractLegacyToolDetail(message)), TOOL_SUMMARY_MAX_CHARS);
+  return truncate(legacyCollapse(extractLegacyToolDetail(message)), TOOL_SUMMARY_MAX_CHARS);
 }
 
 function extractLegacyToolDetail(message: ToolUseChatMessage): string {
@@ -666,6 +666,15 @@ function isTextItem(value: unknown): value is { readonly text: string } {
   return typeof value === 'object'
     && value !== null
     && typeof (value as { text?: unknown }).text === 'string';
+}
+
+// The pre-migration renderer collapsed the whole string with no length bound.
+// `boundedCollapse` slices to 8,000 code units first, which changes the bytes for
+// any legacy message longer than that — and those bytes are what the v3 migration
+// hashes to strip a legacy seed. Frozen here for the same reason as
+// `stringifyLegacyToolResult` and `extractLegacyToolDetail`.
+function legacyCollapse(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function collapseWhitespace(value: string): string {

@@ -110,7 +110,7 @@ export async function convertLinkedHistory(input: {
   for (const [index, node] of chain.entries()) {
     const materialized = node.kind === 'materialized'
       ? node
-      : await readLinkedMaterialized(input.workspaceDir, node.sourceNodeId);
+      : await readLinkedMaterialized(input.workspaceDir, node.sourceNodeId, node.parentId);
     const messages = await readLinkedMessages(input.workspaceDir, materialized, materializedMessages);
     const visibleMessageCount = node.kind === 'prefix' ? node.messageCount : materialized.messageCount;
     if (visibleMessageCount > materialized.messageCount) {
@@ -396,10 +396,20 @@ async function readLinkedNode(workspaceDir: string, id: string): Promise<CarryOv
 async function readLinkedMaterialized(
   workspaceDir: string,
   id: string,
+  expectedParentId: string | null,
 ): Promise<MaterializedCarryOverNode> {
   const node = await readLinkedNode(workspaceDir, id);
   if (node.kind !== 'materialized') {
     throw new LegacyCarryOverDataError(`Linked carryover prefix source ${id} is not materialized`);
+  }
+  // The v4 runtime refused a prefix whose source sat on a different parent, and
+  // dropping that check here would silently import a hybrid chain: the
+  // transcript self-check cannot catch it, because it is assembled from the same
+  // wrongly resolved source.
+  if (node.parentId !== expectedParentId) {
+    throw new LegacyCarryOverDataError(
+      `Linked carryover prefix source ${id} does not share its prefix parent`,
+    );
   }
   return node;
 }
