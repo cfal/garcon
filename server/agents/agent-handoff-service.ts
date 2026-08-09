@@ -55,6 +55,125 @@ export class AgentHandoffService {
     readonly onCommitted?: (chatId: string) => void | Promise<void>;
   }) {}
 
+  // Archives a chat's live provider era into immutable segments and returns the
+  // refs a continuation should inherit. Shared with `/handoff`, which continues
+  // under the same agent in a new chat rather than switching owner in place, so
+  // both paths capture the source identically and only differ in what they do
+  // with the result. The caller owns the returned handle and must release or
+  // discard it, exactly as the in-place handoff does around its commit.
+  async captureContinuationSegments(input: {
+    readonly chatId: string;
+    readonly source: ChatRegistryEntry;
+    readonly target: { readonly agentId: string; readonly model: string };
+    readonly operationId: string;
+    readonly clientRequestId: string;
+    readonly signal: AbortSignal;
+  }): Promise<{
+    readonly segments: readonly CarryOverSegmentRef[];
+    readonly prepared: PreparedCarryOverSegment | null;
+    // Re-asserts that the provider transcript still matches what was captured.
+    // Resolves immediately when the source had no session to capture.
+    assertUnchanged(signal: AbortSignal): Promise<void>;
+  }> {
+    const source = input.source;
+    const integration = this.deps.integrations.get(source.agentId);
+    if (!integration) {
+      throw new DomainError(
+        'SOURCE_TRANSCRIPT_UNAVAILABLE',
+        'The source agent integration is unavailable.',
+        422,
+      );
+    }
+    await this.deps.carryOver.assertAvailable(source.carryOverSegments, input.signal);
+    const reference = toAgentChatReference(
+      integration,
+      input.chatId,
+      source,
+      this.deps.carryOver.revision(
+        source.carryOverSegments,
+        source.carryOverMigrationQuarantine,
+      ),
+    );
+    const snapshot = source.agentSessionId
+      ? await this.deps.settledCapture.loadStable({
+          chatId: input.chatId,
+          integration,
+          reference,
+          signal: input.signal,
+        })
+      : null;
+    const sanitized = sanitizeRecordedCarriedContext({
+      messages: snapshot?.messages ?? [],
+      receipt: source.nativeSeedReceipt,
+      agentSessionId: source.agentSessionId,
+    });
+    if (sanitized.kind === 'mismatch') {
+      throw new DomainError(
+        'CONTEXT_ENVELOPE_MISMATCH',
+        'The recorded carried-context envelope does not match this native session.',
+        422,
+      );
+    }
+
+    const capturedAt = new Date().toISOString();
+    let segments = reconcileArchivedTail(
+      source.carryOverSegments,
+      { agentId: source.agentId, model: source.model },
+      () => emptyEraId(input.chatId, input.operationId),
+      capturedAt,
+    );
+    const segmentId = handoffSegmentId(input.chatId, input.clientRequestId);
+    const trailingHandoff = { agentId: input.target.agentId, model: input.target.model };
+    let prepared: PreparedCarryOverSegment | null = null;
+    if (sanitized.messages.length > 0) {
+      prepared = await this.deps.carryOver.prepareSegment({
+        operationId: input.operationId,
+        id: segmentId,
+        seedSanitation: sanitized.kind,
+        messages: sanitized.messages,
+        signal: input.signal,
+      });
+      await prepared.commit();
+      const ref: CarryOverSegmentRef = {
+        id: prepared.id,
+        agentId: source.agentId,
+        model: source.model,
+        capturedAt,
+        storedMessageCount: prepared.messageCount,
+        visibleMessageCount: prepared.messageCount,
+        trailingHandoff,
+      };
+      segments = [...segments, ref];
+      await this.deps.carryOver.verifySegment(ref, input.signal);
+    } else if (source.agentSessionId || segments.length > 0) {
+      segments = [
+        ...segments,
+        {
+          id: segmentId,
+          agentId: source.agentId,
+          model: source.model,
+          capturedAt,
+          storedMessageCount: 0,
+          visibleMessageCount: 0,
+          trailingHandoff,
+        },
+      ];
+    }
+    return {
+      segments,
+      prepared,
+      assertUnchanged: async (signal) => {
+        if (!snapshot) return;
+        await this.deps.settledCapture.assertRevision({
+          integration,
+          reference,
+          expectedRevision: snapshot.revision,
+          signal,
+        });
+      },
+    };
+  }
+
   async resolveTarget(input: {
     readonly chat: ChatRegistryEntry;
     readonly handoff: AgentHandoffRequest;
@@ -230,96 +349,16 @@ export class AgentHandoffService {
 
           this.#requireUnchangedSource(input.chatId, sourceFence);
           const source = sourceSnapshot;
-          const integration = this.deps.integrations.get(source.agentId);
-          if (!integration) {
-            throw new DomainError(
-              'SOURCE_TRANSCRIPT_UNAVAILABLE',
-              'The source agent integration is unavailable.',
-              422,
-            );
-          }
-          await this.deps.carryOver.assertAvailable(
-            source.carryOverSegments,
-            context.signal,
-          );
-          const reference = toAgentChatReference(
-            integration,
-            input.chatId,
+          const captured = await this.captureContinuationSegments({
+            chatId: input.chatId,
             source,
-            this.deps.carryOver.revision(
-              source.carryOverSegments,
-              source.carryOverMigrationQuarantine,
-            ),
-          );
-          const snapshot = source.agentSessionId
-            ? await this.deps.settledCapture.loadStable({
-                chatId: input.chatId,
-                integration,
-                reference,
-                signal: context.signal,
-              })
-            : null;
-          const sanitized = sanitizeRecordedCarriedContext({
-            messages: snapshot?.messages ?? [],
-            receipt: source.nativeSeedReceipt,
-            agentSessionId: source.agentSessionId,
+            target: { agentId: input.target.agentId, model: input.target.model },
+            operationId,
+            clientRequestId: input.clientRequestId,
+            signal: context.signal,
           });
-          if (sanitized.kind === 'mismatch') {
-            throw new DomainError(
-              'CONTEXT_ENVELOPE_MISMATCH',
-              'The recorded carried-context envelope does not match this native session.',
-              422,
-            );
-          }
-
-          const capturedAt = new Date().toISOString();
-          let targetSegments = reconcileArchivedTail(
-            source.carryOverSegments,
-            { agentId: source.agentId, model: source.model },
-            () => emptyEraId(input.chatId, operationId),
-            capturedAt,
-          );
-          const segmentId = handoffSegmentId(input.chatId, input.clientRequestId);
-          if (sanitized.messages.length > 0) {
-            preparedSegment = await this.deps.carryOver.prepareSegment({
-              operationId,
-              id: segmentId,
-              seedSanitation: sanitized.kind,
-              messages: sanitized.messages,
-              signal: context.signal,
-            });
-            await preparedSegment.commit();
-            const ref: CarryOverSegmentRef = {
-              id: preparedSegment.id,
-              agentId: source.agentId,
-              model: source.model,
-              capturedAt,
-              storedMessageCount: preparedSegment.messageCount,
-              visibleMessageCount: preparedSegment.messageCount,
-              trailingHandoff: {
-                agentId: input.target.agentId,
-                model: input.target.model,
-              },
-            };
-            targetSegments = [...targetSegments, ref];
-            await this.deps.carryOver.verifySegment(ref, context.signal);
-          } else if (source.agentSessionId || targetSegments.length > 0) {
-            targetSegments = [
-              ...targetSegments,
-              {
-                id: segmentId,
-                agentId: source.agentId,
-                model: source.model,
-                capturedAt,
-                storedMessageCount: 0,
-                visibleMessageCount: 0,
-                trailingHandoff: {
-                  agentId: input.target.agentId,
-                  model: input.target.model,
-                },
-              },
-            ];
-          }
+          preparedSegment = captured.prepared;
+          const targetSegments = captured.segments;
 
           if (targetSegments.length > 0) {
             const tail = await this.deps.carryOver.loadProjectionSource({
@@ -344,14 +383,7 @@ export class AgentHandoffService {
             carryOverRevision: carryOverRevision(intent.target.carryOverSegments),
           };
           intentStarted = true;
-          if (snapshot) {
-            await this.deps.settledCapture.assertRevision({
-              integration,
-              reference,
-              expectedRevision: snapshot.revision,
-              signal: context.signal,
-            });
-          }
+          await captured.assertUnchanged(context.signal);
           this.#requireUnchangedSource(input.chatId, sourceFence);
           context.assertAdmissionActive();
           await this.deps.ownership.commitHandoff(operationId, context.assertAdmissionActive);
