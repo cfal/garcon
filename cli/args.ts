@@ -25,6 +25,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] send-async <chat-id> [--allow-steer] <message>
   garcon-cli [options] stop <chat-id>
   garcon-cli [connection options] repair-history accept-native <chat-id> --expected-revision <revision> --expected-epoch <epoch>
+  garcon-cli [connection options] repair-history retry-abandoned
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
 
@@ -162,13 +163,19 @@ export interface StatusCliCommand extends CliConnectionOptions {
   json: boolean;
 }
 
-export interface RepairHistoryCliCommand extends CliConnectionOptions {
-  kind: 'repair-history';
-  action: 'accept-native';
-  chatId: ChatId;
-  expectedCarryOverRevision: string;
-  expectedAgentOwnershipEpoch: string;
-}
+export type RepairHistoryCliCommand = CliConnectionOptions & (
+  | {
+      kind: 'repair-history';
+      action: 'accept-native';
+      chatId: ChatId;
+      expectedCarryOverRevision: string;
+      expectedAgentOwnershipEpoch: string;
+    }
+  | {
+      kind: 'repair-history';
+      action: 'retry-abandoned';
+    }
+);
 
 export type ParsedCliCommand =
   | { kind: 'help' }
@@ -379,8 +386,23 @@ function parseRepairHistory(
   ] as ReadonlyArray<readonly [string, string]>) {
     if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with repair-history`);
   }
+  if (parsed.positionals[1] === 'retry-abandoned') {
+    if (parsed.positionals.length !== 2) {
+      throw argumentError('repair-history retry-abandoned takes no chat ID');
+    }
+    if (values['expected-revision'] !== undefined || values['expected-epoch'] !== undefined) {
+      throw argumentError(
+        '--expected-revision and --expected-epoch cannot be used with repair-history retry-abandoned',
+      );
+    }
+    return {
+      kind: 'repair-history',
+      action: 'retry-abandoned',
+      ...connection,
+    };
+  }
   if (parsed.positionals.length !== 3 || parsed.positionals[1] !== 'accept-native') {
-    throw argumentError('repair-history requires: accept-native <chat-id>');
+    throw argumentError('repair-history requires: accept-native <chat-id> or retry-abandoned');
   }
   const expectedCarryOverRevision = nonEmptyOption(
     values['expected-revision'] as string | undefined,

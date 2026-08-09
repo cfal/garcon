@@ -150,6 +150,7 @@ function createRoutesFixture(overrides = {}) {
       pendingInputs,
       pathCache,
       chatListProjector,
+      ownership: overrides.ownership,
     }),
     ...(searchIndex === undefined ? {} : { searchIndex }),
     notifyHistoryChanged,
@@ -510,5 +511,53 @@ describe('POST /api/v1/chats/repair-history', () => {
       retryable: true,
     });
     expect(updateChat).not.toHaveBeenCalled();
+  });
+
+  it('retries abandoned transfer releases and reports content-free records', async () => {
+    const retriedRecord = {
+      operationId: 'op-1',
+      chatId: 'chat-a',
+      source: { agentId: 'claude' },
+      lastErrorCode: null,
+    };
+    const unresolvedRecord = {
+      operationId: 'op-2',
+      chatId: 'chat-b',
+      source: { agentId: 'codex' },
+      lastErrorCode: 'SOURCE_UNAVAILABLE',
+    };
+    const ownership = {
+      delete: mock(async () => true),
+      abandonedTransferCleanups: mock(() => [unresolvedRecord]),
+      retryAbandonedTransferCleanups: mock(async () => ({
+        retried: [retriedRecord, unresolvedRecord],
+        unresolved: [unresolvedRecord],
+      })),
+    };
+    const { routes } = createRoutesFixture({ ownership });
+    const input = request({ action: 'retry-abandoned-release' });
+
+    const response = await routes['/api/v1/chats/repair-history'].POST(input.request, input.url);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      action: 'retry-abandoned-release',
+      retried: [
+        { chatId: 'chat-a', agentId: 'claude', lastErrorCode: null },
+        { chatId: 'chat-b', agentId: 'codex', lastErrorCode: 'SOURCE_UNAVAILABLE' },
+      ],
+      unresolved: [{ chatId: 'chat-b', agentId: 'codex', lastErrorCode: 'SOURCE_UNAVAILABLE' }],
+    });
+    expect(ownership.retryAbandonedTransferCleanups).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an unknown repair-history action', async () => {
+    const { routes } = createRoutesFixture();
+    const input = request({ action: 'rewrite-history', chatId });
+
+    const response = await routes['/api/v1/chats/repair-history'].POST(input.request, input.url);
+
+    expect(response.status).toBe(400);
   });
 });

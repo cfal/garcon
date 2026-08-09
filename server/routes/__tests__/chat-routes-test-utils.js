@@ -76,6 +76,7 @@ export function createRouteCommandService({
 	pathCache,
 	chatListProjector,
   forkChatFileCopy: forkChatFileCopyOverride,
+  ownership,
 }) {
   return new ChatCommandService({
     chats: registry,
@@ -114,12 +115,14 @@ export function createRouteCommandService({
 		}),
 	},
     fileMentions: { resolve: async (command) => command },
-    ownership: {
+    ownership: ownership ?? {
       delete: async (chatId) => {
         if (!registry.getChat(chatId)) return false;
         registry.removeChat(chatId);
         return true;
       },
+      abandonedTransferCleanups: () => [],
+      retryAbandonedTransferCleanups: async () => ({ retried: [], abandoned: [] }),
     },
     chatIds: new ChatIdAllocator(registry),
 	pathCache: pathCache ?? createRoutePathCache(),

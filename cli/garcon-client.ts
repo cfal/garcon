@@ -6,13 +6,16 @@ import type {
   AgentStopResponse,
   AgentTurnCommandResponse,
   CommandAcceptedResponse,
-  RepairHistoryAcceptNativeRequest,
-  RepairHistoryAcceptNativeResponse,
   StartChatCommandRequest,
   SteerCommandRequest,
   SteerCommandResponse,
 } from '@garcon/common/chat-command-contracts';
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
+import type {
+  AbandonedReleaseMaintenanceRecord,
+  RepairHistoryRequest,
+  RepairHistoryResponse,
+} from '@garcon/common/chat-history-repair';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import type { ChatListResponse } from '@garcon/common/chat-list';
 import {
@@ -81,6 +84,16 @@ function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function isMaintenanceRecord(value: unknown): value is AbandonedReleaseMaintenanceRecord {
+  const candidate = record(value);
+  return Boolean(
+    candidate
+    && typeof candidate.chatId === 'string'
+    && typeof candidate.agentId === 'string'
+    && (candidate.lastErrorCode === null || typeof candidate.lastErrorCode === 'string')
+  );
 }
 
 async function responseBody(response: Response, phase: CliErrorPhase): Promise<unknown> {
@@ -323,9 +336,9 @@ export class GarconClient {
   }
 
   async repairHistory(
-    request: RepairHistoryAcceptNativeRequest,
+    request: RepairHistoryRequest,
     signal?: AbortSignal,
-  ): Promise<RepairHistoryAcceptNativeResponse> {
+  ): Promise<RepairHistoryResponse> {
     const value = await this.#request(
       'submission',
       'POST',
@@ -334,19 +347,38 @@ export class GarconClient {
       signal,
     );
     const response = record(value);
+    if (request.action === 'accept-native') {
+      if (
+        response?.success !== true
+        || response.action !== request.action
+        || response.chatId !== request.chatId
+        || typeof response.receiptCleared !== 'boolean'
+      ) {
+        throw new CliError('submission', 'server returned an invalid history repair response', 3);
+      }
+      return {
+        success: true,
+        action: 'accept-native',
+        chatId: request.chatId,
+        receiptCleared: response.receiptCleared,
+      };
+    }
+    const retried: unknown[] = Array.isArray(response?.retried) ? response.retried : [];
+    const unresolved: unknown[] = Array.isArray(response?.unresolved) ? response.unresolved : [];
     if (
       response?.success !== true
-      || response.action !== request.action
-      || response.chatId !== request.chatId
-      || typeof response.receiptCleared !== 'boolean'
+      || response.action !== 'retry-abandoned-release'
+      || !Array.isArray(response.retried)
+      || !Array.isArray(response.unresolved)
+      || ![...retried, ...unresolved].every(isMaintenanceRecord)
     ) {
       throw new CliError('submission', 'server returned an invalid history repair response', 3);
     }
     return {
       success: true,
-      action: 'accept-native',
-      chatId: request.chatId,
-      receiptCleared: response.receiptCleared,
+      action: 'retry-abandoned-release',
+      retried: retried as AbandonedReleaseMaintenanceRecord[],
+      unresolved: unresolved as AbandonedReleaseMaintenanceRecord[],
     };
   }
 

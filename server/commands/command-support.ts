@@ -160,7 +160,10 @@ export interface ChatCommandServiceDeps {
   chatIds: Pick<ChatIdAllocator, 'allocate'>;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
-  ownership: Pick<AgentOwnershipJournal, 'delete'>;
+  ownership: Pick<
+    AgentOwnershipJournal,
+    'delete' | 'abandonedTransferCleanups' | 'retryAbandonedTransferCleanups'
+  >;
   handoffs: Pick<
     AgentHandoffService,
     'resolveTarget' | 'createPreparation' | 'captureContinuationSegments'

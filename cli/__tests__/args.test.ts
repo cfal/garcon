@@ -371,6 +371,23 @@ describe('parseCliArgs', () => {
     expect(() => parseCliArgs(args, ENV)).toThrow('repair-history requires');
   });
 
+  test('parses a retry of abandoned releases', () => {
+    expect(parseCliArgs(['--workspace', 'work', 'repair-history', 'retry-abandoned'], ENV)).toEqual({
+      kind: 'repair-history',
+      action: 'retry-abandoned',
+      workspace: 'work',
+      configDir: '/home/test/.garcon',
+    });
+  });
+
+  test.each([
+    ['repair-history', 'retry-abandoned', CHAT_ID],
+    ['repair-history', 'retry-abandoned', '--expected-revision', 'carry-v5:abc'],
+    ['repair-history', 'retry-abandoned', '--expected-epoch', 'epoch-1'],
+  ])('rejects retry-abandoned with accept-native arguments: %j', (...args) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow('repair-history retry-abandoned');
+  });
+
   test('treats -- send-async and -- stop as new-chat prompts', () => {
     expect(parseCliArgs([
       '--agent', 'codex',

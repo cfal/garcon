@@ -334,6 +334,43 @@ export class AgentOwnershipJournal {
     return this.#scheduleCleanupWork(() => this.#drainTransferCleanupNow());
   }
 
+  // Abandoned records are the only reference that can reclaim provider residue,
+  // so they stay durable and visible to maintenance instead of being dropped.
+  abandonedTransferCleanups(): readonly SourceReleaseCleanup[] {
+    return this.#journal.transferCleanup.filter((cleanup) => cleanup.status === 'abandoned');
+  }
+
+  // Returns every abandoned record to pending with a fresh attempt budget and
+  // drains inline, serialized behind any in-flight cleanup work. `unresolved`
+  // reports every retried record still held after the drain, whatever its
+  // status: a failed release leaves it pending with one attempt spent, and a
+  // missing integration leaves it pending untouched. Reporting only
+  // re-abandoned records would tell maintenance nothing is stuck while the
+  // provider residue remains.
+  async retryAbandonedTransferCleanups(): Promise<{
+    readonly retried: readonly SourceReleaseCleanup[];
+    readonly unresolved: readonly SourceReleaseCleanup[];
+  }> {
+    return this.#scheduleCleanupWork(async () => {
+      const retried = this.abandonedTransferCleanups();
+      if (retried.length === 0) return { retried, unresolved: [] };
+      const reset = new Set(retried.map((cleanup) => cleanup.operationId));
+      await this.#mutate((current) => ({
+        ...current,
+        transferCleanup: current.transferCleanup.map((cleanup) => (
+          reset.has(cleanup.operationId)
+            ? { ...cleanup, status: 'pending' as const, attempts: 0, lastErrorCode: null }
+            : cleanup
+        )),
+      }));
+      await this.#drainTransferCleanupNow();
+      const unresolved = this.#journal.transferCleanup.filter(
+        (cleanup) => reset.has(cleanup.operationId),
+      );
+      return { retried, unresolved };
+    });
+  }
+
   async #recoverHandoff(intent: AgentHandoffIntent): Promise<void> {
     const current = this.#registry.getChat(intent.chatId);
     if (current && matchesHandoffSource(current, intent)) {

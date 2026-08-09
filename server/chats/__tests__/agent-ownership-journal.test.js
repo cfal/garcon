@@ -291,6 +291,57 @@ describe('AgentOwnershipJournal', () => {
     }]);
   });
 
+  it('abandons a transfer release after three provider failures and retries it through maintenance', async () => {
+    const registry = createRegistry({ chat: chat() });
+    let failing = true;
+    const release = mock(async () => {
+      if (failing) throw new Error('provider unavailable');
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+    });
+    await journal.initialize();
+    const intent = await begin(journal, registry);
+    await journal.commitHandoff(intent.operationId, () => {});
+
+    // One implicit drain from the commit plus explicit drains: three provider
+    // failures spend the attempt budget and abandon the record durably.
+    for (let drain = 0; drain < 3; drain += 1) {
+      await journal.drainTransferCleanup();
+    }
+    expect(journal.abandonedTransferCleanups()).toMatchObject([{
+      chatId: 'chat',
+      status: 'abandoned',
+      attempts: 3,
+      lastErrorCode: 'Error',
+    }]);
+    expect((await readJournal(workspaceDir)).transferCleanup).toMatchObject([{
+      status: 'abandoned',
+    }]);
+
+    // A failed maintenance retry keeps the reference rather than discarding
+    // it, and reports the record as unresolved even though it is only pending:
+    // the provider residue is still out there.
+    const failedRetry = await journal.retryAbandonedTransferCleanups();
+    expect(failedRetry.retried).toHaveLength(1);
+    expect(failedRetry.unresolved).toMatchObject([{ status: 'pending', attempts: 1 }]);
+    expect(journal.abandonedTransferCleanups()).toHaveLength(0);
+    expect((await readJournal(workspaceDir)).transferCleanup).toMatchObject([{
+      status: 'pending',
+      attempts: 1,
+    }]);
+
+    failing = false;
+    const retry = await journal.retryAbandonedTransferCleanups();
+    expect(retry.retried).toHaveLength(0);
+    expect(retry.unresolved).toHaveLength(0);
+    await journal.drainTransferCleanup();
+
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
+  });
+
   it('retires a handoff intent superseded by a newer ownership epoch', async () => {
     const registry = createRegistry({
       chat: chat('target-agent', {

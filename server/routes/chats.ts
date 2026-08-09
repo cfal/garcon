@@ -96,11 +96,14 @@ import {
   parseAgentStopCommandRequest,
   parseCompactCommandRequest,
   parseDeleteChatCommandRequest,
-  parseRepairHistoryAcceptNativeRequest,
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
 } from '../../common/chat-command-contracts.js';
 import { parseSelfHandoffRunCommandRequest } from '../../common/self-handoff-contracts.js';
+import {
+  parseRepairHistoryRequest,
+  type RepairHistoryRetryAbandonedResponse,
+} from '../../common/chat-history-repair.js';
 import {
   parsePermissionDecisionCommandRequest,
   parseProjectPathPatchRequest,
@@ -539,7 +542,21 @@ export default function createChatRoutes({
 
   async function postRepairHistory(body: unknown): Promise<Response> {
     try {
-      const input = parseCommandRequest(parseRepairHistoryAcceptNativeRequest, body);
+      const input = parseCommandRequest(parseRepairHistoryRequest, body);
+      if (input.action === 'retry-abandoned-release') {
+        const outcome = await commands.retryAbandonedTransferCleanups();
+        const record = (cleanup: { chatId: string; source: { agentId: string }; lastErrorCode: string | null }) => ({
+          chatId: cleanup.chatId,
+          agentId: cleanup.source.agentId,
+          lastErrorCode: cleanup.lastErrorCode,
+        });
+        return Response.json({
+          success: true,
+          action: 'retry-abandoned-release',
+          retried: outcome.retried.map(record),
+          unresolved: outcome.unresolved.map(record),
+        } satisfies RepairHistoryRetryAbandonedResponse);
+      }
       const current = registry.getChat(input.chatId);
       if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
       if (
