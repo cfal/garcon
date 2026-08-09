@@ -89,6 +89,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands: NonNullable<AgentIntegration['commands']>;
+  readonly compaction = null;
   readonly forking;
   readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;

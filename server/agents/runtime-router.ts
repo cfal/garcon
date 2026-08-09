@@ -364,6 +364,17 @@ export class AgentRuntimeRouter {
       modelEndpointId: entry.modelEndpointId,
     });
     await this.#validateEndpoint(integration, selection);
+    // Without the facet there is nothing to call. Sending the literal text
+    // `/compact` as a prompt used to look like success while leaving the context
+    // untouched and a stray message in the transcript.
+    const compaction = integration.compaction;
+    if (!compaction) {
+      throw new DomainError(
+        'VALIDATION_FAILED',
+        `${entry.agentId} does not support native compaction. Use /handoff to continue in a new chat instead.`,
+        400,
+      );
+    }
     const operation = operationIdentity(opts, 'agent-compact');
     const prompt = opts.instructions?.trim() ? `/compact ${opts.instructions.trim()}` : '/compact';
     this.#events.trackTurn(chatId, operationMetadata(operation));
@@ -375,8 +386,7 @@ export class AgentRuntimeRouter {
         prompt,
         attachments: [],
       };
-      if (integration.execution.compact) await integration.execution.compact(request);
-      else await integration.execution.resume(request);
+      await compaction.compact(request);
     } catch (error) {
       this.#events.clearTurn(chatId);
       throw error;

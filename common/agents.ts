@@ -40,6 +40,7 @@ export interface AgentCatalogEntry {
   label: string;
   description?: string;
   kind: "agent";
+  supportsCompact: boolean;
   supportsFork: boolean;
   supportsForkAtMessage: boolean;
   supportsForkWhileRunning: boolean;

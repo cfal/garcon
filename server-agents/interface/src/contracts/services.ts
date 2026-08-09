@@ -16,6 +16,7 @@ import type { ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
 import type { SlashCommand } from '@garcon/common/slash-commands';
 import type {
+  AgentCompactRequest,
   AgentExecutionContext,
   AgentResumeRequest,
   AgentStartedSession,
@@ -114,6 +115,15 @@ export interface AgentGoalControlRequest extends AgentResumeRequest {
 export interface AgentGoalControlHandoff {
   validate(): void;
   commit(): void;
+}
+
+// Native, in-place context compaction. A provider that implements this rewrites
+// its own session history and keeps everything the transcript does not capture:
+// cached reads, plan state, MCP connections, session permission grants. Absent
+// this facet the chat can still shed context through `/handoff`, which starts a
+// fresh session from a projected transcript instead.
+export interface AgentCompaction {
+  compact(request: AgentCompactRequest): Promise<void>;
 }
 
 export interface AgentForking {

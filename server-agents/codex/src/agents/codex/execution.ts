@@ -1,6 +1,7 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
+  type AgentCompactRequest,
   type AgentExecution,
   type AgentExecutionContext,
   type AgentGoalControlRequest,
@@ -121,9 +122,7 @@ export class CodexExecution implements AgentExecution {
     );
   }
 
-  async compact(
-    request: Parameters<NonNullable<AgentExecution['compact']>>[0],
-  ): Promise<void> {
+  async compact(request: AgentCompactRequest): Promise<void> {
     return this.#resume(request, (runtimeRequest) => this.runtime.compact(runtimeRequest));
   }
 
