@@ -50,6 +50,7 @@ export interface AgentRegistryServiceContract {
   supportsAuthLogin(agentId: string): boolean;
   supportsAuthLoginCompletion(agentId: string): boolean;
   supportsFork(agentId: string): boolean;
+  singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
   supportsForkAtMessage(agentId: string): boolean;
   supportsForkWhileRunning(agentId: string): boolean;
   supportsUpdateProjectPath(agentId: string): boolean;
@@ -188,6 +189,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   supportsAuthLogin(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.launchLogin); }
   supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
   supportsFork(agentId: string): boolean { return this.#directory.get(agentId)?.forking !== null; }
+  singleQueryRunsToolsWithoutPermission(agentId: string): boolean {
+    return this.#directory.get(agentId)?.singleQuery?.runsToolsWithoutPermission ?? false;
+  }
   supportsForkAtMessage(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsAtMessage ?? false; }
   supportsForkWhileRunning(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsWhileRunning ?? false; }
   supportsUpdateProjectPath(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsProjectPathUpdate ?? false; }

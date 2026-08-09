@@ -18,7 +18,7 @@ function transcript() {
   return messages;
 }
 
-function service({ enabled = true, respond, discovery = 'ok', selection } = {}) {
+function service({ enabled = true, respond, discovery = 'ok', selection, unsafeSingleQuery = false } = {}) {
   const warnings = [];
   const empty = discovery === 'empty';
   const fail = () => {
@@ -39,6 +39,7 @@ function service({ enabled = true, respond, discovery = 'ok', selection } = {}) 
         models: [{ id: 'haiku', label: 'Haiku' }],
       }])),
       runSingleQuery: async (prompt) => respond(prompt),
+      singleQueryRunsToolsWithoutPermission: () => unsafeSingleQuery,
     },
     getUiSettings: () => ({
       agentSwitchCompaction: enabled === null
@@ -108,6 +109,24 @@ describe('carryover compaction', () => {
     expect(context.prefix).toBe(deterministic(messages));
     expect(warnings).toHaveLength(1);
     expect(warnings[0].message).toContain('already fill');
+  });
+
+  it('refuses an integration whose one-shot runs tools without a permission gate', async () => {
+    // The prompt carries archived transcript text influenced by files, web
+    // content and tool output. Sending it to an unrestricted one-shot would let
+    // that text act on the workspace during summarization.
+    const { instance, warnings } = service({
+      unsafeSingleQuery: true,
+      respond: async () => {
+        throw new Error('no model should be queried');
+      },
+    });
+
+    const context = await run(instance);
+
+    expect(context.prefix).toBe(deterministic());
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('without a permission gate');
   });
 
   it('warns when it is enabled but no model can be resolved', async () => {

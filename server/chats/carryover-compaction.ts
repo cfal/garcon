@@ -29,6 +29,7 @@ const SUMMARY_OPEN = '<summary>';
 const SUMMARY_CLOSE = '</summary>';
 
 export interface CarryOverCompactionAgents {
+  singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
@@ -91,6 +92,18 @@ export class CarryOverCompactionService {
     // otherwise pay the full carryover cost with no indication of why.
     if (selection === UNRESOLVED) {
       this.#warnUnresolved(input, 'no generation-capable agent and model could be resolved');
+      return direct();
+    }
+    // The prompt carries archived transcript text, which is influenced by files,
+    // web content and tool output the source agent encountered. An integration
+    // whose one-shot runs tools with no permission gate would let that text act
+    // on the workspace during what the product presents as summarization, so it
+    // is refused rather than trusted to ignore instructions.
+    if (this.deps.agents.singleQueryRunsToolsWithoutPermission(selection.agentId)) {
+      this.deps.warn(
+        input.chatId,
+        `Agent-switch compaction was skipped: ${selection.agentId} runs one-shot queries without a permission gate, and the transcript being summarized is not trusted input. The full transcript was carried over instead. Choose a different compaction model in Settings.`,
+      );
       return direct();
     }
 
