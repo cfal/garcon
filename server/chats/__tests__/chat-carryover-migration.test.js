@@ -10,8 +10,8 @@ import {
   finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
-  rollbackLegacyCarryOverMigration,
 } from '../chat-carryover-migration.ts';
+import { rollbackLegacyCarryOverMigration } from '../chat-carryover-rollback.ts';
 import { migratedTranscriptMatches } from '../legacy-carryover-import.ts';
 
 const CHAT_ID = '1786077000000001';
@@ -362,14 +362,15 @@ describe('legacy carryover migration', () => {
       currentModel: 'opus',
     });
     await migrateLegacyCarryOverWorkspace(workspaceDir);
-    // Crash window: the legacy journal and workspace version are restored, the
-    // registry is still v5, and the resume marker was written. This used to
-    // fail the next boot with 'Invalid migrated ownership journal'.
+    // Crash window: the legacy journal is restored and the resume marker was
+    // written, but the workspace version is still 5, so a version-gated
+    // recovery would never run. This used to fail the next boot with 'Invalid
+    // migrated ownership journal'.
     await fs.writeFile(
       path.join(workspaceDir, 'agent-ownership-journal.json'),
       JSON.stringify({ version: 1, intents: [] }),
     );
-    await writeWorkspaceVersion(3);
+    await writeWorkspaceVersion(5);
     await markRollingBack();
 
     expect(await migrateLegacyCarryOverWorkspace(workspaceDir)).toBe(true);

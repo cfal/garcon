@@ -92,8 +92,11 @@ import {
   finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
-  rollbackLegacyCarryOverMigration,
 } from './chats/chat-carryover-migration.js';
+import {
+  resumeInterruptedCarryOverRollback,
+  rollbackLegacyCarryOverMigration,
+} from './chats/chat-carryover-rollback.js';
 import { OrderedChatTranscriptReader } from './chats/ordered-chat-transcript-reader.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { SettledNativeCaptureService } from './agents/settled-native-capture.js';
@@ -161,6 +164,11 @@ export async function startServer(): Promise<void> {
       workspaceLease = null;
       return;
     }
+    // Rollback recovery answers to the migration marker, not the workspace
+    // version, so it runs before the version-gated ladder opens: a crash
+    // mid-rollback can leave restored legacy files beside a version-5 marker,
+    // which the ladder would never hand to its callback.
+    await resumeInterruptedCarryOverRollback(workspaceDir);
     const runtimeState = createServerRuntimeState(workspaceDir);
     const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
     await workspaceMigrations.run('chat-id-migration', async () => {
@@ -228,9 +236,8 @@ export async function startServer(): Promise<void> {
       settleOwnershipIntents: async () => undefined,
     }));
     await workspaceMigrations.run('carryover-node-migration', async () => undefined);
-    let carryOverRollbackResumed = false;
     await workspaceMigrations.run('carryover-segment-migration', async () => {
-      carryOverRollbackResumed = await migrateLegacyCarryOverWorkspace(workspaceDir);
+      await migrateLegacyCarryOverWorkspace(workspaceDir);
     });
     await chatRegistry.init();
     await settings.init();
@@ -248,9 +255,10 @@ export async function startServer(): Promise<void> {
     await carryOverGarbageCollector.initialize();
     chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
     await workspaceMigrations.finish();
-    // A resumed rollback re-migrated this boot; keep its backups so the fresh
-    // marker's rollback window matches a first migration's.
-    if (workspaceMigrations.initialVersion >= 5 && !carryOverRollbackResumed) {
+    // A resumed rollback restores the source workspace version before the
+    // ladder opens, so its re-migration skips this the way a first migration
+    // does and keeps its rollback window.
+    if (workspaceMigrations.initialVersion >= 5) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
     const apiProviders = new ApiProviderService({
