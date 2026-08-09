@@ -391,6 +391,53 @@ describe('legacy carryover migration', () => {
       .rejects.toThrow('unsafe after new-format history was created');
   });
 
+  it('releases a transfer whose chat was deleted instead of aborting the boot', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'codex',
+      currentModel: 'gpt',
+    });
+    // A pending v1 transfer for a chat that no longer exists. This used to throw
+    // a plain Error outside the per-chat quarantine loop, so one stale entry
+    // failed the whole migration and the workspace could not boot.
+    await fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), JSON.stringify({
+      version: 1,
+      intents: [{
+        id: 'legacy-transfer',
+        kind: 'transfer',
+        chatId: '1786077000009999',
+        oldReference: {
+          chatId: '1786077000009999',
+          agentId: 'claude',
+          agentSessionId: 'claude-session',
+          projectPath: '/workspace/project',
+          model: 'opus',
+          nativeSession: null,
+          carryOverRevision: 'carry-v1:1',
+          settings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+        },
+        oldEpoch: 'claude-epoch',
+        targetAgentId: 'pi',
+        targetEpoch: 'pi-epoch',
+        createdAt: TIMESTAMP,
+      }],
+    }));
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    const journal = await readJson('agent-ownership-journal.json');
+    expect(journal.version).toBe(3);
+    // Converted to a delete intent so the orphaned provider session is still
+    // releasable, matching how the delete branch already handled this state.
+    expect(journal.ownershipIntents).toHaveLength(1);
+    expect(journal.ownershipIntents[0]).toMatchObject({
+      kind: 'delete',
+      chatId: '1786077000009999',
+      phase: 'registry-removed',
+    });
+    expect(journal.ownershipIntents[0].releaseReferences).toHaveLength(1);
+  });
+
   it('rejects transcripts that differ from the committed segments', async () => {
     await writeLegacyWorkspace({
       segments: [

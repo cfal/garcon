@@ -207,7 +207,25 @@ export async function migrateLegacyOwnershipJournal(input: {
           lastErrorCode: null,
           createdAt: requiredString(raw.createdAt, 'legacy transfer timestamp'),
         });
+      } else if (!current) {
+        // The chat was deleted before this transfer's cleanup drained. Converting
+        // rather than throwing keeps the orphaned provider session releasable and
+        // stops one stale journal entry from aborting the whole migration, which
+        // runs before the server can boot. The delete branch below already treats
+        // the identical `!current` case this way.
+        ownershipIntents.push({
+          version: 2,
+          operationId: requiredString(raw.id, 'legacy transfer ID'),
+          kind: 'delete',
+          chatId: raw.chatId,
+          phase: 'registry-removed',
+          sourceEpoch: typeof raw.oldEpoch === 'string' ? raw.oldEpoch : null,
+          releaseReferences: [source],
+          createdAt: requiredString(raw.createdAt, 'legacy transfer timestamp'),
+        });
       } else if (!matchesLegacySource(current, raw)) {
+        // A chat that was handed off again is genuinely ambiguous, so this stays
+        // loud rather than guessing which reference is current.
         throw new Error(`Legacy transfer ownership mismatch for ${raw.chatId}`);
       }
     } else if (raw.kind === 'delete') {
