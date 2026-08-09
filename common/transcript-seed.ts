@@ -127,14 +127,14 @@ export function createCarryoverTranscript(
   // displacing the very instruction it was summarizing for, and because the
   // result fits, no caller can detect the loss. The summary is still never
   // dropped, only bounded by what the floor leaves behind.
-  const asksByAge = entries.filter((entry) => entry.level === 0);
   const frame = opening.length + closing.length + 2 + TRUNCATION_ELEMENT.length + 1;
-  // Both ends of the ask range are reserved, matching what `admitLevel` already
-  // protects when no summary is present. A summary is a model's account of the
-  // older material and may omit the objective outright, so it does not stand in
-  // for either request.
-  const reserved = [...new Set([asksByAge.at(-1), asksByAge[0]])]
-    .reduce((total, ask) => total + (ask ? 1 + ask.text.length : 0), 0);
+  // The whole spine is reserved, not just its asks. The only caller that supplies
+  // a summary passes exactly the pinned turns as `messages`, and those turns are
+  // promised verbatim: a summary that fits the remaining room would otherwise
+  // displace the commands, reads and conclusions inside them while still landing
+  // under the ceiling, so nothing downstream could tell. Costing every entry
+  // matches the design's `CARRYOVER_INJECTION_MAX_CHARS - spine.length` ceiling.
+  const reserved = entries.length > 0 ? body.length + 1 : 0;
   const fittedSummary = options.summary
     ? fitElement(
       '    <summary>',

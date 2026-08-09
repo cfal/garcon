@@ -118,6 +118,29 @@ describe('transcript seed contract', () => {
     expect(context.prefix).toContain('<summary>');
   });
 
+  test('never lets a summary displace the pinned turns it sits beside', () => {
+    // A spine that fits on its own, and a summary that only fits if part of that
+    // spine is dropped. Reserving just the asks left the newest turn's commands
+    // silently missing while the result still landed under the ceiling.
+    const messages = [];
+    for (const turn of [0, 1, 2]) messages.push(new UserMessage(TIME, `request ${turn}`));
+    for (let index = 0; index < 200; index += 1) {
+      messages.push(new BashToolUseMessage(TIME, `t${index}`, `command-${index} ${'x'.repeat(140)}`));
+    }
+
+    const context = createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS, {
+      summary: 'x'.repeat(225_000),
+    });
+
+    expect(context.prefix.length).toBeLessThanOrEqual(CARRYOVER_INJECTION_MAX_CHARS);
+    // Either the spine is complete, or the caller is told the summary was cut so
+    // it can fall back. Silently dropping part of the spine is the defect.
+    expect(context.summaryTruncated).toBeTrue();
+    expect(context.prefix).toContain('command-0');
+    expect(context.prefix).toContain('command-199');
+    expect(context.prefix).toContain('<user>request 0</user>');
+  });
+
   test('aggregates file access per turn and never carries results', () => {
     const context = createCarryoverTranscript([
       new UserMessage(TIME, 'fix the redirect'),

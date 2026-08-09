@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
+import { AssistantMessage, BashToolUseMessage, UserMessage } from '../../../common/chat-types.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
@@ -60,11 +60,56 @@ function run(instance, messages = transcript(), signal) {
   });
 }
 
+// Three turns whose newest carries the bulk, so the pinned spine is genuinely
+// large rather than being three short asks.
+function spineOf(commands) {
+  const messages = [];
+  // Five turns, so the three-turn spine still leaves older material to summarize.
+  for (const turn of [0, 1, 2, 3, 4]) {
+    messages.push(new UserMessage(TIME, `request ${turn}`));
+    messages.push(new AssistantMessage(TIME, `answer ${turn}`));
+  }
+  for (let index = 0; index < commands; index += 1) {
+    messages.push(new BashToolUseMessage(TIME, `t${index}`, `command-${index} ${'x'.repeat(140)}`));
+  }
+  return messages;
+}
+
 function deterministic(messages = transcript()) {
   return createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS).prefix;
 }
 
 describe('carryover compaction', () => {
+  it('falls back rather than clipping the pinned turns', async () => {
+    // A spine that fits on its own beside a summary that only fits if part of it
+    // is dropped. The verbatim guarantee wins and the operator is told why.
+    const messages = spineOf(200);
+    const { instance, warnings } = service({
+      respond: async () => `<summary>${'x'.repeat(225_000)}</summary>`,
+    });
+
+    const context = await run(instance, messages);
+
+    expect(context.prefix).toBe(deterministic(messages));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('too large to carry');
+  });
+
+  it('skips the query when the pinned turns already fill the budget', async () => {
+    const messages = spineOf(2_000);
+    const { instance, warnings } = service({
+      respond: async () => {
+        throw new Error('no model should be queried');
+      },
+    });
+
+    const context = await run(instance, messages);
+
+    expect(context.prefix).toBe(deterministic(messages));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('already fill');
+  });
+
   it('warns when it is enabled but no model can be resolved', async () => {
     // Discovery turns provider failures into empty catalogs, so an operator who
     // opted in would otherwise silently pay the full carryover cost.

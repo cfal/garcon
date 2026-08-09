@@ -102,6 +102,18 @@ export class CarryOverCompactionService {
     const older = input.messages.slice(0, boundary);
     const assembled = createCarryoverTranscript(older, CARRYOVER_COMPACTION_INPUT_MAX_CHARS);
     if (!assembled) return direct();
+    // The spine is reserved whole, so a spine that already fills the injection
+    // budget leaves no room for any summary. Probing with a one-character one
+    // detects that before spending a half-megabyte query that could only be
+    // discarded.
+    if (createCarryoverTranscript(spine, CARRYOVER_INJECTION_MAX_CHARS, { summary: '.' })
+      ?.summaryTruncated) {
+      this.deps.warn(
+        input.chatId,
+        `Agent-switch compaction was skipped: the most recent turns already fill the ${CARRYOVER_INJECTION_MAX_CHARS} character limit. The full transcript was carried over instead.`,
+      );
+      return direct();
+    }
 
     try {
       const summary = await this.deps.agents.runSingleQuery(
