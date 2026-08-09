@@ -627,6 +627,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     }
     const candidate = { ...existing, ...normalizedPatch };
     assertSeedReceiptBinding(candidate);
+    const previous = { ...existing };
     const previousAgentSessionId = existing.agentSessionId;
     const previousTags = existing.tags;
     Object.assign(existing, normalizedPatch);
@@ -634,16 +635,29 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       this.#unsetAgentSessionIdIndex(id, previousAgentSessionId);
       this.#setAgentSessionIdIndex(id, existing.agentSessionId);
     }
-    if ('lastReadAt' in normalizedPatch) {
-      this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
-    }
-    if ('tags' in normalizedPatch && !isDeepStrictEqual(existing.tags, previousTags)) {
-      this.#emitChatTagsUpdated(id);
-    }
+    const emitUpdateEvents = (): void => {
+      if ('lastReadAt' in normalizedPatch) {
+        this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
+      }
+      if ('tags' in normalizedPatch && !isDeepStrictEqual(existing.tags, previousTags)) {
+        this.#emitChatTagsUpdated(id);
+      }
+    };
     const resolved = { id, ...existing };
     if (options.flush) {
-      return this.#flushRegistrySave().then(() => resolved);
+      return this.#flushRegistrySave().then(
+        () => {
+          emitUpdateEvents();
+          return resolved;
+        },
+        (error: unknown) => {
+          registry.sessions[id] = previous;
+          this.#rebuildAgentSessionIdIndex();
+          throw error;
+        },
+      );
     }
+    emitUpdateEvents();
     this.#scheduleRegistrySave();
     return resolved;
   }

@@ -7,6 +7,7 @@ import {
   emptyOwnershipJournalV3,
 } from '../agent-ownership-journal.js';
 import { carryOverRevision } from '../carryover-segments.js';
+import { ChatRegistry } from '../store.ts';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 
@@ -170,6 +171,49 @@ describe('AgentOwnershipJournal', () => {
     expect(registry.getChat('chat').agentId).toBe('source-agent');
     expect(release).not.toHaveBeenCalled();
     expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
+  });
+
+  it('compensates a real registry flush failure without releasing the source', async () => {
+    const chatId = '1786000000000001';
+    const registry = new ChatRegistry(workspaceDir);
+    await registry.init();
+    registry.addChat({ id: chatId, ...chat() });
+    await registry.flush();
+    const release = mock(async () => {});
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+    });
+    await journal.initialize();
+    const intent = await begin(journal, registry, {
+      chatId,
+      source: registry.getChat(chatId),
+    });
+    const saveRegistry = registry.saveRegistry.bind(registry);
+    registry.saveRegistry = mock(() => Promise.reject(new Error('registry write failed')));
+
+    await expect(journal.commitHandoff(intent.operationId, () => {}))
+      .rejects.toThrow('registry write failed');
+    await journal.compensateHandoff(intent.operationId);
+    await journal.drainTransferCleanup();
+
+    expect(registry.getChat(chatId)).toMatchObject({
+      agentId: 'source-agent',
+      carryOverSegments: [],
+      agentSessionId: 'source-agent-session',
+    });
+    expect(release).not.toHaveBeenCalled();
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
+
+    registry.saveRegistry = saveRegistry;
+    const restarted = new ChatRegistry(workspaceDir);
+    await restarted.init();
+    expect(restarted.getChat(chatId)).toMatchObject({
+      agentId: 'source-agent',
+      carryOverSegments: [],
+      agentSessionId: 'source-agent-session',
+    });
   });
 
   it('serializes deletion behind an in-flight transfer release', async () => {

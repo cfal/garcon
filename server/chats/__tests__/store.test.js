@@ -146,6 +146,46 @@ describe('ChatRegistry', () => {
     expect(persisted.sessions[CHAT_ID].nativePath).toBeUndefined();
   });
 
+  it('restores immediate patches and defers events when persistence fails', async () => {
+    registry.addChat(newChat({ agentSessionId: 'native-1', tags: ['source'] }));
+    await registry.updateChat(CHAT_ID, {
+      lastReadAt: '2026-08-09T09:00:00.000Z',
+    }, { flush: true });
+    const readUpdated = mock(() => undefined);
+    const tagsUpdated = mock(() => undefined);
+    registry.onChatReadUpdated(readUpdated);
+    registry.onChatTagsUpdated(tagsUpdated);
+    const saveRegistry = registry.saveRegistry.bind(registry);
+    registry.saveRegistry = mock(() => Promise.reject(new Error('disk full')));
+
+    await expect(registry.updateChat(CHAT_ID, {
+      agentSessionId: 'native-2',
+      tags: ['target'],
+      lastReadAt: '2026-08-09T10:00:00.000Z',
+    }, { flush: true })).rejects.toThrow('disk full');
+
+    expect(registry.getChat(CHAT_ID)).toMatchObject({
+      agentSessionId: 'native-1',
+      tags: ['source'],
+      lastReadAt: '2026-08-09T09:00:00.000Z',
+    });
+    expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+    expect(registry.getChatByAgentSessionId('native-2')).toBeNull();
+    expect(readUpdated).not.toHaveBeenCalled();
+    expect(tagsUpdated).not.toHaveBeenCalled();
+
+    registry.saveRegistry = saveRegistry;
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.getChat(CHAT_ID)).toMatchObject({
+      agentSessionId: 'native-1',
+      tags: ['source'],
+      lastReadAt: '2026-08-09T09:00:00.000Z',
+    });
+    expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+    expect(registry.getChatByAgentSessionId('native-2')).toBeNull();
+  });
+
   it('persists dedicated project-path updates and emits only canonical metadata', async () => {
     registry.addChat(newChat({ nativeSession: nativeSession('test') }));
     const listener = mock(() => undefined);
