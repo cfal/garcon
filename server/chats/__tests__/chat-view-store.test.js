@@ -384,6 +384,51 @@ describe('ChatViewStore', () => {
     expect(page.messages[1].message).toBeInstanceOf(ErrorMessage);
   });
 
+  it('retains operational notices across native reconciliation and reload', async () => {
+    const store = new ChatViewStore(() => false);
+    const prompt = user('continue here');
+    const nativeMessages = [prompt, assistant('working'), assistant('done')];
+    const warning = new ErrorMessage(TS, 'Carryover compaction failed; using fallback.');
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [prompt],
+    );
+    await store.appendOperationalNotice('chat-1', warning);
+    await store.appendToCurrentOrProvisional('chat-1', [
+      new ErrorMessage(TS, 'Superseded provisional error.'),
+    ]);
+
+    await store.reconcileNativeSnapshot('chat-1', nativeReconciliation(nativeMessages));
+
+    expect(contents(store.readPage('chat-1', 20))).toEqual([
+      'continue here',
+      'working',
+      'done',
+      'Carryover compaction failed; using fallback.',
+    ]);
+
+    store.invalidate('chat-1');
+    const reloaded = await store.getOrCreateMessages(
+      'chat-1',
+      snapshotLoader(async () => nativeMessages),
+    );
+    expect(reloaded.map((message) => message.content)).toEqual([
+      'continue here',
+      'working',
+      'done',
+      'Carryover compaction failed; using fallback.',
+    ]);
+
+    store.deleteChatView('chat-1');
+    const afterDeletion = await store.getOrCreatePage(
+      'chat-1',
+      transcriptLoader(async () => nativeMessages),
+      20,
+    );
+    expect(contents(afterDeletion)).toEqual(['continue here', 'working', 'done']);
+  });
+
   it('eviction causes the next access to mint a new generation', async () => {
     const store = new ChatViewStore(() => false);
     const first = await store.getOrCreatePage('chat-1', fullLoader(async () => [assistant('old')]), 20);

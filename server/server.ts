@@ -330,9 +330,10 @@ export async function startServer(): Promise<void> {
     );
     const chatViews = new ChatViewStore(ownsExecution);
     carryOverWarnings = (chatId, message) => {
-      void chatViews.appendToCurrentOrProvisional(chatId, [
+      void chatViews.appendOperationalNotice(
+        chatId,
         new ErrorMessage(new Date().toISOString(), message),
-      ]).catch((error: unknown) => {
+      ).catch((error: unknown) => {
         logger.warn('carryover compaction notice failed:', errorMessage(error));
       });
     };
