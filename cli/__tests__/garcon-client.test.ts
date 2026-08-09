@@ -221,7 +221,12 @@ describe('GarconClient', () => {
   });
 
   test('submits an abandoned-release retry to the maintenance endpoint', async () => {
-    let observed: { url: string; method: string | undefined; body: unknown } | undefined;
+    let observed: {
+      url: string;
+      method: string | undefined;
+      body: unknown;
+      hasDeadline: boolean;
+    } | undefined;
     const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
@@ -229,6 +234,7 @@ describe('GarconClient', () => {
           url: String(input),
           method: init?.method,
           body: JSON.parse(String(init?.body)),
+          hasDeadline: init?.signal !== undefined,
         };
         return Response.json({
           success: true,
@@ -249,6 +255,9 @@ describe('GarconClient', () => {
       url: `${connection.baseUrl}/api/v1/chats/repair-history`,
       method: 'POST',
       body: { action: 'retry-abandoned-release' },
+      // The route drains every retained record serially, so no fixed client
+      // deadline fits; only the caller's own signal may cancel.
+      hasDeadline: false,
     });
   });
 

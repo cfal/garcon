@@ -345,6 +345,9 @@ export class GarconClient {
       '/api/v1/chats/repair-history',
       request,
       signal,
+      // The route drains every retained cleanup serially and each provider
+      // release may take its own timeout, so no fixed client deadline fits.
+      request.action === 'retry-abandoned-release' ? null : REQUEST_TIMEOUT_MS,
     );
     const response = record(value);
     if (request.action === 'accept-native') {
@@ -506,10 +509,14 @@ export class GarconClient {
     route: string,
     body: unknown,
     signal?: AbortSignal,
-    timeoutMs = REQUEST_TIMEOUT_MS,
+    timeoutMs: number | null = REQUEST_TIMEOUT_MS,
   ): Promise<unknown> {
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    // A null deadline is for maintenance calls whose server work is unbounded
+    // (a serial per-record drain); the caller's own signal still cancels.
+    const timeoutSignal = timeoutMs === null ? null : AbortSignal.timeout(timeoutMs);
+    const requestSignal = timeoutSignal
+      ? (signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal)
+      : signal;
     let response: Response;
     try {
       response = await this.#fetch(`${this.#baseUrl}${route}`, {
