@@ -15,12 +15,16 @@ describe('cgroup memory allowance', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  async function fakeCgroup(scope, { max, current }) {
-    await fs.writeFile(path.join(dir, 'self-cgroup'), `0::${scope}\n`);
+  async function writeScope(scope, { max, current }) {
     const scopeDir = path.join(dir, 'mount', scope);
     await fs.mkdir(scopeDir, { recursive: true });
     await fs.writeFile(path.join(scopeDir, 'memory.max'), `${max}\n`);
     await fs.writeFile(path.join(scopeDir, 'memory.current'), `${current}\n`);
+  }
+
+  async function fakeCgroup(scope, allowance) {
+    await fs.writeFile(path.join(dir, 'self-cgroup'), `0::${scope}\n`);
+    await writeScope(scope, allowance);
     return { selfCgroup: path.join(dir, 'self-cgroup'), mount: path.join(dir, 'mount') };
   }
 
@@ -52,5 +56,19 @@ describe('cgroup memory allowance', () => {
     const roots = await fakeCgroup('/user.slice/app.scope', { max: 1_000, current: 5_000 });
 
     expect(await cgroupAvailableBytes(roots)).toBe(0);
+  });
+
+  it('uses a finite parent when the process cgroup is unbounded', async () => {
+    const roots = await fakeCgroup('/parent/leaf', { max: 'max', current: 100 });
+    await writeScope('/parent', { max: 1_000, current: 900 });
+
+    expect(await cgroupAvailableBytes(roots)).toBe(100);
+  });
+
+  it('uses the smallest remaining allowance across the hierarchy', async () => {
+    const roots = await fakeCgroup('/parent/leaf', { max: 5_000, current: 1_000 });
+    await writeScope('/parent', { max: 1_000, current: 900 });
+
+    expect(await cgroupAvailableBytes(roots)).toBe(100);
   });
 });
