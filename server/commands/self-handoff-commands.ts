@@ -51,15 +51,6 @@ export class SelfHandoffCommands {
       input.clientMessageId,
       'clientMessageId',
     );
-    const source = this.#requireSource(input.sourceChatId);
-    await this.support.assertAttachmentsSupported({
-      agentId: source.agentId,
-      model: source.model,
-      apiProviderId: source.apiProviderId,
-      modelEndpointId: source.modelEndpointId,
-      attachments: input.images ?? [],
-    });
-
     const turnId = crypto.randomUUID();
     // A recorded terminal failure is re-raised with its real cause, and a
     // pre-schedule failure is retried, matching ForkCommands. Without this a
@@ -100,6 +91,22 @@ export class SelfHandoffCommands {
         `Session already exists: ${input.chatId}`,
         409,
       );
+    }
+    // Live source state is only consulted for work that still has to be done.
+    // A replay whose target already exists is answered from the ledger, matching
+    // ForkCommands: the handoff succeeded, and deleting the source or making it
+    // busy afterwards must not turn a lost 202 into a report that it never
+    // happened. A payload mismatch is still rejected, by `accept` below.
+    const replaying = targetExists && priorRecord !== undefined && !retryingPreScheduleFailure;
+    const source = replaying ? null : this.#requireSource(input.sourceChatId);
+    if (source) {
+      await this.support.assertAttachmentsSupported({
+        agentId: source.agentId,
+        model: source.model,
+        apiProviderId: source.apiProviderId,
+        modelEndpointId: source.modelEndpointId,
+        attachments: input.images ?? [],
+      });
     }
     // `scheduleAcceptedHttpRun` owns conflict and duplicate handling, so accepting
     // the ledger entry is all this command needs to do with it. Images belong in
@@ -143,7 +150,9 @@ export class SelfHandoffCommands {
           // Both flags are set from inside, the moment `addChat` publishes the
           // target, rather than after the call returns. Setting them here would
           // skip compensation for a throw between registration and return.
-          await this.#createContinuation(input, source, context.signal, (prepared) => {
+          // `source` is only null on the replay path, which returned above.
+          const origin = source ?? this.#requireSource(input.sourceChatId);
+          await this.#createContinuation(input, origin, context.signal, (prepared) => {
             created = true;
             preparedSegment = prepared;
           });

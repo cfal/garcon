@@ -61,7 +61,10 @@ const MAX_LINES = 1000;
 // Self-review of that rollback adds 4 lines: independent cleanup steps also had
 // to stay ordered, since stripping the name and list placement from a target
 // whose removal failed orphans a chat that is still live.
-const EXECUTION_FOOTPRINT_BUDGET = 9006;
+// Answering a lost-response replay from the ledger rather than from live source
+// state adds 4 more, mirroring the ordering ForkCommands already uses so a source
+// deleted after a successful handoff cannot turn the retry into a 404.
+const EXECUTION_FOOTPRINT_BUDGET = 9010;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

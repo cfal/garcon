@@ -327,6 +327,36 @@ describe('self handoff commands', () => {
     expect(added).toHaveLength(0);
   });
 
+  it('answers a lost-response replay from the ledger after the source is gone', async () => {
+    const { commands, support, chats, added } = harness();
+    chats.set(TARGET_ID, sourceChat());
+    // The handoff already succeeded and created its target; only the 202 was
+    // lost. The source being deleted afterwards must not turn that into a 404.
+    chats.delete(SOURCE_ID);
+    support.deps.ledger.getRecord = mock(async () => ({
+      key: 'k', chatId: TARGET_ID, status: 'scheduled', turnId: 'turn-1',
+    }));
+    support.deps.ledger.accept = mock(async () => ({
+      kind: 'duplicate',
+      record: { key: 'k', chatId: TARGET_ID, status: 'scheduled', turnId: 'turn-1' },
+    }));
+
+    const response = await commands.submitSelfHandoffRun(request());
+
+    expect(response.chat.id).toBe(TARGET_ID);
+    expect(added).toHaveLength(0);
+    // Live source capability is irrelevant to a replay and must not be consulted.
+    expect(support.assertAttachmentsSupported).not.toHaveBeenCalled();
+  });
+
+  it('still requires the source for a genuinely new handoff', async () => {
+    const { commands, chats } = harness();
+    chats.delete(SOURCE_ID);
+
+    await expect(commands.submitSelfHandoffRun(request()))
+      .rejects.toMatchObject({ code: 'SESSION_NOT_FOUND' });
+  });
+
   it('binds attachments to the idempotency payload', async () => {
     const { commands, support } = harness();
 
