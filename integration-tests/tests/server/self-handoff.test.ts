@@ -1,0 +1,107 @@
+// Black-box coverage for `/handoff`, which continues a chat under the same agent
+// in a NEW chat rather than switching owner in place. The unit tests exercise the
+// command against a fake CommandSupport; this asserts the HTTP contract, the
+// persisted registry, and that the continuation actually receives the archived
+// history as its carried context.
+import { describe, expect, test } from 'bun:test';
+import { userContents } from '../../support/chat-assertions.js';
+import { CARRIED_CONTEXT_VERSION } from '../../../common/transcript-seed.js';
+import { withIntegrationFixture } from '../../support/integration-fixture.js';
+
+const CARRIED_CONTEXT_MARKER = `<carried-context version="${CARRIED_CONTEXT_VERSION}">`;
+
+describe('self handoff', () => {
+  test('continues in a new chat carrying the source history', async () => {
+    await withIntegrationFixture('self-handoff', async (fixture) => {
+      const client = fixture.client;
+      const agent = fixture.directAgents.openAi;
+      const sourceChatId = fixture.newChatId();
+      const targetChatId = fixture.newChatId();
+
+      const started = await client.startDirectChat({
+        chatId: sourceChatId,
+        content: 'the original request',
+        projectPath: fixture.dirs.project,
+        agent,
+      });
+      expect((await client.waitForTurnTerminal(sourceChatId, started.turnId)).type)
+        .toBe('agent-run-finished');
+
+      const held = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
+      const response = await client.post<{ chat: { id: string } }>(
+        '/api/v1/chats/handoff-run',
+        {
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          sourceChatId,
+          chatId: targetChatId,
+          command: 'continue the work',
+        },
+      );
+
+      // The response names the continuation, which is what the client navigates to.
+      expect(response.chat.id).toBe(targetChatId);
+
+      const request = await held.received;
+      // The continuation's first prompt carries the archived history, exactly one
+      // envelope, followed by the user's text.
+      expect(request.lastUserText).toContain(CARRIED_CONTEXT_MARKER);
+      expect(request.lastUserText).toContain('the original request');
+      expect(request.lastUserText.endsWith('continue the work')).toBeTrue();
+      expect(occurrences(request.lastUserText, CARRIED_CONTEXT_MARKER)).toBe(1);
+      expect(held.releaseText('echo:continue the work')).toBeTrue();
+
+      const chats = (await client.listChats()).sessions;
+      const source = chats.find((chat) => chat.id === sourceChatId);
+      const target = chats.find((chat) => chat.id === targetChatId);
+      expect(target).toBeDefined();
+      // Same agent and model; a fresh chat, not a switch in place.
+      expect(target?.agentId).toBe(source?.agentId);
+      expect(target?.agentOwnershipEpoch).not.toBe(source?.agentOwnershipEpoch);
+      // The source keeps its own session and history.
+      expect(source?.agentId).toBe(agent.agentId);
+
+      const sourceHistory = await client.getMessages(sourceChatId);
+      expect(userContents(sourceHistory.messages)).toContain('the original request');
+    });
+  }, 60_000);
+
+  test('refuses a target chat id that already exists', async () => {
+    await withIntegrationFixture('self-handoff-collision', async (fixture) => {
+      const client = fixture.client;
+      const agent = fixture.directAgents.openAi;
+      const sourceChatId = fixture.newChatId();
+      const otherChatId = fixture.newChatId();
+
+      for (const [chatId, content] of [
+        [sourceChatId, 'source request'],
+        [otherChatId, 'unrelated chat'],
+      ] as const) {
+        const started = await client.startDirectChat({
+          chatId,
+          content,
+          projectPath: fixture.dirs.project,
+          agent,
+        });
+        expect((await client.waitForTurnTerminal(chatId, started.turnId)).type)
+          .toBe('agent-run-finished');
+      }
+
+      // Targeting an existing unrelated chat must not submit the prompt into it.
+      await expect(client.post('/api/v1/chats/handoff-run', {
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        sourceChatId,
+        chatId: otherChatId,
+        command: 'should not land here',
+      })).rejects.toMatchObject({ status: 409 });
+
+      const history = await client.getMessages(otherChatId);
+      expect(userContents(history.messages)).not.toContain('should not land here');
+    });
+  }, 60_000);
+});
+
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}

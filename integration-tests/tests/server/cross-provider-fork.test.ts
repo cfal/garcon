@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { CARRIED_CONTEXT_VERSION } from '../../../common/transcript-seed.js';
 
 describe('cross-provider fork lifecycle', () => {
   test('shares direct handoff history across repeated whole-chat forks', async () => {
@@ -23,7 +24,7 @@ describe('cross-provider fork lifecycle', () => {
       await fixture.client.waitForTurnTerminal(sourceChatId, handoff.turnId);
       const handoffRequest = fixture.fakeProviders.anthropic.requests()[0];
       expect(handoffRequest.lastUserText).toContain('anthropic-handoff-turn');
-      expect(occurrences(handoffRequest.lastUserText, '<carried-context version="2">')).toBe(1);
+      expect(occurrences(handoffRequest.lastUserText, `<carried-context version="${CARRIED_CONTEXT_VERSION}">`)).toBe(1);
 
       const targetChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });
