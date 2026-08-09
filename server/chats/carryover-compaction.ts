@@ -39,7 +39,6 @@ export interface CarryOverCompactionAgents {
     model: string;
     cwd: string;
     projectPath: string;
-    permissionMode: 'default';
     thinkingMode: ThinkingMode;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
@@ -116,6 +115,13 @@ export class CarryOverCompactionService {
     }
 
     try {
+      // This one-shot runs on a tool-capable agent. `RunSingleQueryOptions` has an
+      // index signature, so a `permissionMode` passed here would type-check and
+      // then be dropped by the runtime router, which never forwards it to the
+      // provider. Stating the constraint that way would be worse than not
+      // stating it, so it is left off: the transcript being summarized is
+      // attacker-influenced content, and constraining this path needs the
+      // provider-enforced no-tools mode tracked in the design document.
       const summary = await this.deps.agents.runSingleQuery(
         buildCompactionPrompt(assembled.prefix, input.destination),
         {
@@ -123,7 +129,6 @@ export class CarryOverCompactionService {
           model: selection.model,
           cwd: input.projectPath,
           projectPath: input.projectPath,
-          permissionMode: 'default',
           thinkingMode: selection.thinkingMode,
           apiProviderId: selection.apiProviderId,
           modelEndpointId: selection.modelEndpointId,
