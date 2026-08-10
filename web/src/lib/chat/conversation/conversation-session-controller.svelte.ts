@@ -60,6 +60,7 @@ import {
 	submitGoalControlRoute,
 	submitQueueRoute,
 	submitRunRoute,
+	submitSteerPreferenceRoute,
 	submitSteerRoute,
 } from '$lib/chat/conversation/submission-routes.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -68,11 +69,6 @@ import {
 	executionSelectionFromProjection,
 	type ConversationExecutionSelection,
 } from './conversation-execution-draft-state.svelte.js';
-import {
-	steerSubmissionRejection,
-	steerShortcutRejectionNotice,
-} from './steer-submission-policy.js';
-
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
 	| 'activeChatId'
@@ -728,29 +724,12 @@ export class ConversationSessionController {
 		if (selected.status !== 'running' || !selected.isProcessing) {
 			return this.submitForChat(chatId);
 		}
-
-		const rejection = steerSubmissionRejection({
-			prompt: text,
-			supportsSteering: deps.modelCatalog.supportsSteering(selected.agentId as SessionAgentId),
-			attachmentCount: deps.composerState.images.length,
-			handoffPending: this.#executionDraft.isHandoffPending,
-		});
-		if (rejection) {
-			deps.chatState.appendLocalNotice('error', steerShortcutRejectionNotice(rejection));
-			return 'rejected';
-		}
-
-		return submitSteerRoute(deps, this.#acceptedInputs, {
+		return submitSteerPreferenceRoute(deps, this.#acceptedInputs, {
 			chatId,
 			chat: selected,
-			startup: deps.sessions.startupByChatId[chatId],
 			text,
-			content: text,
-			images: [],
-			previousText: deps.composerState.inputText,
-			previousImages: [...deps.composerState.images],
-			ownsComposer: true,
-			composerRevisionAfterClear: null,
+			supportsSteering: deps.modelCatalog.supportsSteering(selected.agentId as SessionAgentId),
+			handoffPending: this.#executionDraft.isHandoffPending,
 		});
 	}
 

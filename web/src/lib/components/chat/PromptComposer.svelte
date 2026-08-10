@@ -28,7 +28,7 @@
 		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import {
-		resolveComposerEnterAction,
+		resolveComposerKeydownAction,
 		canSubmitComposer,
 		type ComposerEnterAction,
 	} from '$lib/chat/composer/composer-shortcuts.js';
@@ -493,33 +493,22 @@
 		appShell.openSnippets(() => appShell.requestComposerFocus());
 	}
 
-	// Resolves configured Enter submission before preserving native newline behavior.
-	// Defers to the file menu while it is open.
+	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
+		if (!ui.showFileMenu && !ui.showSlashMenu) return false;
+		const menu = ui.showFileMenu ? fileMentionMenu : slashCommandMenu;
+		if (menu?.handleKeyDown(event)) return true;
+		if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) return false;
+		event.preventDefault();
+		return true;
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
 		if (snippetExpansion.pending) return;
-		if (ui.showFileMenu) {
-			if (fileMentionMenu?.handleKeyDown(event)) return;
-			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
-				event.preventDefault();
-				return;
-			}
-		}
-		if (ui.showSlashMenu) {
-			if (slashCommandMenu?.handleKeyDown(event)) return;
-			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
-				event.preventDefault();
-				return;
-			}
-		}
+		if (handleCompletionKeyDown(event)) return;
 		if (event.key !== 'Enter') return;
-		const action = resolveComposerEnterAction({
+		const action = resolveComposerKeydownAction(event, {
 			sendByShiftEnter: localSettings.sendByShiftEnter,
 			steerWithCtrlEnter: localSettings.steerWithCtrlEnter,
-			shiftKey: event.shiftKey,
-			ctrlKey: event.ctrlKey,
-			metaKey: event.metaKey,
-			altKey: event.altKey,
-			isComposing: event.isComposing,
 			isMobile: appShell.isMobile,
 		});
 		if (action === 'newline') return;

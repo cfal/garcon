@@ -11,6 +11,10 @@ import { errorDetail, pendingUserInput } from './conversation-submission-helpers
 import { settleSubmissionFailure } from './submission-settlement.js';
 import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import { steerFailureNotice } from './steer-failure-notice.js';
+import {
+	steerShortcutRejectionNotice,
+	steerSubmissionRejection,
+} from './steer-submission-policy.js';
 import * as m from '$lib/paraglide/messages.js';
 
 type RouteDeps = Pick<
@@ -154,6 +158,42 @@ export async function submitSteerRoute(
 		}
 		return outcomeUnknown ? 'unknown' : 'rejected';
 	}
+}
+
+export function submitSteerPreferenceRoute(
+	deps: RouteDeps,
+	acceptedInputs: AcceptedInputSubmissionService,
+	input: {
+		chatId: string;
+		chat: ChatSessionRecord;
+		text: string;
+		supportsSteering: boolean;
+		handoffPending: boolean;
+	},
+): Promise<ConversationSubmissionOutcome> {
+	const rejection = steerSubmissionRejection({
+		prompt: input.text,
+		supportsSteering: input.supportsSteering,
+		attachmentCount: deps.composerState.images.length,
+		handoffPending: input.handoffPending,
+	});
+	if (rejection) {
+		deps.chatState.appendLocalNotice('error', steerShortcutRejectionNotice(rejection));
+		return Promise.resolve('rejected');
+	}
+
+	return submitSteerRoute(deps, acceptedInputs, {
+		chatId: input.chatId,
+		chat: input.chat,
+		startup: deps.sessions.startupByChatId[input.chatId],
+		text: input.text,
+		content: input.text,
+		images: [],
+		previousText: deps.composerState.inputText,
+		previousImages: [...deps.composerState.images],
+		ownsComposer: true,
+		composerRevisionAfterClear: null,
+	});
 }
 
 export async function submitDraftRoute(

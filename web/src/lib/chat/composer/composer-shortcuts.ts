@@ -12,6 +12,12 @@ interface ComposerEnterActionParams extends EnterSubmissionParams {
 	altKey: boolean;
 }
 
+interface ComposerEnterPreferences {
+	sendByShiftEnter: boolean;
+	steerWithCtrlEnter: boolean;
+	isMobile?: boolean;
+}
+
 export type ComposerEnterAction = 'submit' | 'steer-preferred' | 'newline';
 
 /**
@@ -38,6 +44,20 @@ export function resolveComposerEnterAction(params: ComposerEnterActionParams): C
 	)
 		return 'steer-preferred';
 	return shouldSubmitOnEnter(params) ? 'submit' : 'newline';
+}
+
+export function resolveComposerKeydownAction(
+	event: Pick<KeyboardEvent, 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing'>,
+	preferences: ComposerEnterPreferences,
+): ComposerEnterAction {
+	return resolveComposerEnterAction({
+		...preferences,
+		shiftKey: event.shiftKey,
+		ctrlKey: event.ctrlKey,
+		metaKey: event.metaKey,
+		altKey: event.altKey,
+		isComposing: event.isComposing,
+	});
 }
 
 /** Shared predicate for whether the composer can submit. Used by both
