@@ -21,6 +21,7 @@ import {
   nativePrefixMatchesView,
   reconcileNativeSnapshotView,
 } from './chat-view-native-reconciliation.js';
+import { transferPublishedLiveEntries } from './chat-view-live-publication.js';
 import { ChatViewOperationalNotices } from './chat-view-operational-notices.js';
 import {
   assertValidChatMessage,
@@ -290,7 +291,7 @@ export class ChatViewStore {
       if (options.processErrorNotice && !nativeHasNotice) {
         this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), options.processErrorNotice)]);
       }
-      this.#transferPublishedLiveEntries(previous, view);
+      transferPublishedLiveEntries(previous, view);
       this.#views.set(chatId, view);
       return this.#readPageFromView(view, Number.MAX_SAFE_INTEGER);
     });
@@ -539,7 +540,7 @@ export class ChatViewStore {
     if (unpersistedLive.length > 0) {
       this.#appendLiveToView(view, unpersistedLive, 'native-wins');
     }
-    this.#transferPublishedLiveEntries(previous, view);
+    transferPublishedLiveEntries(previous, view);
     this.#views.set(chatId, view);
     return view;
   }
@@ -639,7 +640,7 @@ export class ChatViewStore {
       const appended = this.#appendLiveToView(view, unpersistedLiveMessages, 'native-wins');
       fullMessages = [...fullMessages, ...appended.map((entry) => entry.message)];
     }
-    this.#transferPublishedLiveEntries(previous, view);
+    transferPublishedLiveEntries(previous, view);
     this.#views.set(chatId, view);
     return { view, messages: fullMessages };
   }
@@ -664,7 +665,7 @@ export class ChatViewStore {
       );
     }
     this.#appendToView(reconciled.view, this.#operationalNotices.missingFrom(chatId, reconciled.view.messages));
-    this.#transferPublishedLiveEntries(previous, reconciled.view);
+    transferPublishedLiveEntries(previous, reconciled.view);
     this.#logGenerationTransition(reconciled.view, reconciled.transition);
     this.#views.set(chatId, reconciled.view);
   }
@@ -773,43 +774,6 @@ export class ChatViewStore {
     const published = [...retained, ...appended].sort((left, right) => left.seq - right.seq);
     for (const entry of published) view.publishedLiveEntries.add(entry);
     return published;
-  }
-
-  #transferPublishedLiveEntries(previous: ChatView | undefined, view: ChatView): void {
-    if (!previous) return;
-    const published = previous.messages.filter((entry) => (
-      previous.publishedLiveEntries.has(entry)
-    ));
-    if (previous.generationId === view.generationId) {
-      const publishedSeqs = new Set(published.map((entry) => entry.seq));
-      for (const entry of view.messages) {
-        if (publishedSeqs.has(entry.seq)) view.publishedLiveEntries.add(entry);
-      }
-      return;
-    }
-
-    const publishedByIdentity = new Map<string, ChatViewMessage[]>();
-    for (const entry of published) {
-      for (const identity of exactMessageIdentityKeys(entry.message)) {
-        const entries = publishedByIdentity.get(identity);
-        if (entries) entries.push(entry);
-        else publishedByIdentity.set(identity, [entry]);
-      }
-    }
-    const retainedByIdentity = new Map<string, ChatViewMessage[]>();
-    for (const entry of view.messages) {
-      for (const identity of exactMessageIdentityKeys(entry.message)) {
-        const entries = retainedByIdentity.get(identity);
-        if (entries) entries.push(entry);
-        else retainedByIdentity.set(identity, [entry]);
-      }
-    }
-    for (const [identity, priorEntries] of publishedByIdentity) {
-      const retainedEntries = retainedByIdentity.get(identity);
-      if (priorEntries.length === 1 && retainedEntries?.length === 1) {
-        view.publishedLiveEntries.add(retainedEntries[0]);
-      }
-    }
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {
