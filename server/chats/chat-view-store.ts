@@ -9,6 +9,7 @@ import {
 } from '../lib/transcript-revision.js';
 import {
   exactMessageIdentityKeys,
+  preserveLiveUserIdentity,
   preserveRetainedUserIdentities,
   retainedMessageMatchesNative,
   userDeliveryPayloadsAreCompatible,
@@ -300,12 +301,25 @@ export class ChatViewStore {
     options: { fence?: number } = {},
   ): Promise<AppendedChatViewMessages> {
     return this.#withChat(chatId, async () => {
+      const previous = this.#views.get(chatId);
+      const previousGenerationId = previous?.generationId;
+      const previousLastSeq = previous?.lastSeq;
       const view = await this.#getOrCreateAppendView(chatId, loader);
       if (options.fence !== undefined && options.fence !== view.streamFence) {
         return { generationId: view.generationId, messages: [], lastSeq: view.lastSeq, skipped: true };
       }
+      const revalidated = previousGenerationId === undefined
+        ? []
+        : this.#matchingViewEntries(view, messages).filter((entry) => (
+            previousGenerationId !== view.generationId
+            || previousLastSeq !== undefined && entry.seq > previousLastSeq
+          ));
       const appended = this.#appendLiveToView(view, messages);
-      return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
+      return {
+        generationId: view.generationId,
+        messages: [...revalidated, ...appended].sort((left, right) => left.seq - right.seq),
+        lastSeq: view.lastSeq,
+      };
     });
   }
 
@@ -744,35 +758,73 @@ export class ChatViewStore {
     conflictPolicy: 'reject' | 'native-wins' = 'reject',
   ): ChatViewMessage[] {
     messages = this.#operationalNotices.filterDuplicateAppends(view.chatId, view.messages, messages);
-    const existingByRequestId = new Map<string, UserMessage>();
-    for (const entry of view.messages) {
-      if (entry.message instanceof UserMessage && entry.message.metadata?.clientRequestId) {
-        existingByRequestId.set(entry.message.metadata.clientRequestId, entry.message);
+    type IndexedMessage = {
+      message: ChatMessage;
+      viewEntry?: ChatViewMessage;
+      uniqueIndex?: number;
+    };
+    const existingByIdentity = new Map<string, IndexedMessage>();
+    const indexMessage = (indexed: IndexedMessage): void => {
+      for (const identity of exactMessageIdentityKeys(indexed.message)) {
+        if (!existingByIdentity.has(identity)) existingByIdentity.set(identity, indexed);
       }
+    };
+    for (const entry of view.messages) {
+      indexMessage({ message: entry.message, viewEntry: entry });
     }
 
     const unique: ChatMessage[] = [];
     for (const message of messages) {
-      if (!(message instanceof UserMessage) || !message.metadata?.clientRequestId) {
-        unique.push(message);
-        continue;
-      }
-      const requestId = message.metadata.clientRequestId;
-      const existing = existingByRequestId.get(requestId);
+      const identities = exactMessageIdentityKeys(message);
+      const existing = identities
+        .map((identity) => existingByIdentity.get(identity))
+        .find((indexed) => indexed !== undefined);
       if (existing) {
-        if (!userDeliveryPayloadsAreCompatible(existing, message)) {
+        if (
+          existing.message instanceof UserMessage
+          && message instanceof UserMessage
+          && !userDeliveryPayloadsAreCompatible(existing.message, message)
+        ) {
+          const requestId = message.metadata?.clientRequestId
+            ?? message.metadata?.upstreamRequestId
+            ?? identities[0];
           if (conflictPolicy === 'native-wins') {
             logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${requestId}`);
             continue;
           }
           throw new Error(`Conflicting user message identity: ${requestId}`);
         }
+        const withIdentity = preserveLiveUserIdentity(message, existing.message);
+        if (withIdentity !== existing.message) {
+          existing.message = withIdentity;
+          if (existing.viewEntry) existing.viewEntry.message = withIdentity;
+          if (existing.uniqueIndex !== undefined) unique[existing.uniqueIndex] = withIdentity;
+          indexMessage(existing);
+        }
         continue;
       }
-      existingByRequestId.set(requestId, message);
+      const indexed = { message, uniqueIndex: unique.length };
       unique.push(message);
+      indexMessage(indexed);
     }
     return this.#appendToView(view, unique);
+  }
+
+  #matchingViewEntries(view: ChatView, messages: ChatMessage[]): ChatViewMessage[] {
+    const viewEntryByIdentity = new Map<string, ChatViewMessage>();
+    for (const entry of view.messages) {
+      for (const identity of exactMessageIdentityKeys(entry.message)) {
+        if (!viewEntryByIdentity.has(identity)) viewEntryByIdentity.set(identity, entry);
+      }
+    }
+    const matches = new Map<number, ChatViewMessage>();
+    for (const message of messages) {
+      const match = exactMessageIdentityKeys(message)
+        .map((identity) => viewEntryByIdentity.get(identity))
+        .find((entry) => entry !== undefined);
+      if (match) matches.set(match.seq, match);
+    }
+    return [...matches.values()];
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {

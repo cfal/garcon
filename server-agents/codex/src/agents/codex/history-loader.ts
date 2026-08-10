@@ -144,10 +144,12 @@ export function addCodexJsonlLine(
     const result = projection.project(entry, context);
     if (!result) return false;
 
+    const entryId = codexTurnItemEntryId(entry);
     let withinSourceOrdinal = 0;
     const appendMessages = (target: ChatMessage[], messages: ChatMessage[]): void => {
       for (const message of messages) {
         target.push(attachNativeMessageSource(message, {
+          entryId,
           byteOffset: context.sourceByteOffset,
           lineNumber: context.sourceLineNumber,
           withinSourceOrdinal,
@@ -178,6 +180,15 @@ export function addCodexJsonlLine(
 function parseCodexJsonlEntry(line: string): Record<string, unknown> | null {
   const parsed = parseFirstJsonlValue<Record<string, unknown>>(line);
   return parsed.kind === 'value' ? asRecord(parsed.value) : null;
+}
+
+function codexTurnItemEntryId(entry: Record<string, unknown>): string | undefined {
+  if (entry.type !== 'response_item') return undefined;
+  const payload = asRecord(entry.payload);
+  const metadata = asRecord(payload.internal_chat_message_metadata_passthrough);
+  const turnId = typeof metadata.turn_id === 'string' ? metadata.turn_id.trim() : '';
+  const itemId = typeof payload.id === 'string' ? payload.id.trim() : '';
+  return turnId && itemId ? `turn:${turnId}:item:${itemId}` : undefined;
 }
 
 function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: boolean): ChatMessage[] {

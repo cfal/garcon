@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { messagesOfType } from '../../support/chat-assertions.js';
+import {
+  assistantContents,
+  messagesOfType,
+  userContents,
+} from '../../support/chat-assertions.js';
 import {
   codexAssistantMessage,
   codexExecCommandCall,
@@ -7,7 +11,7 @@ import {
 } from '../../support/fake-codex-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForVisibleResponse } from '../../support/live-agent.js';
-import { liveCodexStartRequest } from '../../support/live-codex.js';
+import { liveCodexRunRequest, liveCodexStartRequest } from '../../support/live-codex.js';
 import {
   startScriptedCodexTestEnvironment,
   type ScriptedCodexTestEnvironment,
@@ -110,6 +114,66 @@ describe('Codex against a scripted model', () => {
       prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   });
+
+  test('keeps persisted user and assistant items exact-once during page revalidation', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+    const initialReply = `SCRIPTED_INITIAL_${crypto.randomUUID().replaceAll('-', '')}`;
+    const continuedPrompt = `Continue ${crypto.randomUUID()}.`;
+    const continuedReply = `SCRIPTED_CONTINUED_${crypto.randomUUID().replaceAll('-', '')}`;
+    testEnvironment.model.scriptTurn([codexAssistantMessage(initialReply)]);
+
+    await withIntegrationFixture('codex-scripted-page-revalidation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const initialCursor = fixture.client.markEvents();
+      const initial = await fixture.client.startChat(liveCodexStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'Create persisted history for a continuation.',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: initial.turnId,
+        marker: initialReply,
+        afterIndex: initialCursor,
+      });
+
+      await fixture.restartGarcon();
+      const partial = await fixture.client.getMessages(chatId, { limit: 1 });
+      expect(partial.hasMore).toBe(true);
+
+      const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(continuedReply)]);
+      const continuedCursor = fixture.client.markEvents();
+      const continued = await fixture.client.runChat(liveCodexRunRequest({
+        chatId,
+        command: continuedPrompt,
+      }));
+      await held.requested;
+      try {
+        const running = await fixture.client.getMessages(chatId);
+        expect(userContents(running.messages).filter((content) => content === continuedPrompt))
+          .toHaveLength(1);
+      } finally {
+        held.release();
+      }
+
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: continued.turnId,
+        marker: continuedReply,
+        afterIndex: continuedCursor,
+      });
+      const settled = await fixture.client.getMessages(chatId);
+      expect(assistantContents(settled.messages).filter((content) => content === continuedReply))
+        .toHaveLength(1);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      prepareWorkspace: testEnvironment.prepareWorkspace,
+    });
+  }, 120_000);
 
   for (const fault of [
     { kind: 'http-error', status: 500, message: 'transient scripted HTTP failure' },

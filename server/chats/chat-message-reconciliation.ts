@@ -64,7 +64,7 @@ export function userDeliveryPayloadsAreCompatible(
   ) && metadataIsCompatible(left.metadata, right.metadata);
 }
 
-function preserveLiveUserIdentity(
+export function preserveLiveUserIdentity(
   liveMessage: ChatMessage,
   nativeMessage: ChatMessage,
 ): ChatMessage {

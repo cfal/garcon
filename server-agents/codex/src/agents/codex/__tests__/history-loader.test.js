@@ -254,6 +254,30 @@ describe('loadCodexChatMessages', () => {
     }]);
   });
 
+  it('preserves Codex turn and item identity on legacy response messages', async () => {
+    const messages = await withTempJsonl([
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-02-21T09:00:01.000Z',
+        payload: {
+          type: 'message',
+          id: 'message-1',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'persisted reply' }],
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+        },
+      }),
+    ], (filePath) => loadCodexChatMessages(filePath));
+
+    expect(messages).toHaveLength(1);
+    expect(getNativeMessageRevisionSource(messages[0])).toEqual({
+      entryId: 'turn:turn-1:item:message-1',
+      byteOffset: 0,
+      lineNumber: 1,
+      withinSourceOrdinal: 0,
+    });
+  });
+
   it('prefers response_item assistant content over duplicate event_msg wrappers', async () => {
     const tsUser = '2026-02-21T10:00:00.000Z';
     const tsAssistant = '2026-02-21T10:00:01.000Z';

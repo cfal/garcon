@@ -111,6 +111,83 @@ describe('ChatViewStore', () => {
     expect(contents(store.readPage('chat-1', 20))).toEqual(['retry me']);
   });
 
+  it('does not append a live assistant item found during page revalidation', async () => {
+    const store = new ChatViewStore(() => false);
+    const historyRef = { current: [assistant('older one'), assistant('older two')] };
+    await store.getOrCreatePage('chat-1', pagedLoader(historyRef), 1);
+    const source = {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const native = attachNativeMessageSource(assistant('persisted reply'), source);
+    const live = attachNativeMessageSource(assistant('persisted reply'), source);
+    historyRef.current = [...historyRef.current, native];
+
+    const appended = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      pagedLoader(historyRef),
+      [live],
+    );
+
+    expect(appended.messages.map((entry) => entry.message.content)).toEqual(['persisted reply']);
+    expect(contents(store.readPage('chat-1', 20))).toEqual([
+      'older one',
+      'older two',
+      'persisted reply',
+    ]);
+  });
+
+  it('keeps equal native and live assistant text without a shared identity', async () => {
+    const store = new ChatViewStore(() => false);
+    const historyRef = { current: [assistant('older one'), assistant('older two')] };
+    await store.getOrCreatePage('chat-1', pagedLoader(historyRef), 1);
+    historyRef.current = [...historyRef.current, assistant('repeated reply')];
+    const live = attachNativeMessageSource(assistant('repeated reply'), {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    });
+
+    const appended = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      pagedLoader(historyRef),
+      [live],
+    );
+
+    expect(appended.messages.map((entry) => entry.message.content)).toEqual(['repeated reply']);
+    expect(contents(store.readPage('chat-1', 20))).toEqual([
+      'older one',
+      'older two',
+      'repeated reply',
+      'repeated reply',
+    ]);
+  });
+
+  it('reconciles a live user delivery found during page revalidation', async () => {
+    const store = new ChatViewStore(() => false);
+    const historyRef = { current: [assistant('older one'), assistant('older two')] };
+    await store.getOrCreatePage('chat-1', pagedLoader(historyRef), 1);
+    const upstreamRequestId = 'provider-request-1';
+    const native = user('persisted prompt', { upstreamRequestId });
+    const live = user('persisted prompt', {
+      clientRequestId: 'client-request-1',
+      upstreamRequestId,
+      turnId: 'turn-1',
+      deliveryStatus: 'accepted',
+    });
+    historyRef.current = [...historyRef.current, native];
+
+    const appended = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      pagedLoader(historyRef),
+      [live],
+    );
+    const retained = store.readPage('chat-1', 20).messages.map((entry) => entry.message);
+
+    expect(appended.messages.map((entry) => entry.message.content)).toEqual(['persisted prompt']);
+    expect(retained).toHaveLength(3);
+    expect(retained[2].metadata).toEqual(live.metadata);
+  });
+
   it('rejects conflicting content for one user delivery identity', async () => {
     const store = new ChatViewStore(() => false);
     const identity = { clientRequestId: 'request-1', turnId: 'turn-1' };
