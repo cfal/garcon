@@ -27,6 +27,7 @@
 		transcriptScenario?:
 			| 'empty'
 			| 'local-truncation'
+			| 'loading-earlier'
 			| 'loading-later'
 			| 'error-earlier'
 			| 'row-ids'
@@ -87,6 +88,9 @@
 		});
 		if (initialTranscriptScenario === 'loading-later') {
 			chatState.pageStates.later = { status: 'loading', error: null };
+		}
+		if (initialTranscriptScenario === 'loading-earlier') {
+			chatState.pageStates.earlier = { status: 'loading', error: null };
 		}
 		if (initialTranscriptScenario === 'error-earlier') {
 			chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };

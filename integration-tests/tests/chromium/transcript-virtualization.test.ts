@@ -1490,6 +1490,10 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     await withDiagnosticTimeout('the first held earlier-page request', firstPageRequest);
     expect(loadAheadDistance).toBeGreaterThan(0);
     expect(await transcriptBoundaryIntersectsViewport(fixture.page, 'earlier')).toBe(false);
+    const earlierLoadingIndicator = fixture.page.locator(
+      '[data-chat-earlier-loading-indicator]',
+    );
+    await earlierLoadingIndicator.waitFor({ state: 'visible' });
 
     expect(
       await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
@@ -1582,6 +1586,7 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
       fixture.page,
       modelCountBeforePrefetch + 50,
     );
+    await earlierLoadingIndicator.waitFor({ state: 'detached' });
     const prependFrames = await finishReadingAnchorFrameSampler(fixture.page);
     expect(
       Math.max(
