@@ -7,15 +7,15 @@ import {
 
 export function exactMessageIdentityKeys(message: ChatMessage): string[] {
   const identities: string[] = [];
-  if (message instanceof UserMessage && message.metadata?.upstreamRequestId) {
-    identities.push(JSON.stringify(['upstream-request', message.metadata.upstreamRequestId]));
+  const source = getNativeMessageRevisionSource(message);
+  if (source?.entryId && source.withinSourceOrdinal !== undefined) {
+    identities.push(JSON.stringify(['native-source', source.entryId, source.withinSourceOrdinal]));
   }
   if (message instanceof UserMessage && message.metadata?.clientRequestId) {
     identities.push(JSON.stringify(['client-request', message.metadata.clientRequestId]));
   }
-  const source = getNativeMessageRevisionSource(message);
-  if (source?.entryId && source.withinSourceOrdinal !== undefined) {
-    identities.push(JSON.stringify(['native-source', source.entryId, source.withinSourceOrdinal]));
+  if (message instanceof UserMessage && message.metadata?.upstreamRequestId) {
+    identities.push(JSON.stringify(['upstream-request', message.metadata.upstreamRequestId]));
   }
   return identities;
 }
@@ -34,7 +34,10 @@ export function preserveRetainedUserIdentities(
   for (const entry of retainedMessages) {
     const nativeIndex = exactMessageIdentityKeys(entry.message)
       .map((identity) => nativeIndexByIdentity.get(identity))
-      .find((index) => index !== undefined);
+      .find((index) => (
+        index !== undefined
+        && messagesShareExactIdentity(entry.message, nativeMessages[index])
+      ));
     if (nativeIndex === undefined) continue;
     const nativeMessage = nativeMessages[nativeIndex];
     const withIdentity = preserveLiveUserIdentity(entry.message, nativeMessage);
@@ -59,7 +62,10 @@ export function matchingRetainedMessagesByExactIdentity(
   for (const message of messages) {
     const match = exactMessageIdentityKeys(message)
       .map((identity) => retainedByIdentity.get(identity))
-      .find((entry) => entry !== undefined);
+      .find((entry) => (
+        entry !== undefined
+        && messagesShareExactIdentity(entry.message, message)
+      ));
     if (match) matches.set(match.seq, match);
   }
   return [...matches.values()];
@@ -91,7 +97,10 @@ export function reconcileLiveMessageAppends(
     const identities = exactMessageIdentityKeys(message);
     const existing = identities
       .map((identity) => existingByIdentity.get(identity))
-      .find((indexed) => indexed !== undefined);
+      .find((indexed) => (
+        indexed !== undefined
+        && messagesShareExactIdentity(indexed.message, message)
+      ));
     if (existing) {
       if (
         existing.message instanceof UserMessage
@@ -164,8 +173,24 @@ function preserveLiveUserIdentity(
 }
 
 function messagesShareExactIdentity(left: ChatMessage, right: ChatMessage): boolean {
-  const rightIdentities = new Set(exactMessageIdentityKeys(right));
-  return exactMessageIdentityKeys(left).some((identity) => rightIdentities.has(identity));
+  const leftSource = getNativeMessageRevisionSource(left);
+  const rightSource = getNativeMessageRevisionSource(right);
+  if (
+    leftSource?.entryId
+    && rightSource?.entryId === leftSource.entryId
+    && leftSource.withinSourceOrdinal !== undefined
+    && rightSource.withinSourceOrdinal === leftSource.withinSourceOrdinal
+  ) return true;
+  if (!(left instanceof UserMessage) || !(right instanceof UserMessage)) return false;
+  const leftClientRequestId = left.metadata?.clientRequestId;
+  const rightClientRequestId = right.metadata?.clientRequestId;
+  if (leftClientRequestId && rightClientRequestId) {
+    return leftClientRequestId === rightClientRequestId;
+  }
+  return Boolean(
+    left.metadata?.upstreamRequestId
+    && left.metadata.upstreamRequestId === right.metadata?.upstreamRequestId,
+  );
 }
 
 function wireMessagesEqual(left: ChatMessage, right: ChatMessage | undefined): boolean {

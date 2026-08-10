@@ -188,6 +188,22 @@ describe('ChatViewStore', () => {
     expect(retained[2].metadata).toEqual(live.metadata);
   });
 
+  it('keeps distinct live user deliveries that reuse an upstream identity', async () => {
+    const store = new ChatViewStore(() => false);
+    const loader = transcriptLoader(async () => []);
+    const upstreamRequestId = 'reused-message-id';
+    await store.appendAfterEnsuringGeneration('chat-1', loader, [
+      user('first steer', { clientRequestId: 'request-1', upstreamRequestId }),
+    ]);
+
+    const appended = await store.appendAfterEnsuringGeneration('chat-1', loader, [
+      user('second steer', { clientRequestId: 'request-2', upstreamRequestId }),
+    ]);
+
+    expect(appended.messages.map((entry) => entry.message.content)).toEqual(['second steer']);
+    expect(contents(store.readPage('chat-1', 20))).toEqual(['first steer', 'second steer']);
+  });
+
   it('rejects conflicting content for one user delivery identity', async () => {
     const store = new ChatViewStore(() => false);
     const identity = { clientRequestId: 'request-1', turnId: 'turn-1' };
