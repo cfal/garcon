@@ -204,6 +204,48 @@ describe('ChatViewStore', () => {
     expect(contents(store.readPage('chat-1', 20))).toEqual(['first steer', 'second steer']);
   });
 
+  it('pairs distinct persisted deliveries that reuse one upstream identity', async () => {
+    const store = new ChatViewStore(() => false);
+    const upstreamRequestId = 'reused-message-id';
+    await store.appendAfterEnsuringGeneration('chat-1', transcriptLoader(async () => []), [
+      user('first steer', { clientRequestId: 'request-1', upstreamRequestId }),
+      user('second steer', { clientRequestId: 'request-2', upstreamRequestId }),
+    ]);
+
+    await store.reconcileNativeSnapshot('chat-1', nativeReconciliation([
+      user('first steer', { upstreamRequestId }),
+      user('second steer', { upstreamRequestId }),
+    ]));
+
+    const retained = store.readPage('chat-1', 20).messages.map((entry) => entry.message);
+    expect(retained).toHaveLength(2);
+    expect(retained.map((message) => message.metadata?.clientRequestId)).toEqual([
+      'request-1',
+      'request-2',
+    ]);
+  });
+
+  it('pairs equal persisted deliveries with reused upstream identity by stable order', async () => {
+    const store = new ChatViewStore(() => false);
+    const upstreamRequestId = 'reused-message-id';
+    await store.appendAfterEnsuringGeneration('chat-1', transcriptLoader(async () => []), [
+      user('same steer', { clientRequestId: 'request-1', upstreamRequestId }),
+      user('same steer', { clientRequestId: 'request-2', upstreamRequestId }),
+    ]);
+
+    await store.reconcileNativeSnapshot('chat-1', nativeReconciliation([
+      user('same steer', { upstreamRequestId }),
+      user('same steer', { upstreamRequestId }),
+    ]));
+
+    const retained = store.readPage('chat-1', 20).messages.map((entry) => entry.message);
+    expect(retained).toHaveLength(2);
+    expect(retained.map((message) => message.metadata?.clientRequestId)).toEqual([
+      'request-1',
+      'request-2',
+    ]);
+  });
+
   it('rejects conflicting content for one user delivery identity', async () => {
     const store = new ChatViewStore(() => false);
     const identity = { clientRequestId: 'request-1', turnId: 'turn-1' };
@@ -213,6 +255,28 @@ describe('ChatViewStore', () => {
       transcriptLoader(async () => [user('original', identity)]),
       [user('conflict', identity)],
     )).rejects.toThrow('Conflicting user message identity: request-1');
+  });
+
+  it('leaves retained identities unchanged when a later batch row conflicts', async () => {
+    const store = new ChatViewStore(() => false);
+    const upstreamRequestId = 'provider-request-1';
+    await store.getOrCreateMessages(
+      'chat-1',
+      snapshotLoader(async () => [user('original', { upstreamRequestId })]),
+    );
+
+    await expect(store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [
+        user('original', { clientRequestId: 'request-1', upstreamRequestId }),
+        user('conflict', { clientRequestId: 'request-1', upstreamRequestId }),
+      ],
+    )).rejects.toThrow('Conflicting user message identity: request-1');
+
+    expect(store.readPage('chat-1', 20).messages[0].message.metadata).toEqual({
+      upstreamRequestId,
+    });
   });
 
   it('lets an authoritative full native snapshot replace a conflicting retained row', async () => {
@@ -240,7 +304,7 @@ describe('ChatViewStore', () => {
       user('old user two'),
       assistant('old assistant two'),
     ];
-    const liveUser = user('live user content', {
+    const liveUser = user('provider user content', {
       clientRequestId: 'client-request-1',
       turnId: 'turn-1',
       upstreamRequestId: 'provider-request-1',

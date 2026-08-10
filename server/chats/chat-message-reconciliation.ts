@@ -5,6 +5,11 @@ import {
   getNativeMessageRevisionSource,
 } from '../agents/shared/native-message-source.js';
 
+interface MessageCandidate<T> {
+  message: ChatMessage;
+  readonly value: T;
+}
+
 export function exactMessageIdentityKeys(message: ChatMessage): string[] {
   const identities: string[] = [];
   const source = getNativeMessageRevisionSource(message);
@@ -14,9 +19,6 @@ export function exactMessageIdentityKeys(message: ChatMessage): string[] {
   if (message instanceof UserMessage && message.metadata?.clientRequestId) {
     identities.push(JSON.stringify(['client-request', message.metadata.clientRequestId]));
   }
-  if (message instanceof UserMessage && message.metadata?.upstreamRequestId) {
-    identities.push(JSON.stringify(['upstream-request', message.metadata.upstreamRequestId]));
-  }
   return identities;
 }
 
@@ -24,50 +26,44 @@ export function preserveRetainedUserIdentities(
   retainedMessages: ChatViewMessage[],
   nativeMessages: ChatMessage[],
 ): ChatMessage[] {
-  const nativeIndexByIdentity = new Map<string, number>();
-  nativeMessages.forEach((message, index) => {
-    for (const identity of exactMessageIdentityKeys(message)) {
-      if (!nativeIndexByIdentity.has(identity)) nativeIndexByIdentity.set(identity, index);
-    }
-  });
+  const retainedCandidates = retainedMessages.map((entry) => ({
+    message: entry.message,
+    value: entry,
+  }));
+  const nativeCandidates = nativeMessages.map((message, index) => ({ message, value: index }));
+  const matches = pairUserDeliveries(retainedCandidates, nativeCandidates);
   let reconciled = nativeMessages;
-  for (const entry of retainedMessages) {
-    const nativeIndex = exactMessageIdentityKeys(entry.message)
-      .map((identity) => nativeIndexByIdentity.get(identity))
-      .find((index) => (
-        index !== undefined
-        && messagesShareExactIdentity(entry.message, nativeMessages[index])
-      ));
-    if (nativeIndex === undefined) continue;
-    const nativeMessage = nativeMessages[nativeIndex];
-    const withIdentity = preserveLiveUserIdentity(entry.message, nativeMessage);
+
+  for (const [retained, native] of matches) {
+    const nativeMessage = native.message;
+    const withIdentity = mergeRetainedUserIdentity(retained.message, nativeMessage);
     if (withIdentity === nativeMessage) continue;
     if (reconciled === nativeMessages) reconciled = [...nativeMessages];
-    reconciled[nativeIndex] = withIdentity;
+    reconciled[native.value] = withIdentity;
   }
   return reconciled;
 }
 
-export function matchingRetainedMessagesByExactIdentity(
+export function matchingRetainedMessagesByDeliveryIdentity(
   retainedMessages: ChatViewMessage[],
   messages: ChatMessage[],
 ): ChatViewMessage[] {
-  const retainedByIdentity = new Map<string, ChatViewMessage>();
-  for (const entry of retainedMessages) {
-    for (const identity of exactMessageIdentityKeys(entry.message)) {
-      if (!retainedByIdentity.has(identity)) retainedByIdentity.set(identity, entry);
-    }
+  const retainedCandidates = retainedMessages.map((entry) => ({
+    message: entry.message,
+    value: entry,
+  }));
+  const incomingCandidates = messages.map((message, index) => ({ message, value: index }));
+  const pairedUsers = new Map<number, ChatViewMessage>();
+  for (const [incoming, retained] of pairUserDeliveries(incomingCandidates, retainedCandidates)) {
+    pairedUsers.set(incoming.value, retained.value);
   }
+
+  const retainedIndex = new MessageCandidateIndex(retainedCandidates);
   const matches = new Map<number, ChatViewMessage>();
-  for (const message of messages) {
-    const match = exactMessageIdentityKeys(message)
-      .map((identity) => retainedByIdentity.get(identity))
-      .find((entry) => (
-        entry !== undefined
-        && messagesShareExactIdentity(entry.message, message)
-      ));
+  messages.forEach((message, index) => {
+    const match = pairedUsers.get(index) ?? retainedIndex.find(message)?.value;
     if (match) matches.set(match.seq, match);
-  }
+  });
   return [...matches.values()];
 }
 
@@ -76,59 +72,75 @@ export function reconcileLiveMessageAppends(
   messages: ChatMessage[],
   conflictPolicy: 'reject' | 'native-wins',
 ): { messages: ChatMessage[]; droppedConflictingUserIdentities: string[] } {
-  type IndexedMessage = {
-    message: ChatMessage;
-    retainedEntry?: ChatViewMessage;
-    uniqueIndex?: number;
+  type IndexedMessage = MessageCandidate<number> & {
+    readonly retainedEntry?: ChatViewMessage;
+    readonly originalRetainedMessage?: ChatMessage;
+    readonly uniqueIndex?: number;
   };
-  const existingByIdentity = new Map<string, IndexedMessage>();
-  const indexMessage = (indexed: IndexedMessage): void => {
-    for (const identity of exactMessageIdentityKeys(indexed.message)) {
-      if (!existingByIdentity.has(identity)) existingByIdentity.set(identity, indexed);
-    }
-  };
-  for (const entry of retainedMessages) {
-    indexMessage({ message: entry.message, retainedEntry: entry });
+
+  const retainedCandidates: IndexedMessage[] = retainedMessages.map((entry, index) => ({
+    message: entry.message,
+    value: index,
+    retainedEntry: entry,
+    originalRetainedMessage: entry.message,
+  }));
+  const incomingCandidates = messages.map((message, index) => ({ message, value: index }));
+  const pairedUsers = new Map<number, IndexedMessage>();
+  for (const [incoming, retained] of pairUserDeliveries(incomingCandidates, retainedCandidates)) {
+    pairedUsers.set(incoming.value, retained);
+  }
+
+  const existing = new MessageCandidateIndex<IndexedMessage>();
+  for (const candidate of retainedCandidates) {
+    existing.add({ message: candidate.message, value: candidate });
   }
 
   const unique: ChatMessage[] = [];
   const droppedConflictingUserIdentities: string[] = [];
-  for (const message of messages) {
-    const identities = exactMessageIdentityKeys(message);
-    const existing = identities
-      .map((identity) => existingByIdentity.get(identity))
-      .find((indexed) => (
-        indexed !== undefined
-        && messagesShareExactIdentity(indexed.message, message)
-      ));
-    if (existing) {
+  messages.forEach((message, messageIndex) => {
+    const indexed = pairedUsers.get(messageIndex) ?? existing.find(message)?.value;
+    if (indexed) {
       if (
-        existing.message instanceof UserMessage
+        indexed.message instanceof UserMessage
         && message instanceof UserMessage
-        && !userDeliveryPayloadsAreCompatible(existing.message, message)
+        && !userDeliveryPayloadsAreCompatible(indexed.message, message)
       ) {
         const identity = message.metadata?.clientRequestId
           ?? message.metadata?.upstreamRequestId
-          ?? identities[0]
+          ?? exactMessageIdentityKeys(message)[0]
           ?? 'unknown';
         if (conflictPolicy === 'native-wins') {
           droppedConflictingUserIdentities.push(identity);
-          continue;
+          return;
         }
         throw new Error(`Conflicting user message identity: ${identity}`);
       }
-      const withIdentity = preserveLiveUserIdentity(message, existing.message);
-      if (withIdentity !== existing.message) {
-        existing.message = withIdentity;
-        if (existing.retainedEntry) existing.retainedEntry.message = withIdentity;
-        if (existing.uniqueIndex !== undefined) unique[existing.uniqueIndex] = withIdentity;
-        indexMessage(existing);
+
+      const withIdentity = mergeRetainedUserIdentity(message, indexed.message);
+      if (withIdentity !== indexed.message) {
+        indexed.message = withIdentity;
+        if (indexed.uniqueIndex !== undefined) unique[indexed.uniqueIndex] = withIdentity;
+        existing.add({ message: withIdentity, value: indexed });
       }
-      continue;
+      return;
     }
-    const indexed = { message, uniqueIndex: unique.length };
+
+    const appended: IndexedMessage = {
+      message,
+      value: retainedCandidates.length + unique.length,
+      uniqueIndex: unique.length,
+    };
     unique.push(message);
-    indexMessage(indexed);
+    existing.add({ message, value: appended });
+  });
+
+  for (const candidate of retainedCandidates) {
+    if (
+      candidate.retainedEntry
+      && candidate.originalRetainedMessage !== candidate.message
+    ) {
+      candidate.retainedEntry.message = candidate.message;
+    }
   }
   return { messages: unique, droppedConflictingUserIdentities };
 }
@@ -139,40 +151,146 @@ export function retainedMessageMatchesNative(
 ): boolean {
   return wireMessagesEqual(retainedMessage, nativeMessage)
     || nativeMessage !== undefined
-      && messagesShareExactIdentity(retainedMessage, nativeMessage);
+      && (
+        messagesShareStrongIdentity(retainedMessage, nativeMessage)
+        || userMessagesCanBridgeByUpstream(retainedMessage, nativeMessage)
+      );
 }
 
 export function userDeliveryPayloadsAreCompatible(
   left: UserMessage,
   right: UserMessage,
 ): boolean {
-  return wireMessagesEqual(
-    withoutMetadata(left, right.timestamp),
-    withoutMetadata(right, right.timestamp),
-  ) && metadataIsCompatible(left.metadata, right.metadata);
+  return userPayloadKey(left) === userPayloadKey(right)
+    && metadataIsCompatible(left.metadata, right.metadata);
 }
 
-function preserveLiveUserIdentity(
-  liveMessage: ChatMessage,
+class MessageCandidateIndex<T> {
+  readonly #strong = new Map<string, Array<MessageCandidate<T>>>();
+  readonly #upstream = new Map<string, Array<MessageCandidate<T>>>();
+
+  constructor(candidates: Array<MessageCandidate<T>> = []) {
+    for (const candidate of candidates) this.add(candidate);
+  }
+
+  add(candidate: MessageCandidate<T>): void {
+    for (const identity of exactMessageIdentityKeys(candidate.message)) {
+      appendMapValue(this.#strong, identity, candidate);
+    }
+    const upstreamKey = userUpstreamPayloadKey(candidate.message);
+    if (upstreamKey) appendMapValue(this.#upstream, upstreamKey, candidate);
+  }
+
+  find(message: ChatMessage): MessageCandidate<T> | undefined {
+    const strongMatches = uniqueCandidates(
+      exactMessageIdentityKeys(message)
+        .flatMap((identity) => this.#strong.get(identity) ?? [])
+        .filter((candidate) => messagesShareStrongIdentity(candidate.message, message)),
+    );
+    if (strongMatches.length > 0) return strongMatches[0];
+
+    const upstreamKey = userUpstreamPayloadKey(message);
+    if (!upstreamKey) return undefined;
+    const upstreamMatches = uniqueCandidates(
+      (this.#upstream.get(upstreamKey) ?? [])
+        .filter((candidate) => userMessagesCanBridgeByUpstream(candidate.message, message)),
+    );
+    return upstreamMatches.length === 1 ? upstreamMatches[0] : undefined;
+  }
+}
+
+function pairUserDeliveries<L, R>(
+  leftCandidates: Array<MessageCandidate<L>>,
+  rightCandidates: Array<MessageCandidate<R>>,
+): Map<MessageCandidate<L>, MessageCandidate<R>> {
+  const leftUsers = leftCandidates.filter(isUserCandidate);
+  const rightUsers = rightCandidates.filter(isUserCandidate);
+  const matches = new Map<MessageCandidate<L>, MessageCandidate<R>>();
+  const matchedRight = new Set<MessageCandidate<R>>();
+  const rightByStrongIdentity = new Map<string, Array<MessageCandidate<R>>>();
+  for (const right of rightUsers) {
+    for (const identity of exactMessageIdentityKeys(right.message)) {
+      appendMapValue(rightByStrongIdentity, identity, right);
+    }
+  }
+
+  for (const left of leftUsers) {
+    const match = uniqueCandidates(
+      exactMessageIdentityKeys(left.message)
+        .flatMap((identity) => rightByStrongIdentity.get(identity) ?? [])
+        .filter((right) => (
+          !matchedRight.has(right)
+          && messagesShareStrongIdentity(left.message, right.message)
+        )),
+    )[0];
+    if (!match) continue;
+    matches.set(left, match);
+    matchedRight.add(match);
+  }
+
+  const unmatchedLeftByUpstream = new Map<string, Array<MessageCandidate<L>>>();
+  const unmatchedRightByUpstream = new Map<string, Array<MessageCandidate<R>>>();
+  for (const left of leftUsers) {
+    if (matches.has(left)) continue;
+    const key = userUpstreamPayloadKey(left.message);
+    if (key) appendMapValue(unmatchedLeftByUpstream, key, left);
+  }
+  for (const right of rightUsers) {
+    if (matchedRight.has(right)) continue;
+    const key = userUpstreamPayloadKey(right.message);
+    if (key) appendMapValue(unmatchedRightByUpstream, key, right);
+  }
+
+  for (const [key, leftGroup] of unmatchedLeftByUpstream) {
+    const rightGroup = unmatchedRightByUpstream.get(key) ?? [];
+    if (leftGroup.length === rightGroup.length && leftGroup.length > 0) {
+      const orderedPairs = leftGroup.map((left, index) => [left, rightGroup[index]] as const);
+      if (orderedPairs.every(([left, right]) => (
+        userMessagesCanBridgeByUpstream(left.message, right.message)
+      ))) {
+        for (const [left, right] of orderedPairs) {
+          matches.set(left, right);
+          matchedRight.add(right);
+        }
+      }
+      continue;
+    }
+
+    if (leftGroup.length !== 1 && rightGroup.length !== 1) continue;
+    const compatiblePairs = leftGroup.flatMap((left) => rightGroup
+      .filter((right) => userMessagesCanBridgeByUpstream(left.message, right.message))
+      .map((right) => [left, right] as const));
+    if (compatiblePairs.length !== 1) continue;
+    const [left, right] = compatiblePairs[0];
+    matches.set(left, right);
+    matchedRight.add(right);
+  }
+
+  return matches;
+}
+
+function mergeRetainedUserIdentity(
+  retainedMessage: ChatMessage,
   nativeMessage: ChatMessage,
 ): ChatMessage {
   if (
-    !(liveMessage instanceof UserMessage)
+    !(retainedMessage instanceof UserMessage)
     || !(nativeMessage instanceof UserMessage)
-    || !liveMessage.metadata?.clientRequestId
-    || !messagesShareExactIdentity(liveMessage, nativeMessage)
+    || !retainedMessage.metadata?.clientRequestId
   ) {
     return nativeMessage;
   }
+  const metadata = { ...nativeMessage.metadata, ...retainedMessage.metadata };
+  if (JSON.stringify(metadata) === JSON.stringify(nativeMessage.metadata)) return nativeMessage;
   return attachNativeMessageSource(new UserMessage(
     nativeMessage.timestamp,
     nativeMessage.content,
     nativeMessage.images,
-    { ...nativeMessage.metadata, ...liveMessage.metadata },
+    metadata,
   ), getNativeMessageRevisionSource(nativeMessage));
 }
 
-function messagesShareExactIdentity(left: ChatMessage, right: ChatMessage): boolean {
+function messagesShareStrongIdentity(left: ChatMessage, right: ChatMessage): boolean {
   const leftSource = getNativeMessageRevisionSource(left);
   const rightSource = getNativeMessageRevisionSource(right);
   if (
@@ -184,21 +302,63 @@ function messagesShareExactIdentity(left: ChatMessage, right: ChatMessage): bool
   if (!(left instanceof UserMessage) || !(right instanceof UserMessage)) return false;
   const leftClientRequestId = left.metadata?.clientRequestId;
   const rightClientRequestId = right.metadata?.clientRequestId;
-  if (leftClientRequestId && rightClientRequestId) {
-    return leftClientRequestId === rightClientRequestId;
-  }
   return Boolean(
-    left.metadata?.upstreamRequestId
-    && left.metadata.upstreamRequestId === right.metadata?.upstreamRequestId,
+    leftClientRequestId
+    && rightClientRequestId
+    && leftClientRequestId === rightClientRequestId,
   );
+}
+
+function userMessagesCanBridgeByUpstream(left: ChatMessage, right: ChatMessage): boolean {
+  if (!(left instanceof UserMessage) || !(right instanceof UserMessage)) return false;
+  const leftUpstreamRequestId = left.metadata?.upstreamRequestId;
+  const rightUpstreamRequestId = right.metadata?.upstreamRequestId;
+  if (!leftUpstreamRequestId || leftUpstreamRequestId !== rightUpstreamRequestId) return false;
+  const leftClientRequestId = left.metadata?.clientRequestId;
+  const rightClientRequestId = right.metadata?.clientRequestId;
+  if (
+    leftClientRequestId
+    && rightClientRequestId
+    && leftClientRequestId !== rightClientRequestId
+  ) return false;
+  return userDeliveryPayloadsAreCompatible(left, right);
+}
+
+function userUpstreamPayloadKey(message: ChatMessage): string | null {
+  if (!(message instanceof UserMessage) || !message.metadata?.upstreamRequestId) return null;
+  return JSON.stringify([
+    message.metadata.upstreamRequestId,
+    userPayloadKey(message),
+  ]);
+}
+
+function userPayloadKey(message: UserMessage): string {
+  return JSON.stringify([message.content, message.images ?? null]);
+}
+
+function isUserCandidate<T>(candidate: MessageCandidate<T>): candidate is MessageCandidate<T> & {
+  message: UserMessage;
+} {
+  return candidate.message instanceof UserMessage;
+}
+
+function appendMapValue<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const values = map.get(key);
+  if (values) values.push(value);
+  else map.set(key, [value]);
+}
+
+function uniqueCandidates<T>(candidates: Array<MessageCandidate<T>>): Array<MessageCandidate<T>> {
+  const seen = new Set<T>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.value)) return false;
+    seen.add(candidate.value);
+    return true;
+  });
 }
 
 function wireMessagesEqual(left: ChatMessage, right: ChatMessage | undefined): boolean {
   return right !== undefined && JSON.stringify(left) === JSON.stringify(right);
-}
-
-function withoutMetadata(message: UserMessage, timestamp: string): UserMessage {
-  return new UserMessage(timestamp, message.content, message.images);
 }
 
 function metadataIsCompatible(

@@ -21,6 +21,7 @@ import {
 } from '@garcon/server-agent-common/lib/transcript-revision';
 import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
 import { LegacyCodexProjection } from './legacy-history-projection.js';
+import { codexMessageSourceIdentity } from './message-source-identity.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -144,15 +145,21 @@ export function addCodexJsonlLine(
     const result = projection.project(entry, context);
     if (!result) return false;
 
-    const entryId = codexTurnItemEntryId(entry);
+    const identity = codexResponseItemIdentity(entry);
     let withinSourceOrdinal = 0;
     const appendMessages = (target: ChatMessage[], messages: ChatMessage[]): void => {
       for (const message of messages) {
+        const sourceIdentity = codexMessageSourceIdentity({
+          turnId: identity.turnId,
+          itemId: identity.itemId,
+          message,
+          fallbackOrdinal: withinSourceOrdinal,
+        });
         target.push(attachNativeMessageSource(message, {
-          entryId,
+          ...sourceIdentity,
           byteOffset: context.sourceByteOffset,
           lineNumber: context.sourceLineNumber,
-          withinSourceOrdinal,
+          withinSourceOrdinal: sourceIdentity?.withinSourceOrdinal ?? withinSourceOrdinal,
         }));
         withinSourceOrdinal += 1;
       }
@@ -182,13 +189,19 @@ function parseCodexJsonlEntry(line: string): Record<string, unknown> | null {
   return parsed.kind === 'value' ? asRecord(parsed.value) : null;
 }
 
-function codexTurnItemEntryId(entry: Record<string, unknown>): string | undefined {
-  if (entry.type !== 'response_item') return undefined;
+function codexResponseItemIdentity(entry: Record<string, unknown>): {
+  turnId?: string;
+  itemId?: string;
+} {
+  if (entry.type !== 'response_item') return {};
   const payload = asRecord(entry.payload);
   const metadata = asRecord(payload.internal_chat_message_metadata_passthrough);
   const turnId = typeof metadata.turn_id === 'string' ? metadata.turn_id.trim() : '';
   const itemId = typeof payload.id === 'string' ? payload.id.trim() : '';
-  return turnId && itemId ? `turn:${turnId}:item:${itemId}` : undefined;
+  return {
+    ...(turnId ? { turnId } : {}),
+    ...(itemId ? { itemId } : {}),
+  };
 }
 
 function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: boolean): ChatMessage[] {

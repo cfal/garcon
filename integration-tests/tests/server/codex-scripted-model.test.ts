@@ -115,12 +115,14 @@ describe('Codex against a scripted model', () => {
     });
   });
 
-  test('keeps persisted user and assistant items exact-once during page revalidation', async () => {
+  test('keeps persisted user, command, and assistant items exact-once during page revalidation', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
     const initialReply = `SCRIPTED_INITIAL_${crypto.randomUUID().replaceAll('-', '')}`;
     const continuedPrompt = `Continue ${crypto.randomUUID()}.`;
     const continuedReply = `SCRIPTED_CONTINUED_${crypto.randomUUID().replaceAll('-', '')}`;
+    const commandMarker = `COMMAND_${crypto.randomUUID().replaceAll('-', '')}`;
+    const commandCallId = `call_${crypto.randomUUID().replaceAll('-', '')}`;
     testEnvironment.model.scriptTurn([codexAssistantMessage(initialReply)]);
 
     await withIntegrationFixture('codex-scripted-page-revalidation', async (fixture) => {
@@ -143,6 +145,9 @@ describe('Codex against a scripted model', () => {
       const partial = await fixture.client.getMessages(chatId, { limit: 1 });
       expect(partial.hasMore).toBe(true);
 
+      testEnvironment.model.scriptTurn([
+        codexExecCommandCall(commandCallId, `printf ${commandMarker}`),
+      ]);
       const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(continuedReply)]);
       const continuedCursor = fixture.client.markEvents();
       const continued = await fixture.client.runChat(liveCodexRunRequest({
@@ -154,6 +159,23 @@ describe('Codex against a scripted model', () => {
         const running = await fixture.client.getMessages(chatId);
         expect(userContents(running.messages).filter((content) => content === continuedPrompt))
           .toHaveLength(1);
+        expect(messagesOfType(running.messages, 'bash-tool-use')
+          .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
+        expect(messagesOfType(running.messages, 'tool-result')
+          .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
+
+        const emitted = fixture.client.eventsSince(continuedCursor)
+          .flatMap((event) => (
+            event.type === 'chat-messages'
+            && event.chatId === chatId
+            && event.turnId === continued.turnId
+              ? event.messages
+              : []
+          ));
+        expect(messagesOfType(emitted, 'bash-tool-use')
+          .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
+        expect(messagesOfType(emitted, 'tool-result')
+          .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
       } finally {
         held.release();
       }

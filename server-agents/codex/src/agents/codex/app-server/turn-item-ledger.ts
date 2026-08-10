@@ -4,6 +4,7 @@ import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/na
 import { loadCodexChatMessages } from '../history-loader.js';
 import { convertCodexAppServerLiveItem } from './converter.js';
 import type { CodexThreadItem } from './protocol.js';
+import { codexMessageSourceIdentity } from '../message-source-identity.js';
 
 export class CodexTurnItemLedger {
   readonly #seenIds = new Set<string>();
@@ -38,10 +39,12 @@ export class CodexTurnItemLedger {
     if (item.type === 'contextCompaction') this.#manualCompactionPending = false;
     const messages = convertCodexAppServerLiveItem(item, undefined, compactionTrigger);
     messages.forEach((message, withinSourceOrdinal) => {
-      attachNativeMessageSource(message, {
-        entryId: `turn:${turnId}:item:${item.id}`,
-        withinSourceOrdinal,
-      });
+      attachNativeMessageSource(message, codexMessageSourceIdentity({
+        turnId,
+        itemId: item.id,
+        message,
+        fallbackOrdinal: withinSourceOrdinal,
+      }));
     });
     if (messages.length) this.#emit(messages);
   }

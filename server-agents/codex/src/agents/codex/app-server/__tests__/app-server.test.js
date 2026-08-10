@@ -1999,6 +1999,16 @@ describe('CodexAppServerRuntime', () => {
       content: { raw: 'persisted' },
       isError: false,
     });
+    expect(emitted.map(getNativeMessageRevisionSource)).toEqual([
+      {
+        entryId: 'turn:turn-1:tool:command-after-interrupt',
+        withinSourceOrdinal: 0,
+      },
+      {
+        entryId: 'turn:turn-1:tool:command-after-interrupt',
+        withinSourceOrdinal: 1,
+      },
+    ]);
 
     const terminal = new Promise((resolve) => provider.onFinished(resolve));
     fake.emit('notification', {

@@ -1,5 +1,14 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { AssistantMessage, UserMessage } from '../../common/chat-types.js';
+import { ChatViewStore } from '../chats/chat-view-store.js';
+import {
+  historyPage,
+  transcriptSnapshot,
+} from '../chats/__tests__/chat-transcript-test-helpers.js';
+import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from '../agents/shared/native-message-source.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
 import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.ts';
 import { CommandLedger } from '../commands/command-ledger.ts';
@@ -53,7 +62,7 @@ function createWiringFixture(overrides = {}) {
   const metadata = {
     updateFromAppendedMessages: mock(() => undefined),
   };
-  const chatViews = {
+  const chatViews = overrides.chatViewsInstance ?? {
     captureFence: mock(() => 0),
     deleteChatView: mock(() => undefined),
     appendAfterEnsuringGeneration: mock(async () => ({
@@ -122,6 +131,8 @@ function createWiringFixture(overrides = {}) {
     scheduledPrompts: { onInvalidated: noOpSubscription },
     snippets: { onInvalidated: noOpSubscription },
     loadNativeMessages: mock(async () => []),
+    loadChatSnapshot: overrides.loadChatSnapshot ?? mock(async () => transcriptSnapshot([])),
+    loadChatPage: overrides.loadChatPage ?? mock(async () => historyPage([], 100, 0)),
     searchIndex,
   });
   return {
@@ -139,6 +150,53 @@ function createWiringFixture(overrides = {}) {
 }
 
 describe('server event wiring', () => {
+  it('preserves native source identity through ingestion before terminal reconciliation', async () => {
+    const history = [
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'older one'),
+      new AssistantMessage('2026-06-01T00:00:01.000Z', 'older two'),
+    ];
+    const chatViews = new ChatViewStore(() => false);
+    await chatViews.getOrCreatePage('chat-1', {
+      loadAll: async () => transcriptSnapshot(history),
+      loadPage: async (limit, offset) => historyPage(history, limit, offset),
+    }, 1);
+    const source = {
+      entryId: 'turn:turn-1:item:message-1',
+      withinSourceOrdinal: 0,
+    };
+    history.push(attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted reply'),
+      source,
+    ));
+    const live = attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted reply'),
+      source,
+    );
+    const published = [];
+    const fixture = createWiringFixture({
+      chatViewsInstance: chatViews,
+      loadChatSnapshot: async () => transcriptSnapshot(history),
+      loadChatPage: async (_chatId, limit, offset) => historyPage(history, limit, offset),
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.agentListeners.messages('chat-1', [live], { turnId: 'turn-1' });
+    await fixture.wiring.waitForIdle();
+
+    const emitted = published.filter((message) => message.type === 'chat-messages');
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].messages.map((entry) => entry.message.content)).toEqual(['persisted reply']);
+    expect(chatViews.readPage('chat-1', 20).messages.map((entry) => entry.message.content)).toEqual([
+      'older one',
+      'older two',
+      'persisted reply',
+    ]);
+    const appendedMessage = chatViews.readPage('chat-1', 20).messages.at(-1).message;
+    expect(getNativeMessageRevisionSource(appendedMessage)).toEqual(source);
+  });
+
   it('broadcasts the server instance with execution control updates', () => {
     const published = [];
     const fixture = createWiringFixture({

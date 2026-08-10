@@ -9,6 +9,10 @@ import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
+import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from './agents/shared/native-message-source.js';
 import type { ChatRegistry } from './chats/store.js';
 import type { MetadataIndex } from './chats/metadata-store.js';
 import type {
@@ -57,6 +61,18 @@ import {
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
+
+function normalizeAgentMessages(messages: readonly ChatMessage[]): ChatMessage[] {
+  const normalized: ChatMessage[] = [];
+  for (const message of messages) {
+    const source = getNativeMessageRevisionSource(message);
+    for (const parsed of parseChatMessages([message])) {
+      normalized.push(attachNativeMessageSource(parsed, source));
+    }
+  }
+  return normalized;
+}
+
 interface WebSocketPublisher {
   publish(topic: string, payload: string): unknown;
 }
@@ -453,7 +469,7 @@ export function wireServerEvents({
     scheduleChatTask(chatId, 'chat-view: message ingestion failed', async () => {
       if (!chatExists(chatId)) return;
       try {
-        const parsed = parseChatMessages(messages);
+        const parsed = normalizeAgentMessages(messages);
         const appended = await chatViews.appendAfterEnsuringGeneration(
           chatId,
           {

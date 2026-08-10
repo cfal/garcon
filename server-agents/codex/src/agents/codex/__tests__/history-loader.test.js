@@ -460,9 +460,11 @@ describe('loadCodexChatMessages', () => {
         timestamp: ts,
         payload: {
           type: 'function_call',
+          id: 'fc-generated-id',
           name: 'exec_command',
           arguments: '{"cmd":"rg --files","workdir":"/project"}',
           call_id: 'call_abc',
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
         },
       }),
       JSON.stringify({
@@ -470,8 +472,10 @@ describe('loadCodexChatMessages', () => {
         timestamp: tsOutput,
         payload: {
           type: 'function_call_output',
+          id: 'fco-generated-id',
           call_id: 'call_abc',
           output: 'file1.js\nfile2.js',
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
         },
       }),
     ];
@@ -483,6 +487,20 @@ describe('loadCodexChatMessages', () => {
     expect(messages[0].command).toBe('rg --files');
     expect(messages[1].type).toBe('tool-result');
     expect(messages[1].toolId).toBe('call_abc');
+    expect(messages.map(getNativeMessageRevisionSource)).toEqual([
+      {
+        entryId: 'turn:turn-1:tool:call_abc',
+        byteOffset: 0,
+        lineNumber: 1,
+        withinSourceOrdinal: 0,
+      },
+      {
+        entryId: 'turn:turn-1:tool:call_abc',
+        byteOffset: expect.any(Number),
+        lineNumber: 2,
+        withinSourceOrdinal: 1,
+      },
+    ]);
   });
 
   it('loads web_search_call entries as WebSearch tool-use/result', async () => {
@@ -493,7 +511,9 @@ describe('loadCodexChatMessages', () => {
         timestamp: ts,
         payload: {
           type: 'web_search_call',
+          id: 'web-search-1',
           status: 'completed',
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
           action: {
             type: 'search',
             query: 'React performance tips',
@@ -508,6 +528,20 @@ describe('loadCodexChatMessages', () => {
     expect(messages).toHaveLength(2);
     expect(messages[0].type).toBe('web-search-tool-use');
     expect(messages[1].type).toBe('tool-result');
+    expect(messages.map(getNativeMessageRevisionSource)).toEqual([
+      {
+        entryId: 'turn:turn-1:tool:web-search-1',
+        byteOffset: 0,
+        lineNumber: 1,
+        withinSourceOrdinal: 0,
+      },
+      {
+        entryId: 'turn:turn-1:tool:web-search-1',
+        byteOffset: 0,
+        lineNumber: 1,
+        withinSourceOrdinal: 1,
+      },
+    ]);
   });
 
   it('assigns unique fallback IDs to repeated web_search_call entries without provider IDs', async () => {

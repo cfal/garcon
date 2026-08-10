@@ -9,7 +9,7 @@ import {
 } from '../lib/transcript-revision.js';
 import {
   exactMessageIdentityKeys,
-  matchingRetainedMessagesByExactIdentity,
+  matchingRetainedMessagesByDeliveryIdentity,
   preserveRetainedUserIdentities,
   reconcileLiveMessageAppends,
   retainedMessageMatchesNative,
@@ -310,7 +310,7 @@ export class ChatViewStore {
       }
       const revalidated = previousGenerationId === undefined
         ? []
-        : matchingRetainedMessagesByExactIdentity(view.messages, messages).filter((entry) => (
+        : matchingRetainedMessagesByDeliveryIdentity(view.messages, messages).filter((entry) => (
             previousGenerationId !== view.generationId
             || previousLastSeq !== undefined && entry.seq > previousLastSeq
           ));
