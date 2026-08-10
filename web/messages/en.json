@@ -240,6 +240,7 @@
 	"chat_notice_handoff_requires_idle": "Wait for the current work and queued messages to finish before handing this chat to another agent.",
 	"chat_notice_steer_prompt_required": "Add guidance after /steer.",
 	"chat_notice_steer_unsupported": "/steer is not supported by this agent.",
+	"chat_notice_steer_shortcut_unsupported": "This agent does not support steering.",
 	"chat_notice_steer_attachments_unavailable": "Remove attachments before steering the active turn.",
 	"chat_notice_steer_turn_unavailable": "There isn't a turn ready for steering.",
 	"chat_notice_steer_turn_changed": "The active turn changed before steering could be applied.",

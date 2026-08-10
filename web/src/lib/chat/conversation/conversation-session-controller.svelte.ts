@@ -70,7 +70,7 @@ import {
 } from './conversation-execution-draft-state.svelte.js';
 import {
 	steerSubmissionRejection,
-	steerSubmissionRejectionNotice,
+	steerShortcutRejectionNotice,
 } from './steer-submission-policy.js';
 
 type SessionTranscriptState = Pick<
@@ -736,7 +736,7 @@ export class ConversationSessionController {
 			handoffPending: this.#executionDraft.isHandoffPending,
 		});
 		if (rejection) {
-			deps.chatState.appendLocalNotice('error', steerSubmissionRejectionNotice(rejection));
+			deps.chatState.appendLocalNotice('error', steerShortcutRejectionNotice(rejection));
 			return 'rejected';
 		}
 

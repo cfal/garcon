@@ -1939,7 +1939,7 @@ describe('ConversationSessionController', () => {
 		expect(unsupportedOutcome).toBe('rejected');
 		expect(unsupported.deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
 			'error',
-			'/steer is not supported by this agent.',
+			'This agent does not support steering.',
 		);
 		expect(unsupported.deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 

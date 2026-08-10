@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	steerShortcutRejectionNotice,
 	steerSubmissionRejection,
 	steerSubmissionRejectionNotice,
 } from '../steer-submission-policy.js';
@@ -43,5 +44,11 @@ describe('steerSubmissionRejection', () => {
 			'Remove attachments before steering the active turn.',
 		);
 		expect(steerSubmissionRejectionNotice('handoff-pending')).toContain('another agent');
+	});
+
+	it('uses command-neutral copy for shortcut eligibility failures', () => {
+		expect(steerShortcutRejectionNotice('unsupported')).toBe(
+			'This agent does not support steering.',
+		);
 	});
 });

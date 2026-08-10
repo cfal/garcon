@@ -28,3 +28,8 @@ export function steerSubmissionRejectionNotice(rejection: SteerSubmissionRejecti
 			return m.chat_notice_handoff_requires_idle();
 	}
 }
+
+export function steerShortcutRejectionNotice(rejection: SteerSubmissionRejection): string {
+	if (rejection === 'unsupported') return m.chat_notice_steer_shortcut_unsupported();
+	return steerSubmissionRejectionNotice(rejection);
+}
