@@ -165,6 +165,12 @@ async function waitForStableModelCount(page: Page, minimum: number): Promise<num
   }, minimum);
 }
 
+async function transcriptEntryCount(page: Page): Promise<number> {
+  return page
+    .locator(SIZER_SELECTOR)
+    .evaluate((sizer) => Number((sizer as HTMLElement).dataset.chatTranscriptEntryCount ?? 0));
+}
+
 async function virtualDataRevision(page: Page): Promise<number> {
   return page
     .locator(SIZER_SELECTOR)
@@ -1804,28 +1810,7 @@ async function verifyLaterPageReadingPosition(
   await waitForTranscriptReady(fixture.page);
 
   await signalScrollIntent(fixture.page, 'earlier');
-  const prefetchPosition = await fixture.page
-    .locator(FEED_SELECTOR)
-    .evaluate(async (feedElement) => {
-      const feed = feedElement as HTMLElement;
-      const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const targetDistance = Math.max(51, feed.clientHeight * 0.75);
-      let stableFrames = 0;
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
-        if (maximum > targetDistance) {
-          feed.scrollTop = maximum - targetDistance;
-          feed.dispatchEvent(new Event('scroll', { bubbles: true }));
-        }
-        await settle();
-        const distanceFromEnd = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
-        stableFrames = Math.abs(distanceFromEnd - targetDistance) <= 1 ? stableFrames + 1 : 0;
-        if (stableFrames >= 4) {
-          return { distanceFromEnd, viewportHeight: feed.clientHeight };
-        }
-      }
-      throw new Error('The later-page prefetch position did not settle.');
-    });
+  const prefetchPosition = await positionNearLaterPageBoundary(fixture.page);
   expect(prefetchPosition.distanceFromEnd).toBeGreaterThan(50);
   expect(prefetchPosition.distanceFromEnd).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
   const anchor = await readingAnchor(fixture.page);
@@ -1856,6 +1841,31 @@ async function verifyLaterPageReadingPosition(
     .waitFor();
   await waitForStablePinnedTranscriptLayout(fixture.page, 'live-append-after-return');
   fixture.assertNoBrowserErrors();
+}
+
+async function positionNearLaterPageBoundary(
+  page: Page,
+): Promise<{ distanceFromEnd: number; viewportHeight: number }> {
+  return page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const targetDistance = Math.max(51, feed.clientHeight * 0.75);
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+      if (maximum > targetDistance) {
+        feed.scrollTop = maximum - targetDistance;
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      }
+      await settle();
+      const distanceFromEnd = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
+      stableFrames = Math.abs(distanceFromEnd - targetDistance) <= 1 ? stableFrames + 1 : 0;
+      if (stableFrames >= 4) {
+        return { distanceFromEnd, viewportHeight: feed.clientHeight };
+      }
+    }
+    throw new Error('The later-page prefetch position did not settle.');
+  });
 }
 
 async function verifyConcurrentAppendNavigation(
@@ -2466,46 +2476,43 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyCountShrinkMeasurements(fixture: ChromiumFixture): Promise<void> {
-  const chatId = await seedTranscript(fixture.integration, 110, 'chromium-count-shrink');
-  const { initialModelCount } = await prepareTranscript(fixture, chatId);
-  let expandedModelCount = initialModelCount;
-  for (let pageIndex = 0; pageIndex < 4 && expandedModelCount <= 200; pageIndex += 1) {
-    await revealEarlierTranscript(fixture.page, expandedModelCount);
-    expandedModelCount = await waitForStableModelCount(fixture.page, expandedModelCount + 1);
+async function verifyBoundedWindowLaterPage(fixture: ChromiumFixture): Promise<void> {
+  const chatId = await seedTranscript(fixture.integration, 110, 'chromium-bounded-window');
+  await prepareTranscript(fixture, chatId);
+  let entryCount = await transcriptEntryCount(fixture.page);
+  for (let pageIndex = 0; pageIndex < 4 && entryCount < 200; pageIndex += 1) {
+    const previousRevision = await virtualDataRevision(fixture.page);
+    await scrollToPosition(fixture.page, 'start');
+    await waitForVirtualDataRevisionAfter(fixture.page, previousRevision);
+    entryCount = await transcriptEntryCount(fixture.page);
+    expect(entryCount).toBeLessThanOrEqual(200);
   }
-  expect(expandedModelCount).toBeGreaterThan(200);
+  expect(entryCount).toBe(200);
 
-  await scrollToPosition(fixture.page, 'end', false);
-  expect((await viewportPolicy(fixture.page)).pinned).toBe(false);
+  const earlierRevision = await virtualDataRevision(fixture.page);
+  await scrollToPosition(fixture.page, 'start');
+  await waitForVirtualDataRevisionAfter(fixture.page, earlierRevision);
+  expect(await transcriptEntryCount(fixture.page)).toBe(200);
+
+  const prefetchPosition = await positionNearLaterPageBoundary(fixture.page);
+  expect(prefetchPosition.distanceFromEnd).toBeGreaterThan(50);
+  expect(prefetchPosition.distanceFromEnd).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
+  const anchor = await readingAnchor(fixture.page);
+  const laterRevision = await virtualDataRevision(fixture.page);
   await signalScrollIntent(fixture.page, 'later');
   await fixture.page.locator(FEED_SELECTOR).dispatchEvent('scroll');
-  await fixture.page.waitForFunction(
-    ({ selector, previousCount }) => {
-      const sizer = document.querySelector<HTMLElement>(selector);
-      const current = Number(sizer?.dataset.chatVirtualModelCount ?? 0);
-      return current > 0 && current < previousCount;
-    },
-    { selector: SIZER_SELECTOR, previousCount: expandedModelCount },
-    { timeout: 20_000 },
-  );
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'post-compaction');
+  await waitForVirtualDataRevisionAfter(fixture.page, laterRevision);
+  expect(await transcriptEntryCount(fixture.page)).toBe(200);
+  const restored = await anchorByKey(fixture.page, anchor.key);
+  expect(
+    Math.abs(restored.offset - anchor.offset),
+    JSON.stringify({ anchor, restored }),
+  ).toBeLessThanOrEqual(1);
 
-  const compactedGeometry = await transcriptGeometry(fixture.page);
-  expect(compactedGeometry.modelCount).toBeLessThan(expandedModelCount);
-  expect(compactedGeometry.itemCount).toBeGreaterThan(2);
-  expect(compactedGeometry.transcriptItemCount).toBeGreaterThan(1);
-  expect(compactedGeometry.overlaps).toEqual([]);
-  expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
-
-  await appendTurn(fixture.integration, chatId, 'chromium-post-shrink-append');
-  await fixture.page
-    .locator(FEED_SELECTOR)
-    .getByText('echo:chromium-post-shrink-append', { exact: true })
-    .waitFor();
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'post-shrink-publication');
-  const postPublicationGeometry = await transcriptGeometry(fixture.page);
-  expect(postPublicationGeometry.overlaps).toEqual([]);
+  const boundedGeometry = await transcriptGeometry(fixture.page);
+  expect(boundedGeometry.itemCount).toBeGreaterThan(2);
+  expect(boundedGeometry.transcriptItemCount).toBeGreaterThan(1);
+  expect(boundedGeometry.overlaps).toEqual([]);
   expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
   fixture.assertNoBrowserErrors();
 }
@@ -2734,13 +2741,13 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 120_000);
 
-  test('preserves survivor geometry after live-edge compaction and a later publication', async () => {
+  test('bounds the retained transcript while preserving later-page geometry', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
-      'transcript-count-shrink-measurements',
+      'transcript-bounded-window-later-page',
       async (fixture, markPhase) => {
-        markPhase('expanding and compacting the transcript window');
-        await verifyCountShrinkMeasurements(fixture);
+        markPhase('paging across the bounded transcript window');
+        await verifyBoundedWindowLaterPage(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
