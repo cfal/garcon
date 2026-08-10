@@ -276,12 +276,13 @@ export class ChatViewStore {
     } = {},
   ): Promise<ChatViewPage> {
     return this.#withChat(chatId, async () => {
+      const previous = this.#views.get(chatId);
       const snapshot = await loadSnapshot();
       options.assertReplacementAllowed?.();
       this.invalidateFence(chatId);
       const view = this.#createGeneration(chatId, snapshot.messages, {
         reason: options.replacementReason ?? 'native-replacement',
-        previousGenerationId: this.#views.get(chatId)?.generationId,
+        previousGenerationId: previous?.generationId,
         persistence: snapshot,
       });
       const trailingNative = snapshot.messages.at(-1);
@@ -289,6 +290,7 @@ export class ChatViewStore {
       if (options.processErrorNotice && !nativeHasNotice) {
         this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), options.processErrorNotice)]);
       }
+      this.#transferPublishedLiveEntries(previous, view);
       this.#views.set(chatId, view);
       return this.#readPageFromView(view, Number.MAX_SAFE_INTEGER);
     });
@@ -301,23 +303,14 @@ export class ChatViewStore {
     options: { fence?: number } = {},
   ): Promise<AppendedChatViewMessages> {
     return this.#withChat(chatId, async () => {
-      const previous = this.#views.get(chatId);
-      const previousGenerationId = previous?.generationId;
-      const previousLastSeq = previous?.lastSeq;
       const view = await this.#getOrCreateAppendView(chatId, loader);
       if (options.fence !== undefined && options.fence !== view.streamFence) {
         return { generationId: view.generationId, messages: [], lastSeq: view.lastSeq, skipped: true };
       }
-      const revalidated = previousGenerationId === undefined
-        ? []
-        : matchingRetainedMessagesByDeliveryIdentity(view.messages, messages).filter((entry) => (
-            previousGenerationId !== view.generationId
-            || previousLastSeq !== undefined && entry.seq > previousLastSeq
-          ));
-      const appended = this.#appendLiveToView(view, messages);
+      const published = this.#appendLiveForPublication(view, messages);
       return {
         generationId: view.generationId,
-        messages: [...revalidated, ...appended].sort((left, right) => left.seq - right.seq),
+        messages: published,
         lastSeq: view.lastSeq,
       };
     });
@@ -333,7 +326,7 @@ export class ChatViewStore {
         view = this.#createGeneration(chatId, [], { reason: 'initial-live-append' });
         this.#views.set(chatId, view);
       }
-      const appended = this.#appendLiveToView(view, messages);
+      const appended = this.#appendLiveForPublication(view, messages);
       return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
     });
   }
@@ -355,7 +348,7 @@ export class ChatViewStore {
         view.nativePrefixDigest = null;
         this.#views.set(chatId, view);
       }
-      const appended = this.#appendLiveToView(view, messages);
+      const appended = this.#appendLiveForPublication(view, messages);
       return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
     });
   }
@@ -546,6 +539,7 @@ export class ChatViewStore {
     if (unpersistedLive.length > 0) {
       this.#appendLiveToView(view, unpersistedLive, 'native-wins');
     }
+    this.#transferPublishedLiveEntries(previous, view);
     this.#views.set(chatId, view);
     return view;
   }
@@ -645,6 +639,7 @@ export class ChatViewStore {
       const appended = this.#appendLiveToView(view, unpersistedLiveMessages, 'native-wins');
       fullMessages = [...fullMessages, ...appended.map((entry) => entry.message)];
     }
+    this.#transferPublishedLiveEntries(previous, view);
     this.#views.set(chatId, view);
     return { view, messages: fullMessages };
   }
@@ -669,6 +664,7 @@ export class ChatViewStore {
       );
     }
     this.#appendToView(reconciled.view, this.#operationalNotices.missingFrom(chatId, reconciled.view.messages));
+    this.#transferPublishedLiveEntries(previous, reconciled.view);
     this.#logGenerationTransition(reconciled.view, reconciled.transition);
     this.#views.set(chatId, reconciled.view);
   }
@@ -697,6 +693,7 @@ export class ChatViewStore {
       archivedLogicalCount: transition.persistence?.archivedLogicalCount ?? 0,
       nativePrefixDigest: transition.persistence?.nativePrefixDigest ?? null,
       evictedLiveDigest: new OrderedTranscriptDigest(),
+      publishedLiveEntries: new WeakSet(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,
       lastAccessOrder: ++this.#lastAccessOrder,
@@ -727,6 +724,7 @@ export class ChatViewStore {
       archivedLogicalCount: page.archivedLogicalCount,
       nativePrefixDigest: page.nativePrefixDigest,
       evictedLiveDigest: new OrderedTranscriptDigest(),
+      publishedLiveEntries: new WeakSet(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,
       lastAccessOrder: ++this.#lastAccessOrder,
@@ -763,6 +761,55 @@ export class ChatViewStore {
       logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${identity}`);
     }
     return this.#appendToView(view, reconciled.messages);
+  }
+
+  #appendLiveForPublication(
+    view: ChatView,
+    messages: ChatMessage[],
+  ): ChatViewMessage[] {
+    const retained = matchingRetainedMessagesByDeliveryIdentity(view.messages, messages)
+      .filter((entry) => !view.publishedLiveEntries.has(entry));
+    const appended = this.#appendLiveToView(view, messages);
+    const published = [...retained, ...appended].sort((left, right) => left.seq - right.seq);
+    for (const entry of published) view.publishedLiveEntries.add(entry);
+    return published;
+  }
+
+  #transferPublishedLiveEntries(previous: ChatView | undefined, view: ChatView): void {
+    if (!previous) return;
+    const published = previous.messages.filter((entry) => (
+      previous.publishedLiveEntries.has(entry)
+    ));
+    if (previous.generationId === view.generationId) {
+      const publishedSeqs = new Set(published.map((entry) => entry.seq));
+      for (const entry of view.messages) {
+        if (publishedSeqs.has(entry.seq)) view.publishedLiveEntries.add(entry);
+      }
+      return;
+    }
+
+    const publishedByIdentity = new Map<string, ChatViewMessage[]>();
+    for (const entry of published) {
+      for (const identity of exactMessageIdentityKeys(entry.message)) {
+        const entries = publishedByIdentity.get(identity);
+        if (entries) entries.push(entry);
+        else publishedByIdentity.set(identity, [entry]);
+      }
+    }
+    const retainedByIdentity = new Map<string, ChatViewMessage[]>();
+    for (const entry of view.messages) {
+      for (const identity of exactMessageIdentityKeys(entry.message)) {
+        const entries = retainedByIdentity.get(identity);
+        if (entries) entries.push(entry);
+        else retainedByIdentity.set(identity, [entry]);
+      }
+    }
+    for (const [identity, priorEntries] of publishedByIdentity) {
+      const retainedEntries = retainedByIdentity.get(identity);
+      if (priorEntries.length === 1 && retainedEntries?.length === 1) {
+        view.publishedLiveEntries.add(retainedEntries[0]);
+      }
+    }
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {

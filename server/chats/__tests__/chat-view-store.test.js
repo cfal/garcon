@@ -98,7 +98,7 @@ describe('ChatViewStore', () => {
     expect(loadNative).toHaveBeenCalledTimes(1);
   });
 
-  it('does not append an optimistic retry over the same durable user identity', async () => {
+  it('publishes a durable user identity without appending a duplicate', async () => {
     const store = new ChatViewStore(() => false);
     const identity = { clientRequestId: 'request-1', turnId: 'turn-1' };
     const appended = await store.appendAfterEnsuringGeneration(
@@ -107,7 +107,7 @@ describe('ChatViewStore', () => {
       [user('retry me', { ...identity, deliveryStatus: 'accepted' })],
     );
 
-    expect(appended.messages).toEqual([]);
+    expect(contents(appended)).toEqual(['retry me']);
     expect(contents(store.readPage('chat-1', 20))).toEqual(['retry me']);
   });
 
@@ -135,6 +135,174 @@ describe('ChatViewStore', () => {
       'older two',
       'persisted reply',
     ]);
+  });
+
+  it('publishes ahead-imported live rows once when their events arrive', async () => {
+    const store = new ChatViewStore(() => false);
+    const historyRef = { current: [assistant('older one'), assistant('older two')] };
+    await store.getOrCreatePage('chat-1', pagedLoader(historyRef), 1);
+    const firstSource = {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const secondSource = {
+      entryId: 'turn:provider-turn-1:item:provider-item-2',
+      withinSourceOrdinal: 0,
+    };
+    const nativeFirst = attachNativeMessageSource(assistant('persisted first'), firstSource);
+    const nativeSecond = attachNativeMessageSource(assistant('persisted second'), secondSource);
+    const liveFirst = attachNativeMessageSource(assistant('persisted first'), firstSource);
+    const liveSecond = attachNativeMessageSource(assistant('persisted second'), secondSource);
+    historyRef.current = [...historyRef.current, nativeFirst, nativeSecond];
+
+    const first = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      pagedLoader(historyRef),
+      [liveFirst],
+    );
+    const second = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      pagedLoader(historyRef),
+      [liveSecond],
+    );
+    const retry = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      pagedLoader(historyRef),
+      [liveSecond],
+    );
+
+    expect(contents(first)).toEqual(['persisted first']);
+    expect(contents(second)).toEqual(['persisted second']);
+    expect(retry.messages).toEqual([]);
+    expect(contents(store.readPage('chat-1', 20))).toEqual([
+      'older one',
+      'older two',
+      'persisted first',
+      'persisted second',
+    ]);
+  });
+
+  it('transfers publication proof across replacement only by exact identity', async () => {
+    const store = new ChatViewStore(() => false);
+    const firstSource = {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const secondSource = {
+      entryId: 'turn:provider-turn-2:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const nativeFirst = attachNativeMessageSource(assistant('same wire payload'), firstSource);
+    const liveFirst = attachNativeMessageSource(assistant('same wire payload'), firstSource);
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [liveFirst],
+    );
+
+    await store.replaceFromNative('chat-1', snapshotLoader(async () => [nativeFirst]));
+    const exactRetry = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [nativeFirst]),
+      [liveFirst],
+    );
+
+    const nativeSecond = attachNativeMessageSource(assistant('same wire payload'), secondSource);
+    const liveSecond = attachNativeMessageSource(assistant('same wire payload'), secondSource);
+    await store.replaceFromNative('chat-1', snapshotLoader(async () => [nativeSecond]));
+    const distinctDelivery = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [nativeSecond]),
+      [liveSecond],
+    );
+    const distinctRetry = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [nativeSecond]),
+      [liveSecond],
+    );
+
+    expect(exactRetry.messages).toEqual([]);
+    expect(contents(distinctDelivery)).toEqual(['same wire payload']);
+    expect(distinctRetry.messages).toEqual([]);
+  });
+
+  it('transfers publication proof across a preserved generation', async () => {
+    const store = new ChatViewStore(() => false);
+    const source = {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const native = attachNativeMessageSource(assistant('persisted delivery'), source);
+    const live = attachNativeMessageSource(assistant('persisted delivery'), source);
+    const initial = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [live],
+    );
+
+    await store.reconcileNativeSnapshot('chat-1', nativeReconciliation([native]));
+    const retry = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [native]),
+      [live],
+    );
+
+    expect(store.getCursor('chat-1')?.generationId).toBe(initial.generationId);
+    expect(retry.messages).toEqual([]);
+  });
+
+  it('drops publication proof when its retained row is trimmed', async () => {
+    const store = new ChatViewStore(() => false, { messageLimit: 2 });
+    const source = {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const native = attachNativeMessageSource(assistant('trimmed delivery'), source);
+    const live = attachNativeMessageSource(assistant('trimmed delivery'), source);
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [live],
+    );
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [assistant('later one'), assistant('later two')],
+    );
+
+    await store.replaceFromNative('chat-1', snapshotLoader(async () => [native]));
+    const afterTrim = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [native]),
+      [live],
+    );
+
+    expect(contents(afterTrim)).toEqual(['trimmed delivery']);
+  });
+
+  it('drops publication proof when its view is evicted', async () => {
+    const store = new ChatViewStore(() => false);
+    const source = {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const native = attachNativeMessageSource(assistant('evicted delivery'), source);
+    const live = attachNativeMessageSource(assistant('evicted delivery'), source);
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [live],
+    );
+
+    store.evict('chat-1');
+    const afterEviction = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [native]),
+      [live],
+    );
+
+    expect(contents(afterEviction)).toEqual(['evicted delivery']);
+    expect(contents(store.readPage('chat-1', 20))).toEqual(['evicted delivery']);
   });
 
   it('keeps equal native and live assistant text without a shared identity', async () => {
@@ -241,6 +409,36 @@ describe('ChatViewStore', () => {
     const retained = store.readPage('chat-1', 20).messages.map((entry) => entry.message);
     expect(retained).toHaveLength(2);
     expect(retained.map((message) => message.metadata?.clientRequestId)).toEqual([
+      'request-1',
+      'request-2',
+    ]);
+  });
+
+  it('keeps ambiguous equal deliveries separate from one persisted upstream row', async () => {
+    const store = new ChatViewStore(() => false);
+    const upstreamRequestId = 'reused-message-id';
+    await store.getOrCreateMessages(
+      'chat-1',
+      snapshotLoader(async () => [user('same steer', { upstreamRequestId })]),
+    );
+
+    const appended = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [
+        user('same steer', { clientRequestId: 'request-1', upstreamRequestId }),
+        user('same steer', { clientRequestId: 'request-2', upstreamRequestId }),
+      ],
+    );
+
+    expect(appended.messages.map((entry) => entry.message.metadata?.clientRequestId)).toEqual([
+      'request-1',
+      'request-2',
+    ]);
+    const retained = store.readPage('chat-1', 20).messages.map((entry) => entry.message);
+    expect(retained).toHaveLength(3);
+    expect(retained.map((message) => message.metadata?.clientRequestId)).toEqual([
+      undefined,
       'request-1',
       'request-2',
     ]);

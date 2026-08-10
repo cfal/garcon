@@ -150,7 +150,7 @@ function createWiringFixture(overrides = {}) {
 }
 
 describe('server event wiring', () => {
-  it('preserves native source identity through ingestion before terminal reconciliation', async () => {
+  it('publishes ahead-imported rows with their original turn metadata before reconciliation', async () => {
     const history = [
       new AssistantMessage('2026-06-01T00:00:00.000Z', 'older one'),
       new AssistantMessage('2026-06-01T00:00:01.000Z', 'older two'),
@@ -160,18 +160,31 @@ describe('server event wiring', () => {
       loadAll: async () => transcriptSnapshot(history),
       loadPage: async (limit, offset) => historyPage(history, limit, offset),
     }, 1);
-    const source = {
+    const firstSource = {
       entryId: 'turn:turn-1:item:message-1',
       withinSourceOrdinal: 0,
     };
-    history.push(attachNativeMessageSource(
-      new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted reply'),
-      source,
-    ));
-    const live = attachNativeMessageSource(
-      new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted reply'),
-      source,
+    const secondSource = {
+      entryId: 'turn:turn-2:item:message-2',
+      withinSourceOrdinal: 0,
+    };
+    const firstNative = attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted first'),
+      firstSource,
     );
+    const secondNative = attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:03.000Z', 'persisted second'),
+      secondSource,
+    );
+    const firstLive = attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted first'),
+      firstSource,
+    );
+    const secondLive = attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:03.000Z', 'persisted second'),
+      secondSource,
+    );
+    history.push(firstNative, secondNative);
     const published = [];
     const fixture = createWiringFixture({
       chatViewsInstance: chatViews,
@@ -182,19 +195,33 @@ describe('server event wiring', () => {
       },
     });
 
-    fixture.agentListeners.messages('chat-1', [live], { turnId: 'turn-1' });
+    fixture.agentListeners.messages('chat-1', [firstLive], { turnId: 'turn-1' });
+    fixture.agentListeners.messages('chat-1', [secondLive], { turnId: 'turn-2' });
+    fixture.agentListeners.messages('chat-1', [secondLive], { turnId: 'turn-2' });
     await fixture.wiring.waitForIdle();
 
     const emitted = published.filter((message) => message.type === 'chat-messages');
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0].messages.map((entry) => entry.message.content)).toEqual(['persisted reply']);
+    expect(emitted).toHaveLength(2);
+    expect(emitted.map((message) => ({
+      turnId: message.turnId,
+      contents: message.messages.map((entry) => entry.message.content),
+    }))).toEqual([
+      { turnId: 'turn-1', contents: ['persisted first'] },
+      { turnId: 'turn-2', contents: ['persisted second'] },
+    ]);
+    expect(fixture.commandLedger.appendAssistantMessages.mock.calls).toEqual([
+      ['chat-1', 'turn-1', ['persisted first']],
+      ['chat-1', 'turn-2', ['persisted second']],
+    ]);
     expect(chatViews.readPage('chat-1', 20).messages.map((entry) => entry.message.content)).toEqual([
       'older one',
       'older two',
-      'persisted reply',
+      'persisted first',
+      'persisted second',
     ]);
-    const appendedMessage = chatViews.readPage('chat-1', 20).messages.at(-1).message;
-    expect(getNativeMessageRevisionSource(appendedMessage)).toEqual(source);
+    expect(chatViews.readPage('chat-1', 20).messages.slice(-2).map((entry) => (
+      getNativeMessageRevisionSource(entry.message)
+    ))).toEqual([firstSource, secondSource]);
   });
 
   it('broadcasts the server instance with execution control updates', () => {

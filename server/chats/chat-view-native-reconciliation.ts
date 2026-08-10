@@ -40,6 +40,8 @@ export interface MutableChatView {
   evictedLiveStartSeq?: number;
   evictedLiveEndSeq?: number;
   evictedLiveDigest: OrderedTranscriptDigest;
+  // Keeps publication proof bounded by retained entry ownership.
+  readonly publishedLiveEntries: WeakSet<ChatViewMessage>;
   streamFence: number;
   lastAccessAt: number;
   lastAccessOrder: number;
@@ -253,6 +255,7 @@ function createNativeOnlyGeneration(input: ReconcileNativeViewInput & {
     archivedLogicalCount: input.snapshot.archivedLogicalCount,
     nativePrefixDigest: input.snapshot.nativePrefixDigest,
     evictedLiveDigest: new OrderedTranscriptDigest(),
+    publishedLiveEntries: new WeakSet(),
     streamFence: input.streamFence,
     lastAccessAt: input.now,
     lastAccessOrder: input.lastAccessOrder,
