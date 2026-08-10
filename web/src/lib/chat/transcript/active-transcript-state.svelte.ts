@@ -5,34 +5,33 @@ import {
 	type ChatViewMessage,
 	type ChatViewPage,
 } from '$shared/chat-view';
-import {
-	AssistantMessage,
-	ErrorMessage,
-	PermissionRequestMessage,
-	ThinkingMessage,
-	UserMessage,
-	isToolUseMessage,
-	type ChatMessage,
-	type UserMessageDeliveryStatus,
-} from '$shared/chat-types';
-import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
+import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { createRandomId } from '$lib/utils/random-id';
 import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
-import type { ConversationFeedMutationKind } from './conversation-feed-mutations.js';
+import {
+	responseMessageType,
+	type ConversationFeedMutationKind,
+} from './conversation-feed-mutations.js';
 import type {
 	ActiveTranscriptPort,
 	ChatCursor,
 	ChatLoadMessagesOptions,
 	ChatRestoreResult,
 } from './active-transcript-port.js';
-import { collectEarlierTranscriptMessages } from './transcript-page-progress.js';
+import {
+	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+	collectEarlierTranscriptMessages,
+	retainTranscriptEntries,
+} from './transcript-page-progress.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import {
 	applyPendingDeliveryStatuses,
 	mergeRowsWithPendingInputs,
+	normalizePendingInputs,
 	sortPendingInputs,
 	uniqueEntriesByClientRequestId,
 	type ChatTranscriptRow,
@@ -47,7 +46,6 @@ export type { ChatTranscriptRow } from './transcript-row-projection.js';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
-export const ACTIVE_TRANSCRIPT_RETENTION_LIMIT = 200;
 type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
 type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
 type SnapshotBatch = { generationId: string; messages: ChatViewMessage[]; noticeRevision: number };
@@ -66,28 +64,9 @@ export interface TranscriptPageState {
 	error: string | null;
 }
 
-function idlePageState(): TranscriptPageState {
-	return { status: 'idle', error: null };
-}
-
-function retainTranscriptEntries(
-	entries: ChatViewMessage[],
-	edge: TranscriptPageDirection,
-): ChatViewMessage[] {
-	if (entries.length <= ACTIVE_TRANSCRIPT_RETENTION_LIMIT) return entries;
-	return edge === 'earlier'
-		? entries.slice(0, ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
-		: entries.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-}
+const idlePageState = (): TranscriptPageState => ({ status: 'idle', error: null });
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
-function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): PendingUserInput[] {
-	return sortPendingInputs(
-		page.pendingUserInputs
-			.map(normalizePendingUserInput)
-			.filter((input): input is PendingUserInput => Boolean(input)),
-	);
-}
 
 export class ActiveTranscriptState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
@@ -486,7 +465,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasEarlierMessages = page.hasMore || retainedMessages.length < page.messages.length;
 		this.totalMessages = retainedMessages.length;
 		if (this.#pendingUserInputsRevision === this.#pendingUserInputsRevisionAtLoadStart) {
-			this.#replacePendingUserInputs(pendingInputsFromPage(page));
+			this.#replacePendingUserInputs(normalizePendingInputs(page.pendingUserInputs));
 		}
 		this.clearLocalNotices(this.#localNoticeRevisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
@@ -1014,14 +993,4 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (!this.#preserveExpandedVisibleWindow) return;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 	}
-}
-
-function responseMessageType(message: ChatMessage): string | null {
-	return message instanceof AssistantMessage ||
-		message instanceof ThinkingMessage ||
-		message instanceof ErrorMessage ||
-		message instanceof PermissionRequestMessage ||
-		isToolUseMessage(message)
-		? message.type
-		: null;
 }

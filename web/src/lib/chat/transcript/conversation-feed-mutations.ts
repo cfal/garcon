@@ -1,3 +1,12 @@
+import {
+	AssistantMessage,
+	ErrorMessage,
+	PermissionRequestMessage,
+	ThinkingMessage,
+	isToolUseMessage,
+	type ChatMessage,
+} from '$shared/chat-types';
+
 export type ConversationFeedMutationKind =
 	| 'initial'
 	| 'live-append'
@@ -46,4 +55,14 @@ export function conversationFeedEndBehavior(
 		return 'restore-if-pinned';
 	}
 	return 'preserve-reading-position';
+}
+
+export function responseMessageType(message: ChatMessage): string | null {
+	return message instanceof AssistantMessage ||
+		message instanceof ThinkingMessage ||
+		message instanceof ErrorMessage ||
+		message instanceof PermissionRequestMessage ||
+		isToolUseMessage(message)
+		? message.type
+		: null;
 }

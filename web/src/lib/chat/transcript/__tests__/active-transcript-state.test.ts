@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 	ActiveTranscriptState,
 	INITIAL_VISIBLE_MESSAGES,
 } from '../active-transcript-state.svelte.js';
+import { ACTIVE_TRANSCRIPT_RETENTION_LIMIT } from '../transcript-page-progress.js';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import {
 	AssistantMessage,

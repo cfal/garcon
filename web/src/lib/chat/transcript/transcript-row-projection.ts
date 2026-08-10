@@ -1,6 +1,6 @@
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { ChatViewMessage } from '$shared/chat-view';
-import type { PendingUserInput } from '$shared/pending-user-input';
+import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 
 export interface ChatTranscriptRow {
 	kind: 'message';
@@ -11,6 +11,14 @@ export interface ChatTranscriptRow {
 
 export function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {
 	return inputs.slice().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+export function normalizePendingInputs(inputs: readonly unknown[]): PendingUserInput[] {
+	return sortPendingInputs(
+		inputs
+			.map(normalizePendingUserInput)
+			.filter((input): input is PendingUserInput => Boolean(input)),
+	);
 }
 
 export function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMessage[] {
