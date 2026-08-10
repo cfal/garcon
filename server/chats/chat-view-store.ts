@@ -497,7 +497,7 @@ export class ChatViewStore {
       }
       return (await this.#loadFullView(chatId, () => loader.loadAll())).view;
     }
-    if (view.loadedFromFullHistory) {
+    if (view.loadedFromFullHistory || this.#isChatActive(chatId)) {
       this.#touch(view);
       return view;
     }

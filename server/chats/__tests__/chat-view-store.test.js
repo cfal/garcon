@@ -111,6 +111,30 @@ describe('ChatViewStore', () => {
     expect(contents(store.readPage('chat-1', 20))).toEqual(['retry me']);
   });
 
+  it('does not re-read a partial native transcript while execution owns it', async () => {
+    let active = false;
+    const store = new ChatViewStore(() => active);
+    const historyRef = { current: [assistant('older one'), assistant('older two')] };
+    const baseLoader = pagedLoader(historyRef);
+    const loadPage = mock(baseLoader.loadPage);
+    const loader = { ...baseLoader, loadPage };
+    await store.getOrCreatePage('chat-1', loader, 1);
+    const source = {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const native = attachNativeMessageSource(assistant('persisted reply'), source);
+    const live = attachNativeMessageSource(assistant('persisted reply'), source);
+    historyRef.current = [...historyRef.current, native];
+    active = true;
+
+    const appended = await store.appendAfterEnsuringGeneration('chat-1', loader, [live]);
+
+    expect(contents(appended)).toEqual(['persisted reply']);
+    expect(contents(store.readPage('chat-1', 20))).toEqual(['older two', 'persisted reply']);
+    expect(loadPage).toHaveBeenCalledTimes(1);
+  });
+
   it('does not append a live assistant item found during page revalidation', async () => {
     const store = new ChatViewStore(() => false);
     const historyRef = { current: [assistant('older one'), assistant('older two')] };

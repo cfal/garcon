@@ -6065,38 +6065,6 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
 
-  it('revalidates active paginated history through the owning app-server', async () => {
-    const nativePath = path.join(tmpDir, 'active-paginated-thread.jsonl');
-    await writeJsonl(nativePath, [{
-      type: 'session_meta',
-      timestamp: '2026-07-20T00:00:00.000Z',
-      payload: { id: 'thread-1', history_mode: 'paginated', history_base: null },
-    }]);
-    const fake = new FakeClient({
-      listThreadTurns: async () => ({
-        data: [makeTurn({ items: [{
-          type: 'agentMessage', id: 'assistant-1', text: 'active answer', phase: null, memoryCitation: null,
-        }] })],
-        nextCursor: null,
-        backwardsCursor: null,
-      }),
-    });
-    const createClient = mock(() => fake);
-    const provider = new CodexAppServerRuntime({ createClient });
-    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath }));
-
-    const page = await provider.loadMessagePage({
-      provider: 'codex',
-      agentSessionId: 'thread-1',
-      nativePath,
-      projectPath: '/repo',
-    }, { limit: 10, offset: 0 });
-
-    expect(page?.messages.map((message) => message.content)).toEqual(['active answer']);
-    expect(createClient).toHaveBeenCalledTimes(1);
-    expect(fake.shutdown).not.toHaveBeenCalled();
-  });
-
   it('fails closed before loading an inherited paginated history', async () => {
     const nativePath = path.join(tmpDir, 'inherited-paginated-thread.jsonl');
     await writeJsonl(nativePath, [{

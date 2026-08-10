@@ -116,7 +116,7 @@ describe('Codex against a scripted model', () => {
     });
   });
 
-  test('keeps persisted user, command, and assistant items exact-once during page revalidation', async () => {
+  test('keeps persisted user, command, and assistant items exact-once from a partial view', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
     const initialReply = `SCRIPTED_INITIAL_${crypto.randomUUID().replaceAll('-', '')}`;
