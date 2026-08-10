@@ -33,6 +33,99 @@ async function createHistoryFixture(projectPath: string): Promise<void> {
   await writeFile(join(projectPath, 'review.txt'), 'working tree revision\n', 'utf8');
 }
 
+function largeFileContents(file: string, revision: string): string {
+  return Array.from(
+    { length: 180 },
+    (_, index) => `${file} ${revision} line ${String(index + 1).padStart(3, '0')}`,
+  ).join('\n') + '\n';
+}
+
+async function createPinnedHeaderFixture(projectPath: string): Promise<void> {
+  await runGit(projectPath, ['init', '-b', 'main']);
+  await runGit(projectPath, ['config', 'user.email', 'test@example.com']);
+  await runGit(projectPath, ['config', 'user.name', 'E2E Test']);
+  for (const file of ['alpha.txt', 'beta.txt']) {
+    await writeFile(join(projectPath, file), largeFileContents(file, 'baseline'), 'utf8');
+  }
+  await runGit(projectPath, ['add', 'alpha.txt', 'beta.txt']);
+  await runGit(projectPath, ['commit', '-m', 'baseline revision']);
+  for (const file of ['alpha.txt', 'beta.txt']) {
+    await writeFile(join(projectPath, file), largeFileContents(file, 'committed'), 'utf8');
+  }
+  await runGit(projectPath, ['commit', '-am', 'large revision']);
+  for (const file of ['alpha.txt', 'beta.txt']) {
+    await writeFile(join(projectPath, file), largeFileContents(file, 'working'), 'utf8');
+  }
+}
+
+async function pinnedHeaderSnapshot(page: Page, panelSelector: string) {
+  return page.$eval(panelSelector, (panel) => {
+    const viewport = panel.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
+    const overlay = panel.querySelector<HTMLElement>('[data-git-pinned-file-header]');
+    const source = overlay
+      ? [...panel.querySelectorAll<HTMLElement>('[data-git-virtual-row]')].find(
+          (row) =>
+            row.querySelector('[data-git-file-header]')?.getAttribute('data-file-path')
+              === overlay.dataset.filePath,
+        )
+      : null;
+    if (!viewport) throw new Error('Missing Git virtual diff viewport');
+    return {
+      path: overlay?.dataset.filePath ?? null,
+      scrollTop: viewport.scrollTop,
+      scrollHeight: viewport.scrollHeight,
+      spacerHeight:
+        viewport.querySelector<HTMLElement>('[data-git-virtual-row-window]')?.parentElement?.style
+          .height ?? '',
+      sourceInert: source?.getAttribute('inert') ?? null,
+      sourceAriaHidden: source?.getAttribute('aria-hidden') ?? null,
+    };
+  });
+}
+
+async function scrollDiffTo(page: Page, panelSelector: string, scrollTop: number): Promise<void> {
+  await page.$eval(
+    `${panelSelector} [data-git-virtual-diff-root]`,
+    (element, top) => {
+      element.scrollTop = top;
+      element.dispatchEvent(new Event('scroll'));
+    },
+    scrollTop,
+  );
+}
+
+async function waitForPinnedPath(
+  page: Page,
+  panelSelector: string,
+  filePath: string,
+): Promise<void> {
+  await page.waitForFunction(
+    (selector, path) =>
+      document
+        .querySelector<HTMLElement>(`${selector} [data-git-pinned-file-header]`)
+        ?.getAttribute('data-file-path') === path,
+    { timeout: 20_000 },
+    panelSelector,
+    filePath,
+  );
+}
+
+async function switchToGitWorkbench(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
+  });
+  await page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
+  await page.evaluate(() => {
+    const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+      (button) => button.textContent?.includes('Switch to Git'),
+    );
+    if (!option) throw new Error('Missing Switch to Git command.');
+    option.click();
+  });
+  await page.waitForSelector(
+    '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]',
+  );
+}
 
 async function appendEmptyHistoryCommits(projectPath: string, count: number): Promise<void> {
   const parent = await runGit(projectPath, ['rev-parse', 'HEAD']);
@@ -110,6 +203,145 @@ describe('Lightpanda standalone Git views', () => {
         () => matchMedia('(max-width: 768px)').matches,
       )).toBe(false);
       expect(await fixture.page.$('.mobile-shell')).toBeNull();
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('keeps the current file visible across Workbench, Compare, and History diffs', async () => {
+    await withE2eFixture('git-view-pinned-file-headers', async (fixture) => {
+      const project = fixture.integration.dirs.project;
+      await createPinnedHeaderFixture(project);
+      const workbenchPanel =
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
+      const comparePanel =
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+        + '[aria-hidden="false"]';
+      const historyPanel =
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"]'
+        + '[aria-hidden="false"]';
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('git-pinned-file-header-seed');
+      await app.waitForText('echo:git-pinned-file-header-seed');
+
+      await switchToGitWorkbench(fixture.page);
+      await fixture.page.waitForSelector(`${workbenchPanel} [data-git-file-header]`);
+      const initialWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
+      expect(initialWorkbench.path).toBeNull();
+      await scrollDiffTo(fixture.page, workbenchPanel, 60);
+      await waitForPinnedPath(fixture.page, workbenchPanel, 'alpha.txt');
+      const pinnedWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
+      expect(pinnedWorkbench.scrollTop).toBe(60);
+      expect(pinnedWorkbench.scrollHeight).toBe(initialWorkbench.scrollHeight);
+      if (pinnedWorkbench.sourceInert !== null) {
+        expect(pinnedWorkbench.sourceAriaHidden).toBe('true');
+      }
+
+      await fixture.page.$eval(
+        `${workbenchPanel} [data-git-pinned-file-header]`,
+        (header) => {
+          const button = [...header.querySelectorAll<HTMLButtonElement>('button')].find(
+            (candidate) => candidate.textContent?.trim() === 'Stage file',
+          );
+          if (!button) throw new Error('Missing pinned Stage file action.');
+          button.click();
+        },
+      );
+      await fixture.page.waitForFunction(
+        (selector) =>
+          [...(document.querySelector(selector)?.querySelectorAll('button') ?? [])].some(
+            (button) => button.textContent?.replace(/\s+/g, '') === 'Staged(1)',
+          ),
+        { timeout: 20_000 },
+        workbenchPanel,
+      );
+      await fixture.page.$eval(workbenchPanel, (panel) => {
+        const button = [...panel.querySelectorAll<HTMLButtonElement>('button')].find(
+          (candidate) => candidate.textContent?.replace(/\s+/g, '') === 'Staged(1)',
+        );
+        if (!button) throw new Error('Missing staged-files tab.');
+        button.click();
+      });
+      await fixture.page.waitForSelector(
+        `${workbenchPanel} [data-git-file-header][data-file-path="alpha.txt"]`,
+      );
+      await fixture.page.waitForSelector(`${workbenchPanel} [data-git-diff-content-row]`);
+      await scrollDiffTo(fixture.page, workbenchPanel, 60);
+      await waitForPinnedPath(fixture.page, workbenchPanel, 'alpha.txt');
+      const retainedWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
+
+      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await fixture.page.waitForSelector(`${comparePanel} [data-git-file-header]`);
+      await scrollDiffTo(fixture.page, comparePanel, 60);
+      await waitForPinnedPath(fixture.page, comparePanel, 'alpha.txt');
+      const compareSnapshot = await pinnedHeaderSnapshot(fixture.page, comparePanel);
+      expect(compareSnapshot.scrollTop).toBe(60);
+
+      await app.selectMainWorkspaceSurface('Git');
+      await fixture.page.waitForSelector(workbenchPanel);
+      const restoredWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
+      expect(restoredWorkbench.path).toBe(retainedWorkbench.path);
+      expect(restoredWorkbench.scrollTop).toBe(retainedWorkbench.scrollTop);
+      expect(restoredWorkbench.scrollHeight).toBe(retainedWorkbench.scrollHeight);
+      expect(restoredWorkbench.spacerHeight).toBe(retainedWorkbench.spacerHeight);
+
+      await app.selectMainWorkspaceSurface('Open Git History');
+      await fixture.page.waitForSelector(historyPanel);
+      await fixture.page.waitForSelector(
+        `${historyPanel} button[data-git-history-commit-row][aria-label*="large revision"]`,
+      );
+      await fixture.page.$eval(
+        `${historyPanel} button[data-git-history-commit-row][aria-label*="large revision"]`,
+        (button) => (button as HTMLButtonElement).click(),
+      );
+      await fixture.page.waitForSelector(`${historyPanel} [data-git-file-header]`);
+      await scrollDiffTo(fixture.page, historyPanel, 60);
+      await waitForPinnedPath(fixture.page, historyPanel, 'alpha.txt');
+
+      await app.setViewport(390, 844);
+      await app.clickButton('Chat');
+      await fixture.page.waitForSelector(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:chat"][aria-hidden="false"]',
+      );
+      await app.waitForButton('Settings');
+      await app.clickButton('Settings');
+      await app.waitForMenuItemEnabled('Open Git History');
+      await app.clickMenuItem('Open Git History');
+      await fixture.page.waitForSelector(historyPanel);
+      await app.waitForButton('Close view');
+      await fixture.page.waitForSelector(
+        `${historyPanel} button[data-git-history-commit-row][aria-label*="large revision"]`,
+      );
+      await fixture.page.$eval(
+        `${historyPanel} button[data-git-history-commit-row][aria-label*="large revision"]`,
+        (button) => (button as HTMLButtonElement).click(),
+      );
+      await fixture.page.waitForSelector(`${historyPanel} [data-git-file-header]`);
+      await fixture.page.waitForSelector(`${historyPanel} [data-git-history-segmented-navigation]`);
+      await fixture.page.$eval(historyPanel, (panel) => {
+        const button = [...panel.querySelectorAll<HTMLButtonElement>('button')].find(
+          (candidate) => candidate.textContent?.trim() === 'Diff',
+        );
+        button?.click();
+      });
+      await scrollDiffTo(fixture.page, historyPanel, 60);
+      await waitForPinnedPath(fixture.page, historyPanel, 'alpha.txt');
+      expect(await fixture.page.$eval(
+        `${historyPanel} [data-git-pinned-file-header]`,
+        (header) =>
+          header.closest(
+            '[data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]',
+          ) !== null,
+      )).toBe(true);
+
+      await app.clickButton('Close view');
+      await fixture.page.waitForFunction(
+        () => !document.querySelector('[data-workspace-surface-id="singleton:git-history"]'),
+        { timeout: 20_000 },
+      );
       fixture.assertNoBrowserErrors();
     });
   });
