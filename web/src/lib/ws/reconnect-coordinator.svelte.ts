@@ -62,7 +62,7 @@ export interface ChatReconnectCoordinatorOptions {
 		messages: ChatViewMessage[],
 		lastSeq: number,
 	) => Promise<boolean | void> | boolean | void;
-	loadBackgroundSnapshot: (chatId: string) => Promise<void> | void;
+	markBackgroundStale: (chatId: string) => void;
 	onBackgroundMessages?: (
 		chatId: string,
 		generationId: string,
@@ -343,12 +343,12 @@ export class ChatReconnectCoordinator {
 				const message = await this.#subscribe(cursor.chatId, cursor.generationId, cursor.lastSeq);
 				if (epoch !== this.#reconnectEpoch) return;
 				if (message.mode === 'snapshot-required') {
-					await this.options.loadBackgroundSnapshot(cursor.chatId);
+					this.options.markBackgroundStale(cursor.chatId);
 					shouldRefresh = true;
 					continue;
 				}
 				if (message.messages.length === 0 && message.lastSeq > cursor.lastSeq) {
-					await this.options.loadBackgroundSnapshot(cursor.chatId);
+					this.options.markBackgroundStale(cursor.chatId);
 					shouldRefresh = true;
 					continue;
 				}
@@ -360,7 +360,7 @@ export class ChatReconnectCoordinator {
 						message.lastSeq,
 					);
 					if (applied === false) {
-						await this.options.loadBackgroundSnapshot(cursor.chatId);
+						this.options.markBackgroundStale(cursor.chatId);
 					}
 					shouldRefresh = true;
 				}

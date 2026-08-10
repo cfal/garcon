@@ -175,6 +175,22 @@ describe('LocalChatTranscriptStorage', () => {
 		]);
 	});
 
+	it('excludes stale transcripts from reconnect cursors', () => {
+		storage.persist('chat-1', [entry(1, 'a')], {
+			generationId: 'generation-1',
+			lastSeq: 1,
+		});
+		storage.persist('chat-2', [entry(1, 'b')], {
+			generationId: 'generation-2',
+			lastSeq: 1,
+		});
+		storage.markStale('chat-2');
+
+		expect(storage.listCursors()).toEqual([
+			{ chatId: 'chat-1', generationId: 'generation-1', lastSeq: 1 },
+		]);
+	});
+
 	it('remove and clearAll delete snapshots and index state', () => {
 		persist(storage, 'chat-1', [entry(1, 'a')]);
 		persist(storage, 'chat-2', [entry(1, 'b')]);
