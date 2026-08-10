@@ -10,6 +10,7 @@
 	} from '$lib/workspace/transient-layers.svelte';
 	import type { GlobalShortcutOverrides } from '$lib/workspace/global-shortcuts.js';
 	import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import type { Attachment } from 'svelte/attachments';
 	import {
 		managedWorkspaceScrollRegion,
 		type WorkspaceHalfPageDirection,
@@ -40,6 +41,8 @@
 		onPrimaryScroll?: (direction: WorkspaceHalfPageDirection) => void;
 		onContextualScroll?: (direction: WorkspaceHalfPageDirection) => void;
 		onTransientScroll?: (direction: WorkspaceHalfPageDirection) => void;
+		localShortcutOwner?: (event: KeyboardEvent) => boolean;
+		onLocalKeydown?: (event: KeyboardEvent) => void;
 		globalShortcuts?: GlobalShortcutOverrides;
 	}
 
@@ -59,6 +62,8 @@
 		onPrimaryScroll,
 		onContextualScroll,
 		onTransientScroll,
+		localShortcutOwner,
+		onLocalKeydown = () => undefined,
 		globalShortcuts = {},
 	}: KeyboardShortcutsHostProps = $props();
 	let transientElement = $state<HTMLElement | null>(null);
@@ -161,6 +166,10 @@
 			},
 		} satisfies Pick<LocalSettingsStore, 'globalShortcuts'>,
 	});
+	const localShortcutBoundary: Attachment<HTMLElement> = (element) =>
+		localShortcutOwner
+			? shortcuts.registerLocalShortcutOwner(element, (event) => localShortcutOwner(event))
+			: undefined;
 	shortcuts.registerSurface('singleton:chat', (event) => {
 		if (event.key !== 'Escape') return false;
 		onSurfaceEscape();
@@ -170,6 +179,14 @@
 </script>
 
 <KeyboardShortcuts {onToggleCommandMenu} />
+
+{#if localShortcutOwner && !transientKind}
+	<div data-workspace-surface-id="singleton:chat" {@attach localShortcutBoundary}>
+		<button type="button" aria-label="Local shortcut target" onkeydown={onLocalKeydown}
+			>Local</button
+		>
+	</div>
+{/if}
 
 {#if onPrimaryScroll || onContextualScroll}
 	<div
@@ -207,11 +224,12 @@
 {#if transientKind}
 	<div
 		bind:this={transientElement}
+		{@attach localShortcutOwner && localShortcutBoundary}
 		data-workspace-surface-id={transientSurface ? 'file:file-session' : undefined}
 		role={transientKind === 'menu' ? 'menu' : transientKind === 'popover' ? 'region' : 'dialog'}
 	>
 		<button type="button" aria-label="Transient toolbar">Toolbar</button>
-		<input aria-label="Transient input" />
+		<input aria-label="Transient input" onkeydown={onLocalKeydown} />
 		{#if onTransientScroll}
 			<div aria-label="Transient scroll region" {@attach transientScrollRegion}>Transient</div>
 		{/if}

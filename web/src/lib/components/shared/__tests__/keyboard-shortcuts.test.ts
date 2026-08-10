@@ -518,6 +518,97 @@ describe('KeyboardShortcuts', () => {
 		expect(onToggleCommandMenu).toHaveBeenCalledOnce();
 	});
 
+	it('defers locally owned editor chords before global commands run', () => {
+		const appShell = createMockAppShell();
+		const onToggleCommandMenu = vi.fn();
+		const onLocalKeydown = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			onToggleCommandMenu,
+			focusOwner: 'chat',
+			localShortcutOwner: (event) =>
+				event.ctrlKey && ['a', 'e', 'p', 'n'].includes(event.key.toLowerCase()),
+			onLocalKeydown,
+		});
+		const target = screen.getByRole('button', { name: 'Local shortcut target' });
+		const previousLine = new KeyboardEvent('keydown', {
+			key: 'p',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		const nextLine = new KeyboardEvent('keydown', {
+			key: 'n',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		target.dispatchEvent(previousLine);
+		target.dispatchEvent(nextLine);
+
+		expect(previousLine.defaultPrevented).toBe(false);
+		expect(nextLine.defaultPrevented).toBe(false);
+		expect(onLocalKeydown).toHaveBeenCalledTimes(2);
+		expect(onToggleCommandMenu).not.toHaveBeenCalled();
+		expect(appShell.requestNewChat).not.toHaveBeenCalled();
+	});
+
+	it('lets the top transient consume Escape before a local editor owner', () => {
+		const onTransientEscape = vi.fn();
+		const onLocalKeydown = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			transientKind: 'application-dialog',
+			transientSurface: true,
+			localShortcutOwner: () => true,
+			onLocalKeydown,
+			onTransientEscape,
+		});
+
+		screen.getByRole('textbox', { name: 'Transient input' }).dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'Escape',
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onTransientEscape).toHaveBeenCalledOnce();
+		expect(onLocalKeydown).not.toHaveBeenCalled();
+	});
+
+	it('keeps composing Escape inside a modal editor', () => {
+		const onTransientEscape = vi.fn();
+		const onLocalKeydown = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			transientKind: 'application-dialog',
+			transientSurface: true,
+			localShortcutOwner: (event) => event.isComposing,
+			onLocalKeydown,
+			onTransientEscape,
+		});
+		const escape = new KeyboardEvent('keydown', {
+			key: 'Escape',
+			bubbles: true,
+			cancelable: true,
+		});
+		Object.defineProperty(escape, 'isComposing', { value: true });
+
+		screen.getByRole('textbox', { name: 'Transient input' }).dispatchEvent(escape);
+
+		expect(onTransientEscape).not.toHaveBeenCalled();
+		expect(onLocalKeydown).toHaveBeenCalledOnce();
+		expect(escape.defaultPrevented).toBe(false);
+		expect(screen.getByRole('dialog')).toBeTruthy();
+	});
+
 	it('does not navigate chat items while a workspace surface owns focus', () => {
 		const navigation = createMockNavigation();
 
