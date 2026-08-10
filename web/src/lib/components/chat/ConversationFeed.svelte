@@ -421,17 +421,15 @@
 		<!-- Keeps automatic loading outside TanStack geometry so prepends cannot move the reading anchor. -->
 		<div
 			class={cn(
-				'pointer-events-none absolute left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-none',
-				reserveTopFloatingToolbar
-					? 'top-[calc(var(--workspace-floating-taskbar-inset)+0.5rem)]'
-					: 'top-2',
+				'pointer-events-none absolute inset-x-0 z-10 flex h-8 items-center justify-center gap-1.5 border-b border-border bg-background text-xs text-muted-foreground',
+				reserveTopFloatingToolbar ? 'top-[var(--workspace-floating-taskbar-inset)]' : 'top-0',
 			)}
 			role="status"
 			aria-live="polite"
 			data-chat-earlier-loading-indicator
 		>
 			<Loader2 class="size-3.5 animate-spin" aria-hidden="true" />
-			<span class="sr-only">{m.chat_transcript_loading_earlier()}</span>
+			<span>{m.chat_transcript_loading_earlier()}</span>
 		</div>
 	{/if}
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
