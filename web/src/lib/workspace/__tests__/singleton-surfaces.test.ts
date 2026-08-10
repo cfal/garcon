@@ -1,12 +1,44 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { FileTreeResponse } from '$shared/file-contracts';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import SingletonSurfaceRegistryTemplateHost from './SingletonSurfaceRegistryTemplateHost.svelte';
 
-afterEach(cleanup);
+const registries: SingletonSurfaceRegistry[] = [];
+
+afterEach(() => {
+	cleanup();
+	for (const registry of registries.splice(0)) registry.destroy();
+});
+
+function fileTreeResponse(directoryPath: string, fileName: string): FileTreeResponse {
+	return {
+		fileRootPath: '/workspace',
+		directory: {
+			path: directoryPath,
+			relativePath: directoryPath.slice('/workspace/'.length),
+			parentPath: '/workspace',
+			breadcrumbs: [
+				{ name: 'workspace', path: '/workspace' },
+				{ name: directoryPath.split('/').at(-1) ?? directoryPath, path: directoryPath },
+			],
+		},
+		entries: [
+			{
+				name: fileName,
+				path: `${directoryPath}/${fileName}`,
+				relativePath: `${directoryPath.slice('/workspace/'.length)}/${fileName}`,
+				type: 'file',
+				size: 1,
+				modified: null,
+				permissionsRwx: 'rw-r--r--',
+			},
+		],
+	};
+}
 
 function createRegistry() {
 	const commits: Array<{
@@ -45,6 +77,7 @@ function createRegistry() {
 			return controller;
 		},
 	});
+	registries.push(registry);
 	return {
 		registry,
 		commits,
@@ -105,15 +138,27 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(files.presentationVisible).toBe(false);
 	});
 
-	it('keeps template access pure when Files remounts with a retained controller', () => {
+	it('keeps lazy Files derivations live when their presentation owner is destroyed', async () => {
 		const { registry } = createRegistry();
 		registry.setPresentationVisible('files', true);
 		const first = render(SingletonSurfaceRegistryTemplateHost, { registry });
+		const files = registry.files();
+		files.tree.navigation = {
+			kind: 'ready',
+			response: fileTreeResponse('/workspace/first', 'first-only.txt'),
+		};
 		expect(screen.getByText('visible')).toBeTruthy();
+		expect(await screen.findByText('first-only.txt')).toBeTruthy();
 		first.unmount();
 
+		files.tree.navigation = {
+			kind: 'ready',
+			response: fileTreeResponse('/workspace/second', 'second-only.txt'),
+		};
 		expect(() => render(SingletonSurfaceRegistryTemplateHost, { registry })).not.toThrow();
 		expect(screen.getByText('visible')).toBeTruthy();
+		expect(await screen.findByText('second-only.txt')).toBeTruthy();
+		expect(screen.queryByText('first-only.txt')).toBeNull();
 	});
 
 	it('retains each controller across Git placement remounts', () => {

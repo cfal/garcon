@@ -1,4 +1,3 @@
-import { untrack } from 'svelte';
 import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
@@ -51,8 +50,13 @@ type SingletonControllerFactories = {
 	[K in PortableSingletonKind]: () => SingletonControllerByKind[K];
 };
 
+interface OwnedSingletonController {
+	controller: PortableSingletonController;
+	destroyRoot: () => void;
+}
+
 export class SingletonSurfaceRegistry {
-	#controllers = new Map<PortableSingletonKind, PortableSingletonController>();
+	#controllers = new Map<PortableSingletonKind, OwnedSingletonController>();
 	readonly #factories: SingletonControllerFactories;
 	#projectState: WorkspaceProjectState = { kind: 'absent' };
 	#pullRequestsCapability: {
@@ -107,7 +111,7 @@ export class SingletonSurfaceRegistry {
 	}
 
 	commitIfPresent(): CommitController | null {
-		return (this.#controllers.get('commit') as CommitController | undefined) ?? null;
+		return (this.#controllers.get('commit')?.controller as CommitController | undefined) ?? null;
 	}
 
 	pullRequests(): PullRequestsStore {
@@ -116,50 +120,52 @@ export class SingletonSurfaceRegistry {
 
 	setProjectState(projectState: WorkspaceProjectState): void {
 		this.#projectState = projectState;
-		for (const controller of this.#controllers.values()) {
-			controller.setProjectState(projectState);
+		for (const owned of this.#controllers.values()) {
+			owned.controller.setProjectState(projectState);
 		}
 	}
 
 	setPullRequestsCapability(hasChecked: boolean, available: boolean): void {
 		this.#pullRequestsCapability = { hasChecked, available };
-		const controller = this.#controllers.get('pull-requests') as PullRequestsStore | undefined;
+		const controller = this.#controllers.get('pull-requests')?.controller as
+			PullRequestsStore | undefined;
 		controller?.setCapability(hasChecked, available);
 	}
 
 	setPresentationVisible(kind: PortableSingletonKind, visible: boolean): void {
 		if (this.#visible[kind] === visible) return;
 		this.#visible[kind] = visible;
-		this.#controllers.get(kind)?.setPresentationVisible(visible);
+		this.#controllers.get(kind)?.controller.setPresentationVisible(visible);
 	}
 
 	disposeSurface(kind: PortableSingletonKind): void {
 		this.#visible[kind] = false;
-		const controller = this.#controllers.get(kind);
-		if (!controller) return;
-		controller.setPresentationVisible(false);
-		controller.dispose();
+		const owned = this.#controllers.get(kind);
+		if (!owned) return;
 		this.#controllers.delete(kind);
+		try {
+			owned.controller.setPresentationVisible(false);
+			owned.controller.dispose();
+		} finally {
+			owned.destroyRoot();
+		}
 	}
 
 	destroy(): void {
-		for (const [kind, controller] of this.#controllers) {
-			this.#visible[kind] = false;
-			controller.setPresentationVisible(false);
-			controller.dispose();
-		}
-		this.#controllers.clear();
+		for (const kind of [...this.#controllers.keys()]) this.disposeSurface(kind);
 	}
 
 	#controller<K extends PortableSingletonKind>(kind: K): SingletonControllerByKind[K] {
 		const existing = this.#controllers.get(kind);
-		if (existing) return existing as SingletonControllerByKind[K];
-		return untrack(() => {
-			const controller = this.#factories[kind]();
+		if (existing) return existing.controller as SingletonControllerByKind[K];
+		let controller!: SingletonControllerByKind[K];
+		// A registry-owned root keeps lazy rune state alive across presentation remounts.
+		const destroyRoot = $effect.root(() => {
+			controller = this.#factories[kind]();
 			controller.setProjectState(this.#projectState);
 			controller.setPresentationVisible(this.#visible[kind]);
-			this.#controllers.set(kind, controller);
-			return controller;
 		});
+		this.#controllers.set(kind, { controller, destroyRoot });
+		return controller;
 	}
 }
