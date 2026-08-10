@@ -4,6 +4,7 @@ import {
   messagesOfType,
   userContents,
 } from '../../support/chat-assertions.js';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
   codexAssistantMessage,
   codexExecCommandCall,
@@ -156,6 +157,17 @@ describe('Codex against a scripted model', () => {
       }));
       await held.requested;
       try {
+        await fixture.client.waitForEvent(
+          (event): event is ChatMessagesMessage => (
+            event.type === 'chat-messages'
+            && event.chatId === chatId
+            && event.turnId === continued.turnId
+            && messagesOfType(event.messages, 'tool-result')
+              .some((message) => message.toolId === commandCallId)
+          ),
+          'pre-terminal Codex command messages',
+          { afterIndex: continuedCursor },
+        );
         const running = await fixture.client.getMessages(chatId);
         expect(userContents(running.messages).filter((content) => content === continuedPrompt))
           .toHaveLength(1);
