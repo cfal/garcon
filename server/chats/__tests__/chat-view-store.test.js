@@ -226,6 +226,60 @@ describe('ChatViewStore', () => {
     expect(distinctRetry.messages).toEqual([]);
   });
 
+  it('transfers one publication proof to one source-first replacement', async () => {
+    const store = new ChatViewStore(() => false);
+    const firstSource = {
+      entryId: 'turn:provider-turn-1:item:provider-item-1',
+      withinSourceOrdinal: 0,
+    };
+    const secondSource = {
+      entryId: 'turn:provider-turn-1:item:provider-item-2',
+      withinSourceOrdinal: 0,
+    };
+    const published = attachNativeMessageSource(
+      user('same wire payload', { clientRequestId: 'client-1' }),
+      firstSource,
+    );
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => []),
+      [published],
+    );
+
+    const sourceMatch = attachNativeMessageSource(
+      user('same wire payload', { clientRequestId: 'client-2' }),
+      firstSource,
+    );
+    const clientMatch = attachNativeMessageSource(
+      user('same wire payload', { clientRequestId: 'client-1' }),
+      secondSource,
+    );
+    await store.replaceFromNative(
+      'chat-1',
+      snapshotLoader(async () => [sourceMatch, clientMatch]),
+    );
+
+    const sourceRetry = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [sourceMatch, clientMatch]),
+      [sourceMatch],
+    );
+    const clientDelivery = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [sourceMatch, clientMatch]),
+      [clientMatch],
+    );
+    const clientRetry = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [sourceMatch, clientMatch]),
+      [clientMatch],
+    );
+
+    expect(sourceRetry.messages).toEqual([]);
+    expect(contents(clientDelivery)).toEqual(['same wire payload']);
+    expect(clientRetry.messages).toEqual([]);
+  });
+
   it('transfers publication proof across a preserved generation', async () => {
     const store = new ChatViewStore(() => false);
     const source = {
