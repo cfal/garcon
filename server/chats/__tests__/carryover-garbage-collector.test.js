@@ -16,6 +16,7 @@ describe('CarryOverGarbageCollector', () => {
   let sessions;
   let journalRoots;
   let collector;
+  let afterRegistrySnapshot;
 
   beforeEach(async () => {
     workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-carryover-gc-'));
@@ -23,8 +24,16 @@ describe('CarryOverGarbageCollector', () => {
     await store.initialize();
     sessions = {};
     journalRoots = new Set();
+    afterRegistrySnapshot = null;
     collector = new CarryOverGarbageCollector({
-      registry: { listAllChats: () => sessions },
+      registry: {
+        listAllChats: () => {
+          const snapshot = sessions;
+          afterRegistrySnapshot?.();
+          afterRegistrySnapshot = null;
+          return snapshot;
+        },
+      },
       journal: { roots: () => new Set(journalRoots) },
       store,
     });
@@ -73,15 +82,16 @@ describe('CarryOverGarbageCollector', () => {
     await expect(segmentStat(SECOND)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('evaluates durable roots when a serialized sweep begins', async () => {
+  it('retains a writer root until a sweep with a stale durable snapshot completes', async () => {
     const prepared = await prepareSegment(FIRST);
     await prepared.commit();
 
-    const sweep = collector.sweep();
-    sessions = { source: { carryOverSegments: [segmentRef(FIRST)] } };
-    prepared.releaseRoot();
+    afterRegistrySnapshot = () => {
+      sessions = { source: { carryOverSegments: [segmentRef(FIRST)] } };
+      prepared.releaseRoot();
+    };
 
-    await sweep;
+    await collector.sweep();
     await expect(segmentStat(FIRST)).resolves.toBeDefined();
   });
 

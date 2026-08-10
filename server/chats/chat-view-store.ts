@@ -6,7 +6,6 @@ import { createLogger } from '../lib/log.js';
 import {
   OrderedTranscriptDigest,
   orderedTranscriptDigest,
-  transcriptRevision,
 } from '../lib/transcript-revision.js';
 import {
   exactMessageIdentityKeys,
@@ -18,9 +17,10 @@ import {
   type ChatViewGenerationTransition as GenerationTransition,
   type MutableChatView as ChatView,
   type NativeSnapshotReconciliation,
-  persistenceMatches,
+  nativePrefixMatchesView,
   reconcileNativeSnapshotView,
 } from './chat-view-native-reconciliation.js';
+import { ChatViewOperationalNotices } from './chat-view-operational-notices.js';
 import {
   assertValidChatMessage,
   lowerBoundBySeq,
@@ -73,6 +73,7 @@ export type ChatViewReplacementReason = Extract<
 
 export class ChatViewStore {
   #views = new Map<string, ChatView>();
+  #operationalNotices = new ChatViewOperationalNotices();
   #locks = new KeyedPromiseLock();
   #fences = new Map<string, number>();
   #inFlightChats = new Set<string>();
@@ -345,6 +346,11 @@ export class ChatViewStore {
     });
   }
 
+  async appendOperationalNotice(chatId: string, message: ErrorMessage): Promise<void> {
+    this.#operationalNotices.retain(chatId, message);
+    await this.appendToCurrentOrProvisional(chatId, [message]);
+  }
+
   readPage(chatId: string, limit: number, beforeSeq?: number): ChatViewPage | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
@@ -384,6 +390,7 @@ export class ChatViewStore {
   deleteChatView(chatId: string): void {
     this.invalidate(chatId);
     this.#fences.delete(chatId);
+    this.#operationalNotices.delete(chatId);
   }
 
   evict(chatId: string): void {
@@ -553,17 +560,9 @@ export class ChatViewStore {
     const retainedLiveEntries = previous?.messages.filter(
       (entry) => entry.seq > previous.historyLastSeq,
     ) ?? [];
-    const previousNativeCount = previous
-      ? Math.max(0, previous.historyLastSeq - snapshot.archivedLogicalCount)
-      : 0;
-    const priorNativePrefixMatches = Boolean(
-      previous
-      && persistenceMatches(previous, snapshot)
-      && previous.nativePrefixDigest !== null
-      && snapshot.nativeMessages.length >= previousNativeCount
-      && transcriptRevision(snapshot.nativeMessages.slice(0, previousNativeCount))
-        === previous.nativePrefixDigest,
-    );
+    const priorNativePrefixMatches = previous
+      ? nativePrefixMatchesView(previous, snapshot, reconciledNativeMessages)
+      : false;
     const retainedLiveStartSeq = previous
       ? Math.max(previous.historyLastSeq + 1, previous.retainedStartSeq)
       : 1;
@@ -627,10 +626,10 @@ export class ChatViewStore {
         })
         .map((entry) => entry.message)
       : [];
-    let fullMessages = reconciledMessages;
+    let fullMessages = [...reconciledMessages, ...this.#operationalNotices.retained(chatId)];
     if (unpersistedLiveMessages.length > 0) {
       const appended = this.#appendLiveToView(view, unpersistedLiveMessages, 'native-wins');
-      fullMessages = [...reconciledMessages, ...appended.map((entry) => entry.message)];
+      fullMessages = [...fullMessages, ...appended.map((entry) => entry.message)];
     }
     this.#views.set(chatId, view);
     return { view, messages: fullMessages };
@@ -655,6 +654,7 @@ export class ChatViewStore {
         'native-wins',
       );
     }
+    this.#appendToView(reconciled.view, this.#operationalNotices.missingFrom(chatId, reconciled.view.messages));
     this.#logGenerationTransition(reconciled.view, reconciled.transition);
     this.#views.set(chatId, reconciled.view);
   }
@@ -688,6 +688,7 @@ export class ChatViewStore {
       lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#appendToView(view, messages);
+    this.#appendToView(view, this.#operationalNotices.missingFrom(chatId, view.messages));
     this.#logGenerationTransition(view, transition);
     return view;
   }
@@ -710,13 +711,14 @@ export class ChatViewStore {
       carryOverRevision: page.carryOverRevision,
       agentOwnershipEpoch: page.agentOwnershipEpoch,
       archivedLogicalCount: page.archivedLogicalCount,
-      nativePrefixDigest: null,
+      nativePrefixDigest: page.nativePrefixDigest,
       evictedLiveDigest: new OrderedTranscriptDigest(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,
       lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#mergeHistoryPage(view, page);
+    this.#appendToView(view, this.#operationalNotices.missingFrom(chatId, view.messages));
     this.#logGenerationTransition(view, { reason: 'native-history-page' });
     return view;
   }
@@ -741,6 +743,7 @@ export class ChatViewStore {
     messages: ChatMessage[],
     conflictPolicy: 'reject' | 'native-wins' = 'reject',
   ): ChatViewMessage[] {
+    messages = this.#operationalNotices.filterDuplicateAppends(view.chatId, view.messages, messages);
     const existingByRequestId = new Map<string, UserMessage>();
     for (const entry of view.messages) {
       if (entry.message instanceof UserMessage && entry.message.metadata?.clientRequestId) {

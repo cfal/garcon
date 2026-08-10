@@ -37,7 +37,34 @@ const MAX_LINES = 1000;
 // Adversarial hardening adds 12 lines for bounded queue-entry identities and
 // non-throwing delivery-status publication diagnostics.
 // Response identity hardening adds one net line for control-free error authority.
-const EXECUTION_FOOTPRINT_BUDGET = 8782;
+// Same-agent continuation adds a separately reviewed 166 lines for the `/handoff`
+// command: source validation, era capture through the shared handoff path,
+// registration of a target with no provider session so it seeds itself from the
+// carryover projection, and compensation that discards the prepared segment.
+// Adversarial review adds 18 lines restoring safety this file's own pressure had
+// removed: rejecting a pre-existing target that is not this operation's own
+// earlier attempt, binding attachments to the idempotency payload, and re-raising
+// a recorded execution failure instead of a misleading projection error. Cutting
+// those to hit the previous ceiling is what let the defects in. A further 15
+// lines refuse a source whose first turn is still materializing and place the
+// continuation in the chat list with a name and metadata, both of which the
+// established fork path already did, and undo both when scheduling fails.
+// Maintenance retry of abandoned transfer releases adds 6 lines: a widened
+// ownership dependency type and the command-service pass-through the
+// repair-history route calls.
+// A second adversarial round adds 14 lines making self-handoff target creation
+// atomic: rejecting a colliding target before the ledger accepts it rather than
+// after, transferring compensation ownership at the moment `addChat` publishes
+// the target, releasing the writer-root lease a failed preparation still holds,
+// and rolling each cleanup step back independently. Trimming to the previous
+// ceiling is what produced this round's defects in the first place.
+// Self-review of that rollback adds 4 lines: independent cleanup steps also had
+// to stay ordered, since stripping the name and list placement from a target
+// whose removal failed orphans a chat that is still live.
+// Answering a lost-response replay from the ledger rather than from live source
+// state adds 4 more, mirroring the ordering ForkCommands already uses so a source
+// deleted after a successful handoff cannot turn the retry into a 404.
+const EXECUTION_FOOTPRINT_BUDGET = 9010;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

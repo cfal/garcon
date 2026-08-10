@@ -73,6 +73,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
+  readonly compaction = null;
   readonly forking;
   readonly steering = null;
   readonly goals = null;

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 	ActiveTranscriptState,
 	INITIAL_VISIBLE_MESSAGES,
 } from '../active-transcript-state.svelte.js';
+import { ACTIVE_TRANSCRIPT_RETENTION_LIMIT } from '../transcript-page-progress.js';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import {
 	AssistantMessage,
@@ -210,7 +210,49 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
 	});
 
-	it('preserves expanded history until it is explicitly compacted at the live edge', () => {
+	it('bounds oversized generation replacements to the recent message window', () => {
+		const chat = new ActiveTranscriptState();
+		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 25;
+		const messages = Array.from({ length: messageCount }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+
+		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastSeq: messageCount,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+
+		expect(chat.entries).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(chat.entries[0]?.seq).toBe(26);
+		expect(chat.entries.at(-1)?.seq).toBe(messageCount);
+		expect(chat.oldestSeq).toBe(26);
+		expect(chat.hasEarlierMessages).toBe(true);
+	});
+
+	it('bounds oversized snapshot pages to the recent message window', () => {
+		const chat = new ActiveTranscriptState();
+		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 25;
+		const messages = Array.from({ length: messageCount }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+		const epoch = chat.beginSnapshotLoad();
+
+		expect(
+			chat.setFromPage(
+				'chat-1',
+				page({ messages, lastSeq: messageCount, pageOldestSeq: 1 }),
+				epoch,
+			),
+		).toBe('applied');
+		expect(chat.entries).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(chat.entries[0]?.seq).toBe(26);
+		expect(chat.entries.at(-1)?.seq).toBe(messageCount);
+		expect(chat.oldestSeq).toBe(26);
+		expect(chat.hasEarlierMessages).toBe(true);
+	});
+
+	it('bounds expanded history while retaining the live edge', () => {
 		const chat = new ActiveTranscriptState();
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -234,14 +276,43 @@ describe('ActiveTranscriptState', () => {
 			),
 		);
 
-		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
-		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 50);
-		expect(chat.compactToRecentMessages()).toBe(true);
 		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		expect(contentOf(chat.chatMessages[0])).toBe('message-51');
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 50);
 		expect(chat.oldestSeq).toBe(51);
 		expect(chat.hasEarlierMessages).toBe(true);
-		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
+		expect(chat.compactToRecentMessages()).toBe(false);
+	});
+
+	it('detaches a scrolled-up window when live growth reaches the retention limit', () => {
+		const chat = new ActiveTranscriptState();
+		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', initial, {
+			lastSeq: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.isUserScrolledUp = true;
+
+		chat.applyMessages(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 50 }, (_, index) =>
+				entry(
+					ACTIVE_TRANSCRIPT_RETENTION_LIMIT + index + 1,
+					assistant(`message-${ACTIVE_TRANSCRIPT_RETENTION_LIMIT + index + 1}`),
+				),
+			),
+		);
+
+		expect(chat.entries.map((message) => message.seq)).toEqual(
+			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) => index + 1),
+		);
+		expect(chat.lastSeq).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
+		expect(chat.hasEarlierMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(true);
 	});
 
 	it('deduplicates overlapping earlier pages before extending the loaded window', async () => {
@@ -274,6 +345,56 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 51 }, (_, index) => index + 50),
 		);
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 1);
+	});
+
+	it('keeps repeated bidirectional paging within the retained entry window', async () => {
+		const chat = new ActiveTranscriptState();
+		const total = 400;
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 50 }, (_, index) =>
+				entry(index + 351, assistant(`message-${index + 351}`)),
+			),
+			{ lastSeq: total, pageOldestSeq: 351, hasMore: true },
+		);
+		vi.mocked(getChatMessages).mockImplementation(async (request) => {
+			const limit = request.limit ?? 50;
+			const end = Math.min(total, (request.beforeSeq ?? total + 1) - 1);
+			const start = Math.max(1, end - limit + 1);
+			const messages = Array.from({ length: end - start + 1 }, (_, index) =>
+				entry(start + index, assistant(`message-${start + index}`)),
+			);
+			return {
+				chatId: 'chat-1',
+				limit,
+				...page({
+					messages,
+					lastSeq: total,
+					pageOldestSeq: start,
+					hasMore: start > 1,
+				}),
+			};
+		});
+
+		for (let pageIndex = 0; pageIndex < 7; pageIndex += 1) {
+			await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+			expect(chat.entries.length).toBeLessThanOrEqual(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		}
+		expect(chat.entries[0]?.seq).toBe(1);
+		expect(chat.entries.at(-1)?.seq).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(chat.hasEarlierMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(true);
+
+		for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
+			await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
+			expect(chat.entries.length).toBeLessThanOrEqual(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		}
+		expect(chat.entries[0]?.seq).toBe(201);
+		expect(chat.entries.at(-1)?.seq).toBe(total);
+		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.visibleMessageCount).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 	});
 
 	it('fails an earlier page that claims more history without advancing', async () => {

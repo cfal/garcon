@@ -12,6 +12,7 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
+import { parseHandoffCommand } from '$lib/chat/composer/handoff-command.js';
 import {
 	parseCompactCommand,
 	isGoalCommand,
@@ -232,6 +233,14 @@ export class ConversationSlashCommandService {
 					),
 				};
 			}
+		}
+
+		const handoff = parseHandoffCommand(text);
+		if (handoff) {
+			return {
+				kind: 'handled',
+				outcome: this.submitHandoffCommand(chatId, chat, handoff.message, images, ownsComposer),
+			};
 		}
 
 		const compact = parseCompactCommand(text);
@@ -522,6 +531,78 @@ export class ConversationSlashCommandService {
 				m.chat_notice_failed_compact({ detail: errorDetail(error) }),
 			);
 			return 'rejected';
+		}
+	}
+
+	// Continues the chat under the same agent in a fresh chat, then navigates
+	// there so the user lands in the continuation rather than the chat they left.
+	async submitHandoffCommand(
+		sourceChatId: string,
+		sourceChat: ChatSessionRecord,
+		message: string,
+		images: File[],
+		clearComposer: boolean,
+	): Promise<ConversationSubmissionOutcome> {
+		const { deps } = this;
+		if (sourceChat.status !== 'running') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_handoff_draft());
+			return 'rejected';
+		}
+		if (!message.trim()) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_message());
+			return 'rejected';
+		}
+
+		const previousText = deps.composerState.inputText;
+		const previousImages = [...deps.composerState.images];
+		deps.chatState.appendLocalNotice('progress', m.chat_notice_handing_off_chat());
+		deps.chatState.isUserScrolledUp = false;
+		if (clearComposer) deps.composerState.clearAfterSubmit(sourceChatId);
+
+		let imagePayload: ChatImage[] = [];
+		if (images.length > 0) {
+			try {
+				imagePayload = await prepareChatImages(images);
+			} catch (error) {
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+				);
+				return 'rejected';
+			}
+		}
+
+		const submission = this.acceptedInputs.selfHandoff({
+			sourceChatId,
+			chatId: createClientChatId(),
+			command: message.trim(),
+			...(imagePayload.length > 0 ? { images: imagePayload } : {}),
+		});
+		try {
+			const response = await submission.submit();
+			deps.sessions.upsertServerChat(response.chat);
+			deps.sessions.setSelectedChatId(response.chat.id);
+			deps.navigation.navigateToChat?.(response.chat.id);
+			if (response.status === 'accepted') {
+				deps.lifecycle.beginTurn(response.chat.id);
+			}
+			return 'accepted';
+		} catch (error) {
+			// An ambiguous transport outcome may have already created the target and
+			// started its turn. Restoring the composer and calling it a failure
+			// invites a resubmission that would produce a second continuation.
+			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+			if (!outcomeUnknown) {
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+			}
+			deps.chatState.appendLocalNotice(
+				'error',
+				outcomeUnknown
+					? m.chat_notice_handoff_outcome_unconfirmed()
+					: m.chat_notice_failed_handoff({ detail: errorDetail(error) }),
+			);
+			return outcomeUnknown ? 'unknown' : 'rejected';
 		}
 	}
 

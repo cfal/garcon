@@ -220,6 +220,62 @@ describe('GarconClient', () => {
     });
   });
 
+  test('submits an abandoned-release retry to the maintenance endpoint', async () => {
+    let observed: {
+      url: string;
+      method: string | undefined;
+      body: unknown;
+      hasDeadline: boolean;
+    } | undefined;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        observed = {
+          url: String(input),
+          method: init?.method,
+          body: JSON.parse(String(init?.body)),
+          hasDeadline: init?.signal !== undefined,
+        };
+        return Response.json({
+          success: true,
+          action: 'retry-abandoned-release',
+          retried: [{ chatId: 'chat-a', agentId: 'claude', lastErrorCode: null }],
+          unresolved: [{ chatId: 'chat-b', agentId: 'codex', lastErrorCode: 'SOURCE_UNAVAILABLE' }],
+        });
+      },
+    });
+
+    await expect(client.repairHistory({ action: 'retry-abandoned-release' })).resolves.toEqual({
+      success: true,
+      action: 'retry-abandoned-release',
+      retried: [{ chatId: 'chat-a', agentId: 'claude', lastErrorCode: null }],
+      unresolved: [{ chatId: 'chat-b', agentId: 'codex', lastErrorCode: 'SOURCE_UNAVAILABLE' }],
+    });
+    expect(observed).toEqual({
+      url: `${connection.baseUrl}/api/v1/chats/repair-history`,
+      method: 'POST',
+      body: { action: 'retry-abandoned-release' },
+      // The route drains every retained record serially, so no fixed client
+      // deadline fits; only the caller's own signal may cancel.
+      hasDeadline: false,
+    });
+  });
+
+  test('rejects a malformed abandoned-release retry response', async () => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: true,
+        action: 'retry-abandoned-release',
+        retried: [{ chatId: 'chat-a' }],
+        unresolved: 'no',
+      }),
+    });
+
+    await expect(client.repairHistory({ action: 'retry-abandoned-release' }))
+      .rejects.toThrow('invalid history repair response');
+  });
+
   test('updates a chat title through the existing workspace API', async () => {
     let request: { url: string; method: string | undefined; body: string } | undefined;
     const client = new GarconClient({

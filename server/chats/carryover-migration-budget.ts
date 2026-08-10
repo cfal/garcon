@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 const MIGRATION_MEMORY_FACTOR = 8;
 
@@ -25,6 +26,10 @@ export async function assertMigrationCapacity(
 // exceeded ~120MB. The factor covers the one unavoidable whole-file parse plus the
 // chat being converted beside it; a 208MiB legacy file completes under a hard
 // 1200MiB cgroup cap and is killed at 1000MiB, so 8x leaves working headroom.
+// That measurement is only meaningful because `availableMemoryBytes` now honours
+// the cgroup limit: while it read host MemAvailable alone, the guard approved the
+// 1000MiB run it should have refused, and the kill looked like workload rather
+// than a broken preflight.
 export function assertMigrationBudget(input: {
   readonly sourceBytes: number;
   readonly availableDisk: number;
@@ -43,7 +48,16 @@ export function assertMigrationBudget(input: {
 
 // Linux parks reclaimable pages in the page cache, so MemFree understates what a
 // migration can use; MemAvailable is the kernel's own estimate of that headroom.
+// A cgroup limit caps that further and is what actually kills the process, so the
+// smaller of the two governs. Reading only MemAvailable approved migrations a
+// container could never complete and turned the guard into an OOM restart loop.
 async function availableMemoryBytes(): Promise<number> {
+  const host = await hostAvailableBytes();
+  const cgroup = await cgroupAvailableBytes();
+  return cgroup === null ? host : Math.min(host, cgroup);
+}
+
+async function hostAvailableBytes(): Promise<number> {
   try {
     const available = /^MemAvailable:\s+(\d+) kB$/m.exec(
       await fs.readFile('/proc/meminfo', 'utf8'),
@@ -53,4 +67,53 @@ async function availableMemoryBytes(): Promise<number> {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   return os.freemem();
+}
+
+// Returns the process's smallest readable cgroup v2 allowance, or null when no
+// finite limit is readable. Every ancestor constrains its descendants, so all
+// readable levels participate. An unreadable or absent limit is not treated as
+// zero: that would refuse every migration on hosts without cgroups.
+export async function cgroupAvailableBytes(
+  roots: { readonly selfCgroup: string; readonly mount: string } = {
+    selfCgroup: '/proc/self/cgroup',
+    mount: '/sys/fs/cgroup',
+  },
+): Promise<number | null> {
+  try {
+    const self = await fs.readFile(roots.selfCgroup, 'utf8');
+    const cgroupPath = /^0::(.*)$/m.exec(self)?.[1];
+    if (cgroupPath === undefined) return null;
+    const components = cgroupPath.split('/').filter(Boolean);
+    if (components.some((component) => component === '.' || component === '..')) return null;
+
+    const mount = path.resolve(roots.mount);
+    let available: number | null = null;
+    for (let depth = components.length; depth >= 0; depth -= 1) {
+      const allowance = await readCgroupV2Allowance(
+        path.join(mount, ...components.slice(0, depth)),
+      );
+      if (allowance !== null) available = Math.min(available ?? allowance, allowance);
+    }
+    return available;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    if ((error as NodeJS.ErrnoException).code === 'EACCES') return null;
+    throw error;
+  }
+}
+
+async function readCgroupV2Allowance(dir: string): Promise<number | null> {
+  try {
+    const max = (await fs.readFile(path.join(dir, 'memory.max'), 'utf8')).trim();
+    if (max === 'max') return null;
+    const current = (await fs.readFile(path.join(dir, 'memory.current'), 'utf8')).trim();
+    const limit = Number(max);
+    const used = Number(current);
+    if (!max || !current || !Number.isFinite(limit) || !Number.isFinite(used)) return null;
+    return Math.max(0, limit - used);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    if ((error as NodeJS.ErrnoException).code === 'EACCES') return null;
+    throw error;
+  }
 }

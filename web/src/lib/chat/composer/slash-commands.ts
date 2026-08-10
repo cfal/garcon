@@ -24,6 +24,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		description: 'Fork the conversation into a new chat',
 	},
 	{
+		name: 'handoff',
+		source: 'command',
+		description: 'Continue in a new chat with the same agent and a compacted transcript',
+	},
+	{
 		name: 'in',
 		source: 'command',
 		description: 'Schedule a prompt in this chat after a delay',

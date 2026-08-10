@@ -512,7 +512,7 @@ describe('ConversationScrollController', () => {
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
 	});
 
-	it('fills the earlier load-ahead zone after a slow page advances its cursor', async () => {
+	it('does not chain an earlier page after its initiating intent expires', async () => {
 		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
 		let resolveFirstPage!: (result: 'loaded') => void;
 		const firstPage = new Promise<'loaded'>((resolve) => (resolveFirstPage = resolve));
@@ -533,7 +533,8 @@ describe('ConversationScrollController', () => {
 		fixture.state.feedMutationClock = mutationClock(1, 1);
 		resolveFirstPage('loaded');
 
-		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(fixture.viewport.waitForLayout).toHaveBeenCalledOnce());
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
 		now.mockRestore();
 	});
 

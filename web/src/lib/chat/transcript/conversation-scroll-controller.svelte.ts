@@ -331,19 +331,7 @@ export class ConversationScrollController {
 		}
 		this.#syncBoundaryLatch(direction);
 		if (reason === 'button') this.#preserveHistoryBrowsing();
-		const earlierBoundaryAdvanced =
-			direction === 'earlier' &&
-			requestBoundarySignature !== null &&
-			this.#earlierBoundarySignature() !== requestBoundarySignature;
-		const shouldContinueEarlierPrefetch =
-			direction === 'earlier' &&
-			earlierBoundaryAdvanced &&
-			this.#userScrollIntent.direction === 'earlier';
-		if (
-			(continuedPageIntent || shouldContinueEarlierPrefetch) &&
-			this.#isNearPageBoundary(direction) &&
-			(result === 'loaded' || earlierBoundaryAdvanced)
-		) {
+		if (continuedPageIntent && this.#isNearPageBoundary(direction) && result === 'loaded') {
 			if (direction === 'later') this.#laterBoundaryArmed = true;
 			this.#handleBoundaryProximity(direction, true);
 		}
@@ -630,19 +618,11 @@ export class ConversationScrollController {
 		} else if (!this.#laterBoundaryArmed) {
 			return;
 		}
-		// Earlier browsing remains armed across a slow drag or momentum scroll and
-		// advances only with the cursor. Later paging still requires fresh input.
 		const intent = this.#userScrollIntent;
 		const hasEligibleIntent =
-			direction === 'earlier'
-				? intent.direction === 'earlier' &&
-					((intent.epoch > this.#consumedIntentEpoch.earlier &&
-						this.#hasRecentUserScrollIntent()) ||
-						(this.#earlierBoundaryRequestSignature !== null &&
-							this.#earlierBoundaryRequestSignature !== this.#earlierBoundarySignature()))
-				: intent.epoch > this.#consumedIntentEpoch.later &&
-					intent.direction === 'later' &&
-					this.#hasRecentUserScrollIntent();
+			intent.epoch > this.#consumedIntentEpoch[direction] &&
+			intent.direction === direction &&
+			this.#hasRecentUserScrollIntent();
 		if (!hasEligibleIntent) {
 			return;
 		}

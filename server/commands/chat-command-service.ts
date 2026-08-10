@@ -23,7 +23,9 @@ import {
   type SubmitRunInput,
   type UpdateProjectPathInput,
 } from './command-support.js';
+import type { SelfHandoffRunCommandRequest } from '../../common/self-handoff-contracts.js';
 import { ForkCommands } from './fork-commands.js';
+import { SelfHandoffCommands } from './self-handoff-commands.js';
 import { QueueCommands } from './queue-commands.js';
 import { SessionCommands } from './session-commands.js';
 import { StartCommands } from './start-commands.js';
@@ -44,6 +46,7 @@ export type {
 export class ChatCommandService {
   readonly #start: StartCommands;
   readonly #fork: ForkCommands;
+  readonly #selfHandoff: SelfHandoffCommands;
   readonly #queue: QueueCommands;
   readonly #session: SessionCommands;
   readonly #steer: SteerCommands;
@@ -52,6 +55,7 @@ export class ChatCommandService {
     const support = new CommandSupport(deps);
     this.#start = new StartCommands(support);
     this.#fork = new ForkCommands(support);
+    this.#selfHandoff = new SelfHandoffCommands(support);
     this.#queue = new QueueCommands(support);
     this.#session = new SessionCommands(support);
     this.#steer = new SteerCommands(support);
@@ -81,8 +85,16 @@ export class ChatCommandService {
     return this.#session.deleteChat(input);
   }
 
+  retryRetainedTransferCleanups() {
+    return this.deps.ownership.retryRetainedTransferCleanups();
+  }
+
   submitForkRun(input: SubmitForkRunInput) {
     return this.#fork.submitForkRun(input);
+  }
+
+  submitSelfHandoffRun(input: SelfHandoffRunCommandRequest) {
+    return this.#selfHandoff.submitSelfHandoffRun(input);
   }
 
   submitQueueEntryCreate(input: QueueEntryCreateCommandRequest) {

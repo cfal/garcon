@@ -12,6 +12,7 @@ import {
 } from '@garcon/server-agent-interface';
 import { canonicalDigest, canonicalJson } from './digest.js';
 import { projectSearchMessage } from './message-projector.js';
+import { nativeSeedReceiptDigest } from './worker-protocol.js';
 import type { HistoricalSearchMessageRow } from './rows.js';
 import type { TranscriptSearchCatalogEntry } from './transcript-search-service.js';
 
@@ -91,20 +92,6 @@ export function catalogEntryKey(entry: TranscriptSearchCatalogEntry): string {
     agentSessionId: entry.agentSessionId,
     nativeSeedReceiptDigest: nativeSeedReceiptDigest(entry.nativeSeedReceipt),
   });
-}
-
-export function nativeSeedReceiptDigest(receipt: NativeSeedReceipt | null): string {
-  return canonicalDigest(receipt);
-}
-
-export function catalogSourceDescriptorHash(entry: TranscriptSearchCatalogEntry): string | null {
-  return entry.source.state === 'ready'
-    ? canonicalDigest({
-        source: entry.source.reference,
-        agentSessionId: entry.agentSessionId,
-        nativeSeedReceiptDigest: nativeSeedReceiptDigest(entry.nativeSeedReceipt),
-      })
-    : null;
 }
 
 export function validateCatalogEntry(entry: TranscriptSearchCatalogEntry): void {

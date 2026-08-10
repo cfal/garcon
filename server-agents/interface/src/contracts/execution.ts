@@ -14,7 +14,6 @@ export interface AgentExecution {
   abort(agentSessionId: string): Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   runningSessions(): readonly AgentRunningSession[];
-  compact?(request: AgentCompactRequest): Promise<void>;
   applySessionConfiguration?(
     agentSessionId: string,
     configuration: AgentSessionConfiguration,

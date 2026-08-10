@@ -26,8 +26,6 @@ import {
 } from './schema.js';
 import {
   catalogEntryKey,
-  catalogSourceDescriptorHash,
-  nativeSeedReceiptDigest,
   rowsForBatch,
   sanitizeFirstRecordedSeedPreservingSource,
   TRANSCRIPT_INDEX_LOAD_LIMITS,
@@ -40,7 +38,11 @@ import type {
   IndexerRequest,
   TranscriptIndexModuleRegistration,
 } from './worker-protocol.js';
-import { compareGeneration } from './worker-protocol.js';
+import {
+  catalogSourceDescriptorHash,
+  compareGeneration,
+  nativeSeedReceiptDigest,
+} from './worker-protocol.js';
 import type { TranscriptSearchCatalogEntry } from './transcript-search-service.js';
 
 type CatalogWork = TranscriptSearchCatalogEntry & {

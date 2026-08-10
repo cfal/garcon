@@ -56,6 +56,30 @@ function response(
 	};
 }
 
+function responseAt(directoryPath: string, entries: FileTreeEntry[]): FileTreeResponse {
+	const segments = directoryPath.slice('/workspace'.length).split('/').filter(Boolean);
+	let breadcrumbPath = '/workspace';
+	return {
+		fileRootPath: '/workspace',
+		directory: {
+			path: directoryPath,
+			relativePath: segments.join('/'),
+			parentPath:
+				directoryPath === '/workspace'
+					? null
+					: directoryPath.slice(0, directoryPath.lastIndexOf('/')) || '/',
+			breadcrumbs: [
+				{ name: 'workspace', path: '/workspace' },
+				...segments.map((segment) => {
+					breadcrumbPath = `${breadcrumbPath}/${segment}`;
+					return { name: segment, path: breadcrumbPath };
+				}),
+			],
+		},
+		entries,
+	};
+}
+
 function renderReady(entries: FileTreeEntry[]) {
 	const store = new FileTreeStore();
 	store.navigation = { kind: 'ready', response: response(entries) };
@@ -125,6 +149,65 @@ describe('FileTree', () => {
 			kind: 'loading',
 			target: { path: src.path, reason: 'directory-row' },
 		});
+	});
+
+	it('replaces directory rows across consecutive entries and breadcrumb navigation', async () => {
+		const firstPath = '/workspace/project/first';
+		const secondPath = `${firstPath}/second`;
+		const first = entry('first', 'directory');
+		const second = entry('second', 'directory', firstPath);
+		const firstOnly = entry('first-only.txt', 'file', firstPath);
+		const secondOnly = entry('second-only.txt', 'file', secondPath);
+		const projectOnly = entry('project-only.txt', 'file');
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(responseAt(firstPath, [second, firstOnly]))
+			.mockResolvedValueOnce(responseAt(secondPath, [secondOnly]))
+			.mockResolvedValueOnce(responseAt('/workspace/project', [first, projectOnly]));
+		const { container, store } = renderReady([first]);
+		store.activate();
+
+		await fireEvent.click(
+			container.querySelector<HTMLElement>(`[data-file-tree-row-key="${first.path}"]`)!,
+		);
+		await screen.findByRole('rowheader', { name: /^first-only\.txt/ });
+		await fireEvent.click(
+			container.querySelector<HTMLElement>(`[data-file-tree-row-key="${second.path}"]`)!,
+		);
+		await screen.findByRole('rowheader', { name: /^second-only\.txt/ });
+
+		expect(screen.queryByRole('rowheader', { name: /^first-only\.txt/ })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: '/workspace/project' }));
+		await screen.findByRole('rowheader', { name: /^project-only\.txt/ });
+
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+		expect(screen.queryByRole('rowheader', { name: /^second-only\.txt/ })).toBeNull();
+		const keys = [...container.querySelectorAll<HTMLElement>('[data-file-tree-row-key]')].map(
+			(row) => row.dataset.fileTreeRowKey,
+		);
+		expect(new Set(keys).size).toBe(keys.length);
+	});
+
+	it('keeps overlapping child names owned by their expanded sibling directories', async () => {
+		const first = entry('first', 'directory');
+		const second = entry('second', 'directory');
+		const firstChild = entry('shared.txt', 'file', first.path);
+		const secondChild = entry('shared.txt', 'file', second.path);
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(responseAt(first.path, [firstChild]))
+			.mockResolvedValueOnce(responseAt(second.path, [secondChild]));
+		const { container, store } = renderReady([first, second]);
+		store.activate();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Expand first' }));
+		await waitFor(() => expect(store.childrenCache.get(first.path)).toEqual([firstChild]));
+		await fireEvent.click(screen.getByRole('button', { name: 'Expand second' }));
+		await waitFor(() => expect(store.childrenCache.get(second.path)).toEqual([secondChild]));
+
+		expect(screen.getAllByRole('rowheader', { name: /^shared\.txt/ })).toHaveLength(2);
+		const keys = [...container.querySelectorAll<HTMLElement>('[data-file-tree-row-key]')].map(
+			(row) => row.dataset.fileTreeRowKey,
+		);
+		expect(new Set(keys).size).toBe(keys.length);
 	});
 
 	it('opens a file from anywhere on its row', async () => {

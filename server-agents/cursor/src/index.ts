@@ -84,6 +84,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
+  readonly compaction = null;
   readonly forking: NonNullable<AgentIntegration['forking']>;
   readonly steering = null;
   readonly goals = null;

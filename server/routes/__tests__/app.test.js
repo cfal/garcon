@@ -384,14 +384,24 @@ describe('GET /api/app/settings', () => {
       modelProtocol: 'anthropic-messages',
       thinkingMode: 'high',
     };
+    const agentSwitchCompaction = {
+      enabled: true,
+      agentId: 'direct-openai-compatible',
+      model: 'compaction-model',
+      apiProviderId: 'custom-provider',
+      modelEndpointId: 'custom-endpoint',
+      modelProtocol: 'openai-compatible',
+      thinkingMode: 'low',
+    };
     ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
-      ui: { chatTitle, commitMessage },
+      ui: { chatTitle, agentSwitchCompaction, commitMessage },
     }));
 
     const response = await handler();
     const body = await response.json();
 
     expect(body.uiEffective.chatTitle).toMatchObject(chatTitle);
+    expect(body.uiEffective.agentSwitchCompaction).toMatchObject(agentSwitchCompaction);
     expect(body.uiEffective.commitMessage).toMatchObject(commitMessage);
     expect(ctx.agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
     expect(ctx.agents.getAgentReadinessMap).not.toHaveBeenCalled();

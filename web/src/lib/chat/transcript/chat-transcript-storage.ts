@@ -267,9 +267,11 @@ export class LocalChatTranscriptStorage {
 		const boundedLimit = Math.max(0, Math.floor(limit));
 		if (boundedLimit === 0) return [];
 		try {
-			const sorted = [...readIndex().entries].sort(
-				(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
-			);
+			const sorted = readIndex()
+				.entries.filter((entry) => !entry.stale)
+				.sort(
+					(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
+				);
 			const cursors: CachedChatCursor[] = [];
 			for (const entry of sorted) {
 				if (cursors.length >= boundedLimit) break;

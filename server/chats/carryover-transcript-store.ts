@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatMessage } from '../../common/chat-types.js';
+import { boundProjectedMessage, isProjectableMessage } from '../../common/transcript-seed.js';
 import { AgentSwitchMessage } from '../../common/chat-types.js';
 import { DomainError } from '../lib/domain-error.js';
 import { writeJsonFileAtomic, syncDirectory } from '../lib/json-file-store.js';
@@ -103,10 +104,12 @@ export class CarryOverTranscriptStore {
   readonly #indexCacheSize: number;
   readonly #indexCache = new Map<string, CarryOverSegmentIndex>();
   readonly #degradedSegments = new Set<string>();
-  readonly #writerRoots = new Set<string>();
+  readonly #writerRootCounts = new Map<string, number>();
   readonly #decodePage: typeof decodeCarryOverPage;
   readonly #onSegmentCommitted: (() => Promise<void>) | null;
   #gcPromise: Promise<void> = Promise.resolve();
+  // Serializes writer-root leases with the complete mark-and-delete sweep.
+  #rootStatePromise: Promise<void> = Promise.resolve();
   #segmentCommitPromise: Promise<void> = Promise.resolve();
 
   constructor(options: {
@@ -141,7 +144,7 @@ export class CarryOverTranscriptStore {
   }
 
   writerRoots(): ReadonlySet<string> {
-    return new Set(this.#writerRoots);
+    return new Set(this.#writerRootCounts.keys());
   }
 
   async cleanupTemporary(retainedSegmentIds: ReadonlySet<string>): Promise<number> {
@@ -166,7 +169,7 @@ export class CarryOverTranscriptStore {
   sweep(roots: () => ReadonlySet<string>): Promise<CarryOverSweepResult> {
     const operation = this.#gcPromise
       .catch(() => undefined)
-      .then(() => this.#sweepNow(roots()));
+      .then(() => this.#withStableWriterRoots(() => this.#sweepNow(roots())));
     this.#gcPromise = operation.then(() => undefined, () => undefined);
     return operation;
   }
@@ -180,10 +183,10 @@ export class CarryOverTranscriptStore {
       throw new Error('Carryover segment must contain at least one message');
     }
     const preparedDir = this.#preparedSegmentDir(request.operationId, id);
-    await fs.rm(preparedDir, { recursive: true, force: true });
-    await fs.mkdir(path.join(preparedDir, 'pages'), { recursive: true, mode: 0o700 });
-    this.#writerRoots.add(id);
+    await this.#mutateWriterRoots(() => this.#retainWriterRoot(id));
     try {
+      await fs.rm(preparedDir, { recursive: true, force: true });
+      await fs.mkdir(path.join(preparedDir, 'pages'), { recursive: true, mode: 0o700 });
       const pages = await encodeCarryOverPages(request.messages, request.signal);
       for (const page of pages) {
         request.signal?.throwIfAborted();
@@ -204,8 +207,8 @@ export class CarryOverTranscriptStore {
       await syncDirectory(preparedDir);
       return this.#preparedHandle(request.operationId, index, preparedDir);
     } catch (error) {
-      this.#writerRoots.delete(id);
       await fs.rm(preparedDir, { recursive: true, force: true }).catch(() => undefined);
+      await this.#mutateWriterRoots(() => this.#releaseWriterRoot(id));
       throw error;
     }
   }
@@ -297,32 +300,57 @@ export class CarryOverTranscriptStore {
     };
   }
 
-  async loadTailForSeed(input: {
+  // Returns the whole archive for the projection ladder, which selects by message
+  // class rather than recency and therefore needs to see every turn. A tail cannot
+  // serve it: on tool-heavy chats a five-hundred message window held two of
+  // seventy-one user turns, so the asks were gone before any budget applied.
+  // Streams in pages and drops from the oldest end only when the byte guard trips.
+  async loadProjectionSource(input: {
     readonly refs: readonly CarryOverSegmentRef[];
-    readonly maxMessages?: number;
     readonly maxBytes?: number;
     readonly signal?: AbortSignal;
   }): Promise<ChatMessage[]> {
-    const total = archivedLogicalCount(input.refs);
-    if (total === 0) return [];
-    const maxMessages = Math.max(1, input.maxMessages ?? 512);
-    const page = await this.loadPage({
-      refs: input.refs,
-      offset: Math.max(0, total - maxMessages),
-      limit: Math.min(total, maxMessages),
-      signal: input.signal,
-    });
-    const maxBytes = input.maxBytes ?? 4 * 1024 * 1024;
-    const result: ChatMessage[] = [];
+    if (archivedLogicalCount(input.refs) === 0) return [];
+    const maxBytes = input.maxBytes ?? 64 * 1024 * 1024;
+    const collected: ChatMessage[] = [];
     let bytes = 2;
-    for (let index = page.messages.length - 1; index >= 0; index -= 1) {
-      const message = page.messages[index];
-      const cost = Buffer.byteLength(JSON.stringify(message), 'utf8') + (result.length > 0 ? 1 : 0);
-      if (result.length > 0 && bytes + cost > maxBytes) break;
-      result.unshift(message);
-      bytes += cost;
+    for await (const batch of this.stream({
+      refs: input.refs,
+      maxMessagesPerBatch: 512,
+      signal: input.signal,
+    })) {
+      for (const message of batch) {
+        // Only messages the projection can actually render are admitted, so the
+        // byte guard is never spent on content that is discarded downstream.
+        // Tool results alone are 45% of a typical archive; counting them here
+        // let a large chat evict its whole conversation and hand off empty.
+        if (!isProjectableMessage(message)) continue;
+        // Bounded to what the renderer will actually read before it is measured,
+        // so the guard counts projected size rather than payload size. Asks are
+        // never evicted below, so an unbounded one would otherwise stop the guard
+        // trimming at all and defeat the ceiling entirely.
+        const projected = boundProjectedMessage(message);
+        bytes += Buffer.byteLength(JSON.stringify(projected), 'utf8') + 1;
+        collected.push(projected);
+      }
+      while (bytes > maxBytes) {
+        // The asks are never evicted. They are the irreducible floor of a
+        // carried transcript and are tiny beside the tool traffic around them.
+        const index = collected.findIndex((message) => message.type !== 'user-message');
+        // Only an all-ask remainder stops the trim, and the loop runs down to an
+        // empty collection rather than stopping at one message: a sole oversized
+        // tool payload is evictable and must be evicted, since tool bodies are
+        // not bounded by `boundProjectedMessage` the way bodies are.
+        // Known ceiling: asks are bounded individually but not collectively, so a
+        // chat with more than roughly `maxBytes / 8KB` of them still exceeds the
+        // guard. Evicting asks is what this exists to prevent; raising the real
+        // ceiling means paging the projection rather than holding it.
+        if (index === -1) break;
+        bytes -= Buffer.byteLength(JSON.stringify(collected[index]), 'utf8') + 1;
+        collected.splice(index, 1);
+      }
     }
-    return result;
+    return collected;
   }
 
   async *stream(input: {
@@ -518,15 +546,39 @@ export class CarryOverTranscriptStore {
           this.#degradedSegments.delete(index.id);
           await syncDirectory(this.#segmentsDir);
         }
-        this.#writerRoots.delete(index.id);
+        await this.#mutateWriterRoots(() => this.#releaseWriterRoot(index.id));
         released = true;
         await this.#removeEmptyOperationDir(operationId);
       },
       releaseRoot: () => {
-        this.#writerRoots.delete(index.id);
+        if (released) return;
         released = true;
+        void this.#mutateWriterRoots(() => this.#releaseWriterRoot(index.id));
       },
     };
+  }
+
+  #withStableWriterRoots<T>(operation: () => Promise<T>): Promise<T> {
+    return this.#mutateWriterRoots(operation);
+  }
+
+  #mutateWriterRoots<T>(mutation: () => T | Promise<T>): Promise<T> {
+    const operation = this.#rootStatePromise
+      .catch(() => undefined)
+      .then(mutation);
+    this.#rootStatePromise = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  #retainWriterRoot(id: string): void {
+    this.#writerRootCounts.set(id, (this.#writerRootCounts.get(id) ?? 0) + 1);
+  }
+
+  #releaseWriterRoot(id: string): void {
+    const count = this.#writerRootCounts.get(id);
+    if (count === undefined) return;
+    if (count === 1) this.#writerRootCounts.delete(id);
+    else this.#writerRootCounts.set(id, count - 1);
   }
 
   #recordSegmentCommitted(): Promise<void> {
@@ -568,7 +620,7 @@ export class CarryOverTranscriptStore {
 
   async #sweepNow(roots: ReadonlySet<string>): Promise<CarryOverSweepResult> {
     const startedAt = Date.now();
-    const reachable = new Set([...roots, ...this.#writerRoots].map(requireSegmentId));
+    const reachable = new Set([...roots, ...this.#writerRootCounts.keys()].map(requireSegmentId));
     let compressedBytes = 0;
     let declaredUncompressedBytes = 0;
     for (const id of reachable) {
@@ -590,7 +642,7 @@ export class CarryOverTranscriptStore {
       .filter((id) => !reachable.has(id));
     let removedSegmentCount = 0;
     for (const id of candidates) {
-      if (this.#writerRoots.has(id)) continue;
+      if (this.#writerRootCounts.has(id)) continue;
       const trashPath = path.join(this.#trashDir, `${id}-${crypto.randomUUID()}`);
       try {
         await fs.rename(this.#segmentDir(id), trashPath);

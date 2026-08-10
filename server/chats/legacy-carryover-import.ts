@@ -110,7 +110,7 @@ export async function convertLinkedHistory(input: {
   for (const [index, node] of chain.entries()) {
     const materialized = node.kind === 'materialized'
       ? node
-      : await readLinkedMaterialized(input.workspaceDir, node.sourceNodeId);
+      : await readLinkedMaterialized(input.workspaceDir, node.sourceNodeId, node.parentId);
     const messages = await readLinkedMessages(input.workspaceDir, materialized, materializedMessages);
     const visibleMessageCount = node.kind === 'prefix' ? node.messageCount : materialized.messageCount;
     if (visibleMessageCount > materialized.messageCount) {
@@ -207,7 +207,25 @@ export async function migrateLegacyOwnershipJournal(input: {
           lastErrorCode: null,
           createdAt: requiredString(raw.createdAt, 'legacy transfer timestamp'),
         });
+      } else if (!current) {
+        // The chat was deleted before this transfer's cleanup drained. Converting
+        // rather than throwing keeps the orphaned provider session releasable and
+        // stops one stale journal entry from aborting the whole migration, which
+        // runs before the server can boot. The delete branch below already treats
+        // the identical `!current` case this way.
+        ownershipIntents.push({
+          version: 2,
+          operationId: requiredString(raw.id, 'legacy transfer ID'),
+          kind: 'delete',
+          chatId: raw.chatId,
+          phase: 'registry-removed',
+          sourceEpoch: typeof raw.oldEpoch === 'string' ? raw.oldEpoch : null,
+          releaseReferences: [source],
+          createdAt: requiredString(raw.createdAt, 'legacy transfer timestamp'),
+        });
       } else if (!matchesLegacySource(current, raw)) {
+        // A chat that was handed off again is genuinely ambiguous, so this stays
+        // loud rather than guessing which reference is current.
         throw new Error(`Legacy transfer ownership mismatch for ${raw.chatId}`);
       }
     } else if (raw.kind === 'delete') {
@@ -378,10 +396,20 @@ async function readLinkedNode(workspaceDir: string, id: string): Promise<CarryOv
 async function readLinkedMaterialized(
   workspaceDir: string,
   id: string,
+  expectedParentId: string | null,
 ): Promise<MaterializedCarryOverNode> {
   const node = await readLinkedNode(workspaceDir, id);
   if (node.kind !== 'materialized') {
     throw new LegacyCarryOverDataError(`Linked carryover prefix source ${id} is not materialized`);
+  }
+  // The v4 runtime refused a prefix whose source sat on a different parent, and
+  // dropping that check here would silently import a hybrid chain: the
+  // transcript self-check cannot catch it, because it is assembled from the same
+  // wrongly resolved source.
+  if (node.parentId !== expectedParentId) {
+    throw new LegacyCarryOverDataError(
+      `Linked carryover prefix source ${id} does not share its prefix parent`,
+    );
   }
   return node;
 }

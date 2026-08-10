@@ -259,6 +259,7 @@ export class ChatTranscriptCache {
 
 	markStale(chatId: string): void {
 		if (!chatId) return;
+		this.#persistence.remove(chatId);
 		const current = this.#entries.get(chatId);
 		if (current) this.#entries.set(chatId, { ...current, stale: true });
 		this.#storage.markStale(chatId);
@@ -288,7 +289,7 @@ export class ChatTranscriptCache {
 			);
 		if (memory.length >= boundedLimit) return memory.slice(0, boundedLimit);
 
-		const seen = new Set(memory.map((cursor) => cursor.chatId));
+		const seen = new Set(this.#entries.keys());
 		const persisted = this.#storage
 			.listCursors(boundedLimit)
 			.filter((cursor: CachedChatCursor) => !seen.has(cursor.chatId));

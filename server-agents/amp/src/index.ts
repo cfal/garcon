@@ -57,6 +57,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
+  readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
   readonly goals = null;
@@ -107,6 +108,9 @@ export default class AmpAgentIntegration implements AgentIntegration {
       },
     };
     this.singleQuery = {
+      // `runSingleQuery` spawns with `--dangerously-allow-all -x` in the chat
+      // project, so a prompt reaching it can act on the workspace.
+      runsToolsWithoutPermission: true,
       async run(request) {
         request.signal.throwIfAborted();
         try {

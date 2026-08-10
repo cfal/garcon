@@ -14,6 +14,7 @@ import {
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { GarconProcess } from '../../support/garcon-process.js';
+import { CARRIED_CONTEXT_VERSION } from '../../../common/transcript-seed.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WORKSPACE = 'cli-integration';
@@ -269,7 +270,7 @@ describe('garcon-cli', () => {
         'cli-target-turn',
       ]);
       const targetRequest = await targetHeld.received;
-      expect(occurrences(targetRequest.lastUserText, '<carried-context version="2">')).toBe(1);
+      expect(occurrences(targetRequest.lastUserText, `<carried-context version="${CARRIED_CONTEXT_VERSION}">`)).toBe(1);
       expect(targetHeld.releaseText('cli-target-answer')).toBe(true);
       const handedOff = await handoffRun;
 
@@ -303,7 +304,7 @@ describe('garcon-cli', () => {
         'cli-return-turn',
       ]);
       const sourceRequest = await sourceHeld.received;
-      expect(occurrences(sourceRequest.lastUserText, '<carried-context version="2">')).toBe(1);
+      expect(occurrences(sourceRequest.lastUserText, `<carried-context version="${CARRIED_CONTEXT_VERSION}">`)).toBe(1);
       expect(sourceRequest.lastUserText).toContain('cli-target-turn');
       expect(sourceHeld.releaseText('cli-return-answer')).toBe(true);
       const returned = await returnRun;

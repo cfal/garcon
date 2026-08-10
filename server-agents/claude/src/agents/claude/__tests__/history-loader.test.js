@@ -496,7 +496,7 @@ describe('loadClaudeChatMessagePage', () => {
     ]);
   });
 
-  it('matches full-loader ordering for out-of-order timestamps at arbitrary offsets', async () => {
+  it('keeps canonical whole-transcript revisions across windows and off-window changes', async () => {
     const timestamps = [5, 0, 1, 2, 3, 4];
     const lines = timestamps.map((second, index) => JSON.stringify({
       sessionId: 'session-1',
@@ -510,12 +510,25 @@ describe('loadClaudeChatMessagePage', () => {
 
     await withTempJsonl(lines, async (filePath) => {
       const full = await loadClaudeChatMessages(filePath);
+      const latestPage = await loadClaudeChatMessagePage(filePath, 2, 0);
       for (const offset of [0, 2]) {
         const page = await loadClaudeChatMessagePage(filePath, 2, offset);
         const end = full.length - offset;
         expect(page.messages).toEqual(full.slice(end - 2, end));
         expect(page.revision).toBe(transcriptRevision(full));
       }
+
+      const changedLines = [...lines];
+      const changedEntry = JSON.parse(changedLines[1]);
+      changedEntry.message.content = [{ type: 'text', text: 'changed outside the latest page' }];
+      changedLines[1] = JSON.stringify(changedEntry);
+      await fs.writeFile(filePath, `${changedLines.join('\n')}\n`, 'utf8');
+
+      const changedFull = await loadClaudeChatMessages(filePath);
+      const changedPage = await loadClaudeChatMessagePage(filePath, 2, 0);
+      expect(changedPage.messages).toEqual(latestPage.messages);
+      expect(changedPage.revision).not.toBe(latestPage.revision);
+      expect(changedPage.revision).toBe(transcriptRevision(changedFull));
     });
   });
 

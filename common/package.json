@@ -16,6 +16,7 @@
     "./chat-command-contracts": "./chat-command-contracts.ts",
     "./chat-details": "./chat-details.ts",
     "./chat-execution-control": "./chat-execution-control.ts",
+    "./chat-history-repair": "./chat-history-repair.ts",
     "./chat-id": "./chat-id.ts",
     "./chat-list": "./chat-list.ts",
     "./chat-modes": "./chat-modes.ts",

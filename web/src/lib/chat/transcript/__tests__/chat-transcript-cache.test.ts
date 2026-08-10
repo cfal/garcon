@@ -121,6 +121,55 @@ describe('ChatTranscriptCache', () => {
 		]);
 	});
 
+	it('cancels a pending cache write when a persisted transcript becomes stale', () => {
+		const storage = new LocalChatTranscriptStorage();
+		storage.persist('chat-1', [entry(1, 'persisted')], {
+			generationId: 'generation-1',
+			lastSeq: 1,
+		});
+		const cache = new ChatTranscriptCache({ limit: 100, storage });
+		cache.replaceFromPage(
+			'chat-1',
+			page('generation-1', [entry(1, 'persisted'), entry(2, 'pending')]),
+		);
+
+		cache.markStale('chat-1');
+		cache.flush();
+
+		expect(storage.restore('chat-1')).toMatchObject({
+			entries: [entry(1, 'persisted')],
+			stale: true,
+		});
+		expect(cache.listCursors()).toEqual([]);
+	});
+
+	it('does not persist the first cache draft after its transcript becomes stale', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ limit: 100, storage });
+		cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'pending')]));
+
+		cache.markStale('chat-1');
+		cache.flush();
+
+		expect(storage.restore('chat-1')).toBeNull();
+		expect(cache.listCursors()).toEqual([]);
+	});
+
+	it('does not fall through stale memory to a contradictory persisted cursor', () => {
+		const storage = new LocalChatTranscriptStorage();
+		storage.persist('chat-1', [entry(1, 'persisted')], {
+			generationId: 'generation-1',
+			lastSeq: 1,
+		});
+		const cache = new ChatTranscriptCache({ limit: 100, storage });
+		cache.get('chat-1');
+		cache.markStale('chat-1');
+		storage.markValidated('chat-1');
+
+		expect(storage.listCursors()).toHaveLength(1);
+		expect(cache.listCursors()).toEqual([]);
+	});
+
 	it('prunes memory entries after maxEntries is exceeded', () => {
 		const cache = new ChatTranscriptCache({ limit: 100, maxEntries: 2 });
 

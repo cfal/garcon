@@ -202,6 +202,43 @@ describe('TranscriptSearchService', () => {
     });
     await service.close();
   });
+
+  it('delivers source refresh events for chats with and without a seed receipt', async () => {
+    const root = await workspace();
+    const service = createService(root);
+    const refreshes: string[] = [];
+    service.setSourceRefreshHandler(async (request) => {
+      refreshes.push(request.chatId);
+    });
+    await service.enable({
+      modules: [{
+        agentId: 'fixture-failing',
+        reference: {
+          apiVersion: 1,
+          moduleUrl: new URL('./fixture-index-source-failure.ts', import.meta.url).href,
+        },
+      }],
+      signal: new AbortController().signal,
+    });
+    // Regression: the host hashed the receipt raw while the indexer hashed its
+    // digest, so the descriptor comparison dropped every refresh event.
+    const receipt = createNativeSeedReceipt({
+      agentSessionId: 'native-two',
+      placement: 'user-prefix',
+      prefix: '<carried-context version="2">\n<transcript/>\n</carried-context>\n\n',
+    });
+    await service.reconcile(snapshot(service, 1, [
+      failingEntry('one', null, null),
+      failingEntry('two', 'native-two', receipt),
+    ]));
+
+    const deadline = Date.now() + 5_000;
+    while (!refreshes.includes('one') || !refreshes.includes('two')) {
+      if (Date.now() >= deadline) throw new Error(`Source refresh was not delivered: ${refreshes}`);
+      await Bun.sleep(20);
+    }
+    await service.close();
+  });
 });
 
 async function workspace(): Promise<string> {
@@ -262,6 +299,30 @@ function entry(chatId: string, revision: string, messages: ChatMessage[], carryO
     carryOverRevision,
     agentSessionId: null,
     nativeSeedReceipt: null,
+  };
+}
+
+function failingEntry(
+  chatId: string,
+  agentSessionId: string | null,
+  nativeSeedReceipt: ReturnType<typeof createNativeSeedReceipt> | null,
+) {
+  return {
+    chatId,
+    agentId: 'fixture-failing',
+    model: 'model',
+    updatedAt: timestamp,
+    source: {
+      state: 'ready' as const,
+      reference: {
+        ownerId: 'fixture-failing',
+        schemaVersion: 1,
+        value: { revision: 'r1', messages: [] },
+      },
+    },
+    carryOverRevision: 'carry-v1:0',
+    agentSessionId,
+    nativeSeedReceipt,
   };
 }
 

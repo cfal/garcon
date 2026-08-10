@@ -6,6 +6,12 @@ import {
 
 const COMPACTION_REVISION_SOURCE = Symbol.for('garcon.compactionRevisionSource');
 
+declare const agentTranscriptRevisionBrand: unique symbol;
+
+export type AgentTranscriptRevision = string & {
+  readonly [agentTranscriptRevisionBrand]: true;
+};
+
 type CompactionRevisionSource = NativeMessageSource & {
   readonly pairingTimestamp?: number;
 };
@@ -54,10 +60,10 @@ export class TranscriptRevisionAccumulator {
     this.#fragmentCount += other.#fragmentCount;
   }
 
-  finish(): string {
+  finish(): AgentTranscriptRevision {
     const digest = this.#sumA.toString(16).padStart(8, '0')
       + this.#sumB.toString(16).padStart(8, '0');
-    return `v3:${this.#messageCount}:${this.#fragmentCount}:${digest}`;
+    return `v3:${this.#messageCount}:${this.#fragmentCount}:${digest}` as AgentTranscriptRevision;
   }
 
   #addValue(kind: string, value: unknown, source?: unknown): void {
@@ -107,7 +113,9 @@ export function attachCompactionRevisionSource<T extends object>(
   return target;
 }
 
-export function computeAgentTranscriptRevision(messages: readonly ChatMessage[]): string {
+export function computeAgentTranscriptRevision(
+  messages: readonly ChatMessage[],
+): AgentTranscriptRevision {
   return computeAgentTranscriptRevisions(messages).full;
 }
 
@@ -116,7 +124,7 @@ export const transcriptRevision = computeAgentTranscriptRevision;
 export function computeAgentTranscriptRevisions(
   messages: readonly ChatMessage[],
   prefixLength = messages.length,
-): { readonly prefix: string; readonly full: string } {
+): { readonly prefix: AgentTranscriptRevision; readonly full: AgentTranscriptRevision } {
   const accumulator = new TranscriptRevisionAccumulator();
   let prefix = prefixLength === 0 ? accumulator.finish() : undefined;
   for (let index = 0; index < messages.length; index += 1) {

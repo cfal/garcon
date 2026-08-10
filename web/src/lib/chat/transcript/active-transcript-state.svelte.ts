@@ -5,34 +5,33 @@ import {
 	type ChatViewMessage,
 	type ChatViewPage,
 } from '$shared/chat-view';
-import {
-	AssistantMessage,
-	ErrorMessage,
-	PermissionRequestMessage,
-	ThinkingMessage,
-	UserMessage,
-	isToolUseMessage,
-	type ChatMessage,
-	type UserMessageDeliveryStatus,
-} from '$shared/chat-types';
-import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
+import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '$shared/chat-types';
+import type { PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { createRandomId } from '$lib/utils/random-id';
 import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
-import type { ConversationFeedMutationKind } from './conversation-feed-mutations.js';
+import {
+	responseMessageType,
+	type ConversationFeedMutationKind,
+} from './conversation-feed-mutations.js';
 import type {
 	ActiveTranscriptPort,
 	ChatCursor,
 	ChatLoadMessagesOptions,
 	ChatRestoreResult,
 } from './active-transcript-port.js';
-import { collectEarlierTranscriptMessages } from './transcript-page-progress.js';
+import {
+	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+	collectEarlierTranscriptMessages,
+	retainTranscriptEntries,
+} from './transcript-page-progress.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import {
 	applyPendingDeliveryStatuses,
 	mergeRowsWithPendingInputs,
+	normalizePendingInputs,
 	sortPendingInputs,
 	uniqueEntriesByClientRequestId,
 	type ChatTranscriptRow,
@@ -47,7 +46,6 @@ export type { ChatTranscriptRow } from './transcript-row-projection.js';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
-export const ACTIVE_TRANSCRIPT_RETENTION_LIMIT = 200;
 type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
 type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
 type SnapshotBatch = { generationId: string; messages: ChatViewMessage[]; noticeRevision: number };
@@ -66,18 +64,9 @@ export interface TranscriptPageState {
 	error: string | null;
 }
 
-function idlePageState(): TranscriptPageState {
-	return { status: 'idle', error: null };
-}
+const idlePageState = (): TranscriptPageState => ({ status: 'idle', error: null });
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
-function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): PendingUserInput[] {
-	return sortPendingInputs(
-		page.pendingUserInputs
-			.map(normalizePendingUserInput)
-			.filter((input): input is PendingUserInput => Boolean(input)),
-	);
-}
 
 export class ActiveTranscriptState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
@@ -323,30 +312,32 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
 		let entriesChanged = applied.status === 'applied' && applied.changed;
 		if (applied.status === 'applied') {
-			const shouldCompact =
-				!this.isUserScrolledUp && this.visibleMessageCount <= INITIAL_VISIBLE_MESSAGES;
-			const nextEntries =
-				shouldCompact && applied.messages.length > ACTIVE_TRANSCRIPT_RETENTION_LIMIT
-					? applied.messages.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
-					: applied.messages;
+			const exceedsRetentionLimit = applied.messages.length > ACTIVE_TRANSCRIPT_RETENTION_LIMIT;
+			const nextEntries = exceedsRetentionLimit
+				? this.isUserScrolledUp
+					? applied.messages.slice(0, ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
+					: applied.messages.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
+				: applied.messages;
 			this.generationId = generationId;
 			if (nextEntries !== this.entries) this.entries = nextEntries;
 			this.lastSeq = applied.lastSeq;
 			this.oldestSeq = this.entries[0]?.seq ?? 0;
-			if (nextEntries.length < applied.messages.length) {
+			if (exceedsRetentionLimit && !this.isUserScrolledUp) {
 				this.hasEarlierMessages = true;
-				this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
-				this.#preserveExpandedVisibleWindow = false;
 			}
+			this.visibleMessageCount = Math.min(
+				this.visibleMessageCount,
+				ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+			);
 		} else {
 			const restored = this.transcriptCache.get(chatId);
 			if (!restored || restored.generationId !== generationId) return 'gap-detected';
 			this.#invalidatePageLoad();
 			entriesChanged = true;
 			this.generationId = restored.generationId;
-			this.entries = restored.messages;
+			this.entries = retainTranscriptEntries(restored.messages, 'later');
 			this.lastSeq = restored.lastSeq;
-			this.oldestSeq = restored.oldestSeq;
+			this.oldestSeq = this.entries[0]?.seq ?? 0;
 		}
 		if (entriesChanged) {
 			this.clearLocalNotices(noticeRevision);
@@ -403,6 +394,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			pendingUserInputs?: PendingUserInput[];
 		},
 	): void {
+		const retainedMessages = retainTranscriptEntries(messages, 'later');
 		this.#invalidatePageLoad();
 		this.#preserveExpandedVisibleWindow = false;
 		this.historyState = { kind: 'complete' };
@@ -418,11 +410,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		});
 		this.windowRevision += 1;
 		this.generationId = generationId;
-		this.entries = messages;
+		this.entries = retainedMessages;
 		this.lastSeq = options.lastSeq;
-		this.oldestSeq = options.pageOldestSeq;
-		this.hasEarlierMessages = options.hasMore;
-		this.totalMessages = messages.length;
+		this.oldestSeq = retainedMessages[0]?.seq ?? 0;
+		this.hasEarlierMessages = options.hasMore || retainedMessages.length < messages.length;
+		this.totalMessages = retainedMessages.length;
 		this.#replacePendingUserInputs(options.pendingUserInputs ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.localNotices = [];
@@ -465,14 +457,15 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.#preserveExpandedVisibleWindow = false;
 			this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		}
+		const retainedMessages = retainTranscriptEntries(page.messages, 'later');
 		this.generationId = page.generationId;
-		this.entries = page.messages;
+		this.entries = retainedMessages;
 		this.lastSeq = page.lastSeq;
-		this.oldestSeq = page.pageOldestSeq;
-		this.hasEarlierMessages = page.hasMore;
-		this.totalMessages = page.messages.length;
+		this.oldestSeq = retainedMessages[0]?.seq ?? 0;
+		this.hasEarlierMessages = page.hasMore || retainedMessages.length < page.messages.length;
+		this.totalMessages = retainedMessages.length;
 		if (this.#pendingUserInputsRevision === this.#pendingUserInputsRevisionAtLoadStart) {
-			this.#replacePendingUserInputs(pendingInputsFromPage(page));
+			this.#replacePendingUserInputs(normalizePendingInputs(page.pendingUserInputs));
 		}
 		this.clearLocalNotices(this.#localNoticeRevisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
@@ -638,12 +631,16 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.hasEarlierMessages = false;
 			return 'exhausted';
 		}
-		this.entries = [...addedMessages, ...this.entries];
+		const mergedEntries = [...addedMessages, ...this.entries];
+		this.entries = retainTranscriptEntries(mergedEntries, 'earlier');
 		this.oldestSeq = addedMessages[0].seq;
 		this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
 		this.hasEarlierMessages = page.hasMore;
 		this.totalMessages = this.entries.length;
-		this.visibleMessageCount += addedMessages.length;
+		this.visibleMessageCount = Math.min(
+			this.visibleMessageCount + addedMessages.length,
+			ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+		);
 		this.#rememberExpandedVisibleWindow();
 		this.#recordFeedMutation('history-earlier');
 		return 'loaded';
@@ -656,10 +653,17 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			throw new Error('Later transcript page did not advance the loaded window');
 		}
 
-		this.entries = applied.messages;
+		const addedMessageCount = applied.messages.length - previousEntryCount;
+		const trimmedEarlier = applied.messages.length > ACTIVE_TRANSCRIPT_RETENTION_LIMIT;
+		this.entries = retainTranscriptEntries(applied.messages, 'later');
 		this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
+		this.oldestSeq = this.entries[0]?.seq ?? 0;
+		if (trimmedEarlier) this.hasEarlierMessages = true;
 		this.totalMessages = this.entries.length;
-		this.visibleMessageCount += this.entries.length - previousEntryCount;
+		this.visibleMessageCount = Math.min(
+			this.visibleMessageCount + addedMessageCount,
+			ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+		);
 		this.#rememberExpandedVisibleWindow();
 		this.#recordFeedMutation('history-later');
 		return 'loaded';
@@ -878,11 +882,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 			this.#preserveExpandedVisibleWindow = false;
 			this.windowRevision += 1;
-			this.entries = page.messages;
-			this.oldestSeq = page.pageOldestSeq;
+			const retainedMessages = retainTranscriptEntries(page.messages, 'earlier');
+			this.entries = retainedMessages;
+			this.oldestSeq = retainedMessages[0]?.seq ?? 0;
 			this.hasEarlierMessages = false;
-			this.totalMessages = page.messages.length;
-			this.visibleMessageCount = page.messages.length;
+			this.totalMessages = retainedMessages.length;
+			this.visibleMessageCount = retainedMessages.length;
 			if (this.hasLaterMessages) {
 				this.isUserScrolledUp = true;
 			}
@@ -950,15 +955,17 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		// Publishes the bounded cache window atomically; the virtual feed limits mounted row work.
 		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;
-		this.entries = restored.messages;
+		const retainedMessages = retainTranscriptEntries(restored.messages, 'later');
+		this.entries = retainedMessages;
 		this.generationId = restored.generationId;
 		this.lastSeq = restored.lastSeq;
-		this.oldestSeq = restored.oldestSeq;
-		this.totalMessages = restored.messages.length;
+		this.oldestSeq = retainedMessages[0]?.seq ?? 0;
+		this.totalMessages = retainedMessages.length;
 		// Preserves the earlier boundary across cache restore so validation cannot insert it after paint.
-		this.hasEarlierMessages = restored.oldestSeq > 1;
-		this.loadStatus = restored.messages.length === 0 ? 'empty' : 'loaded';
-		return { count: restored.messages.length, stale: restored.stale };
+		this.hasEarlierMessages =
+			restored.oldestSeq > 1 || retainedMessages.length < restored.messages.length;
+		this.loadStatus = retainedMessages.length === 0 ? 'empty' : 'loaded';
+		return { count: retainedMessages.length, stale: restored.stale };
 	}
 
 	removeCachedMessages(chatId: string): void {
@@ -986,14 +993,4 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (!this.#preserveExpandedVisibleWindow) return;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 	}
-}
-
-function responseMessageType(message: ChatMessage): string | null {
-	return message instanceof AssistantMessage ||
-		message instanceof ThinkingMessage ||
-		message instanceof ErrorMessage ||
-		message instanceof PermissionRequestMessage ||
-		isToolUseMessage(message)
-		? message.type
-		: null;
 }

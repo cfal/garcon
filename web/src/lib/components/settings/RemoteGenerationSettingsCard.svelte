@@ -16,6 +16,7 @@
 		settingsKey: GenerationSettingsKey;
 		enabledLabel?: string;
 		modelLabel: string;
+		blurb?: string;
 		showDirectoryPrefix?: boolean;
 		showPrompt?: boolean;
 	}
@@ -24,6 +25,7 @@
 		settingsKey,
 		enabledLabel,
 		modelLabel,
+		blurb,
 		showDirectoryPrefix = false,
 		showPrompt = false,
 	}: Props = $props();
@@ -123,6 +125,10 @@
 				</div>
 			</div>
 		</div>
+
+		{#if blurb}
+			<div class="pb-2 text-xs leading-4 text-muted-foreground">{blurb}</div>
+		{/if}
 
 		{#if showPrompt}
 			<div class="space-y-1.5 py-2">

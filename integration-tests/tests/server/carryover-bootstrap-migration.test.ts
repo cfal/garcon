@@ -91,6 +91,46 @@ describe('carryover bootstrap migration', () => {
       { prepareWorkspace: writeLegacyWorkspace },
     );
   }, 30_000);
+
+  test('resumes an interrupted rollback before the version ladder', async () => {
+    await withIntegrationFixture(
+      'carryover-rollback-resume',
+      async (fixture) => {
+        // The first boot migrated the workspace; backups are still present.
+        await fixture.restartGarcon({
+          beforeStart: async () => {
+            // The crash window that used to wedge the boot: the legacy journal
+            // is restored and the resume marker written, but the registry and
+            // the workspace version are still on the migrated side, so the
+            // version-gated ladder would never invoke its migration callback.
+            await writeFile(
+              join(fixture.dirs.workspace, 'agent-ownership-journal.json'),
+              JSON.stringify({ version: 1, intents: [] }),
+            );
+            const markerPath = join(
+              fixture.dirs.workspace,
+              'carryover-transcripts',
+              'migration-v2.json',
+            );
+            const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+            await writeFile(markerPath, JSON.stringify({ ...marker, phase: 'rolling-back' }));
+          },
+        });
+
+        // The rollback finished from its marker, then the boot re-migrated.
+        expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 5 });
+        expect(await readJson<{ version: number }>(fixture, 'agent-ownership-journal.json'))
+          .toMatchObject({ version: 3 });
+        expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
+          version: 5,
+        });
+        expect(await readJson<MigrationMarker>(fixture, 'carryover-transcripts/migration-v2.json'))
+          .toMatchObject({ phase: 'complete', rollbackSafe: true });
+        await expectMigratedHistory(fixture);
+      },
+      { prepareWorkspace: writeLegacyWorkspace },
+    );
+  }, 30_000);
 });
 
 interface RegistryFile {

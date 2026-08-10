@@ -25,53 +25,40 @@ import {
   parseLegacyCarryOverFile,
 } from './legacy-carryover-import.js';
 import { parseCarryOverSegmentRefs, type CarryOverSegmentRef } from './store.js';
+import {
+  LEGACY_CARRYOVER_FILE,
+  MIGRATION_MARKER_VERSION,
+  OWNERSHIP_JOURNAL_FILE,
+  assertMarkerSources,
+  digest,
+  migratedCarryOverPath,
+  readMarker,
+  readOptionalFile,
+  registryBackupFile,
+  safeMigrationRelativePath,
+  writeMarker,
+  type CarryOverMigrationMarker,
+  type CarryOverMigrationMarkerBase,
+} from './carryover-migration-files.js';
+import { resumeInterruptedCarryOverRollback } from './chat-carryover-rollback.js';
 
 const EMPTY_FILE_SHA256 = crypto.createHash('sha256').digest('hex');
-const MIGRATION_MARKER_VERSION = 2 as const;
-const MIGRATION_MARKER_FILE = 'carryover-transcripts/migration-v2.json';
-const LEGACY_CARRYOVER_FILE = 'chat-carryover.json';
-const OWNERSHIP_JOURNAL_FILE = 'agent-ownership-journal.json';
 
-interface CarryOverMigrationMarkerBase {
-  readonly version: typeof MIGRATION_MARKER_VERSION;
-  readonly sourceCarryOverSha256: string;
-  readonly sourceRegistrySha256: string;
-  readonly sourceJournalSha256: string;
-  readonly legacyJournalBackupFile: string;
-  readonly sourceRegistryVersion: 3 | 4;
-  readonly sourceWorkspaceVersion: number | null;
-  readonly startedAt: string;
-}
-
-type CarryOverMigrationMarker =
-  | (CarryOverMigrationMarkerBase & { readonly phase: 'in-progress' })
-  | (CarryOverMigrationMarkerBase & {
-      readonly phase: 'ready-to-commit';
-      readonly targetRegistrySha256: string;
-      readonly segmentSummarySha256: string;
-      readonly segmentCount: number;
-    })
-  | (CarryOverMigrationMarkerBase & {
-      readonly phase: 'complete';
-      readonly targetRegistrySha256: string;
-      readonly segmentSummarySha256: string;
-      readonly segmentCount: number;
-      readonly completedAt: string;
-      readonly rollbackSafe: boolean;
-    });
-
-export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Promise<void> {
+export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Promise<boolean> {
+  // Direct callers still get rollback recovery here; the server also invokes
+  // it before opening the version ladder, in which case this is a no-op.
+  const rollbackResumed = await resumeInterruptedCarryOverRollback(workspaceDir);
   const registryVersion = await readChatRegistryVersion(workspaceDir);
-  if (registryVersion === null) return;
+  if (registryVersion === null) return rollbackResumed;
   const marker = await readMarker(workspaceDir);
   const workspaceVersion = await readWorkspaceVersion(workspaceDir);
   if (registryVersion === 5) {
-    if (workspaceVersion !== null && workspaceVersion >= 5) return;
-    if (!marker || marker.phase === 'in-progress') {
+    if (workspaceVersion !== null && workspaceVersion >= 5) return rollbackResumed;
+    if (!marker || (marker.phase !== 'ready-to-commit' && marker.phase !== 'complete')) {
       throw new Error('Schema-v5 chat registry has no committed carryover migration marker');
     }
     await resumeCommittedMigration(workspaceDir, marker);
-    return;
+    return rollbackResumed;
   }
   if (registryVersion !== 3 && registryVersion !== 4) {
     throw new Error(`Unsupported chat registry version: ${registryVersion}`);
@@ -127,7 +114,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   const migratedSegmentIds = new Set<string>();
   if (registryVersion === 3) {
     const legacyRegistry = await readLegacyChatRegistryV3(workspaceDir);
-    if (!legacyRegistry) return;
+    if (!legacyRegistry) return rollbackResumed;
     // Parses in a temporary scope so the source bytes are collectable once the
     // chat map exists, and drops each chat's raw messages as it is converted.
     const rawCarryOver = parseLegacyCarryOverFile(await readOptionalFile(carryOverPath));
@@ -241,6 +228,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
     rollbackSafe: true,
   });
   await archiveLegacyCarryOver(carryOverPath, startedAt);
+  return rollbackResumed;
 }
 
 export async function markCarryOverMigrationRollbackUnsafe(workspaceDir: string): Promise<void> {
@@ -277,62 +265,6 @@ export async function finalizeCarryOverMigrationValidation(workspaceDir: string)
     syncDirectory(workspaceDir),
     syncDirectory(path.join(workspaceDir, 'migration-backups')),
   ]);
-}
-
-export async function rollbackLegacyCarryOverMigration(
-  workspaceDir: string,
-): Promise<'restored' | 'already-restored'> {
-  const marker = await readMarker(workspaceDir);
-  const registryVersion = await readChatRegistryVersion(workspaceDir);
-  if ((registryVersion === 3 || registryVersion === 4) && !marker) return 'already-restored';
-  if (!marker || marker.phase !== 'complete') {
-    throw new Error('No completed carryover migration is available to roll back');
-  }
-  if (!marker.rollbackSafe) {
-    throw new Error('Carryover migration rollback is unsafe after new-format history was created');
-  }
-
-  const registryBackupPath = path.join(workspaceDir, registryBackupFile(marker));
-  const registryBackup = await fs.readFile(registryBackupPath);
-  if (digest(registryBackup) !== marker.sourceRegistrySha256) {
-    throw new Error('Legacy chat-registry backup does not match its migration marker');
-  }
-  const journalBackup = await readOptionalFile(path.join(
-    workspaceDir,
-    safeMigrationRelativePath(marker.legacyJournalBackupFile),
-  ));
-  if (digest(journalBackup) !== marker.sourceJournalSha256) {
-    throw new Error('Legacy ownership-journal backup does not match its migration marker');
-  }
-  const legacyCarryOver = await readRollbackCarryOverSource(workspaceDir, marker);
-
-  const registryPath = path.join(workspaceDir, 'chats.json');
-  const currentRegistry = await fs.readFile(registryPath);
-  const currentRegistryDigest = digest(currentRegistry);
-  if (
-    currentRegistryDigest !== marker.targetRegistrySha256
-    && currentRegistryDigest !== marker.sourceRegistrySha256
-  ) {
-    throw new Error('Current chat registry does not match the migration or its backup');
-  }
-
-  await restoreOptionalFile(
-    path.join(workspaceDir, LEGACY_CARRYOVER_FILE),
-    legacyCarryOver,
-  );
-  await restoreOptionalFile(
-    path.join(workspaceDir, OWNERSHIP_JOURNAL_FILE),
-    journalBackup,
-  );
-  await writeJsonFileAtomic(path.join(workspaceDir, 'workspace-version.json'), {
-    version: marker.sourceWorkspaceVersion ?? marker.sourceRegistryVersion,
-  }, {
-    mode: 0o600,
-  });
-  await writeBytesAtomic(registryPath, registryBackup, 0o600);
-  await removeMigratedCarryOverArchive(workspaceDir, marker);
-  await archiveRollbackMarker(workspaceDir, marker);
-  return currentRegistryDigest === marker.sourceRegistrySha256 ? 'already-restored' : 'restored';
 }
 
 async function resumeCommittedMigration(
@@ -612,83 +544,6 @@ async function archiveLegacyCarryOver(filePath: string, startedAt: string): Prom
   }
 }
 
-function migratedCarryOverPath(workspaceDir: string, startedAt: string): string {
-  const suffix = startedAt.replaceAll(':', '').replaceAll('.', '');
-  return path.join(workspaceDir, `chat-carryover.v5.migrated.${suffix}.json`);
-}
-
-function registryBackupFile(marker: CarryOverMigrationMarkerBase): string {
-  return `migration-backups/chats.v${marker.sourceRegistryVersion}.${marker.sourceRegistrySha256.slice(0, 16)}.json`;
-}
-
-async function readRollbackCarryOverSource(
-  workspaceDir: string,
-  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' }>,
-): Promise<Buffer> {
-  const candidates = [
-    path.join(workspaceDir, LEGACY_CARRYOVER_FILE),
-    migratedCarryOverPath(workspaceDir, marker.startedAt),
-  ];
-  for (const candidate of candidates) {
-    const bytes = await readOptionalFile(candidate);
-    if (digest(bytes) === marker.sourceCarryOverSha256) return bytes;
-  }
-  throw new Error('Legacy carryover artifact does not match its migration marker');
-}
-
-async function restoreOptionalFile(filePath: string, bytes: Buffer): Promise<void> {
-  if (bytes.byteLength > 0) {
-    await writeBytesAtomic(filePath, bytes, 0o600);
-    return;
-  }
-  await fs.rm(filePath, { force: true });
-  await syncDirectory(path.dirname(filePath));
-}
-
-async function removeMigratedCarryOverArchive(
-  workspaceDir: string,
-  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' }>,
-): Promise<void> {
-  await fs.rm(migratedCarryOverPath(workspaceDir, marker.startedAt), { force: true });
-  await syncDirectory(workspaceDir);
-}
-
-async function archiveRollbackMarker(
-  workspaceDir: string,
-  marker: Extract<CarryOverMigrationMarker, { phase: 'complete' }>,
-): Promise<void> {
-  const markerPath = path.join(workspaceDir, MIGRATION_MARKER_FILE);
-  const suffix = marker.completedAt.replaceAll(':', '').replaceAll('.', '');
-  await fs.rename(
-    markerPath,
-    path.join(path.dirname(markerPath), `migration-v2.rolled-back.${suffix}.json`),
-  );
-  await syncDirectory(path.dirname(markerPath));
-}
-
-async function writeBytesAtomic(filePath: string, bytes: Buffer, mode: number): Promise<void> {
-  const directory = path.dirname(filePath);
-  const temporaryPath = path.join(
-    directory,
-    `.${path.basename(filePath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
-  );
-  let file: Awaited<ReturnType<typeof fs.open>> | null = null;
-  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  try {
-    file = await fs.open(temporaryPath, 'w', mode);
-    await file.writeFile(bytes);
-    await file.sync();
-    await file.close();
-    file = null;
-    await fs.rename(temporaryPath, filePath);
-    await syncDirectory(directory);
-  } catch (error) {
-    if (file) await file.close().catch(() => undefined);
-    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
-    throw error;
-  }
-}
-
 async function writeMigrationBackup(workspaceDir: string, relativePath: string, bytes: Buffer): Promise<void> {
   if (bytes.byteLength === 0) return;
   const target = path.join(workspaceDir, relativePath);
@@ -706,83 +561,6 @@ async function writeMigrationBackup(workspaceDir: string, relativePath: string, 
   if (digest(existing) !== digest(bytes)) throw new Error(`Migration backup differs: ${relativePath}`);
 }
 
-async function readMarker(workspaceDir: string): Promise<CarryOverMigrationMarker | null> {
-  try {
-    const value: unknown = JSON.parse(await fs.readFile(path.join(workspaceDir, MIGRATION_MARKER_FILE), 'utf8'));
-    return parseMigrationMarker(value);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-function parseMigrationMarker(value: unknown): CarryOverMigrationMarker {
-  if (!isRecord(value) || value.version !== MIGRATION_MARKER_VERSION) {
-    throw new Error('Invalid carryover migration marker');
-  }
-  const base: CarryOverMigrationMarkerBase = {
-    version: MIGRATION_MARKER_VERSION,
-    sourceCarryOverSha256: sha256Value(value.sourceCarryOverSha256, 'carryover source'),
-    sourceRegistrySha256: sha256Value(value.sourceRegistrySha256, 'registry source'),
-    sourceJournalSha256: sha256Value(value.sourceJournalSha256, 'journal source'),
-    legacyJournalBackupFile: safeMigrationRelativePath(
-      requiredString(value.legacyJournalBackupFile, 'legacy journal backup'),
-    ),
-    sourceRegistryVersion: value.sourceRegistryVersion === 3 || value.sourceRegistryVersion === 4
-      ? value.sourceRegistryVersion
-      : (() => { throw new Error('Invalid carryover migration source registry version'); })(),
-    sourceWorkspaceVersion: value.sourceWorkspaceVersion === null
-      ? null
-      : nonNegativeInteger(value.sourceWorkspaceVersion, 'source workspace version'),
-    startedAt: timestampValue(value.startedAt, 'migration start'),
-  };
-  if (value.phase === 'in-progress') return { ...base, phase: 'in-progress' };
-  if (value.phase !== 'ready-to-commit' && value.phase !== 'complete') {
-    throw new Error('Invalid carryover migration marker phase');
-  }
-  const committed = {
-    ...base,
-    targetRegistrySha256: sha256Value(value.targetRegistrySha256, 'target registry'),
-    segmentSummarySha256: sha256Value(value.segmentSummarySha256, 'segment summary'),
-    segmentCount: nonNegativeInteger(value.segmentCount, 'migration segment count'),
-  };
-  if (value.phase === 'ready-to-commit') return { ...committed, phase: 'ready-to-commit' };
-  if (value.rollbackSafe !== true && value.rollbackSafe !== false) {
-    throw new Error('Invalid carryover migration rollback state');
-  }
-  return {
-    ...committed,
-    phase: 'complete',
-    completedAt: timestampValue(value.completedAt, 'migration completion'),
-    rollbackSafe: value.rollbackSafe,
-  };
-}
-
-function assertMarkerSources(
-  marker: CarryOverMigrationMarker,
-  digests: Pick<CarryOverMigrationMarkerBase, 'sourceCarryOverSha256' | 'sourceRegistrySha256' | 'sourceJournalSha256'>,
-): void {
-  if (
-    marker.sourceCarryOverSha256 !== digests.sourceCarryOverSha256
-    || marker.sourceRegistrySha256 !== digests.sourceRegistrySha256
-    || marker.sourceJournalSha256 !== digests.sourceJournalSha256
-  ) {
-    throw new Error('Carryover migration source changed after migration began');
-  }
-}
-
-function writeMarker(workspaceDir: string, marker: CarryOverMigrationMarker): Promise<void> {
-  return writeJsonFileAtomic(path.join(workspaceDir, MIGRATION_MARKER_FILE), marker, { mode: 0o600 });
-}
-
-async function readOptionalFile(filePath: string): Promise<Buffer> {
-  try {
-    return await fs.readFile(filePath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0);
-    throw error;
-  }
-}
 
 async function optionalFileSize(filePath: string): Promise<number> {
   try {
@@ -877,35 +655,6 @@ async function validateMigratedRoots(
   }
 }
 
-function safeMigrationRelativePath(value: string): string {
-  if (path.isAbsolute(value) || value.includes('\\')) {
-    throw new Error('Invalid migration artifact path');
-  }
-  const normalized = path.normalize(value);
-  if (normalized === '..' || normalized.startsWith(`..${path.sep}`)) {
-    throw new Error('Invalid migration artifact path');
-  }
-  return normalized;
-}
-
-function sha256Value(value: unknown, field: string): string {
-  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) {
-    throw new Error(`Invalid ${field} digest`);
-  }
-  return value;
-}
-
-function timestampValue(value: unknown, field: string): string {
-  const timestamp = requiredString(value, field);
-  if (!Number.isFinite(Date.parse(timestamp))) throw new Error(`Invalid ${field} timestamp`);
-  return timestamp;
-}
-
-function nonNegativeInteger(value: unknown, field: string): number {
-  if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error(`Invalid ${field}`);
-  return Number(value);
-}
-
 function isQuarantinableMigrationError(error: unknown): boolean {
   return error instanceof LegacyCarryOverDataError;
 }
@@ -928,20 +677,11 @@ function deterministicUuid(value: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function digest(bytes: Buffer): string {
-  return crypto.createHash('sha256').update(bytes).digest('hex');
-}
-
 function migrationErrorCode(error: unknown): string {
   if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
     return error.code;
   }
   return error instanceof SyntaxError ? 'INVALID_JSON' : 'INVALID_CARRYOVER_ENTRY';
-}
-
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || !value) throw new Error(`Invalid ${field}`);
-  return value;
 }
 
 function nullableString(value: unknown): string | null {

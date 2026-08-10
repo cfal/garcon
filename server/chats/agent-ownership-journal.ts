@@ -334,6 +334,55 @@ export class AgentOwnershipJournal {
     return this.#scheduleCleanupWork(() => this.#drainTransferCleanupNow());
   }
 
+  // Abandoned records are the only reference that can reclaim provider residue,
+  // so they stay durable and visible to maintenance instead of being dropped.
+  abandonedTransferCleanups(): readonly SourceReleaseCleanup[] {
+    return this.#journal.transferCleanup.filter((cleanup) => cleanup.status === 'abandoned');
+  }
+
+  // Maintenance retry covers every retained transfer cleanup, not only
+  // abandoned ones: a record an earlier maintenance call reset settles as
+  // pending after a failed drain and has no drain path until the next startup
+  // or handoff, so selecting only abandoned records would strand it and report
+  // nothing unresolved while provider residue remains. Only abandoned records
+  // get a fresh attempt budget; ordinary pending records keep their history.
+  // `unresolved` reports every selected record still held after the drain,
+  // whatever its status, including a missing integration, which never consumes
+  // an attempt. Serialized behind the cleanup queue, so no in-flight record is
+  // stolen mid-release.
+  async retryRetainedTransferCleanups(): Promise<{
+    readonly retried: readonly SourceReleaseCleanup[];
+    readonly unresolved: readonly SourceReleaseCleanup[];
+  }> {
+    return this.#scheduleCleanupWork(async () => {
+      const retried = this.#journal.transferCleanup.filter(
+        (cleanup) => cleanup.status !== 'claimed',
+      );
+      if (retried.length === 0) return { retried, unresolved: [] };
+      const abandoned = new Set(
+        retried
+          .filter((cleanup) => cleanup.status === 'abandoned')
+          .map((cleanup) => cleanup.operationId),
+      );
+      if (abandoned.size > 0) {
+        await this.#mutate((current) => ({
+          ...current,
+          transferCleanup: current.transferCleanup.map((cleanup) => (
+            abandoned.has(cleanup.operationId)
+              ? { ...cleanup, status: 'pending' as const, attempts: 0, lastErrorCode: null }
+              : cleanup
+          )),
+        }));
+      }
+      await this.#drainTransferCleanupNow();
+      const selected = new Set(retried.map((cleanup) => cleanup.operationId));
+      const unresolved = this.#journal.transferCleanup.filter(
+        (cleanup) => selected.has(cleanup.operationId),
+      );
+      return { retried, unresolved };
+    });
+  }
+
   async #recoverHandoff(intent: AgentHandoffIntent): Promise<void> {
     const current = this.#registry.getChat(intent.chatId);
     if (current && matchesHandoffSource(current, intent)) {

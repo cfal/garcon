@@ -376,14 +376,15 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy();
 	});
 
-	it('keeps a varied twenty-thousand-item transcript below the mounted DOM budget', async () => {
+	it('bounds a twenty-thousand-entry payload before virtual projection', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'twenty-thousand',
 		});
 		await waitFor(
 			() => {
 				const sizer = container.querySelector('[data-chat-virtual-sizer]');
-				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('20002');
+				expect(sizer?.getAttribute('data-chat-transcript-entry-count')).toBe('200');
+				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('202');
 				const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
 				const mountedTranscriptRows = container.querySelectorAll('[data-chat-row-id]').length;
 				expect(mountedItems).toBeGreaterThan(0);

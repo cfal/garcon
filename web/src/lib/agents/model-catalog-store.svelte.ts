@@ -48,6 +48,7 @@ export interface AgentMetadata {
 	id: string;
 	label: string;
 	description?: string;
+	supportsCompact: boolean;
 	supportsFork: boolean;
 	supportsForkAtMessage: boolean;
 	supportsForkWhileRunning: boolean;
@@ -292,6 +293,7 @@ function normalizeAgentMetadataMap(agentMetadata: AgentMetadataMap): AgentMetada
 					id,
 					{
 						...metadata,
+						supportsCompact: metadata.supportsCompact === true,
 						supportsFork: metadata.supportsFork === true,
 						supportsForkAtMessage: metadata.supportsForkAtMessage === true,
 						supportsForkWhileRunning: metadata.supportsForkWhileRunning === true,
@@ -334,6 +336,7 @@ function parseCatalogResponse(data: unknown): {
 			id,
 			label: typeof entry.label === 'string' ? entry.label : id,
 			description: typeof entry.description === 'string' ? entry.description : undefined,
+			supportsCompact: Boolean(entry.supportsCompact),
 			supportsFork: Boolean(entry.supportsFork),
 			supportsForkAtMessage: Boolean(entry.supportsForkAtMessage),
 			supportsForkWhileRunning: Boolean(entry.supportsForkWhileRunning),
@@ -521,6 +524,11 @@ export class ModelCatalogStore {
 			if (matchedEndpointModel) return matchedEndpointModel;
 		}
 		return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
+	}
+
+	supportsCompact(agentId: SessionAgentId): boolean {
+		if (!isAgentId(agentId)) return false;
+		return this.agentMetadata[agentId]?.supportsCompact ?? false;
 	}
 
 	supportsFork(agentId: SessionAgentId): boolean {

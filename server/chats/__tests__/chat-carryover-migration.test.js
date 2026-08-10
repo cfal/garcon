@@ -10,8 +10,8 @@ import {
   finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
-  rollbackLegacyCarryOverMigration,
 } from '../chat-carryover-migration.ts';
+import { rollbackLegacyCarryOverMigration } from '../chat-carryover-rollback.ts';
 import { migratedTranscriptMatches } from '../legacy-carryover-import.ts';
 
 const CHAT_ID = '1786077000000001';
@@ -355,6 +355,90 @@ describe('legacy carryover migration', () => {
     expect(await rollbackLegacyCarryOverMigration(workspaceDir)).toBe('already-restored');
   });
 
+  it('finishes a rollback that stopped after the journal restore on the next boot', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+    // Crash window: the legacy journal is restored and the resume marker was
+    // written, but the workspace version is still 5, so a version-gated
+    // recovery would never run. This used to fail the next boot with 'Invalid
+    // migrated ownership journal'.
+    await fs.writeFile(
+      path.join(workspaceDir, 'agent-ownership-journal.json'),
+      JSON.stringify({ version: 1, intents: [] }),
+    );
+    await writeWorkspaceVersion(5);
+    await markRollingBack();
+
+    expect(await migrateLegacyCarryOverWorkspace(workspaceDir)).toBe(true);
+
+    const registry = await readJson('chats.json');
+    expect(registry.version).toBe(5);
+    expect((await readJson('agent-ownership-journal.json')).version).toBe(3);
+    expect((await readJson('carryover-transcripts/migration-v2.json')).phase).toBe('complete');
+    const store = new CarryOverTranscriptStore({ workspaceDir });
+    await store.initialize();
+    const messages = await store.loadAll(registry.sessions[CHAT_ID].carryOverSegments);
+    expect(messages).toEqual([
+      expect.objectContaining({ type: 'user-message', content: 'first' }),
+      expect.objectContaining({ type: 'agent-switch' }),
+    ]);
+  });
+
+  it('finishes a rollback that restored the registry before any resume marker existed', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+    // Crash window left by a rollback without a resume marker: the legacy
+    // registry is back beside a 'complete' marker. This used to fail the next
+    // boot with 'Completed carryover migration marker cannot accompany a legacy
+    // registry'.
+    const backups = await fs.readdir(path.join(workspaceDir, 'migration-backups'));
+    const registryBackup = backups.find((file) => file.startsWith('chats.v3.'));
+    await fs.copyFile(
+      path.join(workspaceDir, 'migration-backups', registryBackup),
+      path.join(workspaceDir, 'chats.json'),
+    );
+
+    expect(await migrateLegacyCarryOverWorkspace(workspaceDir)).toBe(true);
+
+    expect((await readJson('chats.json')).version).toBe(5);
+    expect((await readJson('carryover-transcripts/migration-v2.json')).phase).toBe('complete');
+  });
+
+  it('resumes an interrupted rollback through the rollback command itself', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const legacyCarryOver = await readJson('chat-carryover.json');
+    const legacyRegistry = await readJson('chats.json');
+    const legacyJournal = await readJson('agent-ownership-journal.json');
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+    await fs.writeFile(
+      path.join(workspaceDir, 'agent-ownership-journal.json'),
+      JSON.stringify(legacyJournal),
+    );
+    await writeWorkspaceVersion(3);
+    await markRollingBack();
+
+    expect(await rollbackLegacyCarryOverMigration(workspaceDir)).toBe('restored');
+
+    expect(await readJson('chats.json')).toEqual(legacyRegistry);
+    expect(await readJson('chat-carryover.json')).toEqual(legacyCarryOver);
+    expect(await readJson('agent-ownership-journal.json')).toEqual(legacyJournal);
+    await expect(fs.stat(path.join(workspaceDir, 'carryover-transcripts/migration-v2.json')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await rollbackLegacyCarryOverMigration(workspaceDir)).toBe('already-restored');
+  });
+
   it('closes the rollback window before a normal segment can be accepted', async () => {
     await writeLegacyWorkspace({
       segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
@@ -389,6 +473,53 @@ describe('legacy carryover migration', () => {
     expect(await fs.readdir(path.join(workspaceDir, 'migration-backups'))).toEqual([]);
     await expect(rollbackLegacyCarryOverMigration(workspaceDir))
       .rejects.toThrow('unsafe after new-format history was created');
+  });
+
+  it('releases a transfer whose chat was deleted instead of aborting the boot', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'codex',
+      currentModel: 'gpt',
+    });
+    // A pending v1 transfer for a chat that no longer exists. This used to throw
+    // a plain Error outside the per-chat quarantine loop, so one stale entry
+    // failed the whole migration and the workspace could not boot.
+    await fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), JSON.stringify({
+      version: 1,
+      intents: [{
+        id: 'legacy-transfer',
+        kind: 'transfer',
+        chatId: '1786077000009999',
+        oldReference: {
+          chatId: '1786077000009999',
+          agentId: 'claude',
+          agentSessionId: 'claude-session',
+          projectPath: '/workspace/project',
+          model: 'opus',
+          nativeSession: null,
+          carryOverRevision: 'carry-v1:1',
+          settings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+        },
+        oldEpoch: 'claude-epoch',
+        targetAgentId: 'pi',
+        targetEpoch: 'pi-epoch',
+        createdAt: TIMESTAMP,
+      }],
+    }));
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    const journal = await readJson('agent-ownership-journal.json');
+    expect(journal.version).toBe(3);
+    // Converted to a delete intent so the orphaned provider session is still
+    // releasable, matching how the delete branch already handled this state.
+    expect(journal.ownershipIntents).toHaveLength(1);
+    expect(journal.ownershipIntents[0]).toMatchObject({
+      kind: 'delete',
+      chatId: '1786077000009999',
+      phase: 'registry-removed',
+    });
+    expect(journal.ownershipIntents[0].releaseReferences).toHaveLength(1);
   });
 
   it('rejects transcripts that differ from the committed segments', async () => {
@@ -470,6 +601,12 @@ describe('legacy carryover migration', () => {
 
   function readJson(relativePath) {
     return fs.readFile(path.join(workspaceDir, relativePath), 'utf8').then(JSON.parse);
+  }
+
+  async function markRollingBack() {
+    const markerPath = path.join(workspaceDir, 'carryover-transcripts', 'migration-v2.json');
+    const marker = JSON.parse(await fs.readFile(markerPath, 'utf8'));
+    await fs.writeFile(markerPath, JSON.stringify({ ...marker, phase: 'rolling-back' }));
   }
 });
 

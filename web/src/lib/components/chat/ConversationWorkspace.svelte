@@ -189,13 +189,7 @@
 		loadVisibleChatSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
 		onVisibleChatMessages: (chatId, generationId, messages, lastSeq) =>
 			applyVisiblePreviewMessages?.(chatId, generationId, messages, lastSeq),
-		loadBackgroundSnapshot: async (chatId) => {
-			if (sessions.selectedChatId === chatId) {
-				await chatState.loadMessages(chatId);
-				return;
-			}
-			backgroundTranscriptLoader.queueLoad(chatId);
-		},
+		markBackgroundStale: (chatId) => transcriptCache.markStale(chatId),
 		onBackgroundMessages: (chatId, generationId, messages, lastSeq) => {
 			const applied = transcriptCache.applyMessages(chatId, generationId, messages, lastSeq);
 			if (applied.status !== 'applied') return false;

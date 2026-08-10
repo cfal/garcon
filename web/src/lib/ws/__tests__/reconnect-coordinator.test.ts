@@ -201,7 +201,7 @@ function createReconnectDeps(
 		getVisibleChatCursor: vi.fn((chatId: string) => options.visibleCursors?.[chatId] ?? null),
 		loadVisibleChatSnapshot: vi.fn(async () => undefined),
 		onVisibleChatMessages: vi.fn(),
-		loadBackgroundSnapshot: vi.fn(async () => undefined),
+		markBackgroundStale: vi.fn(),
 		onBackgroundMessages: vi.fn(),
 	} satisfies ChatReconnectCoordinatorOptions;
 }
@@ -226,7 +226,7 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.getVisibleChatCursor,
 		deps.loadVisibleChatSnapshot,
 		deps.onVisibleChatMessages,
-		deps.loadBackgroundSnapshot,
+		deps.markBackgroundStale,
 		deps.onBackgroundMessages,
 	]) {
 		fn.mockClear();
@@ -1012,7 +1012,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.loadVisibleChatSnapshot).toHaveBeenCalledWith('chat-2');
 	});
 
-	it('loads background snapshots for non-resumable cached cursors', async () => {
+	it('defers background snapshots for non-resumable cached cursors', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
 			backgroundCursors: [{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 }],
@@ -1024,10 +1024,11 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.loadBackgroundSnapshot).toHaveBeenCalledWith('chat-2');
+		expect(deps.markBackgroundStale).toHaveBeenCalledWith('chat-2');
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 	});
 
-	it('loads background snapshots when background delta apply reports a gap', async () => {
+	it('defers background snapshots when background delta apply reports a gap', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
 			backgroundCursors: [{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 }],
@@ -1040,7 +1041,38 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.loadBackgroundSnapshot).toHaveBeenCalledWith('chat-2');
+		expect(deps.markBackgroundStale).toHaveBeenCalledWith('chat-2');
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+	});
+
+	it('marks twenty non-resumable background cursors stale without loading snapshots', async () => {
+		const backgroundCursors = Array.from({ length: 20 }, (_, index) => ({
+			chatId: `chat-${index + 2}`,
+			generationId: `generation-${index + 2}`,
+			lastSeq: 1,
+		}));
+		const subscribeResponses = Object.fromEntries(
+			backgroundCursors.map((cursor) => [
+				cursor.chatId,
+				snapshotRequiredResponse(cursor.chatId, `next-${cursor.generationId}`),
+			]),
+		);
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			backgroundCursors,
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected'),
+				...subscribeResponses,
+			},
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.markBackgroundStale).toHaveBeenCalledTimes(20);
+		expect(deps.markBackgroundStale.mock.calls.map(([chatId]) => chatId)).toEqual(
+			backgroundCursors.map((cursor) => cursor.chatId),
+		);
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 	});
 
 	it('discards stale reconnect responses when a newer reconnect begins', async () => {

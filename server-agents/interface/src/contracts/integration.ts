@@ -7,6 +7,7 @@ import type {
   AgentCatalog,
   AgentCommands,
   AgentEndpoints,
+  AgentCompaction,
   AgentForking,
   AgentGoals,
   AgentLifecycle,
@@ -29,6 +30,7 @@ export interface AgentIntegration {
   readonly migration: AgentMigration;
   readonly auth: AgentAuth | null;
   readonly commands: AgentCommands | null;
+  readonly compaction: AgentCompaction | null;
   readonly forking: AgentForking | null;
   readonly steering: AgentSteering | null;
   readonly goals: AgentGoals | null;

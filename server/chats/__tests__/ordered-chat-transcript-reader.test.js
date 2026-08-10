@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.js';
 import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
+import { transcriptRevision } from '../../lib/transcript-revision.js';
 import { OrderedChatTranscriptReader } from '../ordered-chat-transcript-reader.js';
 
 const timestamp = '2026-08-07T00:00:00.000Z';
@@ -92,6 +93,7 @@ describe('OrderedChatTranscriptReader', () => {
     const latest = await reader.loadPage('chat-1', 3, 0);
     expect(latest.messages.map((message) => message.content)).toEqual(['n2', 'n3', 'n4']);
     expect(latest.total).toBe(7);
+    expect(latest.nativePrefixDigest).toBeNull();
     expect(loadArchivedPage).not.toHaveBeenCalled();
 
     const spanning = await reader.loadPage('chat-1', 4, 2);
@@ -139,6 +141,7 @@ describe('OrderedChatTranscriptReader', () => {
       offsetFromNewest: 0,
     });
     expect(page.messages.map((message) => message.content)).toEqual(['n2', 'n3']);
+    expect(page.nativePrefixDigest).toBe(transcriptRevision(native));
     expect(loadNativeSnapshot).toHaveBeenCalledTimes(2);
   });
 

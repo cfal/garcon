@@ -13,13 +13,17 @@ import type { ApiProtocol } from '$shared/api-providers';
 import { normalizeThinkingMode } from '$shared/chat-modes';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
 import type {
+	AgentSwitchCompactionUiSettings,
 	ChatTitleUiSettings,
 	CommitMessageUiSettings,
 	GenerationSelectionUiSettings,
 	RemoteUiSettings,
 } from '$shared/settings';
 
-export type GenerationSettingsKey = 'chatTitle' | 'commitMessage';
+export type GenerationSettingsKey = 'chatTitle' | 'agentSwitchCompaction' | 'commitMessage';
+
+// Keys whose card owns an on/off switch above the model selector.
+const TOGGLEABLE_KEYS = new Set<GenerationSettingsKey>(['chatTitle', 'agentSwitchCompaction']);
 
 interface RemoteGenerationSettingsCardOptions {
 	remoteSettings: RemoteSettingsStore;
@@ -54,7 +58,7 @@ export class RemoteGenerationSettingsCardState {
 	constructor(private readonly options: RemoteGenerationSettingsCardOptions) {}
 
 	get hasEnabledSwitch(): boolean {
-		return this.options.settingsKey === 'chatTitle' && Boolean(this.options.enabledLabel);
+		return TOGGLEABLE_KEYS.has(this.options.settingsKey) && Boolean(this.options.enabledLabel);
 	}
 
 	get persistedChatTitleSettings(): ChatTitleUiSettings {
@@ -65,16 +69,25 @@ export class RemoteGenerationSettingsCardState {
 		return this.options.remoteSettings.snapshot?.ui?.commitMessage ?? {};
 	}
 
+	get persistedCompactionSettings(): AgentSwitchCompactionUiSettings {
+		return this.options.remoteSettings.snapshot?.ui?.agentSwitchCompaction ?? {};
+	}
+
 	get effectiveSelection(): GenerationSelectionUiSettings {
-		return this.options.settingsKey === 'chatTitle'
-			? (this.options.remoteSettings.snapshot?.uiEffective?.chatTitle ?? {})
-			: (this.options.remoteSettings.snapshot?.uiEffective?.commitMessage ?? {});
+		const effective = this.options.remoteSettings.snapshot?.uiEffective;
+		if (this.options.settingsKey === 'chatTitle') return effective?.chatTitle ?? {};
+		if (this.options.settingsKey === 'agentSwitchCompaction') {
+			return effective?.agentSwitchCompaction ?? {};
+		}
+		return effective?.commitMessage ?? {};
 	}
 
 	get enabled(): boolean {
-		return this.hasEnabledSwitch
-			? this.options.remoteSettings.snapshot?.uiEffective?.chatTitle?.enabled !== false
-			: true;
+		if (!this.hasEnabledSwitch) return true;
+		const effective = this.options.remoteSettings.snapshot?.uiEffective;
+		return this.options.settingsKey === 'agentSwitchCompaction'
+			? effective?.agentSwitchCompaction?.enabled === true
+			: effective?.chatTitle?.enabled !== false;
 	}
 
 	get provider(): SessionAgentId {
@@ -222,6 +235,15 @@ export class RemoteGenerationSettingsCardState {
 	}
 
 	async persistEnabled(enabled: boolean): Promise<boolean> {
+		if (this.options.settingsKey === 'agentSwitchCompaction') {
+			return this.#saveUiSettings({
+				agentSwitchCompaction: {
+					...this.persistedCompactionSettings,
+					...this.#selectionSettings(),
+					enabled,
+				},
+			});
+		}
 		if (this.options.settingsKey !== 'chatTitle') return false;
 		return this.#saveUiSettings({
 			chatTitle: {
@@ -263,22 +285,29 @@ export class RemoteGenerationSettingsCardState {
 			modelProtocol: next.modelProtocol,
 			thinkingMode: normalizeThinkingMode(next.thinkingMode),
 		};
-		const saved = this.options.settingsKey === 'chatTitle'
-			? await this.#saveUiSettings({
-					chatTitle: {
-						...this.persistedChatTitleSettings,
-						...selection,
-						enabled: this.enabled,
-					},
-				})
-			: await this.#saveUiSettings({
-					commitMessage: {
-						...this.persistedCommitMessageSettings,
-						...selection,
-					},
-				});
+		const saved = await this.#saveSelection(selection);
 		if (token !== this.#selectionSaveToken) return;
 		this.selectionOverride = saved ? null : previousOverride;
+	}
+
+	async #saveSelection(selection: GenerationSelectionUiSettings): Promise<boolean> {
+		if (this.options.settingsKey === 'chatTitle') {
+			return this.#saveUiSettings({
+				chatTitle: { ...this.persistedChatTitleSettings, ...selection, enabled: this.enabled },
+			});
+		}
+		if (this.options.settingsKey === 'agentSwitchCompaction') {
+			return this.#saveUiSettings({
+				agentSwitchCompaction: {
+					...this.persistedCompactionSettings,
+					...selection,
+					enabled: this.enabled,
+				},
+			});
+		}
+		return this.#saveUiSettings({
+			commitMessage: { ...this.persistedCommitMessageSettings, ...selection },
+		});
 	}
 
 	async persistPromptDraft(): Promise<void> {

@@ -51,6 +51,7 @@ import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coo
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import { AgentRegistry } from './agents/index.js';
 import { renderCarriedContext } from '@garcon/common/transcript-seed';
+import { CarryOverCompactionService } from './chats/carryover-compaction.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
@@ -74,6 +75,7 @@ import {
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { ChatGenerationResetMessage, WsFaultMessage } from '../common/ws-events.ts';
+import { ErrorMessage } from '../common/chat-types.ts';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
@@ -90,8 +92,11 @@ import {
   finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
-  rollbackLegacyCarryOverMigration,
 } from './chats/chat-carryover-migration.js';
+import {
+  resumeInterruptedCarryOverRollback,
+  rollbackLegacyCarryOverMigration,
+} from './chats/chat-carryover-rollback.js';
 import { OrderedChatTranscriptReader } from './chats/ordered-chat-transcript-reader.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { SettledNativeCaptureService } from './agents/settled-native-capture.js';
@@ -159,6 +164,11 @@ export async function startServer(): Promise<void> {
       workspaceLease = null;
       return;
     }
+    // Rollback recovery answers to the migration marker, not the workspace
+    // version, so it runs before the version-gated ladder opens: a crash
+    // mid-rollback can leave restored legacy files beside a version-5 marker,
+    // which the ladder would never hand to its callback.
+    await resumeInterruptedCarryOverRollback(workspaceDir);
     const runtimeState = createServerRuntimeState(workspaceDir);
     const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
     await workspaceMigrations.run('chat-id-migration', async () => {
@@ -226,9 +236,9 @@ export async function startServer(): Promise<void> {
       settleOwnershipIntents: async () => undefined,
     }));
     await workspaceMigrations.run('carryover-node-migration', async () => undefined);
-    await workspaceMigrations.run('carryover-segment-migration', () => (
-      migrateLegacyCarryOverWorkspace(workspaceDir)
-    ));
+    await workspaceMigrations.run('carryover-segment-migration', async () => {
+      await migrateLegacyCarryOverWorkspace(workspaceDir);
+    });
     await chatRegistry.init();
     await settings.init();
     const agentOwnership = new AgentOwnershipJournal({
@@ -245,6 +255,9 @@ export async function startServer(): Promise<void> {
     await carryOverGarbageCollector.initialize();
     chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
     await workspaceMigrations.finish();
+    // A resumed rollback restores the source workspace version before the
+    // ladder opens, so its re-migration skips this the way a first migration
+    // does and keeps its rollback window.
     if (workspaceMigrations.initialVersion >= 5) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
@@ -263,6 +276,10 @@ export async function startServer(): Promise<void> {
 
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     let eventWiring: ServerEventWiring | null = null;
+    // Both are constructed below but are needed by the carried-context callback,
+    // which only runs once a session starts.
+    let carryOverCompaction: CarryOverCompactionService | null = null;
+    let carryOverWarnings: ((chatId: string, message: string) => void) | null = null;
     const agentRegistry = new AgentRegistry({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -271,17 +288,24 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine ?? null,
       ),
-      async loadCarriedContext(entry, signal) {
+      async loadCarriedContext(chatId, entry, signal) {
         if (entry.carryOverMigrationQuarantine) {
           throw new CarryOverHistoryUnavailableError();
         }
         const refs = entry.carryOverSegments ?? [];
         if (refs.length === 0) return null;
-        const messages = await carryOver.loadTailForSeed({
+        const messages = await carryOver.loadProjectionSource({
           refs,
           signal,
         });
-        return renderCarriedContext(messages);
+        if (!carryOverCompaction) return renderCarriedContext(messages);
+        return carryOverCompaction.carriedContextFor({
+          chatId,
+          projectPath: entry.projectPath,
+          messages,
+          destination: { agentId: entry.agentId, model: entry.model ?? '', prompt: null },
+          signal,
+        });
       },
       getCarryOverMessageCount: async (entry) => (
         carryOver.logicalMessageCount(entry.carryOverSegments ?? [])
@@ -313,6 +337,19 @@ export async function startServer(): Promise<void> {
         : executionCoordinator.ownsExecution(chatId)
     );
     const chatViews = new ChatViewStore(ownsExecution);
+    carryOverWarnings = (chatId, message) => {
+      void chatViews.appendOperationalNotice(
+        chatId,
+        new ErrorMessage(new Date().toISOString(), message),
+      ).catch((error: unknown) => {
+        logger.warn('carryover compaction notice failed:', errorMessage(error));
+      });
+    };
+    carryOverCompaction = new CarryOverCompactionService({
+      agents: agentRegistry,
+      getUiSettings: () => settings.getUiSettings(),
+      warn: (chatId, message) => carryOverWarnings?.(chatId, message),
+    });
     const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
     chatViewPruneTimer.unref();
     const transcripts = new OrderedChatTranscriptReader({

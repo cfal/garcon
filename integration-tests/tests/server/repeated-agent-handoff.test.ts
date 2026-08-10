@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { brotliDecompress } from 'node:zlib';
 import type { ChatMessage } from '../../../common/chat-types.js';
+import { CARRIED_CONTEXT_VERSION } from '../../../common/transcript-seed.js';
 import {
   assistantContents,
   messagesOfType,
@@ -15,7 +16,9 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 
-const CARRIED_CONTEXT_MARKER = '<carried-context version="2">';
+// Derived rather than pinned: a literal here silently rots when the envelope
+// version moves, and these suites do not run under `bun run test`.
+const CARRIED_CONTEXT_MARKER = `<carried-context version="${CARRIED_CONTEXT_VERSION}">`;
 const decompress = promisify(brotliDecompress);
 
 interface RecordedProviderRequest {

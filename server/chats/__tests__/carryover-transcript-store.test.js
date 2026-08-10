@@ -5,8 +5,11 @@ import path from 'node:path';
 import {
   AgentSwitchMessage,
   AssistantMessage,
+  BashToolUseMessage,
+  ToolResultMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
+import { createCarryoverTranscript } from '@garcon/common/transcript-seed';
 import {
   CarryOverHistoryUnavailableError,
   CarryOverTranscriptStore,
@@ -161,6 +164,119 @@ describe('CarryOverTranscriptStore', () => {
       .toEqual([new UserMessage(TIME, 'same')]);
     await expect(commit(store, FIRST, [new UserMessage(TIME, 'different')]))
       .rejects.toMatchObject({ code: 'CARRYOVER_SEGMENT_COLLISION' });
+  });
+
+  it('loads the whole archive in order for projection', async () => {
+    const first = [new UserMessage(TIME, 'the original request')];
+    for (let index = 0; index < 40; index += 1) {
+      first.push(new AssistantMessage(TIME, `step ${index}`));
+    }
+    const second = [new UserMessage(TIME, 'the latest request')];
+    await commit(store, FIRST, first);
+    await commit(store, SECOND, second);
+    const refs = [
+      ref(FIRST, 'a', 'model-a', first.length, { agentId: 'b', model: 'model-b' }),
+      ref(SECOND, 'b', 'model-b', second.length, null),
+    ];
+
+    const source = await store.loadProjectionSource({ refs });
+
+    // Every turn crosses the segment boundary. The agent-switch marker does not:
+    // the projection omits it, so the loader does not spend bytes carrying it.
+    expect(source).toHaveLength(first.length + second.length);
+    expect(source.some((message) => message.type === 'agent-switch')).toBeFalse();
+    expect(source[0]).toEqual(new UserMessage(TIME, 'the original request'));
+    expect(source.at(-1)).toEqual(new UserMessage(TIME, 'the latest request'));
+    expect(source.filter((message) => message.type === 'user-message')).toHaveLength(2);
+  });
+
+  it('never lets discarded classes or the asks fall to the byte guard', async () => {
+    // Tool results are ~45% of a real archive and are never projected, so
+    // spending the guard on them let a large chat evict its whole conversation
+    // and hand off with no context at all.
+    const messages = [new UserMessage(TIME, 'the original request')];
+    for (let index = 0; index < 40; index += 1) {
+      messages.push(new ToolResultMessage(TIME, `t${index}`, { raw: 'y'.repeat(500) }, false));
+    }
+    messages.push(new AssistantMessage(TIME, 'the latest answer'));
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 2_000 });
+
+    expect(source.some((message) => message.type === 'tool-result')).toBeFalse();
+    expect(source[0]).toEqual(new UserMessage(TIME, 'the original request'));
+    expect(source.at(-1)).toEqual(new AssistantMessage(TIME, 'the latest answer'));
+  });
+
+  it('keeps the asks even when other projectable classes overflow the guard', async () => {
+    const messages = [new UserMessage(TIME, 'the original request')];
+    for (let index = 0; index < 60; index += 1) {
+      messages.push(new AssistantMessage(TIME, `step ${index} ${'x'.repeat(200)}`));
+    }
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 2_000 });
+
+    expect(source.length).toBeLessThan(messages.length);
+    expect(source.some((message) => message.content === 'the original request')).toBeTrue();
+  });
+
+  it('evicts a sole oversized tool message rather than returning it', async () => {
+    // The trim loop used to stop at one remaining message, so a single large
+    // evictable payload passed straight through the ceiling.
+    const messages = [new BashToolUseMessage(TIME, 't0', 'x'.repeat(200_000))];
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 40_000 });
+
+    const bytes = source.reduce(
+      (total, message) => total + Buffer.byteLength(JSON.stringify(message), 'utf8') + 1,
+      2,
+    );
+    expect(bytes).toBeLessThanOrEqual(40_000);
+    expect(source).toHaveLength(0);
+  });
+
+  it('bounds oversized asks instead of letting them defeat the guard', async () => {
+    // Asks are never evicted, so before they were bounded a single large one
+    // stopped the guard trimming at all and the ceiling meant nothing.
+    const messages = [
+      new UserMessage(TIME, `first ${'a'.repeat(200_000)}`),
+      new UserMessage(TIME, `second ${'b'.repeat(200_000)}`),
+    ];
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 40_000 });
+
+    // Every ask survives, and the retained bytes respect the ceiling.
+    expect(source).toHaveLength(2);
+    expect(source[0].content.startsWith('first ')).toBeTrue();
+    expect(source[1].content.startsWith('second ')).toBeTrue();
+    const bytes = source.reduce(
+      (total, message) => total + Buffer.byteLength(JSON.stringify(message), 'utf8') + 1,
+      2,
+    );
+    expect(bytes).toBeLessThanOrEqual(40_000);
+    // The projection renders identically to the untruncated messages.
+    expect(createCarryoverTranscript(source, 200_000))
+      .toEqual(createCarryoverTranscript(messages, 200_000));
+  });
+
+  it('drops the oldest messages when the projection byte guard trips', async () => {
+    const messages = Array.from({ length: 30 }, (_, index) => (
+      new AssistantMessage(TIME, `payload ${index} ${'x'.repeat(200)}`)
+    ));
+    await commit(store, FIRST, messages);
+    const refs = [ref(FIRST, 'a', 'model-a', messages.length, null)];
+
+    const source = await store.loadProjectionSource({ refs, maxBytes: 2_000 });
+
+    expect(source.length).toBeLessThan(messages.length);
+    expect(source.at(-1)).toEqual(messages.at(-1));
   });
 });
 

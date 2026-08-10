@@ -75,6 +75,13 @@
 		/>
 
 		<RemoteGenerationSettingsCard
+			settingsKey="agentSwitchCompaction"
+			enabledLabel={m.settings_agent_switch_compaction_enabled()}
+			modelLabel={m.settings_agent_switch_compaction_model()}
+			blurb={m.settings_agent_switch_compaction_hint()}
+		/>
+
+		<RemoteGenerationSettingsCard
 			settingsKey="commitMessage"
 			modelLabel={m.settings_commit_message_model()}
 			showDirectoryPrefix

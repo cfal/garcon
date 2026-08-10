@@ -1,6 +1,7 @@
 import type { FolderFilter, UiSettings } from './types.js';
 import {
   APP_TITLE_MAX_LENGTH,
+  normalizeAgentSwitchCompactionUiSettings,
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
 } from '../../common/settings.js';
@@ -30,6 +31,11 @@ export function normalizeUiSettings(ui: unknown): UiSettings {
     const chatTitle = normalizeChatTitleUiSettings(normalized.chatTitle);
     if (chatTitle) normalized.chatTitle = chatTitle;
     else delete normalized.chatTitle;
+  }
+  if ('agentSwitchCompaction' in normalized) {
+    const compaction = normalizeAgentSwitchCompactionUiSettings(normalized.agentSwitchCompaction);
+    if (compaction) normalized.agentSwitchCompaction = compaction;
+    else delete normalized.agentSwitchCompaction;
   }
   if ('commitMessage' in normalized) {
     const commitMessage = normalizeCommitMessageUiSettings(normalized.commitMessage);

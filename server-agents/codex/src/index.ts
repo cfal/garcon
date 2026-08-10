@@ -4,6 +4,7 @@ import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/cha
 import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 import { CODEX_MODELS } from '@garcon/common/models';
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
+import type { AgentCompactRequest } from '@garcon/server-agent-interface';
 import {
   AgentIntegrationError,
   type AgentForkRequest,
@@ -83,6 +84,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands: NonNullable<AgentIntegration['commands']>;
+  readonly compaction;
   readonly forking;
   readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals: NonNullable<AgentIntegration['goals']>;
@@ -126,6 +128,11 @@ export default class CodexAgentIntegration implements AgentIntegration {
     });
     const execution = new CodexExecution(host, runtime, nativeSessions, config);
     this.execution = execution;
+    // Codex compacts natively through its app-server; the execution object owns
+    // the call, the facet advertises that it exists.
+    this.compaction = {
+      compact: (request: AgentCompactRequest) => execution.compact(request),
+    };
     this.steering = {
       captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
       steer: (request) => runtime.steer(request),
