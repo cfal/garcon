@@ -862,7 +862,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     page: { limit: number; offset: number },
     signal?: AbortSignal,
   ): Promise<CodexTranscriptPage | null> {
-    return this.#history.loadPage(session, page, signal);
+    return this.#history.loadPage(session, page, signal, this.#sessions.get(session.agentSessionId)?.client);
   }
 
   async getPreview(session: CodexChatEntry, signal?: AbortSignal): Promise<unknown> {

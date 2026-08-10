@@ -70,6 +70,7 @@ export class CodexHistoryService {
     session: CodexChatEntry,
     page: { readonly limit: number; readonly offset: number },
     signal: AbortSignal = NEVER_ABORTED,
+    borrowedClient?: Pick<CodexPaginatedHistoryClient, 'listThreadTurns'>,
   ): Promise<AgentTranscriptPage | null> {
     const profile = await this.inspect(session, signal);
     if (!profile) return null;
@@ -82,7 +83,7 @@ export class CodexHistoryService {
         signal,
       );
     }
-    return this.#paginated(profile).loadPage(page, signal);
+    return this.#paginated(profile, borrowedClient).loadPage(page, signal);
   }
 
   async preview(
@@ -106,9 +107,15 @@ export class CodexHistoryService {
 
   #paginated(
     profile: Extract<CodexHistoryProfile, { mode: 'paginated' }>,
+    borrowedClient?: Pick<CodexPaginatedHistoryClient, 'listThreadTurns'>,
   ): PaginatedCodexHistorySource {
     assertCodexPaginatedHistoryMaterializable(profile, 'load-history');
-    return new PaginatedCodexHistorySource(profile, this.#createClient);
+    return new PaginatedCodexHistorySource(profile, borrowedClient
+      ? () => ({
+          listThreadTurns: borrowedClient.listThreadTurns.bind(borrowedClient),
+          shutdown() {},
+        })
+      : this.#createClient);
   }
 }
 
