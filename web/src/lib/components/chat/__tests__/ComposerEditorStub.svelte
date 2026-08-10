@@ -30,7 +30,14 @@
 	let { text, selection, focusRequestId, ariaLabel, onTextChange, onSelectionChange }: Props =
 		$props();
 	let editor = $state<HTMLTextAreaElement | null>(null);
-	lastTextChange = onTextChange;
+
+	$effect(() => {
+		const handler = onTextChange;
+		lastTextChange = handler;
+		return () => {
+			if (lastTextChange === handler) lastTextChange = null;
+		};
+	});
 
 	onMount(() => {
 		if (editor) restoreComposerEditorSelection(editor, selection);

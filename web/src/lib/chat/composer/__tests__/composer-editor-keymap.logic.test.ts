@@ -5,12 +5,17 @@ import {
 	cursorLineStart,
 	cursorLineUp,
 	deleteToLineEnd,
+	emacsStyleKeymap,
 	selectLineDown,
 	selectLineEnd,
 	selectLineStart,
 	selectLineUp,
 } from '@codemirror/commands';
-import { COMPOSER_EDITOR_KEYMAP, ownsComposerEditorShortcut } from '../composer-editor-keymap.js';
+import {
+	COMPOSER_EDITOR_KEYMAP,
+	COMPOSER_EDITOR_STANDARD_KEYMAP,
+	ownsComposerEditorShortcut,
+} from '../composer-editor-keymap.js';
 
 function shortcut(
 	key: string,
@@ -44,6 +49,15 @@ describe('composer editor keymap', () => {
 		]);
 		expect(COMPOSER_EDITOR_KEYMAP).toHaveLength(5);
 		expect(COMPOSER_EDITOR_KEYMAP.at(-1)?.shift).toBeUndefined();
+	});
+
+	it('removes CodeMirror broader macOS Emacs aliases from the standard editing map', () => {
+		const emacsKeys = new Set(emacsStyleKeymap.map((binding) => binding.key));
+		expect(
+			COMPOSER_EDITOR_STANDARD_KEYMAP.filter(
+				(binding) => binding.mac !== undefined && emacsKeys.has(binding.mac),
+			),
+		).toEqual([]);
 	});
 
 	it('owns exact Control movement chords and their Shift selection variants', () => {

@@ -196,6 +196,14 @@
 {/snippet}
 
 <div class="space-y-6" bind:this={sectionElement}>
+	{#if feedback}
+		<div
+			class="rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground"
+			role="status"
+		>
+			{feedback}
+		</div>
+	{/if}
 	<section class="space-y-2">
 		<h3 class="text-sm font-semibold text-foreground">
 			{m.settings_shortcuts_group_composer()}
@@ -221,14 +229,6 @@
 			{m.settings_shortcuts_group_global()}
 		</h3>
 		<p class="text-xs text-muted-foreground">{m.settings_shortcuts_edit_hint()}</p>
-		{#if feedback}
-			<div
-				class="rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground"
-				role="status"
-			>
-				{feedback}
-			</div>
-		{/if}
 		<div class="divide-y divide-border rounded-lg border border-border bg-muted/50">
 			{#each GLOBAL_SHORTCUTS as entry (entry.id)}
 				<div class="px-4">

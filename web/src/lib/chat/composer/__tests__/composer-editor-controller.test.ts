@@ -124,6 +124,18 @@ describe('ComposerEditorController', () => {
 		);
 		expect(view.state.doc.toString()).toBe('one\nt\nthree');
 
+		controller.syncText('one\ntwo\nthree');
+		const unapprovedDeleteLine = new KeyboardEvent('keydown', {
+			key: 'K',
+			ctrlKey: true,
+			shiftKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		Object.defineProperty(unapprovedDeleteLine, 'keyCode', { value: 75 });
+		content.dispatchEvent(unapprovedDeleteLine);
+		expect(view.state.doc.toString()).toBe('one\ntwo\nthree');
+
 		const halfPageDown = new KeyboardEvent('keydown', {
 			key: 'd',
 			ctrlKey: true,

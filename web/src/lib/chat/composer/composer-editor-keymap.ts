@@ -4,10 +4,12 @@ import {
 	cursorLineStart,
 	cursorLineUp,
 	deleteToLineEnd,
+	emacsStyleKeymap,
 	selectLineDown,
 	selectLineEnd,
 	selectLineStart,
 	selectLineUp,
+	standardKeymap,
 } from '@codemirror/commands';
 import type { KeyBinding } from '@codemirror/view';
 
@@ -18,6 +20,14 @@ export const COMPOSER_EDITOR_KEYMAP: readonly KeyBinding[] = [
 	{ key: 'Ctrl-n', run: cursorLineDown, shift: selectLineDown },
 	{ key: 'Ctrl-k', run: deleteToLineEnd },
 ];
+
+const EMACS_STYLE_KEYS = new Set(emacsStyleKeymap.map((binding) => binding.key));
+
+// The standard map excludes CodeMirror's broader macOS Emacs aliases; the curated map supplies
+// the approved cross-platform chords.
+export const COMPOSER_EDITOR_STANDARD_KEYMAP: readonly KeyBinding[] = standardKeymap.filter(
+	(binding) => binding.mac === undefined || !EMACS_STYLE_KEYS.has(binding.mac),
+);
 
 const MOVEMENT_KEYS = new Set(['a', 'e', 'p', 'n']);
 

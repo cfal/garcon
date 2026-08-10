@@ -300,6 +300,7 @@ export class WorkspaceShortcutDispatcher {
 	}
 
 	#isLocallyOwned(event: KeyboardEvent): boolean {
+		if (this.#localOwners.size === 0) return false;
 		const visited = new Set<HTMLElement>();
 		for (const candidate of event.composedPath()) {
 			if (!(candidate instanceof HTMLElement)) continue;

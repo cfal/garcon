@@ -1,4 +1,4 @@
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { history, historyKeymap } from '@codemirror/commands';
 import { Annotation, EditorSelection, EditorState, Prec, Transaction } from '@codemirror/state';
 import {
 	drawSelection,
@@ -8,7 +8,11 @@ import {
 	keymap,
 	type ViewUpdate,
 } from '@codemirror/view';
-import { COMPOSER_EDITOR_KEYMAP, ownsComposerEditorShortcut } from './composer-editor-keymap.js';
+import {
+	COMPOSER_EDITOR_KEYMAP,
+	COMPOSER_EDITOR_STANDARD_KEYMAP,
+	ownsComposerEditorShortcut,
+} from './composer-editor-keymap.js';
 import {
 	clampComposerEditorSelection,
 	type ComposerEditorSelection,
@@ -55,7 +59,7 @@ export class ComposerEditorController {
 				dropCursor(),
 				EditorView.lineWrapping,
 				Prec.high(keymap.of([...COMPOSER_EDITOR_KEYMAP])),
-				keymap.of([...defaultKeymap, ...historyKeymap]),
+				keymap.of([...COMPOSER_EDITOR_STANDARD_KEYMAP, ...historyKeymap]),
 				EditorView.contentAttributes.of({
 					'aria-label': options.ariaLabel,
 					'aria-multiline': 'true',

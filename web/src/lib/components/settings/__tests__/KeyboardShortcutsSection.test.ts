@@ -79,6 +79,21 @@ describe('KeyboardShortcutsSection', () => {
 		});
 	});
 
+	it('shows composer shortcut conflicts as shared feedback outside the Global group', async () => {
+		render(KeyboardShortcutsSectionTestHost);
+		const opener = screen.getByRole('group', { name: 'Open expanded composer' });
+		const change = within(opener).getByRole('button', {
+			name: 'Change shortcut for Open expanded composer',
+		});
+
+		await fireEvent.click(change);
+		await fireEvent.keyDown(change, { key: 'd', ctrlKey: true });
+
+		const status = screen.getByRole('status');
+		expect(status.textContent).toContain('Ctrl+D was removed from Scroll down half a page');
+		expect(status.closest('section')).toBeNull();
+	});
+
 	it('cancels recording on Escape without letting the dialog underneath close', async () => {
 		const transients = new TransientLayerRegistry(new ChatInteractionGate());
 		render(KeyboardShortcutsSectionTestHost, { transients });

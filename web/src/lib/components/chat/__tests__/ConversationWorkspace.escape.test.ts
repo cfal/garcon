@@ -213,4 +213,28 @@ describe('ConversationWorkspace Escape abort handling', () => {
 
 		expect(screen.getByTestId('composer-editor-open-request').textContent).toBe('0');
 	});
+
+	it('routes repeat-open from the presented composer editor chrome while Chat is inert', async () => {
+		render(ConversationWorkspaceEscapeHost);
+		await fireEvent.click(screen.getByRole('button', { name: 'Open composer editor layer' }));
+		const chrome = screen.getByRole('button', { name: 'Composer editor chrome' });
+
+		for (const expectedRequest of ['1', '2']) {
+			const open = new KeyboardEvent('keydown', {
+				key: 'e',
+				ctrlKey: true,
+				shiftKey: true,
+				bubbles: true,
+				cancelable: true,
+			});
+			chrome.dispatchEvent(open);
+
+			expect(open.defaultPrevented).toBe(true);
+			await waitFor(() =>
+				expect(screen.getByTestId('composer-editor-open-request').textContent).toBe(
+					expectedRequest,
+				),
+			);
+		}
+	});
 });

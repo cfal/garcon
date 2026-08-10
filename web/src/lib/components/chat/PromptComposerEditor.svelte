@@ -30,7 +30,9 @@
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const controller = new PromptComposerEditorController({
-		ui,
+		get ui() {
+			return ui;
+		},
 		composer,
 		get selectedChatId() {
 			return sessions.selectedChatId;
@@ -50,7 +52,9 @@
 		get snippetTrigger() {
 			return localSettings.snippetTrigger;
 		},
-		resizeTextarea,
+		get resizeTextarea() {
+			return resizeTextarea;
+		},
 	});
 
 	export function open(): boolean {

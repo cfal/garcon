@@ -511,8 +511,12 @@
 	});
 
 	function handleWorkspaceShortcut(event: KeyboardEvent): boolean {
-		if (!isVisible) return false;
+		if (!isPresented) return false;
+		const targetsPresentedComposerEditor =
+			event.target instanceof Element &&
+			Boolean(event.target.closest('[data-composer-editor-dialog]'));
 		if (
+			(isVisible || targetsPresentedComposerEditor) &&
 			!event.repeat &&
 			!event.isComposing &&
 			sessions.selectedChatId &&
@@ -522,6 +526,7 @@
 			composerEditorOpenRequestId += 1;
 			return true;
 		}
+		if (!isVisible) return false;
 		if (
 			event.key === 'Escape' &&
 			!event.repeat &&
