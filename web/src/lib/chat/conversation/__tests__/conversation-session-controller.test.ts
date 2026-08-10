@@ -1871,6 +1871,153 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
+	it('uses Ctrl+Enter preference to steer an active turn without queueing', async () => {
+		const chat = createRunningChat({ agentId: 'codex', model: 'gpt-5.5', isProcessing: true });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/review the failing contract literally';
+		mockSteerChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'req-steer-hotkey',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-08-10T00:00:00.000Z',
+		});
+
+		const outcome = await new ConversationSessionController(deps).submitComposerWithSteerPreference(
+			'chat-1',
+		);
+
+		expect(outcome).toBe('accepted');
+		expect(mockSteerChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				content: '/review the failing contract literally',
+			}),
+		);
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('uses normal submission for Ctrl+Enter preference while idle', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: false }));
+		deps.agentState.model = 'opus';
+		deps.composerState.inputText = 'start the next turn';
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-run-hotkey',
+			chatId: 'chat-1',
+			turnId: 'turn-2',
+			status: 'accepted',
+			acceptedAt: '2026-08-10T00:00:00.000Z',
+		});
+
+		const outcome = await new ConversationSessionController(deps).submitComposerWithSteerPreference(
+			'chat-1',
+		);
+
+		expect(outcome).toBe('accepted');
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({ chatId: 'chat-1', command: 'start the next turn' }),
+		);
+		expect(mockSteerChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+	});
+
+	it('rejects unsupported or attachment steering without clearing or queueing', async () => {
+		const unsupported = createDeps(
+			createRunningChat({ agentId: 'amp', model: 'amp-smart', isProcessing: true }),
+		);
+		unsupported.deps.composerState.inputText = 'keep this draft';
+		const unsupportedOutcome = await new ConversationSessionController(
+			unsupported.deps,
+		).submitComposerWithSteerPreference('chat-1');
+
+		expect(unsupportedOutcome).toBe('rejected');
+		expect(unsupported.deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			'/steer is not supported by this agent.',
+		);
+		expect(unsupported.deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+
+		const attached = createDeps(
+			createRunningChat({ agentId: 'codex', model: 'gpt-5.5', isProcessing: true }),
+		);
+		attached.deps.composerState.inputText = 'keep this attached draft';
+		attached.deps.composerState.images = [
+			new File(['image'], 'capture.png', { type: 'image/png' }),
+		];
+		const attachmentOutcome = await new ConversationSessionController(
+			attached.deps,
+		).submitComposerWithSteerPreference('chat-1');
+
+		expect(attachmentOutcome).toBe('rejected');
+		expect(attached.deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			'Remove attachments before steering the active turn.',
+		);
+		expect(attached.deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		expect(mockSteerChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+	});
+
+	it('rejects Ctrl+Enter steering while an agent handoff is pending', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'claude', isProcessing: true }));
+		const controller = new ConversationSessionController(deps);
+		controller.handleModelSelectionChange({ agentId: 'codex', modelValue: 'gpt-5.5' });
+		deps.composerState.inputText = 'wait and delegate';
+
+		const outcome = await controller.submitComposerWithSteerPreference('chat-1');
+
+		expect(outcome).toBe('rejected');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			'Wait for the current work and queued messages to finish before handing this chat to another agent.',
+		);
+		expect(mockSteerChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('wait and delegate');
+	});
+
+	it('restores the exact Ctrl+Enter draft after definitive steering failure', async () => {
+		const { deps } = createDeps(
+			createRunningChat({ agentId: 'codex', model: 'gpt-5.5', isProcessing: true }),
+		);
+		deps.composerState.inputText = '  keep this guidance  ';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+		});
+		mockSteerChat.mockRejectedValueOnce(
+			new ApiError(409, 'No active turn', 'STEER_TURN_UNAVAILABLE'),
+		);
+
+		const outcome = await new ConversationSessionController(deps).submitComposerWithSteerPreference(
+			'chat-1',
+		);
+
+		expect(outcome).toBe('rejected');
+		expect(deps.composerState.inputText).toBe('  keep this guidance  ');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('does not admit Ctrl+Enter steering for an empty or non-selected composer', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		const controller = new ConversationSessionController(deps);
+
+		await expect(controller.submitComposerWithSteerPreference('chat-1')).resolves.toBe('no-op');
+		deps.composerState.inputText = 'belongs to another chat';
+		deps.sessions.selectedChatId = 'chat-2';
+		await expect(controller.submitComposerWithSteerPreference('chat-1')).resolves.toBe('no-op');
+
+		expect(mockSteerChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+	});
+
 	it('does not restore a queued draft when both same-ID attempts have ambiguous outcomes', async () => {
 		const chat = createRunningChat({ isProcessing: true, status: 'running' });
 		const { deps } = createDeps(chat);

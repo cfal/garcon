@@ -68,6 +68,10 @@ import {
 	executionSelectionFromProjection,
 	type ConversationExecutionSelection,
 } from './conversation-execution-draft-state.svelte.js';
+import {
+	steerSubmissionRejection,
+	steerSubmissionRejectionNotice,
+} from './steer-submission-policy.js';
 
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
@@ -560,16 +564,17 @@ export class ConversationSessionController {
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
+		const handoffPending = selected.status !== 'draft' && this.#executionDraft.isHandoffPending;
 		const slash = this.#slashCommands.dispatchSubmission({
 			chatId,
 			chat: selected,
 			text,
 			images: [...submissionImages],
 			ownsComposer,
+			handoffPending,
 		});
 		if (slash.kind === 'handled') return slash.outcome;
-		const handoffPending = selected.status !== 'draft' && this.#executionDraft.isHandoffPending;
-		if (handoffPending && (slash.kind === 'steer' || slash.kind === 'goal-control')) {
+		if (handoffPending && slash.kind === 'goal-control') {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_idle());
 			return 'rejected';
 		}
@@ -709,6 +714,44 @@ export class ConversationSessionController {
 		} finally {
 			if (directAdmission) this.#releaseDirectAdmission(chatId, directAdmission);
 		}
+	}
+
+	async submitComposerWithSteerPreference(chatId: string): Promise<ConversationSubmissionOutcome> {
+		const { deps } = this;
+		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)) {
+			return 'no-op';
+		}
+		const selected = deps.sessions.byId[chatId];
+		if (!selected?.projectPath) return 'no-op';
+		const text = deps.composerState.inputText.trim();
+		if (!text) return 'no-op';
+		if (selected.status !== 'running' || !selected.isProcessing) {
+			return this.submitForChat(chatId);
+		}
+
+		const rejection = steerSubmissionRejection({
+			prompt: text,
+			supportsSteering: deps.modelCatalog.supportsSteering(selected.agentId as SessionAgentId),
+			attachmentCount: deps.composerState.images.length,
+			handoffPending: this.#executionDraft.isHandoffPending,
+		});
+		if (rejection) {
+			deps.chatState.appendLocalNotice('error', steerSubmissionRejectionNotice(rejection));
+			return 'rejected';
+		}
+
+		return submitSteerRoute(deps, this.#acceptedInputs, {
+			chatId,
+			chat: selected,
+			startup: deps.sessions.startupByChatId[chatId],
+			text,
+			content: text,
+			images: [],
+			previousText: deps.composerState.inputText,
+			previousImages: [...deps.composerState.images],
+			ownsComposer: true,
+			composerRevisionAfterClear: null,
+		});
 	}
 
 	// Forks a chat without sending a new message, then selects the fork. Backs

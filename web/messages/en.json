@@ -1309,6 +1309,7 @@
 	"settings_shortcut_scroll_half_page_up": "Scroll up half a page",
 	"settings_shortcut_scroll_half_page_down": "Scroll down half a page",
 	"settings_shortcut_send_message": "Send message",
+	"settings_shortcut_steer_with_ctrl_enter": "Steer with Ctrl+Enter",
 	"settings_shortcut_system_default": "System default",
 	"settings_shortcut_custom": "Custom",
 	"settings_shortcut_disabled": "Disabled",

@@ -535,6 +535,12 @@
 		void controller.submitForChat(chatId, text, images);
 	}
 
+	function onSteerPreferredSubmit(): void {
+		const chatId = sessions.selectedChatId;
+		if (!chatId) return;
+		void controller.submitComposerWithSteerPreference(chatId);
+	}
+
 	function openQueuedInputsManager(): void {
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
@@ -711,6 +717,7 @@
 		{isVisible}
 		{directAdmissionPending}
 		onsubmit={onSubmit}
+		{onSteerPreferredSubmit}
 		onModelChange={(next) => controller.handleModelSelectionChange(next)}
 		onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 		onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}

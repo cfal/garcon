@@ -242,9 +242,6 @@
 			{@render settingRow(m.settings_chat_auto_scroll_to_bottom(), ls.autoScrollToBottom, () =>
 				ls.toggle('autoScrollToBottom'),
 			)}
-			{@render settingRow(m.settings_chat_send_by_shift_enter(), ls.sendByShiftEnter, () =>
-				ls.toggle('sendByShiftEnter'),
-			)}
 			<div class="flex items-center justify-between gap-4 py-2">
 				<div class="min-w-0">
 					<label class="text-sm font-medium text-foreground" for="local-snippet-trigger">

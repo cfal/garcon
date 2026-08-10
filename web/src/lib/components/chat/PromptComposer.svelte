@@ -27,7 +27,11 @@
 		isSupportedChatAttachment,
 		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
-	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer/composer-shortcuts.js';
+	import {
+		resolveComposerEnterAction,
+		canSubmitComposer,
+		type ComposerEnterAction,
+	} from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
@@ -86,6 +90,7 @@
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	interface Props {
 		onsubmit: () => void;
+		onSteerPreferredSubmit: () => void;
 		onModelChange?: (selection: ModelSelectorChange) => void;
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
@@ -106,6 +111,7 @@
 
 	let {
 		onsubmit,
+		onSteerPreferredSubmit,
 		onModelChange,
 		onPermissionModeChange,
 		onThinkingModeChange,
@@ -487,7 +493,7 @@
 		appShell.openSnippets(() => appShell.requestComposerFocus());
 	}
 
-	// Handles Enter/Shift+Enter submission depending on preference.
+	// Resolves configured Enter submission before preserving native newline behavior.
 	// Defers to the file menu while it is open.
 	function handleKeyDown(event: KeyboardEvent) {
 		if (snippetExpansion.pending) return;
@@ -506,23 +512,23 @@
 			}
 		}
 		if (event.key !== 'Enter') return;
-		if (
-			!shouldSubmitOnEnter({
-				sendByShiftEnter: localSettings.sendByShiftEnter,
-				shiftKey: event.shiftKey,
-				ctrlKey: event.ctrlKey,
-				metaKey: event.metaKey,
-				isComposing: event.isComposing,
-				isMobile: appShell.isMobile,
-			})
-		)
-			return;
+		const action = resolveComposerEnterAction({
+			sendByShiftEnter: localSettings.sendByShiftEnter,
+			steerWithCtrlEnter: localSettings.steerWithCtrlEnter,
+			shiftKey: event.shiftKey,
+			ctrlKey: event.ctrlKey,
+			metaKey: event.metaKey,
+			altKey: event.altKey,
+			isComposing: event.isComposing,
+			isMobile: appShell.isMobile,
+		});
+		if (action === 'newline') return;
 
 		event.preventDefault();
-		handleFormSubmit();
+		handleFormSubmit(action);
 	}
 
-	function handleFormSubmit() {
+	function handleFormSubmit(action: Exclude<ComposerEnterAction, 'newline'> = 'submit') {
 		if (!canSubmit || snippetExpansion.pending) return;
 		const command = parseSnippetCommand(composerState.inputText);
 		if (command.kind === 'invalid') {
@@ -537,7 +543,8 @@
 			void expandSnippetInvocation(command);
 			return;
 		}
-		onsubmit();
+		if (action === 'steer-preferred') onSteerPreferredSubmit();
+		else onsubmit();
 	}
 
 	function handleInput(event: Event) {
@@ -908,7 +915,7 @@
 					onThinkingModeChange?.(mode);
 				}}
 				canSend={canSubmit}
-				onSend={handleFormSubmit}
+				onSend={() => handleFormSubmit()}
 				sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
 				{sendButtonClass}
 			>

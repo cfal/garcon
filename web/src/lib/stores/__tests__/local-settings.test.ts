@@ -25,8 +25,30 @@ describe('LocalSettingsStore', () => {
 		expect(store.markdownViewerOpenPlacement).toBe('source');
 		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
+		expect(store.steerWithCtrlEnter).toBe(true);
 
 		store.destroy();
+	});
+
+	it('persists Ctrl+Enter steering and defaults malformed values to enabled', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('steerWithCtrlEnter');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ steerWithCtrlEnter: false });
+		const restored = createLocalSettingsStore();
+		expect(restored.steerWithCtrlEnter).toBe(false);
+		store.destroy();
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ steerWithCtrlEnter: 'enabled' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.steerWithCtrlEnter).toBe(true);
+		malformed.destroy();
 	});
 
 	it('persists and restores the desktop layout order', () => {
@@ -439,6 +461,7 @@ describe('LocalSettingsStore', () => {
 				sidebarCompactChatItems: true,
 				showQuickCommitTray: false,
 				allowDirectChats: true,
+				steerWithCtrlEnter: false,
 				desktopLayoutOrder: ['main', 'workspace-sidebar', 'chat-list'],
 				textEditorOpenPlacement: 'source',
 				imageViewerOpenPlacement: 'sidebar',
@@ -459,6 +482,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.sidebarCompactChatItems).toBe(true);
 		expect(secondStore.showQuickCommitTray).toBe(false);
 		expect(secondStore.allowDirectChats).toBe(true);
+		expect(secondStore.steerWithCtrlEnter).toBe(false);
 		expect(secondStore.desktopLayoutOrder).toEqual([
 			'main',
 			'workspace-sidebar',

@@ -60,8 +60,11 @@ describe('Settings', () => {
 			expect(screen.getByRole('tablist')).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Providers' })).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Other Agents' })).toBeTruthy();
-			expect(screen.getByRole('tab', { name: 'Local Settings' })).toBeTruthy();
-			expect(screen.getByRole('tab', { name: 'Remote Settings' })).toBeTruthy();
+			const remoteTab = screen.getByRole('tab', { name: 'Remote Settings' });
+			const localTab = screen.getByRole('tab', { name: 'Local Settings' });
+			expect(
+				remoteTab.compareDocumentPosition(localTab) & Node.DOCUMENT_POSITION_FOLLOWING,
+			).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Shortcuts' })).toBeTruthy();
 			expect(screen.queryByRole('heading', { name: 'Remote Settings' })).toBeNull();
 			expect(screen.getByText('These settings are stored on the garcon server.')).toBeTruthy();
@@ -248,6 +251,7 @@ describe('Settings', () => {
 			expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
 			expect(screen.queryByText('Direct (Responses)')).toBeNull();
 			expect(screen.getByText('These settings are stored in your browser.')).toBeTruthy();
+			expect(screen.queryByRole('switch', { name: 'Send by Shift+Enter' })).toBeNull();
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Shortcuts' }));
 			expect(appShell.settingsTab).toBe('shortcuts');
@@ -261,6 +265,8 @@ describe('Settings', () => {
 			expect(screen.getByText('Scroll up half a page')).toBeTruthy();
 			expect(screen.getByText('Scroll down half a page')).toBeTruthy();
 			expect(screen.getByText('Send message')).toBeTruthy();
+			expect(screen.getByRole('switch', { name: 'Send by Shift+Enter' })).toBeTruthy();
+			expect(screen.getByRole('switch', { name: 'Steer with Ctrl+Enter' })).toBeTruthy();
 			expect(screen.getByText('/compact')).toBeTruthy();
 			expect(screen.getByText('/fork [<prompt>]')).toBeTruthy();
 			expect(screen.getByText('/rename <title>')).toBeTruthy();

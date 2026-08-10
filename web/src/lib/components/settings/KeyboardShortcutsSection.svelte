@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getLocalSettings, getOptionalTransientLayers } from '$lib/context';
 	import { Button } from '$lib/components/ui/button';
+	import { Switch } from '$lib/components/ui/switch';
 	import * as m from '$lib/paraglide/messages.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { GLOBAL_SHORTCUTS, SLASH_COMMANDS } from './keyboard-shortcut-entries.js';
@@ -123,7 +124,31 @@
 	</div>
 {/snippet}
 
+{#snippet preferenceRow(label: string, checked: boolean, onToggle: () => void)}
+	<div class="flex items-center justify-between gap-4 py-2">
+		<div class="text-sm font-medium text-foreground">{label}</div>
+		<Switch {checked} onCheckedChange={onToggle} aria-label={label} />
+	</div>
+{/snippet}
+
 <div class="space-y-6" bind:this={sectionElement}>
+	<section class="space-y-2">
+		<h3 class="text-sm font-semibold text-foreground">
+			{m.settings_shortcuts_group_composer()}
+		</h3>
+		<div class="divide-y divide-border rounded-lg border border-border bg-muted/50 px-4 py-1">
+			{@render preferenceRow(m.settings_chat_send_by_shift_enter(), ls.sendByShiftEnter, () =>
+				ls.toggle('sendByShiftEnter'),
+			)}
+			{@render preferenceRow(
+				m.settings_shortcut_steer_with_ctrl_enter(),
+				ls.steerWithCtrlEnter,
+				() => ls.toggle('steerWithCtrlEnter'),
+			)}
+			{@render shortcutRow(m.settings_shortcut_send_message(), sendMessageKeys)}
+		</div>
+	</section>
+
 	<section class="space-y-2">
 		<h3 class="text-sm font-semibold text-foreground">
 			{m.settings_shortcuts_group_global()}
@@ -195,15 +220,6 @@
 					</div>
 				</div>
 			{/each}
-		</div>
-	</section>
-
-	<section class="space-y-2">
-		<h3 class="text-sm font-semibold text-foreground">
-			{m.settings_shortcuts_group_composer()}
-		</h3>
-		<div class="bg-muted/50 border border-border rounded-lg px-4 py-1">
-			{@render shortcutRow(m.settings_shortcut_send_message(), sendMessageKeys)}
 		</div>
 	</section>
 

@@ -46,6 +46,7 @@
 		recentAgentSettings?: RecentAgentSetting[];
 		allowDirectChats?: boolean;
 		reduceMotion?: boolean;
+		steerWithCtrlEnter?: boolean;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		quickCommitTrayVisible?: boolean;
@@ -53,6 +54,7 @@
 		quickCommitSummary?: GitQuickSummaryReady | null;
 		directAdmissionPending?: boolean;
 		onsubmit?: () => void;
+		onSteerPreferredSubmit?: () => void;
 		onAbort?: () => void;
 		onQuickCommit?: () => void;
 	}
@@ -70,6 +72,7 @@
 		recentAgentSettings = [],
 		allowDirectChats = false,
 		reduceMotion = false,
+		steerWithCtrlEnter = true,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		quickCommitTrayVisible = false,
@@ -77,6 +80,7 @@
 		quickCommitSummary = null,
 		directAdmissionPending = false,
 		onsubmit = () => {},
+		onSteerPreferredSubmit = () => {},
 		onAbort = () => {},
 		onQuickCommit = () => {},
 	}: Props = $props();
@@ -204,6 +208,9 @@
 		get sendByShiftEnter() {
 			return false;
 		},
+		get steerWithCtrlEnter() {
+			return steerWithCtrlEnter;
+		},
 		get reduceMotion() {
 			return reduceMotion;
 		},
@@ -324,6 +331,7 @@
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <PromptComposer
 	{onsubmit}
+	{onSteerPreferredSubmit}
 	{isVisible}
 	{quickCommitTrayVisible}
 	{quickCommitRefreshing}

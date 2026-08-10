@@ -4,6 +4,10 @@ import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ApiProtocol } from '$shared/api-providers';
+import {
+	steerSubmissionRejection,
+	steerSubmissionRejectionNotice,
+} from './steer-submission-policy.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
@@ -132,8 +136,9 @@ export class ConversationSlashCommandService {
 		text: string;
 		images: File[];
 		ownsComposer: boolean;
+		handoffPending: boolean;
 	}): SlashCommandSubmissionResolution {
-		const { chatId, chat, text, images, ownsComposer } = input;
+		const { chatId, chat, text, images, ownsComposer, handoffPending } = input;
 		const rename = parseRenameCommand(text);
 		if (rename) {
 			return {
@@ -174,19 +179,23 @@ export class ConversationSlashCommandService {
 
 		const agentId = chat.agentId as SessionAgentId;
 		const steer = parseSteerCommand(text);
-		if (steer.kind === 'invalid') {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_prompt_required());
-			return { kind: 'handled', outcome: 'rejected' };
+		if (steer.kind !== 'not-command') {
+			const prompt = steer.kind === 'valid' ? steer.prompt : '';
+			const rejection = steerSubmissionRejection({
+				prompt,
+				supportsSteering: this.deps.modelCatalog.supportsSteering(agentId),
+				attachmentCount: images.length,
+				handoffPending,
+			});
+			if (rejection) {
+				this.deps.chatState.appendLocalNotice(
+					'error',
+					steerSubmissionRejectionNotice(rejection),
+				);
+				return { kind: 'handled', outcome: 'rejected' };
+			}
+			return { kind: 'steer', content: prompt };
 		}
-		if (steer.kind === 'valid' && !this.deps.modelCatalog.supportsSteering(agentId)) {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_unsupported());
-			return { kind: 'handled', outcome: 'rejected' };
-		}
-		if (steer.kind === 'valid' && images.length > 0) {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_attachments_unavailable());
-			return { kind: 'handled', outcome: 'rejected' };
-		}
-		if (steer.kind === 'valid') return { kind: 'steer', content: steer.prompt };
 
 		if (
 			isGoalCommand(text)

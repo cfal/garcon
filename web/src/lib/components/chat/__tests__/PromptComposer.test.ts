@@ -76,6 +76,78 @@ describe('PromptComposer focus', () => {
 		expect(composer?.className).not.toContain('shadow-sm');
 	});
 
+	it('routes exact enabled Ctrl+Enter through steer-preferred submission', async () => {
+		const onsubmit = vi.fn();
+		const onSteerPreferredSubmit = vi.fn();
+		render(PromptComposerTestHost, { onsubmit, onSteerPreferredSubmit });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Focus on the failing test' } });
+		const event = new KeyboardEvent('keydown', {
+			key: 'Enter',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		textarea.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(onSteerPreferredSubmit).toHaveBeenCalledOnce();
+		expect(onsubmit).not.toHaveBeenCalled();
+	});
+
+	it('leaves Ctrl+Enter native when steer preference is disabled', async () => {
+		const onsubmit = vi.fn();
+		const onSteerPreferredSubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			steerWithCtrlEnter: false,
+			onsubmit,
+			onSteerPreferredSubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Keep editing' } });
+		const event = new KeyboardEvent('keydown', {
+			key: 'Enter',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		textarea.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(false);
+		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
+		expect(onsubmit).not.toHaveBeenCalled();
+	});
+
+	it('applies the shared submit gate before Ctrl+Enter steering', async () => {
+		const onSteerPreferredSubmit = vi.fn();
+		const { rerender } = render(PromptComposerTestHost, { onSteerPreferredSubmit });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
+
+		await rerender({ directAdmissionPending: true, onSteerPreferredSubmit });
+		await fireEvent.input(textarea, { target: { value: 'Wait for admission' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
+	});
+
+	it('gives completion menus first refusal over Ctrl+Enter', async () => {
+		const onsubmit = vi.fn();
+		const onSteerPreferredSubmit = vi.fn();
+		render(PromptComposerTestHost, { onsubmit, onSteerPreferredSubmit });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, '/', 1);
+		await screen.findByText('/compact');
+
+		await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
+		expect(onsubmit).not.toHaveBeenCalled();
+	});
+
 	it('resizes and reveals a draft block appended from another surface', async () => {
 		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-append',

@@ -200,6 +200,7 @@
 		showQuickCommitTray: true,
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
+		steerWithCtrlEnter: true,
 		get globalShortcuts() {
 			return globalShortcuts;
 		},

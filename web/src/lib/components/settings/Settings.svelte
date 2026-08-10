@@ -62,11 +62,11 @@
 					<Tabs.Trigger value="other-agents" class="h-8 px-2">
 						{m.settings_tab_other_agents()}
 					</Tabs.Trigger>
-					<Tabs.Trigger value="local" class="h-8 px-2">
-						{m.settings_tab_local_settings()}
-					</Tabs.Trigger>
 					<Tabs.Trigger value="remote" class="h-8 px-2">
 						{m.settings_tab_remote_settings()}
+					</Tabs.Trigger>
+					<Tabs.Trigger value="local" class="h-8 px-2">
+						{m.settings_tab_local_settings()}
 					</Tabs.Trigger>
 					<Tabs.Trigger value="shortcuts" class="h-8 px-2">
 						{m.settings_tab_shortcuts()}
@@ -84,14 +84,14 @@
 					<OtherAgentsSection {settingsAuth} />
 				</Tabs.Content>
 
-				<Tabs.Content value="local" class="mt-0 space-y-6">
-					{@render tabDescription(m.settings_scope_local_description())}
-					<LocalSettingsSection />
-				</Tabs.Content>
-
 				<Tabs.Content value="remote" class="mt-0 space-y-6">
 					{@render tabDescription(m.settings_scope_remote_description())}
 					<RemoteSettingsSection />
+				</Tabs.Content>
+
+				<Tabs.Content value="local" class="mt-0 space-y-6">
+					{@render tabDescription(m.settings_scope_local_description())}
+					<LocalSettingsSection />
 				</Tabs.Content>
 
 				<Tabs.Content value="shortcuts" class="mt-0 space-y-6">

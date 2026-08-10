@@ -37,6 +37,28 @@ describe('KeyboardShortcutsSection', () => {
 		});
 	});
 
+	it('renders composer preferences before editable shortcuts and persists both switches', async () => {
+		render(KeyboardShortcutsSectionTestHost);
+		const shiftEnter = screen.getByRole('switch', { name: 'Send by Shift+Enter' });
+		const ctrlEnter = screen.getByRole('switch', { name: 'Steer with Ctrl+Enter' });
+		const firstEditableShortcut = screen.getByRole('group', { name: 'New chat' });
+
+		expect(shiftEnter.getAttribute('aria-checked')).toBe('false');
+		expect(ctrlEnter.getAttribute('aria-checked')).toBe('true');
+		expect(
+			ctrlEnter.compareDocumentPosition(firstEditableShortcut) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+
+		await fireEvent.click(shiftEnter);
+		await fireEvent.click(ctrlEnter);
+
+		expect(shiftEnter.getAttribute('aria-checked')).toBe('true');
+		expect(ctrlEnter.getAttribute('aria-checked')).toBe('false');
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ sendByShiftEnter: true, steerWithCtrlEnter: false });
+	});
+
 	it('cancels recording on Escape without letting the dialog underneath close', async () => {
 		const transients = new TransientLayerRegistry(new ChatInteractionGate());
 		render(KeyboardShortcutsSectionTestHost, { transients });
