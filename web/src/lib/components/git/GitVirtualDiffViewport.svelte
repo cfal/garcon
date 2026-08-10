@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { tick, untrack, type Snippet } from 'svelte';
 	import { createVirtualizer } from '@tanstack/svelte-virtual';
-	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type {
+		GitVirtualFileHeaderRow,
+		GitVirtualReviewRow,
+	} from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import {
@@ -23,6 +26,7 @@
 		reviewDocumentId?: string | null;
 		active?: boolean;
 		source: GitVirtualReviewRowSource;
+		pinFileHeaders: boolean;
 		fontSize: number;
 		scrollToRequest: { filePath: string; token: number } | null;
 		overscan?: number;
@@ -36,6 +40,7 @@
 		reviewDocumentId = null,
 		active = true,
 		source,
+		pinFileHeaders,
 		fontSize,
 		scrollToRequest,
 		overscan = 18,
@@ -45,6 +50,7 @@
 	}: GitVirtualDiffViewportProps = $props();
 
 	let viewportRef = $state<HTMLDivElement | null>(null);
+	let focusedViewportElement = $state<Element | null>(null);
 	let lastScrollRequestKey = '';
 	let pendingScrollRequestKey = '';
 	let scrollRequestSequence = 0;
@@ -82,6 +88,20 @@
 			return row ? [{ virtualItem, row }] : [];
 		}),
 	);
+	let pinnedFileHeader = $derived.by<GitVirtualFileHeaderRow | null>(() => {
+		if (!pinFileHeaders) return null;
+		const firstVisibleIndex = $virtualizer.range?.startIndex;
+		if (firstVisibleIndex === undefined) return null;
+
+		const filePath = source.filePathAt(firstVisibleIndex);
+		if (!filePath) return null;
+
+		const headerIndex = source.fileStart(filePath);
+		if (headerIndex === undefined || firstVisibleIndex <= headerIndex) return null;
+
+		const row = source.rowAt(headerIndex);
+		return row?.kind === 'file-header' ? row : null;
+	});
 	let demandedFilePaths = $derived.by(() => {
 		const first = virtualItems[0]?.index;
 		const last = virtualItems.at(-1)?.index;
@@ -95,6 +115,25 @@
 
 	function completeScrollRequest(): void {
 		if (servicedScrollRequestId) completedScrollRequestId = servicedScrollRequestId;
+	}
+
+	function handleViewportFocusIn(event: FocusEvent): void {
+		focusedViewportElement = event.target instanceof Element ? event.target : null;
+	}
+
+	function handleViewportFocusOut(event: FocusEvent): void {
+		const nextTarget = event.relatedTarget;
+		focusedViewportElement =
+			nextTarget instanceof Element && viewportRef?.contains(nextTarget) ? nextTarget : null;
+	}
+
+	function rowOwnsViewportFocus(rowId: string): boolean {
+		const focusedElement = focusedViewportElement;
+		if (!focusedElement?.isConnected) return false;
+		return (
+			focusedElement.closest<HTMLElement>('[data-git-virtual-row]')?.dataset.gitVirtualRowId ===
+			rowId
+		);
 	}
 
 	$effect(() => {
@@ -336,11 +375,26 @@
 	}
 </script>
 
+{#snippet renderRow(row: GitVirtualReviewRow)}
+	<svelte:boundary>
+		{@render rowSnippet(row)}
+		{#snippet failed(error)}
+			<div
+				class="border border-status-error-border bg-status-error/10 px-3 py-2 text-xs text-status-error-foreground"
+			>
+				Failed to render diff row: {error instanceof Error ? error.message : String(error)}
+			</div>
+		{/snippet}
+	</svelte:boundary>
+{/snippet}
+
 <div
 	bind:this={viewportRef}
 	{@attach primaryScrollRegion}
 	class="min-h-0 flex-1 overflow-auto bg-muted/15"
 	data-git-virtual-diff-root
+	onfocusin={handleViewportFocusIn}
+	onfocusout={handleViewportFocusOut}
 >
 	{#if source.rowCount === 0}
 		<div class="flex h-full items-center justify-center px-4 text-sm text-muted-foreground">
@@ -348,26 +402,32 @@
 		</div>
 	{:else}
 		<div class="relative w-full" style:height={`${totalHeight}px`}>
+			{#if pinnedFileHeader}
+				<div class="sticky top-0 z-20 h-0" data-git-pinned-file-header-host>
+					<div
+						class="absolute inset-x-0 top-0"
+						data-git-pinned-file-header
+						data-file-path={pinnedFileHeader.filePath}
+					>
+						{@render renderRow(pinnedFileHeader)}
+					</div>
+				</div>
+			{/if}
+
 			<!-- Keeps adjacent diff backgrounds in one flow layout; per-row transforms create fractional-DPR paint seams. -->
 			<div class="absolute inset-x-0" style:top={`${windowStart}px`} data-git-virtual-row-window>
 				{#each renderedVirtualItems as rendered (rendered.virtualItem.key)}
+					{@const isPinnedOriginal = pinnedFileHeader?.id === rendered.row.id}
+					{@const hidePinnedOriginal = isPinnedOriginal && !rowOwnsViewportFocus(rendered.row.id)}
 					<div
 						data-index={rendered.virtualItem.index}
 						data-git-virtual-row
+						data-git-virtual-row-id={rendered.row.id}
+						aria-hidden={hidePinnedOriginal}
+						inert={hidePinnedOriginal}
 						use:measureRow={rendered.virtualItem.index}
 					>
-						<svelte:boundary>
-							{@render rowSnippet(rendered.row)}
-							{#snippet failed(error)}
-								<div
-									class="border border-status-error-border bg-status-error/10 px-3 py-2 text-xs text-status-error-foreground"
-								>
-									Failed to render diff row: {error instanceof Error
-										? error.message
-										: String(error)}
-								</div>
-							{/snippet}
-						</svelte:boundary>
+						{@render renderRow(rendered.row)}
 					</div>
 				{/each}
 			</div>

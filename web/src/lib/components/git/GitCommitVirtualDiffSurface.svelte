@@ -96,6 +96,7 @@
 	reviewDocumentId={documentId}
 	{active}
 	{source}
+	pinFileHeaders={true}
 	{fontSize}
 	{scrollToRequest}
 	{overscan}

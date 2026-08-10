@@ -68,6 +68,7 @@
 	layoutIdentity={documentId}
 	reviewDocumentId={documentId}
 	{source}
+	pinFileHeaders={false}
 	fontSize={12}
 	scrollToRequest={null}
 	onBodyDemand={() => undefined}

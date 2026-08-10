@@ -139,6 +139,7 @@
 	{reviewDocumentId}
 	{active}
 	{source}
+	pinFileHeaders={true}
 	{fontSize}
 	{scrollToRequest}
 	{overscan}

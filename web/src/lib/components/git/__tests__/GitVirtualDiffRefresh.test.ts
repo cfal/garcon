@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { PartialKeys, VirtualizerOptions } from '@tanstack/svelte-virtual';
+import type { ComponentProps } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
 	GitVirtualFileHeaderRow,
@@ -7,6 +8,7 @@ import type {
 	GitVirtualFilePlaceholderRow,
 	GitVirtualReviewRow,
 	GitVirtualUnifiedRow,
+	GitVirtualCollectionLimitRow,
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import { measureVirtualRow } from '../git-virtual-row-measurement.js';
@@ -21,37 +23,46 @@ let initialVirtualizerOptions: TestInitialVirtualizerOptions | null;
 let refreshedVirtualizerOptions: TestRefreshedVirtualizerOptions | null;
 let measureCalls: number;
 let scrollToIndexCalls: number[];
+let publishVisibleRange: (startIndex: number, endIndex?: number) => void;
 
 vi.mock('@tanstack/svelte-virtual', async () => {
-	const { readable } = await import('svelte/store');
-	const virtualItems = [0, 1, 2].map((index) => ({
-		index,
-		key: `file:${index}:header`,
-		start: index * 42,
-		size: 42,
-		end: (index + 1) * 42,
-	}));
-	const virtualizer = {
-		getVirtualItems: () => virtualItems,
-		getTotalSize: () => 126,
-		setOptions: (options: TestRefreshedVirtualizerOptions) => {
-			refreshedVirtualizerOptions = options;
-		},
-		measureElement: () => undefined,
-		scrollToIndex: (index: number) => scrollToIndexCalls.push(index),
-		measure: () => {
-			measureCalls += 1;
-		},
-	};
+	const { writable } = await import('svelte/store');
 	return {
 		createVirtualizer: (options: TestInitialVirtualizerOptions) => {
 			initialVirtualizerOptions = options;
-			return readable(virtualizer);
+			const virtualItems = [0, 1, 2].map((index) => ({
+				index,
+				key: `file:${index}:header`,
+				start: index * 42,
+				size: 42,
+				end: (index + 1) * 42,
+			}));
+			const virtualizer = {
+				range: { startIndex: 0, endIndex: 2 },
+				getVirtualItems: () => virtualItems,
+				getTotalSize: () => 126,
+				setOptions: (next: TestRefreshedVirtualizerOptions) => {
+					refreshedVirtualizerOptions = next;
+				},
+				measureElement: () => undefined,
+				scrollToIndex: (index: number) => scrollToIndexCalls.push(index),
+				measure: () => {
+					measureCalls += 1;
+				},
+			};
+			const store = writable(virtualizer);
+			publishVisibleRange = (startIndex, endIndex = startIndex) => {
+				virtualizer.range = { startIndex, endIndex };
+				store.set(virtualizer);
+			};
+			return store;
 		},
 	};
 });
 
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
+
+type GitVirtualDiffSurfaceProps = ComponentProps<typeof GitVirtualDiffSurface>;
 
 function makeHeaderRow(index: number, documentId = 'doc-a'): GitVirtualFileHeaderRow {
 	const path = `file-${index}.ts`;
@@ -142,6 +153,17 @@ function makeLimitRow(index: number, documentId = 'doc-a'): GitVirtualFileLimitR
 	};
 }
 
+function makeCollectionLimitRow(documentId = 'doc-a'): GitVirtualCollectionLimitRow {
+	return {
+		kind: 'collection-limit',
+		id: `${documentId}:collection-limit`,
+		filePath: '',
+		estimatedHeight: 112,
+		title: 'Additional files omitted',
+		message: 'Narrow the comparison to load more files.',
+	};
+}
+
 function makeUnloadedRows(): GitVirtualReviewRow[] {
 	return [0, 1, 2].flatMap((index) => [makeHeaderRow(index), makePlaceholderRow(index)]);
 }
@@ -150,6 +172,48 @@ function fileIndexes(rows: GitVirtualReviewRow[]): Map<string, number> {
 	return new Map(
 		rows.flatMap((row, index) => (row.kind === 'file-header' ? [[row.filePath, index]] : [])),
 	);
+}
+
+function makeSurfaceProps(
+	rows: GitVirtualReviewRow[],
+	overrides: Partial<GitVirtualDiffSurfaceProps> = {},
+): GitVirtualDiffSurfaceProps {
+	return {
+		layoutIdentity: 'layout-a',
+		reviewDocumentId: 'doc-a',
+		source: arrayGitVirtualReviewRowSource(rows, fileIndexes(rows)),
+		activeTab: 'unstaged',
+		fontSize: 12,
+		selectedLineKeys: new Set<string>(),
+		operationPending: false,
+		scrollToRequest: null,
+		composerState: {
+			open: false,
+			focusPending: false,
+			filePath: '',
+			side: 'after',
+			line: 0,
+			body: '',
+			severity: 'note',
+		},
+		showInlineCommentComposer: true,
+		onBodyDemand: vi.fn(),
+		onSelectFile: vi.fn(),
+		onToggleLineSelection: vi.fn(),
+		onSelectLineRange: vi.fn(),
+		onStageHunk: vi.fn(),
+		onUnstageHunk: vi.fn(),
+		onStageLine: vi.fn(),
+		onUnstageLine: vi.fn(),
+		onStageFile: vi.fn(),
+		onUnstageFile: vi.fn(),
+		onAddCommentForFile: vi.fn(),
+		commentFeedback: null,
+		commentError: null,
+		commentCopyText: null,
+		onOpenChat: vi.fn(),
+		...overrides,
+	};
 }
 
 describe('Git virtual diff refresh', () => {
@@ -569,8 +633,110 @@ describe('Git virtual diff refresh', () => {
 		expect(measureCalls).toBe(1);
 	});
 
+	it('recomputes the pinned file after a placeholder expands and moves later headers', async () => {
+		const initialRows = [
+			makeHeaderRow(0),
+			makePlaceholderRow(0),
+			makeHeaderRow(1),
+			makePlaceholderRow(1),
+		];
+		const props = makeSurfaceProps(initialRows);
+		const { container, rerender } = render(GitVirtualDiffSurface, { props });
+
+		publishVisibleRange(1);
+		await waitFor(() =>
+			expect(
+				container.querySelector<HTMLElement>('[data-git-pinned-file-header]')?.dataset.filePath,
+			).toBe('file-0.ts'),
+		);
+
+		const expandedRows = [
+			makeHeaderRow(0),
+			makeUnifiedRow(0),
+			makeUnifiedRow(0, 'doc-a-expanded'),
+			makeHeaderRow(1),
+			makeUnifiedRow(1),
+		];
+		await rerender({
+			...props,
+			source: arrayGitVirtualReviewRowSource(expandedRows, fileIndexes(expandedRows)),
+		});
+		publishVisibleRange(4);
+
+		await waitFor(() =>
+			expect(
+				container.querySelector<HTMLElement>('[data-git-pinned-file-header]')?.dataset.filePath,
+			).toBe('file-1.ts'),
+		);
+	});
+
+	it('replaces a pinned header from the current source without resetting stable layout geometry', async () => {
+		const initialRows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
+		const props = makeSurfaceProps(initialRows);
+		const { container, rerender } = render(GitVirtualDiffSurface, { props });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		viewport.scrollTop = 300;
+		publishVisibleRange(1);
+		await waitFor(() =>
+			expect(
+				container.querySelector<HTMLElement>('[data-git-pinned-file-header]')?.dataset.filePath,
+			).toBe('file-0.ts'),
+		);
+
+		const replacementRows = [makeHeaderRow(9), makeUnifiedRow(9), makeHeaderRow(10)];
+		await rerender({
+			...props,
+			reviewDocumentId: 'doc-b',
+			source: arrayGitVirtualReviewRowSource(replacementRows, fileIndexes(replacementRows)),
+		});
+
+		await waitFor(() =>
+			expect(
+				container.querySelector<HTMLElement>('[data-git-pinned-file-header]')?.dataset.filePath,
+			).toBe('file-9.ts'),
+		);
+		expect(viewport.scrollTop).toBe(300);
+		expect(measureCalls).toBe(1);
+	});
+
+	it('removes the pinned copy when navigation returns the real header to the visible range', async () => {
+		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
+		const props = makeSurfaceProps(rows);
+		const { container, rerender } = render(GitVirtualDiffSurface, { props });
+		publishVisibleRange(1);
+		await waitFor(() =>
+			expect(container.querySelector('[data-git-pinned-file-header]')).toBeTruthy(),
+		);
+
+		await rerender({
+			...props,
+			scrollToRequest: { filePath: 'file-0.ts', token: 1 },
+		});
+		await waitFor(() => expect(scrollToIndexCalls).toEqual([0]));
+		publishVisibleRange(0);
+
+		await waitFor(() =>
+			expect(container.querySelector('[data-git-pinned-file-header]')).toBeNull(),
+		);
+	});
+
+	it('does not carry a file header over a collection-level limit row', async () => {
+		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeCollectionLimitRow()];
+		const props = makeSurfaceProps(rows);
+		const { container } = render(GitVirtualDiffSurface, { props });
+		publishVisibleRange(1);
+		await waitFor(() =>
+			expect(container.querySelector('[data-git-pinned-file-header]')).toBeTruthy(),
+		);
+
+		publishVisibleRange(2);
+		await waitFor(() =>
+			expect(container.querySelector('[data-git-pinned-file-header]')).toBeNull(),
+		);
+	});
+
 	it('resets scroll and measurements when the layout identity changes', async () => {
-		const initialRows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
+		const initialRows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
 		const onBodyDemand = vi.fn();
 		const props = {
 			layoutIdentity: 'layout-a',
@@ -610,22 +776,26 @@ describe('Git virtual diff refresh', () => {
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
 		viewport.scrollTop = 300;
+		publishVisibleRange(1);
+		await waitFor(() =>
+			expect(container.querySelector('[data-git-pinned-file-header]')).toBeTruthy(),
+		);
 		await waitFor(() => expect(onBodyDemand).toHaveBeenCalled());
 		onBodyDemand.mockClear();
 
-		const replacementRows = [
-			makeHeaderRow(0, 'doc-b'),
-			makeHeaderRow(1, 'doc-b'),
-			makeHeaderRow(2, 'doc-b'),
-		];
+		const replacementRows = [makeHeaderRow(0, 'doc-b'), makeUnifiedRow(0, 'doc-b')];
 		await rerender({
 			...props,
 			layoutIdentity: 'layout-b',
 			reviewDocumentId: 'doc-b',
 			source: arrayGitVirtualReviewRowSource(replacementRows),
 		});
+		publishVisibleRange(0);
 
 		expect(viewport.scrollTop).toBe(0);
+		await waitFor(() =>
+			expect(container.querySelector('[data-git-pinned-file-header]')).toBeNull(),
+		);
 		expect(measureCalls).toBeGreaterThanOrEqual(2);
 		await waitFor(() => expect(onBodyDemand).toHaveBeenCalled());
 	});
