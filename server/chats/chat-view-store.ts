@@ -9,10 +9,10 @@ import {
 } from '../lib/transcript-revision.js';
 import {
   exactMessageIdentityKeys,
-  preserveLiveUserIdentity,
+  matchingRetainedMessagesByExactIdentity,
   preserveRetainedUserIdentities,
+  reconcileLiveMessageAppends,
   retainedMessageMatchesNative,
-  userDeliveryPayloadsAreCompatible,
 } from './chat-message-reconciliation.js';
 import {
   type ChatViewGenerationTransition as GenerationTransition,
@@ -310,7 +310,7 @@ export class ChatViewStore {
       }
       const revalidated = previousGenerationId === undefined
         ? []
-        : this.#matchingViewEntries(view, messages).filter((entry) => (
+        : matchingRetainedMessagesByExactIdentity(view.messages, messages).filter((entry) => (
             previousGenerationId !== view.generationId
             || previousLastSeq !== undefined && entry.seq > previousLastSeq
           ));
@@ -758,73 +758,11 @@ export class ChatViewStore {
     conflictPolicy: 'reject' | 'native-wins' = 'reject',
   ): ChatViewMessage[] {
     messages = this.#operationalNotices.filterDuplicateAppends(view.chatId, view.messages, messages);
-    type IndexedMessage = {
-      message: ChatMessage;
-      viewEntry?: ChatViewMessage;
-      uniqueIndex?: number;
-    };
-    const existingByIdentity = new Map<string, IndexedMessage>();
-    const indexMessage = (indexed: IndexedMessage): void => {
-      for (const identity of exactMessageIdentityKeys(indexed.message)) {
-        if (!existingByIdentity.has(identity)) existingByIdentity.set(identity, indexed);
-      }
-    };
-    for (const entry of view.messages) {
-      indexMessage({ message: entry.message, viewEntry: entry });
+    const reconciled = reconcileLiveMessageAppends(view.messages, messages, conflictPolicy);
+    for (const identity of reconciled.droppedConflictingUserIdentities) {
+      logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${identity}`);
     }
-
-    const unique: ChatMessage[] = [];
-    for (const message of messages) {
-      const identities = exactMessageIdentityKeys(message);
-      const existing = identities
-        .map((identity) => existingByIdentity.get(identity))
-        .find((indexed) => indexed !== undefined);
-      if (existing) {
-        if (
-          existing.message instanceof UserMessage
-          && message instanceof UserMessage
-          && !userDeliveryPayloadsAreCompatible(existing.message, message)
-        ) {
-          const requestId = message.metadata?.clientRequestId
-            ?? message.metadata?.upstreamRequestId
-            ?? identities[0];
-          if (conflictPolicy === 'native-wins') {
-            logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${requestId}`);
-            continue;
-          }
-          throw new Error(`Conflicting user message identity: ${requestId}`);
-        }
-        const withIdentity = preserveLiveUserIdentity(message, existing.message);
-        if (withIdentity !== existing.message) {
-          existing.message = withIdentity;
-          if (existing.viewEntry) existing.viewEntry.message = withIdentity;
-          if (existing.uniqueIndex !== undefined) unique[existing.uniqueIndex] = withIdentity;
-          indexMessage(existing);
-        }
-        continue;
-      }
-      const indexed = { message, uniqueIndex: unique.length };
-      unique.push(message);
-      indexMessage(indexed);
-    }
-    return this.#appendToView(view, unique);
-  }
-
-  #matchingViewEntries(view: ChatView, messages: ChatMessage[]): ChatViewMessage[] {
-    const viewEntryByIdentity = new Map<string, ChatViewMessage>();
-    for (const entry of view.messages) {
-      for (const identity of exactMessageIdentityKeys(entry.message)) {
-        if (!viewEntryByIdentity.has(identity)) viewEntryByIdentity.set(identity, entry);
-      }
-    }
-    const matches = new Map<number, ChatViewMessage>();
-    for (const message of messages) {
-      const match = exactMessageIdentityKeys(message)
-        .map((identity) => viewEntryByIdentity.get(identity))
-        .find((entry) => entry !== undefined);
-      if (match) matches.set(match.seq, match);
-    }
-    return [...matches.values()];
+    return this.#appendToView(view, reconciled.messages);
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {

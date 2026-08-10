@@ -45,6 +45,85 @@ export function preserveRetainedUserIdentities(
   return reconciled;
 }
 
+export function matchingRetainedMessagesByExactIdentity(
+  retainedMessages: ChatViewMessage[],
+  messages: ChatMessage[],
+): ChatViewMessage[] {
+  const retainedByIdentity = new Map<string, ChatViewMessage>();
+  for (const entry of retainedMessages) {
+    for (const identity of exactMessageIdentityKeys(entry.message)) {
+      if (!retainedByIdentity.has(identity)) retainedByIdentity.set(identity, entry);
+    }
+  }
+  const matches = new Map<number, ChatViewMessage>();
+  for (const message of messages) {
+    const match = exactMessageIdentityKeys(message)
+      .map((identity) => retainedByIdentity.get(identity))
+      .find((entry) => entry !== undefined);
+    if (match) matches.set(match.seq, match);
+  }
+  return [...matches.values()];
+}
+
+export function reconcileLiveMessageAppends(
+  retainedMessages: ChatViewMessage[],
+  messages: ChatMessage[],
+  conflictPolicy: 'reject' | 'native-wins',
+): { messages: ChatMessage[]; droppedConflictingUserIdentities: string[] } {
+  type IndexedMessage = {
+    message: ChatMessage;
+    retainedEntry?: ChatViewMessage;
+    uniqueIndex?: number;
+  };
+  const existingByIdentity = new Map<string, IndexedMessage>();
+  const indexMessage = (indexed: IndexedMessage): void => {
+    for (const identity of exactMessageIdentityKeys(indexed.message)) {
+      if (!existingByIdentity.has(identity)) existingByIdentity.set(identity, indexed);
+    }
+  };
+  for (const entry of retainedMessages) {
+    indexMessage({ message: entry.message, retainedEntry: entry });
+  }
+
+  const unique: ChatMessage[] = [];
+  const droppedConflictingUserIdentities: string[] = [];
+  for (const message of messages) {
+    const identities = exactMessageIdentityKeys(message);
+    const existing = identities
+      .map((identity) => existingByIdentity.get(identity))
+      .find((indexed) => indexed !== undefined);
+    if (existing) {
+      if (
+        existing.message instanceof UserMessage
+        && message instanceof UserMessage
+        && !userDeliveryPayloadsAreCompatible(existing.message, message)
+      ) {
+        const identity = message.metadata?.clientRequestId
+          ?? message.metadata?.upstreamRequestId
+          ?? identities[0]
+          ?? 'unknown';
+        if (conflictPolicy === 'native-wins') {
+          droppedConflictingUserIdentities.push(identity);
+          continue;
+        }
+        throw new Error(`Conflicting user message identity: ${identity}`);
+      }
+      const withIdentity = preserveLiveUserIdentity(message, existing.message);
+      if (withIdentity !== existing.message) {
+        existing.message = withIdentity;
+        if (existing.retainedEntry) existing.retainedEntry.message = withIdentity;
+        if (existing.uniqueIndex !== undefined) unique[existing.uniqueIndex] = withIdentity;
+        indexMessage(existing);
+      }
+      continue;
+    }
+    const indexed = { message, uniqueIndex: unique.length };
+    unique.push(message);
+    indexMessage(indexed);
+  }
+  return { messages: unique, droppedConflictingUserIdentities };
+}
+
 export function retainedMessageMatchesNative(
   retainedMessage: ChatMessage,
   nativeMessage: ChatMessage | undefined,
@@ -64,7 +143,7 @@ export function userDeliveryPayloadsAreCompatible(
   ) && metadataIsCompatible(left.metadata, right.metadata);
 }
 
-export function preserveLiveUserIdentity(
+function preserveLiveUserIdentity(
   liveMessage: ChatMessage,
   nativeMessage: ChatMessage,
 ): ChatMessage {
