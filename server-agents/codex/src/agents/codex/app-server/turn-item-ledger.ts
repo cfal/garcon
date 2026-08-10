@@ -38,10 +38,19 @@ export class CodexTurnItemLedger {
       : undefined;
     if (item.type === 'contextCompaction') this.#manualCompactionPending = false;
     const messages = convertCodexAppServerLiveItem(item, undefined, compactionTrigger);
+    this.#emitWithSource(turnId, item.id, messages);
+  }
+
+  emitConverted(turnId: string, itemId: string | undefined, messages: ChatMessage[]): void {
+    this.recordMessages(messages);
+    this.#emitWithSource(turnId, itemId, messages);
+  }
+
+  #emitWithSource(turnId: string, itemId: string | undefined, messages: ChatMessage[]): void {
     messages.forEach((message, withinSourceOrdinal) => {
       attachNativeMessageSource(message, codexMessageSourceIdentity({
         turnId,
-        itemId: item.id,
+        itemId,
         message,
         fallbackOrdinal: withinSourceOrdinal,
       }));

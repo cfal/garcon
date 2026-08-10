@@ -1,7 +1,6 @@
 import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage } from '@garcon/common/chat-types';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type {
   AgentGoalControlHandoff,
   AgentLogger,
@@ -30,7 +29,6 @@ import {
   type CodexAppServerMetric,
 } from './client.js';
 import { convertCodexRawCodeModeItem } from './converter.js';
-import { codexMessageSourceIdentity } from '../message-source-identity.js';
 import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
 import { NativePathDiscoveryRefreshLimiter, type NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
@@ -1370,16 +1368,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       new Date().toISOString(),
       session.liveCodeModeResultToolIds,
     );
-    messages.forEach((message, fallbackOrdinal) => {
-      attachNativeMessageSource(message, codexMessageSourceIdentity({
-        turnId: params.turnId,
-        itemId: params.item.id,
-        message,
-        fallbackOrdinal,
-      }));
-    });
-    session.turnItems.recordMessages(messages);
-    if (messages.length) this.emitMessages(session.chatId, messages);
+    session.turnItems.emitConverted(params.turnId, params.item.id, messages);
   }
 
   #handleTurnCompleted(client: CodexAppServerClient, params: TurnCompletedNotification): void {
