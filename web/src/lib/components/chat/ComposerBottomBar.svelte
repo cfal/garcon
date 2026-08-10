@@ -10,6 +10,7 @@
 	import type { ComposerModeOption } from '$lib/chat/composer/composer-controls.js';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Send from '@lucide/svelte/icons/send';
 	import * as m from '$lib/paraglide/messages.js';
 	import ComposerAddMenu from './ComposerAddMenu.svelte';
@@ -19,6 +20,7 @@
 		attachImagesTooltip: string;
 		onAddImage: () => void;
 		onOpenSnippetPalette?: () => void;
+		onOpenExpandedEditor?: () => void;
 		permissionOptions: ComposerModeOption<PermissionMode>[];
 		selectedPermission: PermissionMode;
 		onPermissionSelect: (mode: PermissionMode) => void;
@@ -44,6 +46,7 @@
 		attachImagesTooltip,
 		onAddImage,
 		onOpenSnippetPalette = () => undefined,
+		onOpenExpandedEditor,
 		permissionOptions,
 		selectedPermission,
 		onPermissionSelect,
@@ -171,6 +174,19 @@
 				</div>
 			{:else if selectorsSide === 'right' && modelSelector}
 				{@render modelSelector()}
+			{/if}
+
+			{#if onOpenExpandedEditor}
+				<button
+					type="button"
+					onclick={onOpenExpandedEditor}
+					disabled={addMenuDisabled || isPromptTransformPending}
+					class="inline-flex size-9 items-center justify-center rounded-lg border border-border bg-background text-foreground transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+					title={m.chat_composer_open_expanded_editor()}
+					aria-label={m.chat_composer_open_expanded_editor()}
+				>
+					<Maximize2 class="size-4" aria-hidden="true" />
+				</button>
 			{/if}
 
 			{#if showSendButton}

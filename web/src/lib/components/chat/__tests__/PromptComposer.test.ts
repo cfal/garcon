@@ -2,6 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
+import {
+	emitLastComposerEditorTextChange,
+	resetComposerEditorStub,
+} from './ComposerEditorStub.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
@@ -12,6 +16,10 @@ vi.mock('$lib/api/snippets', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
 	return { ...actual, expandSnippet: vi.fn() };
 });
+
+vi.mock('../ComposerEditor.svelte', async () => ({
+	default: (await import('./ComposerEditorStub.svelte')).default,
+}));
 
 function nextAnimationFrame(): Promise<void> {
 	return new Promise((resolve) => {
@@ -60,6 +68,7 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 describe('PromptComposer focus', () => {
 	afterEach(() => {
 		cleanup();
+		resetComposerEditorStub();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.composerHeight);
@@ -115,6 +124,126 @@ describe('PromptComposer focus', () => {
 
 		expect(textarea.style.minHeight).toBe('240px');
 		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.composerHeight)).toBe('240');
+	});
+
+	it('opens a live expanded editor and restores directional selection on Escape', async () => {
+		const chatId = 'chat-expanded-live';
+		localStorage.removeItem(chatDraftStorageKey(chatId));
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: chatId,
+			composerEditorOpenRequestId: 0,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'alpha\nbeta' } });
+		textarea.setSelectionRange(2, 7, 'backward');
+
+		await rerender({ selectedChatId: chatId, composerEditorOpenRequestId: 1 });
+		const editor = (await screen.findByRole('textbox', {
+			name: 'Expanded composer text',
+		})) as HTMLTextAreaElement;
+		expect(editor.value).toBe('alpha\nbeta');
+		editor.value = 'alpha\nbeta\ngamma';
+		editor.setSelectionRange(3, 16, 'backward');
+		await fireEvent.input(editor);
+		await fireEvent.pointerUp(editor);
+		await waitFor(() => expect(textarea.value).toBe('alpha\nbeta\ngamma'));
+		await waitFor(() =>
+			expect(localStorage.getItem(chatDraftStorageKey(chatId))).toBe('alpha\nbeta\ngamma'),
+		);
+
+		await fireEvent.keyDown(editor, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(textarea.selectionStart).toBe(3);
+		expect(textarea.selectionEnd).toBe(16);
+		expect(textarea.selectionDirection).toBe('backward');
+		localStorage.removeItem(chatDraftStorageKey(chatId));
+	});
+
+	it('synchronizes external composer changes without echoing a second revision', async () => {
+		render(PromptComposerTestHost, { selectedChatId: 'chat-expanded-external' });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'before' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		const editor = await screen.findByRole('textbox', { name: 'Expanded composer text' });
+		await fireEvent.input(textarea, { target: { value: 'external replacement' } });
+
+		await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe('external replacement'));
+	});
+
+	it('opens and refocuses the existing editor from monotonic workspace requests', async () => {
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-expanded-request',
+			composerEditorOpenRequestId: 0,
+		});
+
+		await rerender({
+			selectedChatId: 'chat-expanded-request',
+			composerEditorOpenRequestId: 1,
+		});
+		const editor = await screen.findByRole('textbox', { name: 'Expanded composer text' });
+		await waitFor(() => expect(document.activeElement).toBe(editor));
+		screen.getByRole('button', { name: 'Close expanded composer' }).focus();
+
+		await rerender({
+			selectedChatId: 'chat-expanded-request',
+			isVisible: false,
+			isPresented: true,
+			composerEditorOpenRequestId: 2,
+		});
+		expect(screen.getAllByRole('dialog')).toHaveLength(1);
+		await waitFor(() => expect(document.activeElement).toBe(editor));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close expanded composer' }));
+		await rerender({
+			selectedChatId: 'chat-expanded-request',
+			isVisible: true,
+			isPresented: true,
+			composerEditorOpenRequestId: 2,
+		});
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	});
+
+	it('distinguishes modal interactivity from Chat surface presentation', async () => {
+		const chatId = 'chat-expanded-presentation';
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: chatId,
+			isVisible: true,
+			isPresented: true,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		await screen.findByRole('dialog');
+
+		await rerender({ selectedChatId: chatId, isVisible: false, isPresented: true });
+		expect(screen.getByRole('dialog')).toBeTruthy();
+
+		await rerender({ selectedChatId: chatId, isVisible: false, isPresented: false });
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	});
+
+	it('closes on chat switch and rejects late writes from the outgoing editor', async () => {
+		const firstChatId = 'chat-expanded-switch-a';
+		const secondChatId = 'chat-expanded-switch-b';
+		const { rerender } = render(PromptComposerTestHost, { selectedChatId: firstChatId });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'first draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		await screen.findByRole('dialog');
+
+		await rerender({ selectedChatId: secondChatId });
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		await fireEvent.input(textarea, { target: { value: 'second draft' } });
+		emitLastComposerEditorTextChange('stale first-chat write');
+
+		expect(textarea.value).toBe('second draft');
+		await waitFor(() =>
+			expect(localStorage.getItem(chatDraftStorageKey(secondChatId))).toBe('second draft'),
+		);
+		expect(localStorage.getItem(chatDraftStorageKey(secondChatId))).not.toBe(
+			'stale first-chat write',
+		);
+		localStorage.removeItem(chatDraftStorageKey(firstChatId));
+		localStorage.removeItem(chatDraftStorageKey(secondChatId));
 	});
 
 	it('routes exact enabled Ctrl+Enter through steer-preferred submission', async () => {

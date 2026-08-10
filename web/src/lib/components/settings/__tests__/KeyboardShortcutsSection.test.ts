@@ -41,7 +41,7 @@ describe('KeyboardShortcutsSection', () => {
 		render(KeyboardShortcutsSectionTestHost);
 		const shiftEnter = screen.getByRole('switch', { name: 'Send by Shift+Enter' });
 		const ctrlEnter = screen.getByRole('switch', { name: 'Steer with Ctrl+Enter' });
-		const firstEditableShortcut = screen.getByRole('group', { name: 'New chat' });
+		const firstEditableShortcut = screen.getByRole('group', { name: 'Open expanded composer' });
 
 		expect(shiftEnter.getAttribute('aria-checked')).toBe('false');
 		expect(ctrlEnter.getAttribute('aria-checked')).toBe('true');
@@ -57,6 +57,26 @@ describe('KeyboardShortcutsSection', () => {
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({ sendByShiftEnter: true, steerWithCtrlEnter: false });
+	});
+
+	it('renders and edits the expanded composer opener in the Composer group', async () => {
+		render(KeyboardShortcutsSectionTestHost);
+		const opener = screen.getByRole('group', { name: 'Open expanded composer' });
+		const change = within(opener).getByRole('button', {
+			name: 'Change shortcut for Open expanded composer',
+		});
+
+		expect(change.textContent).toContain('Ctrl');
+		expect(change.textContent).toContain('Shift');
+		expect(change.textContent).toContain('E');
+		await fireEvent.click(change);
+		await fireEvent.keyDown(change, { key: 'x', ctrlKey: true, shiftKey: true });
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}').globalShortcuts,
+		).toMatchObject({
+			'open-composer-editor': { key: 'x', ctrl: true, shift: true },
+		});
 	});
 
 	it('cancels recording on Escape without letting the dialog underneath close', async () => {

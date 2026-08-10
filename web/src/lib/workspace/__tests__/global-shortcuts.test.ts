@@ -24,6 +24,11 @@ describe('global shortcuts', () => {
 			key: 'd',
 			ctrl: true,
 		});
+		expect(getEffectiveGlobalShortcut('open-composer-editor', {})).toEqual({
+			key: 'e',
+			ctrl: true,
+			shift: true,
+		});
 		expect(
 			getEffectiveGlobalShortcut('delete-chat', {
 				'delete-chat': { key: 'x', ctrl: true },
@@ -109,6 +114,17 @@ describe('global shortcuts', () => {
 			'rename-chat': { key: 'd', ctrl: true },
 			'delete-chat': null,
 			'scroll-half-page-down': null,
+		});
+	});
+
+	it('preserves an older custom chord that conflicts with the editor default', () => {
+		expect(
+			sanitizeGlobalShortcutOverrides({
+				'new-chat': { key: 'E', ctrl: true, shift: true },
+			}),
+		).toEqual({
+			'new-chat': { key: 'e', ctrl: true, shift: true },
+			'open-composer-editor': null,
 		});
 	});
 

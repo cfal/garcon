@@ -169,4 +169,48 @@ describe('ConversationWorkspace Escape abort handling', () => {
 
 		expect(mockStopChat).not.toHaveBeenCalled();
 	});
+
+	it('routes the configurable expanded composer command as a monotonic request', async () => {
+		render(ConversationWorkspaceEscapeHost);
+		const request = screen.getByTestId('composer-editor-open-request');
+		const open = new KeyboardEvent('keydown', {
+			key: 'e',
+			ctrlKey: true,
+			shiftKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		window.dispatchEvent(open);
+
+		expect(open.defaultPrevented).toBe(true);
+		await waitFor(() => expect(request.textContent).toBe('1'));
+
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'e',
+				ctrlKey: true,
+				shiftKey: true,
+				repeat: true,
+			}),
+		);
+		expect(request.textContent).toBe('1');
+	});
+
+	it('does not open the composer editor underneath a top modal', async () => {
+		render(ConversationWorkspaceEscapeHost);
+		await fireEvent.click(screen.getByRole('button', { name: 'Open test layer' }));
+
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'e',
+				ctrlKey: true,
+				shiftKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(screen.getByTestId('composer-editor-open-request').textContent).toBe('0');
+	});
 });
