@@ -72,6 +72,7 @@
 	"chat_composer_reply_placeholder": "Reply...",
 	"chat_composer_remove_image": "Remove attachment {name}",
 	"chat_composer_queue_message": "Queue message",
+	"chat_composer_resize": "Resize message composer",
 	"chat_composer_send_message": "Send message",
 	"chat_composer_thinking_effort": "Thinking effort",
 	"chat_composer_agent_setting_thinking": "Thinking",

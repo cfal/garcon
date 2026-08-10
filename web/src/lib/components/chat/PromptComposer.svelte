@@ -3,6 +3,7 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
@@ -678,13 +679,11 @@
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
 		cn(
-			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200',
+			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-colors duration-200',
 			'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]',
 		),
 	);
 
-	// Composer resize via drag handle. Persists height to browser storage and
-	// mutates the DOM directly during drag to avoid render latency.
 	const COMPOSER_DEFAULT_HEIGHT = 140;
 	const COMPOSER_MIN_HEIGHT = 52;
 	const COMPOSER_MAX_HEIGHT = 500;
@@ -694,58 +693,25 @@
 	}
 
 	let composerHeight = $state(COMPOSER_DEFAULT_HEIGHT);
-	let dragCleanup: (() => void) | null = null;
+	let composerHeightPreview = $state<number | null>(null);
+	const renderedComposerHeight = $derived(composerHeightPreview ?? composerHeight);
 
-	// Initialise from persisted browser storage on mount.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		const stored = Number(getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight));
-		if (Number.isFinite(stored)) composerHeight = clampHeight(stored);
+	onMount(() => {
+		const stored = getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight);
+		if (stored === null || stored.trim() === '') return;
+		const parsed = Number(stored);
+		if (Number.isFinite(parsed)) composerHeight = clampHeight(parsed);
 	});
 
-	function handleResizeStart(event: PointerEvent) {
-		event.preventDefault();
-		const startY = event.clientY;
-		const startHeight = composerHeight;
-		const ta = textarea;
-		if (!ta) return;
-
-		document.body.style.cursor = 'row-resize';
-		document.body.style.userSelect = 'none';
-		document.body.style.touchAction = 'none';
-
-		function onPointerMove(e: PointerEvent) {
-			if (ta) ta.style.minHeight = `${clampHeight(startHeight + startY - e.clientY)}px`;
-		}
-
-		function onPointerUp(e: PointerEvent) {
-			document.removeEventListener('pointermove', onPointerMove);
-			document.removeEventListener('pointerup', onPointerUp);
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			document.body.style.touchAction = '';
-			dragCleanup = null;
-			const finalHeight = clampHeight(startHeight + startY - e.clientY);
-			composerHeight = finalHeight;
-			setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(finalHeight)));
-		}
-
-		document.addEventListener('pointermove', onPointerMove);
-		document.addEventListener('pointerup', onPointerUp);
-
-		dragCleanup = () => {
-			document.removeEventListener('pointermove', onPointerMove);
-			document.removeEventListener('pointerup', onPointerUp);
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			document.body.style.touchAction = '';
-		};
+	function previewComposerHeight(height: number): void {
+		composerHeightPreview = clampHeight(height);
 	}
 
-	onDestroy(() => {
-		dragCleanup?.();
-		dragCleanup = null;
-	});
+	function commitComposerHeight(height: number): void {
+		composerHeight = clampHeight(height);
+		composerHeightPreview = null;
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(composerHeight)));
+	}
 </script>
 
 {#snippet composerSurface()}
@@ -880,7 +846,8 @@
 						readonly={snippetExpansion.pending}
 						aria-busy={snippetExpansion.pending}
 						class={textareaClass}
-						style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}></textarea>
+						style:min-height={appShell.isMobile ? undefined : `${renderedComposerHeight}px`}
+					></textarea>
 				</div>
 			</div>
 
@@ -977,12 +944,16 @@
 			onCommit={() => onQuickCommit?.()}
 		/>
 		{#if !appShell.isMobile}
-			<!-- Keeps the grab zone outside the clipped rounded surface. -->
-			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer-only resize handle supplements composer sizing controls; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
-			<div
-				onpointerdown={handleResizeStart}
-				class="absolute left-0 right-0 -top-1 z-40 h-3 cursor-row-resize touch-none"
-			></div>
+			<ComposerResizeHandle
+				value={renderedComposerHeight}
+				minimum={COMPOSER_MIN_HEIGHT}
+				maximum={COMPOSER_MAX_HEIGHT}
+				label={m.chat_composer_resize()}
+				onPreview={previewComposerHeight}
+				onCommit={commitComposerHeight}
+				onCancel={() => (composerHeightPreview = null)}
+				onReset={() => commitComposerHeight(COMPOSER_DEFAULT_HEIGHT)}
+			/>
 		{/if}
 		{@render composerSurface()}
 	</div>

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
-import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
+import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
 
 const appCss = readFileSync('src/app.css', 'utf8');
@@ -62,6 +62,7 @@ describe('PromptComposer focus', () => {
 		cleanup();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.composerHeight);
 	});
 
 	it('renders without a surface shadow', () => {
@@ -74,6 +75,46 @@ describe('PromptComposer focus', () => {
 
 		expect(composer?.className).toContain('shadow-none');
 		expect(composer?.className).not.toContain('shadow-sm');
+	});
+
+	it('previews and persists composer resizing while the selected chat is processing', async () => {
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const slider = screen.getByRole('slider', { name: 'Resize message composer' });
+		slider.setPointerCapture = vi.fn();
+		slider.hasPointerCapture = vi.fn(() => true);
+		slider.releasePointerCapture = vi.fn();
+
+		expect(textarea.style.minHeight).toBe('140px');
+		await fireEvent.pointerDown(slider, {
+			pointerId: 11,
+			clientY: 400,
+			button: 0,
+			isPrimary: true,
+		});
+		await fireEvent.pointerMove(slider, { pointerId: 11, clientY: 300 });
+
+		expect(textarea.style.minHeight).toBe('240px');
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.composerHeight)).toBeNull();
+
+		await rerender({
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+			quickCommitRefreshing: true,
+		});
+		expect(textarea.style.minHeight).toBe('240px');
+
+		await fireEvent.pointerUp(slider, { pointerId: 11, clientY: 300 });
+
+		expect(textarea.style.minHeight).toBe('240px');
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.composerHeight)).toBe('240');
 	});
 
 	it('routes exact enabled Ctrl+Enter through steer-preferred submission', async () => {
