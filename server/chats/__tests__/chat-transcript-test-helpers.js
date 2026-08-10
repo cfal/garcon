@@ -63,6 +63,7 @@ export function historyPage(messages, limit, offset, options = {}) {
     carryOverRevision: snapshot.carryOverRevision,
     agentOwnershipEpoch: snapshot.agentOwnershipEpoch,
     archivedLogicalCount: snapshot.archivedLogicalCount,
+    nativePrefixDigest: options.nativePrefixDigest ?? null,
   };
 }
 

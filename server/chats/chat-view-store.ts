@@ -6,7 +6,6 @@ import { createLogger } from '../lib/log.js';
 import {
   OrderedTranscriptDigest,
   orderedTranscriptDigest,
-  transcriptRevision,
 } from '../lib/transcript-revision.js';
 import {
   exactMessageIdentityKeys,
@@ -18,7 +17,7 @@ import {
   type ChatViewGenerationTransition as GenerationTransition,
   type MutableChatView as ChatView,
   type NativeSnapshotReconciliation,
-  persistenceMatches,
+  nativePrefixMatchesView,
   reconcileNativeSnapshotView,
 } from './chat-view-native-reconciliation.js';
 import { ChatViewOperationalNotices } from './chat-view-operational-notices.js';
@@ -561,17 +560,9 @@ export class ChatViewStore {
     const retainedLiveEntries = previous?.messages.filter(
       (entry) => entry.seq > previous.historyLastSeq,
     ) ?? [];
-    const previousNativeCount = previous
-      ? Math.max(0, previous.historyLastSeq - snapshot.archivedLogicalCount)
-      : 0;
-    const priorNativePrefixMatches = Boolean(
-      previous
-      && persistenceMatches(previous, snapshot)
-      && previous.nativePrefixDigest !== null
-      && snapshot.nativeMessages.length >= previousNativeCount
-      && transcriptRevision(snapshot.nativeMessages.slice(0, previousNativeCount))
-        === previous.nativePrefixDigest,
-    );
+    const priorNativePrefixMatches = previous
+      ? nativePrefixMatchesView(previous, snapshot, reconciledNativeMessages)
+      : false;
     const retainedLiveStartSeq = previous
       ? Math.max(previous.historyLastSeq + 1, previous.retainedStartSeq)
       : 1;
@@ -720,7 +711,7 @@ export class ChatViewStore {
       carryOverRevision: page.carryOverRevision,
       agentOwnershipEpoch: page.agentOwnershipEpoch,
       archivedLogicalCount: page.archivedLogicalCount,
-      nativePrefixDigest: null,
+      nativePrefixDigest: page.nativePrefixDigest,
       evictedLiveDigest: new OrderedTranscriptDigest(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,

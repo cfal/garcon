@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentIntegration } from '../../index.js';
+import { computeAgentTranscriptRevision } from '../../transcript-revision.js';
 import { validateAgentIntegration } from '../conformance.js';
 
 const settings = { ownerId: 'other', schemaVersion: 1, values: {} } as const;
+const emptyRevision = computeAgentTranscriptRevision([]);
 
 const integration = {
   descriptor: {
@@ -27,9 +29,9 @@ const integration = {
   },
   transcript: {
     resolveNativeSession: async () => null,
-    load: async () => ({ messages: [], revision: 'empty' }),
+    load: async () => ({ messages: [], revision: emptyRevision }),
     preview: async () => null,
-    revision: async () => 'empty',
+    revision: async () => emptyRevision,
     resolveIndexSource: async () => null,
     refreshIndexSource: async () => null,
     describeSource: async () => null,

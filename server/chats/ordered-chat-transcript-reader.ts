@@ -214,6 +214,9 @@ export class OrderedChatTranscriptReader {
     const nativeMessages = native.kind === 'snapshot'
       ? sliceFromNewest(native.messages, boundedLimit, boundedOffset)
       : native.messages;
+    const nativePrefixDigest = native.kind === 'snapshot'
+      ? transcriptRevision(native.messages)
+      : null;
     const messages: ChatMessage[] = [];
     const archivedEnd = Math.min(end, archivedCount);
     if (start < archivedEnd) {
@@ -244,6 +247,7 @@ export class OrderedChatTranscriptReader {
       carryOverRevision,
       agentOwnershipEpoch: entry.agentOwnershipEpoch,
       archivedLogicalCount: archivedCount,
+      nativePrefixDigest,
     };
   }
 

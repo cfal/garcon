@@ -774,7 +774,7 @@ describe('ChatViewStore', () => {
 
       await store.getOrCreateMessages('chat-1', snapshotLoader(async () => initialHistory));
       const fullGeneration = store.getCursor('chat-1').generationId;
-      expect(fullGeneration).not.toBe(initial.generationId);
+      expect(fullGeneration).toBe(initial.generationId);
       await store.reconcileNativeSnapshot('chat-1', nativeReconciliation(initialHistory));
       const preserved = store.getCursor('chat-1').generationId;
       await store.reconcileNativeSnapshot('chat-1', nativeReconciliation([
@@ -1055,8 +1055,44 @@ describe('ChatViewStore', () => {
 
     const loaded = await store.getOrCreateMessages('chat-1', snapshotLoader(loadAll));
     expect(loaded.map((message) => message.content)).toEqual(['one', 'two', 'three']);
+    expect(store.getCursor('chat-1')?.generationId).toBe(page.generationId);
     expect(store.getLoadedMessages('chat-1')).toHaveLength(3);
     expect(loadAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('rotates a page generation when the full snapshot revision changed', async () => {
+    const store = new ChatViewStore(() => false);
+    const history = [user('one'), assistant('two'), assistant('three')];
+    const page = await store.getOrCreatePage('chat-1', {
+      loadAll: snapshotLoader(async () => history),
+      loadPage: async (limit, offset) => historyPage(history, limit, offset),
+    }, 1);
+
+    await store.getOrCreateMessages(
+      'chat-1',
+      snapshotLoader(async () => history, { nativeRevision: 'changed-native-revision' }),
+    );
+
+    expect(store.getCursor('chat-1')?.generationId).not.toBe(page.generationId);
+  });
+
+  it('rotates a page generation when retained native content changed under the same revision', async () => {
+    const store = new ChatViewStore(() => false);
+    const history = [user('one'), assistant('two'), assistant('three')];
+    const pageSnapshot = transcriptSnapshot(history);
+    const page = await store.getOrCreatePage('chat-1', {
+      loadAll: snapshotLoader(async () => history),
+      loadPage: async (limit, offset) => historyPage(history, limit, offset, {
+        compositeRevision: pageSnapshot.compositeRevision,
+      }),
+    }, 1);
+
+    await store.getOrCreateMessages('chat-1', snapshotLoader(
+      async () => [user('one'), assistant('two'), assistant('changed-three')],
+      { compositeRevision: pageSnapshot.compositeRevision },
+    ));
+
+    expect(store.getCursor('chat-1')?.generationId).not.toBe(page.generationId);
   });
 
   it('requires a snapshot when a replay cursor predates the retained tail', async () => {

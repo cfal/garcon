@@ -3,6 +3,7 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentTranscriptIndexSourceRef } from './transcript-index.js';
+import type { AgentTranscriptRevision } from '../transcript-revision.js';
 
 export interface AgentTranscript {
   /**
@@ -15,7 +16,7 @@ export interface AgentTranscript {
     request: AgentTranscriptRequest & { readonly page: { readonly limit: number; readonly offset: number } },
   ): Promise<AgentTranscriptPage | null>;
   preview(request: AgentTranscriptRequest): Promise<AgentTranscriptPreview | null>;
-  revision(request: AgentTranscriptRequest): Promise<string>;
+  revision(request: AgentTranscriptRequest): Promise<AgentTranscriptRevision>;
   resolveIndexSource(
     request: AgentTranscriptRequest,
   ): Promise<AgentTranscriptIndexSourceRef | null>;
@@ -39,7 +40,7 @@ export type AgentTranscriptSourceLocation =
 
 export interface AgentTranscriptSnapshot {
   readonly messages: readonly ChatMessage[];
-  readonly revision: string;
+  readonly revision: AgentTranscriptRevision;
 }
 
 export interface AgentTranscriptRequest {
@@ -60,7 +61,8 @@ export interface AgentTranscriptPage {
   readonly hasMore: boolean;
   readonly offset: number;
   readonly limit: number;
-  readonly revision: string;
+  /** Canonically identifies the complete rendered transcript, independent of the requested window. */
+  readonly revision: AgentTranscriptRevision;
 }
 
 export interface AgentTranscriptReleaseRequest extends AgentTranscriptRequest {

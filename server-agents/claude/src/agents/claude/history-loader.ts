@@ -22,7 +22,11 @@ import { extractCompactionSummary, parseCompactMetadata } from './compaction.js'
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { attachNativeMessageSource, getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
-import type { AgentLogger, AgentTranscriptPage } from '@garcon/server-agent-interface';
+import type {
+  AgentLogger,
+  AgentTranscriptPage,
+  AgentTranscriptRevision,
+} from '@garcon/server-agent-interface';
 import {
   TranscriptRevisionAccumulator,
   attachCompactionRevisionSource,
@@ -453,7 +457,7 @@ async function scanClaudeMessagePage(
 ): Promise<{
   total: number;
   messages: ChatMessage[];
-  revision: string;
+  revision: AgentTranscriptRevision;
   requiresFullLoad: boolean;
 }> {
   let total = 0;

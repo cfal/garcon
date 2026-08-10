@@ -9,7 +9,11 @@ import {
 } from './history-normalizer.js';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { ChatMessage } from '@garcon/common/chat-types';
-import type { AgentLogger, AgentTranscriptPage } from '@garcon/server-agent-interface';
+import type {
+  AgentLogger,
+  AgentTranscriptPage,
+  AgentTranscriptRevision,
+} from '@garcon/server-agent-interface';
 import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
 import {
   TranscriptRevisionAccumulator,
@@ -191,7 +195,7 @@ async function scanCodexMessagePage(
 ): Promise<{
   summary: CodexMessageSummary;
   messages: ChatMessage[];
-  revision: string;
+  revision: AgentTranscriptRevision;
   requiresFullLoad: boolean;
 }> {
   const summary: CodexMessageSummary = {

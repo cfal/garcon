@@ -100,17 +100,9 @@ export function reconcileNativeSnapshotView(
   const retainedLiveEntries = previous?.messages.filter(
     (entry) => entry.seq > previous.historyLastSeq,
   ) ?? [];
-  const previousNativeCount = previous
-    ? Math.max(0, previous.historyLastSeq - snapshot.archivedLogicalCount)
-    : 0;
-  const priorNativePrefixMatches = Boolean(
-    previous
-    && persistenceMatches(previous, snapshot)
-    && previous.nativePrefixDigest !== null
-    && nativeMessages.length >= previousNativeCount
-    && transcriptRevision(nativeMessages.slice(0, previousNativeCount))
-      === previous.nativePrefixDigest,
-  );
+  const priorNativePrefixMatches = previous
+    ? nativePrefixMatchesView(previous, snapshot, nativeMessages)
+    : false;
   const retainedLiveStartSeq = previous
     ? Math.max(previous.historyLastSeq + 1, previous.retainedStartSeq)
     : snapshot.archivedLogicalCount + 1;
@@ -193,6 +185,36 @@ export function persistenceMatches(
   return view.carryOverRevision === input.carryOverRevision
     && view.agentOwnershipEpoch === input.agentOwnershipEpoch
     && view.archivedLogicalCount === input.archivedLogicalCount;
+}
+
+export function nativePrefixMatchesView(
+  view: MutableChatView,
+  snapshot: NativeSnapshotReconciliation,
+  nativeMessages: readonly ChatMessage[],
+): boolean {
+  if (!persistenceMatches(view, snapshot)) return false;
+  const previousNativeCount = Math.max(
+    0,
+    view.historyLastSeq - snapshot.archivedLogicalCount,
+  );
+  if (nativeMessages.length < previousNativeCount) return false;
+  const retainedNativeOverlapMatches = view.messages
+    .filter((entry) => (
+      entry.seq > snapshot.archivedLogicalCount
+      && entry.seq <= view.historyLastSeq
+    ))
+    .every((entry) => retainedMessageMatchesNative(
+      entry.message,
+      nativeMessages[entry.seq - snapshot.archivedLogicalCount - 1],
+    ));
+  if (!retainedNativeOverlapMatches) return false;
+  if (view.nativePrefixDigest !== null) {
+    return transcriptRevision(nativeMessages.slice(0, previousNativeCount))
+      === view.nativePrefixDigest;
+  }
+  // Canonical page and snapshot revisions identify the same complete transcript,
+  // which bootstraps page-backed views without treating native growth as safe.
+  return view.compositeRevision === snapshot.compositeRevision;
 }
 
 function createNativeOnlyGeneration(input: ReconcileNativeViewInput & {

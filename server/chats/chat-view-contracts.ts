@@ -11,6 +11,7 @@ export interface ChatHistoryPage {
   carryOverRevision: string;
   agentOwnershipEpoch: string;
   archivedLogicalCount: number;
+  nativePrefixDigest: string | null;
 }
 
 export interface ChatTranscriptSnapshot {
@@ -34,4 +35,3 @@ export interface AppendedChatViewMessages {
   lastSeq: number;
   skipped?: boolean;
 }
-
