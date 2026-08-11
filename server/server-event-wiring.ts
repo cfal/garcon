@@ -656,6 +656,10 @@ export function wireServerEvents({
   });
   chatRegistry.onChatAdded((chatId) => {
     markSearchCatalogDirty(chatId);
+    // A first-turn chat reserves execution before its registry entry exists,
+    // so the reservation's processing invalidation was dropped by the
+    // existence guard. Republish at the moment the chat becomes broadcastable.
+    if (processing.phase(chatId) !== null) publishProcessing(chatId);
   });
   chatRegistry.onChatRemoved((chatId, removalReason) => {
     agentRegistry.discardTurn(chatId);
