@@ -87,6 +87,16 @@ describe('main', () => {
           },
           pendingUserInputs: [],
           transcript: { availability: 'not-requested' },
+          transientFeed: {
+            serverInstanceId: 'instance',
+            chatId: CHAT_ID,
+            agentOwnershipEpoch: 'epoch-1',
+            generationId: 'generation-0',
+            resetTransactionId: null,
+            transientRevision: 0,
+            stateDigest: 'transient-v1:empty',
+            rows: [],
+          },
         });
       },
       discoverRuntime: stubDiscovery,

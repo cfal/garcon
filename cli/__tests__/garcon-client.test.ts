@@ -87,6 +87,16 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
       pageOldestSeq: 0,
       hasMore: false,
     },
+    transientFeed: {
+      serverInstanceId: connection.instanceId,
+      chatId: runRequest.chatId,
+      agentOwnershipEpoch: 'epoch-1',
+      generationId: 'generation-1',
+      resetTransactionId: null,
+      transientRevision: 0,
+      stateDigest: 'transient-v1:empty',
+      rows: [],
+    },
     ...overrides,
   };
 }
@@ -120,6 +130,10 @@ describe('GarconClient', () => {
   test.each([
     ['chat ID', () => validSnapshot({
       chat: { ...validSnapshot().chat as object, id: '1785337200123457' },
+      transientFeed: {
+        ...validSnapshot().transientFeed as object,
+        chatId: '1785337200123457',
+      },
     })],
     ['message limit', () => validSnapshot({ messageLimit: 9 })],
     ['server instance', () => validSnapshot({
