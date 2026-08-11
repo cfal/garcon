@@ -137,6 +137,13 @@ export function createAgentOwnedProjection(
             });
             controls.delete(event.chatId);
           }
+          // The settled boundary is where newly persisted live rows gain their
+          // native aliases and the projection-ahead fence recomputes; an audit
+          // failure is diagnostic and never blocks the terminal.
+          await transcript.refreshNativeContinuity({
+            chat,
+            signal: AbortSignal.timeout(10_000),
+          }).catch((error) => options.onProjectionError?.(error, event.chatId));
           await transcript.emitTerminal({
             chat,
             operation: terminalOperation,

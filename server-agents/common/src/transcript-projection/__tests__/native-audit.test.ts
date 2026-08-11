@@ -276,6 +276,44 @@ describe('existing-journal native audit', () => {
     expect(resolved.kind).toBe('ready');
   });
 
+  it('binds a live row for forking at the settled boundary without restart', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+
+    // A live commit lands in the journal before the provider persists it.
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new UserMessage('2026-06-01T00:00:00.000Z', 'streamed')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'item-1', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+    const before = await openContents(stream);
+    await expect(stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(before.checkpoint, before.entries[0]!.id),
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'projection-ahead-of-provider' });
+
+    // Provider persistence observed at the settled boundary binds the alias.
+    persisted = [nativeMessage('item-1', 'streamed')];
+    await stream.refreshNativeContinuity({ chat, signal: signal() });
+    const after = await openContents(stream);
+    expect(after.contents).toEqual(['streamed']);
+    expect(after.checkpoint.projection.durableRevision)
+      .toBe(before.checkpoint.projection.durableRevision);
+    const resolved = await stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(after.checkpoint, after.entries[0]!.id),
+    });
+    expect(resolved.kind).toBe('ready');
+  });
+
   it('serves the committed journal unchanged when evidence is unavailable or empty', async () => {
     const directory = await createDirectory();
     const first = await openContents(streamOver(directory, () => [

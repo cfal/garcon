@@ -192,31 +192,41 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     if (outcome.suffix.length > 0) {
       await journal.appendImported(seedEntries(request.chat, outcome.suffix));
     }
-    const importedAliases = aliasesFromSeeds(outcome.suffix);
-    // Committed identities the provider has now persisted gain their native
-    // positions, which is what makes rows journalled from live events line
-    // addressable for fork continuity.
-    const boundAliases = Object.fromEntries(
-      [...outcome.matchedAliases]
-        .filter(([key]) => state.aliases[key] === undefined
-          || nativeAliasLineNumber(state.aliases[key]) === null)
-        .flatMap(([key, seed]) => {
-          const alias = seed.nativeAlias === undefined ? nativeAlias(seed.message) : seed.nativeAlias;
-          return alias ? [[key, alias] as const] : [];
-        }),
-    );
-    const floor = outcome.nativeRetentionFloor;
-    if (Object.keys(importedAliases).length > 0
-        || Object.keys(boundAliases).length > 0
-        || (floor !== null && floor > state.nativeRetentionFloor)) {
-      await journal.updateNativeMetadata({
-        nativeRetentionFloor: floor !== null && floor > state.nativeRetentionFloor
-          ? floor
-          : state.nativeRetentionFloor,
-        aliases: { ...state.aliases, ...boundAliases, ...importedAliases },
-      });
-    }
+    await applyAuditMetadata(journal, outcome, aliasesFromSeeds(outcome.suffix));
     return outcome.aheadFromOrdinal;
+  }
+
+  // Rebinds native continuity for an open segment at a settled provider
+  // boundary: a newly persisted live row gains its native alias without a
+  // process restart, the ahead fence clears once the provider catches up, and
+  // divergence records durably. Committed rows are never appended, reread into
+  // the materialization, or re-rendered here.
+  async refreshNativeContinuity(request: AgentTranscriptRequestV4): Promise<void> {
+    const segment = this.#segments.get(segmentKey(request.chat));
+    if (!segment) return;
+    const evidence = await this.options.bootstrap(request);
+    if (evidence.kind !== 'ready') return;
+    await segment.gate.run(async () => {
+      const state = segment.journal.state;
+      const outcome = auditNativeEvidence({
+        ownerId: this.options.ownerId,
+        entries: state.entries,
+        seeds: evidence.value,
+      });
+      if (outcome.kind === 'skipped') return;
+      if (outcome.kind === 'diverged') {
+        if (state.nativeContinuity !== 'diverged') {
+          await segment.journal.updateNativeMetadata({
+            nativeRetentionFloor: state.nativeRetentionFloor,
+            aliases: state.aliases,
+            nativeContinuity: 'diverged',
+          });
+        }
+        return;
+      }
+      await applyAuditMetadata(segment.journal, outcome, {});
+      segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
+    });
   }
 
   async replay(
@@ -861,6 +871,36 @@ function messageTimestamp(message: ChatMessage): string | null {
   return 'timestamp' in message && typeof message.timestamp === 'string'
     ? message.timestamp
     : null;
+}
+
+// Binds matched aliases and an explained retention-floor advance from one
+// audit outcome. Only identities without a native line binding are rebound.
+async function applyAuditMetadata(
+  journal: AgentProjectionJournal,
+  outcome: Extract<ReturnType<typeof auditNativeEvidence>, { kind: 'aligned' }>,
+  importedAliases: JsonObject,
+): Promise<void> {
+  const state = journal.state;
+  const boundAliases = Object.fromEntries(
+    [...outcome.matchedAliases]
+      .filter(([key]) => state.aliases[key] === undefined
+        || nativeAliasLineNumber(state.aliases[key]) === null)
+      .flatMap(([key, seed]) => {
+        const alias = seed.nativeAlias === undefined ? nativeAlias(seed.message) : seed.nativeAlias;
+        return alias ? [[key, alias] as const] : [];
+      }),
+  );
+  const floor = outcome.nativeRetentionFloor;
+  if (Object.keys(importedAliases).length > 0
+      || Object.keys(boundAliases).length > 0
+      || (floor !== null && floor > state.nativeRetentionFloor)) {
+    await journal.updateNativeMetadata({
+      nativeRetentionFloor: floor !== null && floor > state.nativeRetentionFloor
+        ? floor
+        : state.nativeRetentionFloor,
+      aliases: { ...state.aliases, ...boundAliases, ...importedAliases },
+    });
+  }
 }
 
 function aliasesFromSeeds(seeds: readonly AgentTranscriptSeedEntry[]): JsonObject {
