@@ -1378,7 +1378,9 @@ describe('OpenCodeRuntime abort', () => {
 
     await expect(successor).resolves.toBeUndefined();
     expect(failures).toEqual([]);
-    expect(finishes).toHaveLength(1);
+    // One terminal for the aborted turn and one for the successor; the late
+    // unwind mints nothing extra.
+    expect(finishes).toHaveLength(2);
 
     eventStream.close();
     runtime.shutdown();
@@ -1435,7 +1437,9 @@ describe('OpenCodeRuntime abort', () => {
 
     acknowledged.resolve({ data: true });
     await expect(aborting).resolves.toBe(true);
-    expect(finishes).toEqual([]);
+    // The acknowledged stop emits exactly one terminal; the skipped unwind
+    // idle adds none.
+    expect(finishes).toEqual(['finished']);
     expect(runtime.isRunning('session-1')).toBe(false);
     eventStream.close();
     runtime.shutdown();

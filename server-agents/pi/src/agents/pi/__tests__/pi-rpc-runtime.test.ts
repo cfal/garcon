@@ -250,7 +250,7 @@ function collect(runtime) {
 
 async function writePiSessionRows(
   nativePath: string,
-  rows: readonly { role: 'user' | 'assistant'; text: string }[],
+  rows: readonly { role: 'user' | 'assistant' | 'toolResult'; text: string }[],
 ): Promise<void> {
   const entries = [
     { type: 'session', version: 3, id: 'pi-session-1', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
@@ -261,7 +261,9 @@ async function writePiSessionRows(
       timestamp: `2026-01-01T00:00:0${index + 1}.000Z`,
       message: row.role === 'user'
         ? { role: 'user', content: row.text, timestamp: 1767225601000 + index }
-        : { role: 'assistant', content: [{ type: 'text', text: row.text }], api: 'anthropic-messages', provider: 'anthropic', model: 'test', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, stopReason: 'stop', timestamp: 1767225601000 + index },
+        : row.role === 'toolResult'
+          ? { role: 'toolResult', toolCallId: 'call-1', content: [{ type: 'text', text: row.text }], timestamp: 1767225601000 + index }
+          : { role: 'assistant', content: [{ type: 'text', text: row.text }], api: 'anthropic-messages', provider: 'anthropic', model: 'test', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, stopReason: 'stop', timestamp: 1767225601000 + index },
     })),
   ];
   await fs.writeFile(nativePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
@@ -427,7 +429,8 @@ describe('PiRpcRuntime', () => {
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
     expect(seen.failed).toEqual([]);
-    expect(seen.finished).toEqual([]);
+    // The stop is turn-terminal work: one finished event releases the turn.
+    expect(seen.finished).toEqual(['chat-1']);
     await runtime.shutdown();
   });
 
@@ -675,6 +678,17 @@ describe('PiRpcRuntime', () => {
     await waitForActive(runtime);
 
     const fake = fakes[0];
+    // Finalized message occurrences carry the rendered rows, tools included;
+    // per-run tool execution events are progress-only.
+    fake.pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'call-1', name: 'bash', arguments: { command: 'echo hi' } }],
+        stopReason: 'toolUse',
+        timestamp: 0,
+      },
+    });
     fake.pushEvent({
       type: 'tool_execution_start',
       toolCallId: 'call-1',
@@ -686,6 +700,15 @@ describe('PiRpcRuntime', () => {
       toolCallId: 'call-1',
       result: { content: [{ type: 'text', text: 'hi' }] },
       isError: false,
+    });
+    fake.pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        content: [{ type: 'text', text: 'hi' }],
+        timestamp: 0,
+      },
     });
     fake.pushEvent({
       type: 'message_end',
@@ -708,11 +731,13 @@ describe('PiRpcRuntime', () => {
     await turn;
     expect(seen.finished).toEqual(['chat-2']);
     expect(seen.messages.flatMap((entry) => entry.messages)).toHaveLength(3);
-    // The journalled assistant row is not in the native file yet, so
-    // settlement stays unresolved until Pi persists it.
+    // The journalled occurrences are not in the native file yet, so
+    // settlement stays unresolved until Pi persists every one of them.
     await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
     await writePiSessionRows(baseResumeRequest().nativePath, [
       { role: 'user', text: 'continue' },
+      { role: 'assistant', text: 'tool call' },
+      { role: 'toolResult', text: 'hi' },
       { role: 'assistant', text: 'done' },
     ]);
     await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('confirmed');
@@ -829,7 +854,7 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('stop kills the process without run terminal events and resolves the turn', async () => {
+  it('stop kills the process, emits one stop terminal, and resolves the turn', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
     const seen = collect(runtime);
@@ -839,7 +864,7 @@ describe('PiRpcRuntime', () => {
     expect(runtime.isRunning('pi-session-1')).toBe(true);
     expect(runtime.abort('pi-session-1')).toBe(true);
     await turn;
-    expect(seen.finished).toEqual([]);
+    expect(seen.finished).toEqual(['chat-2']);
     expect(seen.failed).toEqual([]);
     expect(seen.processing.at(-1)).toEqual({ chatId: 'chat-2', isProcessing: false });
     expect(fakes[0].proc.killed).toBe(true);

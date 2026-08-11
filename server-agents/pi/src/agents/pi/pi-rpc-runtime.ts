@@ -5,11 +5,9 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import {
   ErrorMessage,
-  ToolResultMessage,
 } from '@garcon/common/chat-types';
 import { isArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
-import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
@@ -68,7 +66,6 @@ import {
   verifyPiTurnSettlement,
   type PiTurnSettlementProof,
 } from './pi-turn-settlement.js';
-import { convertPiToolUse } from './tool-use-converter.js';
 
 export interface PiModelReader {
   getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
@@ -699,11 +696,10 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       if (session.turn && typeof role === 'string') {
         addExpectedNativeMessage(session.turn.expectedNative, role);
       }
-      const messages = convertPiMessage(message, {
-        includeToolCalls: false,
-        includeToolResults: false,
-        includeUser: false,
-      });
+      // Rendering the full occurrence here, tools included, keeps live rows
+      // identical to the evidence conversion of the same session entry, so
+      // the audit matches by identity without per-event reassembly.
+      const messages = convertPiMessage(message, { includeUser: false });
       if (occurrenceOrdinal !== null && session.turn?.turnId) {
         messages.forEach((rendered, withinSourceOrdinal) => {
           attachNativeMessageSource(rendered, {
@@ -725,37 +721,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
           new ErrorMessage(timestamp, typeof errorMessage === 'string' ? errorMessage : 'Pi turn failed.'),
         ], session.eventMetadata);
       }
-      return;
-    }
-
-    if (type === 'tool_execution_start') {
-      this.emitMessages(session.chatId, [
-        convertPiToolUse(
-          timestamp,
-          typeof event.toolCallId === 'string' ? event.toolCallId : '',
-          typeof event.toolName === 'string' ? event.toolName : 'Unknown',
-          event.args,
-        ),
-      ], session.eventMetadata);
-      return;
-    }
-
-    if (type === 'tool_execution_end') {
-      const result = event.result && typeof event.result === 'object'
-        ? event.result as Record<string, unknown>
-        : event.result;
-      this.emitMessages(session.chatId, [
-        new ToolResultMessage(
-          timestamp,
-          typeof event.toolCallId === 'string' ? event.toolCallId : '',
-          normalizeToolResultContent(
-            result && typeof result === 'object' && 'content' in result
-              ? (result as Record<string, unknown>).content
-              : result,
-          ),
-          Boolean(event.isError),
-        ),
-      ], session.eventMetadata);
       return;
     }
 
@@ -814,6 +779,18 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
   #finishSettle(session: PiRpcSession): void {
     const turn = session.turn;
     if (!turn) return;
+    const steeringUnresolved = this.#recordSettlement(session, turn);
+    this.#completeTurn(session, turn, 'finished');
+    if (steeringUnresolved) {
+      this.#retireInBackground(session, 'steering remained uncertain at settle');
+    }
+  }
+
+  // Captures the turn's persistence proof: the ordered occurrences finalized
+  // so far, the pre-prompt baseline, and whether accepted steering ever left
+  // an unpersisted or queued remainder. A stopped turn records the same
+  // proof so its persisted prefix is provable at the settled boundary.
+  #recordSettlement(session: PiRpcSession, turn: PiActiveTurn): boolean {
     const hasUnpersistedSteer = Array.from(turn.steerSubmissions).some(
       (submission) => submission.accepted && !submission.persisted,
     );
@@ -825,10 +802,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       nativePath: session.nativePath,
       turnId: turn.turnId ?? null,
     });
-    this.#completeTurn(session, turn, 'finished');
-    if (hasUnpersistedSteer || hasQueuedSteering) {
-      this.#retireInBackground(session, 'steering remained uncertain at settle');
-    }
+    return hasUnpersistedSteer || hasQueuedSteering;
   }
 
   // Verifies the last finished turn's native persistence evidence with a
@@ -883,6 +857,14 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     });
     if (outcome === 'finished') {
       this.#emitLifecycle(session, 'turn-finished', () => {
+        this.emitFinished(session.chatId, 0, session.eventMetadata);
+      });
+    } else if (outcome === 'stopped') {
+      // A stop is turn-terminal work like any other: the terminal event is
+      // what releases the projection operation and drives the stop-settled
+      // sequence, with success still gated on the recorded persistence proof.
+      this.#recordSettlement(session, turn);
+      this.#emitLifecycle(session, 'turn-stopped', () => {
         this.emitFinished(session.chatId, 0, session.eventMetadata);
       });
     } else if (outcome === 'failed') {

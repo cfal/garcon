@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {
   isAbortAcknowledged,
   type ChatStopIntent,
+  type ChatStopOutcome,
   type ChatMessage,
 } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
@@ -29,6 +30,7 @@ import type { TelegramSettingsStore } from './notifications/telegram-settings-st
 import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import type { SnippetService } from './snippets/service.js';
 import { createLogger } from './lib/log.js';
+import { matchesTurnIdentity } from './lib/turn-identity.js';
 import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { UserAbortLifecycleCoordinator } from './chats/user-abort-lifecycle-coordinator.js';
@@ -474,6 +476,52 @@ export function wireServerEvents({
     if (inlineTerminalReleases.has(chatId)) return;
     publishProcessing(chatId);
   });
+  // A stop acknowledged against an identified turn broadcasts its
+  // chat-session-stopped after that turn's terminal-driven processing update,
+  // preserving the per-chat terminal event order; a bounded fallback covers a
+  // provider whose terminal never arrives.
+  const pendingStopBroadcasts = new Map<string, {
+    outcome: ChatStopOutcome;
+    intent: ChatStopIntent;
+    turn: TurnEventMetadata;
+    timer: ReturnType<typeof setTimeout>;
+  }[]>();
+  // The provider terminal can release before the stop command resolves; the
+  // last released identity lets that acknowledgement broadcast immediately.
+  const lastReleasedTerminalByChatId = new Map<string, TurnEventMetadata | null>();
+  const broadcastSessionStopped = (
+    chatId: string,
+    outcome: ChatStopOutcome,
+    intent: ChatStopIntent,
+  ) => {
+    scheduleChatTask(chatId, 'server-events: session-stopped broadcast failed', () => {
+      if (!chatExists(chatId)) return;
+      broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
+    });
+  };
+  // Inline delivery keeps the design order within the terminal task:
+  // processing false, chat-session-stopped, then the run terminal message.
+  const flushPendingStopBroadcasts = (
+    chatId: string,
+    turnMetadata: TurnEventMetadata | undefined,
+    delivery: 'inline' | 'scheduled' = 'scheduled',
+  ) => {
+    const pending = pendingStopBroadcasts.get(chatId);
+    if (!pending?.length) return;
+    const matching = pending.filter((entry) => (
+      !turnMetadata || matchesTurnIdentity(entry.turn, turnMetadata)
+    ));
+    if (!matching.length) return;
+    pendingStopBroadcasts.set(chatId, pending.filter((entry) => !matching.includes(entry)));
+    for (const entry of matching) {
+      clearTimeout(entry.timer);
+      if (delivery === 'inline' && chatExists(chatId)) {
+        broadcast(new ChatSessionStoppedMessage(chatId, entry.outcome, entry.intent));
+      } else {
+        broadcastSessionStopped(chatId, entry.outcome, entry.intent);
+      }
+    }
+  };
   const releaseTerminalOwnership = async (
     chatId: string,
     turnMetadata: TurnEventMetadata | undefined,
@@ -487,6 +535,8 @@ export function wireServerEvents({
     if (chatExists(chatId)) {
       broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
     }
+    lastReleasedTerminalByChatId.set(chatId, turnMetadata ? { ...turnMetadata } : null);
+    flushPendingStopBroadcasts(chatId, turnMetadata, 'inline');
   };
   agentRegistry.onSessionCreated((chatId) => {
     if (!chatExists(chatId)) return;
@@ -554,6 +604,17 @@ export function wireServerEvents({
           await releaseTerminalOwnership(chatId, turnMetadata);
           released = true;
           await settleExecutionCommand(chatId, turnMetadata, 'finished');
+          // The stop completed; the terminal-driven sequence still surfaces a
+          // finished run rather than provider failure or silence.
+          if (chatExists(chatId)) {
+            broadcast(new AgentRunFinishedMessage(
+              chatId,
+              0,
+              turnMetadata?.turnId,
+              turnMetadata?.clientRequestId,
+              turnMetadata?.upstreamRequestId,
+            ));
+          }
         } finally {
           if (!released) await releaseTerminalOwnership(chatId, turnMetadata);
         }
@@ -750,8 +811,18 @@ export function wireServerEvents({
     if (acknowledgement.terminalDisposition === 'suppress') {
       const failure = takeDeferredTerminalFailure(chatId, acknowledgement.turn);
       if (failure) {
-        scheduleChatTask(chatId, 'server-events: interrupted command settlement failed', () =>
-          settleExecutionCommand(chatId, failure.turnMetadata, 'finished'));
+        scheduleChatTask(chatId, 'server-events: interrupted command settlement failed', async () => {
+          await settleExecutionCommand(chatId, failure.turnMetadata, 'finished');
+          if (chatExists(chatId)) {
+            broadcast(new AgentRunFinishedMessage(
+              chatId,
+              0,
+              failure.turnMetadata?.turnId,
+              failure.turnMetadata?.clientRequestId,
+              failure.turnMetadata?.upstreamRequestId,
+            ));
+          }
+        });
       }
     } else if (acknowledgement.terminalDisposition === 'release') {
       const failure = takeDeferredTerminalFailure(chatId, acknowledgement.turn);
@@ -759,10 +830,19 @@ export function wireServerEvents({
       else reconcilePendingAfterTerminal(chatId, 'rejected stop');
     }
     publishProcessing(chatId);
-    scheduleChatTask(chatId, 'server-events: session-stopped broadcast failed', () => {
-      if (!chatExists(chatId)) return;
-      broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
-    });
+    const releasedTerminal = lastReleasedTerminalByChatId.get(chatId);
+    if (abortAcknowledged
+        && acknowledgement.turn?.turnId
+        && !(releasedTerminal && matchesTurnIdentity(acknowledgement.turn, releasedTerminal))) {
+      const turn = { ...acknowledgement.turn };
+      const timer = setTimeout(() => flushPendingStopBroadcasts(chatId, undefined), 10_000);
+      timer.unref?.();
+      const pending = pendingStopBroadcasts.get(chatId) ?? [];
+      pending.push({ outcome, intent, turn, timer });
+      pendingStopBroadcasts.set(chatId, pending);
+    } else {
+      broadcastSessionStopped(chatId, outcome, intent);
+    }
     if (acknowledgement.turn?.turnId) {
       scheduleChatTask(chatId, 'server-events: interrupted receipt settlement failed', async () => {
         if (abortAcknowledged) {

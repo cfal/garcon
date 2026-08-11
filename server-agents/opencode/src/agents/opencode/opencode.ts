@@ -1347,8 +1347,12 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.steering.stagePendingCleanup(session);
     session.status = 'aborted';
     session.lastActivityAt = Date.now();
-    this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session aborted'));
     this.#cancelPendingPermissionsForSession(agentSessionId, 'aborted');
+    // The acknowledged stop is turn-terminal work: the terminal event drives
+    // the stop-settled sequence and releases the projection operation.
+    this.emitProcessing(session.chatId, false);
+    this.emitFinished(session.chatId, 0, turn.eventMetadata);
+    this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session aborted'));
     return true;
   }
 

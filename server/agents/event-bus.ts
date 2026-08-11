@@ -35,6 +35,10 @@ interface AbortableTurnWaiter {
 
 export class AgentEventBus {
   readonly #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
+  // A stop can settle the queue-side attempt before the provider's
+  // authoritative terminal event applies; the settled identity is retained
+  // until the next turn so that terminal still dispatches exactly once.
+  readonly #settledTurnByChatId = new Map<string, TurnEventMetadata>();
   readonly #abortableTurnByChatId = new Map<string, TurnEventMetadata>();
   readonly #abortableWaiters = new Map<string, Set<AbortableTurnWaiter>>();
   readonly #processingListeners = new Set<(chatId: string, processing: boolean) => void | Promise<void>>();
@@ -108,17 +112,23 @@ export class AgentEventBus {
     if (abortable && !matchesTurnIdentity(turn, abortable)) {
       this.#abortableTurnByChatId.delete(chatId);
     }
+    this.#settledTurnByChatId.delete(chatId);
     this.#turnMetadataByChatId.set(chatId, turn);
   }
 
   clearTurn(chatId: string): void {
     this.#turnMetadataByChatId.delete(chatId);
+    this.#settledTurnByChatId.delete(chatId);
     this.#clearAbortability(chatId);
   }
 
   settleTurn(chatId: string, turn: TurnEventMetadata): void {
     const active = this.#turnMetadataByChatId.get(chatId);
-    if (active && matchesTurnIdentity(active, turn)) this.clearTurn(chatId);
+    if (active && matchesTurnIdentity(active, turn)) {
+      this.#turnMetadataByChatId.delete(chatId);
+      this.#settledTurnByChatId.set(chatId, active);
+      this.#clearAbortability(chatId);
+    }
   }
 
   getActiveTurn(chatId: string): TurnEventMetadata | undefined {
@@ -225,7 +235,8 @@ export class AgentEventBus {
       }
       case 'terminal': {
         const metadata = operationMetadata(event.operation);
-        if (!this.#isActive(event, metadata)) return;
+        if (!this.#isTerminalDeliverable(event.chatId, metadata)) return;
+        this.#settledTurnByChatId.delete(event.chatId);
         this.#clearAbortability(event.chatId);
         await this.#dispatchProjection(applied);
         if (event.outcome.kind === 'finished') {
@@ -251,9 +262,11 @@ export class AgentEventBus {
 
   async #dispatchProjectionFailure(failure: ProjectionIngressFailure): Promise<void> {
     const metadata = failureMetadata(failure)
-      ?? this.#turnMetadataByChatId.get(failure.chat.chatId);
+      ?? this.#turnMetadataByChatId.get(failure.chat.chatId)
+      ?? this.#settledTurnByChatId.get(failure.chat.chatId);
     if (!metadata || metadata.agentOwnershipEpoch !== failure.chat.agentOwnershipEpoch) return;
-    if (!this.#isActiveEntry(failure.chat.chatId, metadata)) return;
+    if (!this.#isTerminalDeliverable(failure.chat.chatId, metadata)) return;
+    this.#settledTurnByChatId.delete(failure.chat.chatId);
     this.#clearAbortability(failure.chat.chatId);
     for (const listener of this.#projectionFailureListeners) {
       await listener(failure.chat.chatId, failure.error, metadata);
@@ -262,6 +275,17 @@ export class AgentEventBus {
 
   #isActive(event: AgentStreamEvent, metadata: TurnEventMetadata): boolean {
     return this.#isActiveEntry(event.chatId, metadata);
+  }
+
+  // The terminal is the authoritative close of its turn, so it dispatches
+  // for the active turn or for the turn a stop already settled queue-side.
+  #isTerminalDeliverable(chatId: string, metadata: TurnEventMetadata): boolean {
+    const active = this.#turnMetadataByChatId.get(chatId);
+    if (active && matchesTurnIdentity(active, metadata)) return true;
+    const settled = this.#settledTurnByChatId.get(chatId);
+    if (settled && matchesTurnIdentity(settled, metadata)) return true;
+    logger.warn('agents: ignored projection event for a non-active turn', chatId);
+    return false;
   }
 
   #isActiveEntry(chatId: string, metadata: TurnEventMetadata): boolean {

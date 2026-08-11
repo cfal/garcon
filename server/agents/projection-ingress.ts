@@ -22,6 +22,9 @@ import {
   type AgentProjectionMaterialization,
 } from '@garcon/server-agent-common/transcript-projection/state';
 import { stageProjectionReset } from '@garcon/server-agent-common/transcript-projection/reset';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('agents:projection-ingress');
 
 const PAGE_SIZE = 500;
 const SUPERSEDED_EPOCH_LIMIT = 16;
@@ -241,6 +244,14 @@ export class AgentProjectionIngress {
         record.blockedError ??= error;
         if (record.failureReported) return;
         record.failureReported = true;
+        // A fenced projection refuses every later open; the cause must be
+        // visible even when failure publication finds no active turn.
+        logger.error('agents: projection apply failed; segment fenced until repair', {
+          chatId: event.chatId,
+          eventKind: event.kind,
+          error: error instanceof Error ? error.message : String(error),
+          projection: record.materialization.checkpoint.projection,
+        });
         try {
           await this.#onFailure({
             integration,
