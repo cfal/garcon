@@ -201,6 +201,18 @@ const SAFE_DIAGNOSTIC_STRING_KEYS = new Set([
   'type',
 ]);
 
+// A typed deferred or degraded history response; tests assert on the state
+// instead of a transport failure.
+export class UnavailableChatHistoryError extends Error {
+  constructor(
+    readonly chatId: string,
+    readonly historyState: { kind: 'deferred' | 'degraded'; errorCode?: string; retryable?: boolean },
+  ) {
+    super(`Chat ${chatId} history is ${historyState.kind}`);
+    this.name = 'UnavailableChatHistoryError';
+  }
+}
+
 export class GarconApiError extends Error {
   constructor(
     readonly status: number,
@@ -742,6 +754,13 @@ export class GarconTestClient {
     });
     if (options.beforeSeq !== undefined) query.set('beforeSeq', String(options.beforeSeq));
     const response = await this.get<Record<string, unknown>>(`/api/v1/chats/messages?${query}`);
+    const historyState = response.historyState as { kind?: unknown } | undefined;
+    if (historyState && historyState.kind !== 'complete') {
+      throw new UnavailableChatHistoryError(
+        requiredString(response.chatId, 'chatId'),
+        historyState as UnavailableChatHistoryError['historyState'],
+      );
+    }
     const messages = parseChatViewMessages(response.messages);
     if (!messages) throw new Error(`Invalid messages response: ${JSON.stringify(response)}`);
     if (!Array.isArray(response.pendingUserInputs)) {

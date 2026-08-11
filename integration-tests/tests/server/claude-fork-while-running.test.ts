@@ -62,8 +62,9 @@ describe('Claude fork while a turn is running', () => {
         agentSettings: claude.defaultSettings,
         model: claude.defaultModel,
       });
-      const streaming = await waitForSeqBeyond(fixture, sourceChatId, settledLastSeq + 1);
-      expect(assistantContents(streaming.messages)).toContain(`echo:${RUNNING_PROMPT}`);
+      // Admission commits the user row before provider evidence, so the wait
+      // targets the streamed assistant reply itself rather than seq movement.
+      const streaming = await waitForAssistantEcho(fixture, sourceChatId, `echo:${RUNNING_PROMPT}`);
 
       // The streamed assistant reply has no transcript line yet.
       await expectEventStreamForkRefusal(fixture.client.forkChat({
@@ -138,18 +139,18 @@ describe('Claude fork while a turn is running', () => {
   }, 30_000);
 });
 
-async function waitForSeqBeyond(
+async function waitForAssistantEcho(
   fixture: IntegrationFixture,
   chatId: string,
-  lastSeq: number,
+  content: string,
 ): Promise<Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>> {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const page = await fixture.client.getMessages(chatId);
-    if (page.lastSeq >= lastSeq) return page;
-    await Bun.sleep(1_000);
+    if (assistantContents(page.messages).includes(content)) return page;
+    await Bun.sleep(250);
   }
-  throw new Error(`Chat ${chatId} never streamed past seq ${lastSeq}`);
+  throw new Error(`Chat ${chatId} never streamed assistant content ${content}`);
 }
 
 async function expectEventStreamForkRefusal(promise: Promise<unknown>): Promise<void> {

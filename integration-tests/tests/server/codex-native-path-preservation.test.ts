@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
-import { GarconApiError } from '../../support/garcon-client.js';
+import { GarconApiError, UnavailableChatHistoryError } from '../../support/garcon-client.js';
 import { createCodexRolloutFileName } from '../../support/codex-rollout-filename.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { reloadUntilNativeContains } from '../../support/live-agent.js';
@@ -145,12 +145,13 @@ describe('Codex native transcript path preservation', () => {
           failure = error;
         }
 
-        expect(failure).toBeInstanceOf(GarconApiError);
+        // An unresolvable projection read is a typed degraded history state
+        // rather than a transport failure.
+        expect(failure).toBeInstanceOf(UnavailableChatHistoryError);
         expect(failure).toMatchObject({
-          status: 503,
-          body: {
-            success: false,
-            error: 'Chat transcript is temporarily unavailable. Retry the request.',
+          chatId,
+          historyState: {
+            kind: 'degraded',
             errorCode: 'TRANSCRIPT_UNAVAILABLE',
             retryable: true,
           },

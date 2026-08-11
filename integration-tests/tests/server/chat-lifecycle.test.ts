@@ -332,7 +332,9 @@ describe('chat lifecycle', () => {
         ))).toBe(false);
       const whileHeld = await fixture.client.getMessages(chatId);
       expect(userContents(whileHeld.messages)).toEqual(['admission-first']);
-      expect(whileHeld.pendingUserInputs.map((input) => input.content)).toEqual(['admission-first']);
+      // Projection admission commits the accepted row before provider start, so
+      // it is transcript state, not a pending overlay, while the turn is held.
+      expect(whileHeld.pendingUserInputs).toEqual([]);
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
 
       held.releaseEcho();
