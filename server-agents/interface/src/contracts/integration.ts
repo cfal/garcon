@@ -18,6 +18,11 @@ import type {
 } from './services.js';
 import type { AgentTranscriptIndexModuleReference } from './transcript-index.js';
 import type { AgentTranscript } from './transcript.js';
+import type { AgentExecutionV4 } from './execution-events-v4.js';
+import type {
+  AgentTranscriptStream,
+  AgentTransientControlCapabilityV4,
+} from './transcript-stream-v4.js';
 
 export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
@@ -42,5 +47,19 @@ export interface AgentIntegrationClass {
   new (host: AgentHost): AgentIntegration;
   readonly integrationId: string;
   readonly apiVersion: 3;
+  readonly transcriptIndex: AgentTranscriptIndexModuleReference;
+}
+
+export interface AgentIntegrationV4
+  extends Omit<AgentIntegration, 'execution' | 'transcript'> {
+  readonly execution: AgentExecutionV4;
+  readonly transcript: AgentTranscriptStream;
+  readonly transientControls: AgentTransientControlCapabilityV4 | null;
+}
+
+export interface AgentIntegrationClassV4 {
+  new (host: AgentHost): AgentIntegrationV4;
+  readonly integrationId: string;
+  readonly apiVersion: 4;
   readonly transcriptIndex: AgentTranscriptIndexModuleReference;
 }

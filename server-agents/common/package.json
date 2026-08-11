@@ -20,7 +20,8 @@
     "./logging/*": "./src/logging/*.ts",
     "./migration/*": "./src/migration/*.ts",
     "./native-session/*": "./src/native-session/*.ts",
-    "./settings/*": "./src/settings/*.ts"
+    "./settings/*": "./src/settings/*.ts",
+    "./transcript-projection/*": "./src/transcript-projection/*.ts"
   },
   "scripts": {
     "typecheck": "bunx tsc -p tsconfig.json"
