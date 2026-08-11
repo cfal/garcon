@@ -74,7 +74,7 @@ export function createProjectionEventFanout(deps: ProjectionEventFanoutDeps) {
     if (event.kind === 'commit') {
       return deps.scheduleChatTask(event.chatId, 'chat-view: projection commit failed', async () => {
         if (!deps.chatExists(event.chatId)) return;
-        await applyCommit(deps, event);
+        await applyCommit(deps, applied, event);
       });
     }
     return deps.scheduleChatTask(event.chatId, 'transient-feed: projection failed', async () => {
@@ -89,6 +89,7 @@ export function createProjectionEventFanout(deps: ProjectionEventFanoutDeps) {
 // exactly once, independent of the view application outcome.
 async function applyCommit(
   deps: ProjectionEventFanoutDeps,
+  applied: AppliedProjectionEvent,
   event: AgentTranscriptCommitEvent,
 ): Promise<void> {
   const chatId = event.chatId;
@@ -119,8 +120,15 @@ async function applyCommit(
     appendedMessages,
     carryOverMessageCount,
   }, {
-    loadAll: () => deps.loadChatSnapshot(chatId),
-    loadPage: (limit, offset) => deps.loadChatPage(chatId, limit, offset),
+    // A relist must land on the staged post-commit materialization. Reading
+    // back through the registry here would observe the ingress predecessor
+    // state and silently drop the very commit being applied.
+    loadAll: () => deps.composeProjectionSnapshot(
+      chatId,
+      applied.current.entries.map((entry) => entry.message),
+      event.checkpoint.projection.stateRevision,
+      event.checkpoint.projection,
+    ),
   });
   if (application.kind === 'applied' && application.messages.length > 0) {
     let offset = 0;

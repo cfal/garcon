@@ -74,6 +74,7 @@ function appliedCommit({
   previous,
   appended = [],
   promoted = [],
+  currentEntries = appended,
 }) {
   const checkpoint = projectionState({
     epoch: previous.epoch,
@@ -94,6 +95,7 @@ function appliedCommit({
       promoted,
       appended,
     },
+    current: { entries: currentEntries },
   };
 }
 
@@ -212,7 +214,9 @@ function createWiringFixture(overrides = {}) {
     loadNativeMessages: mock(async () => []),
     loadChatSnapshot: overrides.loadChatSnapshot ?? mock(async () => transcriptSnapshot([])),
     composeProjectionSnapshot: overrides.composeProjectionSnapshot
-      ?? mock(async (_chatId, messages) => transcriptSnapshot(messages)),
+      ?? mock(async (_chatId, messages, _revision, projectionState) => (
+        transcriptSnapshot(messages, { projectionState: projectionState ?? null })
+      )),
     getCarryOverMessageCount: overrides.getCarryOverMessageCount ?? mock(async () => 0),
     loadChatPage: overrides.loadChatPage ?? mock(async () => historyPage([], 100, 0)),
     searchIndex,
@@ -348,19 +352,14 @@ describe('server event wiring', () => {
     const commit = appliedCommit({
       previous: projectionState({ total: 1 }),
       appended: [commitEntry(new AssistantMessage('2026-06-01T00:00:01.000Z', 'fresh'))],
+      currentEntries: [
+        commitEntry(new AssistantMessage('2026-06-01T00:00:00.000Z', 'stale')),
+        commitEntry(new AssistantMessage('2026-06-01T00:00:01.000Z', 'fresh')),
+      ],
     });
-    const current = [
-      new AssistantMessage('2026-06-01T00:00:00.000Z', 'stale'),
-      new AssistantMessage('2026-06-01T00:00:01.000Z', 'fresh'),
-    ];
-    const currentState = commit.event.checkpoint.projection;
     const published = [];
     const fixture = createWiringFixture({
       chatViewsInstance: chatViews,
-      loadChatSnapshot: async () => transcriptSnapshot(current, { projectionState: currentState }),
-      loadChatPage: async (_chatId, limit, offset) => (
-        historyPage(current, limit, offset, { projectionState: currentState })
-      ),
       server: {
         publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
       },
