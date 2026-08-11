@@ -81,6 +81,13 @@ function controllerFixture(integrations, registrations, service = createService(
     apiVersion: 4,
     transcriptIndex: { apiVersion: 2, moduleUrl: import.meta.url },
   }));
+  const persistContentEpoch = mock(async () => {});
+  const releases = [];
+  const reserveIdleTranscriptSnapshot = mock(() => {
+    const release = mock(async () => {});
+    releases.push(release);
+    return release;
+  });
   return {
     controller: new TranscriptSearchController({
       integrations: {
@@ -89,10 +96,18 @@ function controllerFixture(integrations, registrations, service = createService(
       },
       listChats: () => registrations,
       service,
-      persistContentEpoch: mock(async () => {}),
+      persistContentEpoch,
+      reserveIdleTranscriptSnapshot,
     }),
     service,
+    persistContentEpoch,
+    reserveIdleTranscriptSnapshot,
+    releases,
   };
+}
+
+function mirrorless(entry) {
+  return { ...entry, transcriptContentEpoch: null };
 }
 
 describe('TranscriptSearchController', () => {
@@ -244,6 +259,60 @@ describe('TranscriptSearchController', () => {
     expect(peaks.get('codex')).toBeLessThanOrEqual(2);
     expect(service.reconcile.mock.calls[0][0].chats).toHaveLength(12);
     await controller.close();
+  });
+
+  it('backfills a mirror-less chat only under the idle reservation', async () => {
+    const provider = integration('claude', source('claude', 'chat-1'));
+    const fixture = controllerFixture(
+      [provider],
+      [mirrorless(registration('claude', 'chat-1'))],
+    );
+
+    await fixture.controller.start();
+    while (fixture.service.reconcile.mock.calls.length === 0) await Bun.sleep(5);
+
+    expect(fixture.reserveIdleTranscriptSnapshot).toHaveBeenCalledWith('chat-1');
+    expect(fixture.releases).toHaveLength(1);
+    expect(fixture.releases[0]).toHaveBeenCalledTimes(1);
+    // The registry mirror flush happened while the reservation was held.
+    expect(fixture.persistContentEpoch).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      agentOwnershipEpoch: 'owner-chat-1',
+      contentEpoch: 'segment-chat-1',
+    });
+    const entry = fixture.service.reconcile.mock.calls[0][0].chats[0];
+    expect(entry.source.state).toBe('ready');
+    await fixture.controller.close();
+  });
+
+  it('defers a busy mirror-less chat as retryable without opening it', async () => {
+    const provider = integration('claude', source('claude', 'chat-1'));
+    const fixture = controllerFixture(
+      [provider],
+      [mirrorless(registration('claude', 'chat-1'))],
+    );
+    fixture.reserveIdleTranscriptSnapshot.mockImplementation(() => null);
+
+    await fixture.controller.start();
+    while (fixture.service.reconcile.mock.calls.length === 0) await Bun.sleep(5);
+
+    const entry = fixture.service.reconcile.mock.calls[0][0].chats[0];
+    expect(entry.source).toEqual({ state: 'failed', code: 'CHAT_BUSY', retryable: true });
+    expect(provider.transcript.resolveIndexSource).not.toHaveBeenCalled();
+    expect(fixture.persistContentEpoch).not.toHaveBeenCalled();
+    await fixture.controller.close();
+  });
+
+  it('resolves mirrored chats without acquiring a reservation', async () => {
+    const provider = integration('claude', source('claude', 'chat-1'));
+    const fixture = controllerFixture([provider], [registration('claude', 'chat-1')]);
+
+    await fixture.controller.start();
+    while (fixture.service.reconcile.mock.calls.length === 0) await Bun.sleep(5);
+
+    expect(fixture.reserveIdleTranscriptSnapshot).not.toHaveBeenCalled();
+    expect(fixture.service.reconcile.mock.calls[0][0].chats[0].source.state).toBe('ready');
+    await fixture.controller.close();
   });
 
   it('reports failed admission as retryable and permits a later retry', async () => {

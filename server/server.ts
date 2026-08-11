@@ -405,6 +405,16 @@ export async function startServer(): Promise<void> {
           { flush: true },
         );
       },
+      // Runs at reconcile time, after startup wired the coordinator below.
+      reserveIdleTranscriptSnapshot: (chatId) => {
+        let reservation;
+        try {
+          reservation = queue.reserveTranscriptSnapshot(chatId);
+        } catch {
+          return null;
+        }
+        return () => queue.releaseTranscriptSnapshot(reservation);
+      },
       listChats: () => Object.entries(chatRegistry.listAllChats()).flatMap(([chatId, session]) => {
         const integration = integrationRegistry.get(session.agentId);
         if (!integration) return [];

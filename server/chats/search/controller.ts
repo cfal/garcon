@@ -42,6 +42,10 @@ export interface TranscriptSearchControllerDeps {
     readonly agentOwnershipEpoch: string;
     readonly contentEpoch: string;
   }) => Promise<void>;
+  // Acquires the transcript-snapshot reservation for an idle chat, or null
+  // while any operation owns execution. The mirror backfill's first open may
+  // run the one-time native import and must be fenced against admission.
+  readonly reserveIdleTranscriptSnapshot: (chatId: string) => (() => Promise<void>) | null;
   readonly searchTimeoutMs?: number;
 }
 
@@ -282,6 +286,23 @@ export class TranscriptSearchController {
   ): Promise<TranscriptSearchCatalogEntry> {
     const integration = this.#deps.integrations.get(registration.agentId);
     let source: TranscriptSearchCatalogEntry['source'];
+    // A chat without a durable mirror has never completed a V4 open, so its
+    // first resolution is the backfill: it runs only while the chat is idle,
+    // under the transcript-snapshot reservation, held through the registry
+    // flush. Busy chats stay search-pending and retry after idle.
+    let releaseReservation: (() => Promise<void>) | null = null;
+    if (integration && registration.transcriptContentEpoch === null) {
+      releaseReservation = this.#deps.reserveIdleTranscriptSnapshot(
+        registration.reference.chatId,
+      );
+      if (!releaseReservation) {
+        return this.#catalogEntry(registration, {
+          state: 'failed',
+          code: 'CHAT_BUSY',
+          retryable: true,
+        });
+      }
+    }
     if (!integration) {
       source = { state: 'failed', code: 'INTEGRATION_UNAVAILABLE', retryable: false };
     } else {
@@ -313,6 +334,8 @@ export class TranscriptSearchController {
         signal.throwIfAborted();
         const failure = sanitizeResolutionFailure(error);
         source = { state: 'failed', code: failure.code, retryable: failure.retryable };
+      } finally {
+        await releaseReservation?.().catch(() => {});
       }
     }
     return this.#catalogEntry(registration, source);
