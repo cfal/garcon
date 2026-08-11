@@ -38,6 +38,7 @@ interface JournalSnapshotRecord {
   readonly discardedAdmissions: readonly PersistedDiscardedAdmission[];
   readonly nativeRetentionFloor: number;
   readonly aliases: JsonObject;
+  readonly handoffCleanupBlocked?: boolean;
 }
 
 interface JournalAppendRecord {
@@ -60,12 +61,18 @@ interface JournalMetadataRecord {
   readonly aliases: JsonObject;
 }
 
+interface JournalHandoffBoundaryViolationRecord {
+  readonly kind: 'handoff-boundary-violation';
+  readonly operationId: string;
+}
+
 type JournalRecord =
   | JournalHeader
   | JournalSnapshotRecord
   | JournalAppendRecord
   | JournalDiscardRecord
-  | JournalMetadataRecord;
+  | JournalMetadataRecord
+  | JournalHandoffBoundaryViolationRecord;
 
 type SerializedAdmissionIdentity = Pick<
   AgentTranscriptAdmissionIdentity,
@@ -81,6 +88,7 @@ export interface ProjectionJournalState extends AgentSegmentIdentity {
   readonly entries: readonly AgentTranscriptEntry[];
   readonly nativeRetentionFloor: number;
   readonly aliases: JsonObject;
+  readonly handoffCleanupBlocked: boolean;
 }
 
 export interface ProjectionJournalOptions extends AgentSegmentIdentity {
@@ -100,6 +108,7 @@ export class AgentProjectionJournal {
   #contentEpoch: AgentTranscriptContentEpoch;
   #nativeRetentionFloor: number;
   #aliases: JsonObject;
+  #handoffCleanupBlocked: boolean;
 
   private constructor(
     private readonly options: ProjectionJournalOptions,
@@ -112,6 +121,7 @@ export class AgentProjectionJournal {
     this.#contentEpoch = state.contentEpoch;
     this.#nativeRetentionFloor = state.nativeRetentionFloor;
     this.#aliases = state.aliases;
+    this.#handoffCleanupBlocked = state.handoffCleanupBlocked;
     for (const discarded of state.discardedAdmissions) {
       this.#discardedAdmissions.set(admissionKey(discarded.identity), discarded);
     }
@@ -139,6 +149,7 @@ export class AgentProjectionJournal {
         entries,
         nativeRetentionFloor: 0,
         aliases: {},
+        handoffCleanupBlocked: false,
         discardedAdmissions: [],
       } as const;
       await replaceJournal(filePath, header(options), snapshotRecord(state));
@@ -166,6 +177,7 @@ export class AgentProjectionJournal {
       entries: this.#entries.map((entry) => ({ ...entry })),
       nativeRetentionFloor: this.#nativeRetentionFloor,
       aliases: this.#aliases,
+      handoffCleanupBlocked: this.#handoffCleanupBlocked,
     };
   }
 
@@ -239,6 +251,7 @@ export class AgentProjectionJournal {
       entries: [...resultingEntries],
       nativeRetentionFloor: 0,
       aliases: {},
+      handoffCleanupBlocked: false,
       discardedAdmissions: [],
     } as const;
     await replaceJournal(this.#filePath, header(this.options), snapshotRecord(nextState));
@@ -246,6 +259,7 @@ export class AgentProjectionJournal {
     this.#contentEpoch = event.checkpoint.projection.contentEpoch;
     this.#nativeRetentionFloor = 0;
     this.#aliases = {};
+    this.#handoffCleanupBlocked = false;
     this.#discardedAdmissions.clear();
   }
 
@@ -263,6 +277,12 @@ export class AgentProjectionJournal {
     this.#aliases = options.aliases;
   }
 
+  async markHandoffBoundaryViolation(operationId: string): Promise<void> {
+    if (this.#handoffCleanupBlocked) return;
+    await appendRecord(this.#filePath, { kind: 'handoff-boundary-violation', operationId });
+    this.#handoffCleanupBlocked = true;
+  }
+
   async compact(): Promise<void> {
     const state = {
       ...this.state,
@@ -272,9 +292,13 @@ export class AgentProjectionJournal {
   }
 
   async delete(): Promise<void> {
+    await AgentProjectionJournal.delete(this.options);
+  }
+
+  static async delete(options: ProjectionJournalOptions): Promise<void> {
     try {
-      await fs.rm(this.#filePath);
-      await syncDirectory(this.options.directory);
+      await fs.rm(journalPath(options.directory, options.chatId, options.agentOwnershipEpoch));
+      await syncDirectory(options.directory);
     } catch (error) {
       if (!isNodeError(error, 'ENOENT')) throw error;
     }
@@ -339,6 +363,7 @@ async function parseJournal(
   let contentEpoch = agentTranscriptContentEpoch(snapshot.contentEpoch);
   let nativeRetentionFloor = snapshot.nativeRetentionFloor;
   let aliases = snapshot.aliases;
+  let handoffCleanupBlocked = snapshot.handoffCleanupBlocked === true;
   const discarded = new Map<string, { entryId: string; identity: SerializedAdmissionIdentity }>();
   for (const value of snapshot.discardedAdmissions) {
     const identity = parseAdmission(value);
@@ -366,6 +391,11 @@ async function parseJournal(
       }
       nativeRetentionFloor = record.nativeRetentionFloor;
       aliases = record.aliases;
+    } else if (record.kind === 'handoff-boundary-violation') {
+      if (!record.operationId) {
+        throw new ProjectionJournalCorruptError('Projection handoff violation is missing its operation ID');
+      }
+      handoffCleanupBlocked = true;
     } else {
       throw new ProjectionJournalCorruptError('Projection journal contains an unexpected record');
     }
@@ -378,6 +408,7 @@ async function parseJournal(
     entries,
     nativeRetentionFloor,
     aliases,
+    handoffCleanupBlocked,
     discardedAdmissions: [...discarded.values()],
   };
 }
@@ -440,6 +471,7 @@ function snapshotRecord(state: {
   readonly discardedAdmissions: readonly ({ entryId: string; identity: SerializedAdmissionIdentity } | SerializedAdmissionIdentity)[];
   readonly nativeRetentionFloor: number;
   readonly aliases: JsonObject;
+  readonly handoffCleanupBlocked: boolean;
 }): JournalSnapshotRecord {
   return {
     kind: 'snapshot',
@@ -450,6 +482,7 @@ function snapshotRecord(state: {
     )) as readonly PersistedDiscardedAdmission[],
     nativeRetentionFloor: state.nativeRetentionFloor,
     aliases: state.aliases,
+    handoffCleanupBlocked: state.handoffCleanupBlocked,
   };
 }
 

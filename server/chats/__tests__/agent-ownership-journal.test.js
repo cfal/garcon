@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   AgentOwnershipJournal,
-  emptyOwnershipJournalV3,
+  emptyOwnershipJournalV4,
 } from '../agent-ownership-journal.js';
 import { carryOverRevision } from '../carryover-segments.js';
 import { ChatRegistry } from '../store.ts';
@@ -83,7 +83,17 @@ function createIntegrations(release) {
       defaults: () => envelope(agentId),
       parse: (input) => input,
     },
-    transcript: { release },
+    transcript: {
+      release,
+      prepareOwnershipSegment: mock(async ({ chat }) => ({
+        kind: 'ready',
+        value: {
+          checkpoint: checkpoint(chat.agentOwnershipEpoch, 'target-content', 0),
+          commitAfterDecision: mock(async () => {}),
+          rollbackBeforeDecision: mock(async () => {}),
+        },
+      })),
+    },
   }]));
   return {
     get: (agentId) => byId.get(agentId),
@@ -133,7 +143,9 @@ describe('AgentOwnershipJournal', () => {
     await journal.initialize();
     const intent = await begin(journal, registry);
 
-    const updated = await journal.commitHandoff(intent.operationId, () => {});
+    await stageAndDecide(journal, intent);
+    const updated = await journal.applyHandoffDecision(intent.operationId);
+    await journal.completeHandoff(intent.operationId);
     await journal.drainTransferCleanup();
 
     expect(updated).toMatchObject({
@@ -149,7 +161,7 @@ describe('AgentOwnershipJournal', () => {
       reason: 'transferred',
       chat: { agentId: 'source-agent', agentSessionId: 'source-agent-session' },
     });
-    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV4());
   });
 
   it('keeps source ownership when the registry commit fails', async () => {
@@ -164,13 +176,40 @@ describe('AgentOwnershipJournal', () => {
     await journal.initialize();
     const intent = await begin(journal, registry);
 
-    await expect(journal.commitHandoff(intent.operationId, () => {}))
+    await stageAndDecide(journal, intent);
+    await expect(journal.applyHandoffDecision(intent.operationId))
       .rejects.toThrow('registry write failed');
-    await journal.compensateHandoff(intent.operationId);
+    registry.setFailUpdateBeforeCommit(false);
+    await journal.applyHandoffDecision(intent.operationId);
+    await journal.completeHandoff(intent.operationId);
+    await journal.drainTransferCleanup();
 
-    expect(registry.getChat('chat').agentId).toBe('source-agent');
-    expect(release).not.toHaveBeenCalled();
-    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
+    expect(registry.getChat('chat').agentId).toBe('target-agent');
+    expect(await readJournal(workspaceDir)).toMatchObject({ ownershipIntents: [] });
+  });
+
+  it('accepts only an identical retry after handoff staging is durable', async () => {
+    const registry = createRegistry({ chat: chat() });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(mock(async () => {})),
+    });
+    await journal.initialize();
+    const intent = await begin(journal, registry);
+    const staged = {
+      operationId: intent.operationId,
+      targetCarryOverSegments: intent.target.carryOverSegments,
+      sourceCheckpoint: checkpoint(intent.source.agentOwnershipEpoch, 'source-content', 1),
+      incomingCheckpoint: checkpoint(intent.target.agentOwnershipEpoch, 'target-content', 0),
+    };
+
+    await expect(journal.stageHandoff(staged)).resolves.toMatchObject({ phase: 'staged' });
+    await expect(journal.stageHandoff(staged)).resolves.toMatchObject({ phase: 'staged' });
+    await expect(journal.stageHandoff({
+      ...staged,
+      incomingCheckpoint: checkpoint(intent.target.agentOwnershipEpoch, 'changed-content', 0),
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
   });
 
   it('compensates a real registry flush failure without releasing the source', async () => {
@@ -193,26 +232,23 @@ describe('AgentOwnershipJournal', () => {
     const saveRegistry = registry.saveRegistry.bind(registry);
     registry.saveRegistry = mock(() => Promise.reject(new Error('registry write failed')));
 
-    await expect(journal.commitHandoff(intent.operationId, () => {}))
+    await stageAndDecide(journal, intent);
+    await expect(journal.applyHandoffDecision(intent.operationId))
       .rejects.toThrow('registry write failed');
-    await journal.compensateHandoff(intent.operationId);
+    registry.saveRegistry = saveRegistry;
+    await journal.applyHandoffDecision(intent.operationId);
+    await journal.completeHandoff(intent.operationId);
     await journal.drainTransferCleanup();
 
     expect(registry.getChat(chatId)).toMatchObject({
-      agentId: 'source-agent',
-      carryOverSegments: [],
-      agentSessionId: 'source-agent-session',
+      agentId: 'target-agent',
+      agentSessionId: null,
     });
-    expect(release).not.toHaveBeenCalled();
-    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
-
-    registry.saveRegistry = saveRegistry;
     const restarted = new ChatRegistry(workspaceDir);
     await restarted.init();
     expect(restarted.getChat(chatId)).toMatchObject({
-      agentId: 'source-agent',
-      carryOverSegments: [],
-      agentSessionId: 'source-agent-session',
+      agentId: 'target-agent',
+      agentSessionId: null,
     });
   });
 
@@ -236,7 +272,9 @@ describe('AgentOwnershipJournal', () => {
     });
     await journal.initialize();
     const intent = await begin(journal, registry);
-    await journal.commitHandoff(intent.operationId, () => {});
+    await stageAndDecide(journal, intent);
+    await journal.applyHandoffDecision(intent.operationId);
+    await journal.completeHandoff(intent.operationId);
     await started;
 
     let deletionFinished = false;
@@ -248,14 +286,14 @@ describe('AgentOwnershipJournal', () => {
 
     expect(registry.getChat('chat')).toBeNull();
     expect(releases.map((request) => request.reason)).toEqual(['transferred', 'deleted']);
-    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV4());
   });
 
   it('retains delete cleanup without blocking startup when release fails', async () => {
     const registry = createRegistry({});
     const reference = referenceFor('source-agent');
     await fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), JSON.stringify({
-      version: 3,
+      version: 4,
       ownershipIntents: [{
         version: 2,
         operationId: 'delete:chat',
@@ -289,7 +327,7 @@ describe('AgentOwnershipJournal', () => {
     const registry = createRegistry({});
     const reference = referenceFor('removed-agent');
     await fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), JSON.stringify({
-      version: 3,
+      version: 4,
       ownershipIntents: [{
         version: 2,
         operationId: 'delete:chat',
@@ -314,11 +352,11 @@ describe('AgentOwnershipJournal', () => {
     expect((await readJournal(workspaceDir)).ownershipIntents).toHaveLength(1);
   });
 
-  it('retains an inconsistent intent without blocking unrelated startup recovery', async () => {
+  it('rolls a durable decision forward when the registry still names the source', async () => {
     const registry = createRegistry({ chat: chat() });
-    const inconsistent = persistedHandoff({ phase: 'registry-committed' });
+    const inconsistent = persistedHandoff({ phase: 'commit-decided' });
     await writeJournal(workspaceDir, {
-      version: 3,
+      version: 4,
       ownershipIntents: [inconsistent],
       transferCleanup: [],
     });
@@ -330,9 +368,13 @@ describe('AgentOwnershipJournal', () => {
 
     await expect(journal.initialize()).resolves.toBeUndefined();
 
-    expect((await readJournal(workspaceDir)).ownershipIntents).toMatchObject([{
-      operationId: inconsistent.operationId,
-    }]);
+    expect(registry.getChat('chat')).toMatchObject({
+      agentId: 'target-agent',
+      agentOwnershipEpoch: 'target-epoch',
+      transcriptContentEpoch: 'target-content',
+    });
+    expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
+    await journal.drainTransferCleanup();
   });
 
   it('abandons a transfer release after three provider failures and retries it through maintenance', async () => {
@@ -348,7 +390,9 @@ describe('AgentOwnershipJournal', () => {
     });
     await journal.initialize();
     const intent = await begin(journal, registry);
-    await journal.commitHandoff(intent.operationId, () => {});
+    await stageAndDecide(journal, intent);
+    await journal.applyHandoffDecision(intent.operationId);
+    await journal.completeHandoff(intent.operationId);
 
     // One implicit drain from the commit plus explicit drains: three provider
     // failures spend the attempt budget and abandon the record durably.
@@ -385,7 +429,7 @@ describe('AgentOwnershipJournal', () => {
     expect(retry.unresolved).toHaveLength(0);
     expect(release).toHaveBeenCalledTimes(5);
 
-    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV3());
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV4());
   });
 
   it('retires a handoff intent superseded by a newer ownership epoch', async () => {
@@ -396,7 +440,7 @@ describe('AgentOwnershipJournal', () => {
       }),
     });
     await writeJournal(workspaceDir, {
-      version: 3,
+      version: 4,
       ownershipIntents: [persistedHandoff()],
       transferCleanup: [],
     });
@@ -413,17 +457,18 @@ describe('AgentOwnershipJournal', () => {
 
   it('rejects malformed handoff records before recovery dereferences them', async () => {
     await writeJournal(workspaceDir, {
-      version: 3,
+      version: 4,
       ownershipIntents: [{
-        version: 3,
+        version: 4,
         operationId: 'handoff:malformed',
         clientRequestId: 'request-malformed',
         submittedTargetHash: 'a'.repeat(64),
         kind: 'handoff',
         chatId: 'chat',
-        phase: 'segment-prepared',
+        phase: 'intent',
         source: {},
         target: {},
+        staging: null,
         createdAt: timestamp,
       }],
       transferCleanup: [],
@@ -440,14 +485,18 @@ describe('AgentOwnershipJournal', () => {
 
 function persistedHandoff(overrides = {}) {
   const source = chat();
+  const staging = {
+    sourceCheckpoint: checkpoint('source-agent-epoch', 'source-content', 1),
+    incomingCheckpoint: checkpoint('target-epoch', 'target-content', 0),
+  };
   return {
-    version: 3,
+    version: 4,
     operationId: 'handoff:request-1',
     clientRequestId: 'request-1',
     submittedTargetHash: 'a'.repeat(64),
     kind: 'handoff',
     chatId: 'chat',
-    phase: 'segment-prepared',
+    phase: 'staged',
     source: {
       agentId: source.agentId,
       model: source.model,
@@ -465,6 +514,7 @@ function persistedHandoff(overrides = {}) {
       agentOwnershipEpoch: 'target-epoch',
       carryOverSegments: [segmentRef()],
     },
+    staging,
     createdAt: timestamp,
     ...overrides,
   };
@@ -494,6 +544,33 @@ function referenceFor(agentId) {
     carryOverRevision: 'carry-v1:0',
     nativeSeedReceipt: null,
     settings: envelope(agentId),
+    agentOwnershipEpoch: `${agentId}-epoch`,
+  };
+}
+
+async function stageAndDecide(journal, intent) {
+  await journal.stageHandoff({
+    operationId: intent.operationId,
+    targetCarryOverSegments: intent.target.carryOverSegments,
+    sourceCheckpoint: checkpoint(intent.source.agentOwnershipEpoch, 'source-content', 1, intent.chatId),
+    incomingCheckpoint: checkpoint(intent.target.agentOwnershipEpoch, 'target-content', 0, intent.chatId),
+  });
+  return journal.decideHandoff(intent.operationId);
+}
+
+function checkpoint(agentOwnershipEpoch, contentEpoch, total, chatId = 'chat') {
+  return {
+    chatId,
+    agentOwnershipEpoch,
+    offset: '0',
+    projection: {
+      epoch: `${agentOwnershipEpoch}-stream`,
+      contentEpoch,
+      total,
+      durableCount: total,
+      durableRevision: `revision-${total}`,
+      stateRevision: `state-${total}`,
+    },
   };
 }
 

@@ -30,9 +30,23 @@ interface GateLeaseState {
 export class AgentProjectionMutationGate {
   #tail: Promise<void> = Promise.resolve();
   #lease: GateLeaseState | null = null;
+  #retired = false;
+
+  constructor(
+    private readonly onPostBoundaryMutation: () => Promise<void> = async () => {},
+  ) {}
 
   run<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.#lease) {
+    if (this.#lease || this.#retired) {
+      if (this.#retired || this.#lease?.sealed) {
+        const error = new Error('Projection mutation arrived after sealed handoff boundary');
+        const rejected = this.onPostBoundaryMutation().then<T>(
+          () => { throw error; },
+          (cause) => { throw new AggregateError([error, cause], error.message); },
+        );
+        this.#tail = rejected.then(() => {}, () => {});
+        return rejected;
+      }
       return new Promise<T>((resolve, reject) => {
         this.#lease!.buffered.push({
           operation,
@@ -68,6 +82,7 @@ export class AgentProjectionMutationGate {
         this.#assertLease(state.token);
         if (state.sealed !== seal) throw new TypeError('Handoff seal does not belong to this lease');
         this.#lease = null;
+        this.#retired = true;
         const error = new Error('Projection mutation arrived after committed handoff boundary');
         for (const buffered of state.buffered) buffered.reject(error);
       },

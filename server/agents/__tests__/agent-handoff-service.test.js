@@ -71,6 +71,39 @@ function integration(agentId) {
   };
 }
 
+function projectedIntegrations({ outgoing, incoming, calls = [] }) {
+  const source = {
+    ...integration('source-agent'),
+    transcript: {
+      prepareHandoffLease: mock(async () => {
+        calls.push('outgoing-prepare');
+        return { kind: 'ready', value: outgoing };
+      }),
+    },
+  };
+  const targetAgent = {
+    ...integration('target-agent'),
+    transcript: {
+      prepareOwnershipSegment: mock(async () => {
+        calls.push('incoming-prepare');
+        return { kind: 'ready', value: incoming };
+      }),
+    },
+  };
+  const byId = new Map([
+    ['source-agent', source],
+    ['target-agent', targetAgent],
+  ]);
+  return {
+    get: (agentId) => byId.get(agentId),
+    require: (agentId) => {
+      const value = byId.get(agentId);
+      if (!value) throw new Error(`Missing integration: ${agentId}`);
+      return value;
+    },
+  };
+}
+
 function context() {
   return {
     signal: new AbortController().signal,
@@ -92,92 +125,134 @@ describe('AgentHandoffService', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('preserves a committed segment when the journal fails after mutating the live registry entry', async () => {
+  it('decides once between a sealed outgoing lease and participant activation', async () => {
     const current = sourceChat();
-    const registry = { getChat: () => current };
-    let targetSegments;
+    const calls = [];
+    const sourceCheckpoint = checkpoint('source-epoch', 'source-content', 1);
+    const incomingCheckpoint = checkpoint('target-epoch', 'target-content', 0);
+    const outgoing = {
+      operationId: 'unused',
+      frozen: {
+        checkpoint: sourceCheckpoint,
+        entries: [entry('source-entry', new UserMessage(timestamp, 'captured'))],
+      },
+      sealForDecision: mock(() => { calls.push('seal'); return {}; }),
+      commitAfterDecision: mock(async () => { calls.push('outgoing-commit'); }),
+      rollbackBeforeDecision: mock(async () => { calls.push('outgoing-rollback'); }),
+    };
+    const incoming = {
+      checkpoint: incomingCheckpoint,
+      commitAfterDecision: mock(async () => { calls.push('incoming-commit'); }),
+      rollbackBeforeDecision: mock(async () => { calls.push('incoming-rollback'); }),
+    };
+    let activeIntent = null;
     const ownership = {
-      findHandoff: () => null,
+      findHandoff: () => activeIntent,
       beginHandoff: mock(async (input) => {
-        targetSegments = input.targetCarryOverSegments;
-        return handoffIntent(input, 'target-epoch');
+        calls.push('intent');
+        activeIntent = handoffIntent(input, 'target-epoch');
+        return activeIntent;
       }),
-      commitHandoff: mock(async () => {
+      stageHandoff: mock(async (input) => {
+        calls.push('stage');
+        activeIntent = stagedIntent(activeIntent, input);
+        return activeIntent;
+      }),
+      decideHandoff: mock(async () => {
+        calls.push('decision');
+        activeIntent = { ...activeIntent, phase: 'commit-decided' };
+        return { operationId: activeIntent.operationId, targetOwnershipEpoch: 'target-epoch' };
+      }),
+      applyHandoffDecision: mock(async () => {
+        calls.push('registry');
         Object.assign(current, {
           agentId: 'target-agent',
           agentOwnershipEpoch: 'target-epoch',
           agentSessionId: null,
-          carryOverSegments: targetSegments,
+          carryOverSegments: activeIntent.target.carryOverSegments,
         });
-        throw new Error('journal follow-up write failed');
       }),
-      compensateHandoff: mock(async () => {}),
+      completeHandoff: mock(async () => { calls.push('complete'); activeIntent = null; }),
+      abortHandoff: mock(async () => { calls.push('abort'); activeIntent = null; }),
     };
-    const service = createService({ registry, ownership, carryOver });
-    const preparation = service.createPreparation({
-      chatId: 'chat',
-      clientRequestId: 'request-1',
-      handoff: handoff(),
-      source: current,
-      target: target(),
-    });
-
-    await expect(preparation.prepare(context())).rejects.toThrow('journal follow-up write failed');
-    await preparation.compensate();
-
-    expect(current).toMatchObject({
-      agentId: 'target-agent',
-      agentOwnershipEpoch: 'target-epoch',
-      carryOverSegments: targetSegments,
-    });
-    await expect(carryOver.readIndex(targetSegments[0].id)).resolves.toMatchObject({
-      id: targetSegments[0].id,
-    });
-  });
-
-  it('detects source ownership changes after native capture with a stable snapshot fence', async () => {
-    const current = sourceChat();
-    const registry = { getChat: () => current };
-    const beginHandoff = mock(async (input) => handoffIntent(input, 'target-epoch'));
     const settledCapture = {
-      loadStable: mock(async () => {
-        current.agentOwnershipEpoch = 'new-owner-epoch';
-        return {
-          messages: [new UserMessage(timestamp, 'captured')],
-          revision: 'native-r1',
-        };
-      }),
-      assertRevision: mock(async () => {}),
+      loadStable: mock(async () => { throw new Error('native capture is forbidden'); }),
+      assertRevision: mock(async () => { throw new Error('native recheck is forbidden'); }),
     };
     const service = createService({
-      registry,
+      registry: { getChat: () => current },
+      ownership,
       carryOver,
       settledCapture,
-      ownership: {
-        findHandoff: () => null,
-        beginHandoff,
-        commitHandoff: mock(async () => {}),
-        compensateHandoff: mock(async () => {}),
-      },
+      integrations: projectedIntegrations({ outgoing, incoming, calls }),
     });
-    const preparation = service.createPreparation({
+
+    await service.createPreparation({
       chatId: 'chat',
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
       target: target(),
+    }).prepare(context());
+
+    expect(calls).toEqual([
+      'intent',
+      'outgoing-prepare',
+      'incoming-prepare',
+      'stage',
+      'seal',
+      'decision',
+      'registry',
+      'incoming-commit',
+      'outgoing-commit',
+      'complete',
+    ]);
+    expect(settledCapture.loadStable).not.toHaveBeenCalled();
+    expect(current).toMatchObject({ agentId: 'target-agent', agentOwnershipEpoch: 'target-epoch' });
+    expect(await segmentDirectories(workspaceDir)).toHaveLength(1);
+  });
+
+  it('rolls back every staged artifact when the outgoing lease becomes dirty before decision', async () => {
+    const current = sourceChat();
+    const outgoing = {
+      frozen: {
+        checkpoint: checkpoint('source-epoch', 'source-content', 1),
+        entries: [entry('source-entry', new UserMessage(timestamp, 'captured'))],
+      },
+      sealForDecision: mock(() => { throw new Error('buffered source mutation'); }),
+      commitAfterDecision: mock(async () => {}),
+      rollbackBeforeDecision: mock(async () => {}),
+    };
+    const incoming = {
+      checkpoint: checkpoint('target-epoch', 'target-content', 0),
+      commitAfterDecision: mock(async () => {}),
+      rollbackBeforeDecision: mock(async () => {}),
+    };
+    let activeIntent = null;
+    const ownership = ownershipState(() => activeIntent, (value) => { activeIntent = value; });
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership,
+      carryOver,
+      integrations: projectedIntegrations({ outgoing, incoming }),
     });
 
-    await expect(preparation.prepare(context())).rejects.toMatchObject({
-      code: 'STALE_CHAT_OWNERSHIP',
-      status: 409,
-    });
-    await preparation.compensate();
-    expect(beginHandoff).toHaveBeenCalledTimes(1);
+    await expect(service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-1',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+    }).prepare(context())).rejects.toThrow('buffered source mutation');
+
+    expect(ownership.decideHandoff).not.toHaveBeenCalled();
+    expect(incoming.rollbackBeforeDecision).toHaveBeenCalledTimes(1);
+    expect(outgoing.rollbackBeforeDecision).toHaveBeenCalledTimes(1);
+    expect(ownership.abortHandoff).toHaveBeenCalledTimes(1);
     expect(await segmentDirectories(workspaceDir)).toEqual([]);
   });
 
-  it('resumes an existing prepared intent without recapturing or writing another segment', async () => {
+  it('rolls forward a previously decided intent without recapturing the source', async () => {
     const current = sourceChat();
     const registry = { getChat: () => current };
     const segmentId = '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e';
@@ -198,7 +273,7 @@ describe('AgentHandoffService', () => {
       visibleMessageCount: 1,
       trailingHandoff: { agentId: 'target-agent', model: 'target-model' },
     }];
-    const existing = handoffIntent({
+    let existing = stagedIntent(handoffIntent({
       operationId: 'existing-operation',
       clientRequestId: 'request-1',
       submittedTargetHash: hashTarget(handoff()),
@@ -206,12 +281,17 @@ describe('AgentHandoffService', () => {
       source: current,
       target: target(),
       targetCarryOverSegments: targetSegments,
-    }, 'target-epoch');
+    }, 'target-epoch'), {
+      targetCarryOverSegments: targetSegments,
+      sourceCheckpoint: checkpoint('source-epoch', 'source-content', 1),
+      incomingCheckpoint: checkpoint('target-epoch', 'target-content', 0),
+    });
+    existing = { ...existing, phase: 'commit-decided' };
     const settledCapture = {
       loadStable: mock(async () => { throw new Error('unexpected capture'); }),
       assertRevision: mock(async () => {}),
     };
-    const commitHandoff = mock(async () => {
+    const applyHandoffDecision = mock(async () => {
       Object.assign(current, {
         agentId: 'target-agent',
         agentOwnershipEpoch: 'target-epoch',
@@ -226,9 +306,21 @@ describe('AgentHandoffService', () => {
       ownership: {
         findHandoff: () => existing,
         beginHandoff: mock(async () => { throw new Error('unexpected begin'); }),
-        commitHandoff,
-        compensateHandoff: mock(async () => {}),
+        decideHandoff: mock(async () => ({
+          operationId: existing.operationId,
+          targetOwnershipEpoch: existing.target.agentOwnershipEpoch,
+        })),
+        applyHandoffDecision,
+        completeHandoff: mock(async () => {}),
       },
+      integrations: projectedIntegrations({
+        outgoing: null,
+        incoming: {
+          checkpoint: existing.staging.incomingCheckpoint,
+          commitAfterDecision: mock(async () => {}),
+          rollbackBeforeDecision: mock(async () => {}),
+        },
+      }),
     });
     const preparation = service.createPreparation({
       chatId: 'chat',
@@ -241,7 +333,7 @@ describe('AgentHandoffService', () => {
     await preparation.prepare(context());
 
     expect(settledCapture.loadStable).not.toHaveBeenCalled();
-    expect(commitHandoff).toHaveBeenCalledWith('existing-operation', expect.any(Function));
+    expect(applyHandoffDecision).toHaveBeenCalledWith('existing-operation');
     expect(await segmentDirectories(workspaceDir)).toEqual([segmentId]);
   });
 
@@ -257,15 +349,12 @@ describe('AgentHandoffService', () => {
       target: target(),
       targetCarryOverSegments: [],
     }, 'target-epoch');
-    const commitHandoff = mock(async () => {});
     const service = createService({
       registry,
       carryOver,
       ownership: {
         findHandoff: () => existing,
         beginHandoff: mock(async () => {}),
-        commitHandoff,
-        compensateHandoff: mock(async () => {}),
       },
     });
     const preparation = service.createPreparation({
@@ -285,7 +374,7 @@ describe('AgentHandoffService', () => {
       code: 'IDEMPOTENCY_CONFLICT',
       status: 409,
     });
-    expect(commitHandoff).not.toHaveBeenCalled();
+    expect(current.agentId).toBe('source-agent');
   });
 
   it('rejects quarantined history before resolving or preparing a handoff', async () => {
@@ -303,8 +392,6 @@ describe('AgentHandoffService', () => {
       ownership: {
         findHandoff: () => null,
         beginHandoff,
-        commitHandoff: mock(async () => {}),
-        compensateHandoff: mock(async () => {}),
       },
       ...targetResolutionDeps(),
     });
@@ -453,13 +540,13 @@ function targetResolutionDeps({ permissionModes = ['default'] } = {}) {
 
 function handoffIntent(input, targetEpoch) {
   return {
-    version: 3,
+    version: 4,
     operationId: input.operationId,
     clientRequestId: input.clientRequestId,
     submittedTargetHash: input.submittedTargetHash,
     kind: 'handoff',
     chatId: input.chatId,
-    phase: 'segment-prepared',
+    phase: 'intent',
     source: {
       agentId: input.source.agentId,
       model: input.source.model,
@@ -470,14 +557,91 @@ function handoffIntent(input, targetEpoch) {
         input.source.carryOverMigrationQuarantine,
       ),
       nativeSeedReceipt: input.source.nativeSeedReceipt,
-      reference: {},
+      reference: {
+        chatId: input.chatId,
+        agentId: input.source.agentId,
+        agentSessionId: input.source.agentSessionId,
+        projectPath: input.source.projectPath,
+        model: input.source.model,
+        nativeSession: input.source.nativeSession,
+        carryOverRevision: carryOverRevision(input.source.carryOverSegments),
+        nativeSeedReceipt: input.source.nativeSeedReceipt,
+        settings: input.source.agentSettingsById[input.source.agentId],
+        agentOwnershipEpoch: input.source.agentOwnershipEpoch,
+      },
     },
     target: {
       execution: input.target,
       agentOwnershipEpoch: targetEpoch,
-      carryOverSegments: input.targetCarryOverSegments,
+      carryOverSegments: input.targetCarryOverSegments ?? [],
     },
+    staging: null,
     createdAt: timestamp,
+  };
+}
+
+function stagedIntent(intent, staging) {
+  return {
+    ...intent,
+    phase: 'staged',
+    target: {
+      ...intent.target,
+      carryOverSegments: staging.targetCarryOverSegments,
+    },
+    staging: {
+      sourceCheckpoint: staging.sourceCheckpoint,
+      incomingCheckpoint: staging.incomingCheckpoint,
+    },
+  };
+}
+
+function ownershipState(getIntent, setIntent) {
+  return {
+    findHandoff: () => getIntent(),
+    beginHandoff: mock(async (input) => {
+      const intent = handoffIntent(input, 'target-epoch');
+      setIntent(intent);
+      return intent;
+    }),
+    stageHandoff: mock(async (input) => {
+      const intent = stagedIntent(getIntent(), input);
+      setIntent(intent);
+      return intent;
+    }),
+    decideHandoff: mock(async () => {
+      const intent = { ...getIntent(), phase: 'commit-decided' };
+      setIntent(intent);
+      return { operationId: intent.operationId, targetOwnershipEpoch: intent.target.agentOwnershipEpoch };
+    }),
+    applyHandoffDecision: mock(async () => {}),
+    completeHandoff: mock(async () => setIntent(null)),
+    abortHandoff: mock(async () => setIntent(null)),
+  };
+}
+
+function checkpoint(agentOwnershipEpoch, contentEpoch, total) {
+  return {
+    chatId: 'chat',
+    agentOwnershipEpoch,
+    offset: '0',
+    projection: {
+      epoch: `${agentOwnershipEpoch}-stream`,
+      contentEpoch,
+      total,
+      durableCount: total,
+      durableRevision: `revision-${total}`,
+      stateRevision: `state-${total}`,
+    },
+  };
+}
+
+function entry(id, message) {
+  return {
+    id,
+    lifetime: 'durable',
+    source: { namespace: 'fixture', itemId: id, subrowId: 'message' },
+    provenance: null,
+    message,
   };
 }
 

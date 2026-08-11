@@ -159,7 +159,7 @@ describe('repeated agent handoff lifecycle', () => {
       expect(secondIndex).toMatchObject({
         id: secondRef.id,
         messageCount: 4,
-        seedSanitation: 'stripped-exact',
+        seedSanitation: 'absent',
       });
       expectArtifactIsProviderNeutral(secondIndex);
       const secondMessages = await readSegmentMessages(fixture, secondIndex);
@@ -231,7 +231,7 @@ describe('repeated agent handoff lifecycle', () => {
       expect(thirdIndex).toMatchObject({
         id: thirdRef.id,
         messageCount: 4,
-        seedSanitation: 'stripped-exact',
+        seedSanitation: 'absent',
       });
       expectArtifactIsProviderNeutral(thirdIndex);
       const thirdMessages = await readSegmentMessages(fixture, thirdIndex);

@@ -5,9 +5,8 @@ import { AgentSwitchMessage, parseChatMessages } from '../../common/chat-types.j
 import { parseNativeSeedReceipt } from '../../common/transcript-seed.js';
 import { isRecord } from '../../common/json.js';
 import {
-  emptyOwnershipJournalV3,
-  type AgentHandoffIntent,
-  type AgentOwnershipJournalFileV3,
+  emptyOwnershipJournalV4,
+  type AgentOwnershipJournalFileV4,
   type DeleteIntentV2,
   type SourceReleaseCleanup,
 } from './agent-ownership-journal.js';
@@ -177,11 +176,12 @@ export async function migrateLegacyOwnershipJournal(input: {
   readonly sessions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   readonly sourceRegistryVersion: 3 | 4;
   readonly store: CarryOverTranscriptStore;
-}): Promise<AgentOwnershipJournalFileV3> {
-  if (input.bytes.byteLength === 0) return emptyOwnershipJournalV3();
+}): Promise<AgentOwnershipJournalFileV4> {
+  if (input.bytes.byteLength === 0) return emptyOwnershipJournalV4();
   const value: unknown = JSON.parse(input.bytes.toString('utf8'));
   if (!isRecord(value)) throw new Error('Invalid legacy ownership journal');
-  if (value.version === 3) return value as unknown as AgentOwnershipJournalFileV3;
+  if (value.version === 4) return value as unknown as AgentOwnershipJournalFileV4;
+  if (value.version === 3) return migrateVersionThreeJournal(value);
   if (value.version === 2) return migrateVersionTwoJournal(input, value);
   if (value.version !== 1 || !Array.isArray(value.intents)) {
     throw new Error('Unsupported legacy ownership journal');
@@ -193,7 +193,13 @@ export async function migrateLegacyOwnershipJournal(input: {
       throw new Error('Invalid legacy ownership intent');
     }
     const current = input.sessions[raw.chatId];
-    const source = { ...raw.oldReference, nativeSeedReceipt: null } as unknown as SourceReleaseCleanup['source'];
+    const source = {
+      ...raw.oldReference,
+      nativeSeedReceipt: null,
+      agentOwnershipEpoch: typeof raw.oldEpoch === 'string'
+        ? raw.oldEpoch
+        : `legacy-release:${raw.chatId}`,
+    } as unknown as SourceReleaseCleanup['source'];
     if (raw.kind === 'transfer') {
       if (current?.agentId === raw.targetAgentId && current.agentOwnershipEpoch === raw.targetEpoch) {
         transferCleanup.push({
@@ -247,17 +253,18 @@ export async function migrateLegacyOwnershipJournal(input: {
       throw new Error('Invalid legacy ownership intent kind');
     }
   }
-  return { version: 3, ownershipIntents, transferCleanup };
+  return { version: 4, ownershipIntents, transferCleanup };
 }
 
 async function migrateVersionTwoJournal(
   input: Parameters<typeof migrateLegacyOwnershipJournal>[0],
   value: Readonly<Record<string, unknown>>,
-): Promise<AgentOwnershipJournalFileV3> {
+): Promise<AgentOwnershipJournalFileV4> {
   if (!Array.isArray(value.ownershipIntents) || !Array.isArray(value.transferCleanup)) {
     throw new Error('Invalid version-two ownership journal');
   }
-  const ownershipIntents: Array<AgentHandoffIntent | DeleteIntentV2> = [];
+  const ownershipIntents: DeleteIntentV2[] = [];
+  const transferCleanup = value.transferCleanup.map((raw) => migrateTransferCleanup(raw));
   for (const raw of value.ownershipIntents) {
     if (!isRecord(raw)) throw new Error('Invalid version-two ownership intent');
     if (raw.kind === 'delete') {
@@ -291,42 +298,73 @@ async function migrateVersionTwoJournal(
       store: input.store,
     });
     const reference = migrateJournalReference(raw.source.reference, sourceHeadId);
-    ownershipIntents.push({
-      version: 3,
-      operationId: requiredString(raw.operationId, 'handoff operation ID'),
-      clientRequestId: requiredString(raw.clientRequestId, 'handoff request ID'),
-      submittedTargetHash: requiredString(raw.submittedTargetHash, 'handoff target hash'),
-      kind: 'handoff',
-      chatId,
-      phase: raw.phase === 'registry-committed' ? 'registry-committed' : 'segment-prepared',
-      source: {
-        agentId: requiredString(raw.source.agentId, 'handoff source agent'),
-        model: stringValue(raw.source.model, 'handoff source model'),
-        sessionId: nullableString(raw.source.sessionId),
-        agentOwnershipEpoch: requiredString(raw.source.agentOwnershipEpoch, 'handoff source epoch'),
+    if (raw.phase === 'registry-committed') {
+      const sourceReference = {
+        ...reference,
         carryOverRevision: carryOverRevision(sourceConverted.refs),
-        nativeSeedReceipt: migrateV4Receipt(
-          raw.source.nativeSeedReceipt,
-          sourceHeadId,
-        ) as AgentHandoffIntent['source']['nativeSeedReceipt'],
-        reference: {
-          ...reference,
-          carryOverRevision: carryOverRevision(sourceConverted.refs),
-        },
-      },
-      target: {
-        execution: raw.target.execution as unknown as AgentHandoffIntent['target']['execution'],
-        agentOwnershipEpoch: requiredString(raw.target.agentOwnershipEpoch, 'handoff target epoch'),
-        carryOverSegments: targetConverted.refs,
-      },
+        agentOwnershipEpoch: requiredString(
+          raw.source.agentOwnershipEpoch,
+          'handoff source epoch',
+        ),
+      } as unknown as SourceReleaseCleanup['source'];
+      transferCleanup.push({
+        version: 1,
+        operationId: requiredString(raw.operationId, 'handoff operation ID'),
+        chatId,
+        source: sourceReference,
+        reason: 'transferred',
+        status: 'pending',
+        attempts: 0,
+        lastErrorCode: null,
+        createdAt: requiredString(raw.createdAt, 'handoff timestamp'),
+      });
+    }
+    void targetConverted;
+  }
+  return {
+    version: 4,
+    ownershipIntents,
+    transferCleanup,
+  };
+}
+
+function migrateVersionThreeJournal(
+  value: Readonly<Record<string, unknown>>,
+): AgentOwnershipJournalFileV4 {
+  if (!Array.isArray(value.ownershipIntents) || !Array.isArray(value.transferCleanup)) {
+    throw new Error('Invalid version-three ownership journal');
+  }
+  const ownershipIntents: DeleteIntentV2[] = [];
+  const transferCleanup = value.transferCleanup.map((raw) => migrateTransferCleanup(raw));
+  for (const raw of value.ownershipIntents) {
+    if (!isRecord(raw)) throw new Error('Invalid version-three ownership intent');
+    if (raw.kind === 'delete') {
+      ownershipIntents.push(raw as unknown as DeleteIntentV2);
+      continue;
+    }
+    if (raw.kind !== 'handoff' || !isRecord(raw.source) || !isRecord(raw.source.reference)) {
+      throw new Error('Invalid version-three handoff intent');
+    }
+    if (raw.phase !== 'registry-committed') continue;
+    transferCleanup.push({
+      version: 1,
+      operationId: requiredString(raw.operationId, 'handoff operation ID'),
+      chatId: requiredString(raw.chatId, 'handoff chat ID'),
+      source: {
+        ...raw.source.reference,
+        agentOwnershipEpoch: requiredString(
+          raw.source.agentOwnershipEpoch,
+          'handoff source epoch',
+        ),
+      } as unknown as SourceReleaseCleanup['source'],
+      reason: 'transferred',
+      status: 'pending',
+      attempts: 0,
+      lastErrorCode: null,
       createdAt: requiredString(raw.createdAt, 'handoff timestamp'),
     });
   }
-  return {
-    version: 3,
-    ownershipIntents,
-    transferCleanup: value.transferCleanup.map((raw) => migrateTransferCleanup(raw)),
-  };
+  return { version: 4, ownershipIntents, transferCleanup };
 }
 
 function parseLegacySegment(value: unknown, index: number): LegacyCarryOverSegment {
@@ -456,6 +494,9 @@ function migrateTransferCleanup(value: unknown): SourceReleaseCleanup {
     ...value,
     source: {
       ...value.source,
+      agentOwnershipEpoch: typeof value.source.agentOwnershipEpoch === 'string'
+        ? value.source.agentOwnershipEpoch
+        : `legacy-release:${requiredString(value.chatId, 'cleanup chat ID')}`,
       nativeSeedReceipt: value.source.nativeSeedReceipt === null
         ? null
         : parseNativeSeedReceipt(value.source.nativeSeedReceipt),

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type {
   AgentEventDigest,
+  AgentHandoffDecision,
   AgentOwnershipEpoch,
   AgentProjectionState,
   AgentSegmentIdentity,
@@ -28,6 +29,14 @@ export function newAgentTranscriptContentEpoch(): AgentTranscriptContentEpoch {
 
 export function newAgentTranscriptEntryId(): AgentTranscriptEntryId {
   return crypto.randomUUID() as AgentTranscriptEntryId;
+}
+
+export function agentHandoffDecision(input: {
+  readonly operationId: string;
+  readonly targetOwnershipEpoch: AgentOwnershipEpoch;
+}): AgentHandoffDecision {
+  required(input.operationId, 'Handoff operation ID');
+  return Object.freeze({ ...input }) as AgentHandoffDecision;
 }
 
 export function agentTranscriptEntryId(value: string): AgentTranscriptEntryId {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,7 @@ import {
 } from '@garcon/common/chat-types';
 import type {
   AgentOwnershipEpoch,
+  AgentChatReferenceV4,
   AgentTranscriptAdmissionIdentity,
   AgentTranscriptEntry,
   AgentTranscriptProvenance,
@@ -20,13 +21,16 @@ import type {
 import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import { AgentInputAdmissionCoordinator } from '../admission.js';
 import { applyProjectionEvent } from '../apply.js';
+import { AgentProjectionMutationGate } from '../handoff.js';
 import { AgentProjectionJournal } from '../journal.js';
 import {
+  agentHandoffDecision,
   agentStreamOffset,
   newAgentStreamEpoch,
   newAgentTranscriptContentEpoch,
   newAgentTranscriptEntryId,
 } from '../identity.js';
+import { JournalBackedAgentTranscriptStream } from '../journal-stream.js';
 import { AgentProjectionPager } from '../paging.js';
 import {
   AgentProjectionRevisionAccumulator,
@@ -189,6 +193,37 @@ describe('AgentProjectionPager', () => {
   });
 });
 
+describe('AgentProjectionMutationGate', () => {
+  it('replays pre-seal work on rollback and rejects every post-seal mutation', async () => {
+    let violations = 0;
+    const applied: string[] = [];
+    const gate = new AgentProjectionMutationGate(async () => { violations += 1; });
+    const lease = await gate.acquire();
+    const buffered = gate.run(async () => {
+      applied.push('buffered');
+      return 'applied';
+    });
+    expect(() => lease.seal()).toThrow('buffered mutation');
+    await lease.rollback();
+    expect(await buffered).toBe('applied');
+
+    const committedLease = await gate.acquire();
+    const seal = committedLease.seal();
+    let ran = false;
+    await expect(gate.run(async () => {
+      ran = true;
+    })).rejects.toThrow('sealed handoff boundary');
+    committedLease.commit(seal);
+    await expect(gate.run(async () => {
+      ran = true;
+    })).rejects.toThrow('sealed handoff boundary');
+
+    expect(applied).toEqual(['buffered']);
+    expect(ran).toBe(false);
+    expect(violations).toBe(2);
+  });
+});
+
 describe('AgentProjectionJournal', () => {
   it('recovers durable envelopes and discarded admission identities without active state', async () => {
     const directory = await tempDirectory();
@@ -245,6 +280,54 @@ describe('AgentProjectionJournal', () => {
       'malformed record',
     );
   });
+
+  it('persists a post-boundary cleanup fence through compaction and restart', async () => {
+    const directory = await tempDirectory();
+    const identity = projection().identity;
+    const journal = await AgentProjectionJournal.open({ directory, ...identity });
+    await journal.markHandoffBoundaryViolation('handoff-1');
+    await journal.compact();
+
+    const reopened = await AgentProjectionJournal.open({ directory, ...identity });
+    expect(reopened.state.handoffCleanupBlocked).toBe(true);
+  });
+});
+
+describe('JournalBackedAgentTranscriptStream handoff cleanup', () => {
+  it('preserves provider and projection artifacts after a post-boundary callback across restart', async () => {
+    const directory = await tempDirectory();
+    const identity = projection().identity;
+    const chat = chatReference(identity);
+    const first = journalStream(directory);
+    expect((await first.openSegment({ chat, signal: AbortSignal.timeout(1_000) })).kind).toBe('ready');
+    const leaseResult = await first.prepareHandoffLease({
+      chat,
+      handoffOperationId: 'handoff-1',
+      signal: AbortSignal.timeout(1_000),
+    });
+    expect(leaseResult.kind).toBe('ready');
+    if (leaseResult.kind !== 'ready') return;
+    const seal = leaseResult.value.sealForDecision();
+    await expect(first.appendMessages({
+      chat,
+      operation: operationIdentity(identity.agentOwnershipEpoch),
+      messages: [new AssistantMessage(timestamp(), 'late')],
+    })).rejects.toThrow('sealed handoff boundary');
+    await leaseResult.value.commitAfterDecision(seal, agentHandoffDecision({
+      operationId: 'handoff-1',
+      targetOwnershipEpoch: agentOwnershipEpoch('target-epoch'),
+    }));
+
+    const releaseProvider = mock(async () => undefined);
+    const restarted = journalStream(directory, releaseProvider);
+    await expect(restarted.release({
+      chat,
+      reason: 'transferred',
+      signal: AbortSignal.timeout(1_000),
+    })).rejects.toMatchObject({ code: 'PROJECTION_HANDOFF_POST_BOUNDARY_EVENT' });
+    expect(releaseProvider).not.toHaveBeenCalled();
+    expect(await AgentProjectionJournal.exists({ directory, ...identity })).toBe(true);
+  });
 });
 
 function projection(
@@ -270,6 +353,34 @@ function projection(
     stream,
     admission: new AgentInputAdmissionCoordinator(stream),
   };
+}
+
+function chatReference(
+  identity: { readonly chatId: string; readonly agentOwnershipEpoch: AgentOwnershipEpoch },
+): AgentChatReferenceV4 {
+  return {
+    ...identity,
+    agentId: 'fake',
+    agentSessionId: null,
+    projectPath: '/tmp/project',
+    model: 'model',
+    nativeSession: null,
+    carryOverRevision: 'carry-v1:0',
+    nativeSeedReceipt: null,
+    settings: { ownerId: 'fake', schemaVersion: 1, values: {} },
+  };
+}
+
+function journalStream(
+  directory: string,
+  releaseProvider?: () => Promise<void>,
+): JournalBackedAgentTranscriptStream {
+  return new JournalBackedAgentTranscriptStream({
+    ownerId: 'fake',
+    directory: async () => directory,
+    bootstrap: async () => ({ kind: 'ready', value: [] }),
+    ...(releaseProvider ? { releaseProvider } : {}),
+  });
 }
 
 function fixtureProvenance(): AgentTranscriptProvenance {

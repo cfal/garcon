@@ -8,10 +8,16 @@ import {
   type NativeSeedReceipt,
 } from '@garcon/common/transcript-seed';
 import {
+  type AgentHandoffDecision,
   agentOwnershipEpoch,
   type AgentChatReference,
   type AgentChatReferenceV4,
+  type AgentStreamCheckpoint,
 } from '@garcon/server-agent-interface';
+import {
+  agentHandoffDecision,
+  sameCheckpoint,
+} from '@garcon/server-agent-common/transcript-projection/identity';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
@@ -28,18 +34,18 @@ import { parseCarryOverSegmentRefs } from './store.js';
 import { carryOverRevision } from './carryover-segments.js';
 
 const logger = createLogger('chats:ownership-journal');
-export const AGENT_OWNERSHIP_JOURNAL_VERSION = 3 as const;
+export const AGENT_OWNERSHIP_JOURNAL_VERSION = 4 as const;
 const MAX_TRANSFER_RELEASE_ATTEMPTS = 3;
 const DEFAULT_RELEASE_TIMEOUT_MS = 30_000;
 
 export interface AgentHandoffIntent {
-  readonly version: 3;
+  readonly version: 4;
   readonly operationId: string;
   readonly clientRequestId: string;
   readonly submittedTargetHash: string;
   readonly kind: 'handoff';
   readonly chatId: string;
-  readonly phase: 'segment-prepared' | 'registry-committed';
+  readonly phase: 'intent' | 'staged' | 'commit-decided' | 'registry-committed';
   readonly source: {
     readonly agentId: string;
     readonly model: string;
@@ -47,13 +53,17 @@ export interface AgentHandoffIntent {
     readonly agentOwnershipEpoch: string;
     readonly carryOverRevision: string;
     readonly nativeSeedReceipt: NativeSeedReceipt | null;
-    readonly reference: AgentChatReference;
+    readonly reference: AgentChatReferenceV4;
   };
   readonly target: {
     readonly execution: ResolvedAgentHandoffTarget;
     readonly agentOwnershipEpoch: string;
     readonly carryOverSegments: readonly CarryOverSegmentRef[];
   };
+  readonly staging: {
+    readonly sourceCheckpoint: AgentStreamCheckpoint;
+    readonly incomingCheckpoint: AgentStreamCheckpoint;
+  } | null;
   readonly createdAt: string;
 }
 
@@ -61,7 +71,7 @@ export interface SourceReleaseCleanup {
   readonly version: 1;
   readonly operationId: string;
   readonly chatId: string;
-  readonly source: AgentChatReference;
+  readonly source: AgentChatReferenceV4;
   readonly reason: 'transferred';
   readonly status: 'pending' | 'claimed' | 'abandoned';
   readonly attempts: number;
@@ -80,13 +90,13 @@ export interface DeleteIntentV2 {
   readonly createdAt: string;
 }
 
-export interface AgentOwnershipJournalFileV3 {
+export interface AgentOwnershipJournalFileV4 {
   readonly version: typeof AGENT_OWNERSHIP_JOURNAL_VERSION;
   readonly ownershipIntents: readonly (AgentHandoffIntent | DeleteIntentV2)[];
   readonly transferCleanup: readonly SourceReleaseCleanup[];
 }
 
-export function emptyOwnershipJournalV3(): AgentOwnershipJournalFileV3 {
+export function emptyOwnershipJournalV4(): AgentOwnershipJournalFileV4 {
   return {
     version: AGENT_OWNERSHIP_JOURNAL_VERSION,
     ownershipIntents: [],
@@ -99,7 +109,7 @@ export class AgentOwnershipJournal {
   readonly #registry: IChatRegistry;
   readonly #integrations: IntegrationRegistry;
   readonly #releaseTimeoutMs: number;
-  #journal: AgentOwnershipJournalFileV3 = emptyOwnershipJournalV3();
+  #journal: AgentOwnershipJournalFileV4 = emptyOwnershipJournalV4();
   #cleanupPromise: Promise<void> = Promise.resolve();
   #mutationPromise: Promise<void> = Promise.resolve();
 
@@ -179,17 +189,17 @@ export class AgentOwnershipJournal {
     readonly chatId: string;
     readonly source: ChatRegistryEntry;
     readonly target: ResolvedAgentHandoffTarget;
-    readonly targetCarryOverSegments: readonly CarryOverSegmentRef[];
+    readonly targetCarryOverSegments?: readonly CarryOverSegmentRef[];
   }): Promise<AgentHandoffIntent> {
     const sourceIntegration = this.#integrations.require(options.source.agentId);
     const intent: AgentHandoffIntent = {
-      version: 3,
+      version: 4,
       operationId: options.operationId,
       clientRequestId: options.clientRequestId,
       submittedTargetHash: options.submittedTargetHash,
       kind: 'handoff',
       chatId: options.chatId,
-      phase: 'segment-prepared',
+      phase: 'intent',
       source: {
         agentId: options.source.agentId,
         model: options.source.model,
@@ -213,8 +223,9 @@ export class AgentOwnershipJournal {
       target: {
         execution: options.target,
         agentOwnershipEpoch: crypto.randomUUID(),
-        carryOverSegments: parseCarryOverSegmentRefs(options.targetCarryOverSegments),
+        carryOverSegments: parseCarryOverSegmentRefs(options.targetCarryOverSegments ?? []),
       },
+      staging: null,
       createdAt: new Date().toISOString(),
     };
     await this.#mutate((current) => {
@@ -227,14 +238,64 @@ export class AgentOwnershipJournal {
     return intent;
   }
 
-  async commitHandoff(
-    operationId: string,
-    assertAdmissionActive: () => void,
-  ): Promise<ChatRegistryResolvedEntry> {
+  async stageHandoff(options: {
+    readonly operationId: string;
+    readonly targetCarryOverSegments: readonly CarryOverSegmentRef[];
+    readonly sourceCheckpoint: AgentStreamCheckpoint;
+    readonly incomingCheckpoint: AgentStreamCheckpoint;
+  }): Promise<AgentHandoffIntent> {
+    const intent = this.#requireHandoff(options.operationId);
+    if (intent.phase !== 'intent') {
+      assertMatchingStaging(intent, options);
+      return intent;
+    }
+    assertCheckpointFor(
+      options.sourceCheckpoint,
+      intent.chatId,
+      intent.source.agentOwnershipEpoch,
+      'source',
+    );
+    assertCheckpointFor(
+      options.incomingCheckpoint,
+      intent.chatId,
+      intent.target.agentOwnershipEpoch,
+      'incoming',
+    );
+    const staged: AgentHandoffIntent = {
+      ...intent,
+      phase: 'staged',
+      target: {
+        ...intent.target,
+        carryOverSegments: parseCarryOverSegmentRefs(options.targetCarryOverSegments),
+      },
+      staging: {
+        sourceCheckpoint: structuredClone(options.sourceCheckpoint),
+        incomingCheckpoint: structuredClone(options.incomingCheckpoint),
+      },
+    };
+    await this.#replaceIntent(staged);
+    return staged;
+  }
+
+  async decideHandoff(operationId: string): Promise<AgentHandoffDecision> {
     const intent = this.#requireHandoff(operationId);
+    if (!intent.staging || intent.phase === 'intent') {
+      throw new Error(`Agent handoff is not fully staged: ${operationId}`);
+    }
+    if (intent.phase !== 'commit-decided' && intent.phase !== 'registry-committed') {
+      await this.#replaceIntent({ ...intent, phase: 'commit-decided' });
+    }
+    return decisionFor(intent);
+  }
+
+  async applyHandoffDecision(operationId: string): Promise<ChatRegistryResolvedEntry> {
+    let intent = this.#requireHandoff(operationId);
+    if (!intent.staging
+        || (intent.phase !== 'commit-decided' && intent.phase !== 'registry-committed')) {
+      throw new Error(`Agent handoff has no durable decision: ${operationId}`);
+    }
     const current = this.#registry.getChat(intent.chatId);
     if (current && matchesHandoffTarget(current, intent)) {
-      await this.#finishHandoff(intent);
       return { id: intent.chatId, ...current };
     }
     if (!current || !matchesHandoffSource(current, intent)) {
@@ -244,7 +305,6 @@ export class AgentOwnershipJournal {
         409,
       );
     }
-    assertAdmissionActive();
     const execution = intent.target.execution;
     const updated = await this.#registry.updateChat(intent.chatId, {
       agentId: execution.agentId,
@@ -263,23 +323,37 @@ export class AgentOwnershipJournal {
       nativeSeedReceipt: null,
       carryOverSegments: intent.target.carryOverSegments,
       agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
+      transcriptContentEpoch: intent.staging.incomingCheckpoint.projection.contentEpoch,
     }, { flush: true });
     if (!updated) throw new Error(`Session not found: ${intent.chatId}`);
 
-    const committed = { ...intent, phase: 'registry-committed' as const };
-    await this.#replaceIntent(committed);
-    await this.#finishHandoff(committed);
+    if (intent.phase !== 'registry-committed') {
+      intent = { ...intent, phase: 'registry-committed' };
+      await this.#replaceIntent(intent);
+    }
     return updated;
   }
 
-  async compensateHandoff(operationId: string): Promise<void> {
+  async completeHandoff(operationId: string): Promise<void> {
+    const intent = this.#requireHandoff(operationId);
+    if (!intent.staging
+        || (intent.phase !== 'commit-decided' && intent.phase !== 'registry-committed')) {
+      throw new Error(`Cannot complete undecided handoff: ${operationId}`);
+    }
+    const current = this.#registry.getChat(intent.chatId);
+    if (!current || !matchesHandoffTarget(current, intent)) {
+      throw new Error(`Cannot complete handoff before target ownership is installed: ${operationId}`);
+    }
+    await this.#finishHandoff(intent);
+  }
+
+  async abortHandoff(operationId: string): Promise<void> {
     const intent = this.#findHandoffByOperation(operationId);
     if (!intent) return;
-    const current = this.#registry.getChat(intent.chatId);
-    if (current && matchesHandoffTarget(current, intent)) {
-      await this.#finishHandoff(intent);
-      return;
+    if (intent.phase === 'commit-decided' || intent.phase === 'registry-committed') {
+      throw new Error(`A decided handoff cannot roll back: ${operationId}`);
     }
+    const current = this.#registry.getChat(intent.chatId);
     if (current && !matchesHandoffSource(current, intent)) {
       throw new Error(`Cannot compensate handoff after ownership changed for ${intent.chatId}`);
     }
@@ -389,22 +463,52 @@ export class AgentOwnershipJournal {
 
   async #recoverHandoff(intent: AgentHandoffIntent): Promise<void> {
     const current = this.#registry.getChat(intent.chatId);
-    if (current && matchesHandoffSource(current, intent)) {
-      if (intent.phase === 'registry-committed') {
-        throw new Error(`Committed handoff reverted to its source for ${intent.chatId}`);
+    const decided = intent.phase === 'commit-decided' || intent.phase === 'registry-committed';
+    if (!decided) {
+      if (current && matchesHandoffSource(current, intent)) {
+        if (intent.staging) {
+          const incoming = await this.#prepareIncoming(intent);
+          await incoming.rollbackBeforeDecision();
+        }
+        await this.#removeIntent(intent.operationId);
+        return;
       }
+      logger.warn('Discarding a superseded undecided handoff intent', {
+        chatId: intent.chatId,
+        operationId: intent.operationId,
+      });
       await this.#removeIntent(intent.operationId);
       return;
     }
-    if (current && matchesHandoffTarget(current, intent)) {
-      await this.#finishHandoff(intent);
-      return;
+    if (!intent.staging) {
+      throw new Error(`Decided handoff has no staged projection checkpoints for ${intent.chatId}`);
     }
-    logger.warn('Discarding a superseded handoff intent', {
-      chatId: intent.chatId,
-      operationId: intent.operationId,
+    if (current && !matchesHandoffSource(current, intent) && !matchesHandoffTarget(current, intent)) {
+      throw new Error(`Decided handoff was superseded before roll-forward for ${intent.chatId}`);
+    }
+    const incoming = await this.#prepareIncoming(intent);
+    await this.applyHandoffDecision(intent.operationId);
+    await incoming.commitAfterDecision(decisionFor(intent));
+    await this.completeHandoff(intent.operationId);
+  }
+
+  async #prepareIncoming(intent: AgentHandoffIntent) {
+    if (!intent.staging) throw new Error(`Handoff is missing staged checkpoints: ${intent.operationId}`);
+    const integration = this.#integrations.require(intent.target.execution.agentId);
+    const result = await integration.transcript.prepareOwnershipSegment({
+      chat: targetReference(intent, integration),
+      handoffOperationId: intent.operationId,
+      signal: AbortSignal.timeout(30_000),
     });
-    await this.#removeIntent(intent.operationId);
+    if (result.kind !== 'ready') {
+      throw new Error(result.kind === 'deferred'
+        ? 'Incoming projection preparation is deferred'
+        : result.errorCode);
+    }
+    if (!sameHandoffProjection(result.value.checkpoint, intent.staging.incomingCheckpoint)) {
+      throw new Error(`Incoming projection preparation changed for ${intent.chatId}`);
+    }
+    return result.value;
   }
 
   async #recoverDelete(intent: DeleteIntentV2): Promise<void> {
@@ -612,9 +716,9 @@ export class AgentOwnershipJournal {
   }
 
   #mutate<T>(
-    mutation: (current: AgentOwnershipJournalFileV3) =>
-      | AgentOwnershipJournalFileV3
-      | { journal: AgentOwnershipJournalFileV3; result: T },
+    mutation: (current: AgentOwnershipJournalFileV4) =>
+      | AgentOwnershipJournalFileV4
+      | { journal: AgentOwnershipJournalFileV4; result: T },
   ): Promise<T> {
     const operation = this.#mutationPromise
       .catch(() => undefined)
@@ -632,13 +736,13 @@ export class AgentOwnershipJournal {
     return operation;
   }
 
-  async #load(): Promise<AgentOwnershipJournalFileV3> {
+  async #load(): Promise<AgentOwnershipJournalFileV4> {
     try {
       const value: unknown = JSON.parse(await fs.readFile(this.#filePath, 'utf8'));
-      if (!isJournalV3(value)) throw new Error('Invalid agent ownership journal');
+      if (!isJournalV4(value)) throw new Error('Invalid agent ownership journal');
       return value;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyOwnershipJournalV3();
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyOwnershipJournalV4();
       throw error;
     }
   }
@@ -669,8 +773,81 @@ function matchesHandoffSource(
     ) === intent.source.carryOverRevision;
 }
 
+function targetReference(
+  intent: AgentHandoffIntent,
+  integration: ReturnType<IntegrationRegistry['require']>,
+): AgentChatReferenceV4 {
+  const execution = intent.target.execution;
+  return {
+    chatId: intent.chatId,
+    agentId: execution.agentId,
+    agentSessionId: null,
+    projectPath: intent.source.reference.projectPath,
+    model: execution.model,
+    nativeSession: null,
+    carryOverRevision: carryOverRevision(intent.target.carryOverSegments),
+    nativeSeedReceipt: null,
+    settings: integration.settings.parse(execution.agentSettings),
+    agentOwnershipEpoch: agentOwnershipEpoch(intent.target.agentOwnershipEpoch),
+  };
+}
+
+function decisionFor(intent: AgentHandoffIntent): AgentHandoffDecision {
+  return agentHandoffDecision({
+    operationId: intent.operationId,
+    targetOwnershipEpoch: agentOwnershipEpoch(intent.target.agentOwnershipEpoch),
+  });
+}
+
+function assertCheckpointFor(
+  checkpoint: AgentStreamCheckpoint,
+  chatId: string,
+  ownershipEpoch: string,
+  label: string,
+): void {
+  if (checkpoint.chatId !== chatId
+      || checkpoint.agentOwnershipEpoch !== ownershipEpoch
+      || checkpoint.projection.total !== checkpoint.projection.durableCount) {
+    throw new TypeError(`${label} handoff checkpoint is invalid`);
+  }
+}
+
+function assertMatchingStaging(
+  intent: AgentHandoffIntent,
+  options: {
+    readonly targetCarryOverSegments: readonly CarryOverSegmentRef[];
+    readonly sourceCheckpoint: AgentStreamCheckpoint;
+    readonly incomingCheckpoint: AgentStreamCheckpoint;
+  },
+): void {
+  if (!intent.staging
+      || !sameCheckpoint(intent.staging.sourceCheckpoint, options.sourceCheckpoint)
+      || !sameCheckpoint(intent.staging.incomingCheckpoint, options.incomingCheckpoint)
+      || JSON.stringify(intent.target.carryOverSegments)
+        !== JSON.stringify(parseCarryOverSegmentRefs(options.targetCarryOverSegments))) {
+    throw new DomainError(
+      'IDEMPOTENCY_CONFLICT',
+      'The handoff operation was staged with different artifacts.',
+      409,
+    );
+  }
+}
+
+function sameHandoffProjection(
+  left: AgentStreamCheckpoint,
+  right: AgentStreamCheckpoint,
+): boolean {
+  return left.chatId === right.chatId
+    && left.agentOwnershipEpoch === right.agentOwnershipEpoch
+    && left.projection.contentEpoch === right.projection.contentEpoch
+    && left.projection.total === right.projection.total
+    && left.projection.durableCount === right.projection.durableCount
+    && left.projection.durableRevision === right.projection.durableRevision
+    && left.projection.stateRevision === right.projection.stateRevision;
+}
+
 function assertAvailable(
-  journal: AgentOwnershipJournalFileV3,
+  journal: AgentOwnershipJournalFileV4,
   chatId: string,
   code: 'AGENT_HANDOFF_REQUIRES_IDLE' | 'SESSION_BUSY' = 'AGENT_HANDOFF_REQUIRES_IDLE',
 ): void {
@@ -685,9 +862,9 @@ function assertAvailable(
 }
 
 function replaceCleanup(
-  journal: AgentOwnershipJournalFileV3,
+  journal: AgentOwnershipJournalFileV4,
   cleanup: SourceReleaseCleanup,
-): AgentOwnershipJournalFileV3 {
+): AgentOwnershipJournalFileV4 {
   return {
     ...journal,
     transferCleanup: journal.transferCleanup.map((candidate) => (
@@ -702,7 +879,9 @@ function matchesHandoffTarget(
 ): boolean {
   return current?.agentId === intent.target.execution.agentId
     && current.agentOwnershipEpoch === intent.target.agentOwnershipEpoch
-    && JSON.stringify(current.carryOverSegments) === JSON.stringify(intent.target.carryOverSegments);
+    && JSON.stringify(current.carryOverSegments) === JSON.stringify(intent.target.carryOverSegments)
+    && (!intent.staging
+      || current.transcriptContentEpoch === intent.staging.incomingCheckpoint.projection.contentEpoch);
 }
 
 function deduplicateReferences(references: readonly AgentChatReference[]): AgentChatReference[] {
@@ -722,7 +901,7 @@ function errorCode(error: unknown): string {
   return error instanceof Error ? error.name : 'UNKNOWN';
 }
 
-function isJournalV3(value: unknown): value is AgentOwnershipJournalFileV3 {
+function isJournalV4(value: unknown): value is AgentOwnershipJournalFileV4 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const journal = value as Record<string, unknown>;
   if (journal.version !== AGENT_OWNERSHIP_JOURNAL_VERSION) return false;
@@ -734,7 +913,7 @@ function isJournalV3(value: unknown): value is AgentOwnershipJournalFileV3 {
 function isOwnershipIntent(value: unknown): value is AgentHandoffIntent | DeleteIntentV2 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const intent = value as Record<string, unknown>;
-  if ((intent.version !== 2 && intent.version !== 3) || typeof intent.operationId !== 'string' || typeof intent.chatId !== 'string') {
+  if ((intent.version !== 2 && intent.version !== 4) || typeof intent.operationId !== 'string' || typeof intent.chatId !== 'string') {
     return false;
   }
   if (intent.kind === 'delete') {
@@ -746,9 +925,12 @@ function isOwnershipIntent(value: unknown): value is AgentHandoffIntent | Delete
   }
   const source = intent.source;
   const target = intent.target;
+  const staging = intent.staging;
+  const phase = intent.phase;
   return intent.kind === 'handoff'
-    && intent.version === 3
-    && (intent.phase === 'segment-prepared' || intent.phase === 'registry-committed')
+    && intent.version === 4
+    && (phase === 'intent' || phase === 'staged'
+      || phase === 'commit-decided' || phase === 'registry-committed')
     && typeof intent.clientRequestId === 'string'
     && typeof intent.submittedTargetHash === 'string'
     && /^[a-f0-9]{64}$/.test(intent.submittedTargetHash)
@@ -759,12 +941,42 @@ function isOwnershipIntent(value: unknown): value is AgentHandoffIntent | Delete
     && nonEmptyString(source.agentOwnershipEpoch)
     && nonEmptyString(source.carryOverRevision)
     && isNativeSeedReceiptOrNull(source.nativeSeedReceipt)
-    && isAgentChatReference(source.reference)
+    && isAgentChatReferenceV4(source.reference)
     && isObject(target)
     && isResolvedHandoffTarget(target.execution)
     && nonEmptyString(target.agentOwnershipEpoch)
     && isCarryOverSegmentRefs(target.carryOverSegments)
+    && (staging === null || isHandoffStaging(staging, intent.chatId, source.agentOwnershipEpoch, target.agentOwnershipEpoch))
+    && (phase === 'intent' ? staging === null : staging !== null)
     && typeof intent.createdAt === 'string';
+}
+
+function isHandoffStaging(
+  value: unknown,
+  chatId: unknown,
+  sourceEpoch: unknown,
+  targetEpoch: unknown,
+): boolean {
+  if (!isObject(value) || typeof chatId !== 'string'
+      || typeof sourceEpoch !== 'string' || typeof targetEpoch !== 'string') return false;
+  return isStreamCheckpoint(value.sourceCheckpoint, chatId, sourceEpoch)
+    && isStreamCheckpoint(value.incomingCheckpoint, chatId, targetEpoch);
+}
+
+function isStreamCheckpoint(value: unknown, chatId: string, ownershipEpoch: string): boolean {
+  if (!isObject(value) || value.chatId !== chatId
+      || value.agentOwnershipEpoch !== ownershipEpoch
+      || typeof value.offset !== 'string') return false;
+  const projection = value.projection;
+  return isObject(projection)
+    && nonEmptyString(projection.epoch)
+    && nonEmptyString(projection.contentEpoch)
+    && Number.isSafeInteger(projection.total)
+    && Number(projection.total) >= 0
+    && Number.isSafeInteger(projection.durableCount)
+    && Number(projection.durableCount) === Number(projection.total)
+    && nonEmptyString(projection.durableRevision)
+    && nonEmptyString(projection.stateRevision);
 }
 
 function isTransferCleanup(value: unknown): value is SourceReleaseCleanup {
@@ -773,12 +985,13 @@ function isTransferCleanup(value: unknown): value is SourceReleaseCleanup {
   return cleanup.version === 1
     && typeof cleanup.operationId === 'string'
     && typeof cleanup.chatId === 'string'
-    && isAgentChatReference(cleanup.source)
+    && isAgentChatReferenceV4(cleanup.source)
     && cleanup.reason === 'transferred'
     && (cleanup.status === 'pending' || cleanup.status === 'claimed' || cleanup.status === 'abandoned')
     && Number.isSafeInteger(cleanup.attempts)
     && Number(cleanup.attempts) >= 0
-    && (cleanup.lastErrorCode === null || typeof cleanup.lastErrorCode === 'string');
+    && (cleanup.lastErrorCode === null || typeof cleanup.lastErrorCode === 'string')
+    && typeof cleanup.createdAt === 'string';
 }
 
 function isResolvedHandoffTarget(value: unknown): value is ResolvedAgentHandoffTarget {
@@ -812,6 +1025,11 @@ function isAgentChatReference(value: unknown): value is AgentChatReference {
     && isNativeSeedReceiptOrNull(value.nativeSeedReceipt)
     && settings !== null
     && settings.ownerId === value.agentId;
+}
+
+function isAgentChatReferenceV4(value: unknown): value is AgentChatReferenceV4 {
+  return isAgentChatReference(value)
+    && nonEmptyString((value as unknown as Record<string, unknown>).agentOwnershipEpoch);
 }
 
 function isNativeSessionOrNull(value: unknown, agentId: string): boolean {

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { ChatMessage, UserMessage } from '@garcon/common/chat-types';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type {
   AgentChatReferenceV4,
   AgentControlEvent,
@@ -8,6 +9,7 @@ import type {
   AgentInputPreparation,
   AgentNativeSessionRef,
   AgentOperationIdentityV4,
+  AgentOutgoingHandoffLease,
   AgentProjectionState,
   AgentSegmentIdentity,
   AgentSegmentOpenResult,
@@ -79,6 +81,11 @@ interface OpenSegment {
   readonly admission: AgentInputAdmissionCoordinator;
   readonly pager: AgentProjectionPager;
   readonly gate: AgentProjectionMutationGate;
+  readonly handoffHealth: {
+    cleanupBlock: Promise<void> | null;
+    operationId: string | null;
+  };
+  forwarded: boolean;
 }
 
 export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream {
@@ -189,12 +196,26 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }) {
     request.signal.throwIfAborted();
     const segment = this.#open(request.chat);
-    const lease = await prepareOutgoingHandoffLease({
-      operationId: request.handoffOperationId,
-      gate: segment.gate,
-      materialization: () => segment.stream.current,
-      afterDecision: async () => {},
-    });
+    if (segment.handoffHealth.operationId
+        && segment.handoffHealth.operationId !== request.handoffOperationId) {
+      throw new TypeError('Outgoing projection already has a different handoff lease');
+    }
+    segment.handoffHealth.operationId = request.handoffOperationId;
+    let lease: AgentOutgoingHandoffLease;
+    try {
+      lease = await prepareOutgoingHandoffLease({
+        operationId: request.handoffOperationId,
+        gate: segment.gate,
+        materialization: () => segment.stream.current,
+        afterDecision: async () => {},
+        beforeRollback: async () => {
+          segment.handoffHealth.operationId = null;
+        },
+      });
+    } catch (error) {
+      segment.handoffHealth.operationId = null;
+      throw error;
+    }
     return { kind: 'ready' as const, value: lease };
   }
 
@@ -203,16 +224,30 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }) {
     request.signal.throwIfAborted();
     const key = preparationKey(request.handoffOperationId, request.chat);
+    const active = this.#segments.get(segmentKey(request.chat));
+    if (active) {
+      return {
+        kind: 'ready' as const,
+        value: prepareIncomingOwnershipSegment({
+          checkpoint: active.stream.current.checkpoint,
+          commit: async (decision) => this.#validateDecision(request, decision),
+          rollback: async () => {
+            throw new TypeError('Active ownership segment cannot roll back');
+          },
+        }),
+      };
+    }
     const existing = this.#preparations.get(key);
     if (existing) {
       return {
         kind: 'ready' as const,
         value: prepareIncomingOwnershipSegment({
           checkpoint: existing.stream.current.checkpoint,
-          commit: async () => {
-            this.#segments.set(segmentKey(request.chat), existing);
+          commit: async (decision) => {
+            this.#validateDecision(request, decision);
+            this.#activatePreparation(key, request.chat, existing);
           },
-          rollback: async () => {},
+          rollback: async () => this.#rollbackPreparation(key, existing),
         }),
       };
     }
@@ -227,18 +262,10 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     const preparation = prepareIncomingOwnershipSegment({
       checkpoint: segment.stream.current.checkpoint,
       commit: async (decision) => {
-        if (decision.operationId !== request.handoffOperationId
-            || decision.targetOwnershipEpoch !== request.chat.agentOwnershipEpoch) {
-          throw new TypeError('Incoming ownership decision does not match preparation');
-        }
-        this.#segments.set(segmentKey(request.chat), segment);
-        this.#preparations.delete(key);
-        this.#forward(segment);
+        this.#validateDecision(request, decision);
+        this.#activatePreparation(key, request.chat, segment);
       },
-      rollback: async () => {
-        this.#preparations.delete(key);
-        await journal.delete();
-      },
+      rollback: async () => this.#rollbackPreparation(key, segment),
     });
     return { kind: 'ready' as const, value: preparation };
   }
@@ -299,9 +326,26 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     request.signal.throwIfAborted();
     const key = segmentKey(request.chat);
     const segment = this.#segments.get(key);
-    this.#segments.delete(key);
-    if (segment) await segment.journal.delete();
+    const directory = await this.options.directory();
+    const journalOptions = {
+      directory,
+      ...segmentIdentity(request.chat),
+    };
+    const retainedJournal = segment?.journal
+      ?? (await AgentProjectionJournal.exists(journalOptions)
+        ? await AgentProjectionJournal.open(journalOptions)
+        : null);
+    if (segment?.handoffHealth.cleanupBlock) await segment.handoffHealth.cleanupBlock;
+    if (request.reason === 'transferred' && retainedJournal?.state.handoffCleanupBlocked) {
+      throw new AgentIntegrationError(
+        'PROJECTION_HANDOFF_POST_BOUNDARY_EVENT',
+        'The outgoing projection observed a mutation after the handoff boundary',
+        false,
+      );
+    }
     await this.options.releaseProvider?.(request);
+    await AgentProjectionJournal.delete(journalOptions);
+    if (this.#segments.get(key) === segment) this.#segments.delete(key);
   }
 
   async promoteActiveInput(
@@ -453,6 +497,12 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       initial,
       persist: (event, previous, resulting) => journal.persist(event, previous, resulting),
     });
+    const handoffHealth: OpenSegment['handoffHealth'] = {
+      cleanupBlock: state.handoffCleanupBlocked
+        ? Promise.resolve()
+        : null,
+      operationId: null,
+    };
     const segment: OpenSegment = {
       identity: segmentIdentity(chat),
       chat,
@@ -460,7 +510,14 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       stream,
       admission: new AgentInputAdmissionCoordinator(stream),
       pager: new AgentProjectionPager(),
-      gate: new AgentProjectionMutationGate(),
+      gate: new AgentProjectionMutationGate(() => {
+        handoffHealth.cleanupBlock ??= journal.markHandoffBoundaryViolation(
+          handoffHealth.operationId ?? 'unknown-handoff',
+        );
+        return handoffHealth.cleanupBlock;
+      }),
+      handoffHealth,
+      forwarded: false,
     };
     segment.pager.retain(initial.checkpoint.projection, initial.entries);
     if (forward) this.#forward(segment);
@@ -468,9 +525,39 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }
 
   #forward(segment: OpenSegment): void {
+    if (segment.forwarded) return;
+    segment.forwarded = true;
     segment.stream.subscribe((event) => {
       for (const listener of this.#listeners) listener(event);
     });
+  }
+
+  #validateDecision(
+    request: AgentTranscriptRequestV4 & { readonly handoffOperationId: string },
+    decision: import('@garcon/server-agent-interface').AgentHandoffDecision,
+  ): void {
+    if (decision.operationId !== request.handoffOperationId
+        || decision.targetOwnershipEpoch !== request.chat.agentOwnershipEpoch) {
+      throw new TypeError('Incoming ownership decision does not match preparation');
+    }
+  }
+
+  #activatePreparation(
+    key: string,
+    chat: AgentChatReferenceV4,
+    segment: OpenSegment,
+  ): void {
+    this.#segments.set(segmentKey(chat), segment);
+    this.#preparations.delete(key);
+    this.#forward(segment);
+  }
+
+  async #rollbackPreparation(key: string, segment: OpenSegment): Promise<void> {
+    if (this.#segments.get(segmentKey(segment.chat)) === segment) {
+      throw new TypeError('Active ownership segment cannot roll back');
+    }
+    this.#preparations.delete(key);
+    await segment.journal.delete();
   }
 
   async #requireOpen(
