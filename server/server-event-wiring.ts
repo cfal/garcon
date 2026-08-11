@@ -44,6 +44,7 @@ import {
   AgentRunFailedMessage,
   ChatMessagesMessage,
   ChatGenerationResetMessage,
+  ChatOperationalNoticeMessage,
   ChatProjectionGenerationTransitionMessage,
   ChatTransientFeedMutationMessage,
   ChatSessionCreatedMessage,
@@ -123,6 +124,11 @@ export interface ServerEventWiringDeps {
 export interface ServerEventWiring {
   notifyAgentHandoff(chatId: string): void;
   notifyTranscriptCompositionChanged(chatId: string): void;
+  notifyOperationalNotice(
+    chatId: string,
+    noticeType: ChatOperationalNoticeMessage['noticeType'],
+    content: string,
+  ): void;
   waitForIdle(): Promise<void>;
 }
 
@@ -258,6 +264,22 @@ export function wireServerEvents({
     if (!chatExists(chatId)) return;
     idleReconciler.noteHistoryChanged(chatId);
     markSearchCatalogDirty(chatId);
+  }
+
+  // Notices are process-only feed overlays; they never enter the transcript
+  // sequence space and are not replayed to late subscribers.
+  function notifyOperationalNotice(
+    chatId: string,
+    noticeType: ChatOperationalNoticeMessage['noticeType'],
+    content: string,
+  ): void {
+    if (!chatExists(chatId)) return;
+    broadcast(new ChatOperationalNoticeMessage(
+      chatId,
+      noticeType,
+      content,
+      new Date().toISOString(),
+    ));
   }
 
   scheduledPrompts.onInvalidated((reason) => {
@@ -993,5 +1015,10 @@ export function wireServerEvents({
     if (turn) agentRegistry.settleTurn(chatId, turn);
   });
 
-  return { notifyAgentHandoff, notifyTranscriptCompositionChanged, waitForIdle };
+  return {
+    notifyAgentHandoff,
+    notifyTranscriptCompositionChanged,
+    notifyOperationalNotice,
+    waitForIdle,
+  };
 }

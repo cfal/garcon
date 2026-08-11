@@ -79,7 +79,6 @@ import {
   ChatProjectionGenerationTransitionMessage,
   WsFaultMessage,
 } from '../common/ws-events.ts';
-import { ErrorMessage } from '../common/chat-types.ts';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
@@ -343,12 +342,7 @@ export async function startServer(): Promise<void> {
     const chatViews = new ChatViewStore(ownsExecution);
     const transientFeeds = new ChatTransientFeedStore(runtimeState.identity.instanceId);
     carryOverWarnings = (chatId, message) => {
-      void chatViews.appendOperationalNotice(
-        chatId,
-        new ErrorMessage(new Date().toISOString(), message),
-      ).catch((error: unknown) => {
-        logger.warn('carryover compaction notice failed:', errorMessage(error));
-      });
+      eventWiring?.notifyOperationalNotice(chatId, 'warning', message);
     };
     carryOverCompaction = new CarryOverCompactionService({
       agents: agentRegistry,

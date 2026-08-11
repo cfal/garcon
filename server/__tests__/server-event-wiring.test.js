@@ -1368,4 +1368,37 @@ describe('server event wiring', () => {
       clientRequestId: 'req-a',
     }));
   });
+
+  it('broadcasts operational notices as feed overlays without touching the view store', async () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.wiring.notifyOperationalNotice('chat-1', 'warning', 'Carryover context was compacted.');
+
+    expect(published).toContainEqual(expect.objectContaining({
+      type: 'chat-operational-notice',
+      chatId: 'chat-1',
+      noticeType: 'warning',
+      content: 'Carryover context was compacted.',
+    }));
+    expect(fixture.chatViews.appendAfterEnsuringGeneration).not.toHaveBeenCalled();
+  });
+
+  it('drops operational notices for removed chats', async () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      chatRegistry: { getChat: mock(() => null) },
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.wiring.notifyOperationalNotice('chat-1', 'error', 'gone');
+
+    expect(published).toEqual([]);
+  });
 });

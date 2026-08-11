@@ -200,6 +200,20 @@ export class QueueDispatchingMessage {
   ) {}
 }
 
+export type ChatOperationalNoticeType = 'warning' | 'error';
+
+// Process-only advisory overlay for the chat feed. Notices never enter the
+// transcript sequence space, pages, replay, search, or shares.
+export class ChatOperationalNoticeMessage {
+  readonly type = 'chat-operational-notice' as const;
+  constructor(
+    public chatId: string,
+    public noticeType: ChatOperationalNoticeType,
+    public content: string,
+    public timestamp: string,
+  ) {}
+}
+
 export type ReconnectControlResult =
   | { chatId: string; outcome: 'snapshot'; control: ChatExecutionControlState }
   | { chatId: string; outcome: 'not-found' }
@@ -378,6 +392,7 @@ export type ServerWsMessage =
   | ChatProcessingUpdatedMessage
   | ChatExecutionControlUpdatedMessage
   | QueueDispatchingMessage
+  | ChatOperationalNoticeMessage
   | ReconnectStateMessage
   | PendingUserInputUpdatedMessage
   | PendingUserInputStatusUpdatedMessage
@@ -715,6 +730,16 @@ export function parseServerWsMessage(
             entryId,
             String(data.content ?? ''),
           )
+        : null;
+    }
+    case 'chat-operational-notice': {
+      const chatId = requiredStr(data.chatId);
+      const content = requiredStr(data.content);
+      const noticeType = data.noticeType === 'warning' || data.noticeType === 'error'
+        ? data.noticeType
+        : null;
+      return chatId && content && noticeType
+        ? new ChatOperationalNoticeMessage(chatId, noticeType, content, str(data.timestamp))
         : null;
     }
     case 'reconnect-state': {

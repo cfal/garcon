@@ -22,7 +22,6 @@ import {
   reconcileNativeSnapshotView,
 } from './chat-view-native-reconciliation.js';
 import { transferPublishedLiveEntries } from './chat-view-live-publication.js';
-import { ChatViewOperationalNotices } from './chat-view-operational-notices.js';
 import {
   assertValidChatMessage,
   lowerBoundBySeq,
@@ -75,7 +74,6 @@ export type ChatViewReplacementReason = Extract<
 
 export class ChatViewStore {
   #views = new Map<string, ChatView>();
-  #operationalNotices = new ChatViewOperationalNotices();
   #locks = new KeyedPromiseLock();
   #fences = new Map<string, number>();
   #inFlightChats = new Set<string>();
@@ -365,11 +363,6 @@ export class ChatViewStore {
     });
   }
 
-  async appendOperationalNotice(chatId: string, message: ErrorMessage): Promise<void> {
-    this.#operationalNotices.retain(chatId, message);
-    await this.appendToCurrentOrProvisional(chatId, [message]);
-  }
-
   readPage(chatId: string, limit: number, beforeSeq?: number): ChatViewPage | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
@@ -409,7 +402,6 @@ export class ChatViewStore {
   deleteChatView(chatId: string): void {
     this.invalidate(chatId);
     this.#fences.delete(chatId);
-    this.#operationalNotices.delete(chatId);
   }
 
   evict(chatId: string): void {
@@ -646,7 +638,7 @@ export class ChatViewStore {
         })
         .map((entry) => entry.message)
       : [];
-    let fullMessages = [...reconciledMessages, ...this.#operationalNotices.retained(chatId)];
+    let fullMessages = [...reconciledMessages];
     if (unpersistedLiveMessages.length > 0) {
       const appended = this.#appendLiveToView(view, unpersistedLiveMessages, 'native-wins');
       fullMessages = [...fullMessages, ...appended.map((entry) => entry.message)];
@@ -675,7 +667,6 @@ export class ChatViewStore {
         'native-wins',
       );
     }
-    this.#appendToView(reconciled.view, this.#operationalNotices.missingFrom(chatId, reconciled.view.messages));
     transferPublishedLiveEntries(previous, reconciled.view);
     this.#logGenerationTransition(reconciled.view, reconciled.transition);
     this.#views.set(chatId, reconciled.view);
@@ -712,7 +703,6 @@ export class ChatViewStore {
       lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#appendToView(view, messages);
-    this.#appendToView(view, this.#operationalNotices.missingFrom(chatId, view.messages));
     this.#logGenerationTransition(view, transition);
     return view;
   }
@@ -744,7 +734,6 @@ export class ChatViewStore {
       lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#mergeHistoryPage(view, page);
-    this.#appendToView(view, this.#operationalNotices.missingFrom(chatId, view.messages));
     this.#logGenerationTransition(view, { reason: 'native-history-page' });
     return view;
   }
@@ -769,7 +758,6 @@ export class ChatViewStore {
     messages: ChatMessage[],
     conflictPolicy: 'reject' | 'native-wins' = 'reject',
   ): ChatViewMessage[] {
-    messages = this.#operationalNotices.filterDuplicateAppends(view.chatId, view.messages, messages);
     const reconciled = reconcileLiveMessageAppends(view.messages, messages, conflictPolicy);
     for (const identity of reconciled.droppedConflictingUserIdentities) {
       logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${identity}`);

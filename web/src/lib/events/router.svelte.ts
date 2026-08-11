@@ -8,6 +8,7 @@ import type { ServerWsMessage, EventKey } from '$shared/ws-events';
 import {
 	ChatMessagesMessage,
 	ChatGenerationResetMessage,
+	ChatOperationalNoticeMessage,
 	ChatProjectionGenerationTransitionMessage,
 	ChatTransientFeedMutationMessage,
 	AgentRunFinishedMessage,
@@ -393,6 +394,10 @@ function buildDispatch(
 			if (msg instanceof ChatExecutionControlUpdatedMessage) {
 				handleExecutionControlUpdated(msg, queueCtx);
 			}
+		},
+		'chat-operational-notice': (msg) => {
+			if (!(msg instanceof ChatOperationalNoticeMessage)) return;
+			stores.chatState.appendLocalNotice(msg.noticeType, msg.content);
 		},
 		'queue-dispatching': (msg) => {
 			if (!(msg instanceof QueueDispatchingMessage)) return;
