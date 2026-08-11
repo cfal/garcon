@@ -58,7 +58,7 @@ describe('GitComparisonScreen', () => {
 		expect(screen.queryByText('Loading comparison')).toBeNull();
 	});
 
-	it('shows the compared revisions without a redundant screen title', () => {
+	it('shows the compared revisions without redundant title or direct-mode labels', () => {
 		const comparison = new GitComparisonController();
 		comparison.snapshot = readySnapshot();
 
@@ -67,6 +67,29 @@ describe('GitComparisonScreen', () => {
 		expect(screen.getByText('HEAD~1')).toBeTruthy();
 		expect(screen.getByText('Working Tree')).toBeTruthy();
 		expect(screen.queryByText('Compare revisions')).toBeNull();
+		expect(screen.queryByText('Direct')).toBeNull();
+	});
+
+	it('identifies a comparison made since the common ancestor', () => {
+		const comparison = new GitComparisonController();
+		comparison.snapshot = {
+			...readySnapshot(),
+			mode: 'merge-base',
+			to: {
+				kind: 'revision',
+				requestedRevision: 'feature',
+				label: 'feature',
+				hash: 'b'.repeat(40),
+				shortHash: 'bbbbbbb',
+			},
+			effectiveFromHash: 'c'.repeat(40),
+			mergeBaseHash: 'c'.repeat(40),
+		};
+
+		renderScreen(comparison, false);
+
+		expect(screen.getByText('Since common ancestor')).toBeTruthy();
+		expect(screen.getByText('base cccccccccc')).toBeTruthy();
 	});
 
 	it('offers local back navigation without exposing the standalone Edit action', async () => {
@@ -90,7 +113,7 @@ describe('GitComparisonScreen', () => {
 	});
 
 	it.each(['main', 'sidebar'] as const)(
-		'places the %s fullscreen control after the wide file-tree toggle',
+		'keeps the %s summary beside top-aligned wide controls',
 		async (presentation) => {
 			const comparison = new GitComparisonController();
 			comparison.snapshot = readySnapshot();
@@ -108,6 +131,21 @@ describe('GitComparisonScreen', () => {
 			ResizeObserverHarness.emit(document, 1_100);
 			await vi.waitFor(() => expect(document.dataset.gitHistoryLayout).toBe('wide'));
 
+			const headerRow = container.querySelector('[data-git-comparison-header-row]');
+			const summary = container.querySelector('[data-git-comparison-summary]');
+			const range = container.querySelector('[data-git-comparison-range]');
+			const stats = container.querySelector('[data-git-comparison-stats]');
+			const separator = container.querySelector('[data-git-comparison-separator]');
+			const actions = container.querySelector('[data-git-comparison-actions]');
+			expect(headerRow?.classList.contains('items-center')).toBe(true);
+			expect(summary?.parentElement).toBe(headerRow);
+			expect(summary?.classList.contains('font-mono')).toBe(true);
+			expect(range?.parentElement).toBe(summary);
+			expect(stats?.parentElement).toBe(summary);
+			expect(separator?.parentElement).toBe(stats);
+			expect(separator?.getAttribute('aria-hidden')).toBe('true');
+			expect(actions?.parentElement).toBe(headerRow);
+			expect(actions?.classList.contains('self-start')).toBe(true);
 			expect(
 				screen
 					.getByRole('button', { name: 'Hide file tree' })
