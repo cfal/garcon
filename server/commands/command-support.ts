@@ -113,6 +113,7 @@ export type AgentRegistryDep = Pick<
   | 'compactSession'
   | 'resolveNativeSession'
   | 'prepareProjectPathUpdate'
+  | 'notifyProjectPathRelocated'
 >;
 
 export type ForkChatFileCopyDep = (args: {

@@ -287,6 +287,7 @@ export interface AgentTranscriptStream {
   resolveIndexSource(request: AgentTranscriptRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptIndexSourceRefV4 | null>>;
   refreshIndexSource(request: AgentTranscriptIndexRefreshRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptIndexSourceRefV4 | null>>;
   describeSource(request: AgentTranscriptRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptSourceLocation | null>>;
+  updateNativeReference?(chat: AgentChatReferenceV4): void;
   release(request: AgentTranscriptRequestV4 & { readonly reason: 'deleted' | 'transferred' }): Promise<void>;
 }
 

@@ -446,6 +446,19 @@ export class AgentRuntimeRouter {
     });
   }
 
+  // Refreshes the open projection segment's provider reference after a
+  // project-path relocation persists the new native session, so the settled
+  // boundary reads the relocated evidence rather than the moved-away path.
+  notifyProjectPathRelocated(chatId: string): void {
+    const entry = this.#registry.getChat(chatId);
+    if (!entry?.agentId) return;
+    const integration = this.#directory.get(entry.agentId);
+    if (!integration) return;
+    integration.transcript.updateNativeReference?.(
+      toAgentChatReference(integration, chatId, entry, this.#getCarryOverRevision(entry)),
+    );
+  }
+
   async abortSession(chatId: string): Promise<boolean> {
     const entry = this.#registry.getChat(chatId);
     if (!entry?.agentSessionId) return false;

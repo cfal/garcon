@@ -832,6 +832,19 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     });
   }
 
+  // Refreshes an open segment's provider reference after a project-path
+  // relocation moves the native session, so later evidence reads and boundary
+  // audits use the current path rather than the one cached at open time.
+  updateNativeReference(chat: AgentChatReferenceV4): void {
+    const segment = this.#segments.get(segmentKey(chat));
+    if (!segment) return;
+    segment.chat = {
+      ...segment.chat,
+      projectPath: chat.projectPath,
+      nativeSession: chat.nativeSession ?? segment.chat.nativeSession,
+    };
+  }
+
   referenceForOperation(
     chatId: string,
     operation: Pick<AgentOperationIdentityV4, 'agentOwnershipEpoch'>,

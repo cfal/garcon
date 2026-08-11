@@ -120,6 +120,7 @@ export interface AgentRegistryServiceContract {
     agentId: string,
     request: PrepareProjectPathUpdateRequest,
   ): Promise<AgentProjectPathUpdatePreparation | void>;
+  notifyProjectPathRelocated(chatId: string): void;
   resolveNativeSession(session: AgentChatEntry, chatId?: string): Promise<AgentNativeSessionRef | null>;
   describeTranscriptSource(
     session: AgentChatEntry,
@@ -290,6 +291,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     request: PrepareProjectPathUpdateRequest,
   ): Promise<AgentProjectPathUpdatePreparation | void> {
     return this.#runtime.prepareProjectPathUpdate(agentId, request);
+  }
+  notifyProjectPathRelocated(chatId: string): void {
+    this.#runtime.notifyProjectPathRelocated(chatId);
   }
   forkAgentSession(args: {
     sourceSession: AgentChatEntry;

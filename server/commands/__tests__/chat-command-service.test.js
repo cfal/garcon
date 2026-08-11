@@ -537,6 +537,7 @@ function makeService(overrides = {}) {
     compactSession: mock(() => Promise.resolve(undefined)),
     resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
+    notifyProjectPathRelocated: mock(() => undefined),
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
     getAgentCatalogEntries: mock(() => []),

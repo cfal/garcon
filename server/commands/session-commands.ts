@@ -506,6 +506,9 @@ export class SessionCommands {
     if (!updated) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
+    // The registry now holds the relocated native session; refresh the open
+    // projection segment so its settled boundary reads the new path.
+    this.deps.agents.notifyProjectPathRelocated(input.chatId);
 
     return {
       success: true,

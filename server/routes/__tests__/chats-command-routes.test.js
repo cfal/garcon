@@ -442,6 +442,7 @@ function createRouteAgent(sessionOverrides = {}) {
     resolvePermission: mock(() => undefined),
     resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
+    notifyProjectPathRelocated: mock(() => undefined),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
   const commandLedger = createRouteCommandLedger('chats-command-routes');
