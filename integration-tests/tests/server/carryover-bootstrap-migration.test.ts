@@ -40,7 +40,7 @@ describe('carryover bootstrap migration', () => {
           ownershipIntents: unknown[];
           transferCleanup: unknown[];
         }>(fixture, 'agent-ownership-journal.json')).toEqual({
-          version: 3,
+          version: 4,
           ownershipIntents: [],
           transferCleanup: [],
         });
@@ -120,7 +120,7 @@ describe('carryover bootstrap migration', () => {
         // The rollback finished from its marker, then the boot re-migrated.
         expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 5 });
         expect(await readJson<{ version: number }>(fixture, 'agent-ownership-journal.json'))
-          .toMatchObject({ version: 3 });
+          .toMatchObject({ version: 4 });
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
           version: 5,
         });

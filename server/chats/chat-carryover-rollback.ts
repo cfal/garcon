@@ -20,6 +20,7 @@ import {
   type CarryOverMigrationMarker,
 } from './carryover-migration-files.js';
 import { readChatRegistryVersion } from './legacy-chat-registry-v3.js';
+import { CHAT_REGISTRY_VERSION } from './store.js';
 
 export async function rollbackLegacyCarryOverMigration(
   workspaceDir: string,
@@ -85,14 +86,23 @@ async function restoreLegacyCarryOverState(
   }
   const legacyCarryOver = await readRollbackCarryOverSource(workspaceDir, marker);
 
+  // Routine operation rewrites the migrated registry, so byte equality with
+  // the migration output cannot hold; lineage is proven by the migrated
+  // schema version instead, and the source digest still recognises a
+  // half-restored registry.
   const registryPath = path.join(workspaceDir, 'chats.json');
   const currentRegistry = await fs.readFile(registryPath);
   const currentRegistryDigest = digest(currentRegistry);
-  if (
-    currentRegistryDigest !== marker.targetRegistrySha256
-    && currentRegistryDigest !== marker.sourceRegistrySha256
-  ) {
-    throw new Error('Current chat registry does not match the migration or its backup');
+  if (currentRegistryDigest !== marker.sourceRegistrySha256) {
+    let version: unknown;
+    try {
+      version = (JSON.parse(currentRegistry.toString('utf8')) as { version?: unknown }).version;
+    } catch {
+      throw new Error('Current chat registry does not match the migration or its backup');
+    }
+    if (version !== CHAT_REGISTRY_VERSION) {
+      throw new Error('Current chat registry does not match the migration or its backup');
+    }
   }
 
   await writeMarker(workspaceDir, { ...marker, phase: 'rolling-back' });
