@@ -238,10 +238,8 @@ export class ForkCommands {
       ) {
         throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
       }
-      // An idle view can still number its messages from the event stream, so rebuild it from
-      // native history first rather than trusting a stale boundary. Reconciling is a no-op once
-      // the view is native-backed, and it declines while a turn owns the chat.
-      await this.deps.idleReconciler.ensureReconciled(sourceChatId);
+      // Exact projection application keeps an idle view's seq numbering equal to
+      // carryover count plus entry ordinal, so no native rebuild is needed here.
       if (input.generationId !== undefined) {
         const cursor = this.deps.chatViews.getCursor(sourceChatId);
         if (cursor === null || cursor.generationId !== input.generationId) {

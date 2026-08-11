@@ -18,7 +18,6 @@ import type {
   ChatTranscriptSnapshot,
   ChatViewStore,
 } from './chats/chat-view-store.js';
-import type { IdleNativeReconciler } from './chats/idle-native-reconciler.js';
 import type { PendingUserInputService } from './chats/pending-user-input-service.js';
 import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
@@ -78,7 +77,6 @@ export interface ServerEventWiringDeps {
   metadata: MetadataIndex;
   chatViews: ChatViewStore;
   transientFeeds: ChatTransientFeedStore;
-  idleReconciler: IdleNativeReconciler;
   pendingInputs: PendingUserInputService;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
@@ -119,7 +117,6 @@ export function wireServerEvents({
   metadata,
   chatViews,
   transientFeeds,
-  idleReconciler,
   pendingInputs,
   commandLedger,
   shareStore,
@@ -233,7 +230,6 @@ export function wireServerEvents({
 
   function notifyTranscriptCompositionChanged(chatId: string): void {
     if (!chatExists(chatId)) return;
-    idleReconciler.noteHistoryChanged(chatId);
     markSearchCatalogDirty(chatId);
   }
 
@@ -419,7 +415,6 @@ export function wireServerEvents({
       pendingInputs.markFailed(chatId, options.clientRequestId);
     }
     await pendingInputs.reconcileNativeHistory(chatId);
-    await idleReconciler.ensureHistoryChangeReconciled(chatId);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
     await markPublicTurnTerminal(chatId, options);
   }
@@ -437,14 +432,6 @@ export function wireServerEvents({
   }
 
   const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
-
-  // A settled view still numbers its messages from the event stream until it is rebuilt from
-  // native history, so reconcile once the chat stops working. Chats report idle more than once
-  // per settle; the reconciler debounces and re-checks ownership before it acts.
-  queue.onChatIdle((chatId) => {
-    if (!chatExists(chatId)) return;
-    idleReconciler.noteIdle(chatId);
-  });
 
   agentRegistry.onProjectionApplied(createProjectionEventFanout({
     chatExists,
@@ -521,7 +508,6 @@ export function wireServerEvents({
         }
         await settleExecutionCommand(chatId, turnMetadata, 'finished');
         if (!expectedAbort) await pendingInputs.reconcileNativeHistory(chatId);
-        await idleReconciler.ensureHistoryChangeReconciled(chatId);
         if (!chatExists(chatId)) return;
         broadcast(
           new AgentRunFinishedMessage(
@@ -565,7 +551,6 @@ export function wireServerEvents({
           await releaseTerminalOwnership(chatId, turnMetadata);
           released = true;
           await settleExecutionCommand(chatId, turnMetadata, 'finished');
-          await idleReconciler.ensureHistoryChangeReconciled(chatId);
         } finally {
           if (!released) await releaseTerminalOwnership(chatId, turnMetadata);
         }

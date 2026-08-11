@@ -8,7 +8,6 @@ import type { NativeTranscriptWindow } from './chat-message-reader.js';
 import type {
   ChatHistoryPage,
   ChatTranscriptSnapshot,
-  NativeSnapshotReconciliation,
 } from './chat-view-store.js';
 import { serializeCompositeTranscriptRevision } from './composite-transcript-revision.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
@@ -125,44 +124,6 @@ export class OrderedChatTranscriptReader {
       totalNativeMessages: native.messages.length,
       offsetFromNewest: 0,
       nativeRevision: native.revision,
-      projectionState: native.projectionState,
-    };
-  }
-
-  async loadNativeReconciliation(chatId: string): Promise<NativeSnapshotReconciliation> {
-    const entry = this.#requireReadableEntry(chatId);
-    if (!entry) {
-      const snapshot = emptySnapshot();
-      return {
-        messages: [],
-        compositeRevision: snapshot.compositeRevision,
-        carryOverRevision: snapshot.carryOverRevision,
-        agentOwnershipEpoch: snapshot.agentOwnershipEpoch,
-        archivedLogicalCount: 0,
-        nativePrefixDigest: snapshot.nativePrefixDigest,
-        projectionState: null,
-      };
-    }
-    const [archivedLogicalCount, native] = await Promise.all([
-      this.deps.carryOver.logicalMessageCount(entry.carryOverSegments),
-      this.#loadCurrentNativeSnapshot(entry, chatId),
-    ]);
-    this.#assertEntryUnchanged(chatId, entry);
-    const carryOverRevision = this.deps.carryOver.revision(
-      entry.carryOverSegments,
-      entry.carryOverMigrationQuarantine,
-    );
-    return {
-      messages: native.messages,
-      compositeRevision: serializeCompositeTranscriptRevision({
-        carryOver: carryOverRevision,
-        native: native.revision,
-        agentOwnershipEpoch: entry.agentOwnershipEpoch,
-      }),
-      carryOverRevision,
-      agentOwnershipEpoch: entry.agentOwnershipEpoch,
-      archivedLogicalCount,
-      nativePrefixDigest: transcriptRevision(native.messages),
       projectionState: native.projectionState,
     };
   }

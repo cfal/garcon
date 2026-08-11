@@ -172,12 +172,6 @@ function createWiringFixture(overrides = {}) {
     catalogMayHaveChanged: mock(() => undefined),
     deleteChat: mock(() => undefined),
   };
-  const idleReconciler = {
-    noteIdle: mock(() => undefined),
-    noteHistoryChanged: mock(() => undefined),
-    ensureHistoryChangeReconciled: mock(async () => undefined),
-    ...overrides.idleReconciler,
-  };
   const chatRegistry = {
     getChat: mock(() => ({ agentOwnershipEpoch: 'ownership-1' })),
     onChatAdded: noOpSubscription,
@@ -202,7 +196,6 @@ function createWiringFixture(overrides = {}) {
     chatViews,
     transientFeeds: overrides.transientFeeds
       ?? new ChatTransientFeedStore('server-instance-test'),
-    idleReconciler,
     pendingInputs,
     pendingRecovery: { waitForSettlements: mock(async () => undefined) },
     commandLedger,
@@ -231,7 +224,6 @@ function createWiringFixture(overrides = {}) {
     chatViews,
     commandLedger,
     searchIndex,
-    idleReconciler,
   };
 }
 
@@ -466,12 +458,11 @@ describe('server event wiring', () => {
     ]);
   });
 
-  it('defers transcript composition changes to settled-history reconciliation', () => {
+  it('marks the search catalog dirty on transcript composition changes', () => {
     const fixture = createWiringFixture();
 
     fixture.wiring.notifyTranscriptCompositionChanged('chat-1');
 
-    expect(fixture.idleReconciler.noteHistoryChanged).toHaveBeenCalledWith('chat-1');
     expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
   });
 
@@ -709,35 +700,9 @@ describe('server event wiring', () => {
     expect(clearIndex).toBeLessThan(types.lastIndexOf('chat-processing-updated'));
   });
 
-  it('settles a pending transcript composition change before publishing turn completion', async () => {
-    const published = [];
-    const reconciliation = deferred();
-    const fixture = createWiringFixture({
-      server: {
-        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
-      },
-      idleReconciler: {
-        ensureHistoryChangeReconciled: mock(() => reconciliation.promise),
-      },
-    });
-
-    fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(published.some((message) => message.type === 'agent-run-finished')).toBe(false);
-
-    reconciliation.resolve();
-    await fixture.wiring.waitForIdle();
-    expect(published).toContainEqual(expect.objectContaining({
-      type: 'agent-run-finished',
-      chatId: 'chat-1',
-      turnId: 'turn-1',
-    }));
-  });
-
-  it('waits for runtime retirement before settled transcript reconciliation', async () => {
+  it('waits for runtime retirement before publishing turn completion', async () => {
     const published = [];
     const retired = deferred();
-    const reconcile = mock(async () => undefined);
     const fixture = createWiringFixture({
       server: {
         publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
@@ -745,19 +710,14 @@ describe('server event wiring', () => {
       queue: {
         onAgentTurnTerminal: mock(() => retired.promise),
       },
-      idleReconciler: {
-        ensureHistoryChangeReconciled: reconcile,
-      },
     });
 
     fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1' });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(reconcile).not.toHaveBeenCalled();
     expect(published.some((message) => message.type === 'agent-run-finished')).toBe(false);
 
     retired.resolve();
     await fixture.wiring.waitForIdle();
-    expect(reconcile).toHaveBeenCalledTimes(1);
     expect(published.some((message) => message.type === 'agent-run-finished')).toBe(true);
   });
 
@@ -1339,12 +1299,6 @@ describe('server event wiring', () => {
       processing: { phase: mock(() => null) },
       metadata: {},
       chatViews: {},
-      idleReconciler: {
-        noteIdle: () => undefined,
-        noteHistoryChanged: () => undefined,
-        ensureReconciled: async () => undefined,
-        ensureHistoryChangeReconciled: async () => undefined,
-      },
       pendingInputs,
       pendingRecovery: { waitForSettlements: mock(async () => undefined) },
       commandLedger: {
@@ -1451,12 +1405,6 @@ describe('server event wiring', () => {
       processing: { phase: mock(() => null) },
       metadata: {},
       chatViews: {},
-      idleReconciler: {
-        noteIdle: () => undefined,
-        noteHistoryChanged: () => undefined,
-        ensureReconciled: async () => undefined,
-        ensureHistoryChangeReconciled: async () => undefined,
-      },
       pendingInputs,
       pendingRecovery: { waitForSettlements: mock(async () => undefined) },
       commandLedger: {

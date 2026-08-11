@@ -665,9 +665,6 @@ function makeService(overrides = {}) {
     getNativeHistoryLastSeq: mock(() => null),
     getCursor: mock(() => ({ generationId: 'generation-1', lastSeq: 0 })),
   };
-  const idleReconciler = overrides.idleReconciler ?? {
-    ensureReconciled: mock(async () => undefined),
-  };
   const fileMentions = overrides.fileMentions ?? {
     resolve: mock(async (command) => command),
   };
@@ -675,7 +672,6 @@ function makeService(overrides = {}) {
     chats,
     queue,
     chatViews,
-    idleReconciler,
     ledger,
     settings,
     recentTitleIcons: {
@@ -703,7 +699,6 @@ function makeService(overrides = {}) {
     chats,
     queue,
     chatViews,
-    idleReconciler,
     settings,
     agents,
     pendingInputs,
@@ -2809,14 +2804,9 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
-  it('reconciles an idle source before resolving its fork point', async () => {
-    const { service, chatViews, idleReconciler, forkChatFileCopy } = makeService();
-    chatViews.getNativeHistoryLastSeq.mockReturnValue(0);
-    // Reconciling is what makes an idle view address native positions, so the guard runs against
-    // the rebuilt boundary rather than the stale one.
-    idleReconciler.ensureReconciled.mockImplementation(async () => {
-      chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
-    });
+  it('resolves a fork point against the projection-backed view boundary', async () => {
+    const { service, chatViews, forkChatFileCopy } = makeService();
+    chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -2824,14 +2814,13 @@ describe('ChatCommandService', () => {
       upToSeq: 2,
     });
 
-    expect(idleReconciler.ensureReconciled).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).toHaveBeenCalledWith(
       expect.objectContaining({ upToSequence: 2 }),
     );
   });
 
   it('refuses a fork point bound to a stale view generation', async () => {
-    const { service, chatViews, idleReconciler, forkChatFileCopy } = makeService();
+    const { service, chatViews, forkChatFileCopy } = makeService();
     chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
     chatViews.getCursor.mockReturnValue({ generationId: 'generation-2', lastSeq: 2 });
 
@@ -2846,7 +2835,6 @@ describe('ChatCommandService', () => {
       retryable: true,
     });
 
-    expect(idleReconciler.ensureReconciled).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 

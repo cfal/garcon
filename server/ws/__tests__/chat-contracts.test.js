@@ -49,16 +49,13 @@ const mockChatViews = {
   })),
 };
 
-const mockNativeReloader = {
-  reloadFromNative: mock(() => Promise.resolve({
-    generationId: 'generation-2',
-    messages: [chatViewMessage],
-    lastSeq: 1,
-    pageOldestSeq: 1,
-    hasMore: false,
-    mode: 'manual-reload',
-  })),
-};
+const mockProjectionReload = mock(() => Promise.resolve({
+  generationId: 'generation-2',
+  messages: [chatViewMessage],
+  lastSeq: 1,
+  pageOldestSeq: 1,
+  hasMore: false,
+}));
 
 const mockQueue = {
   readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
@@ -85,7 +82,7 @@ const injectedMocks = [
   mockProcessing.snapshot,
   mockRegistry.getChat,
   mockChatViews.readReplay,
-  mockNativeReloader.reloadFromNative,
+  mockProjectionReload,
   mockQueue.readChatExecutionControl,
   mockPendingInputs.listForTransport,
   mockTransientFeeds.currentSnapshot,
@@ -99,7 +96,7 @@ function createHandler() {
     serverInstanceId: 'server-instance-test',
     processing: mockProcessing,
     chatViews: mockChatViews,
-    nativeReloader: mockNativeReloader,
+    projectionReload: mockProjectionReload,
     queue: mockQueue,
     pendingInputs: mockPendingInputs,
     transientFeeds: mockTransientFeeds,
@@ -154,7 +151,7 @@ describe('chat WebSocket handler', () => {
       messages: [chatViewMessage],
       lastSeq: 1,
     });
-    mockNativeReloader.reloadFromNative.mockResolvedValue({
+    mockProjectionReload.mockResolvedValue({
       generationId: 'generation-2',
       messages: [chatViewMessage],
       lastSeq: 1,
@@ -491,14 +488,14 @@ describe('chat WebSocket handler', () => {
     });
   });
 
-  it('reloads from native and broadcasts a lightweight generation reset', async () => {
+  it('reloads from the projection and broadcasts a lightweight generation reset', async () => {
     await chatHandler.message(ws, {
       type: 'chat-reload',
       chatId: '123',
       clientRequestId: 'req-reload-1',
     });
 
-    expect(mockNativeReloader.reloadFromNative).toHaveBeenCalledWith('123', 'manual-reload');
+    expect(mockProjectionReload).toHaveBeenCalledWith('123');
     expect(lastSentPayload()).toMatchObject({
       type: 'chat-reloaded',
       clientRequestId: 'req-reload-1',
@@ -521,7 +518,7 @@ describe('chat WebSocket handler', () => {
   });
 
   it('returns retryable CHAT_RUNNING for running-chat reload failures', async () => {
-    mockNativeReloader.reloadFromNative.mockRejectedValueOnce(
+    mockProjectionReload.mockRejectedValueOnce(
       new ChatRunningError('123'),
     );
 

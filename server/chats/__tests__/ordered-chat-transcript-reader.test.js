@@ -196,18 +196,4 @@ describe('OrderedChatTranscriptReader', () => {
     })).rejects.toMatchObject({ code: 'SOURCE_REVISION_CHANGED' });
   });
 
-  it('reconciles current native history without reading archived page bodies', async () => {
-    const fixtureState = fixture();
-
-    const snapshot = await fixtureState.reader.loadNativeReconciliation('chat-1');
-
-    expect(snapshot.archivedLogicalCount).toBe(3);
-    expect(snapshot.messages.map((message) => message.content)).toEqual([
-      'n1',
-      'n2',
-      'n3',
-      'n4',
-    ]);
-    expect(fixtureState.loadArchivedPage).not.toHaveBeenCalled();
-  });
 });

@@ -44,7 +44,6 @@ import {
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
-import { IdleNativeReconciler } from './chats/idle-native-reconciler.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
@@ -74,10 +73,7 @@ import {
   waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
-import {
-  ChatProjectionGenerationTransitionMessage,
-  WsFaultMessage,
-} from '../common/ws-events.ts';
+import { WsFaultMessage } from '../common/ws-events.ts';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
@@ -473,12 +469,6 @@ export async function startServer(): Promise<void> {
           beforeSeq,
         );
       },
-      async reconcileNativeSnapshot(
-        chatId: string,
-        input: Parameters<ChatViewStore['reconcileNativeSnapshot']>[1],
-      ) {
-        await chatViews.reconcileNativeSnapshot(chatId, input);
-      },
     };
     const pendingInputs = new PendingUserInputService(chatMessageReader);
     const handoffs = new AgentHandoffService({
@@ -509,40 +499,6 @@ export async function startServer(): Promise<void> {
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
     executionCoordinator = queue;
-    const idleReconciler = new IdleNativeReconciler({
-      views: chatViews,
-      source: {
-        loadNativeSnapshot: (chatId) => transcripts.loadNativeReconciliation(chatId),
-        loadFullSnapshot: (chatId) => transcripts.loadAll(chatId),
-      },
-      ownsExecution,
-      onGenerationReset: (chatId, previousGenerationId, generationId) => {
-        if (!webSocketPublisher) return;
-        const entry = chatRegistry.getChat(chatId);
-        if (!entry) return;
-        const transition = transientFeeds.resetEmptyGeneration({
-          chatId,
-          agentOwnershipEpoch: entry.agentOwnershipEpoch,
-          previousGenerationId,
-          generationId,
-        });
-        publishWebSocketPayload(
-          webSocketPublisher,
-          'chat',
-          JSON.stringify(new ChatProjectionGenerationTransitionMessage(
-            transition.resetTransactionId,
-            transition.serverInstanceId,
-            transition.chatId,
-            transition.agentOwnershipEpoch,
-            transition.previousGenerationId,
-            transition.generationId,
-            transition.transientRevision,
-            transition.stateDigest,
-            transition.rows,
-          )),
-        );
-      },
-    });
     const chatProcessingActivity = new ChatProcessingActivity(agentRegistry, queue);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
@@ -557,7 +513,6 @@ export async function startServer(): Promise<void> {
       chats: chatRegistry,
       queue,
       chatViews,
-      idleReconciler,
       ledger: commandLedger,
       settings,
       recentTitleIcons,
@@ -630,7 +585,6 @@ export async function startServer(): Promise<void> {
         metadata,
         chatViews,
         transientFeeds,
-        idleReconciler,
         pendingInputs,
         commandLedger,
         shareStore,
@@ -854,7 +808,6 @@ export async function startServer(): Promise<void> {
       try {
         await server.stop(true);
         clearInterval(chatViewPruneTimer);
-        idleReconciler.stop();
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),

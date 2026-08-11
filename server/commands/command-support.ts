@@ -148,7 +148,6 @@ export interface ChatCommandServiceDeps {
   chats: IChatRegistry;
   queue: ChatExecutionCommands;
   chatViews: ChatViewSeqDep;
-  idleReconciler: { ensureReconciled(chatId: string): Promise<void> };
   ledger: CommandLedger;
   settings: SettingsDep;
   recentTitleIcons: RecentTitleIconSource;
