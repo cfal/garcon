@@ -7,7 +7,7 @@
 	import type {
 		TranscriptPageDirection,
 		TranscriptPageState,
-	} from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	} from '$lib/chat/transcript/transcript-page-progress.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {

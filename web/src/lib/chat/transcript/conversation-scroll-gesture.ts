@@ -1,4 +1,4 @@
-import type { TranscriptPageDirection } from './active-transcript-state.svelte.js';
+import type { TranscriptPageDirection } from './transcript-page-progress.js';
 
 export interface ConversationTouchPoint {
 	identifier: number;

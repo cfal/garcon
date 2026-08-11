@@ -1,9 +1,6 @@
 import { UserMessage } from '$shared/chat-types';
-import type {
-	ChatDisplayRow,
-	ChatLoadStatus,
-	TranscriptPageLoadResult,
-} from './active-transcript-state.svelte.js';
+import type { ChatDisplayRow, ChatLoadStatus } from './active-transcript-state.svelte.js';
+import type { TranscriptPageLoadResult } from './transcript-page-progress.js';
 
 export interface UserMessageNavigatorItem {
 	id: string;

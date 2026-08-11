@@ -1,10 +1,10 @@
 import { tick } from 'svelte';
+import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type {
-	ActiveTranscriptState,
 	TranscriptPageDirection,
 	TranscriptPageLoadResult,
 	TranscriptWindowTarget,
-} from '$lib/chat/transcript/active-transcript-state.svelte.js';
+} from '$lib/chat/transcript/transcript-page-progress.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import type {
 	UserMessageNavigatorSelectionResult,

@@ -10,7 +10,7 @@ import type { PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import { createRandomId } from '$lib/utils/random-id';
+import { TranscriptNoticeFeed } from './transcript-notice-feed.svelte.js';
 import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
 import {
 	responseMessageType,
@@ -25,7 +25,13 @@ import type {
 import {
 	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 	collectEarlierTranscriptMessages,
+	idlePageState,
 	retainTranscriptEntries,
+	type TranscriptPageDirection,
+	type TranscriptPageLoadResult,
+	type TranscriptPageState,
+	type TranscriptWindowLoadResult,
+	type TranscriptWindowTarget,
 } from './transcript-page-progress.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import {
@@ -45,7 +51,6 @@ export type {
 export type { ChatTranscriptRow } from './transcript-row-projection.js';
 
 const MESSAGES_PER_PAGE = 50;
-const SERVER_NOTICE_RETENTION_LIMIT = 8;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
 type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
@@ -54,18 +59,6 @@ export type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detecte
 type PageApplyResult = MessageApplyResult | 'stale';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
-export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
-export type TranscriptPageDirection = 'earlier' | 'later';
-export type TranscriptPageStatus = 'idle' | 'loading' | 'error';
-export type TranscriptWindowLoadResult = 'loaded' | 'invalidated' | 'failed';
-export type TranscriptWindowTarget = 'initial' | 'latest';
-
-export interface TranscriptPageState {
-	status: TranscriptPageStatus;
-	error: string | null;
-}
-
-const idlePageState = (): TranscriptPageState => ({ status: 'idle', error: null });
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
 
@@ -78,7 +71,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	lastSeq = $state(0);
 	oldestSeq = $state(0);
 	pendingUserInputs = $state<PendingUserInput[]>([]);
-	localNotices = $state<(LocalNoticeRow & { revision: number })[]>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
 	hasEarlierMessages = $state(false);
@@ -93,9 +85,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	historyState = $state<ChatHistoryState>({ kind: 'complete' });
 	#snapshotBuffer: SnapshotBatch[] | null = null;
 	#loadEpoch = 0;
-	#localNoticeRevision = 0;
-	#localNoticeRevisionAtLoadStart = 0;
-	#retainedServerNotices = new Map<string, LocalNoticeRow[]>();
+	#notices = new TranscriptNoticeFeed();
 	#pendingUserInputsRevision = 0;
 	#pendingUserInputsRevisionAtLoadStart = 0;
 	#pageLoadPromise: Promise<TranscriptPageLoadResult> | null = null;
@@ -108,6 +98,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
 		this.transcriptCache = transcriptCache;
+	}
+
+	get localNotices(): (LocalNoticeRow & { revision: number })[] {
+		return this.#notices.rows;
 	}
 
 	#renderEntries = $derived.by(() =>
@@ -258,7 +252,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
-		noticeRevision = this.#localNoticeRevision,
+		noticeRevision = this.#notices.revision,
 	): MessageApplyResult {
 		if (this.historyState.kind === 'degraded') {
 			this.transcriptCache.markStale(chatId);
@@ -419,7 +413,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = retainedMessages.length;
 		this.#replacePendingUserInputs(options.pendingUserInputs ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
-		this.localNotices = [];
+		this.#notices.reset();
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
@@ -469,7 +463,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (this.#pendingUserInputsRevision === this.#pendingUserInputsRevisionAtLoadStart) {
 			this.#replacePendingUserInputs(normalizePendingInputs(page.pendingUserInputs));
 		}
-		this.clearLocalNotices(this.#localNoticeRevisionAtLoadStart);
+		this.clearLocalNotices(this.#notices.revisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
@@ -696,17 +690,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
-		this.localNotices = [
-			...this.localNotices,
-			{
-				kind: 'local-notice',
-				id: `local_${createRandomId()}`,
-				noticeType,
-				content,
-				timestamp: new Date().toISOString(),
-				revision: ++this.#localNoticeRevision,
-			},
-		];
+		this.#notices.append(noticeType, content);
 		this.#growExpandedVisibleWindow();
 		this.#recordFeedMutation('presentation-structure');
 	}
@@ -715,42 +699,22 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	// conversation shows it immediately, any other chat retains it until that
 	// chat activates. Retention is bounded per chat and dropped with the chat.
 	appendServerNotice(chatId: string, noticeType: LocalNoticeType, content: string): void {
-		if (chatId === this.activeChatId) {
-			this.appendLocalNotice(noticeType, content);
-			return;
-		}
-		const retained = this.#retainedServerNotices.get(chatId) ?? [];
-		retained.push({
-			kind: 'local-notice',
-			id: `server_${createRandomId()}`,
-			noticeType,
-			content,
-			timestamp: new Date().toISOString(),
-		});
-		if (retained.length > SERVER_NOTICE_RETENTION_LIMIT) retained.shift();
-		this.#retainedServerNotices.set(chatId, retained);
+		if (chatId === this.activeChatId) this.appendLocalNotice(noticeType, content);
+		else this.#notices.retain(chatId, noticeType, content);
 	}
 
 	discardServerNotices(chatId: string): void {
-		this.#retainedServerNotices.delete(chatId);
+		this.#notices.discard(chatId);
 	}
 
 	#drainServerNotices(chatId: string): void {
-		const retained = this.#retainedServerNotices.get(chatId);
-		if (!retained?.length) return;
-		this.#retainedServerNotices.delete(chatId);
-		this.localNotices = [
-			...this.localNotices,
-			...retained.map((notice) => ({ ...notice, revision: ++this.#localNoticeRevision })),
-		];
+		if (!this.#notices.drain(chatId)) return;
 		this.#growExpandedVisibleWindow();
 		this.#recordFeedMutation('presentation-structure');
 	}
 
-	clearLocalNotices(throughRevision = this.#localNoticeRevision): void {
-		const next = this.localNotices.filter((notice) => notice.revision > throughRevision);
-		if (next.length === this.localNotices.length) return;
-		this.localNotices = next;
+	clearLocalNotices(throughRevision?: number): void {
+		if (!this.#notices.clearThrough(throughRevision)) return;
 		this.#recordFeedMutation('presentation-structure');
 	}
 
@@ -807,7 +771,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.lastSeq = 0;
 		this.oldestSeq = 0;
 		this.#replacePendingUserInputs([]);
-		this.localNotices = [];
+		this.#notices.reset();
 		this.hasEarlierMessages = false;
 		this.totalMessages = 0;
 		this.loadStatus = 'idle';
@@ -949,7 +913,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	#beginLoadEpoch(): number {
 		this.#pendingUserInputsRevisionAtLoadStart = this.#pendingUserInputsRevision;
-		this.#localNoticeRevisionAtLoadStart = this.#localNoticeRevision;
+		this.#notices.markLoadStart();
 		return ++this.#loadEpoch;
 	}
 
@@ -975,7 +939,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.lastSeq = 0;
 		this.oldestSeq = 0;
 		this.#replacePendingUserInputs([]);
-		this.localNotices = [];
+		this.#notices.reset();
 		this.hasEarlierMessages = false;
 		this.totalMessages = 0;
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
