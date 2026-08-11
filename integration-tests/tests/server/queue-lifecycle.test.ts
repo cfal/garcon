@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, test } from 'bun:test';
 import type {
   ChatMessagesMessage,
+  ChatSessionStoppedMessage,
   PendingUserInputClearedMessage,
   PendingUserInputUpdatedMessage,
 } from '../../../common/ws-events.js';
@@ -610,6 +611,17 @@ describe('queue lifecycle', () => {
       expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'already-idle-seed',
       ]);
+      // Stop responses resolve before the scheduled broadcasts flush; wait for
+      // both settlement events instead of reading the log immediately.
+      await fixture.client.waitForEventCount(
+        (event): event is ChatSessionStoppedMessage =>
+          event.type === 'chat-session-stopped'
+          && event.chatId === chatId
+          && event.outcome === 'already-idle',
+        2,
+        'repeated idle stop settlement',
+        { afterIndex: cursor },
+      );
       expect(fixture.client.eventsSince(cursor).filter((event) =>
         event.type === 'chat-session-stopped'
         && event.chatId === chatId
@@ -655,6 +667,16 @@ describe('queue lifecycle', () => {
       expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText))
         .toEqual(['stale-processing-seed']);
 
+      // The idle repair and stop outcome broadcasts share one ordered per-chat
+      // queue; waiting for the later stop event guarantees both are present.
+      await fixture.client.waitForEvent(
+        (event): event is ChatSessionStoppedMessage =>
+          event.type === 'chat-session-stopped'
+          && event.chatId === chatId
+          && event.outcome === 'already-idle',
+        'idle stop settlement',
+        { afterIndex: cursor },
+      );
       const events = fixture.client.eventsSince(cursor);
       const idleIndex = events.findIndex((event) =>
         event.type === 'chat-processing-updated'
@@ -851,9 +873,11 @@ describe('queue lifecycle', () => {
       heldActive.releaseEcho();
       await heldB.received;
 
+      // Admission commits the drained input's user row at dispatch, so it is
+      // already durable rather than pending while the provider holds the turn.
+      const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'drain-stop-b');
       const duringDrain = await fixture.client.getMessages(chatId);
-      const pendingB = duringDrain.pendingUserInputs.find((entry) => entry.content === 'drain-stop-b');
-      if (!pendingB) throw new Error('Actively draining input was not pending.');
+      expect(countUserContent(duringDrain.messages, 'drain-stop-b')).toBe(1);
       const stopCursor = fixture.client.markEvents();
       const activeAborted = heldB.expectAbort();
       const stopped = await fixture.client.stopChat({
@@ -873,10 +897,9 @@ describe('queue lifecycle', () => {
         (event): event is PendingUserInputClearedMessage =>
           event.type === 'pending-user-input-cleared'
           && event.chatId === chatId
-          && event.clientRequestId === pendingB.clientRequestId
+          && event.clientRequestId === queuedTurnB.clientRequestId
           && event.reason === 'persisted',
         'stopped drain persistence settlement',
-        { afterIndex: stopCursor },
       );
 
 		const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'drain-stop-c' });
@@ -983,6 +1006,8 @@ describe('queue lifecycle', () => {
       heldA.releaseText('stale response must be ignored');
       const finalCursor = fixture.client.markEvents();
       heldB.releaseEcho();
+      // The successor persisted at admission, before the provider echo, so its
+      // cleared event precedes this release point.
       await Promise.all([
         fixture.client.waitForEvent(
           (event): event is PendingUserInputClearedMessage =>
@@ -991,7 +1016,7 @@ describe('queue lifecycle', () => {
             && event.clientRequestId === clientRequestId
             && event.reason === 'persisted',
           'interrupt successor persistence',
-          { afterIndex: finalCursor },
+          { afterIndex: eventCursor },
         ),
         fixture.client.waitForTurnTerminal(chatId, successorIdentity.turnId, {
           afterIndex: finalCursor,
