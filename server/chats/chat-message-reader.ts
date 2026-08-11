@@ -14,18 +14,6 @@ export type NativeTranscriptWindow =
   | (NativeTranscriptWindowBase & { readonly kind: 'page' })
   | (NativeTranscriptWindowBase & { readonly kind: 'snapshot' });
 
-export interface PendingInputHistoryReader {
-  loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
-  loadNativeWindow?(input: {
-    readonly chatId: string;
-    readonly limit: number;
-    readonly offsetFromNewest?: number;
-    readonly signal: AbortSignal;
-  }): Promise<NativeTranscriptWindow>;
-  getRetainedHistoryMessages(chatId: string): ChatMessage[] | null;
-  hasCompleteHistory?(chatId: string): boolean;
-}
-
 export interface ChatViewPageReader {
   getOrCreatePage(chatId: string, limit: number, beforeSeq?: number): Promise<ChatViewPage>;
 }

@@ -59,10 +59,7 @@ describe('queue and transcript stability', () => {
       const chatId = 'chat-rejected-steer';
       const views = new ChatViewStore(() => true);
       const pendingInputs = new PendingUserInputService({
-        loadNativeMessages: mock(async () => []),
-        getRetainedHistoryMessages: (requestedChatId) => (
-          views.getRetainedHistoryMessages(requestedChatId)
-        ),
+        settledInputRequests: async () => new Set(),
       });
       const queue = new ChatExecutionCoordinator(
         workspaceDir,
@@ -139,10 +136,7 @@ describe('queue and transcript stability', () => {
       const chatId = 'chat-unknown-steer-listener';
       const views = new ChatViewStore(() => true);
       const pendingInputs = new PendingUserInputService({
-        loadNativeMessages: mock(async () => []),
-        getRetainedHistoryMessages: (requestedChatId) => (
-          views.getRetainedHistoryMessages(requestedChatId)
-        ),
+        settledInputRequests: async () => new Set(),
       });
       pendingInputs.store.onStatusUpdated(() => { throw null; });
       const steerInput = mock(async (_chatId, _content, _options, _target, prepareDelivery) => {
@@ -337,13 +331,11 @@ describe('queue and transcript stability', () => {
       const interruptedSettled = deferred();
       const views = new ChatViewStore(() => false);
       const pendingInputs = new PendingUserInputService({
-        loadNativeMessages: mock(async () => {
+        settledInputRequests: async () => {
           nativeLoadStarted.resolve();
-          return nativeLoadResult.promise;
-        }),
-        getRetainedHistoryMessages: (requestedChatId) => (
-          views.getRetainedHistoryMessages(requestedChatId)
-        ),
+          await nativeLoadResult.promise;
+          return new Set();
+        },
       });
       let interruptedRequestId;
       pendingInputs.store.onStatusUpdated((_chatId, clientRequestId, deliveryStatus) => {
@@ -434,10 +426,7 @@ describe('queue and transcript stability', () => {
       const turnResult = deferred();
       const views = new ChatViewStore(() => false);
       const pendingInputs = new PendingUserInputService({
-        loadNativeMessages: mock(async () => []),
-        getRetainedHistoryMessages: (requestedChatId) => (
-          views.getRetainedHistoryMessages(requestedChatId)
-        ),
+        settledInputRequests: async () => new Set(),
       });
       const pendingPort = {
         register: mock(async (...args) => {
@@ -524,9 +513,8 @@ describe('queue and transcript stability', () => {
       const views = new ChatViewStore(ownsExecution);
       const loadNativeMessages = mock(async () => [...nativeMessages]);
       const pendingInputs = new PendingUserInputService({
-        loadNativeMessages,
-        getRetainedHistoryMessages: (requestedChatId) => (
-          views.getRetainedHistoryMessages(requestedChatId)
+        settledInputRequests: async () => new Set(
+          nativeMessages.map((message) => message.metadata?.clientRequestId),
         ),
       });
       let turnCount = 0;

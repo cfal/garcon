@@ -1392,8 +1392,7 @@ describe('ChatCommandService', () => {
 
   it('records one acknowledged latch outcome for two unique Stop commands', async () => {
     const pendingInputsService = new PendingUserInputService({
-      loadNativeMessages: mock(async () => []),
-      getRetainedHistoryMessages: mock(() => []),
+      settledInputRequests: mock(async () => new Set()),
     });
     let running = true;
     const abortSession = mock(async () => true);
@@ -1441,8 +1440,7 @@ describe('ChatCommandService', () => {
     let successorLaunches = 0;
     let queueService;
     const pendingInputsService = new PendingUserInputService({
-      loadNativeMessages: mock(async () => []),
-      getRetainedHistoryMessages: mock(() => []),
+      settledInputRequests: mock(async () => new Set()),
     });
     const abortSession = mock(async () => {
       abortStarted.resolve();
@@ -4527,8 +4525,7 @@ describe('ChatCommandService', () => {
 
   it('recovers an ambiguous active delivery through the real execution control transitions', async () => {
     const pendingInputsService = new PendingUserInputService({
-      loadNativeMessages: mock(async () => []),
-      getRetainedHistoryMessages: mock(() => []),
+      settledInputRequests: mock(async () => new Set()),
     });
     const submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
       await beforeDelivery(runtimeHandoff());
@@ -4978,14 +4975,8 @@ describe('ChatCommandService', () => {
   });
 
   it('keeps terminal delivery evidence without treating it as active work', async () => {
-    const views = new ChatViewStore(() => false);
-    const loadNativeMessages = mock(async () => {
-      throw new Error('project path update must not load native history');
-    });
-    const pendingInputsService = new PendingUserInputService({
-      loadNativeMessages,
-      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
-    });
+    const settledInputRequests = mock(async () => new Set());
+    const pendingInputsService = new PendingUserInputService({ settledInputRequests });
     await pendingInputsService.register(SOURCE_CHAT_ID, 'interrupted input', {
       clientRequestId: 'req-unconfirmed',
       turnId: 'turn-unconfirmed',
@@ -4999,7 +4990,7 @@ describe('ChatCommandService', () => {
     });
     await pendingInputsService.reconcileRetainedHistory(SOURCE_CHAT_ID);
     expect(pendingInputsService.hasInFlightForChat(SOURCE_CHAT_ID)).toBe(true);
-    pendingInputsService.settleRetainedCohort(
+    await pendingInputsService.settleNativeCohort(
       pendingInputsService.captureCohort(SOURCE_CHAT_ID),
     );
 
@@ -5026,15 +5017,13 @@ describe('ChatCommandService', () => {
       }),
     ]));
     expect(pendingInputsService.hasInFlightForChat(SOURCE_CHAT_ID)).toBe(false);
-    expect(loadNativeMessages).not.toHaveBeenCalled();
     expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
     expect(chats.updateProjectPath).toHaveBeenCalledTimes(1);
   });
 
   it('rejects project path updates during a real execution reservation', async () => {
     const pendingInputsService = new PendingUserInputService({
-      loadNativeMessages: mock(async () => []),
-      getRetainedHistoryMessages: mock(() => []),
+      settledInputRequests: mock(async () => new Set()),
     });
     const queueService = makeRealQueue(pendingInputsService);
     const reservation = queueService.reserveDirectTurn(SOURCE_CHAT_ID, {
@@ -5070,8 +5059,7 @@ describe('ChatCommandService', () => {
 
   it('rejects project path updates while a real drain finalizes an empty queue', async () => {
     const pendingInputsService = new PendingUserInputService({
-      loadNativeMessages: mock(async () => []),
-      getRetainedHistoryMessages: mock(() => []),
+      settledInputRequests: mock(async () => new Set()),
     });
     const queueService = makeRealQueue(pendingInputsService);
     const entryRemoved = deferred();
@@ -5114,8 +5102,7 @@ describe('ChatCommandService', () => {
 
   it('rejects a path update crossing the reservation-to-runtime compaction handoff', async () => {
     const pendingInputsService = new PendingUserInputService({
-      loadNativeMessages: mock(async () => []),
-      getRetainedHistoryMessages: mock(() => []),
+      settledInputRequests: mock(async () => new Set()),
     });
     let runtimeRunning = false;
     let compactTurn;

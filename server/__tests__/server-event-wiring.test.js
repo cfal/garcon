@@ -106,8 +106,7 @@ function createWiringFixture(overrides = {}) {
   const chatRegistryListeners = {};
   const noOpSubscription = mock(() => undefined);
   const pendingInputs = overrides.pendingInputs ?? new PendingUserInputService({
-    loadNativeMessages: mock(async () => []),
-    getRetainedHistoryMessages: mock(() => []),
+    settledInputRequests: mock(async () => new Set()),
   });
   const agentRegistry = {
     onProcessing: mock((callback) => { agentListeners.processing = callback; }),
@@ -1232,14 +1231,12 @@ describe('server event wiring', () => {
     const timestamp = '2026-06-01T00:00:00.000Z';
     const nativeLoadStarted = deferred();
     const releaseNativeLoad = deferred();
-    const loadNativeMessages = mock(async () => {
+    const settledInputRequests = mock(async () => {
       nativeLoadStarted.resolve();
-      return releaseNativeLoad.promise;
+      await releaseNativeLoad.promise;
+      return new Set();
     });
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages,
-      getRetainedHistoryMessages: mock(() => []),
-    });
+    const pendingInputs = new PendingUserInputService({ settledInputRequests });
     await pendingInputs.register(chatId, 'interrupted', {
       ...turn,
       createdAt: timestamp,
@@ -1331,10 +1328,10 @@ describe('server event wiring', () => {
     queueListeners.sessionStopped(chatId, 'interrupt-requested', 'interrupt-and-send', 'stop-a', 5);
     agentListeners.finished(chatId, 0, turn);
     await nativeLoadStarted.promise;
-    releaseNativeLoad.resolve([new UserMessage(timestamp, 'successor')]);
+    releaseNativeLoad.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(loadNativeMessages).toHaveBeenCalledTimes(1);
+    expect(settledInputRequests).toHaveBeenCalledTimes(1);
     expect(pendingInputs.listForChat(chatId)).toMatchObject([
       { clientRequestId: 'req-a', deliveryStatus: 'unconfirmed' },
       { clientRequestId: 'req-b', deliveryStatus: 'accepted' },
@@ -1346,8 +1343,7 @@ describe('server event wiring', () => {
     const chatId = 'chat-1';
     const turn = { clientRequestId: 'req-a', turnId: 'turn-a' };
     const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: mock(async () => []),
-      getRetainedHistoryMessages: mock(() => []),
+      settledInputRequests: mock(async () => new Set()),
     });
     await pendingInputs.register(chatId, 'still running', {
       ...turn,

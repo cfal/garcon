@@ -120,6 +120,13 @@ export function auditNativeEvidence(options: {
   // source, and the retention floor is monotonic; leave it for a later audit.
   if (native.length === 0 && journal.length > 0) return { kind: 'skipped' };
 
+  // Provider-identified rows preserve provider order among themselves, and
+  // admission rows claim user occurrences in delivery order among
+  // themselves. The two families keep separate cursors: an input accepted
+  // while a concurrent occurrence was still persisting commits in a journal
+  // order that legitimately interleaves differently from the native file.
+  let exactCursor = -1;
+  let admissionCursor = -1;
   let lastMatchedNativePosition = -1;
   const missing: number[] = [];
   const matchedAliases = new Map<string, AgentTranscriptSeedEntry>();
@@ -130,17 +137,18 @@ export function auditNativeEvidence(options: {
     let position: number | undefined;
     if (committed.kind === 'exact') {
       position = nativePositions.get(committed.matchKey);
-      // Native order must preserve committed order.
-      if (position !== undefined && position <= lastMatchedNativePosition) {
-        return { kind: 'diverged' };
+      if (position !== undefined) {
+        if (position <= exactCursor) return { kind: 'diverged' };
+        exactCursor = position;
       }
     } else {
-      for (let candidate = lastMatchedNativePosition + 1; candidate < native.length; candidate += 1) {
+      for (let candidate = admissionCursor + 1; candidate < native.length; candidate += 1) {
         if (claimed.has(candidate)) continue;
         if (native[candidate]!.seed.message.type !== 'user-message') continue;
         position = candidate;
         break;
       }
+      if (position !== undefined) admissionCursor = position;
     }
     if (position === undefined) {
       missing.push(index);
@@ -148,7 +156,7 @@ export function auditNativeEvidence(options: {
     }
     if (firstMatchedJournalIndex === -1) firstMatchedJournalIndex = index;
     lastMatchedJournalIndex = index;
-    lastMatchedNativePosition = position;
+    lastMatchedNativePosition = Math.max(lastMatchedNativePosition, position);
     claimed.add(position);
     matchedAliases.set(committed.key, native[position]!.seed);
   }

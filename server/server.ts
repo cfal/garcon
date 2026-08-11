@@ -353,9 +353,6 @@ export async function startServer(): Promise<void> {
     });
     const loadChatSnapshot = (chatId: string) => transcripts.loadAll(chatId);
     const loadChatMessages = async (chatId: string) => (await loadChatSnapshot(chatId)).messages;
-    const loadCurrentNativeMessages = (chatId: string) => (
-      transcripts.loadCurrentNativeMessages(chatId)
-    );
     const transcriptSearchService = new TranscriptSearchService({
       workspaceDirectory: workspaceDir,
       logger,
@@ -450,18 +447,8 @@ export async function startServer(): Promise<void> {
     );
 
     const chatMessageReader = {
-      loadNativeMessages: loadCurrentNativeMessages,
-      loadNativeWindow: (input: Parameters<OrderedChatTranscriptReader['loadNativeWindow']>[0]) => (
-        transcripts.loadNativeWindow(input)
-      ),
       getMessages(chatId: string) {
         return chatViews.getLoadedMessages(chatId);
-      },
-      getRetainedHistoryMessages(chatId: string) {
-        return chatViews.getRetainedHistoryMessages(chatId);
-      },
-      hasCompleteHistory(chatId: string) {
-        return chatViews.getLoadedMessages(chatId) !== null;
       },
     };
     const chatViewPages = {
@@ -480,7 +467,14 @@ export async function startServer(): Promise<void> {
         );
       },
     };
-    const pendingInputs = new PendingUserInputService(chatMessageReader);
+    const pendingInputs = new PendingUserInputService({
+      async settledInputRequests(chatId) {
+        return new Set(await agentRegistry.listSettledInputRequests(
+          chatRegistry.getChat(chatId) ?? null,
+          chatId,
+        ));
+      },
+    });
     const handoffs = new AgentHandoffService({
       registry: chatRegistry,
       integrations: integrationRegistry,

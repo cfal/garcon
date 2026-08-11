@@ -339,6 +339,22 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return [...(await this.loadTranscriptSnapshot(session, chatId)).messages];
   }
 
+  // Client-request identities of user rows the projection has bound to proven
+  // provider-native evidence; the pending-input service settles against these.
+  async listSettledInputRequests(
+    session: AgentChatEntry | null,
+    chatId = '',
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<readonly string[]> {
+    if (!session?.agentId) return [];
+    const integration = this.#directory.get(session.agentId);
+    if (!integration) return [];
+    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
+    const settled = await integration.transcript.settledInputRequests({ chat, signal });
+    if (settled.kind !== 'ready') throw transcriptAccessFailure(settled);
+    return settled.value;
+  }
+
   async loadTranscriptSnapshot(
     session: AgentChatEntry | null,
     chatId = '',

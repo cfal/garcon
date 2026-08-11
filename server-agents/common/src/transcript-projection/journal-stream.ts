@@ -242,41 +242,65 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
         ? await request.sourceSettlement()
         : null;
       const settlement = proof?.verdict ?? null;
-      const evidence = await this.options.bootstrap({ chat: segment.chat, signal: request.signal });
-      if (evidence.kind !== 'ready') return settlement ?? 'unresolved';
-      const state = segment.journal.state;
-      const outcome = auditNativeEvidence({
-        ownerId: this.options.ownerId,
-        entries: state.entries,
-        seeds: evidence.value,
-        aliases: state.aliases,
-        itemAliases: proof?.itemAliases,
-      });
-      if (outcome.kind === 'skipped') {
-        const trivial = state.entries.length === 0 && evidence.value.length === 0;
-        return settlement ?? (trivial ? 'confirmed' : 'unresolved');
-      }
-      if (outcome.kind === 'diverged') {
-        if (state.nativeContinuity !== 'diverged') {
-          await segment.journal.updateNativeMetadata({
-            nativeRetentionFloor: state.nativeRetentionFloor,
-            aliases: state.aliases,
-            nativeContinuity: 'diverged',
-          });
+      // Providers persist native records asynchronously relative to their
+      // stream terminals, so a boundary whose evidence has not caught up yet
+      // rereads boundedly before concluding. A provider settlement hook owns
+      // its own wait, so hook boundaries read exactly once.
+      const deadline = Date.now() + (request.sourceSettlement ? 0 : SETTLEMENT_WAIT_MS);
+      for (;;) {
+        const evidence = await this.options.bootstrap({ chat: segment.chat, signal: request.signal });
+        if (evidence.kind !== 'ready') return settlement ?? 'unresolved';
+        const state = segment.journal.state;
+        const outcome = auditNativeEvidence({
+          ownerId: this.options.ownerId,
+          entries: state.entries,
+          seeds: evidence.value,
+          aliases: state.aliases,
+          itemAliases: proof?.itemAliases,
+        });
+        if (outcome.kind === 'skipped') {
+          // The proof obligation is vacuous when no durable row claims a
+          // provider-native identity: a cancelled-before-start or output-free
+          // turn left nothing the provider owes evidence for. Owner-native
+          // rows facing ambiguous evidence keep success withheld.
+          const namespace = `${this.options.ownerId}:native`;
+          const providerOwedRows = state.entries.some((entry) => (
+            entry.lifetime === 'durable'
+            && entry.source?.namespace === namespace
+            && !entry.source.itemId.startsWith('event:')
+          ));
+          if (providerOwedRows && Date.now() < deadline) {
+            await sleep(SETTLEMENT_POLL_INTERVAL_MS);
+            continue;
+          }
+          return settlement ?? (providerOwedRows ? 'unresolved' : 'confirmed');
         }
+        if (outcome.kind === 'diverged') {
+          if (state.nativeContinuity !== 'diverged') {
+            await segment.journal.updateNativeMetadata({
+              nativeRetentionFloor: state.nativeRetentionFloor,
+              aliases: state.aliases,
+              nativeContinuity: 'diverged',
+            });
+          }
+          return settlement ?? 'confirmed';
+        }
+        if (outcome.aheadFromOrdinal !== null && Date.now() < deadline) {
+          await sleep(SETTLEMENT_POLL_INTERVAL_MS);
+          continue;
+        }
+        if (outcome.suffix.length > 0) {
+          const provenance = request.operation
+            ? { ...request.operation, upstreamRequestId: null }
+            : null;
+          await segment.stream.commit([], seedEntries(segment.chat, outcome.suffix).map((entry) => (
+            entry.provenance || !provenance ? entry : { ...entry, provenance }
+          )));
+        }
+        await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
+        segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
         return settlement ?? 'confirmed';
       }
-      if (outcome.suffix.length > 0) {
-        const provenance = request.operation
-          ? { ...request.operation, upstreamRequestId: null }
-          : null;
-        await segment.stream.commit([], seedEntries(segment.chat, outcome.suffix).map((entry) => (
-          entry.provenance || !provenance ? entry : { ...entry, provenance }
-        )));
-      }
-      await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
-      segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
-      return settlement ?? 'confirmed';
     });
   }
 
@@ -312,6 +336,31 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }): Promise<void> {
     request.signal.throwIfAborted();
     this.#open(request.chat).stream.commitOffset(request.commit);
+  }
+
+  // A user row's admission identity settles once it is bound to proven
+  // provider-native evidence: a native-claimed source or an audit-bound
+  // alias. Promotion alone is acceptance, not persistence proof.
+  async settledInputRequests(
+    request: AgentTranscriptRequestV4,
+  ): Promise<AgentTranscriptAccessResult<readonly string[]>> {
+    request.signal.throwIfAborted();
+    const opened = await this.#requireOpen(request);
+    if (opened.kind !== 'ready') return opened;
+    const segment = opened.value;
+    const aliases = segment.journal.state.aliases;
+    const namespace = `${this.options.ownerId}:native`;
+    const settled = segment.stream.current.entries.flatMap((entry) => {
+      if (entry.lifetime !== 'durable' || entry.message.type !== 'user-message') return [];
+      const clientRequestId = entry.provenance?.clientRequestId;
+      if (!clientRequestId || !entry.source) return [];
+      const claimedNative = entry.source.namespace === namespace
+        && !entry.source.itemId.startsWith('event:');
+      return claimedNative || hasNativeBinding(aliases[sourceIdentityKey(entry.source)])
+        ? [clientRequestId]
+        : [];
+    });
+    return { kind: 'ready', value: settled };
   }
 
   async prepareInput(request: AgentTranscriptRequestV4 & {
@@ -858,6 +907,21 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     if (!segment) throw new TypeError(`Projection segment ${chat.chatId} is not open`);
     return segment;
   }
+}
+
+const SETTLEMENT_WAIT_MS = 1_500;
+const SETTLEMENT_POLL_INTERVAL_MS = 25;
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function hasNativeBinding(alias: unknown): boolean {
+  if (!alias || typeof alias !== 'object' || Array.isArray(alias)) return false;
+  const record = alias as Record<string, unknown>;
+  return (typeof record.entryId === 'string' && record.entryId.length > 0)
+    || (typeof record.lineNumber === 'number' && Number.isSafeInteger(record.lineNumber) && record.lineNumber > 0)
+    || (typeof record.byteOffset === 'number' && Number.isSafeInteger(record.byteOffset) && record.byteOffset >= 0);
 }
 
 function admissionSource(operation: AgentTurnBoundOperationIdentityV4): AgentTranscriptSourceIdentity {

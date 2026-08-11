@@ -306,28 +306,15 @@ describe('GET /api/v1/chats/messages', () => {
     expect(pendingInputs.reconcileRetainedHistory).not.toHaveBeenCalled();
   });
 
-  it('bounds native full loads across repeated reads with an unresolved conflicting echo', async () => {
+  it('serves an unproven pending input across repeated reads without images', async () => {
     const history = [
       new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-1'),
       new AssistantMessage('2026-06-01T00:00:01.000Z', 'history-2'),
     ];
-    const nativeMessages = [
-      ...history,
-      new UserMessage(
-        '2026-06-01T00:00:02.000Z',
-        'pending',
-        undefined,
-        { clientRequestId: 'req-native', turnId: 'turn-native' },
-      ),
-    ];
-    const loadAll = mock(async () => nativeMessages);
-    const loadPage = mock(async (limit, offset) => historyPage(nativeMessages, limit, offset));
     const views = new ChatViewStore(() => false, { messageLimit: 2 });
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: loadAll,
-      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
-      hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
-    });
+    // A foreign identity in the settled set never clears the live record.
+    const settledInputRequests = mock(async () => new Set(['req-native']));
+    const pendingInputs = new PendingUserInputService({ settledInputRequests });
     await pendingInputs.register('123', 'pending', {
       clientRequestId: 'req-live',
       turnId: 'turn-live',
@@ -345,7 +332,7 @@ describe('GET /api/v1/chats/messages', () => {
     const chatViews = {
       getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
         chatId,
-        { loadAll: snapshotLoader(loadAll), loadPage },
+        { loadAll: async () => transcriptSnapshot(history) },
         limit,
         beforeSeq,
       ),
@@ -362,11 +349,7 @@ describe('GET /api/v1/chats/messages', () => {
       });
       expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');
     }
-
-    expect(loadAll).toHaveBeenCalledTimes(1);
-    expect(loadPage).not.toHaveBeenCalled();
   });
-
 });
 
 describe('POST /api/v1/chats/repair-history', () => {

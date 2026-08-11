@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import {
   type ChatImage,
-  type UserMessage,
   type UserMessageDeliveryStatus,
 } from '../../common/chat-types.js';
 import type {
@@ -13,17 +12,8 @@ import {
   PendingUserInputStore,
   type PendingUserInputRecord,
 } from './pending-user-input-store.js';
-import type { PendingInputHistoryReader } from './chat-message-reader.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
-import {
-  matchingRequestIds,
-  type IdentitylessEvidenceClaim,
-} from './pending-input-matching.js';
-import {
-  nativeUserMessages,
-  scanCurrentNativeUserEvidence,
-} from './native-pending-evidence-scanner.js';
 
 const logger = createLogger('pending-inputs');
 
@@ -50,6 +40,12 @@ interface NativeReconcileRun {
   promise: Promise<void>;
 }
 
+// Answers which client-request identities the projection has bound to proven
+// provider-native evidence for a chat.
+export interface SettledInputRequestReader {
+  settledInputRequests(chatId: string): Promise<ReadonlySet<string>>;
+}
+
 export interface PendingUserInputServiceContract {
   listForChat(chatId: string): PendingUserInput[];
   listForTransport(chatId: string): PendingUserInput[];
@@ -64,18 +60,21 @@ export interface PendingUserInputServiceContract {
   reconcileRetainedHistory(chatId: string): Promise<void>;
   reconcileNativeHistory(chatId: string): Promise<void>;
   settleNativeCohort(cohort: PendingUserInputCohort): Promise<void>;
-  settleRetainedCohort(cohort: PendingUserInputCohort): void;
 }
 
+// Settlement uses admission entry identity and source promotion: a record
+// clears once the projection binds its client-request identity to proven
+// provider-native evidence, and a stop-captured cohort that cannot prove
+// persistence surfaces as unconfirmed instead of silently clearing. Native
+// user-message text never participates.
 export class PendingUserInputService implements PendingUserInputServiceContract {
   readonly store = new PendingUserInputStore();
-  #messages: PendingInputHistoryReader;
-  #nativeEvidenceLock = new KeyedPromiseLock();
+  #settled: SettledInputRequestReader;
+  #settleLock = new KeyedPromiseLock();
   #nativeReconcileByChatId = new Map<string, NativeReconcileRun>();
-  #claimedIdentitylessEvidenceByChatId = new Map<string, Map<string, IdentitylessEvidenceClaim>>();
 
-  constructor(messages: PendingInputHistoryReader) {
-    this.#messages = messages;
+  constructor(settled: SettledInputRequestReader) {
+    this.#settled = settled;
   }
 
   listForChat(chatId: string): PendingUserInput[] {
@@ -106,13 +105,10 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
 
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {
     this.store.clearChat(chatId, reason);
-    this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
   }
 
   discardChat(chatId: string): number {
-    const discarded = this.store.discardChat(chatId);
-    this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
-    return discarded;
+    return this.store.discardChat(chatId);
   }
 
   discard(chatId: string, clientRequestId: string): boolean {
@@ -127,8 +123,9 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     return this.store.updateDeliveryStatus(chatId, clientRequestId, 'unconfirmed');
   }
 
+  // Registration never blocks on a settlement read; commit-driven reconciles
+  // and snapshot reads clear records the projection has already proven.
   async register(chatId: string, content: string, options: RegisterPendingUserInputOptions = {}): Promise<PendingUserInput> {
-    await this.reconcileRetainedHistory(chatId);
     const input: PendingUserInput = {
       chatId,
       clientRequestId: options.clientRequestId ?? crypto.randomUUID(),
@@ -139,9 +136,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       ...(options.turnId ? { turnId: options.turnId } : {}),
       ...(options.images ? { images: options.images } : {}),
     };
-    const registered = this.store.upsert(input);
-    this.#pruneIdentitylessEvidence(chatId);
-    return registered;
+    return this.store.upsert(input);
   }
 
   captureCohort(chatId: string): PendingUserInputCohort {
@@ -152,13 +147,8 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   }
 
   async reconcileRetainedHistory(chatId: string): Promise<void> {
-    const records = this.#reconcilableRecords(chatId);
-    if (records.length === 0) return;
-    this.#clearMatches(
-      chatId,
-      records,
-      nativeUserMessages(this.#messages.getRetainedHistoryMessages(chatId)),
-    );
+    if (!this.store.hasRecordsForChat(chatId)) return;
+    await this.#clearSettled(chatId, this.#reconcilableRecords(chatId));
   }
 
   async reconcileNativeHistory(chatId: string): Promise<void> {
@@ -188,71 +178,51 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   async #runNativeReconcile(chatId: string, run: NativeReconcileRun): Promise<void> {
     do {
       run.dirty = false;
-      await this.#reconcileNativeHistoryOnce(chatId);
+      try {
+        await this.#clearSettled(chatId, this.#reconcilableRecords(chatId));
+      } catch (error) {
+        logger.warn('pending input settlement read failed', {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
     } while (run.dirty && this.store.hasRecordsForChat(chatId));
   }
 
-  async #reconcileNativeHistoryOnce(chatId: string): Promise<void> {
-    try {
-      await this.#reconcileNativeHistoryStrictOnce(chatId);
-    } catch {
-      const cohort = this.captureCohort(chatId);
-      this.#clearMatches(
-        chatId,
-        this.#currentCohortRecords(cohort),
-        nativeUserMessages(this.#messages.getRetainedHistoryMessages(chatId)),
-      );
-    }
-  }
-
-  async #reconcileNativeHistoryStrictOnce(chatId: string): Promise<void> {
-    await this.#nativeEvidenceLock.runExclusive(chatId, async () => {
-      const cohort = this.captureCohort(chatId);
-      const records = this.#currentCohortRecords(cohort);
-      if (records.length === 0) return;
-      await this.#scanNativeEvidence(cohort, true);
-    });
-  }
-
   async settleNativeCohort(cohort: PendingUserInputCohort): Promise<void> {
-    await this.#nativeEvidenceLock.runExclusive(cohort.chatId, async () => {
-      const records = this.#currentCohortRecords(cohort);
-      if (records.length === 0) return;
-
+    await this.#settleLock.runExclusive(cohort.chatId, async () => {
+      if (this.#currentCohortRecords(cohort).length === 0) return;
       try {
-        const nativeMessages = await this.#scanNativeEvidence(cohort, false);
-        this.#settleCohort(cohort, nativeMessages);
-      } catch {
-        this.#settleCohort(
-          cohort,
-          nativeUserMessages(this.#messages.getRetainedHistoryMessages(cohort.chatId)),
-        );
+        await this.#clearSettled(cohort.chatId, this.#currentCohortRecords(cohort));
+      } catch (error) {
+        logger.warn('pending cohort settlement read failed', {
+          chatId: cohort.chatId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      // Whatever the boundary could not prove persisted is unconfirmed, never
+      // silently cleared.
+      for (const record of this.#currentCohortRecords(cohort)) {
+        if (record.deliveryStatus === 'failed') continue;
+        if (this.store.updateDeliveryStatusIfCurrent(cohort.chatId, record, 'unconfirmed')) {
+          logger.debug('pending input expired unmatched', {
+            chatId: cohort.chatId,
+            clientRequestId: record.clientRequestId,
+            count: 1,
+          });
+        }
       }
     });
   }
 
-  settleRetainedCohort(cohort: PendingUserInputCohort): void {
-    this.#settleCohort(
-      cohort,
-      nativeUserMessages(this.#messages.getRetainedHistoryMessages(cohort.chatId)),
-    );
-  }
-
-  async #scanNativeEvidence(
-    cohort: PendingUserInputCohort,
-    allowIdentityless: boolean,
-  ): Promise<UserMessage[]> {
-    return scanCurrentNativeUserEvidence({
-      chatId: cohort.chatId,
-      reader: this.#messages,
-      shouldContinue: () => this.#currentCohortRecords(cohort).length > 0,
-      acceptEvidence: (messages) => this.#clearMatches(
-        cohort.chatId,
-        this.#currentCohortRecords(cohort),
-        messages,
-        allowIdentityless,
-      ),
-    });
+  async #clearSettled(chatId: string, records: readonly PendingUserInputRecord[]): Promise<void> {
+    if (records.length === 0) return;
+    const settled = await this.#settled.settledInputRequests(chatId);
+    for (const record of records) {
+      if (!settled.has(record.clientRequestId)) continue;
+      this.store.clear(chatId, record.clientRequestId, 'persisted');
+    }
   }
 
   #reconcilableRecords(chatId: string): PendingUserInputRecord[] {
@@ -264,69 +234,4 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   #currentCohortRecords(cohort: PendingUserInputCohort): PendingUserInputRecord[] {
     return cohort.records.filter((record) => this.store.isCurrentRecord(cohort.chatId, record));
   }
-
-  #settleCohort(cohort: PendingUserInputCohort, messages: UserMessage[]): void {
-    this.#clearMatches(
-      cohort.chatId,
-      this.#currentCohortRecords(cohort),
-      messages,
-      false,
-    );
-    for (const record of this.#currentCohortRecords(cohort)) {
-      if (record.deliveryStatus === 'failed') continue;
-      if (this.store.updateDeliveryStatusIfCurrent(cohort.chatId, record, 'unconfirmed')) {
-        logger.debug('pending input expired unmatched', {
-          chatId: cohort.chatId,
-          clientRequestId: record.clientRequestId,
-          count: 1,
-        });
-      }
-    }
-  }
-
-  #clearMatches(
-    chatId: string,
-    records: PendingUserInputRecord[],
-    messages: UserMessage[],
-    allowIdentityless = true,
-  ): void {
-    const claimedEvidence = this.#claimedIdentitylessEvidenceByChatId.get(chatId) ?? new Map();
-    const matches = matchingRequestIds(records, messages, claimedEvidence, allowIdentityless);
-    if (matches.identitylessRequestIds.size > 0) {
-      logger.debug('identityless pending input echoes matched', {
-        chatId,
-        count: matches.identitylessRequestIds.size,
-      });
-    }
-    for (const [key, evidence] of matches.identitylessEvidence) {
-      const prior = claimedEvidence.get(key);
-      claimedEvidence.set(key, {
-        count: Math.max(prior?.count ?? 0, evidence.count),
-        messageAt: evidence.messageAt,
-      });
-    }
-    if (claimedEvidence.size > 0) {
-      this.#claimedIdentitylessEvidenceByChatId.set(chatId, claimedEvidence);
-    }
-    for (const clientRequestId of matches.requestIds) {
-      this.store.clear(chatId, clientRequestId, 'persisted');
-    }
-  }
-
-  #pruneIdentitylessEvidence(chatId: string): void {
-    const claims = this.#claimedIdentitylessEvidenceByChatId.get(chatId);
-    if (!claims || claims.size === 0) return;
-    const earliestPendingAt = this.store
-      .listRecordsForChat(chatId)
-      .map((record) => Date.parse(record.createdAt))
-      .filter(Number.isFinite)
-      .reduce((earliest, createdAt) => Math.min(earliest, createdAt), Number.POSITIVE_INFINITY);
-    if (!Number.isFinite(earliestPendingAt)) return;
-    const oldestRelevantEvidenceAt = earliestPendingAt;
-    for (const [key, claim] of claims) {
-      if (claim.messageAt < oldestRelevantEvidenceAt) claims.delete(key);
-    }
-    if (claims.size === 0) this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
-  }
-
 }
