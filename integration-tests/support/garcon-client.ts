@@ -873,6 +873,18 @@ export class GarconTestClient {
     );
   }
 
+  async waitForSessionStopped(
+    chatId: string,
+    options: { afterIndex?: number; timeoutMs?: number } = {},
+  ): Promise<void> {
+    await this.waitForEvent(
+      (message): message is ServerWsMessage => message.type === 'chat-session-stopped'
+        && (message as { chatId?: string }).chatId === chatId,
+      `${chatId} chat-session-stopped`,
+      options,
+    );
+  }
+
   async waitForTransientPermission(
     chatId: string,
     predicate: (row: TransientFeedRow) => boolean = () => true,

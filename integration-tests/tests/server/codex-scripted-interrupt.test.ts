@@ -65,6 +65,7 @@ describe('scripted Codex interrupt lifecycle', () => {
         afterIndex: stopCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
+      await fixture.client.waitForSessionStopped(chatId, { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS });
       expectStoppedTurnEventOrder(
         fixture.client.eventsSince(stopCursor),
         chatId,

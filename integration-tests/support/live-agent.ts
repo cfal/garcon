@@ -27,6 +27,8 @@ export function expectAssistantMarker(contents: readonly string[], value: string
   expect(contents.some((content) => content.includes(value))).toBe(true);
 }
 
+// The stop settles as terminal-driven work: processing drops to idle first
+// and chat-session-stopped follows once the stopped turn's terminal applies.
 export function expectStoppedTurnEventOrder(
   events: readonly ServerWsMessage[],
   chatId: string,
@@ -36,19 +38,19 @@ export function expectStoppedTurnEventOrder(
     event.type === 'chat-processing-updated'
     && event.chatId === chatId
     && event.phase === 'stopping');
+  const idle = events.findIndex((event) =>
+    event.type === 'chat-processing-updated'
+    && event.chatId === chatId
+    && event.phase === null);
   const stopped = events.findIndex((event) =>
     event.type === 'chat-session-stopped'
     && event.chatId === chatId
     && event.intent === 'stop'
     && event.outcome === 'interrupt-requested');
-  const idle = events.findIndex((event) =>
-    event.type === 'chat-processing-updated'
-    && event.chatId === chatId
-    && event.phase === null);
 
   expect(stopping).toBeGreaterThanOrEqual(0);
-  expect(stopped).toBeGreaterThan(stopping);
-  expect(idle).toBeGreaterThan(stopped);
+  expect(idle).toBeGreaterThan(stopping);
+  expect(stopped).toBeGreaterThan(idle);
   expect(events).not.toContainEqual(expect.objectContaining({
     type: 'agent-run-failed',
     chatId,
