@@ -49,6 +49,7 @@ import {
   sourceIdentityKey,
 } from './identity.js';
 import { AgentProjectionJournal } from './journal.js';
+import { auditNativeEvidence } from './native-audit.js';
 import { AgentProjectionPager } from './paging.js';
 import { createProjectionMaterialization } from './state.js';
 import { AgentProjectionEventStream } from './stream.js';
@@ -90,6 +91,9 @@ interface OpenSegment {
     cleanupBlock: Promise<void> | null;
     operationId: string | null;
   };
+  // Ordinal of the first committed entry the provider had not persisted at the
+  // open-time audit; fences native fork continuity until a later open confirms.
+  nativeAheadFromOrdinal: number | null;
   forwarded: boolean;
 }
 
@@ -131,10 +135,58 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       bootstrapEntries: entries,
       bootstrapAliases,
     });
+    const aheadFromOrdinal = exists ? await this.#auditExistingJournal(request, journal) : null;
     request.signal.throwIfAborted();
     const segment = this.#createSegment(request.chat, journal);
+    segment.nativeAheadFromOrdinal = aheadFromOrdinal;
     this.#segments.set(key, segment);
     return { kind: 'ready', value: { checkpoint: segment.stream.current.checkpoint, idle: true } };
+  }
+
+  // Audits a recovered journal against current provider-native evidence before
+  // the segment opens: a crash-missed native suffix is imported exactly once, a
+  // compaction-explained prefix loss advances the native-retention floor, a
+  // provider that has not persisted the committed tail fences native fork
+  // continuity until it catches up, and unexplained divergence records a
+  // durable fence. The committed rendering is never changed, and unavailable
+  // evidence leaves the journal serving as-is for a later audit.
+  async #auditExistingJournal(
+    request: AgentTranscriptRequestV4,
+    journal: AgentProjectionJournal,
+  ): Promise<number | null> {
+    const evidence = await this.options.bootstrap(request);
+    if (evidence.kind !== 'ready') return null;
+    const state = journal.state;
+    const outcome = auditNativeEvidence({
+      ownerId: this.options.ownerId,
+      entries: state.entries,
+      seeds: evidence.value,
+    });
+    if (outcome.kind === 'skipped') return null;
+    if (outcome.kind === 'diverged') {
+      if (state.nativeContinuity !== 'diverged') {
+        await journal.updateNativeMetadata({
+          nativeRetentionFloor: state.nativeRetentionFloor,
+          aliases: state.aliases,
+          nativeContinuity: 'diverged',
+        });
+      }
+      return null;
+    }
+    if (outcome.suffix.length > 0) {
+      await journal.appendImported(seedEntries(request.chat, outcome.suffix));
+    }
+    const importedAliases = aliasesFromSeeds(outcome.suffix);
+    const floor = outcome.nativeRetentionFloor;
+    if (Object.keys(importedAliases).length > 0 || (floor !== null && floor > state.nativeRetentionFloor)) {
+      await journal.updateNativeMetadata({
+        nativeRetentionFloor: floor !== null && floor > state.nativeRetentionFloor
+          ? floor
+          : state.nativeRetentionFloor,
+        aliases: { ...state.aliases, ...importedAliases },
+      });
+    }
+    return outcome.aheadFromOrdinal;
   }
 
   async replay(
@@ -330,6 +382,9 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     }
     if (opened.kind === 'degraded') return opened;
     const segment = opened.value;
+    if (segment.journal.state.nativeContinuity === 'diverged') {
+      return { kind: 'unavailable', reason: 'source-diverged' };
+    }
     const checkpoint = segment.stream.current.checkpoint;
     if (request.point.agentOwnershipEpoch !== request.chat.agentOwnershipEpoch
         || request.point.contentEpoch !== checkpoint.projection.contentEpoch
@@ -345,6 +400,9 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     const journal = segment.journal.state;
     if (ordinal <= journal.nativeRetentionFloor) {
       return { kind: 'unavailable', reason: 'below-native-retention-floor' };
+    }
+    if (segment.nativeAheadFromOrdinal !== null && ordinal >= segment.nativeAheadFromOrdinal) {
+      return { kind: 'unavailable', reason: 'projection-ahead-of-provider' };
     }
     if (!entry.source) return { kind: 'unavailable', reason: 'no-native-source' };
     const alias = journal.aliases[sourceIdentityKey(entry.source)];
@@ -594,6 +652,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       chat,
       journal,
       stream,
+      nativeAheadFromOrdinal: null,
       admission: new AgentInputAdmissionCoordinator(stream),
       pager: new AgentProjectionPager(),
       gate: new AgentProjectionMutationGate(() => {

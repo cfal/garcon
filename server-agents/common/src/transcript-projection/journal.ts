@@ -31,6 +31,8 @@ interface JournalHeader {
   readonly agentOwnershipEpoch: AgentOwnershipEpoch;
 }
 
+export type ProjectionNativeContinuity = 'confirmed' | 'diverged';
+
 interface JournalSnapshotRecord {
   readonly kind: 'snapshot';
   readonly contentEpoch: AgentTranscriptContentEpoch;
@@ -38,6 +40,7 @@ interface JournalSnapshotRecord {
   readonly discardedAdmissions: readonly PersistedDiscardedAdmission[];
   readonly nativeRetentionFloor: number;
   readonly aliases: JsonObject;
+  readonly nativeContinuity?: ProjectionNativeContinuity;
   readonly handoffCleanupBlocked?: boolean;
 }
 
@@ -59,6 +62,7 @@ interface JournalMetadataRecord {
   readonly kind: 'metadata';
   readonly nativeRetentionFloor: number;
   readonly aliases: JsonObject;
+  readonly nativeContinuity?: ProjectionNativeContinuity;
 }
 
 interface JournalHandoffBoundaryViolationRecord {
@@ -88,6 +92,7 @@ export interface ProjectionJournalState extends AgentSegmentIdentity {
   readonly entries: readonly AgentTranscriptEntry[];
   readonly nativeRetentionFloor: number;
   readonly aliases: JsonObject;
+  readonly nativeContinuity: ProjectionNativeContinuity;
   readonly handoffCleanupBlocked: boolean;
 }
 
@@ -109,6 +114,7 @@ export class AgentProjectionJournal {
   #contentEpoch: AgentTranscriptContentEpoch;
   #nativeRetentionFloor: number;
   #aliases: JsonObject;
+  #nativeContinuity: ProjectionNativeContinuity;
   #handoffCleanupBlocked: boolean;
 
   private constructor(
@@ -122,6 +128,7 @@ export class AgentProjectionJournal {
     this.#contentEpoch = state.contentEpoch;
     this.#nativeRetentionFloor = state.nativeRetentionFloor;
     this.#aliases = state.aliases;
+    this.#nativeContinuity = state.nativeContinuity;
     this.#handoffCleanupBlocked = state.handoffCleanupBlocked;
     for (const discarded of state.discardedAdmissions) {
       this.#discardedAdmissions.set(admissionKey(discarded.identity), discarded);
@@ -150,6 +157,7 @@ export class AgentProjectionJournal {
         entries,
         nativeRetentionFloor: 0,
         aliases: options.bootstrapAliases ?? {},
+        nativeContinuity: 'confirmed',
         handoffCleanupBlocked: false,
         discardedAdmissions: [],
       } as const;
@@ -178,6 +186,7 @@ export class AgentProjectionJournal {
       entries: this.#entries.map((entry) => ({ ...entry })),
       nativeRetentionFloor: this.#nativeRetentionFloor,
       aliases: this.#aliases,
+      nativeContinuity: this.#nativeContinuity,
       handoffCleanupBlocked: this.#handoffCleanupBlocked,
     };
   }
@@ -252,6 +261,7 @@ export class AgentProjectionJournal {
       entries: [...resultingEntries],
       nativeRetentionFloor: 0,
       aliases: {},
+      nativeContinuity: 'confirmed',
       handoffCleanupBlocked: false,
       discardedAdmissions: [],
     } as const;
@@ -260,6 +270,7 @@ export class AgentProjectionJournal {
     this.#contentEpoch = event.checkpoint.projection.contentEpoch;
     this.#nativeRetentionFloor = 0;
     this.#aliases = {};
+    this.#nativeContinuity = 'confirmed';
     this.#handoffCleanupBlocked = false;
     this.#discardedAdmissions.clear();
   }
@@ -267,15 +278,43 @@ export class AgentProjectionJournal {
   async updateNativeMetadata(options: {
     readonly nativeRetentionFloor: number;
     readonly aliases: JsonObject;
+    readonly nativeContinuity?: ProjectionNativeContinuity;
   }): Promise<void> {
     if (!Number.isSafeInteger(options.nativeRetentionFloor)
         || options.nativeRetentionFloor < this.#nativeRetentionFloor
         || options.nativeRetentionFloor > this.#entries.length) {
       throw new TypeError('Native retention floor must advance monotonically within the ledger');
     }
-    await appendRecord(this.#filePath, { kind: 'metadata', ...options });
+    const nativeContinuity = options.nativeContinuity ?? this.#nativeContinuity;
+    // Divergence clears only through an explicit repair or adoption reset.
+    if (this.#nativeContinuity === 'diverged' && nativeContinuity === 'confirmed') {
+      throw new TypeError('Native continuity divergence cannot be cleared by metadata');
+    }
+    await appendRecord(this.#filePath, {
+      kind: 'metadata',
+      nativeRetentionFloor: options.nativeRetentionFloor,
+      aliases: options.aliases,
+      nativeContinuity,
+    });
     this.#nativeRetentionFloor = options.nativeRetentionFloor;
     this.#aliases = options.aliases;
+    this.#nativeContinuity = nativeContinuity;
+  }
+
+  // Appends crash-missed native rows discovered by the open-time audit. The
+  // suffix lands after every committed entry and never re-renders one.
+  async appendImported(entries: readonly AgentTranscriptEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    if (entries.some((entry) => entry.lifetime !== 'durable')) {
+      throw new TypeError('Imported journal entries must be durable');
+    }
+    validateEntries([...this.#entries, ...entries]);
+    await appendRecord(this.#filePath, {
+      kind: 'append',
+      previousDurableRevision: computeProjectionRevisions(this.#entries).durableRevision,
+      entries,
+    });
+    this.#entries.push(...entries);
   }
 
   async markHandoffBoundaryViolation(operationId: string): Promise<void> {
@@ -364,6 +403,7 @@ async function parseJournal(
   let contentEpoch = agentTranscriptContentEpoch(snapshot.contentEpoch);
   let nativeRetentionFloor = snapshot.nativeRetentionFloor;
   let aliases = snapshot.aliases;
+  let nativeContinuity = parseNativeContinuity(snapshot.nativeContinuity);
   let handoffCleanupBlocked = snapshot.handoffCleanupBlocked === true;
   const discarded = new Map<string, { entryId: string; identity: SerializedAdmissionIdentity }>();
   for (const value of snapshot.discardedAdmissions) {
@@ -392,6 +432,10 @@ async function parseJournal(
       }
       nativeRetentionFloor = record.nativeRetentionFloor;
       aliases = record.aliases;
+      if (nativeContinuity === 'diverged' && parseNativeContinuity(record.nativeContinuity) === 'confirmed') {
+        throw new ProjectionJournalCorruptError('Projection native continuity regressed');
+      }
+      nativeContinuity = parseNativeContinuity(record.nativeContinuity);
     } else if (record.kind === 'handoff-boundary-violation') {
       if (!record.operationId) {
         throw new ProjectionJournalCorruptError('Projection handoff violation is missing its operation ID');
@@ -409,9 +453,16 @@ async function parseJournal(
     entries,
     nativeRetentionFloor,
     aliases,
+    nativeContinuity,
     handoffCleanupBlocked,
     discardedAdmissions: [...discarded.values()],
   };
+}
+
+function parseNativeContinuity(value: unknown): ProjectionNativeContinuity {
+  if (value === undefined || value === 'confirmed') return 'confirmed';
+  if (value === 'diverged') return 'diverged';
+  throw new ProjectionJournalCorruptError('Projection native continuity is invalid');
 }
 
 function parseRecord(line: string, lineNumber: number): JournalRecord {
@@ -472,6 +523,7 @@ function snapshotRecord(state: {
   readonly discardedAdmissions: readonly ({ entryId: string; identity: SerializedAdmissionIdentity } | SerializedAdmissionIdentity)[];
   readonly nativeRetentionFloor: number;
   readonly aliases: JsonObject;
+  readonly nativeContinuity: ProjectionNativeContinuity;
   readonly handoffCleanupBlocked: boolean;
 }): JournalSnapshotRecord {
   return {
@@ -483,6 +535,7 @@ function snapshotRecord(state: {
     )) as readonly PersistedDiscardedAdmission[],
     nativeRetentionFloor: state.nativeRetentionFloor,
     aliases: state.aliases,
+    nativeContinuity: state.nativeContinuity,
     handoffCleanupBlocked: state.handoffCleanupBlocked,
   };
 }
