@@ -59,6 +59,7 @@ export type ChatViewGenerationReason =
   | 'manual-reload'
   | 'process-error'
   | 'projection-reset'
+  | 'projection-relist'
   | 'initial-live-append'
   | 'initial-provisional-append';
 

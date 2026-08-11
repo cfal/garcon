@@ -38,3 +38,29 @@ export interface AppendedChatViewMessages {
   lastSeq: number;
   skipped?: boolean;
 }
+
+export interface ProjectionCommitViewInput {
+  readonly previousProjection: AgentProjectionState;
+  readonly checkpointProjection: AgentProjectionState;
+  readonly appendedMessages: readonly ChatMessage[];
+  readonly carryOverMessageCount: number;
+}
+
+export type ProjectionCommitViewApplication =
+  | {
+      readonly kind: 'applied';
+      readonly generationId: string;
+      readonly messages: ChatViewMessage[];
+      readonly lastSeq: number;
+    }
+  | {
+      readonly kind: 'already-applied';
+      readonly generationId: string;
+      readonly lastSeq: number;
+    }
+  | {
+      readonly kind: 'relisted';
+      readonly previousGenerationId: string | null;
+      readonly generationId: string;
+      readonly lastSeq: number;
+    };

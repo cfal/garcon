@@ -171,6 +171,45 @@ export class ChatTransientFeedStore {
     return record ? snapshotOf(this.serverInstanceId, record) : null;
   }
 
+  // Carries the current control rows into a new browser transcript generation
+  // after a view relist. Anchors keep their carryover-plus-ordinal positions;
+  // only the generation identity of each row changes.
+  rebaseGeneration(input: {
+    readonly chatId: string;
+    readonly agentOwnershipEpoch: string;
+    readonly previousGenerationId: string;
+    readonly generationId: string;
+  }): ChatProjectionGenerationTransition {
+    if (input.previousGenerationId === input.generationId) {
+      throw new TypeError('Generation rebase requires distinct generations');
+    }
+    const existing = this.#records.get(input.chatId);
+    if (existing && existing.generationId !== input.previousGenerationId) {
+      throw new TypeError('Generation rebase predecessor is stale');
+    }
+    const record = this.#record(
+      input.chatId,
+      input.agentOwnershipEpoch,
+      input.previousGenerationId,
+    );
+    const rows = new Map<string, TransientFeedRow>();
+    for (const row of record.rows.values()) {
+      rows.set(row.id, {
+        ...row,
+        transcript: {
+          generationId: input.generationId,
+          afterSeq: row.transcript.afterSeq,
+        },
+      });
+    }
+    record.generationId = input.generationId;
+    record.rows = rows;
+    record.transientRevision += 1;
+    record.resetTransactionId = crypto.randomUUID();
+    record.stateDigest = stateDigest(rows);
+    return transitionOf(this.serverInstanceId, record, input.previousGenerationId);
+  }
+
   resetEmptyGeneration(input: {
     readonly chatId: string;
     readonly agentOwnershipEpoch: string;

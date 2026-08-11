@@ -22,6 +22,7 @@ export function transcriptSnapshot(messages, options = {}) {
     agentOwnershipEpoch,
     archivedLogicalCount,
     nativePrefixDigest: options.nativePrefixDigest ?? transcriptRevision(nativeMessages),
+    projectionState: options.projectionState ?? null,
   };
 }
 
@@ -38,6 +39,7 @@ export function nativeReconciliation(messages, options = {}) {
     agentOwnershipEpoch: snapshot.agentOwnershipEpoch,
     archivedLogicalCount: snapshot.archivedLogicalCount,
     nativePrefixDigest: snapshot.nativePrefixDigest,
+    projectionState: snapshot.projectionState,
   };
 }
 
@@ -64,6 +66,7 @@ export function historyPage(messages, limit, offset, options = {}) {
     agentOwnershipEpoch: snapshot.agentOwnershipEpoch,
     archivedLogicalCount: snapshot.archivedLogicalCount,
     nativePrefixDigest: options.nativePrefixDigest ?? null,
+    projectionState: snapshot.projectionState,
   };
 }
 

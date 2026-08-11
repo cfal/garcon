@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { sameProjectionState } from '@garcon/server-agent-common/transcript-projection/identity';
 import { ErrorMessage, UserMessage, type ChatMessage } from '../../common/chat-types.js';
 import type { ChatReplayResult, ChatViewMessage, ChatViewPage } from '../../common/chat-view.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -32,6 +33,8 @@ import type {
   ChatHistoryPage,
   ChatTranscriptSnapshot,
   ChatViewLoader,
+  ProjectionCommitViewApplication,
+  ProjectionCommitViewInput,
 } from './chat-view-contracts.js';
 import { ChatRunningError } from './errors.js';
 
@@ -41,6 +44,8 @@ export type {
   ChatHistoryPage,
   ChatTranscriptSnapshot,
   ChatViewLoader,
+  ProjectionCommitViewApplication,
+  ProjectionCommitViewInput,
 } from './chat-view-contracts.js';
 
 const logger = createLogger('chat-view');
@@ -234,11 +239,7 @@ export class ChatViewStore {
           missingHistory.limit,
           missingHistory.offset,
         );
-        if (
-          olderPage
-          && olderPage.total === view.historyLastSeq
-          && revisionsMatch(view.compositeRevision, olderPage.compositeRevision)
-        ) {
+        if (olderPage && this.#olderPageMatchesView(view, olderPage)) {
           const pageEndSeq = olderPage.total - olderPage.offset;
           const oldestRetainedSeq = view.messages[0]?.seq ?? view.historyLastSeq + 1;
           if (pageEndSeq < oldestRetainedSeq - 1) {
@@ -303,6 +304,55 @@ export class ChatViewStore {
       });
       this.#views.set(chatId, view);
       return this.#readPageFromView(view, Number.MAX_SAFE_INTEGER);
+    });
+  }
+
+  // Applies one integration commit event against the exact predecessor state the
+  // view already holds. Identity is the projection state alone: content and
+  // delivery identity never participate. A view on any other state relists from
+  // the authoritative projection under a fresh generation.
+  async applyProjectionCommit(
+    chatId: string,
+    commit: ProjectionCommitViewInput,
+    loader: ChatViewLoader,
+  ): Promise<ProjectionCommitViewApplication> {
+    return this.#withChat(chatId, async () => {
+      const view = this.#views.get(chatId);
+      if (view?.projectionState) {
+        if (sameProjectionState(view.projectionState, commit.checkpointProjection)) {
+          this.#touch(view);
+          return {
+            kind: 'already-applied',
+            generationId: view.generationId,
+            lastSeq: view.lastSeq,
+          };
+        }
+        const expectedTotal = commit.previousProjection.total + commit.appendedMessages.length;
+        if (
+          sameProjectionState(view.projectionState, commit.previousProjection)
+          && commit.checkpointProjection.total === expectedTotal
+          && view.archivedLogicalCount === commit.carryOverMessageCount
+          && view.lastSeq === commit.carryOverMessageCount + commit.previousProjection.total
+        ) {
+          const appended = this.#appendToView(view, [...commit.appendedMessages]);
+          view.historyLastSeq = view.lastSeq;
+          view.projectionState = commit.checkpointProjection;
+          return {
+            kind: 'applied',
+            generationId: view.generationId,
+            messages: appended,
+            lastSeq: view.lastSeq,
+          };
+        }
+      }
+      const previousGenerationId = view?.generationId ?? null;
+      const relisted = await this.#relistFromProjection(chatId, loader);
+      return {
+        kind: 'relisted',
+        previousGenerationId,
+        generationId: relisted.generationId,
+        lastSeq: relisted.lastSeq,
+      };
     });
   }
 
@@ -544,6 +594,31 @@ export class ChatViewStore {
       this.#appendLiveToView(view, unpersistedLive, 'native-wins');
     }
     transferPublishedLiveEntries(previous, view);
+    this.#views.set(chatId, view);
+    return view;
+  }
+
+  // Rebuilds the view from the authoritative projection under a new generation.
+  // The fence invalidation drops any in-flight legacy append against the old
+  // generation before its rows could interleave with the relisted state.
+  async #relistFromProjection(chatId: string, loader: ChatViewLoader): Promise<ChatView> {
+    const previous = this.#views.get(chatId);
+    this.invalidateFence(chatId);
+    const page = await loader.loadPage?.(
+      Math.min(this.#messageLimit, this.#replayLimit),
+      0,
+    );
+    if (page) {
+      const view = this.#createGenerationFromPage(chatId, page);
+      this.#views.set(chatId, view);
+      return view;
+    }
+    const snapshot = await loader.loadAll();
+    const view = this.#createGeneration(chatId, snapshot.messages, {
+      reason: 'projection-relist',
+      previousGenerationId: previous?.generationId,
+      persistence: snapshot,
+    });
     this.#views.set(chatId, view);
     return view;
   }
@@ -891,6 +966,22 @@ export class ChatViewStore {
   #refreshRetainedState(view: ChatView): void {
     view.retainedStartSeq = view.messages[0]?.seq ?? view.lastSeq + 1;
     view.complete = this.#hasCompleteHistory(view);
+  }
+
+  // A continuation page is coherent when it addresses the same projection
+  // lineage and composite window as the loaded view. Within one stream epoch
+  // and content epoch the durable prefix is append-only, so equal totals
+  // address identical ordinals without content comparison. Views without
+  // projection state fall back to the composite content revision.
+  #olderPageMatchesView(view: ChatView, page: ChatHistoryPage): boolean {
+    if (page.total !== view.historyLastSeq) return false;
+    if (view.projectionState && page.projectionState) {
+      return view.projectionState.epoch === page.projectionState.epoch
+        && view.projectionState.contentEpoch === page.projectionState.contentEpoch
+        && view.carryOverRevision === page.carryOverRevision
+        && view.archivedLogicalCount === page.archivedLogicalCount;
+    }
+    return revisionsMatch(view.compositeRevision, page.compositeRevision);
   }
 
   #missingHistoryRequest(
