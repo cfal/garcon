@@ -12,6 +12,8 @@ import {
   loadOpenCodeChatMessages,
 } from '../history-loader.js';
 import { FILE_CONTEXT_SEPARATOR } from '@garcon/server-agent-common/shared/file-mention-context';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { convertOpenCodeEventToChatMessages } from '../event-converter.js';
 
 let originalError;
 let originalWarn;
@@ -91,6 +93,51 @@ describe('OpenCode history loader', () => {
     expect(messages[6]).toBeInstanceOf(ToolResultMessage);
     expect(messages[6].toolId).toBe('tool-2');
     expect(messages[6].isError).toBe(true);
+  });
+
+  it('carries stable part and message identities identically for stored and live rows', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { id: 'msg_user', role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ id: 'prt_u1', type: 'text', text: 'prompt' }],
+            },
+            {
+              info: { id: 'msg_a', role: 'assistant', time: { created: '2026-07-04T00:00:01.000Z' } },
+              parts: [
+                { id: 'prt_think', type: 'reasoning', reasoning: 'why' },
+                { id: 'prt_tool', type: 'tool', tool: 'bash', callID: 'tool-1', state: { status: 'completed', input: { command: 'pwd' }, output: 'ok' } },
+                { id: 'prt_text', type: 'text', text: 'done' },
+              ],
+            },
+          ],
+        })),
+      },
+    }));
+    const stored = await loadOpenCodeChatMessages('session-1', getClient);
+    const storedTuples = stored.map((message) => getNativeMessageRevisionSource(message));
+    expect(storedTuples).toEqual([
+      { entryId: 'msg_user', withinSourceOrdinal: 0 },
+      { entryId: 'prt_think', withinSourceOrdinal: 0 },
+      { entryId: 'prt_tool', withinSourceOrdinal: 0 },
+      { entryId: 'prt_tool', withinSourceOrdinal: 1 },
+      { entryId: 'prt_text', withinSourceOrdinal: 0 },
+    ]);
+
+    // Live conversion of the same parts yields identical identity tuples in
+    // the same order, so audits match without type or content guessing.
+    const turn = { assistantPartTypes: new Map(), messageRoles: new Map() };
+    const logger = { debug() {}, info() {}, warn() {}, error() {} };
+    const live = [
+      { type: 'message.part.updated', properties: { part: { id: 'prt_think', messageID: 'msg_a', role: 'assistant', type: 'reasoning', text: 'why' } } },
+      { type: 'message.part.updated', properties: { part: { id: 'prt_tool', messageID: 'msg_a', role: 'assistant', type: 'tool', tool: 'bash', callID: 'tool-1', state: { status: 'completed', input: { command: 'pwd' }, output: 'ok' } } } },
+      { type: 'message.part.updated', properties: { part: { id: 'prt_text', messageID: 'msg_a', role: 'assistant', type: 'text', text: 'done' } } },
+    ].flatMap((event) => convertOpenCodeEventToChatMessages(event, turn, logger) ?? []);
+    expect(live.map((message) => getNativeMessageRevisionSource(message))).toEqual(
+      storedTuples.slice(1),
+    );
   });
 
   it('hides provider-owned compaction messages and an overflow replay', async () => {

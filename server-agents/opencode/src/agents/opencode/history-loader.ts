@@ -14,6 +14,7 @@ import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
@@ -335,6 +336,14 @@ export async function fetchOpenCodeStoredMessages(
 
 export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
+  // Rows keep provider part order, and every row carries its stable provider
+  // identity: part rows the part ID, message-level rows the message ID. Live
+  // conversion attaches the same tuples, so audits match without guessing.
+  const push = (message: ChatMessage, entryId: unknown, withinSourceOrdinal = 0): void => {
+    messages.push(typeof entryId === 'string' && entryId.length > 0
+      ? attachNativeMessageSource(message, { entryId, withinSourceOrdinal })
+      : message);
+  };
   for (const msg of visibleOpenCodeStoredMessages(rawMessages)) {
     const info = msg.info || {};
     const ts = dateToIso(info.time?.created)
@@ -343,7 +352,7 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
     if (info.role === 'user') {
       const text = extractUserTextFromParts(msg.parts || []);
       if (text?.trim()) {
-        messages.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
+        push(new UserMessage(ts, stripResolvedFileMentionContext(text)), info.id);
       }
       continue;
     }
@@ -351,7 +360,6 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
     if (info.role === 'assistant') {
       const providerError = openCodeStoredErrorMessage(info.error);
       const aborted = isOpenCodeStoredAbort(info.error);
-      // Emit thinking parts first
       const parts = Array.isArray(msg.parts) ? msg.parts : [];
       for (const rawPart of parts) {
         const part = asRecord(rawPart);
@@ -362,40 +370,33 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
               ? part.text
               : '';
           if (content.trim()) {
-            messages.push(new ThinkingMessage(ts, content));
+            push(new ThinkingMessage(ts, content), part.id);
           }
-        }
-      }
-
-      // Emit text and tool-use parts
-      for (const rawPart of parts) {
-        const part = asRecord(rawPart);
-        if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
-          messages.push(new AssistantMessage(ts, part.text));
+        } else if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+          push(new AssistantMessage(ts, part.text), part.id);
         } else if (part.type === 'tool' && !aborted) {
           const state = asRecord(part.state);
           const toolUse = convertOpenCodeToolUse(ts, part);
-          messages.push(toolUse);
+          push(toolUse, part.id);
 
-          // Emit tool result if completed or errored
           if (state.status === 'completed') {
-            messages.push(new ToolResultMessage(
+            push(new ToolResultMessage(
               ts,
               toolUse.toolId,
               normalizeToolResultContent(state.output),
               false,
-            ));
+            ), part.id, 1);
           } else if (state.status === 'error') {
-            messages.push(new ToolResultMessage(
+            push(new ToolResultMessage(
               ts,
               toolUse.toolId,
               normalizeToolResultContent(state.error || 'Error'),
               true,
-            ));
+            ), part.id, 1);
           }
         }
       }
-      if (providerError) messages.push(new ErrorMessage(ts, providerError));
+      if (providerError) push(new ErrorMessage(ts, providerError), info.id);
     }
   }
   return messages;

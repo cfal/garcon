@@ -4,6 +4,7 @@ import {
   ToolResultMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { SSEEvent } from './sse-events.js';
@@ -77,6 +78,7 @@ export function convertOpenCodeEventToChatMessages(
             true,
           ));
         }
+        attachPartIdentity(chatMessages, part.id);
         break;
       }
 
@@ -99,6 +101,7 @@ export function convertOpenCodeEventToChatMessages(
         } else {
           chatMessages.push(new ThinkingMessage(now, part.text));
         }
+        attachPartIdentity(chatMessages, part.id);
       }
       break;
     }
@@ -111,4 +114,12 @@ export function convertOpenCodeEventToChatMessages(
   }
 
   return chatMessages;
+}
+
+// The stable part ID is the canonical provider identity every rendered row
+// from that part shares, live and in stored history alike.
+function attachPartIdentity(rows: readonly ChatMessage[], partId: string): void {
+  rows.forEach((row, withinSourceOrdinal) => {
+    attachNativeMessageSource(row, { entryId: partId, withinSourceOrdinal });
+  });
 }
