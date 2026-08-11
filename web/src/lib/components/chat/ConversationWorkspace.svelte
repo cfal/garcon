@@ -18,6 +18,7 @@
 	} from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { ChatViewMessage } from '$shared/chat-view';
 	import type { ChatProcessingPhase } from '$shared/chat-types';
+	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
 	import type { SplitPanePreviewCursor } from '$lib/chat/split/split-pane-preview-store.svelte.js';
@@ -412,6 +413,22 @@
 	const directAdmissionPending = $derived(
 		controller.isDirectAdmissionPending(sessions.selectedChatId),
 	);
+	// Consumes an epoch-validated search navigation exactly once, after the
+	// selected chat's transcript has the target row loaded.
+	$effect(() => {
+		const chatId = chatState.activeChatId;
+		if (!chatId || chatState.loadStatus !== 'loaded') return;
+		if (!searchResultNavigation.peek(chatId)) return;
+		if (chatState.generationId === '') return;
+		const seq = searchResultNavigation.take(chatId);
+		if (seq === null || seq > chatState.lastSeq) return;
+		void scroll.jumpToMessageRow({
+			chatId,
+			generationId: chatState.generationId,
+			rowId: `${chatState.generationId}:${seq}`,
+		});
+	});
+
 	const userMessageNavigator = new UserMessageNavigatorController({
 		transcript: chatState,
 		getSelectedChatId: () => sessions.selectedChatId,

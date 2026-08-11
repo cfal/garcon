@@ -123,6 +123,8 @@ import type {
 import type {
   ChatSearchRequest,
   ChatSearchResponse,
+  ChatSearchNavigateRequest,
+  ChatSearchNavigateResponse,
 } from '../../common/chat-search.js';
 import type { ChatDetailsResponse } from '../../common/chat-details.js';
 import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
@@ -178,6 +180,7 @@ type PendingInputsDep = PendingUserInputServiceContract;
 
 interface ChatSearchDep {
   catalogMayHaveChanged(chatId?: string): void;
+  validateResultEpoch(chatId: string, contentEpoch: string): boolean;
   search(options: {
     query: string;
     textTokens?: string[];
@@ -322,6 +325,39 @@ function optionalBoundedStringArrayField(
     }
   }
   return values.map((value) => value.trim()).filter(Boolean);
+}
+
+function parseSearchNavigateRequest(body: unknown): ChatSearchNavigateRequest {
+  const raw = body && typeof body === 'object' ? body as Record<string, unknown> : null;
+  const anchor = raw?.anchor && typeof raw.anchor === 'object'
+    ? raw.anchor as Record<string, unknown>
+    : null;
+  const anchorKind = anchor?.kind;
+  const validAnchor = anchor !== null && (
+    (anchorKind === 'carryover-entry'
+      && typeof anchor.segmentId === 'string'
+      && Number.isSafeInteger(anchor.localOrdinal))
+    || (anchorKind === 'agent-switch' && typeof anchor.segmentId === 'string')
+    || (anchorKind === 'current-entry'
+      && typeof anchor.agentOwnershipEpoch === 'string'
+      && typeof anchor.entryId === 'string')
+  );
+  if (
+    !raw
+    || typeof raw.chatId !== 'string' || raw.chatId.length === 0
+    || typeof raw.contentEpoch !== 'string' || raw.contentEpoch.length === 0
+    || !Number.isSafeInteger(raw.messageOrdinal)
+    || (raw.messageOrdinal as number) < 1
+    || !validAnchor
+  ) {
+    throw new ValidationDomainError('Invalid search navigation request');
+  }
+  return {
+    chatId: raw.chatId,
+    contentEpoch: raw.contentEpoch,
+    messageOrdinal: raw.messageOrdinal as number,
+    anchor: raw.anchor as ChatSearchNavigateRequest['anchor'],
+  };
 }
 
 function parseSearchRequest(body: unknown): ChatSearchRequest {
@@ -720,6 +756,39 @@ export default function createChatRoutes({
         total: result.results.length,
         index: result.index,
       } satisfies ChatSearchResponse);
+    } catch (error: unknown) {
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  // Resolves one search snippet to a browser seq under the current composite
+  // content epoch. A result that raced a reset, handoff, or carryover change
+  // is rejected as stale so the client requeries instead of scrolling to a
+  // possibly reused ordinal; ordinary tail append preserves navigation.
+  async function postSearchNavigate(body: unknown): Promise<Response> {
+    try {
+      const request = parseSearchNavigateRequest(body);
+      const session = registry.getChat(request.chatId);
+      if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      if (!searchIndex?.validateResultEpoch(request.chatId, request.contentEpoch)) {
+        return jsonError('The search result no longer matches the chat', 409, 'SEARCH_RESULT_STALE');
+      }
+      if (request.anchor.kind === 'current-entry') {
+        const verified = request.anchor.agentOwnershipEpoch === session.agentOwnershipEpoch
+          && await agents.verifyProjectionEntry(
+            session,
+            request.chatId,
+            request.messageOrdinal - archivedLogicalCount(session.carryOverSegments),
+            request.anchor.entryId,
+          );
+        if (!verified) {
+          return jsonError('The search result no longer matches the chat', 409, 'SEARCH_RESULT_STALE');
+        }
+      }
+      return Response.json({
+        chatId: request.chatId,
+        seq: request.messageOrdinal,
+      } satisfies ChatSearchNavigateResponse);
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }
@@ -1292,6 +1361,7 @@ export default function createChatRoutes({
     '/api/v1/chats/messages': { GET: getMessages },
     '/api/v1/chats/repair-history': { POST: withJsonBody(postRepairHistory) },
     '/api/v1/chats/search': { POST: withJsonBody(postSearchChats) },
+    '/api/v1/chats/search/navigate': { POST: withJsonBody(postSearchNavigate) },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
     '/api/v1/chats/queue/entries': {

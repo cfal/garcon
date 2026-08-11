@@ -825,3 +825,99 @@ describe('SidebarSearchStore', () => {
 		});
 	});
 });
+
+describe('openTranscriptResult', () => {
+	function resultFor(chatId: string) {
+		return {
+			chatId,
+			contentEpoch: 'composite-1',
+			score: 1,
+			matchedMessageCount: 1,
+			snippets: [{
+				messageOrdinal: 4,
+				anchor: {
+					kind: 'current-entry' as const,
+					agentOwnershipEpoch: 'owner-1',
+					entryId: 'entry-4',
+				},
+				role: 'assistant' as const,
+				text: 'needle',
+				highlights: [],
+			}],
+		};
+	}
+
+	function navigationStore(overrides: Partial<SidebarSearchStoreDeps> = {}) {
+		const store = createSidebarSearchStore({
+			getChats: () => [makeChat({ id: 'chat-1' })],
+			getSelectedChatId: () => null,
+			getTranscriptSearchEnabled: () => true,
+			notifyError: vi.fn(),
+			...overrides,
+		});
+		store.transcriptSearchResults = [resultFor('chat-1')];
+		return store;
+	}
+
+	it('resolves the epoch-qualified snippet and opens at its seq', async () => {
+		const navigate = vi.fn(async () => ({ chatId: 'chat-1', seq: 4 }));
+		const store = navigationStore({ navigateToSearchResult: navigate });
+		const opened = vi.fn();
+
+		await store.openTranscriptResult('chat-1', opened);
+
+		expect(navigate).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			contentEpoch: 'composite-1',
+			messageOrdinal: 4,
+			anchor: {
+				kind: 'current-entry',
+				agentOwnershipEpoch: 'owner-1',
+				entryId: 'entry-4',
+			},
+		});
+		expect(opened).toHaveBeenCalledWith('chat-1', 4);
+	});
+
+	it('removes a stale result, requeries, and opens without a seq', async () => {
+		const navigate = vi.fn(async () => {
+			throw new ApiError('stale', 409, 'SEARCH_RESULT_STALE');
+		});
+		const search = vi.fn(async () => ({
+			query: 'needle',
+			results: [],
+			total: 0,
+			index: {
+				indexedChatCount: 1,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unsupportedChatCount: 0,
+			},
+		}));
+		const store = navigationStore({
+			navigateToSearchResult: navigate,
+			searchChatTranscripts: search,
+		});
+		store.transcriptSearchQuery = 'needle';
+		const opened = vi.fn();
+
+		await store.openTranscriptResult('chat-1', opened);
+
+		expect(store.transcriptSearchResults).toEqual([]);
+		expect(opened).toHaveBeenCalledWith('chat-1', null);
+		expect(search).toHaveBeenCalled();
+	});
+
+	it('opens a chat without a transcript snippet directly', async () => {
+		const navigate = vi.fn();
+		const store = navigationStore({ navigateToSearchResult: navigate });
+		store.transcriptSearchResults = [];
+		const opened = vi.fn();
+
+		await store.openTranscriptResult('chat-1', opened);
+
+		expect(navigate).not.toHaveBeenCalled();
+		expect(opened).toHaveBeenCalledWith('chat-1', null);
+	});
+});
+

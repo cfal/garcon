@@ -125,6 +125,12 @@ export interface AgentRegistryServiceContract {
     session: AgentChatEntry,
     chatId: string,
   ): Promise<AgentTranscriptSourceLocation | null>;
+  verifyProjectionEntry(
+    session: AgentChatEntry | null,
+    chatId: string,
+    ordinal: number,
+    entryId: string,
+  ): Promise<boolean>;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
@@ -342,6 +348,34 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       revision: transcriptRevision(messages),
       projectionState: opened.value.checkpoint.projection,
     };
+  }
+
+  // Verifies a search anchor: the current-segment entry at the given ordinal
+  // must still carry the anchored identity. Non-ready reads report false so
+  // navigation rejects instead of scrolling to a possibly reused ordinal.
+  async verifyProjectionEntry(
+    session: AgentChatEntry | null,
+    chatId: string,
+    ordinal: number,
+    entryId: string,
+  ): Promise<boolean> {
+    if (!session?.agentId || !Number.isSafeInteger(ordinal) || ordinal < 1) return false;
+    const integration = this.#directory.get(session.agentId);
+    if (!integration) return false;
+    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
+    const opened = await this.#projection.open(integration, chat, new AbortController().signal);
+    if (opened.kind !== 'ready') return false;
+    const page = await this.#projection.page({
+      integration,
+      chat,
+      signal: new AbortController().signal,
+      limit: 1,
+      beforeOrdinal: ordinal + 1,
+      expectedProjection: opened.value.checkpoint.projection,
+    });
+    return page.kind === 'ready'
+      && page.page.firstOrdinal === ordinal
+      && page.page.entries[0]?.id === entryId;
   }
 
   async loadMessagePage(

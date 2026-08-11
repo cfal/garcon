@@ -52,6 +52,21 @@ export interface ChatSearchSnippet {
   text: string;
 }
 
+// Content-epoch-qualified navigation to one search snippet. The epoch names
+// the composite lineage the ordinal is valid in; a stale result is rejected
+// instead of scrolling to a possibly reused ordinal.
+export interface ChatSearchNavigateRequest {
+  readonly chatId: string;
+  readonly contentEpoch: string;
+  readonly messageOrdinal: number;
+  readonly anchor: TranscriptSearchEntryAnchor;
+}
+
+export interface ChatSearchNavigateResponse {
+  readonly chatId: string;
+  readonly seq: number;
+}
+
 export interface ChatSearchResult {
   chatId: string;
   contentEpoch: string;

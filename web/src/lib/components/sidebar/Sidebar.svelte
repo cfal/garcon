@@ -4,6 +4,7 @@
 	import SidebarSearchDock from './SidebarSearchDock.svelte';
 	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
 	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
+	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import {
@@ -392,7 +393,10 @@
 
 	function handleSearchSelectChat(chatId: string) {
 		sidebarSearch.confirmSearchDialog();
-		onChatSelect(chatId);
+		void sidebarSearch.openTranscriptResult(chatId, (id, seq) => {
+			if (seq !== null) searchResultNavigation.set(id, seq);
+			onChatSelect(id);
+		});
 	}
 
 	function handleApplySavedSearch(search: SavedChatSearch) {

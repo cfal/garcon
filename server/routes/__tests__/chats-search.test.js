@@ -113,6 +113,7 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     runSingleQuery: mock(async () => 'title'),
     resolvePermission: mock(() => undefined),
     updateSessionSettings: mock(async () => undefined),
+    verifyProjectionEntry: mock(async () => true),
   };
   const pendingInputs = {
     register: mock(async () => undefined),
@@ -123,6 +124,7 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     clearChat: mock(() => undefined),
   };
   const searchIndex = {
+    validateResultEpoch: mock(() => true),
     search: mock((request) => ({
       results: request.allowedChatIds.length > 0 ? [
         {
@@ -173,7 +175,7 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     }),
   });
 
-  return { routes, searchIndex };
+  return { routes, searchIndex, registry, agents };
 }
 
 async function postSearch(routes, body) {
@@ -318,5 +320,100 @@ describe('POST /api/v1/chats/search', () => {
       expect(response.status).toBe(503);
       await expect(response.json()).resolves.toMatchObject({ errorCode: code, retryable: true });
     }
+  });
+});
+
+describe('POST /api/v1/chats/search/navigate', () => {
+  const request = (overrides = {}) => ({
+    chatId: 'c1',
+    contentEpoch: 'composite-epoch-1',
+    messageOrdinal: 3,
+    anchor: {
+      kind: 'current-entry',
+      agentOwnershipEpoch: 'owner-1',
+      entryId: 'entry-3',
+    },
+    ...overrides,
+  });
+
+  async function navigate(fixture, body) {
+    return fixture.routes['/api/v1/chats/search/navigate'].POST(
+      new Request('http://localhost/api/v1/chats/search/navigate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  it('resolves an epoch-qualified anchor to its browser seq', async () => {
+    const fixture = createRoutesFixture();
+    fixture.registry.getChat.mockImplementation(() => ({
+      agentId: 'claude',
+      agentSessionId: 's1',
+      agentOwnershipEpoch: 'owner-1',
+      carryOverSegments: [],
+      projectPath: '/tmp/project',
+      tags: [],
+      model: 'sonnet',
+    }));
+
+    const response = await navigate(fixture, request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ chatId: 'c1', seq: 3 });
+    expect(fixture.searchIndex.validateResultEpoch)
+      .toHaveBeenCalledWith('c1', 'composite-epoch-1');
+    expect(fixture.agents.verifyProjectionEntry).toHaveBeenCalledWith(
+      expect.anything(),
+      'c1',
+      3,
+      'entry-3',
+    );
+  });
+
+  it('rejects a result whose composite content epoch rotated', async () => {
+    const fixture = createRoutesFixture();
+    fixture.searchIndex.validateResultEpoch.mockImplementation(() => false);
+
+    const response = await navigate(fixture, request());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      errorCode: 'SEARCH_RESULT_STALE',
+    });
+    expect(fixture.agents.verifyProjectionEntry).not.toHaveBeenCalled();
+  });
+
+  it('rejects an anchor whose entry identity no longer resolves', async () => {
+    const fixture = createRoutesFixture();
+    fixture.registry.getChat.mockImplementation(() => ({
+      agentId: 'claude',
+      agentSessionId: 's1',
+      agentOwnershipEpoch: 'owner-1',
+      carryOverSegments: [],
+      projectPath: '/tmp/project',
+      tags: [],
+      model: 'sonnet',
+    }));
+    fixture.agents.verifyProjectionEntry.mockImplementation(async () => false);
+
+    const response = await navigate(fixture, request());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      errorCode: 'SEARCH_RESULT_STALE',
+    });
+  });
+
+  it('validates the navigation payload', async () => {
+    const fixture = createRoutesFixture();
+
+    const response = await navigate(fixture, request({ messageOrdinal: 0 }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      errorCode: 'VALIDATION_FAILED',
+    });
   });
 });

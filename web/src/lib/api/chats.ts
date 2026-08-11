@@ -69,7 +69,12 @@ import type {
 	GenerateChatTitleRequest,
 	GenerateChatTitleResponse,
 } from '$shared/chat-title-contracts';
-import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search';
+import type {
+	ChatSearchNavigateRequest,
+	ChatSearchNavigateResponse,
+	ChatSearchRequest,
+	ChatSearchResponse,
+} from '$shared/chat-search';
 import type { ChatDetailsResponse } from '$shared/chat-details';
 import {
 	parseChatExecutionControlState,
@@ -450,6 +455,24 @@ export async function getChatMessages(params: {
 		pendingUserInputs: parsePendingUserInputs(response.pendingUserInputs),
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
+	};
+}
+
+// Resolves one search result to a browser seq under its composite content
+// epoch. A stale result rejects with SEARCH_RESULT_STALE instead of scrolling
+// to a possibly reused ordinal.
+export async function navigateToSearchResult(
+	request: ChatSearchNavigateRequest,
+	options?: ApiFetchOptions,
+): Promise<ChatSearchNavigateResponse> {
+	const response = await apiPost<{ chatId?: unknown; seq?: unknown }>(
+		'/api/v1/chats/search/navigate',
+		request,
+		options,
+	);
+	return {
+		chatId: requireNonEmptyString(response.chatId, 'chatId'),
+		seq: requirePositiveInteger(response.seq, 'seq'),
 	};
 }
 

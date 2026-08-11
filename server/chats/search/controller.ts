@@ -185,6 +185,13 @@ export class TranscriptSearchController {
     }
   }
 
+  // Navigation admission: a result is only resolvable while its composite
+  // content epoch is still the chat's current one.
+  validateResultEpoch(chatId: string, contentEpoch: string): boolean {
+    if (!this.#enabled || this.#closed) return false;
+    return this.#catalogEntries.get(chatId)?.contentEpoch === contentEpoch;
+  }
+
   async disableAndDelete(): Promise<void> {
     this.#enabled = false;
     this.#admissionFailed = false;
