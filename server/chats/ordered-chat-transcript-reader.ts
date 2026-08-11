@@ -218,9 +218,6 @@ export class OrderedChatTranscriptReader {
     const nativeMessages = native.kind === 'snapshot'
       ? sliceFromNewest(native.messages, boundedLimit, boundedOffset)
       : native.messages;
-    const nativePrefixDigest = native.kind === 'snapshot'
-      ? transcriptRevision(native.messages)
-      : null;
     const messages: ChatMessage[] = [];
     const archivedEnd = Math.min(end, archivedCount);
     if (start < archivedEnd) {
@@ -251,7 +248,6 @@ export class OrderedChatTranscriptReader {
       carryOverRevision,
       agentOwnershipEpoch: entry.agentOwnershipEpoch,
       archivedLogicalCount: archivedCount,
-      nativePrefixDigest,
       projectionState: native.projectionState,
     };
   }
@@ -294,7 +290,6 @@ export class OrderedChatTranscriptReader {
     );
     return {
       messages: [...archived, ...native],
-      nativeMessages: native,
       compositeRevision: serializeCompositeTranscriptRevision({
         carryOver: carryOverRevision,
         native: nativeRevision,
@@ -303,7 +298,6 @@ export class OrderedChatTranscriptReader {
       carryOverRevision,
       agentOwnershipEpoch: entry.agentOwnershipEpoch,
       archivedLogicalCount: archived.length,
-      nativePrefixDigest: transcriptRevision(native),
       projectionState,
     };
   }
@@ -364,19 +358,16 @@ function assertNativePage(page: {
 }
 
 function emptySnapshot(): ChatTranscriptSnapshot {
-  const nativeRevision = transcriptRevision([]);
   return {
     messages: [],
-    nativeMessages: [],
     compositeRevision: serializeCompositeTranscriptRevision({
       carryOver: 'carry-v1:0',
-      native: nativeRevision,
+      native: transcriptRevision([]),
       agentOwnershipEpoch: 'missing',
     }),
     carryOverRevision: 'carry-v1:0',
     agentOwnershipEpoch: 'missing',
     archivedLogicalCount: 0,
-    nativePrefixDigest: nativeRevision,
     projectionState: null,
   };
 }

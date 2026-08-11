@@ -100,7 +100,6 @@ function createRoutesFixture(overrides = {}) {
       hasMore: false,
       limit,
     })),
-    reconcileNativeSnapshot: mock(async () => undefined),
   };
   const agents = {
     hasAgent: mock(() => true),
@@ -194,7 +193,6 @@ describe('GET /api/v1/chats/messages', () => {
             cause: new Error('private storage detail'),
           });
         }),
-        reconcileNativeSnapshot: mock(async () => undefined),
       },
     });
     const url = new URL('http://localhost/api/v1/chats/messages?chatId=123');
@@ -239,7 +237,6 @@ describe('GET /api/v1/chats/messages', () => {
         getOrCreatePage: mock(async () => {
           throw failure;
         }),
-        reconcileNativeSnapshot: mock(async () => undefined),
       },
     });
     const url = new URL('http://localhost/api/v1/chats/messages?chatId=123');

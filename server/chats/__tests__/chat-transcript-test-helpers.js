@@ -6,13 +6,12 @@ export const EMPTY_CARRY_OVER_REVISION = 'carry-v1:0';
 
 export function transcriptSnapshot(messages, options = {}) {
   const archivedLogicalCount = options.archivedLogicalCount ?? 0;
-  const nativeMessages = options.nativeMessages ?? messages.slice(archivedLogicalCount);
   const carryOverRevision = options.carryOverRevision ?? EMPTY_CARRY_OVER_REVISION;
   const agentOwnershipEpoch = options.agentOwnershipEpoch ?? TEST_AGENT_OWNERSHIP_EPOCH;
-  const nativeRevision = options.nativeRevision ?? transcriptRevision(nativeMessages);
+  const nativeRevision = options.nativeRevision
+    ?? transcriptRevision(messages.slice(archivedLogicalCount));
   return {
     messages: [...messages],
-    nativeMessages: [...nativeMessages],
     compositeRevision: options.compositeRevision ?? serializeCompositeTranscriptRevision({
       carryOver: carryOverRevision,
       native: nativeRevision,
@@ -21,25 +20,7 @@ export function transcriptSnapshot(messages, options = {}) {
     carryOverRevision,
     agentOwnershipEpoch,
     archivedLogicalCount,
-    nativePrefixDigest: options.nativePrefixDigest ?? transcriptRevision(nativeMessages),
     projectionState: options.projectionState ?? null,
-  };
-}
-
-export function nativeReconciliation(messages, options = {}) {
-  const snapshot = transcriptSnapshot(messages, {
-    ...options,
-    nativeMessages: messages,
-    archivedLogicalCount: options.archivedLogicalCount ?? 0,
-  });
-  return {
-    messages: snapshot.nativeMessages,
-    compositeRevision: snapshot.compositeRevision,
-    carryOverRevision: snapshot.carryOverRevision,
-    agentOwnershipEpoch: snapshot.agentOwnershipEpoch,
-    archivedLogicalCount: snapshot.archivedLogicalCount,
-    nativePrefixDigest: snapshot.nativePrefixDigest,
-    projectionState: snapshot.projectionState,
   };
 }
 
@@ -65,7 +46,6 @@ export function historyPage(messages, limit, offset, options = {}) {
     carryOverRevision: snapshot.carryOverRevision,
     agentOwnershipEpoch: snapshot.agentOwnershipEpoch,
     archivedLogicalCount: snapshot.archivedLogicalCount,
-    nativePrefixDigest: options.nativePrefixDigest ?? null,
     projectionState: snapshot.projectionState,
   };
 }

@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { ChatViewMessage, ChatViewPage } from '../../common/chat-view.js';
+import type { ChatViewMessage } from '../../common/chat-view.js';
 import type { AgentProjectionState } from '@garcon/server-agent-interface';
 
 export interface ChatHistoryPage {
@@ -12,18 +12,15 @@ export interface ChatHistoryPage {
   carryOverRevision: string;
   agentOwnershipEpoch: string;
   archivedLogicalCount: number;
-  nativePrefixDigest: string | null;
   projectionState: AgentProjectionState | null;
 }
 
 export interface ChatTranscriptSnapshot {
-  readonly messages: ChatMessage[];
-  readonly nativeMessages: ChatMessage[];
+  readonly messages: readonly ChatMessage[];
   readonly compositeRevision: string;
   readonly carryOverRevision: string;
   readonly agentOwnershipEpoch: string;
   readonly archivedLogicalCount: number;
-  readonly nativePrefixDigest: string;
   readonly projectionState: AgentProjectionState | null;
 }
 
@@ -32,11 +29,47 @@ export interface ChatViewLoader {
   loadPage?(limit: number, offset: number): Promise<ChatHistoryPage | null>;
 }
 
-export interface AppendedChatViewMessages {
+// One browser generation of a chat view. Rows are exact ledger material at
+// seq = carryover count + entry ordinal; there is no separate live overlay.
+export interface MutableChatView {
+  chatId: string;
   generationId: string;
   messages: ChatViewMessage[];
   lastSeq: number;
-  skipped?: boolean;
+  historyLastSeq: number;
+  complete: boolean;
+  loadedFromFullHistory: boolean;
+  retainedStartSeq: number;
+  compositeRevision?: string;
+  carryOverRevision?: string;
+  agentOwnershipEpoch?: string;
+  archivedLogicalCount: number;
+  projectionState: AgentProjectionState | null;
+  streamFence: number;
+  lastAccessAt: number;
+  lastAccessOrder: number;
+}
+
+export type ChatViewGenerationReason =
+  | 'projection-load'
+  | 'projection-page'
+  | 'projection-extended'
+  | 'projection-replaced'
+  | 'projection-reset'
+  | 'projection-relist';
+
+export interface ChatViewGenerationTransition {
+  reason: ChatViewGenerationReason;
+  previousGenerationId?: string;
+  generationId?: string;
+  persistence?: Pick<
+    ChatTranscriptSnapshot,
+    | 'agentOwnershipEpoch'
+    | 'archivedLogicalCount'
+    | 'carryOverRevision'
+    | 'compositeRevision'
+    | 'projectionState'
+  >;
 }
 
 export interface ProjectionCommitViewInput {

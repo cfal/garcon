@@ -1,20 +1,15 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { ChatViewStore } from '../chat-view-store.js';
 import {
-  AgentSwitchMessage,
   AssistantMessage,
   CompactionMessage,
-  ErrorMessage,
   UserMessage,
 } from '../../../common/chat-types.js';
-import { attachNativeMessageSource } from '../../agents/shared/native-message-source.js';
 import {
   historyPage,
-  nativeReconciliation,
   pagedTranscriptLoader,
   projectionAppender,
   snapshotLoader,
-  transcriptSnapshot,
   transcriptLoader,
 } from './chat-transcript-test-helpers.js';
 
@@ -71,19 +66,6 @@ describe('ChatViewStore', () => {
     expect(older.hasMore).toBe(false);
   });
 
-  it('replaces native generations intentionally', async () => {
-    const store = new ChatViewStore(() => false);
-    const first = await store.getOrCreatePage('chat-1', fullLoader(async () => [user('old')]), 20);
-    const replacement = await store.replaceFromNative(
-      'chat-1',
-      snapshotLoader(async () => [assistant('fresh')]),
-    );
-
-    expect(replacement.generationId).not.toBe(first.generationId);
-    expect(contents(replacement)).toEqual(['fresh']);
-    expect(replacement.lastSeq).toBe(1);
-  });
-
   it('replays same-generation messages after lastSeq', async () => {
     const store = new ChatViewStore(() => false);
     const append = projectionAppender(store, 'chat-1');
@@ -115,28 +97,6 @@ describe('ChatViewStore', () => {
       generationId: appended.generationId,
       lastSeq: 3,
     });
-  });
-
-  it('appends the given process-error notice as a normal in-memory message', async () => {
-    const store = new ChatViewStore(() => false);
-    const page = await store.replaceFromNative('chat-1', snapshotLoader(async () => [assistant('native')]), {
-      processErrorNotice: 'Codex rate limit exceeded. Please wait a moment and try again.',
-    });
-
-    expect(contents(page)).toEqual(['native', 'Codex rate limit exceeded. Please wait a moment and try again.']);
-    expect(page.messages[1].message).toBeInstanceOf(ErrorMessage);
-  });
-
-  it('does not duplicate a matching native process-error row', async () => {
-    const store = new ChatViewStore(() => false);
-    const reason = 'Provider rejected the request.';
-    const page = await store.replaceFromNative('chat-1', snapshotLoader(async () => [
-      assistant('partial response'),
-      new ErrorMessage(TS, reason),
-    ]), { processErrorNotice: reason });
-
-    expect(contents(page)).toEqual(['partial response', reason]);
-    expect(page.messages[1].message).toBeInstanceOf(ErrorMessage);
   });
 
   it('eviction causes the next access to mint a new generation', async () => {

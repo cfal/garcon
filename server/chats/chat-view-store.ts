@@ -1,37 +1,20 @@
 import crypto from 'crypto';
 import { sameProjectionState } from '@garcon/server-agent-common/transcript-projection/identity';
-import { ErrorMessage, UserMessage, type ChatMessage } from '../../common/chat-types.js';
+import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatReplayResult, ChatViewMessage, ChatViewPage } from '../../common/chat-view.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
-import {
-  OrderedTranscriptDigest,
-  orderedTranscriptDigest,
-} from '../lib/transcript-revision.js';
-import {
-  exactMessageIdentityKeys,
-  preserveRetainedUserIdentities,
-  reconcileLiveMessageAppends,
-  retainedMessageMatchesNative,
-} from './chat-message-reconciliation.js';
-import {
-  type ChatViewGenerationTransition as GenerationTransition,
-  type MutableChatView as ChatView,
-  type NativeSnapshotReconciliation,
-  nativePrefixMatchesView,
-  reconcileNativeSnapshotView,
-} from './chat-view-native-reconciliation.js';
-import { transferPublishedLiveEntries } from './chat-view-live-publication.js';
 import {
   assertValidChatMessage,
   lowerBoundBySeq,
   revisionsMatch,
 } from './chat-view-sequence.js';
 import type {
-  AppendedChatViewMessages,
   ChatHistoryPage,
   ChatTranscriptSnapshot,
+  ChatViewGenerationTransition as GenerationTransition,
   ChatViewLoader,
+  MutableChatView as ChatView,
   ProjectionCommitViewApplication,
   ProjectionCommitViewInput,
 } from './chat-view-contracts.js';
@@ -39,7 +22,6 @@ import { ChatRunningError } from './errors.js';
 
 export { lowerBoundBySeq } from './chat-view-sequence.js';
 export type {
-  AppendedChatViewMessages,
   ChatHistoryPage,
   ChatTranscriptSnapshot,
   ChatViewLoader,
@@ -58,11 +40,10 @@ export interface ChatViewStoreOptions {
   now?: () => number;
 }
 
-export type { NativeSnapshotReconciliation } from './chat-view-native-reconciliation.js';
-
-type MissingHistoryRequest =
-  | { kind: 'page'; limit: number; offset: number }
-  | { kind: 'full' };
+interface MissingHistoryRequest {
+  limit: number;
+  offset: number;
+}
 
 const REPLAY_LIMIT = 2048;
 const CACHE_LIMIT = 100;
@@ -71,10 +52,6 @@ const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
 const RECENT_VIEW_RETENTION_COUNT = 10;
 
 type PruneEvictionReason = 'stale' | 'view-capacity' | 'message-capacity';
-export type ChatViewReplacementReason = Extract<
-  import('./chat-view-native-reconciliation.js').ChatViewGenerationReason,
-  'native-replacement' | 'manual-reload' | 'process-error'
->;
 
 export class ChatViewStore {
   #views = new Map<string, ChatView>();
@@ -132,9 +109,8 @@ export class ChatViewStore {
     return view.messages.map((entry) => entry.message);
   }
 
-  // Highest seq the current generation reads back from the provider-native transcript. Live
-  // messages appended during a turn sit above it and have no native counterpart yet, so callers
-  // that translate a client seq into a native transcript position must not cross this boundary.
+  // Highest seq the current generation covers with authoritative ledger rows.
+  // Under exact commit application this equals the view's last seq.
   getNativeHistoryLastSeq(chatId: string): number | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
@@ -149,26 +125,6 @@ export class ChatViewStore {
     return view.messages
       .filter((entry) => entry.seq <= view.historyLastSeq)
       .map((entry) => entry.message);
-  }
-
-  async reconcileNativeSnapshot(
-    chatId: string,
-    input: NativeSnapshotReconciliation,
-  ): Promise<void> {
-    await this.#withChat(chatId, async () => {
-      if (this.#isChatActive(chatId)) throw new ChatRunningError(chatId);
-      this.#reconcileNativeView(chatId, input);
-    });
-  }
-
-  async reconcileFullSnapshot(
-    chatId: string,
-    input: ChatTranscriptSnapshot,
-  ): Promise<void> {
-    await this.#withChat(chatId, async () => {
-      if (this.#isChatActive(chatId)) throw new ChatRunningError(chatId);
-      this.#reconcileFullView(chatId, input);
-    });
   }
 
   async getOrCreatePage(
@@ -192,38 +148,14 @@ export class ChatViewStore {
           const reconciled = this.#reconcileFullView(chatId, snapshot);
           view = reconciled.view;
           if (snapshot.messages.length > view.messages.length) {
-            return this.#pageFromFullMessages(view, snapshot.messages, limit, beforeSeq);
+            return this.#pageFromFullMessages(view, [...snapshot.messages], limit, beforeSeq);
           }
-        }
-      }
-
-      if (!view.loadedFromFullHistory && view.historyLastSeq === 0) {
-        const snapshot = await loader.loadAll();
-        const reconciled = this.#reconcileFullView(chatId, snapshot);
-        view = reconciled.view;
-        if (reconciled.messages.length > view.messages.length) {
-          return this.#pageFromFullMessages(
-            view,
-            reconciled.messages,
-            limit,
-            beforeSeq,
-          );
         }
       }
 
       const missingHistory = this.#missingHistoryRequest(view, limit, beforeSeq);
       if (missingHistory) {
         this.#touch(view);
-        if (missingHistory.kind === 'full') {
-          const snapshot = await loader.loadAll();
-          const reconciled = this.#reconcileFullView(chatId, snapshot);
-          return this.#pageFromFullMessages(
-            reconciled.view,
-            reconciled.messages,
-            limit,
-            beforeSeq,
-          );
-        }
         const olderPage = await loader.loadPage?.(
           missingHistory.limit,
           missingHistory.offset,
@@ -255,40 +187,11 @@ export class ChatViewStore {
     });
   }
 
-  async replaceFromNative(
-    chatId: string,
-    loadSnapshot: () => Promise<ChatTranscriptSnapshot>,
-    options: {
-      processErrorNotice?: string;
-      assertReplacementAllowed?: () => void;
-      replacementReason?: ChatViewReplacementReason;
-    } = {},
-  ): Promise<ChatViewPage> {
-    return this.#withChat(chatId, async () => {
-      const previous = this.#views.get(chatId);
-      const snapshot = await loadSnapshot();
-      options.assertReplacementAllowed?.();
-      this.invalidateFence(chatId);
-      const view = this.#createGeneration(chatId, snapshot.messages, {
-        reason: options.replacementReason ?? 'native-replacement',
-        previousGenerationId: previous?.generationId,
-        persistence: snapshot,
-      });
-      const trailingNative = snapshot.messages.at(-1);
-      const nativeHasNotice = trailingNative?.type === 'error' && trailingNative.content === options.processErrorNotice;
-      if (options.processErrorNotice && !nativeHasNotice) {
-        this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), options.processErrorNotice)]);
-      }
-      transferPublishedLiveEntries(previous, view);
-      this.#views.set(chatId, view);
-      return this.#readPageFromView(view, Number.MAX_SAFE_INTEGER);
-    });
-  }
   async replaceFromProjection(chatId: string, snapshot: ChatTranscriptSnapshot): Promise<ChatViewPage> {
     return this.#withChat(chatId, async () => {
       const previous = this.#views.get(chatId);
       this.invalidateFence(chatId);
-      const view = this.#createGeneration(chatId, snapshot.messages, {
+      const view = this.#createGeneration(chatId, [...snapshot.messages], {
         reason: 'projection-reset', previousGenerationId: previous?.generationId, persistence: snapshot,
       });
       this.#views.set(chatId, view);
@@ -495,8 +398,8 @@ export class ChatViewStore {
   }
 
   // Rebuilds the view from the authoritative projection under a new generation.
-  // The fence invalidation drops any in-flight legacy append against the old
-  // generation before its rows could interleave with the relisted state.
+  // The fence invalidation marks the old generation superseded before the
+  // relisted state installs.
   async #relistFromProjection(chatId: string, loader: ChatViewLoader): Promise<ChatView> {
     const previous = this.#views.get(chatId);
     this.invalidateFence(chatId);
@@ -510,7 +413,7 @@ export class ChatViewStore {
       return view;
     }
     const snapshot = await loader.loadAll();
-    const view = this.#createGeneration(chatId, snapshot.messages, {
+    const view = this.#createGeneration(chatId, [...snapshot.messages], {
       reason: 'projection-relist',
       previousGenerationId: previous?.generationId,
       persistence: snapshot,
@@ -519,116 +422,48 @@ export class ChatViewStore {
     return view;
   }
 
+  // Rebuilds the full view from a composite snapshot. Within one projection
+  // lineage, append-only growth preserves the generation by state comparison
+  // alone. Without a ledger lineage on both sides, only a byte-identical
+  // composite revision proves the reload addresses the same rows. Any other
+  // relationship starts a new generation; per-row content is never compared.
   #reconcileFullView(
     chatId: string,
     snapshot: ChatTranscriptSnapshot,
   ): { view: ChatView; messages: ChatMessage[] } {
     const previous = this.#views.get(chatId);
-    const reconciledMessages = previous
-      ? preserveRetainedUserIdentities(previous.messages, snapshot.messages)
-      : snapshot.messages;
-    const reconciledNativeMessages = reconciledMessages.slice(snapshot.archivedLogicalCount);
-    const retainedLiveEntries = previous?.messages.filter(
-      (entry) => entry.seq > previous.historyLastSeq,
-    ) ?? [];
-    const priorNativePrefixMatches = previous
-      ? nativePrefixMatchesView(previous, snapshot, reconciledNativeMessages)
-      : false;
-    const retainedLiveStartSeq = previous
-      ? Math.max(previous.historyLastSeq + 1, previous.retainedStartSeq)
-      : 1;
-    const retainedLiveIsContiguous = previous
-      ? retainedLiveEntries.every(
-        (entry, index) => entry.seq === retainedLiveStartSeq + index,
-      )
-      : false;
-    const nativeGrowthClosesTrimmedGap = previous
-      ? reconciledMessages.length >= Math.min(retainedLiveStartSeq - 1, previous.lastSeq)
-      : false;
-    const evictedLiveRangeClosed = previous?.evictedLiveEndSeq === undefined
-      || reconciledMessages.length >= previous.evictedLiveEndSeq;
-    const evictedLiveMatches = previous?.evictedLiveStartSeq === undefined
-      || previous.evictedLiveEndSeq === undefined
-      || evictedLiveRangeClosed && orderedTranscriptDigest(
-        reconciledMessages
-          .slice(previous.evictedLiveStartSeq - 1, previous.evictedLiveEndSeq)
-          .map((message, index) => ({
-            seq: previous.evictedLiveStartSeq! + index,
-            message,
-          })),
-      ) === previous.evictedLiveDigest.finish();
-    const retainedNativeOverlapMatches = previous
-      ? retainedLiveEntries
-        .filter((entry) => entry.seq <= reconciledMessages.length)
-        .every((entry) => retainedMessageMatchesNative(
-          entry.message,
-          reconciledMessages[entry.seq - 1],
-        ))
-      : false;
+    const sameLineage = previous?.projectionState && snapshot.projectionState
+      ? previous.projectionState.epoch === snapshot.projectionState.epoch
+        && previous.projectionState.contentEpoch === snapshot.projectionState.contentEpoch
+        && snapshot.projectionState.total >= previous.projectionState.total
+      : Boolean(
+        previous
+        && !previous.projectionState
+        && !snapshot.projectionState
+        && previous.compositeRevision !== undefined
+        && revisionsMatch(previous.compositeRevision, snapshot.compositeRevision),
+      );
     const preservesGeneration = Boolean(
       previous
-      && priorNativePrefixMatches
-      && retainedLiveIsContiguous
-      && nativeGrowthClosesTrimmedGap
-      && evictedLiveRangeClosed
-      && evictedLiveMatches
-      && retainedNativeOverlapMatches,
+      && sameLineage
+      && previous.carryOverRevision === snapshot.carryOverRevision
+      && previous.agentOwnershipEpoch === snapshot.agentOwnershipEpoch
+      && previous.archivedLogicalCount === snapshot.archivedLogicalCount
+      && snapshot.messages.length >= previous.lastSeq,
     );
-
-    const view = this.#createGeneration(chatId, reconciledMessages, {
+    const messages = [...snapshot.messages];
+    const view = this.#createGeneration(chatId, messages, {
       reason: !previous
-        ? 'native-history-load'
+        ? 'projection-load'
         : preservesGeneration
-          ? 'native-history-reconciled'
-          : 'native-history-mismatch',
+          ? 'projection-extended'
+          : 'projection-replaced',
       previousGenerationId: previous?.generationId,
       generationId: preservesGeneration ? previous?.generationId : undefined,
       persistence: snapshot,
     });
-    const nativeIdentities = new Set(
-      reconciledMessages.flatMap(exactMessageIdentityKeys),
-    );
-    const unpersistedLiveMessages = previous
-        ? retainedLiveEntries
-        .filter((entry) => {
-          const identities = exactMessageIdentityKeys(entry.message);
-          return entry.seq > reconciledMessages.length
-            && !identities.some((identity) => nativeIdentities.has(identity));
-        })
-        .map((entry) => entry.message)
-      : [];
-    let fullMessages = [...reconciledMessages];
-    if (unpersistedLiveMessages.length > 0) {
-      const appended = this.#appendLiveToView(view, unpersistedLiveMessages, 'native-wins');
-      fullMessages = [...fullMessages, ...appended.map((entry) => entry.message)];
-    }
-    transferPublishedLiveEntries(previous, view);
     this.#views.set(chatId, view);
-    return { view, messages: fullMessages };
-  }
-
-  #reconcileNativeView(chatId: string, input: NativeSnapshotReconciliation): void {
-    const previous = this.#views.get(chatId);
-    const now = this.#now();
-    const reconciled = reconcileNativeSnapshotView({
-      chatId,
-      snapshot: input,
-      previous,
-      messageLimit: this.#messageLimit,
-      now,
-      streamFence: this.captureFence(chatId),
-      lastAccessOrder: ++this.#lastAccessOrder,
-    });
-    if (reconciled.unpersistedLiveMessages.length > 0) {
-      this.#appendLiveToView(
-        reconciled.view,
-        reconciled.unpersistedLiveMessages,
-        'native-wins',
-      );
-    }
-    transferPublishedLiveEntries(previous, reconciled.view);
-    this.#logGenerationTransition(reconciled.view, reconciled.transition);
-    this.#views.set(chatId, reconciled.view);
+    return { view, messages };
   }
 
   #createGeneration(
@@ -637,12 +472,9 @@ export class ChatViewStore {
     transition: GenerationTransition,
   ): ChatView {
     const now = this.#now();
-    const isoNow = new Date(now).toISOString();
     const view: ChatView = {
       chatId,
       generationId: transition.generationId ?? crypto.randomUUID(),
-      createdAt: isoNow,
-      historyReadAt: isoNow,
       messages: [],
       lastSeq: 0,
       historyLastSeq: messages.length,
@@ -653,10 +485,7 @@ export class ChatViewStore {
       carryOverRevision: transition.persistence?.carryOverRevision,
       agentOwnershipEpoch: transition.persistence?.agentOwnershipEpoch,
       archivedLogicalCount: transition.persistence?.archivedLogicalCount ?? 0,
-      nativePrefixDigest: transition.persistence?.nativePrefixDigest ?? null,
       projectionState: transition.persistence?.projectionState ?? null,
-      evictedLiveDigest: new OrderedTranscriptDigest(),
-      publishedLiveEntries: new WeakSet(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,
       lastAccessOrder: ++this.#lastAccessOrder,
@@ -668,12 +497,9 @@ export class ChatViewStore {
 
   #createGenerationFromPage(chatId: string, page: ChatHistoryPage): ChatView {
     const now = this.#now();
-    const isoNow = new Date(now).toISOString();
     const view: ChatView = {
       chatId,
       generationId: crypto.randomUUID(),
-      createdAt: isoNow,
-      historyReadAt: isoNow,
       messages: [],
       lastSeq: page.total,
       historyLastSeq: page.total,
@@ -684,16 +510,13 @@ export class ChatViewStore {
       carryOverRevision: page.carryOverRevision,
       agentOwnershipEpoch: page.agentOwnershipEpoch,
       archivedLogicalCount: page.archivedLogicalCount,
-      nativePrefixDigest: page.nativePrefixDigest,
       projectionState: page.projectionState,
-      evictedLiveDigest: new OrderedTranscriptDigest(),
-      publishedLiveEntries: new WeakSet(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,
       lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#mergeHistoryPage(view, page);
-    this.#logGenerationTransition(view, { reason: 'native-history-page' });
+    this.#logGenerationTransition(view, { reason: 'projection-page' });
     return view;
   }
 
@@ -710,18 +533,6 @@ export class ChatViewStore {
     this.#enforceViewMessageLimit(view);
     this.#touch(view);
     return appended;
-  }
-
-  #appendLiveToView(
-    view: ChatView,
-    messages: ChatMessage[],
-    conflictPolicy: 'reject' | 'native-wins' = 'reject',
-  ): ChatViewMessage[] {
-    const reconciled = reconcileLiveMessageAppends(view.messages, messages, conflictPolicy);
-    for (const identity of reconciled.droppedConflictingUserIdentities) {
-      logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${identity}`);
-    }
-    return this.#appendToView(view, reconciled.messages);
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {
@@ -823,15 +634,7 @@ export class ChatViewStore {
   }
 
   #trimOldestMessages(view: ChatView, count: number): void {
-    if (count > 0) {
-      const removed = view.messages.splice(0, count);
-      for (const entry of removed) {
-        if (entry.seq <= view.historyLastSeq) continue;
-        view.evictedLiveStartSeq ??= entry.seq;
-        view.evictedLiveEndSeq = entry.seq;
-        view.evictedLiveDigest.add(entry.message, entry.seq);
-      }
-    }
+    if (count > 0) view.messages.splice(0, count);
     this.#refreshRetainedState(view);
   }
 
@@ -869,14 +672,6 @@ export class ChatViewStore {
       ? Math.min(beforeSeq - 1, view.lastSeq)
       : view.lastSeq;
     const requestedStartSeq = Math.max(1, requestedEndSeq - boundedLimit + 1);
-    if (
-      view.evictedLiveStartSeq !== undefined
-      && view.evictedLiveEndSeq !== undefined
-      && requestedStartSeq <= view.evictedLiveEndSeq
-      && requestedEndSeq >= view.evictedLiveStartSeq
-    ) {
-      return { kind: 'full' };
-    }
     const oldestRetainedSeq = view.retainedStartSeq;
     if (requestedStartSeq >= oldestRetainedSeq || requestedStartSeq > view.historyLastSeq) {
       return null;
@@ -889,7 +684,6 @@ export class ChatViewStore {
     );
     if (missingEndSeq < requestedStartSeq) return null;
     return {
-      kind: 'page',
       limit: missingEndSeq - requestedStartSeq + 1,
       offset: view.historyLastSeq - missingEndSeq,
     };
