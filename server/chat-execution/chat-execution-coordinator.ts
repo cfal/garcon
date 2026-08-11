@@ -285,8 +285,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     void task.finally(() => this.#dispatchTasks.delete(task));
   }
 
-  onAgentTurnTerminal(chatId: string, turn: TurnIdentity | undefined): void {
-    this.#onDirectTerminal(chatId, turn);
+  onAgentTurnTerminal(chatId: string, turn: TurnIdentity | undefined): Promise<void> {
+    return this.#onDirectTerminal(chatId, turn);
   }
 
   replaceTurnWithTranscriptSnapshotReservation(
@@ -743,11 +743,12 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
   }
 
-  #onDirectTerminal(chatId: string, turn: TurnIdentity | undefined): void {
+  async #onDirectTerminal(chatId: string, turn: TurnIdentity | undefined): Promise<void> {
     const attempt = this.#ownership.attempt(chatId);
     if (!attempt?.matches(turn)) return;
     attempt.markTerminalObserved();
     this.#settleDirectAttempt(chatId, attempt);
+    await attempt.waitUntilSettled();
   }
 
   #settleDirectAttempt(chatId: string, attempt: QueueExecutionAttempt): void {

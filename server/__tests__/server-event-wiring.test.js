@@ -610,6 +610,33 @@ describe('server event wiring', () => {
     }));
   });
 
+  it('waits for runtime retirement before settled transcript reconciliation', async () => {
+    const published = [];
+    const retired = deferred();
+    const reconcile = mock(async () => undefined);
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+      queue: {
+        onAgentTurnTerminal: mock(() => retired.promise),
+      },
+      idleReconciler: {
+        ensureHistoryChangeReconciled: reconcile,
+      },
+    });
+
+    fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(published.some((message) => message.type === 'agent-run-finished')).toBe(false);
+
+    retired.resolve();
+    await fixture.wiring.waitForIdle();
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(published.some((message) => message.type === 'agent-run-finished')).toBe(true);
+  });
+
   it('makes recovered native output unavailable instead of reporting an empty success', async () => {
     const ledger = new CommandLedger();
     await ledger.accept({

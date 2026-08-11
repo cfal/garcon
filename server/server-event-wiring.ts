@@ -673,13 +673,13 @@ export function wireServerEvents({
     if (inlineTerminalReleases.has(chatId)) return;
     publishProcessing(chatId);
   });
-  const releaseTerminalOwnership = (
+  const releaseTerminalOwnership = async (
     chatId: string,
     turnMetadata: TurnEventMetadata | undefined,
-  ) => {
+  ): Promise<void> => {
     inlineTerminalReleases.add(chatId);
     try {
-      queue.onAgentTurnTerminal(chatId, turnMetadata);
+      await queue.onAgentTurnTerminal(chatId, turnMetadata);
     } finally {
       inlineTerminalReleases.delete(chatId);
     }
@@ -703,7 +703,7 @@ export function wireServerEvents({
       try {
         if (!chatExists(chatId)) return;
         if (queuedFinalization && await queuedFinalization !== 'committed') return;
-        releaseTerminalOwnership(chatId, turnMetadata);
+        await releaseTerminalOwnership(chatId, turnMetadata);
         released = true;
         if (turnMetadata?.turnOwner) {
           await commandLedger.finalizeProjectionOutput(chatId, turnMetadata.turnOwner);
@@ -723,14 +723,14 @@ export function wireServerEvents({
         );
         if (!expectedAbort) await markPublicTurnTerminal(chatId, turnMetadata);
       } finally {
-        if (!released) releaseTerminalOwnership(chatId, turnMetadata);
+        if (!released) await releaseTerminalOwnership(chatId, turnMetadata);
         void queue.checkChatIdle(chatId).catch((err) => {
           logger.warn('queue: checkChatIdle error:', errorMessage(err));
         });
       }
     });
   });
-  agentRegistry.onFailed((chatId, agentErrorMessage, turnMetadata) => {
+  agentRegistry.onFailed(async (chatId, agentErrorMessage, turnMetadata) => {
     if (!chatExists(chatId)) return;
     const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
     const expectedAbort = userAbortLifecycle.onTurnTerminal(chatId, turnMetadata);
@@ -741,7 +741,7 @@ export function wireServerEvents({
         message: agentErrorMessage,
         ...(turnMetadata ? { turnMetadata } : {}),
       });
-      releaseTerminalOwnership(chatId, turnMetadata);
+      await releaseTerminalOwnership(chatId, turnMetadata);
       return queue.checkChatIdle(chatId).catch((err) => {
         logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
@@ -751,12 +751,12 @@ export function wireServerEvents({
       return scheduleChatTask(chatId, 'server-events: interrupted command settlement failed', async () => {
         let released = false;
         try {
-          releaseTerminalOwnership(chatId, turnMetadata);
+          await releaseTerminalOwnership(chatId, turnMetadata);
           released = true;
           await settleExecutionCommand(chatId, turnMetadata, 'finished');
           await idleReconciler.ensureHistoryChangeReconciled(chatId);
         } finally {
-          if (!released) releaseTerminalOwnership(chatId, turnMetadata);
+          if (!released) await releaseTerminalOwnership(chatId, turnMetadata);
         }
       });
       queue.checkChatIdle(chatId).catch((err) => {
@@ -769,14 +769,14 @@ export function wireServerEvents({
       try {
         if (!chatExists(chatId)) return;
         if (queuedFinalization && await queuedFinalization !== 'committed') return;
-        releaseTerminalOwnership(chatId, turnMetadata);
+        await releaseTerminalOwnership(chatId, turnMetadata);
         released = true;
         if (turnMetadata?.turnOwner) {
           await commandLedger.finalizeProjectionOutput(chatId, turnMetadata.turnOwner);
         }
         await handleAgentFailure(chatId, agentErrorMessage, turnMetadata);
       } finally {
-        if (!released) releaseTerminalOwnership(chatId, turnMetadata);
+        if (!released) await releaseTerminalOwnership(chatId, turnMetadata);
         void queue.checkChatIdle(chatId).catch((err) => {
           logger.warn('queue: checkChatIdle error:', errorMessage(err));
         });
@@ -793,7 +793,7 @@ export function wireServerEvents({
     return scheduleChatTask(chatId, 'server-events: projection failure handling failed', async () => {
       let released = false;
       try {
-        releaseTerminalOwnership(chatId, turnMetadata);
+        await releaseTerminalOwnership(chatId, turnMetadata);
         released = true;
         if (turnMetadata.turnOwner) {
           await commandLedger.markProjectionOutputUnavailable(
@@ -810,7 +810,7 @@ export function wireServerEvents({
         broadcastAgentFailure(chatId, message, turnMetadata);
         await markPublicTurnTerminal(chatId, turnMetadata);
       } finally {
-        if (!released) releaseTerminalOwnership(chatId, turnMetadata);
+        if (!released) await releaseTerminalOwnership(chatId, turnMetadata);
         if (reservation) {
           const repaired = await agentRegistry.repairProjection(
             chatId,
