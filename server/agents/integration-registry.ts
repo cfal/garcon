@@ -137,7 +137,7 @@ function validateClass(
   if (existing.has(integrationClass.integrationId)) {
     throw new Error(`Duplicate agent integration ID: ${integrationClass.integrationId}`);
   }
-  if (integrationClass.transcriptIndex?.apiVersion !== 1
+  if (integrationClass.transcriptIndex?.apiVersion !== 2
       || typeof integrationClass.transcriptIndex.moduleUrl !== 'string'
       || integrationClass.transcriptIndex.moduleUrl.length === 0) {
     throw new Error(`Agent integration ${integrationClass.integrationId} has an invalid transcript index module`);

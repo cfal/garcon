@@ -49,7 +49,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
   static readonly integrationId = DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
-    apiVersion: 1,
+    apiVersion: 2,
     moduleUrl: resolveAgentStandaloneEntrypoint({
       integrationId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
       name: 'transcript-index-source',

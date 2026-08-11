@@ -1,5 +1,4 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
-import { getNativeMessageSource } from '@garcon/server-agent-interface';
 import type { ChatSearchSnippetRole } from '@garcon/common/chat-search';
 import type { SearchMessageRowInput } from './rows.js';
 
@@ -299,10 +298,6 @@ function projectOne(message: ChatMessage): {
       role: roleForMessage(message),
       timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
       body,
-      sourceAnchor: (() => {
-        const source = getNativeMessageSource(message);
-        return source ? JSON.stringify(source) : null;
-      })(),
     } : null,
   };
 }

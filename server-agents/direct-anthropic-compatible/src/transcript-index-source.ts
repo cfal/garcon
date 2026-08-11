@@ -1,6 +1,4 @@
 import { DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID } from '@garcon/common/agents';
-import { createDirectTranscriptIndexerModule } from '@garcon/server-agent-common/direct/transcript-index-source';
+import { createJournalTranscriptIndexerModule } from '@garcon/server-agent-common/transcript-projection/index-source';
 
-export default createDirectTranscriptIndexerModule(
-  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-);
+export default createJournalTranscriptIndexerModule(DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID);

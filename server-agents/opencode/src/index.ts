@@ -51,7 +51,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'opencode';
   static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
-    apiVersion: 1,
+    apiVersion: 2,
     moduleUrl: resolveAgentStandaloneEntrypoint({
       integrationId: 'opencode',
       name: 'transcript-index-source',

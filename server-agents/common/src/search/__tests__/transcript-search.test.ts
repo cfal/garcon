@@ -3,16 +3,21 @@ import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, UserMessage, type ChatMessage } from '@garcon/common/chat-types';
-import { createNativeSeedReceipt } from '@garcon/common/transcript-seed';
-import { canonicalDigest } from '../digest.js';
+import {
+  AssistantMessage,
+  PermissionResolvedMessage,
+  UserMessage,
+  type ChatMessage,
+} from '@garcon/common/chat-types';
 import { TranscriptSearchService } from '../transcript-search-service.js';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 const roots: string[] = [];
+const contentEpochs = new Map<string, string>();
 const logger = { debug() {}, info() {}, warn() {}, error() {} };
 
 afterEach(async () => {
+  contentEpochs.clear();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -34,6 +39,11 @@ describe('TranscriptSearchService', () => {
 
     expect(roles).toEqual(['indexer', 'reader']);
     expect(result.results.map((hit) => hit.chatId)).toEqual(['two']);
+    expect(result.results[0]?.snippets[0]?.anchor).toEqual({
+      kind: 'current-entry',
+      agentOwnershipEpoch: 'owner:two',
+      entryId: 'fixture-entry-1',
+    });
     expect(result.index.indexedChatCount).toBe(2);
     await service.close();
   });
@@ -53,6 +63,11 @@ describe('TranscriptSearchService', () => {
     const result = await waitForSearch(service, 'gamma', ['one']);
 
     expect(result.results.map((hit) => hit.chatId)).toEqual(['one']);
+    expect(result.results[0]?.snippets[0]?.anchor).toEqual({
+      kind: 'carryover-entry',
+      segmentId: 'segment-one',
+      localOrdinal: 1,
+    });
     await service.close();
   });
 
@@ -85,9 +100,12 @@ describe('TranscriptSearchService', () => {
 
     const restarted = createService(root);
     await enable(restarted);
+    await restarted.reconcile(snapshot(restarted, 1, [entry('one', 'r1', [
+      new UserMessage(timestamp, 'durable token'),
+    ])]));
     const durable = await restarted.search({
       query: query('durable'),
-      allowedChatIds: ['one'],
+      allowedChats: allowed(['one']),
       limit: 20,
       signal: new AbortController().signal,
     });
@@ -107,9 +125,12 @@ describe('TranscriptSearchService', () => {
     ])]));
     await waitForSearch(service, 'legacytoken', ['one']);
 
-    await service.reconcile(snapshot(service, 2, [entry('one', 'r2', [
+    const replacement = entry('one', 'r2', [
       new UserMessage(timestamp, 'replacementtoken'),
-    ])]));
+    ], 'carry-v1:0', 'content:one:v2');
+    await service.reconcile(snapshot(service, 2, [replacement]));
+
+    expect((await search(service, 'legacytoken', ['one'])).results).toEqual([]);
     await waitForSearch(service, 'replacementtoken', ['one']);
 
     const stale = await search(service, 'legacytoken', ['one']);
@@ -157,49 +178,44 @@ describe('TranscriptSearchService', () => {
     await service.close();
   });
 
-  it('rebuilds when a receipt appears and removes only its exact carried-context prefix', async () => {
+  it('indexes only a validated suffix when the ledger content epoch is unchanged', async () => {
     const root = await workspace();
-    const prefix = '<carried-context version="2">\n<transcript><user>seedonlytoken</user></transcript>\n</carried-context>\n\n';
-    const native = [new UserMessage(timestamp, `${prefix}realprompttoken`)];
-    const service = createService(root, {
-      one: [new AssistantMessage(timestamp, 'archivedtoken')],
-    });
+    const service = createService(root);
     await enable(service);
-    const initial = entry('one', 'r1', native, `carry-v5:${'a'.repeat(64)}`);
+    const initial = entry('one', 'r1', [new UserMessage(timestamp, 'prefixonlytoken')]);
     await service.reconcile(snapshot(service, 1, [initial]));
-    await waitForSearch(service, 'seedonlytoken', ['one']);
-
-    const receipt = createNativeSeedReceipt({
-      agentSessionId: 'native-one',
-      placement: 'user-prefix',
-      prefix,
+    await waitForSearch(service, 'prefixonlytoken', ['one']);
+    await service.reconcile(snapshot(service, 2, [entry('one', 'r3', [
+      new UserMessage(timestamp, 'prefixonlytoken'),
+      new PermissionResolvedMessage(timestamp, 'permission-one', true),
+      new AssistantMessage(timestamp, 'suffixonlytoken'),
+    ])]));
+    const suffix = await waitForSearch(service, 'suffixonlytoken', ['one']);
+    const prefix = await search(service, 'prefixonlytoken', ['one']);
+    expect(prefix.results).toHaveLength(1);
+    expect(prefix.results[0]?.snippets[0]?.anchor).toEqual({
+      kind: 'current-entry',
+      agentOwnershipEpoch: 'owner:one',
+      entryId: 'fixture-entry-1',
     });
-    await service.reconcile(snapshot(service, 2, [{
-      ...initial,
-      agentSessionId: 'native-one',
-      nativeSeedReceipt: receipt,
-    }]));
-    await waitForSearch(service, 'realprompttoken', ['one']);
-    await waitForMissingSearch(service, 'seedonlytoken', ['one']);
-
-    expect((await search(service, 'archivedtoken', ['one'])).results).toHaveLength(1);
+    expect(suffix.results[0]?.snippets[0]).toMatchObject({
+      messageOrdinal: 3,
+      anchor: {
+        kind: 'current-entry',
+        agentOwnershipEpoch: 'owner:one',
+        entryId: 'fixture-entry-3',
+      },
+    });
     const db = new Database(path.join(root, 'transcript-search', 'index.sqlite'), {
       readonly: true,
       create: false,
     });
-    const persisted = db.query<{
-      agentSessionId: string | null;
-      nativeSeedReceiptDigest: string;
-    }, []>(`
-      SELECT agent_session_id AS agentSessionId,
-        native_seed_receipt_digest AS nativeSeedReceiptDigest
+    const persisted = db.query<{ indexedDurableCount: number }, []>(`
+      SELECT indexed_durable_count AS indexedDurableCount
       FROM search_chat_state WHERE chat_id = 'one'
     `).get();
     db.close();
-    expect(persisted).toEqual({
-      agentSessionId: 'native-one',
-      nativeSeedReceiptDigest: canonicalDigest(receipt),
-    });
+    expect(persisted?.indexedDurableCount).toBe(3);
     await service.close();
   });
 
@@ -214,7 +230,7 @@ describe('TranscriptSearchService', () => {
       modules: [{
         agentId: 'fixture-failing',
         reference: {
-          apiVersion: 1,
+          apiVersion: 2,
           moduleUrl: new URL('./fixture-index-source-failure.ts', import.meta.url).href,
         },
       }],
@@ -222,14 +238,9 @@ describe('TranscriptSearchService', () => {
     });
     // Regression: the host hashed the receipt raw while the indexer hashed its
     // digest, so the descriptor comparison dropped every refresh event.
-    const receipt = createNativeSeedReceipt({
-      agentSessionId: 'native-two',
-      placement: 'user-prefix',
-      prefix: '<carried-context version="2">\n<transcript/>\n</carried-context>\n\n',
-    });
     await service.reconcile(snapshot(service, 1, [
       failingEntry('one', null, null),
-      failingEntry('two', 'native-two', receipt),
+      failingEntry('two', 'native-two', null),
     ]));
 
     const deadline = Date.now() + 5_000;
@@ -272,7 +283,7 @@ async function enable(service: TranscriptSearchService): Promise<void> {
   await service.enable({
     modules: [{
       agentId: 'fixture',
-      reference: { apiVersion: 1, moduleUrl: new URL('./fixture-index-source.ts', import.meta.url).href },
+      reference: { apiVersion: 2, moduleUrl: new URL('./fixture-index-source.ts', import.meta.url).href },
     }],
     signal: new AbortController().signal,
   });
@@ -282,7 +293,14 @@ function snapshot(service: TranscriptSearchService, sequence: number, chats: Ret
   return { generation: { epoch: service.operationEpoch(), sequence }, chats };
 }
 
-function entry(chatId: string, revision: string, messages: ChatMessage[], carryOverRevision = 'carry-v1:0') {
+function entry(
+  chatId: string,
+  revision: string,
+  messages: ChatMessage[],
+  carryOverRevision = 'carry-v1:0',
+  contentEpoch = `content:${chatId}`,
+) {
+  contentEpochs.set(chatId, contentEpoch);
   return {
     chatId,
     agentId: 'fixture',
@@ -291,11 +309,20 @@ function entry(chatId: string, revision: string, messages: ChatMessage[], carryO
     source: {
       state: 'ready' as const,
       reference: {
+        apiVersion: 2 as const,
         ownerId: 'fixture',
-        schemaVersion: 1,
-        value: { revision, messages: JSON.parse(JSON.stringify(messages)) },
+        schemaVersion: 2 as const,
+        checkpoint: {
+          chatId,
+          agentOwnershipEpoch: `owner:${chatId}`,
+          contentEpoch: `segment:${chatId}`,
+          durableCount: messages.length,
+          durableRevision: revision,
+        },
+        value: { messages: JSON.parse(JSON.stringify(messages)) },
       },
     },
+    contentEpoch,
     carryOverRevision,
     agentSessionId: null,
     nativeSeedReceipt: null,
@@ -305,7 +332,7 @@ function entry(chatId: string, revision: string, messages: ChatMessage[], carryO
 function failingEntry(
   chatId: string,
   agentSessionId: string | null,
-  nativeSeedReceipt: ReturnType<typeof createNativeSeedReceipt> | null,
+  nativeSeedReceipt: null,
 ) {
   return {
     chatId,
@@ -315,11 +342,20 @@ function failingEntry(
     source: {
       state: 'ready' as const,
       reference: {
+        apiVersion: 2 as const,
         ownerId: 'fixture-failing',
-        schemaVersion: 1,
-        value: { revision: 'r1', messages: [] },
+        schemaVersion: 2 as const,
+        checkpoint: {
+          chatId,
+          agentOwnershipEpoch: `owner:${chatId}`,
+          contentEpoch: `segment:${chatId}`,
+          durableCount: 0,
+          durableRevision: 'r1',
+        },
+        value: { messages: [] },
       },
     },
+    contentEpoch: `content:${chatId}`,
     carryOverRevision: 'carry-v1:0',
     agentSessionId,
     nativeSeedReceipt,
@@ -331,7 +367,7 @@ async function waitForSearch(service: TranscriptSearchService, text: string, cha
   while (true) {
     const result = await service.search({
       query: query(text),
-      allowedChatIds: chatIds,
+      allowedChats: allowed(chatIds),
       limit: 20,
       signal: new AbortController().signal,
     });
@@ -357,7 +393,7 @@ async function waitForMissingSearch(
 function search(service: TranscriptSearchService, text: string, chatIds: string[]) {
   return service.search({
     query: query(text),
-    allowedChatIds: chatIds,
+    allowedChats: allowed(chatIds),
     limit: 20,
     signal: new AbortController().signal,
   });
@@ -384,8 +420,21 @@ function query(text: string) {
   };
 }
 
-async function* batches(messages: ChatMessage[]): AsyncIterable<readonly ChatMessage[]> {
-  if (messages.length > 0) yield messages;
+function allowed(chatIds: readonly string[]) {
+  return chatIds.flatMap((chatId) => {
+    const contentEpoch = contentEpochs.get(chatId);
+    return contentEpoch ? [{ chatId, contentEpoch }] : [];
+  });
 }
 
-async function* emptyBatches(): AsyncIterable<readonly ChatMessage[]> {}
+async function* batches(messages: ChatMessage[]): AsyncIterable<readonly {
+  message: ChatMessage;
+  anchor: { kind: 'carryover-entry'; segmentId: string; localOrdinal: number };
+}[]> {
+  if (messages.length > 0) yield messages.map((message, index) => ({
+    message,
+    anchor: { kind: 'carryover-entry', segmentId: 'segment-one', localOrdinal: index + 1 },
+  }));
+}
+
+async function* emptyBatches(): AsyncIterable<readonly never[]> {}

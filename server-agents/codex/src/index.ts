@@ -65,7 +65,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'codex';
   static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
-    apiVersion: 1,
+    apiVersion: 2,
     moduleUrl: resolveAgentStandaloneEntrypoint({
       integrationId: 'codex',
       name: 'transcript-index-source',

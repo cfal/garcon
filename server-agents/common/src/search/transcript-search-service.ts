@@ -4,11 +4,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
-import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
+import type {
+  ChatSearchIndexStatus,
+  ChatSearchQueryV1,
+  ChatSearchResult,
+  TranscriptSearchAllowedChat,
+  TranscriptSearchEntryAnchor,
+} from '@garcon/common/chat-search';
 import type {
   AgentLogger,
   AgentTranscriptIndexModuleReference,
-  AgentTranscriptIndexSourceRef,
+  AgentTranscriptIndexSourceRefV4,
 } from '@garcon/server-agent-interface';
 import {
   isEmbeddedStandaloneEntrypoint,
@@ -57,10 +63,11 @@ export interface TranscriptSearchCatalogEntry {
   readonly model: string;
   readonly updatedAt: string | null;
   readonly source:
-    | { readonly state: 'ready'; readonly reference: AgentTranscriptIndexSourceRef }
+    | { readonly state: 'ready'; readonly reference: AgentTranscriptIndexSourceRefV4 }
     | { readonly state: 'absent' }
     | { readonly state: 'failed'; readonly code: string; readonly retryable: boolean };
   readonly carryOverRevision: string;
+  readonly contentEpoch: string | null;
   readonly agentSessionId: string | null;
   readonly nativeSeedReceipt: NativeSeedReceipt | null;
 }
@@ -84,7 +91,12 @@ export interface TranscriptSearchCarryOverRequest {
 
 export interface TranscriptSearchCarryOverStream {
   readonly revision: string;
-  readonly batches: AsyncIterable<readonly ChatMessage[]>;
+  readonly batches: AsyncIterable<readonly TranscriptSearchCarryOverEntry[]>;
+}
+
+export interface TranscriptSearchCarryOverEntry {
+  readonly message: ChatMessage;
+  readonly anchor: TranscriptSearchEntryAnchor;
 }
 
 export type TranscriptSearchCarryOverFailure =
@@ -110,7 +122,7 @@ export interface TranscriptSearchServiceOptions {
 
 type CarryState = {
   readonly controller: AbortController;
-  readonly iterator: AsyncIterator<readonly ChatMessage[]>;
+  readonly iterator: AsyncIterator<readonly TranscriptSearchCarryOverEntry[]>;
   readonly revision: string;
   readonly lifecycleEpoch: string;
   nextChunkIndex: number;
@@ -119,7 +131,7 @@ type CarryState = {
 
 type SearchQueueItem = {
   readonly query: ChatSearchQueryV1;
-  readonly allowedChatIds: readonly string[];
+  readonly allowedChats: readonly TranscriptSearchAllowedChat[];
   readonly limit: number;
   readonly deadline: number;
   readonly controller: AbortController;
@@ -133,7 +145,7 @@ type SearchQueueItem = {
 export interface TranscriptSearchSourceRefreshRequest {
   readonly chatId: string;
   readonly agentId: string;
-  readonly failedSource: AgentTranscriptIndexSourceRef;
+  readonly failedSource: AgentTranscriptIndexSourceRefV4;
   readonly failureCode: string;
   readonly signal: AbortSignal;
 }
@@ -333,7 +345,7 @@ export class TranscriptSearchService {
 
   async search(request: {
     readonly query: ChatSearchQueryV1;
-    readonly allowedChatIds: readonly string[];
+    readonly allowedChats: readonly TranscriptSearchAllowedChat[];
     readonly limit: number;
     readonly signal: AbortSignal;
   }): Promise<{ readonly results: readonly ChatSearchResult[]; readonly index: ChatSearchIndexStatus }> {
@@ -342,16 +354,24 @@ export class TranscriptSearchService {
     }
     request.signal.throwIfAborted();
     const event = await this.#enqueueSearch(request);
-    const allowed = new Set(request.allowedChatIds);
-    if (event.results.some((result) => !allowed.has(result.chatId))) {
+    const allowed = new Map(request.allowedChats.map((entry) => [entry.chatId, entry.contentEpoch]));
+    if (event.results.some((result) => allowed.get(result.chatId) !== result.contentEpoch)) {
       throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
     }
-    return { results: event.results, index: event.index };
+    const latest = new Map(
+      (this.#latestCatalog?.chats ?? [])
+        .filter((entry) => entry.contentEpoch !== null)
+        .map((entry) => [entry.chatId, entry.contentEpoch]),
+    );
+    return {
+      results: event.results.filter((result) => latest.get(result.chatId) === result.contentEpoch),
+      index: event.index,
+    };
   }
 
   #enqueueSearch(request: {
     readonly query: ChatSearchQueryV1;
-    readonly allowedChatIds: readonly string[];
+    readonly allowedChats: readonly TranscriptSearchAllowedChat[];
     readonly limit: number;
     readonly signal: AbortSignal;
   }): Promise<Extract<ReaderEvent, { type: 'search-result' }>> {
@@ -369,7 +389,7 @@ export class TranscriptSearchService {
     return new Promise((resolve, reject) => {
       const item: SearchQueueItem = {
         query: request.query,
-        allowedChatIds: request.allowedChatIds,
+        allowedChats: request.allowedChats,
         limit: request.limit,
         deadline,
         controller,
@@ -408,7 +428,7 @@ export class TranscriptSearchService {
     }
     this.#activeSearch = item;
     void this.#requestReaderFrames(
-      searchFrames(item.query, item.allowedChatIds, item.limit),
+      searchFrames(item.query, item.allowedChats, item.limit),
       item.controller.signal,
       Math.max(1, item.deadline - Date.now()),
     ).then((event) => {
@@ -673,9 +693,9 @@ export class TranscriptSearchService {
       const next = await stream.iterator.next();
       if (this.#carryStreams.get(requestId) !== stream
           || stream.lifecycleEpoch !== this.#indexer.epoch || !this.#indexer.available) return;
-      const messages = next.value ? [...next.value] : [];
-      const bytes = Buffer.byteLength(JSON.stringify(messages));
-      if (messages.length > MAX_CARRY_MESSAGES || bytes > MAX_CARRY_BYTES) {
+      const entries = next.value ? [...next.value] : [];
+      const bytes = Buffer.byteLength(JSON.stringify(entries));
+      if (entries.length > MAX_CARRY_MESSAGES || bytes > MAX_CARRY_BYTES) {
         throw new Error('CARRY_OVER_MESSAGE_TOO_LARGE');
       }
       stream.pulling = false;
@@ -685,7 +705,7 @@ export class TranscriptSearchService {
         lifecycleEpoch: stream.lifecycleEpoch,
         chunkIndex: stream.nextChunkIndex,
         revision: stream.revision,
-        messages,
+        entries,
         done: Boolean(next.done),
       });
       stream.nextChunkIndex += 1;
@@ -719,7 +739,7 @@ export class TranscriptSearchService {
       lifecycleEpoch,
       chunkIndex: this.#carryStreams.get(requestId)?.nextChunkIndex ?? 0,
       revision,
-      messages: [],
+      entries: [],
       done: true,
       code,
       retryable: historyUnavailable
@@ -935,16 +955,16 @@ function catalogFrames(
 
 function searchFrames(
   query: ChatSearchQueryV1,
-  allowedChatIds: readonly string[],
+  allowedChats: readonly TranscriptSearchAllowedChat[],
   limit: number,
 ): Array<WorkerRequestInput<ReaderRequest>> {
-  const frames = boundedFrames(allowedChatIds, MAX_ALLOWLIST_IDS_PER_FRAME);
+  const frames = boundedFrames(allowedChats, MAX_ALLOWLIST_IDS_PER_FRAME);
   return [
     { type: 'search-start', query, limit },
-    ...frames.map((ids, chunkIndex) => ({
+    ...frames.map((chats, chunkIndex) => ({
       type: 'search-allowlist-chunk' as const,
       chunkIndex,
-      allowedChatIds: ids,
+      allowedChats: chats,
       done: chunkIndex === frames.length - 1,
     })),
   ];

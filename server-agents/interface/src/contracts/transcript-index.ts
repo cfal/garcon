@@ -3,7 +3,7 @@ import type { JsonObject } from '@garcon/common/json';
 import type { AgentLogger } from './host.js';
 
 export interface AgentTranscriptIndexModuleReference {
-  readonly apiVersion: 1;
+  readonly apiVersion: 2;
   readonly moduleUrl: string;
 }
 

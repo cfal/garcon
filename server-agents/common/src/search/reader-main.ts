@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import type { TranscriptSearchAllowedChat } from '@garcon/common/chat-search';
 import { searchTranscriptIndexV1 } from './query.js';
 import { openSearchReadDatabase } from './schema.js';
 import type { ReaderEvent, ReaderRequest } from './worker-protocol.js';
@@ -10,7 +11,7 @@ let closing = false;
 const searches = new Map<number, {
   readonly query: Extract<ReaderRequest, { type: 'search-start' }>['query'];
   readonly limit: number;
-  readonly allowedChatIds: string[];
+  readonly allowedChats: TranscriptSearchAllowedChat[];
   nextChunkIndex: number;
 }>();
 
@@ -40,7 +41,7 @@ function handle(request: ReaderRequest): void {
         searches.set(request.requestId, {
           query: request.query,
           limit: request.limit,
-          allowedChatIds: [],
+          allowedChats: [],
           nextChunkIndex: 0,
         });
         return;
@@ -49,18 +50,18 @@ function handle(request: ReaderRequest): void {
         if (!db || closing) throw new Error('READER_UNAVAILABLE');
         const search = searches.get(request.requestId);
         if (!search || search.nextChunkIndex !== request.chunkIndex
-            || request.allowedChatIds.length > 2_000
-            || Buffer.byteLength(JSON.stringify(request.allowedChatIds)) > 8 * 1024 * 1024) {
+            || request.allowedChats.length > 2_000
+            || Buffer.byteLength(JSON.stringify(request.allowedChats)) > 8 * 1024 * 1024) {
           searches.delete(request.requestId);
           throw new Error('INVALID_SEARCH_FRAME');
         }
-        search.allowedChatIds.push(...request.allowedChatIds);
+        search.allowedChats.push(...request.allowedChats);
         search.nextChunkIndex += 1;
         if (!request.done) return;
         searches.delete(request.requestId);
         const result = searchTranscriptIndexV1(db, {
           query: search.query,
-          allowedChatIds: search.allowedChatIds,
+          allowedChats: search.allowedChats,
           limit: search.limit,
         });
         post({ type: 'search-result', ...response(request), ...result });

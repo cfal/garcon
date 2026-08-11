@@ -5,14 +5,17 @@ import type { Database } from 'bun:sqlite';
 import {
   type AgentLogger,
   type AgentTranscriptIndexFailure,
-  type AgentTranscriptIndexerModule,
-  type AgentTranscriptIndexSource,
+  type AgentTranscriptIndexCheckpointV4,
+  type AgentTranscriptIndexerModuleV4,
+  type AgentTranscriptIndexSourceV4,
+  AgentTranscriptIndexError,
 } from '@garcon/server-agent-interface';
 import { isEmbeddedStandaloneEntrypoint } from '../build/standalone-entrypoint.js';
 import { canonicalDigest } from './digest.js';
 import { TRANSCRIPT_SEARCH_PROJECTOR_VERSION } from './message-projector.js';
 import {
   closeSearchDatabase,
+  appendChatFromStaging,
   deleteChatRows,
   getChatSafetyStates,
   getChatState,
@@ -26,11 +29,9 @@ import {
 } from './schema.js';
 import {
   catalogEntryKey,
-  rowsForBatch,
-  sanitizeFirstRecordedSeedPreservingSource,
-  TRANSCRIPT_INDEX_LOAD_LIMITS,
+  rowsForCarryOverBatch,
+  rowsForCurrentBatch,
   validateCatalogEntry,
-  validateNativeBatch,
 } from './indexer-job-data.js';
 import { IndexerCarryOverStream, IndexerCatalogFrames } from './indexer-protocol-streams.js';
 import type {
@@ -76,7 +77,7 @@ let scratchDirectory = '';
 let closing = false;
 let newestCatalogSequence = 0;
 const registrations = new Map<string, TranscriptIndexModuleRegistration>();
-const instances = new Map<string, AgentTranscriptIndexSource>();
+const instances = new Map<string, AgentTranscriptIndexSourceV4>();
 const catalog = new Map<string, CatalogWork>();
 const agentQueues = new Map<string, QueuedWork[]>();
 const agentOrder: string[] = [];
@@ -154,22 +155,21 @@ const logger: AgentLogger = {
   error(message, fields) { console.error('[transcript-indexer]', message, fields ?? ''); },
 };
 
-async function loadProvider(agentId: string): Promise<AgentTranscriptIndexSource> {
+async function loadProvider(agentId: string): Promise<AgentTranscriptIndexSourceV4> {
   const existing = instances.get(agentId);
   if (existing) return existing;
   const registration = registrations.get(agentId);
   if (!registration) throw new Error('Transcript index module is not registered');
   const imported = await import(registration.moduleUrl) as { default?: unknown };
-  const module = imported.default as Partial<AgentTranscriptIndexerModule> | undefined;
+  const module = imported.default as Partial<AgentTranscriptIndexerModuleV4> | undefined;
   if (!module
-      || module.apiVersion !== 1
+      || module.apiVersion !== 2
       || module.integrationId !== agentId
       || typeof module.create !== 'function') {
     throw new Error('Transcript index module contract is invalid');
   }
   const instance = module.create({ agentId, logger });
-  if (!instance || typeof instance.probe !== 'function'
-      || typeof instance.load !== 'function' || typeof instance.close !== 'function') {
+  if (!instance || typeof instance.open !== 'function' || typeof instance.close !== 'function') {
     throw new Error('Transcript index source contract is invalid');
   }
   instances.set(agentId, instance);
@@ -434,9 +434,10 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
   const source = entry.source.state === 'ready' ? entry.source.reference : null;
   const descriptorHash = catalogSourceDescriptorHash(entry);
   const receiptDigest = nativeSeedReceiptDigest(entry.nativeSeedReceipt);
-  const moduleApiVersion = registrations.get(entry.agentId)?.apiVersion ?? 1;
-  let provider: AgentTranscriptIndexSource | null = null;
-  let sourceRevision: string | null = null;
+  const moduleApiVersion = registrations.get(entry.agentId)?.apiVersion ?? 2;
+  let provider: AgentTranscriptIndexSourceV4 | null = null;
+  const sourceRevision = source?.checkpoint.durableRevision ?? null;
+  const sourceCheckpoint = source?.checkpoint ?? null;
   let jobSignature: string | null = null;
   const attemptBase = {
     chatId: entry.chatId,
@@ -446,6 +447,8 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
     projectorVersion: TRANSCRIPT_SEARCH_PROJECTOR_VERSION,
     sourceDescriptorHash: descriptorHash,
     sourceRevision,
+    contentEpoch: entry.contentEpoch,
+    sourceCheckpoint,
     carryOverRevision: entry.carryOverRevision,
     agentSessionId: entry.agentSessionId,
     nativeSeedReceiptDigest: receiptDigest,
@@ -464,20 +467,23 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
       );
       return;
     }
+    if (!entry.contentEpoch) {
+      markChatAttempt(requireDb(), attemptBase, 'pending', 'CONTENT_EPOCH_PENDING');
+      emitSourceStatus(entry, generation, 'pending', 'CONTENT_EPOCH_PENDING', true);
+      return;
+    }
     if (source) {
       if (source.ownerId !== entry.agentId) throw new Error('SOURCE_OWNER_MISMATCH');
       provider = await loadProvider(entry.agentId);
-      sourceRevision = (await provider.probe(source, controller.signal)).revision;
     }
     if (!generationCurrent(entry)) return;
     jobSignature = canonicalDigest({
       agentId: entry.agentId,
       model: entry.model,
       sourceDescriptorHash: descriptorHash,
-      sourceRevision: sourceRevision ?? `generation:${generation.sequence}`,
+      sourceCheckpoint,
       carryOverRevision: entry.carryOverRevision,
-      agentSessionId: entry.agentSessionId,
-      nativeSeedReceiptDigest: receiptDigest,
+      contentEpoch: entry.contentEpoch,
     });
     post({
       type: 'job-state',
@@ -488,95 +494,143 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
     });
     const quarantinedSignature = quarantines.get(entry.chatId);
     if (quarantinedSignature === jobSignature) {
-      markChatAttempt(requireDb(), { ...attemptBase, sourceRevision }, 'failed', 'SOURCE_QUARANTINED');
+      markChatAttempt(requireDb(), attemptBase, 'failed', 'SOURCE_QUARANTINED');
       emitSourceStatus(entry, generation, 'failed', 'SOURCE_QUARANTINED', false);
       return;
     }
     if (quarantinedSignature) quarantines.delete(entry.chatId);
     const previous = getChatState(requireDb(), entry.chatId);
-    const unchanged = previous?.status === 'sealed'
+    const unchanged = (previous?.status === 'sealed' || previous?.status === 'unsupported')
       && previous.agentId === entry.agentId
       && previous.model === entry.model
       && previous.sourceDescriptorHash === descriptorHash
       && previous.sourceRevision === sourceRevision
       && previous.carryOverRevision === entry.carryOverRevision
-      && previous.agentSessionId === entry.agentSessionId
-      && previous.nativeSeedReceiptDigest === receiptDigest
-      && sourceRevision !== null;
+      && previous.contentEpoch === entry.contentEpoch
+      && previous.indexedDurableCount === (sourceCheckpoint?.durableCount ?? 0)
+      && previous.indexedDurableRevision === (sourceCheckpoint?.durableRevision ?? null);
     safetyCheckedAt.set(entry.chatId, Date.now());
     if (unchanged) {
       handleUnchangedRevision(entry, generation);
       return;
     }
 
-    const attempt = { ...attemptBase, sourceRevision };
+    const attempt = attemptBase;
     markChatAttempt(requireDb(), attempt, 'pending');
     emitSourceStatus(entry, generation, 'pending', null, null);
     prepareChatBuild(requireDb());
-    const ordinal = { value: 0 };
     const content = createHash('sha256');
     let rowCount = 0;
-    let carriedMessages = 0;
-    for await (const batch of carryOverStream.batches(entry, controller.signal)) {
-      const batchStartedAt = performance.now();
-      if (!generationCurrent(entry)) throw new DOMException('Superseded', 'AbortError');
-      carriedMessages += batch.length;
-      const rows = rowsForBatch(batch, ordinal, content);
-      rowCount += rows.length;
-      if (rows.length > 0) stageChatRows(requireDb(), rows);
-      await yieldForBackgroundDuty(batchStartedAt);
-    }
-
-    if (source && provider) {
-      let seedHandled = carriedMessages === 0;
-      for await (const rawBatch of provider.load({
-        source,
-        signal: controller.signal,
-        limits: TRANSCRIPT_INDEX_LOAD_LIMITS,
-        scratchDirectory,
-      })) {
+    const canAppend = Boolean(previous
+      && previous.contentEpoch === entry.contentEpoch
+      && previous.carryOverRevision === entry.carryOverRevision
+      && previous.agentId === entry.agentId
+      && previous.model === entry.model
+      && previous.indexedDurableRevision
+      && sourceCheckpoint
+      && previous.indexedDurableCount <= sourceCheckpoint.durableCount);
+    let carryOverCount = canAppend
+      ? previous!.messageCount - previous!.indexedDurableCount
+      : 0;
+    if (!canAppend) {
+      const ordinal = { value: 0 };
+      for await (const batch of carryOverStream.batches(entry, controller.signal)) {
         const batchStartedAt = performance.now();
         if (!generationCurrent(entry)) throw new DOMException('Superseded', 'AbortError');
-        let batch = validateNativeBatch(rawBatch);
-        if (!seedHandled) {
-          const firstUser = batch.some((message) => message.type === 'user-message');
-          batch = sanitizeFirstRecordedSeedPreservingSource(
-            batch,
-            entry.nativeSeedReceipt,
-            entry.agentSessionId,
-          );
-          seedHandled = firstUser;
-        }
-        const rows = rowsForBatch(batch, ordinal, content);
+        const rows = rowsForCarryOverBatch(batch, ordinal, content);
         rowCount += rows.length;
         if (rows.length > 0) stageChatRows(requireDb(), rows);
         await yieldForBackgroundDuty(batchStartedAt);
       }
-      const afterRevision = (await provider.probe(source, controller.signal)).revision;
-      if (sourceRevision !== afterRevision) throw new Error('SOURCE_CHANGED');
+      carryOverCount = ordinal.value;
+    }
+
+    let opened: Awaited<ReturnType<AgentTranscriptIndexSourceV4['open']>> | null = null;
+    if (source && provider) {
+      const previousCheckpoint: AgentTranscriptIndexCheckpointV4 | null = canAppend
+        ? {
+            ...source.checkpoint,
+            durableCount: previous!.indexedDurableCount,
+            durableRevision: previous!.indexedDurableRevision as AgentTranscriptIndexCheckpointV4['durableRevision'],
+          }
+        : null;
+      opened = await provider.open({
+        source,
+        previous: previousCheckpoint,
+        signal: controller.signal,
+        maxEntriesPerBatch: 250,
+      });
+      if (opened.kind === 'expired') throw sourceOpenFailure('SOURCE_EXPIRED', true, true);
+      if (opened.kind === 'degraded') {
+        throw sourceOpenFailure(opened.errorCode, opened.retryable, opened.retryable);
+      }
+      const fullBuildRequired = !canAppend && opened.kind === 'append';
+      if (fullBuildRequired) throw new Error('SOURCE_INCREMENTAL_WITHOUT_PREFIX');
+      if (canAppend && opened.kind === 'snapshot') {
+        prepareChatBuild(requireDb());
+        rowCount = 0;
+        carryOverCount = 0;
+        const ordinal = { value: 0 };
+        for await (const batch of carryOverStream.batches(entry, controller.signal)) {
+          const rows = rowsForCarryOverBatch(batch, ordinal, content);
+          rowCount += rows.length;
+          if (rows.length > 0) stageChatRows(requireDb(), rows);
+        }
+        carryOverCount = ordinal.value;
+      }
+      if (opened.kind === 'append' || opened.kind === 'snapshot') {
+        for await (const batch of opened.batches) {
+          const batchStartedAt = performance.now();
+          if (!generationCurrent(entry)) throw new DOMException('Superseded', 'AbortError');
+          const rows = rowsForCurrentBatch(
+            batch,
+            carryOverCount,
+            source.checkpoint.agentOwnershipEpoch,
+            content,
+          );
+          rowCount += rows.length;
+          if (rows.length > 0) stageChatRows(requireDb(), rows);
+          await yieldForBackgroundDuty(batchStartedAt);
+        }
+      }
+      if (!sameIndexCheckpoint(opened.checkpoint, source.checkpoint)) {
+        throw new Error('SOURCE_CHECKPOINT_MISMATCH');
+      }
     }
     if (!generationCurrent(entry)) return;
-    const contentDigest = content.digest('hex');
+    const snapshotBuild = !canAppend || opened?.kind === 'snapshot';
+    const contentDigest = canonicalDigest({
+      contentEpoch: entry.contentEpoch,
+      carryOverRevision: entry.carryOverRevision,
+      sourceCheckpoint,
+      suffixDigest: content.digest('hex'),
+    });
     const sealedSourceKey = canonicalDigest({
-      schemaVersion: 4,
+      schemaVersion: 6,
       projectorVersion: TRANSCRIPT_SEARCH_PROJECTOR_VERSION,
       sourceApiVersion: moduleApiVersion,
       agentId: entry.agentId,
       model: entry.model,
       descriptorHash,
-      sourceRevision,
+      sourceCheckpoint,
       carryOverRevision: entry.carryOverRevision,
-      agentSessionId: entry.agentSessionId,
-      nativeSeedReceiptDigest: receiptDigest,
+      contentEpoch: entry.contentEpoch,
       contentDigest,
     });
-    if (rowCount === 0) {
-      sealChatFromStaging(requireDb(), {
-        ...attempt,
-        contentDigest,
-        sealedSourceKey,
-        messageCount: 0,
-      });
+    const messageCount = carryOverCount + (sourceCheckpoint?.durableCount ?? 0);
+    const seal = {
+      ...attempt,
+      contentEpoch: entry.contentEpoch,
+      contentDigest,
+      sealedSourceKey,
+      messageCount,
+    };
+    if (snapshotBuild) sealChatFromStaging(requireDb(), seal);
+    else appendChatFromStaging(requireDb(), seal);
+    const searchableCount = Number(requireDb().query<{ count: number }, [string, string]>(`
+      SELECT COUNT(*) AS count FROM search_chunks WHERE chat_id = ? AND content_epoch = ?
+    `).get(entry.chatId, entry.contentEpoch)?.count ?? 0);
+    if (searchableCount === 0) {
       requireDb().query(`
         UPDATE search_chat_state SET status = 'unsupported' WHERE chat_id = ?
       `).run(entry.chatId);
@@ -584,28 +638,6 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
       emitSourceStatus(entry, generation, 'unsupported', null, null);
       return;
     }
-    if (previous?.sealedSourceKey === sealedSourceKey) {
-      markChatAttempt(requireDb(), attempt, 'pending');
-      // The rows remain sealed; a same-content null probe requires no replacement.
-      requireDb().query(`
-        UPDATE search_chat_state SET status = 'sealed', last_error_code = NULL,
-          operation_epoch = ?, operation_sequence = ?, last_checked_at = ?, updated_at = ?
-        WHERE chat_id = ?
-      `).run(generation.epoch, generation.sequence, new Date().toISOString(), new Date().toISOString(), entry.chatId);
-      if (sourceRevision === null && work.reason !== 'safety') {
-        handleUnchangedNullProbe(entry, generation);
-      } else {
-        resetRetryState(entry.chatId);
-        emitSourceStatus(entry, generation, 'sealed', null, null);
-      }
-      return;
-    }
-    sealChatFromStaging(requireDb(), {
-      ...attempt,
-      contentDigest,
-      sealedSourceKey,
-      messageCount: rowCount,
-    });
     resetRetryState(entry.chatId);
     emitSourceStatus(entry, generation, 'sealed', null, null);
   } catch (error) {
@@ -623,7 +655,7 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
       || code === 'SOURCE_CHANGED'
       || code === 'CARRY_OVER_TIMEOUT'
       || code === 'CARRY_OVER_REVISION_CHANGED';
-    markChatAttempt(requireDb(), { ...attemptBase, sourceRevision }, 'failed', code);
+    markChatAttempt(requireDb(), attemptBase, 'failed', code);
     emitSourceStatus(entry, generation, 'failed', code, retryable);
     if (retryable) {
       const retryAfterMs = code === 'SOURCE_CHANGED'
@@ -656,6 +688,30 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
     });
     emitProgress();
   }
+}
+
+function sameIndexCheckpoint(
+  left: AgentTranscriptIndexCheckpointV4,
+  right: AgentTranscriptIndexCheckpointV4,
+): boolean {
+  return left.chatId === right.chatId
+    && left.agentOwnershipEpoch === right.agentOwnershipEpoch
+    && left.contentEpoch === right.contentEpoch
+    && left.durableCount === right.durableCount
+    && left.durableRevision === right.durableRevision;
+}
+
+function sourceOpenFailure(
+  code: string,
+  retryable: boolean,
+  refreshSource: boolean,
+): AgentTranscriptIndexError {
+  return new AgentTranscriptIndexError({
+    kind: 'agent-transcript-index-failure',
+    code: /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : 'SOURCE_INTERNAL',
+    retryable,
+    refreshSource,
+  });
 }
 
 async function drainQueue(): Promise<void> {
@@ -695,7 +751,7 @@ export async function handleIndexerRequest(request: IndexerRequest): Promise<voi
         await fs.rm(scratchDirectory, { recursive: true, force: true });
         await fs.mkdir(scratchDirectory, { recursive: true, mode: 0o700 });
         for (const registration of request.modules) {
-          if (registration.agentId.length === 0 || registration.apiVersion !== 1) {
+          if (registration.agentId.length === 0 || registration.apiVersion !== 2) {
             throw new Error('INVALID_MODULE_REGISTRATION');
           }
           if (registrations.has(registration.agentId)) throw new Error('DUPLICATE_MODULE_REGISTRATION');

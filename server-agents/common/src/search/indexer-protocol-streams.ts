@@ -1,4 +1,4 @@
-import { parseChatMessages, type ChatMessage } from '@garcon/common/chat-types';
+import { parseChatMessages } from '@garcon/common/chat-types';
 import { AgentTranscriptIndexError } from '@garcon/server-agent-interface';
 import { TRANSCRIPT_INDEX_LOAD_LIMITS } from './indexer-job-data.js';
 import type { IndexerEvent, IndexerRequest } from './worker-protocol.js';
@@ -6,6 +6,7 @@ import { compareGeneration } from './worker-protocol.js';
 import type {
   TranscriptSearchCatalogEntry,
   TranscriptSearchCatalogSnapshot,
+  TranscriptSearchCarryOverEntry,
 } from './transcript-search-service.js';
 
 type CatalogChunk = Extract<IndexerRequest, { type: 'catalog-chunk' }>;
@@ -116,7 +117,10 @@ export class IndexerCarryOverStream {
     this.#waiters.clear();
   }
 
-  async *batches(entry: CarryOverEntry, signal: AbortSignal): AsyncIterable<readonly ChatMessage[]> {
+  async *batches(
+    entry: CarryOverEntry,
+    signal: AbortSignal,
+  ): AsyncIterable<readonly TranscriptSearchCarryOverEntry[]> {
     if (entry.carryOverRevision === 'carry-v1:0') return;
     const requestId = ++this.#requestId;
     this.post({
@@ -134,8 +138,8 @@ export class IndexerCarryOverStream {
         signal.throwIfAborted();
         const chunk = await this.#nextChunk(requestId);
         if (chunk.chunkIndex !== expectedChunkIndex
-            || chunk.messages.length > TRANSCRIPT_INDEX_LOAD_LIMITS.maxMessagesPerBatch
-            || Buffer.byteLength(JSON.stringify(chunk.messages))
+            || chunk.entries.length > TRANSCRIPT_INDEX_LOAD_LIMITS.maxMessagesPerBatch
+            || Buffer.byteLength(JSON.stringify(chunk.entries))
               > TRANSCRIPT_INDEX_LOAD_LIMITS.maxBatchBytes) {
           throw new Error('INVALID_CARRY_OVER_FRAME');
         }
@@ -151,7 +155,12 @@ export class IndexerCarryOverStream {
         if (chunk.revision !== entry.carryOverRevision) {
           throw new Error('CARRY_OVER_REVISION_CHANGED');
         }
-        yield parseChatMessages(chunk.messages);
+        const parsed = chunk.entries.map((item) => {
+          const message = parseChatMessages([item.message])[0];
+          if (!message) throw new Error('INVALID_CARRY_OVER_FRAME');
+          return { message, anchor: item.anchor };
+        });
+        yield parsed;
         if (chunk.done) return;
         this.post({
           type: 'carry-over-pull',

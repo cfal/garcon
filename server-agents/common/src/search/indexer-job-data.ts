@@ -1,20 +1,17 @@
 import type { createHash } from 'node:crypto';
 import { parseChatMessages, type ChatMessage } from '@garcon/common/chat-types';
-import {
-  parseNativeSeedReceipt,
-  sanitizeRecordedCarriedContext,
-  type NativeSeedReceipt,
-} from '@garcon/common/transcript-seed';
-import {
-  attachNativeMessageSource,
-  AgentTranscriptIndexError,
-  getNativeMessageSource,
+import type { TranscriptSearchEntryAnchor } from '@garcon/common/chat-search';
+import type {
+  AgentTranscriptIndexEntryV4,
+  AgentTranscriptIndexSourceRefV4,
 } from '@garcon/server-agent-interface';
 import { canonicalDigest, canonicalJson } from './digest.js';
 import { projectSearchMessage } from './message-projector.js';
-import { nativeSeedReceiptDigest } from './worker-protocol.js';
 import type { HistoricalSearchMessageRow } from './rows.js';
-import type { TranscriptSearchCatalogEntry } from './transcript-search-service.js';
+import type {
+  TranscriptSearchCatalogEntry,
+  TranscriptSearchCarryOverEntry,
+} from './transcript-search-service.js';
 
 export const TRANSCRIPT_INDEX_LOAD_LIMITS = {
   maxMessagesPerBatch: 250,
@@ -22,75 +19,82 @@ export const TRANSCRIPT_INDEX_LOAD_LIMITS = {
   maxRecordBytes: 8 * 1024 * 1024,
 } as const;
 
-export function rowsForBatch(
-  batch: readonly ChatMessage[],
+interface SearchEnvelope {
+  readonly messageOrdinal: number;
+  readonly message: ChatMessage;
+  readonly anchor: TranscriptSearchEntryAnchor;
+  readonly integrity: unknown;
+}
+
+export function rowsForCarryOverBatch(
+  batch: readonly TranscriptSearchCarryOverEntry[],
   ordinal: { value: number },
   content: ReturnType<typeof createHash>,
 ): HistoricalSearchMessageRow[] {
-  const rows: HistoricalSearchMessageRow[] = [];
-  for (const message of batch) {
+  return rowsForEnvelopes(batch.map((item) => {
     ordinal.value += 1;
-    const projected = projectSearchMessage(message);
-    if (!projected) continue;
-    content.update(canonicalJson({ ...projected, messageOrdinal: ordinal.value }));
+    return {
+      messageOrdinal: ordinal.value,
+      message: parseOneMessage(item.message),
+      anchor: item.anchor,
+      integrity: { anchor: item.anchor, message: item.message },
+    };
+  }), content);
+}
+
+export function rowsForCurrentBatch(
+  batch: readonly AgentTranscriptIndexEntryV4[],
+  carryOverCount: number,
+  agentOwnershipEpoch: string,
+  content: ReturnType<typeof createHash>,
+): HistoricalSearchMessageRow[] {
+  return rowsForEnvelopes(batch.map((item) => ({
+    messageOrdinal: carryOverCount + item.ordinal,
+    message: parseOneMessage(item.entry.message),
+    anchor: {
+      kind: 'current-entry' as const,
+      agentOwnershipEpoch,
+      entryId: item.entry.id,
+    },
+    integrity: item,
+  })), content);
+}
+
+function rowsForEnvelopes(
+  envelopes: readonly SearchEnvelope[],
+  content: ReturnType<typeof createHash>,
+): HistoricalSearchMessageRow[] {
+  const rows: HistoricalSearchMessageRow[] = [];
+  for (const envelope of envelopes) {
+    content.update(canonicalJson({
+      messageOrdinal: envelope.messageOrdinal,
+      anchor: envelope.anchor,
+      integrity: envelope.integrity,
+    }));
     content.update('\n');
-    rows.push({ ...projected, messageOrdinal: ordinal.value });
+    const projected = projectSearchMessage(envelope.message);
+    if (projected) rows.push({ ...projected, messageOrdinal: envelope.messageOrdinal, anchor: envelope.anchor });
   }
   return rows;
 }
 
-export function validateNativeBatch(batch: readonly ChatMessage[]): ChatMessage[] {
-  if (batch.length > TRANSCRIPT_INDEX_LOAD_LIMITS.maxMessagesPerBatch) {
-    throw batchTooLargeError();
+function parseOneMessage(value: ChatMessage): ChatMessage {
+  const encodedBytes = Buffer.byteLength(JSON.stringify(value));
+  if (encodedBytes > TRANSCRIPT_INDEX_LOAD_LIMITS.maxRecordBytes) {
+    throw new Error('SOURCE_BATCH_TOO_LARGE');
   }
-  const parsed: ChatMessage[] = [];
-  let batchBytes = 0;
-  for (const raw of batch) {
-    const recordBytes = Buffer.byteLength(JSON.stringify(raw));
-    batchBytes += recordBytes;
-    if (recordBytes > TRANSCRIPT_INDEX_LOAD_LIMITS.maxRecordBytes
-        || batchBytes > TRANSCRIPT_INDEX_LOAD_LIMITS.maxBatchBytes) {
-      throw batchTooLargeError();
-    }
-    const message = parseChatMessages([raw])[0];
-    if (!message) continue;
-    attachNativeMessageSource(message, getNativeMessageSource(raw));
-    parsed.push(message);
-  }
-  return parsed;
-}
-
-export function sanitizeFirstRecordedSeedPreservingSource(
-  batch: ChatMessage[],
-  receipt: NativeSeedReceipt | null,
-  agentSessionId: string | null,
-): ChatMessage[] {
-  const index = batch.findIndex((message) => message.type === 'user-message');
-  if (index < 0) return batch;
-  const source = getNativeMessageSource(batch[index]);
-  const sanitized = sanitizeRecordedCarriedContext({ messages: batch, receipt, agentSessionId });
-  if (sanitized.kind === 'mismatch') {
-    throw new AgentTranscriptIndexError({
-      kind: 'agent-transcript-index-failure',
-      code: 'CONTEXT_ENVELOPE_MISMATCH',
-      retryable: false,
-      refreshSource: false,
-    });
-  }
-  const messages = [...sanitized.messages];
-  if (source && messages[index] !== batch[index]) attachNativeMessageSource(messages[index], source);
-  return messages;
+  const message = parseChatMessages([value])[0];
+  if (!message) throw new Error('SOURCE_RECORD_INVALID');
+  return message;
 }
 
 export function catalogEntryKey(entry: TranscriptSearchCatalogEntry): string {
   return canonicalDigest({
     agentId: entry.agentId,
     model: entry.model,
-    updatedAt: entry.updatedAt,
     source: entry.source,
     carryOverRevision: entry.carryOverRevision,
-    agentSessionId: entry.agentSessionId,
-    nativeSeedReceiptDigest: nativeSeedReceiptDigest(entry.nativeSeedReceipt),
+    contentEpoch: entry.contentEpoch,
   });
 }
 
@@ -99,20 +103,11 @@ export function validateCatalogEntry(entry: TranscriptSearchCatalogEntry): void 
       || typeof entry.chatId !== 'string' || entry.chatId.length === 0
       || typeof entry.agentId !== 'string' || entry.agentId.length === 0
       || typeof entry.model !== 'string'
-      || (entry.updatedAt !== null && typeof entry.updatedAt !== 'string')
       || typeof entry.carryOverRevision !== 'string'
-      || (entry.agentSessionId !== null && (
-        typeof entry.agentSessionId !== 'string' || entry.agentSessionId.length === 0
+      || (entry.contentEpoch !== null && (
+        typeof entry.contentEpoch !== 'string' || entry.contentEpoch.length === 0
       ))
       || !entry.source || typeof entry.source !== 'object') {
-    throw new Error('INVALID_CATALOG_ENTRY');
-  }
-  const parsedReceipt = parseNativeSeedReceipt(entry.nativeSeedReceipt);
-  if ((entry.nativeSeedReceipt === null) !== (parsedReceipt === null)
-      || (parsedReceipt && (
-        parsedReceipt.agentSessionId !== entry.agentSessionId
-        || JSON.stringify(parsedReceipt) !== JSON.stringify(entry.nativeSeedReceipt)
-      ))) {
     throw new Error('INVALID_CATALOG_ENTRY');
   }
   if (entry.source.state === 'absent') return;
@@ -124,11 +119,23 @@ export function validateCatalogEntry(entry: TranscriptSearchCatalogEntry): void 
     return;
   }
   if (entry.source.state !== 'ready') throw new Error('INVALID_CATALOG_ENTRY');
-  const reference = entry.source.reference;
-  if (!reference || typeof reference !== 'object'
-      || reference.ownerId !== entry.agentId
-      || !Number.isSafeInteger(reference.schemaVersion) || reference.schemaVersion < 1
-      || !reference.value || typeof reference.value !== 'object' || Array.isArray(reference.value)
+  validateSourceReference(entry.source.reference, entry.agentId, entry.chatId);
+}
+
+function validateSourceReference(
+  reference: AgentTranscriptIndexSourceRefV4,
+  agentId: string,
+  chatId: string,
+): void {
+  if (reference.apiVersion !== 2
+      || reference.ownerId !== agentId
+      || reference.schemaVersion !== 2
+      || reference.checkpoint.chatId !== chatId
+      || reference.checkpoint.agentOwnershipEpoch.length === 0
+      || reference.checkpoint.contentEpoch.length === 0
+      || !Number.isSafeInteger(reference.checkpoint.durableCount)
+      || reference.checkpoint.durableCount < 0
+      || reference.checkpoint.durableRevision.length === 0
       || !isJsonValue(reference.value, new Set())) {
     throw new Error('INVALID_CATALOG_ENTRY');
   }
@@ -139,15 +146,6 @@ export function validateCatalogEntry(entry: TranscriptSearchCatalogEntry): void 
     throw new Error('INVALID_CATALOG_ENTRY');
   }
   if (Buffer.byteLength(encoded) > 64 * 1024) throw new Error('INVALID_CATALOG_ENTRY');
-}
-
-function batchTooLargeError(): AgentTranscriptIndexError {
-  return new AgentTranscriptIndexError({
-    kind: 'agent-transcript-index-failure',
-    code: 'SOURCE_BATCH_TOO_LARGE',
-    retryable: false,
-    refreshSource: false,
-  });
 }
 
 function isJsonValue(value: unknown, ancestors: Set<object>): boolean {

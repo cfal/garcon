@@ -579,6 +579,17 @@ export function wireServerEvents({
 
       const carryOverMessageCount = await getCarryOverMessageCount(event.chatId);
       if (event.kind === 'reset') {
+        const registered = chatRegistry.getChat(event.chatId);
+        if (!registered || registered.agentOwnershipEpoch !== event.agentOwnershipEpoch) {
+          throw new Error('PROJECTION_RESET_STALE_OWNER');
+        }
+        if (registered.transcriptContentEpoch !== event.checkpoint.projection.contentEpoch) {
+          await chatRegistry.updateChat(
+            event.chatId,
+            { transcriptContentEpoch: event.checkpoint.projection.contentEpoch },
+            { flush: true },
+          );
+        }
         const snapshot = await composeProjectionSnapshot(
           event.chatId,
           applied.current.entries.map((entry) => entry.message),
@@ -605,6 +616,7 @@ export function wireServerEvents({
           value.stateDigest,
           value.rows,
         ));
+        markSearchCatalogDirty(event.chatId);
         return;
       }
 

@@ -27,7 +27,7 @@ describe('CursorAgentIntegration', () => {
 
     expect(CursorAgentIntegration.integrationId).toBe('cursor');
     expect(CursorAgentIntegration.apiVersion).toBe(4);
-    expect(CursorAgentIntegration.transcriptIndex.apiVersion).toBe(1);
+    expect(CursorAgentIntegration.transcriptIndex.apiVersion).toBe(2);
     expect(integration.descriptor.id).toBe('cursor');
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();

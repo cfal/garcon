@@ -94,6 +94,7 @@ export interface AgentChatEntry {
   agentSettingsById?: Record<string, AgentSettingsEnvelope>;
   nativeSession?: AgentNativeSessionRef | null;
   agentOwnershipEpoch?: string;
+  transcriptContentEpoch?: string | null;
   nativeSeedReceipt?: NativeSeedReceipt | null;
   carryOverSegments?: readonly CarryOverSegmentRef[];
   carryOverMigrationQuarantine?: { artifactId: string; errorCode: string } | null;

@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { TranscriptSearchController } from '../controller.js';
+import { compositeSearchContentEpoch, TranscriptSearchController } from '../controller.js';
 
 const emptyStatus = {
   indexedChatCount: 0,
@@ -17,9 +17,35 @@ function registration(agentId, chatId) {
       model: 'model',
       nativeSession: null,
       carryOverRevision: 'carry-v1:0',
+      agentOwnershipEpoch: `owner-${chatId}`,
     },
     updatedAt: '2026-01-01T00:00:00.000Z',
+    transcriptContentEpoch: `segment-${chatId}`,
   };
+}
+
+function source(agentId, chatId) {
+  return {
+    apiVersion: 2,
+    ownerId: agentId,
+    schemaVersion: 2,
+    checkpoint: {
+      chatId,
+      agentOwnershipEpoch: `owner-${chatId}`,
+      contentEpoch: `segment-${chatId}`,
+      durableCount: 0,
+      durableRevision: 'revision-empty',
+    },
+    value: { directory: '/tmp/projection' },
+  };
+}
+
+function compositeEpoch(chatId) {
+  return compositeSearchContentEpoch({
+    carryOverRevision: 'carry-v1:0',
+    agentOwnershipEpoch: `owner-${chatId}`,
+    segmentContentEpoch: `segment-${chatId}`,
+  });
 }
 
 function integration(agentId, source = null) {
@@ -52,8 +78,8 @@ function controllerFixture(integrations, registrations, service = createService(
   const byId = new Map(integrations.map((entry) => [entry.descriptor.id, entry]));
   const classes = integrations.map((entry) => ({
     integrationId: entry.descriptor.id,
-    apiVersion: 3,
-    transcriptIndex: { apiVersion: 1, moduleUrl: import.meta.url },
+    apiVersion: 4,
+    transcriptIndex: { apiVersion: 2, moduleUrl: import.meta.url },
   }));
   return {
     controller: new TranscriptSearchController({
@@ -63,6 +89,7 @@ function controllerFixture(integrations, registrations, service = createService(
       },
       listChats: () => registrations,
       service,
+      persistContentEpoch: mock(async () => {}),
     }),
     service,
   };
@@ -89,14 +116,14 @@ describe('TranscriptSearchController', () => {
     expect(service.enable).toHaveBeenCalledWith({
       modules: [{
         agentId: 'claude',
-        reference: { apiVersion: 1, moduleUrl: import.meta.url },
+        reference: { apiVersion: 2, moduleUrl: import.meta.url },
       }],
       signal: expect.any(AbortSignal),
     });
     expect(service.reconcile).not.toHaveBeenCalled();
     release({
       kind: 'ready',
-      value: { ownerId: 'claude', schemaVersion: 1, value: { nativePath: '/tmp/chat.jsonl' } },
+      value: source('claude', 'chat-1'),
     });
     await Bun.sleep(10);
     expect(service.reconcile).toHaveBeenCalledWith({
@@ -131,20 +158,41 @@ describe('TranscriptSearchController', () => {
     const service = createService({
       search: mock(async () => ({
         results: [
-          { chatId: 'allowed', score: 2, matchedMessageCount: 1, snippets: [] },
-          { chatId: 'outside', score: 1, matchedMessageCount: 1, snippets: [] },
+          { chatId: 'allowed', contentEpoch: compositeEpoch('allowed'), score: 2, matchedMessageCount: 1, snippets: [] },
+          { chatId: 'stale', contentEpoch: 'superseded-content-epoch', score: 1.5, matchedMessageCount: 1, snippets: [] },
+          { chatId: 'outside', contentEpoch: compositeEpoch('outside'), score: 1, matchedMessageCount: 1, snippets: [] },
         ],
         index: { ...emptyStatus, indexedChatCount: 1 },
       })),
     });
-    const { controller } = controllerFixture([], [], service);
+    const providers = [
+      integration('claude', source('claude', 'allowed')),
+      integration('pi', source('pi', 'stale')),
+      integration('codex', source('codex', 'outside')),
+    ];
+    const { controller } = controllerFixture(
+      providers,
+      [
+        registration('claude', 'allowed'),
+        registration('pi', 'stale'),
+        registration('codex', 'outside'),
+      ],
+      service,
+    );
     await controller.start();
+    await Bun.sleep(10);
 
-    const response = await controller.search({ query: 'needle', allowedChatIds: ['allowed'] });
+    const response = await controller.search({
+      query: 'needle',
+      allowedChatIds: ['allowed', 'stale'],
+    });
 
     expect(response.results.map((result) => result.chatId)).toEqual(['allowed']);
     expect(service.search).toHaveBeenCalledWith(expect.objectContaining({
-      allowedChatIds: ['allowed'],
+      allowedChats: [
+        { chatId: 'allowed', contentEpoch: compositeEpoch('allowed') },
+        { chatId: 'stale', contentEpoch: compositeEpoch('stale') },
+      ],
       limit: 20,
       query: expect.objectContaining({ version: 1 }),
     }));

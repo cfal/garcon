@@ -493,6 +493,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     );
     this.#projection.closeSegment(chat);
     const result = await this.#projection.open(integration, chat, signal);
+    if (result.kind === 'ready') {
+      await this.#persistProjectionContentEpoch(
+        chatId,
+        chat.agentOwnershipEpoch,
+        result.value.checkpoint.projection.contentEpoch,
+      );
+    }
     return result.kind === 'ready';
   }
 
@@ -517,6 +524,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         ? 'TRANSCRIPT_PROJECTION_DEFERRED'
         : opened.errorCode);
     }
+    await this.#persistProjectionContentEpoch(
+      chatId,
+      chat.agentOwnershipEpoch,
+      opened.value.checkpoint.projection.contentEpoch,
+    );
     const operation = this.#admissionIdentity(chatId, session, options);
     if (options.commandType !== 'steer') {
       this.#events.trackTurn(chatId, {
@@ -593,6 +605,23 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       turnId: owner.turnId,
       turnOwner: owner,
     };
+  }
+
+  async #persistProjectionContentEpoch(
+    chatId: string,
+    ownershipEpoch: string,
+    contentEpoch: string,
+  ): Promise<void> {
+    const current = this.#registry.getChat(chatId);
+    if (!current || current.agentOwnershipEpoch !== ownershipEpoch) {
+      throw new Error('Projection content epoch belongs to a stale owner');
+    }
+    if (current.transcriptContentEpoch === contentEpoch) return;
+    await this.#registry.updateChat(
+      chatId,
+      { transcriptContentEpoch: contentEpoch },
+      { flush: true },
+    );
   }
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
   getAgentCatalogEntries() { return this.#catalog.getAgentCatalogEntries(); }

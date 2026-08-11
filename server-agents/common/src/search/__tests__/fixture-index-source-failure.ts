@@ -1,20 +1,14 @@
 import {
   AgentTranscriptIndexError,
-  type AgentTranscriptIndexerModule,
+  type AgentTranscriptIndexerModuleV4,
 } from '@garcon/server-agent-interface';
 
-// A source whose load always fails the way an expired provider session does:
-// retryable, and asking the host to refresh the source reference.
-const fixtureFailureModule: AgentTranscriptIndexerModule = {
+const fixtureFailureModule: AgentTranscriptIndexerModuleV4 = {
   integrationId: 'fixture-failing',
-  apiVersion: 1,
+  apiVersion: 2,
   create() {
     return {
-      async probe(source, signal) {
-        signal.throwIfAborted();
-        return { revision: typeof source.value.revision === 'string' ? source.value.revision : null };
-      },
-      load(request) {
+      async open(request) {
         request.signal.throwIfAborted();
         throw new AgentTranscriptIndexError({
           kind: 'agent-transcript-index-failure',

@@ -27,7 +27,7 @@ describe('ClaudeAgentIntegration', () => {
 
     expect(ClaudeAgentIntegration.integrationId).toBe('claude');
     expect(ClaudeAgentIntegration.apiVersion).toBe(4);
-    expect(ClaudeAgentIntegration.transcriptIndex.apiVersion).toBe(1);
+    expect(ClaudeAgentIntegration.transcriptIndex.apiVersion).toBe(2);
     expect(integration.descriptor.id).toBe('claude');
     expect(integration.descriptor.requiresNativePathForProjectPathUpdate).toBe(false);
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();

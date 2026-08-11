@@ -2,7 +2,7 @@ import type {
   AgentLogger,
   AgentIntegrationClassV4,
   AgentIntegrationV4,
-  AgentTranscriptIndexerModule,
+  AgentTranscriptIndexerModuleV4,
 } from '../index.js';
 
 export interface AgentIntegrationConformanceOptions {
@@ -31,7 +31,7 @@ export function validateAgentIntegration(
   if ('transcriptSearch' in integration) {
     throw new Error(`Agent integration ${integration.descriptor.id} exposes removed transcriptSearch state`);
   }
-  if (integrationClass.transcriptIndex.apiVersion !== 1
+  if (integrationClass.transcriptIndex.apiVersion !== 2
       || !integrationClass.transcriptIndex.moduleUrl) {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing its transcript index module`);
   }
@@ -139,14 +139,13 @@ export async function runAgentTranscriptIndexerConformance(options: {
   readonly logger: AgentLogger;
 }): Promise<void> {
   const imported = await import(options.moduleUrl) as { default?: unknown };
-  const module = imported.default as Partial<AgentTranscriptIndexerModule> | undefined;
-  if (!module || module.apiVersion !== 1 || module.integrationId !== options.integrationId
+  const module = imported.default as Partial<AgentTranscriptIndexerModuleV4> | undefined;
+  if (!module || module.apiVersion !== 2 || module.integrationId !== options.integrationId
       || typeof module.create !== 'function') {
     throw new Error(`Agent integration ${options.integrationId} has an invalid transcript index module`);
   }
   const source = module.create({ agentId: options.integrationId, logger: options.logger });
-  if (!source || typeof source.probe !== 'function'
-      || typeof source.load !== 'function' || typeof source.close !== 'function') {
+  if (!source || typeof source.open !== 'function' || typeof source.close !== 'function') {
     throw new Error(`Agent integration ${options.integrationId} has an invalid transcript index source`);
   }
   await source.close();

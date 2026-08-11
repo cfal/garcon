@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import type {
   AgentChatReferenceV4,
-  AgentTranscriptIndexSourceRef,
   AgentTranscriptIndexSourceRefV4,
 } from '@garcon/server-agent-interface';
 import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
 import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
+import { stableJsonStringify } from '@garcon/common/json';
 import type { IntegrationRegistry } from '../../agents/integration-registry.js';
 import type {
   TranscriptSearchCatalogEntry,
@@ -25,12 +26,18 @@ export interface TranscriptSearchChatRegistration {
   readonly agentId: string;
   readonly reference: AgentChatReferenceV4;
   readonly updatedAt: string | null;
+  readonly transcriptContentEpoch: string | null;
 }
 
 export interface TranscriptSearchControllerDeps {
   readonly integrations: IntegrationRegistry;
   readonly listChats: () => readonly TranscriptSearchChatRegistration[];
   readonly service: TranscriptSearchService;
+  readonly persistContentEpoch: (request: {
+    readonly chatId: string;
+    readonly agentOwnershipEpoch: string;
+    readonly contentEpoch: string;
+  }) => Promise<void>;
   readonly searchTimeoutMs?: number;
 }
 
@@ -87,9 +94,7 @@ export class TranscriptSearchController {
     const known = this.#deps.listChats().some((entry) => entry.reference.chatId === chatId);
     if (!known) return;
     this.#deps.service.sourceMayHaveChanged({ chatId, generation: this.#nextGeneration() });
-    if (this.#catalogEntries.get(chatId)?.source.state !== 'ready') {
-      this.#scheduleCatalogReconcile();
-    }
+    this.#scheduleCatalogReconcile();
   }
 
   markDirty(chatId: string): void {
@@ -144,14 +149,21 @@ export class TranscriptSearchController {
     timeout.unref?.();
     try {
       const allowed = new Set(options.allowedChatIds);
+      const allowedChats = options.allowedChatIds.flatMap((chatId) => {
+        const contentEpoch = this.#catalogEntries.get(chatId)?.contentEpoch;
+        return contentEpoch ? [{ chatId, contentEpoch }] : [];
+      });
       const response = await this.#deps.service.search({
         query: compileQuery(options.query, options.textTokens),
-        allowedChatIds: options.allowedChatIds,
+        allowedChats,
         limit: clampLimit(options.limit),
         signal: abort.signal,
       });
       return {
-        results: response.results.filter((result) => allowed.has(result.chatId)),
+        results: response.results.filter((result) => (
+          allowed.has(result.chatId)
+          && this.#catalogEntries.get(result.chatId)?.contentEpoch === result.contentEpoch
+        )),
         index: response.index,
       };
     } catch (error) {
@@ -270,7 +282,14 @@ export class TranscriptSearchController {
         const reference = result.value;
         if (!reference) source = { state: 'absent' };
         else {
-          validateIndexSource(reference, registration.agentId);
+          validateIndexSource(reference, registration.agentId, registration.reference);
+          if (registration.transcriptContentEpoch !== reference.checkpoint.contentEpoch) {
+            await this.#deps.persistContentEpoch({
+              chatId: registration.reference.chatId,
+              agentOwnershipEpoch: registration.reference.agentOwnershipEpoch,
+              contentEpoch: reference.checkpoint.contentEpoch,
+            });
+          }
           source = { state: 'ready', reference };
         }
       } catch (error) {
@@ -286,12 +305,22 @@ export class TranscriptSearchController {
     registration: TranscriptSearchChatRegistration,
     source: TranscriptSearchCatalogEntry['source'],
   ): TranscriptSearchCatalogEntry {
+    const segmentContentEpoch = source.state === 'ready'
+      ? source.reference.checkpoint.contentEpoch
+      : registration.transcriptContentEpoch;
     return {
       chatId: registration.reference.chatId,
       agentId: registration.agentId,
       model: registration.reference.model,
       updatedAt: registration.updatedAt,
       source,
+      contentEpoch: segmentContentEpoch
+        ? compositeSearchContentEpoch({
+            carryOverRevision: registration.reference.carryOverRevision,
+            agentOwnershipEpoch: registration.reference.agentOwnershipEpoch,
+            segmentContentEpoch,
+          })
+        : null,
       carryOverRevision: registration.reference.carryOverRevision,
       agentSessionId: registration.reference.agentSessionId,
       nativeSeedReceipt: registration.reference.nativeSeedReceipt,
@@ -322,7 +351,6 @@ export class TranscriptSearchController {
     const integration = this.#deps.integrations.get(request.agentId);
     if (!registration || !integration) return;
     const signal = AbortSignal.any([request.signal, this.#lifecycleAbort.signal]);
-    if (!isV4IndexSource(request.failedSource)) return;
     const result = await integration.transcript.refreshIndexSource({
       chat: registration.reference,
       failedSource: request.failedSource,
@@ -332,7 +360,7 @@ export class TranscriptSearchController {
     signal.throwIfAborted();
     if (result.kind !== 'ready') return;
     const reference = result.value;
-    if (reference) validateIndexSource(reference, request.agentId);
+    if (reference) validateIndexSource(reference, request.agentId, registration.reference);
     this.#scheduleCatalogReconcile(0);
   }
 
@@ -341,10 +369,20 @@ export class TranscriptSearchController {
   }
 }
 
-function validateIndexSource(reference: AgentTranscriptIndexSourceRef, agentId: string): void {
+function validateIndexSource(
+  reference: AgentTranscriptIndexSourceRefV4,
+  agentId: string,
+  chat: AgentChatReferenceV4,
+): void {
   if (reference.ownerId !== agentId
-      || !Number.isSafeInteger(reference.schemaVersion)
-      || reference.schemaVersion < 1
+      || reference.apiVersion !== 2
+      || reference.schemaVersion !== 2
+      || reference.checkpoint.chatId !== chat.chatId
+      || reference.checkpoint.agentOwnershipEpoch !== chat.agentOwnershipEpoch
+      || reference.checkpoint.contentEpoch.length === 0
+      || !Number.isSafeInteger(reference.checkpoint.durableCount)
+      || reference.checkpoint.durableCount < 0
+      || reference.checkpoint.durableRevision.length === 0
       || !reference.value
       || typeof reference.value !== 'object'
       || Array.isArray(reference.value)
@@ -356,11 +394,17 @@ function validateIndexSource(reference: AgentTranscriptIndexSourceRef, agentId: 
   }
 }
 
-function isV4IndexSource(
-  reference: AgentTranscriptIndexSourceRef,
-): reference is AgentTranscriptIndexSourceRefV4 {
-  return (reference as Partial<AgentTranscriptIndexSourceRefV4>).apiVersion === 2
-    && Boolean((reference as Partial<AgentTranscriptIndexSourceRefV4>).checkpoint);
+export function compositeSearchContentEpoch(input: {
+  readonly carryOverRevision: string;
+  readonly agentOwnershipEpoch: string;
+  readonly segmentContentEpoch: string;
+}): string {
+  return `search-content-v1:${createHash('sha256').update(stableJsonStringify({
+    version: 1,
+    carryOverRevision: input.carryOverRevision,
+    agentOwnershipEpoch: input.agentOwnershipEpoch,
+    segmentContentEpoch: input.segmentContentEpoch,
+  })).digest('hex')}`;
 }
 
 function isJsonValue(value: unknown, ancestors: Set<object>): boolean {

@@ -41,7 +41,7 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'amp';
   static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
-    apiVersion: 1,
+    apiVersion: 2,
     moduleUrl: resolveAgentStandaloneEntrypoint({
       integrationId: 'amp',
       name: 'transcript-index-source',

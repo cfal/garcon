@@ -20,6 +20,7 @@ import type {
   AgentSteeringV4,
 } from './services.js';
 import type { AgentTranscriptIndexModuleReference } from './transcript-index.js';
+import type { AgentTranscriptIndexerModuleV4 } from './transcript-index-v4.js';
 import type { AgentTranscript } from './transcript.js';
 import type { AgentExecutionV4 } from './execution-events-v4.js';
 import type {
@@ -67,5 +68,5 @@ export interface AgentIntegrationClassV4 {
   new (host: AgentHost): AgentIntegrationV4;
   readonly integrationId: string;
   readonly apiVersion: 4;
-  readonly transcriptIndex: AgentTranscriptIndexModuleReference;
+  readonly transcriptIndex: AgentTranscriptIndexModuleReference & Pick<AgentTranscriptIndexerModuleV4, 'apiVersion'>;
 }

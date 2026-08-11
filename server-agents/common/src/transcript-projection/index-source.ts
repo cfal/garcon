@@ -5,6 +5,7 @@ import type {
   AgentTranscriptIndexOpenResultV4,
   AgentTranscriptIndexSourceRefV4,
   AgentTranscriptIndexSourceV4,
+  AgentTranscriptIndexerModuleV4,
 } from '@garcon/server-agent-interface';
 import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import { AgentProjectionJournal } from './journal.js';
@@ -69,6 +70,16 @@ export class JournalTranscriptIndexSource implements AgentTranscriptIndexSourceV
   }
 
   async close(): Promise<void> {}
+}
+
+export function createJournalTranscriptIndexerModule(
+  integrationId: string,
+): AgentTranscriptIndexerModuleV4 {
+  return {
+    integrationId,
+    apiVersion: 2,
+    create: () => new JournalTranscriptIndexSource(),
+  };
 }
 
 async function* batches(

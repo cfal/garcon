@@ -1,5 +1,10 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
-import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
+import type {
+  ChatSearchIndexStatus,
+  ChatSearchQueryV1,
+  ChatSearchResult,
+  TranscriptSearchAllowedChat,
+} from '@garcon/common/chat-search';
 import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type {
@@ -12,7 +17,7 @@ import { canonicalDigest } from './digest.js';
 export interface TranscriptIndexModuleRegistration {
   readonly agentId: string;
   readonly moduleUrl: string;
-  readonly apiVersion: 1;
+  readonly apiVersion: 2;
 }
 
 interface RequestBase {
@@ -50,7 +55,7 @@ export type IndexerRequest =
       readonly type: 'carry-over-chunk';
       readonly chunkIndex: number;
       readonly revision: string;
-      readonly messages: readonly ChatMessage[];
+      readonly entries: readonly import('./transcript-search-service.js').TranscriptSearchCarryOverEntry[];
       readonly done: boolean;
       readonly code?: string;
       readonly retryable?: boolean;
@@ -123,7 +128,7 @@ export type ReaderRequest =
   | (RequestBase & {
       readonly type: 'search-allowlist-chunk';
       readonly chunkIndex: number;
-      readonly allowedChatIds: readonly string[];
+      readonly allowedChats: readonly TranscriptSearchAllowedChat[];
       readonly done: boolean;
     })
   | (RequestBase & { readonly type: 'close' });
@@ -164,10 +169,6 @@ function generation(value: unknown): boolean {
     && Number(candidate!.sequence) > 0;
 }
 
-function stringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
-}
-
 function failureCode(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value);
 }
@@ -192,6 +193,8 @@ function searchResult(value: unknown): boolean {
   if (!candidate
       || typeof candidate.chatId !== 'string'
       || candidate.chatId.length === 0
+      || typeof candidate.contentEpoch !== 'string'
+      || candidate.contentEpoch.length === 0
       || typeof candidate.score !== 'number'
       || !Number.isFinite(candidate.score)
       || !Number.isSafeInteger(candidate.matchedMessageCount)
@@ -203,9 +206,36 @@ function searchResult(value: unknown): boolean {
     return Boolean(snippet)
       && Number.isSafeInteger(snippet!.messageOrdinal)
       && Number(snippet!.messageOrdinal) >= 0
+      && searchAnchor(snippet!.anchor)
       && ['user', 'assistant', 'tool', 'system'].includes(String(snippet!.role))
       && (snippet!.timestamp === null || typeof snippet!.timestamp === 'string')
       && typeof snippet!.text === 'string';
+  });
+}
+
+function searchAnchor(value: unknown): boolean {
+  const candidate = record(value);
+  if (!candidate) return false;
+  if (candidate.kind === 'carryover-entry') {
+    return typeof candidate.segmentId === 'string' && candidate.segmentId.length > 0
+      && Number.isSafeInteger(candidate.localOrdinal) && Number(candidate.localOrdinal) > 0;
+  }
+  if (candidate.kind === 'agent-switch') {
+    return typeof candidate.segmentId === 'string' && candidate.segmentId.length > 0;
+  }
+  return candidate.kind === 'current-entry'
+    && typeof candidate.agentOwnershipEpoch === 'string'
+    && candidate.agentOwnershipEpoch.length > 0
+    && typeof candidate.entryId === 'string'
+    && candidate.entryId.length > 0;
+}
+
+function allowedChats(value: unknown): value is TranscriptSearchAllowedChat[] {
+  return Array.isArray(value) && value.every((entry) => {
+    const candidate = record(entry);
+    return Boolean(candidate)
+      && typeof candidate!.chatId === 'string' && candidate!.chatId.length > 0
+      && typeof candidate!.contentEpoch === 'string' && candidate!.contentEpoch.length > 0;
   });
 }
 
@@ -256,7 +286,7 @@ export function isIndexerRequest(value: unknown): value is IndexerRequest {
           return Boolean(module)
             && typeof module!.agentId === 'string'
             && typeof module!.moduleUrl === 'string' && module!.moduleUrl.length <= 64 * 1024
-            && module!.apiVersion === 1;
+            && module!.apiVersion === 2;
         })
         && Array.isArray(candidate.quarantines) && candidate.quarantines.length <= 10_000
         && candidate.quarantines.every((entry) => {
@@ -278,8 +308,12 @@ export function isIndexerRequest(value: unknown): value is IndexerRequest {
     case 'carry-over-chunk':
       return Number.isSafeInteger(candidate.chunkIndex)
         && typeof candidate.revision === 'string'
-        && Array.isArray(candidate.messages) && candidate.messages.length <= 250
-        && jsonBytesWithin(candidate.messages, 8 * 1024 * 1024)
+        && Array.isArray(candidate.entries) && candidate.entries.length <= 250
+        && candidate.entries.every((entry) => {
+          const carry = record(entry);
+          return Boolean(carry) && record(carry!.message) !== null && searchAnchor(carry!.anchor);
+        })
+        && jsonBytesWithin(candidate.entries, 8 * 1024 * 1024)
         && typeof candidate.done === 'boolean'
         && (candidate.code === undefined || failureCode(candidate.code))
         && (candidate.retryable === undefined || typeof candidate.retryable === 'boolean');
@@ -303,9 +337,9 @@ export function isReaderRequest(value: unknown): value is ReaderRequest {
         && Number(candidate.limit) <= 100;
     case 'search-allowlist-chunk':
       return Number.isSafeInteger(candidate.chunkIndex)
-        && stringArray(candidate.allowedChatIds)
-        && candidate.allowedChatIds.length <= 2_000
-        && jsonBytesWithin(candidate.allowedChatIds, 8 * 1024 * 1024)
+        && allowedChats(candidate.allowedChats)
+        && candidate.allowedChats.length <= 2_000
+        && jsonBytesWithin(candidate.allowedChats, 8 * 1024 * 1024)
         && typeof candidate.done === 'boolean';
     case 'close':
       return true;
@@ -404,10 +438,6 @@ export function nativeSeedReceiptDigest(receipt: NativeSeedReceipt | null): stri
 
 export function catalogSourceDescriptorHash(entry: TranscriptSearchCatalogEntry): string | null {
   return entry.source.state === 'ready'
-    ? canonicalDigest({
-        source: entry.source.reference,
-        agentSessionId: entry.agentSessionId,
-        nativeSeedReceiptDigest: nativeSeedReceiptDigest(entry.nativeSeedReceipt),
-      })
+    ? canonicalDigest(entry.source.reference)
     : null;
 }

@@ -3,8 +3,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { canonicalDigest } from './digest.js';
 import type { HistoricalSearchMessageRow } from './rows.js';
+import type { AgentTranscriptIndexCheckpointV4 } from '@garcon/server-agent-interface';
 
-export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 5;
+export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 6;
 
 export type SearchChatStatus = 'pending' | 'sealed' | 'failed' | 'unsupported';
 
@@ -20,6 +21,11 @@ export interface SearchChatState {
   readonly model: string;
   readonly sourceDescriptorHash: string | null;
   readonly sourceRevision: string | null;
+  readonly contentEpoch: string | null;
+  readonly indexedDurableCount: number;
+  readonly indexedDurableRevision: string | null;
+  readonly targetDurableCount: number;
+  readonly targetDurableRevision: string | null;
   readonly carryOverRevision: string;
   readonly agentSessionId: string | null;
   readonly nativeSeedReceiptDigest: string;
@@ -40,6 +46,8 @@ export interface SearchChatAttempt {
   readonly projectorVersion: number;
   readonly sourceDescriptorHash: string | null;
   readonly sourceRevision: string | null;
+  readonly contentEpoch: string | null;
+  readonly sourceCheckpoint: AgentTranscriptIndexCheckpointV4 | null;
   readonly carryOverRevision: string;
   readonly agentSessionId: string | null;
   readonly nativeSeedReceiptDigest: string;
@@ -48,6 +56,7 @@ export interface SearchChatAttempt {
 }
 
 export interface SearchChatSeal extends SearchChatAttempt {
+  readonly contentEpoch: string;
   readonly contentDigest: string;
   readonly sealedSourceKey: string;
   readonly messageCount: number;
@@ -93,6 +102,11 @@ export function createSchema(db: Database): void {
       projector_version INTEGER NOT NULL,
       source_descriptor_hash TEXT,
       source_revision TEXT,
+      content_epoch TEXT,
+      indexed_durable_count INTEGER NOT NULL,
+      indexed_durable_revision TEXT,
+      target_durable_count INTEGER NOT NULL,
+      target_durable_revision TEXT,
       carry_over_revision TEXT NOT NULL,
       agent_session_id TEXT,
       native_seed_receipt_digest TEXT NOT NULL,
@@ -110,15 +124,16 @@ export function createSchema(db: Database): void {
     CREATE TABLE search_chunks (
       id INTEGER PRIMARY KEY,
       chat_id TEXT NOT NULL REFERENCES search_chat_state(chat_id) ON DELETE CASCADE,
+      content_epoch TEXT NOT NULL,
       message_ordinal INTEGER NOT NULL,
       role INTEGER NOT NULL CHECK(role IN (0, 1, 2, 3)),
       timestamp TEXT,
       body TEXT NOT NULL,
-      source_anchor TEXT,
+      entry_anchor TEXT NOT NULL,
       chat_scope TEXT NOT NULL GENERATED ALWAYS AS (
         'c' || lower(hex(CAST(chat_id AS BLOB)))
       ) STORED,
-      UNIQUE(chat_id, message_ordinal)
+      UNIQUE(chat_id, content_epoch, message_ordinal)
     ) STRICT;
     CREATE VIRTUAL TABLE search_chunks_fts USING fts5(
       body,
@@ -169,20 +184,23 @@ function validateExistingSchema(db: Database): void {
   const chunksSql = db.query<{ sql: string | null }, []>(
     "SELECT sql FROM sqlite_master WHERE name = 'search_chunks'",
   ).get()?.sql ?? '';
-  if (!/source_anchor/i.test(chunksSql) || !/chat_scope/i.test(chunksSql)) {
+  if (!/entry_anchor/i.test(chunksSql) || !/content_epoch/i.test(chunksSql)
+      || !/chat_scope/i.test(chunksSql)) {
     throw new Error('Transcript search chunk schema is invalid');
   }
   requireColumns(db, 'search_chat_state', [
     'chat_id', 'agent_id', 'model', 'source_api_version', 'projector_version',
     'source_descriptor_hash', 'source_revision', 'carry_over_revision',
+    'content_epoch', 'indexed_durable_count', 'indexed_durable_revision',
+    'target_durable_count', 'target_durable_revision',
     'agent_session_id', 'native_seed_receipt_digest',
     'content_digest', 'sealed_source_key', 'operation_epoch', 'operation_sequence',
     'message_count', 'status', 'last_error_code', 'last_checked_at', 'indexed_at',
     'updated_at',
   ]);
   requireColumns(db, 'search_chunks', [
-    'id', 'chat_id', 'message_ordinal', 'role', 'timestamp', 'body',
-    'source_anchor', 'chat_scope',
+    'id', 'chat_id', 'content_epoch', 'message_ordinal', 'role', 'timestamp', 'body',
+    'entry_anchor', 'chat_scope',
   ]);
   const ftsSql = db.query<{ sql: string | null }, []>(
     "SELECT sql FROM sqlite_master WHERE name = 'search_chunks_fts'",
@@ -294,7 +312,7 @@ export function prepareChatBuild(db: Database): void {
       role INTEGER NOT NULL,
       timestamp TEXT,
       body TEXT NOT NULL,
-      source_anchor TEXT
+      entry_anchor TEXT NOT NULL
     ) WITHOUT ROWID
   `);
   db.query('DELETE FROM temp_search_build').run();
@@ -302,12 +320,12 @@ export function prepareChatBuild(db: Database): void {
 
 export function stageChatRows(db: Database, rows: readonly HistoricalSearchMessageRow[]): void {
   const insert = db.query(`
-    INSERT INTO temp_search_build(message_ordinal, role, timestamp, body, source_anchor)
+    INSERT INTO temp_search_build(message_ordinal, role, timestamp, body, entry_anchor)
     VALUES (?, ?, ?, ?, ?)
   `);
   runTransaction(db, () => {
     for (const row of rows) {
-      insert.run(row.messageOrdinal, ROLE_CODES[row.role], row.timestamp, row.body, row.sourceAnchor ?? null);
+      insert.run(row.messageOrdinal, ROLE_CODES[row.role], row.timestamp, row.body, JSON.stringify(row.anchor));
     }
   });
 }
@@ -316,6 +334,11 @@ export function getChatState(db: Database, chatId: string): SearchChatState | nu
   return db.query<SearchChatState, [string]>(`
     SELECT chat_id AS chatId, agent_id AS agentId, model,
       source_descriptor_hash AS sourceDescriptorHash, source_revision AS sourceRevision,
+      content_epoch AS contentEpoch,
+      indexed_durable_count AS indexedDurableCount,
+      indexed_durable_revision AS indexedDurableRevision,
+      target_durable_count AS targetDurableCount,
+      target_durable_revision AS targetDurableRevision,
       carry_over_revision AS carryOverRevision, agent_session_id AS agentSessionId,
       native_seed_receipt_digest AS nativeSeedReceiptDigest,
       content_digest AS contentDigest,
@@ -352,10 +375,12 @@ export function markChatAttempt(
     INSERT INTO search_chat_state(
       chat_id, agent_id, model, source_api_version, projector_version,
       source_descriptor_hash, source_revision, carry_over_revision,
+      content_epoch, indexed_durable_count, indexed_durable_revision,
+      target_durable_count, target_durable_revision,
       agent_session_id, native_seed_receipt_digest,
       operation_epoch, operation_sequence, message_count, status,
       last_error_code, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
     ON CONFLICT(chat_id) DO UPDATE SET
       agent_id = excluded.agent_id,
       model = excluded.model,
@@ -363,6 +388,9 @@ export function markChatAttempt(
       projector_version = excluded.projector_version,
       source_descriptor_hash = excluded.source_descriptor_hash,
       source_revision = excluded.source_revision,
+      content_epoch = excluded.content_epoch,
+      target_durable_count = excluded.target_durable_count,
+      target_durable_revision = excluded.target_durable_revision,
       carry_over_revision = excluded.carry_over_revision,
       agent_session_id = excluded.agent_session_id,
       native_seed_receipt_digest = excluded.native_seed_receipt_digest,
@@ -374,7 +402,10 @@ export function markChatAttempt(
   `).run(
     attempt.chatId, attempt.agentId, attempt.model, attempt.sourceApiVersion,
     attempt.projectorVersion, attempt.sourceDescriptorHash, attempt.sourceRevision,
-    attempt.carryOverRevision, attempt.agentSessionId, attempt.nativeSeedReceiptDigest,
+    attempt.carryOverRevision, attempt.contentEpoch,
+    attempt.sourceCheckpoint?.durableCount ?? 0,
+    attempt.sourceCheckpoint?.durableRevision ?? null,
+    attempt.agentSessionId, attempt.nativeSeedReceiptDigest,
     attempt.operationEpoch, attempt.operationSequence,
     status, errorCode, timestamp,
   );
@@ -387,10 +418,12 @@ export function sealChatFromStaging(db: Database, seal: SearchChatSeal): void {
       INSERT INTO search_chat_state(
         chat_id, agent_id, model, source_api_version, projector_version,
         source_descriptor_hash, source_revision, carry_over_revision,
+        content_epoch, indexed_durable_count, indexed_durable_revision,
+        target_durable_count, target_durable_revision,
         agent_session_id, native_seed_receipt_digest,
         content_digest, sealed_source_key, operation_epoch, operation_sequence,
         message_count, status, last_error_code, last_checked_at, indexed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sealed', NULL, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sealed', NULL, ?, ?, ?)
       ON CONFLICT(chat_id) DO UPDATE SET
         agent_id = excluded.agent_id,
         model = excluded.model,
@@ -398,6 +431,11 @@ export function sealChatFromStaging(db: Database, seal: SearchChatSeal): void {
         projector_version = excluded.projector_version,
         source_descriptor_hash = excluded.source_descriptor_hash,
         source_revision = excluded.source_revision,
+        content_epoch = excluded.content_epoch,
+        indexed_durable_count = excluded.indexed_durable_count,
+        indexed_durable_revision = excluded.indexed_durable_revision,
+        target_durable_count = excluded.target_durable_count,
+        target_durable_revision = excluded.target_durable_revision,
         carry_over_revision = excluded.carry_over_revision,
         agent_session_id = excluded.agent_session_id,
         native_seed_receipt_digest = excluded.native_seed_receipt_digest,
@@ -412,16 +450,64 @@ export function sealChatFromStaging(db: Database, seal: SearchChatSeal): void {
     `).run(
       seal.chatId, seal.agentId, seal.model, seal.sourceApiVersion, seal.projectorVersion,
       seal.sourceDescriptorHash, seal.sourceRevision, seal.carryOverRevision,
+      seal.contentEpoch,
+      seal.sourceCheckpoint?.durableCount ?? 0,
+      seal.sourceCheckpoint?.durableRevision ?? null,
+      seal.sourceCheckpoint?.durableCount ?? 0,
+      seal.sourceCheckpoint?.durableRevision ?? null,
       seal.agentSessionId, seal.nativeSeedReceiptDigest,
       seal.contentDigest, seal.sealedSourceKey, seal.operationEpoch, seal.operationSequence,
       seal.messageCount, timestamp, timestamp, timestamp,
     );
     db.query('DELETE FROM search_chunks WHERE chat_id = ?').run(seal.chatId);
     db.query(`
-      INSERT INTO search_chunks(chat_id, message_ordinal, role, timestamp, body, source_anchor)
-      SELECT ?, message_ordinal, role, timestamp, body, source_anchor
+      INSERT INTO search_chunks(chat_id, content_epoch, message_ordinal, role, timestamp, body, entry_anchor)
+      SELECT ?, ?, message_ordinal, role, timestamp, body, entry_anchor
       FROM temp_search_build ORDER BY message_ordinal
-    `).run(seal.chatId);
+    `).run(seal.chatId, seal.contentEpoch);
+  });
+}
+
+export function appendChatFromStaging(db: Database, seal: SearchChatSeal): void {
+  const timestamp = nowIso();
+  runTransaction(db, () => {
+    const current = db.query<{ contentEpoch: string | null }, [string]>(`
+      SELECT content_epoch AS contentEpoch FROM search_chat_state WHERE chat_id = ?
+    `).get(seal.chatId);
+    if (current?.contentEpoch !== seal.contentEpoch) {
+      throw new Error('SEARCH_CONTENT_EPOCH_MISMATCH');
+    }
+    db.query(`
+      INSERT INTO search_chunks(chat_id, content_epoch, message_ordinal, role, timestamp, body, entry_anchor)
+      SELECT ?, ?, message_ordinal, role, timestamp, body, entry_anchor
+      FROM temp_search_build ORDER BY message_ordinal
+    `).run(seal.chatId, seal.contentEpoch);
+    const searchable = Number(db.query<{ count: number }, [string, string]>(`
+      SELECT COUNT(*) AS count FROM search_chunks WHERE chat_id = ? AND content_epoch = ?
+    `).get(seal.chatId, seal.contentEpoch)?.count ?? 0);
+    db.query(`
+      UPDATE search_chat_state SET
+        agent_id = ?, model = ?, source_api_version = ?, projector_version = ?,
+        source_descriptor_hash = ?, source_revision = ?, carry_over_revision = ?,
+        indexed_durable_count = ?, indexed_durable_revision = ?,
+        target_durable_count = ?, target_durable_revision = ?,
+        agent_session_id = ?, native_seed_receipt_digest = ?, content_digest = ?,
+        sealed_source_key = ?, operation_epoch = ?, operation_sequence = ?,
+        message_count = ?, status = ?, last_error_code = NULL,
+        last_checked_at = ?, indexed_at = ?, updated_at = ?
+      WHERE chat_id = ? AND content_epoch = ?
+    `).run(
+      seal.agentId, seal.model, seal.sourceApiVersion, seal.projectorVersion,
+      seal.sourceDescriptorHash, seal.sourceRevision, seal.carryOverRevision,
+      seal.sourceCheckpoint?.durableCount ?? 0,
+      seal.sourceCheckpoint?.durableRevision ?? null,
+      seal.sourceCheckpoint?.durableCount ?? 0,
+      seal.sourceCheckpoint?.durableRevision ?? null,
+      seal.agentSessionId, seal.nativeSeedReceiptDigest, seal.contentDigest,
+      seal.sealedSourceKey, seal.operationEpoch, seal.operationSequence,
+      seal.messageCount, searchable > 0 ? 'sealed' : 'unsupported',
+      timestamp, timestamp, timestamp, seal.chatId, seal.contentEpoch,
+    );
   });
 }
 
@@ -459,6 +545,8 @@ export function replaceChatRows(
     projectorVersion: 1,
     sourceDescriptorHash: null,
     sourceRevision: sourceKey,
+    contentEpoch: `benchmark:${sourceKey}`,
+    sourceCheckpoint: null,
     carryOverRevision: 'carry-v1:0',
     agentSessionId: null,
     nativeSeedReceiptDigest: canonicalDigest(null),

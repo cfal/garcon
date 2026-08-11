@@ -26,8 +26,27 @@ export interface ChatSearchRequest {
   limit?: number;
 }
 
+export type TranscriptSearchEntryAnchor =
+  | {
+      readonly kind: 'carryover-entry';
+      readonly segmentId: string;
+      readonly localOrdinal: number;
+    }
+  | { readonly kind: 'agent-switch'; readonly segmentId: string }
+  | {
+      readonly kind: 'current-entry';
+      readonly agentOwnershipEpoch: string;
+      readonly entryId: string;
+    };
+
+export interface TranscriptSearchAllowedChat {
+  readonly chatId: string;
+  readonly contentEpoch: string;
+}
+
 export interface ChatSearchSnippet {
   messageOrdinal: number;
+  anchor: TranscriptSearchEntryAnchor;
   role: ChatSearchSnippetRole;
   timestamp: string | null;
   text: string;
@@ -35,6 +54,7 @@ export interface ChatSearchSnippet {
 
 export interface ChatSearchResult {
   chatId: string;
+  contentEpoch: string;
   score: number;
   matchedMessageCount: number;
   snippets: ChatSearchSnippet[];

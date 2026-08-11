@@ -398,7 +398,7 @@ export async function startServer(): Promise<void> {
         }
         return {
           revision,
-          batches: carryOver.stream({
+          batches: carryOver.streamSearchEntries({
             refs: entry.carryOverSegments,
             maxMessagesPerBatch: request.limits.maxMessagesPerBatch,
             signal: request.signal,
@@ -409,6 +409,18 @@ export async function startServer(): Promise<void> {
     const chatSearch = new TranscriptSearchController({
       integrations: integrationRegistry,
       service: transcriptSearchService,
+      persistContentEpoch: async (request) => {
+        const current = chatRegistry.getChat(request.chatId);
+        if (!current || current.agentOwnershipEpoch !== request.agentOwnershipEpoch) {
+          throw new Error('SEARCH_CONTENT_EPOCH_STALE_OWNER');
+        }
+        if (current.transcriptContentEpoch === request.contentEpoch) return;
+        await chatRegistry.updateChat(
+          request.chatId,
+          { transcriptContentEpoch: request.contentEpoch },
+          { flush: true },
+        );
+      },
       listChats: () => Object.entries(chatRegistry.listAllChats()).flatMap(([chatId, session]) => {
         const integration = integrationRegistry.get(session.agentId);
         if (!integration) return [];
@@ -424,6 +436,7 @@ export async function startServer(): Promise<void> {
             ),
           ),
           updatedAt: metadata.getChatMetadata(chatId)?.lastActivity ?? null,
+          transcriptContentEpoch: session.transcriptContentEpoch,
         }];
       }),
     });

@@ -52,7 +52,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
   static readonly integrationId = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
-    apiVersion: 1,
+    apiVersion: 2,
     moduleUrl: resolveAgentStandaloneEntrypoint({
       integrationId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
       name: 'transcript-index-source',
