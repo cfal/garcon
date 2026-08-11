@@ -99,7 +99,7 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     const events = [];
-    execution.subscribe((event) => events.push(event));
+    execution.subscribeProjectionEvents((event) => events.push(event));
     const request = startRequest({
       endpoint: {
         apiProviderId: 'provider-1',
@@ -171,7 +171,7 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     const events = [];
-    execution.subscribe((event) => events.push(event));
+    execution.subscribeProjectionEvents((event) => events.push(event));
 
     await expect(execution.start(startRequest())).rejects.toThrow('did not materialize');
     expect(events.some((event) => event.type === 'session-created')).toBe(false);
@@ -232,7 +232,7 @@ describe('CodexExecution', () => {
       const successor = { ...predecessor, clientRequestId: 'request-2', turnId: 'turn-2' };
       const next = { ...predecessor, clientRequestId: 'request-3', turnId: 'turn-3' };
       const events = [];
-      execution.subscribe((event) => events.push(event));
+      execution.subscribeProjectionEvents((event) => events.push(event));
       await execution.start(startRequest());
       runtime.submitGoalControl.mockImplementation(async () => {
         runtime.emitFinished('chat-1', 0, {
@@ -267,7 +267,7 @@ describe('CodexExecution', () => {
     const predecessor = startRequest().operation;
     const successor = { ...predecessor, clientRequestId: 'request-2', turnId: 'turn-2' };
     const events = [];
-    execution.subscribe((event) => events.push(event));
+    execution.subscribeProjectionEvents((event) => events.push(event));
     await execution.start(startRequest());
     runtime.submitGoalControl.mockImplementation(async (_request, beforeDelivery) => {
       await beforeDelivery({
@@ -315,9 +315,9 @@ describe('CodexExecution', () => {
     };
     const trackedMessages = [];
     const routedMessages = [];
-    execution.subscribe((event) => {
+    execution.subscribeProjectionEvents((event) => {
       if (event.type === 'messages') {
-        trackedMessages.push({ content: event.messages[0].content, turnId: event.operation.turnId });
+        trackedMessages.push({ content: event.messages[0].message.content, turnId: event.operation.turnId });
         projectionOffset += 1;
         const turnOwner = {
           agentOwnershipEpoch: 'ownership-1',
@@ -334,7 +334,7 @@ describe('CodexExecution', () => {
             checkpoint: { offset: String(projectionOffset) },
             digest: `digest-${projectionOffset}`,
             promoted: [],
-            appended: event.messages.map((message, index) => ({
+            appended: event.messages.map((record, index) => ({
               id: `entry-${projectionOffset}-${index}`,
               lifetime: 'durable',
               source: {
@@ -348,7 +348,7 @@ describe('CodexExecution', () => {
                 turnOwner,
                 upstreamRequestId: null,
               },
-              message,
+              message: record.message,
             })),
           },
           previous: { entries: [] },
@@ -356,8 +356,14 @@ describe('CodexExecution', () => {
         });
       }
     });
-    bus.onMessages((_chatId, messages, metadata) => {
-      routedMessages.push({ content: messages[0].content, turnId: metadata.turnId });
+    bus.onProjectionApplied((applied) => {
+      if (applied.event.kind !== 'commit') return;
+      for (const entry of applied.event.appended) {
+        routedMessages.push({
+          content: entry.message.content,
+          turnId: entry.provenance?.turnOwner.turnId,
+        });
+      }
     });
     const emitOutput = async (content) => {
       runtime.emitMessages(

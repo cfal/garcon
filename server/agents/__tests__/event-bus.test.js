@@ -106,11 +106,12 @@ describe('AgentEventBus', () => {
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
   });
 
-  it('keeps predecessor output attributable while successor persistence is pending', async () => {
+  it('dispatches commit entries by serialized provenance while a handoff is pending', async () => {
     const { bus, emit } = makeBus();
-    const forwarded = [];
-    bus.onMessages((_chatId, messages, metadata) => {
-      forwarded.push({ content: messages[0].content, turnId: metadata.turnId });
+    const applied = [];
+    bus.onProjectionApplied((event) => {
+      if (event.event.kind !== 'commit') return;
+      applied.push(event.event.appended[0].provenance.turnOwner.turnId);
     });
     bus.trackTurn('chat-1', operation('turn-a'));
     bus.handoffTurn(
@@ -129,11 +130,11 @@ describe('AgentEventBus', () => {
     await emit({
       type: 'messages',
       chatId: 'chat-1',
-      messages: [new UserMessage('2026-07-18T00:00:01.000Z', 'uncommitted successor output')],
+      messages: [new UserMessage('2026-07-18T00:00:01.000Z', 'successor output')],
       operation: operation('turn-b'),
     });
 
-    expect(forwarded).toEqual([{ content: 'predecessor output', turnId: 'turn-a' }]);
+    expect(applied).toEqual(['turn-a', 'turn-b']);
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-a');
   });
 
@@ -196,34 +197,19 @@ describe('AgentEventBus', () => {
     expect(bus.getActiveTurn('chat-1')).toBeUndefined();
   });
 
-  it('drops stale output and terminals instead of assigning them to a successor', async () => {
+  it('drops stale terminals instead of assigning them to a successor', async () => {
     const { bus, emit } = makeBus();
-    const messages = [];
     const failures = [];
-    bus.onMessages((_chatId, received) => messages.push(...received));
     bus.onFailed((_chatId, message) => failures.push(message));
     bus.trackTurn('chat-1', operation('turn-b', 'request-b'));
 
-    await emit({
-      type: 'messages',
-      chatId: 'chat-1',
-      messages: [new UserMessage('2026-07-18T00:00:00.000Z', 'stale')],
-      operation: operation('turn-a', 'request-a'),
-    });
     await emit({
       type: 'failed',
       chatId: 'chat-1',
       error: new AgentIntegrationError('PROVIDER_FAILURE', 'stale failure'),
       operation: operation('turn-a', 'request-a'),
     });
-    await emit({
-      type: 'messages',
-      chatId: 'chat-1',
-      messages: [new UserMessage('2026-07-18T00:00:01.000Z', 'current')],
-      operation: operation('turn-b', 'request-b'),
-    });
 
-    expect(messages.map((message) => message.content)).toEqual(['current']);
     expect(failures).toEqual([]);
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-b');
   });

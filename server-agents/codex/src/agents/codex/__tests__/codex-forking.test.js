@@ -36,7 +36,13 @@ function setup(profile, nativeImplementation = async () => startedSession) {
   const resolveProfile = mock(async () => profile);
   return {
     forking: createCodexForking({
-      legacy: { supportsAtMessage: true, supportsWhileRunning: true, fork: legacyFork },
+      journal: {
+        supportsAtMessage: true,
+        supportsWhileRunning: true,
+        fork: legacyFork,
+        resolvePoint: mock(async () => ({ kind: 'unavailable', reason: 'no-native-source' })),
+        discard: mock(async () => undefined),
+      },
       resolveProfile,
       forkPaginatedWhole,
     }),
