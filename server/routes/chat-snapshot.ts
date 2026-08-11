@@ -12,6 +12,7 @@ import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import { transcriptUnavailableMessage } from '../lib/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -96,6 +97,18 @@ async function readTranscript(
     const page = await deps.chatViews.getOrCreatePage(chatId, messageLimit);
     return { availability: 'available', ...page };
   } catch (error) {
+    // Typed deferred/degraded reads keep the rest of the snapshot usable: the
+    // transcript section names the history state instead of failing the call.
+    if (error instanceof TranscriptHistoryUnavailableError) {
+      return {
+        availability: 'unavailable',
+        errorCode: error.historyState.kind === 'deferred'
+          ? 'TRANSCRIPT_DEFERRED'
+          : error.historyState.errorCode,
+        retryable: error.retryable,
+        message: error.message,
+      };
+    }
     if (
       error instanceof AgentIntegrationError
       && error.code === 'TRANSCRIPT_UNAVAILABLE'

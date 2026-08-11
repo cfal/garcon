@@ -54,12 +54,17 @@ export interface AvailableChatSnapshotTranscript {
   hasMore: boolean;
 }
 
+// Carries the typed non-complete history state: TRANSCRIPT_DEFERRED while the
+// projection defers reads until execution settles, otherwise the degraded
+// store code (TRANSCRIPT_UNAVAILABLE when no more specific code exists).
 export interface UnavailableChatSnapshotTranscript {
   availability: 'unavailable';
-  errorCode: 'TRANSCRIPT_UNAVAILABLE';
+  errorCode: string;
   retryable: boolean;
   message: string;
 }
+
+const SNAPSHOT_TRANSCRIPT_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 export interface NotRequestedChatSnapshotTranscript {
   availability: 'not-requested';
@@ -196,7 +201,8 @@ function parseTranscript(value: unknown, messageLimit: number): ChatSnapshotTran
     fail('transcript cannot be not-requested when messages were requested');
   }
   if (raw.availability === 'unavailable') {
-    if (raw.errorCode !== 'TRANSCRIPT_UNAVAILABLE') {
+    if (typeof raw.errorCode !== 'string'
+        || !SNAPSHOT_TRANSCRIPT_ERROR_CODE_PATTERN.test(raw.errorCode)) {
       fail('transcript.errorCode is invalid');
     }
     if (typeof raw.retryable !== 'boolean') fail('transcript.retryable is invalid');

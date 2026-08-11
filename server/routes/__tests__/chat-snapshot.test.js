@@ -12,6 +12,7 @@ const routeLogger = {
   error: mock(() => undefined),
 };
 
+import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
 import { createChatSnapshotRoutes } from '../chat-snapshot.js';
 
 const CHAT_ID = '1785337200123456';
@@ -238,6 +239,46 @@ describe('GET /api/v1/chats/snapshot', () => {
       message: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
     });
     expect(testFixture.pendingInputs.reconcileRetainedHistory).toHaveBeenCalled();
+  });
+
+  test('names the typed deferred and degraded history states in the transcript section', async () => {
+    const deferredFixture = fixture({
+      chatViews: {
+        getOrCreatePage: mock(async () => {
+          throw new TranscriptHistoryUnavailableError({
+            kind: 'deferred',
+            retry: 'execution-settled',
+          });
+        }),
+      },
+    });
+    const deferred = await getSnapshot(deferredFixture, `chatId=${CHAT_ID}`);
+    expect(deferred.response.status).toBe(200);
+    expect(deferred.body.transcript).toMatchObject({
+      availability: 'unavailable',
+      errorCode: 'TRANSCRIPT_DEFERRED',
+      retryable: true,
+    });
+
+    const degradedFixture = fixture({
+      chatViews: {
+        getOrCreatePage: mock(async () => {
+          throw new TranscriptHistoryUnavailableError({
+            kind: 'degraded',
+            errorCode: 'PROJECTION_REPAIR_REQUIRED',
+            retryable: true,
+          });
+        }),
+      },
+    });
+    const degraded = await getSnapshot(degradedFixture, `chatId=${CHAT_ID}`);
+    expect(degraded.response.status).toBe(200);
+    expect(degraded.body.transcript).toMatchObject({
+      availability: 'unavailable',
+      errorCode: 'PROJECTION_REPAIR_REQUIRED',
+      retryable: true,
+    });
+    expect(() => parseChatSnapshotResponse(degraded.body)).not.toThrow();
   });
 
   test('uses the standard error envelope for unexpected transcript failures', async () => {
