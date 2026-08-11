@@ -27,6 +27,7 @@ const logger = createLogger('queue-dispatch');
 export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
   registerPending(chatId: string, content: string, options: RunAgentTurnOptions): Promise<void>;
+  discardProjectedInput(chatId: string, clientRequestId: string): Promise<void>;
   publishDispatching(chatId: string, entry: StoredQueueEntry): void;
   publishIdle(chatId: string): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
@@ -170,7 +171,18 @@ export class QueueDrainer {
       await this.#callbacks.removeSent(chatId, entry.id);
       finalization.settle('committed');
       return true;
-    } catch (error: unknown) {
+    } catch (caught: unknown) {
+      let error = caught;
+      if (!executionStarted && options.clientRequestId) {
+        try {
+          await this.#callbacks.discardProjectedInput(chatId, options.clientRequestId);
+        } catch (discardError) {
+          error = new AggregateError(
+            [caught, discardError],
+            `Failed to discard an unstarted queued input for ${chatId}`,
+          );
+        }
+      }
       if (this.#ownership.shutdownTargetsEntry(chatId, entry.id)) {
         attempt?.clearExpectedAbort();
         await this.#tryShutdownCompensation(chatId, entry, options, executionStarted);

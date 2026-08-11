@@ -481,21 +481,6 @@ export async function startServer(): Promise<void> {
         await chatViews.reconcileNativeSnapshot(chatId, input);
       },
     };
-    const chatMessageAppender = {
-      async appendMessages(
-        chatId: string,
-        messages: Parameters<ChatViewStore['appendAfterEnsuringGeneration']>[2],
-      ) {
-        return chatViews.appendAfterEnsuringGeneration(
-          chatId,
-          {
-            loadAll: () => loadChatSnapshot(chatId),
-            loadPage: (limit, offset) => transcripts.loadPage(chatId, limit, offset),
-          },
-          messages,
-        );
-      },
-    };
     const pendingInputs = new PendingUserInputService(chatMessageReader);
     const handoffs = new AgentHandoffService({
       registry: chatRegistry,
@@ -518,7 +503,7 @@ export async function startServer(): Promise<void> {
       workspaceDir,
       agentRegistry,
       pendingInputs,
-      chatMessageAppender,
+      agentRegistry,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
       (chatId) => Boolean(chatRegistry.getChat(chatId)),
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),

@@ -298,7 +298,12 @@ describe('CodexExecution', () => {
       createPathNativeSessionCodec('codex'),
       createConfig(),
     );
-    const bus = new AgentEventBus({ list: () => [{ execution }] });
+    let applyProjection;
+    let projectionOffset = 0;
+    const bus = new AgentEventBus({
+      onApply(listener) { applyProjection = listener; },
+      onFailure() {},
+    });
     const predecessor = startRequest().operation;
     const rejected = { ...predecessor, clientRequestId: 'request-rejected', turnId: 'turn-rejected' };
     const successor = { ...predecessor, clientRequestId: 'request-b', turnId: 'turn-b' };
@@ -313,16 +318,56 @@ describe('CodexExecution', () => {
     execution.subscribe((event) => {
       if (event.type === 'messages') {
         trackedMessages.push({ content: event.messages[0].content, turnId: event.operation.turnId });
+        projectionOffset += 1;
+        const turnOwner = {
+          agentOwnershipEpoch: 'ownership-1',
+          commandType: event.operation.commandType,
+          clientRequestId: event.operation.clientRequestId,
+          turnId: event.operation.turnId,
+        };
+        void applyProjection({
+          event: {
+            kind: 'commit',
+            chatId: event.chatId,
+            agentOwnershipEpoch: turnOwner.agentOwnershipEpoch,
+            previous: {},
+            checkpoint: { offset: String(projectionOffset) },
+            digest: `digest-${projectionOffset}`,
+            promoted: [],
+            appended: event.messages.map((message, index) => ({
+              id: `entry-${projectionOffset}-${index}`,
+              lifetime: 'durable',
+              source: {
+                namespace: 'codex-test',
+                itemId: String(projectionOffset),
+                subrowId: String(index),
+              },
+              provenance: {
+                ...event.operation,
+                agentOwnershipEpoch: turnOwner.agentOwnershipEpoch,
+                turnOwner,
+                upstreamRequestId: null,
+              },
+              message,
+            })),
+          },
+          previous: { entries: [] },
+          current: { entries: [] },
+        });
       }
     });
     bus.onMessages((_chatId, messages, metadata) => {
       routedMessages.push({ content: messages[0].content, turnId: metadata.turnId });
     });
-    const emitOutput = (content) => runtime.emitMessages(
-      'chat-1',
-      [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
-      runtimeMetadata,
-    );
+    const emitOutput = async (content) => {
+      runtime.emitMessages(
+        'chat-1',
+        [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
+        runtimeMetadata,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    };
     const assertOwner = (turnId, content) => {
       expect(runtimeMetadata.turnId).toBe(turnId);
       expect(attempt.identity().turnId).toBe(turnId);
@@ -358,11 +403,11 @@ describe('CodexExecution', () => {
       const handoff = composeHandoff(operationHandoff, rejected);
       handoff.validate();
       await Promise.resolve();
-      emitOutput('A while persistence fails');
+      await emitOutput('A while persistence fails');
       assertOwner('turn-1', 'A while persistence fails');
       throw new Error('persistence failed');
     }))).rejects.toThrow('persistence failed');
-    emitOutput('A after persistence failed');
+    await emitOutput('A after persistence failed');
     assertOwner('turn-1', 'A after persistence failed');
 
     await expect(execution.submitGoalControl({
@@ -370,11 +415,11 @@ describe('CodexExecution', () => {
         const handoff = composeHandoff(operationHandoff, successor);
         handoff.validate();
         await Promise.resolve();
-        emitOutput('A before persistence commits');
+        await emitOutput('A before persistence commits');
         assertOwner('turn-1', 'A before persistence commits');
         handoff.validate();
         handoff.commit();
-        emitOutput('B after the atomic commit');
+        await emitOutput('B after the atomic commit');
         assertOwner('turn-b', 'B after the atomic commit');
       }),
       admission: {

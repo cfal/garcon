@@ -4,6 +4,7 @@ import {
   AgentIntegrationError,
   computeAgentTranscriptRevision,
   type AgentIntegration,
+  type AgentIntegrationV4,
   type AgentHost,
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
@@ -16,6 +17,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
 import { createAmpConfig } from './config.js';
 import { getAmpAuthStatus } from './agents/amp/amp-auth.js';
 import { AmpCliRuntime, runSingleQuery } from './agents/amp/amp-cli.js';
@@ -35,9 +37,9 @@ const AMP_DESCRIPTOR = {
   configuration: [{ key: 'AMP_BINARY', source: 'environment' as const, description: 'Amp CLI binary.' }],
 } as const;
 
-export default class AmpAgentIntegration implements AgentIntegration {
+export default class AmpAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'amp';
-  static readonly apiVersion = 3 as const;
+  static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -50,7 +52,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
   readonly descriptor = AMP_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
-  readonly transcript: AgentTranscript;
+  readonly transcript;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -63,6 +65,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
     const config = createAmpConfig(host.environment);
@@ -85,8 +88,16 @@ export default class AmpAgentIntegration implements AgentIntegration {
         ],
       }],
     });
-    this.execution = new AmpExecution(runtime, nativeSessions);
-    this.transcript = createAmpTranscript(runtime, nativeSessions, config.binary);
+    const legacyExecution = new AmpExecution(runtime, nativeSessions);
+    const legacyTranscript = createAmpTranscript(runtime, nativeSessions, config.binary);
+    const projection = createLegacyProjectionAdapter({
+      ownerId: 'amp',
+      host,
+      execution: legacyExecution,
+      transcript: legacyTranscript,
+    });
+    this.execution = projection.execution;
+    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: AMP_MODELS.DEFAULT,

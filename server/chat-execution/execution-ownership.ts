@@ -39,11 +39,12 @@ interface ChatExecutionState {
   turn: { attempt: QueueExecutionAttempt; admission: AbortController | null } | null;
   // Intent recorded while something else owns the chat.
   pending: { drainRequested: boolean; suppressions: Set<DrainSuppressionReason> };
+  repairSnapshot: TranscriptSnapshotReservation | null;
   sessionStop: SessionStopInFlight | null;
 }
 
 function ownsExecution(state: ChatExecutionState): boolean {
-  return state.owner.kind !== 'idle' || state.turn !== null;
+  return state.owner.kind !== 'idle' || state.turn !== null || state.repairSnapshot !== null;
 }
 
 // A turn the user started holds the chat: a direct reservation, or the queue entry a drain is
@@ -58,6 +59,7 @@ function emptyChatExecutionState(): ChatExecutionState {
     owner: IDLE_OWNER,
     turn: null,
     pending: { drainRequested: false, suppressions: new Set() },
+    repairSnapshot: null,
     sessionStop: null,
   };
 }
@@ -169,18 +171,41 @@ export class ExecutionOwnership {
   }
 
   hasTranscriptSnapshot(chatId: string): boolean {
-    return this.#chats.get(chatId)?.owner.kind === 'snapshot';
+    const state = this.#chats.get(chatId);
+    return state !== undefined
+      && (state.owner.kind === 'snapshot' || state.repairSnapshot !== null);
   }
 
   releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): void {
     const state = this.#chats.get(reservation.chatId);
     if (!state) return;
+    if (state.repairSnapshot?.reservationId === reservation.reservationId) {
+      state.repairSnapshot = null;
+      if (state.owner.kind === 'snapshot'
+          && state.owner.reservationId === reservation.reservationId) {
+        state.owner = IDLE_OWNER;
+      }
+      this.#gc(reservation.chatId);
+      return;
+    }
     if (state.owner.kind !== 'snapshot') return;
     if (state.owner.reservationId !== reservation.reservationId) {
       throw new Error('Transcript snapshot reservation is no longer active');
     }
     state.owner = IDLE_OWNER;
     this.#gc(reservation.chatId);
+  }
+
+  replaceTurnWithTranscriptSnapshot(
+    chatId: string,
+    turn: TurnIdentity,
+  ): TranscriptSnapshotReservation | null {
+    const state = this.#chats.get(chatId);
+    if (!state?.turn?.attempt.matches(turn)) return null;
+    if (state.repairSnapshot) return state.repairSnapshot;
+    const reservation = Object.freeze({ chatId, reservationId: crypto.randomUUID() });
+    state.repairSnapshot = reservation;
+    return reservation;
   }
 
   // Refuses every owner kind, including a direct reservation and a turn still settling. The
@@ -220,7 +245,11 @@ export class ExecutionOwnership {
   releaseDirect(reservation: DirectTurnReservation): void {
     const state = this.#chats.get(reservation.chatId);
     if (!state) return;
-    if (state.owner.kind === 'direct') state.owner = IDLE_OWNER;
+    if (state.owner.kind === 'direct') {
+      state.owner = state.repairSnapshot
+        ? { kind: 'snapshot', reservationId: state.repairSnapshot.reservationId }
+        : IDLE_OWNER;
+    }
     this.#gc(reservation.chatId);
   }
 
@@ -240,7 +269,11 @@ export class ExecutionOwnership {
   endDrain(chatId: string): void {
     const state = this.#chats.get(chatId);
     if (!state) return;
-    if (state.owner.kind === 'draining') state.owner = IDLE_OWNER;
+    if (state.owner.kind === 'draining') {
+      state.owner = state.repairSnapshot
+        ? { kind: 'snapshot', reservationId: state.repairSnapshot.reservationId }
+        : IDLE_OWNER;
+    }
     this.#gc(chatId);
   }
 
@@ -281,6 +314,12 @@ export class ExecutionOwnership {
     const state = this.#chats.get(chatId);
     if (!state || state.turn?.attempt !== attempt) return false;
     state.turn = null;
+    if (state.owner.kind === 'idle' && state.repairSnapshot) {
+      state.owner = {
+        kind: 'snapshot',
+        reservationId: state.repairSnapshot.reservationId,
+      };
+    }
     this.#gc(chatId);
     return true;
   }
@@ -355,6 +394,7 @@ export class ExecutionOwnership {
       this.#abortAdmissions(state, reason);
       state.turn?.attempt.markSettled();
       state.turn = null;
+      state.repairSnapshot = null;
       // A live drain keeps its ownership while its loop unwinds against a deleted chat, but
       // loses the handles that only describe the entry it was running.
       state.owner = state.owner.kind === 'draining'

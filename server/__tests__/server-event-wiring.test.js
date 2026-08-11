@@ -41,6 +41,9 @@ function createWiringFixture(overrides = {}) {
     onSessionCreated: noOpSubscription,
     onFinished: mock((callback) => { agentListeners.finished = callback; }),
     onFailed: mock((callback) => { agentListeners.failed = callback; }),
+    onInputSettled: mock((callback) => { agentListeners.inputSettled = callback; }),
+    onProjectionFailure: mock((callback) => { agentListeners.projectionFailure = callback; }),
+    repairProjection: mock(async () => true),
     discardTurn: mock(() => undefined),
     settleTurn: mock(() => undefined),
   };
@@ -49,13 +52,15 @@ function createWiringFixture(overrides = {}) {
     onSessionStopRequested: noOpSubscription,
     onDispatching: noOpSubscription,
     onChatIdle: noOpSubscription,
-    onChatMessages: noOpSubscription,
     onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
     onProcessingInvalidated: mock((callback) => { queueListeners.processing = callback; }),
     onTurnFailed: mock((callback) => { queueListeners.failed = callback; }),
     onTurnSettled: noOpSubscription,
     getQueuedTurnFinalization: mock(() => null),
     onAgentTurnTerminal: mock(() => undefined),
+    onAcceptedInputSettled: mock(() => undefined),
+    replaceTurnWithTranscriptSnapshotReservation: mock(() => null),
+    releaseTranscriptSnapshot: mock(async () => undefined),
     checkChatIdle: mock(async () => undefined),
     ...overrides.queue,
   };
@@ -75,6 +80,9 @@ function createWiringFixture(overrides = {}) {
   const commandLedger = overrides.commandLedgerInstance ?? {
     settleTerminal: mock(async () => undefined),
     appendAssistantMessages: mock(async () => undefined),
+    appendProjectionAssistantMessages: mock(async () => undefined),
+    finalizeProjectionOutput: mock(async () => undefined),
+    markProjectionOutputUnavailable: mock(async () => undefined),
     markTurnOutputUnavailable: mock(async () => undefined),
     markPublicTerminal: mock(async () => undefined),
     publishDeferredTerminal: mock(async () => undefined),
@@ -195,9 +203,21 @@ describe('server event wiring', () => {
       },
     });
 
-    fixture.agentListeners.messages('chat-1', [firstLive], { turnId: 'turn-1' });
-    fixture.agentListeners.messages('chat-1', [secondLive], { turnId: 'turn-2' });
-    fixture.agentListeners.messages('chat-1', [secondLive], { turnId: 'turn-2' });
+    const firstOwner = {
+      agentOwnershipEpoch: 'ownership-1',
+      commandType: 'agent-run',
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+    };
+    const secondOwner = {
+      agentOwnershipEpoch: 'ownership-1',
+      commandType: 'agent-run',
+      clientRequestId: 'request-2',
+      turnId: 'turn-2',
+    };
+    fixture.agentListeners.messages('chat-1', [firstLive], { turnId: 'turn-1', turnOwner: firstOwner });
+    fixture.agentListeners.messages('chat-1', [secondLive], { turnId: 'turn-2', turnOwner: secondOwner });
+    fixture.agentListeners.messages('chat-1', [secondLive], { turnId: 'turn-2', turnOwner: secondOwner });
     await fixture.wiring.waitForIdle();
 
     const emitted = published.filter((message) => message.type === 'chat-messages');
@@ -209,9 +229,9 @@ describe('server event wiring', () => {
       { turnId: 'turn-1', contents: ['persisted first'] },
       { turnId: 'turn-2', contents: ['persisted second'] },
     ]);
-    expect(fixture.commandLedger.appendAssistantMessages.mock.calls).toEqual([
-      ['chat-1', 'turn-1', ['persisted first']],
-      ['chat-1', 'turn-2', ['persisted second']],
+    expect(fixture.commandLedger.appendProjectionAssistantMessages.mock.calls).toEqual([
+      ['chat-1', firstOwner, ['persisted first']],
+      ['chat-1', secondOwner, ['persisted second']],
     ]);
     expect(chatViews.readPage('chat-1', 20).messages.map((entry) => entry.message.content)).toEqual([
       'older one',
@@ -437,8 +457,14 @@ describe('server event wiring', () => {
       },
     });
 
-    fixture.agentListeners.messages('chat-1', [finalReply], { turnId: 'turn-1' });
-    fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1' });
+    const owner = {
+      agentOwnershipEpoch: 'ownership-1',
+      commandType: 'agent-run',
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+    };
+    fixture.agentListeners.messages('chat-1', [finalReply], { turnId: 'turn-1', turnOwner: owner });
+    fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1', turnOwner: owner });
     append.resolve({
       generationId: 'generation-1',
       messages: [{ seq: 1, message: finalReply }],
@@ -452,9 +478,9 @@ describe('server event wiring', () => {
       .toBeLessThan(types.indexOf('chat-processing-updated'));
     expect(types.indexOf('chat-processing-updated'))
       .toBeLessThan(types.indexOf('agent-run-finished'));
-    expect(fixture.commandLedger.appendAssistantMessages).toHaveBeenCalledWith(
+    expect(fixture.commandLedger.appendProjectionAssistantMessages).toHaveBeenCalledWith(
       'chat-1',
-      'turn-1',
+      owner,
       ['final reply'],
     );
     expect(fixture.commandLedger.markPublicTerminal).toHaveBeenCalledWith(
@@ -993,6 +1019,9 @@ describe('server event wiring', () => {
       onSessionCreated: mock(() => undefined),
       onFinished: mock((callback) => { agentListeners.finished = callback; }),
       onFailed: mock(() => undefined),
+      onInputSettled: mock(() => undefined),
+      onProjectionFailure: mock(() => undefined),
+      repairProjection: mock(async () => true),
       discardTurn: mock(() => undefined),
       settleTurn: mock(() => undefined),
     };
@@ -1001,7 +1030,6 @@ describe('server event wiring', () => {
       onSessionStopRequested: mock((callback) => { queueListeners.stopRequested = callback; }),
       onDispatching: mock(() => undefined),
       onChatIdle: mock(() => undefined),
-      onChatMessages: mock(() => undefined),
       onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
       onProcessingInvalidated: mock(() => undefined),
       onTurnFailed: mock(() => undefined),
@@ -1018,6 +1046,9 @@ describe('server event wiring', () => {
         });
         queueListeners.turnSettled(terminalChatId, terminalTurn);
       }),
+      onAcceptedInputSettled: mock(() => undefined),
+      replaceTurnWithTranscriptSnapshotReservation: mock(() => null),
+      releaseTranscriptSnapshot: mock(async () => undefined),
       checkChatIdle: mock(async () => undefined),
     };
     const noOpSubscription = mock(() => undefined);
@@ -1054,6 +1085,9 @@ describe('server event wiring', () => {
       commandLedger: {
         settleTerminal: mock(async () => undefined),
         appendAssistantMessages: mock(async () => undefined),
+        appendProjectionAssistantMessages: mock(async () => undefined),
+        finalizeProjectionOutput: mock(async () => undefined),
+        markProjectionOutputUnavailable: mock(async () => undefined),
         markPublicTerminal: mock(async () => undefined),
         publishDeferredTerminal: mock(async () => undefined),
         markChatInterrupted: mock(async () => undefined),
@@ -1110,6 +1144,9 @@ describe('server event wiring', () => {
       onSessionCreated: mock(() => undefined),
       onFinished: mock(() => undefined),
       onFailed: mock((callback) => { agentListeners.failed = callback; }),
+      onInputSettled: mock(() => undefined),
+      onProjectionFailure: mock(() => undefined),
+      repairProjection: mock(async () => true),
       discardTurn: mock(() => undefined),
       settleTurn: mock(() => undefined),
     };
@@ -1118,7 +1155,6 @@ describe('server event wiring', () => {
       onSessionStopRequested: mock((callback) => { queueListeners.stopRequested = callback; }),
       onDispatching: mock(() => undefined),
       onChatIdle: mock(() => undefined),
-      onChatMessages: mock(() => undefined),
       onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
       onProcessingInvalidated: mock(() => undefined),
       onTurnFailed: mock(() => undefined),
@@ -1127,6 +1163,9 @@ describe('server event wiring', () => {
       onAgentTurnTerminal: mock((terminalChatId, terminalTurn) => {
         queueListeners.turnSettled(terminalChatId, terminalTurn);
       }),
+      onAcceptedInputSettled: mock(() => undefined),
+      replaceTurnWithTranscriptSnapshotReservation: mock(() => null),
+      releaseTranscriptSnapshot: mock(async () => undefined),
       checkChatIdle: mock(async () => undefined),
     };
     const noOpSubscription = mock(() => undefined);
@@ -1167,6 +1206,9 @@ describe('server event wiring', () => {
       commandLedger: {
         settleTerminal: mock(async () => undefined),
         appendAssistantMessages: mock(async () => undefined),
+        appendProjectionAssistantMessages: mock(async () => undefined),
+        finalizeProjectionOutput: mock(async () => undefined),
+        markProjectionOutputUnavailable: mock(async () => undefined),
         markPublicTerminal: mock(async () => undefined),
         publishDeferredTerminal: mock(async () => undefined),
         markChatInterrupted: mock(async () => undefined),

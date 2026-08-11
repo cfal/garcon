@@ -178,6 +178,7 @@ export class AgentProjectionJournal {
     return {
       apiVersion: 2,
       ownerId,
+      schemaVersion: 2,
       checkpoint: {
         chatId: this.options.chatId,
         agentOwnershipEpoch: this.options.agentOwnershipEpoch,

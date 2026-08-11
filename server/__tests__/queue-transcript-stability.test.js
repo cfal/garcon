@@ -33,6 +33,21 @@ function controlRepository(serverInstanceId = 'server-instance-test') {
   return new InMemoryChatExecutionControlRepository(serverInstanceId);
 }
 
+function projectionPort(views, loadMessages = async () => []) {
+  return {
+    admitInput: async (chatId, message) => {
+      if (views) {
+        await views.appendAfterEnsuringGeneration(
+          chatId,
+          transcriptLoader(loadMessages),
+          [message],
+        );
+      }
+      return { discardKnownNotSent: async () => {} };
+    },
+  };
+}
+
 describe('queue and transcript stability', () => {
 
   it('keeps definitely rejected queued steering visibly failed while retaining its source', async () => {
@@ -60,13 +75,7 @@ describe('queue and transcript stability', () => {
           waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         pendingInputs,
-        {
-          appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
-            requestedChatId,
-            transcriptLoader(async () => []),
-            messages,
-          ),
-        },
+        projectionPort(views),
         () => ({}),
         () => true,
         controlRepository(),
@@ -148,13 +157,7 @@ describe('queue and transcript stability', () => {
           waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         pendingInputs,
-        {
-          appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
-            requestedChatId,
-            transcriptLoader(async () => []),
-            messages,
-          ),
-        },
+        projectionPort(views),
         () => ({}),
         () => true,
         controlRepository(),
@@ -265,7 +268,7 @@ describe('queue and transcript stability', () => {
           markFailed: mock(() => true),
           markUnconfirmed: mock(() => true),
         },
-        { appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })) },
+        projectionPort(),
         () => ({}),
         () => true,
         controlRepository(),
@@ -369,13 +372,7 @@ describe('queue and transcript stability', () => {
           waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         pendingInputs,
-        {
-          appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
-            requestedChatId,
-            transcriptLoader(async () => []),
-            messages,
-          ),
-        },
+        projectionPort(views),
         () => ({}),
         () => true,
         controlRepository(),
@@ -468,13 +465,7 @@ describe('queue and transcript stability', () => {
         workspaceDir,
         turnRunner,
         pendingPort,
-        {
-          appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
-            requestedChatId,
-            transcriptLoader(async () => []),
-            messages,
-          ),
-        },
+        projectionPort(views),
         () => ({}),
         () => true,
         controlRepository(),
@@ -559,13 +550,7 @@ describe('queue and transcript stability', () => {
           waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         pendingInputs,
-        {
-          appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
-            requestedChatId,
-            transcriptLoader(async () => [...nativeMessages]),
-            messages,
-          ),
-        },
+        projectionPort(views, async () => [...nativeMessages]),
         () => ({}),
         () => true,
         controlRepository(),
@@ -632,9 +617,7 @@ describe('queue and transcript stability', () => {
           markFailed: mock(() => true),
           markUnconfirmed: mock(() => true),
         },
-        {
-          appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })),
-        },
+        projectionPort(),
         () => ({}),
         () => true,
       ];

@@ -2,31 +2,30 @@ import {
   UserMessage,
   type ChatImage,
 } from '../../common/chat-types.ts';
-import type { ChatViewMessage } from '../../common/chat-view.ts';
 import type { RunAgentTurnOptions } from '../agents/session-types.ts';
-import { createLogger } from '../lib/log.ts';
 import type {
-  ChatMessagesPort,
   PendingInputsPort,
   PendingUserInputRegistrationOptions,
 } from './types.ts';
 
-const logger = createLogger('accepted-input-transcript');
+export interface AcceptedInputProjectionHandle {
+  discardKnownNotSent(): Promise<void>;
+}
 
-export interface AcceptedInputTranscriptEvents {
-  appended(
+export interface AcceptedInputProjectionPort {
+  admitInput(
     chatId: string,
-    generationId: string,
-    messages: ChatViewMessage[],
-    metadata: { clientRequestId?: string; turnId?: string },
-  ): void;
+    message: UserMessage,
+    options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
+  ): Promise<AcceptedInputProjectionHandle>;
 }
 
 export class AcceptedInputTranscript {
+  readonly #handles = new Map<string, AcceptedInputProjectionHandle>();
+
   constructor(
     private readonly pendingInputs: PendingInputsPort,
-    private readonly chatMessages: ChatMessagesPort,
-    private readonly events: AcceptedInputTranscriptEvents,
+    private readonly projection: AcceptedInputProjectionPort,
   ) {}
 
   async register(
@@ -38,7 +37,6 @@ export class AcceptedInputTranscript {
     const deliveryStatus = options.deliveryStatus ?? 'accepted';
     const images = normalizeChatImages(options.images);
     let clientRequestId: string | undefined;
-    let appended: { generationId: string; messages: ChatViewMessage[] };
     try {
       const registered = await this.pendingInputs.register(chatId, content, {
         clientRequestId: options.clientRequestId,
@@ -53,28 +51,39 @@ export class AcceptedInputTranscript {
       clientRequestId = typeof record?.clientRequestId === 'string'
         ? record.clientRequestId
         : options.clientRequestId;
-      appended = await this.chatMessages.appendMessages(chatId, [
+      if (!clientRequestId) throw new TypeError('Accepted input is missing a client request ID');
+      const handle = await this.projection.admitInput(
+        chatId,
         new UserMessage(new Date().toISOString(), content, images, {
           clientRequestId,
           upstreamRequestId: options.clientMessageId,
           turnId: options.turnId,
           deliveryStatus,
         }),
-      ]);
+        { ...options, clientRequestId },
+      );
+      this.#handles.set(inputKey(chatId, clientRequestId), handle);
     } catch (error) {
       if (clientRequestId) this.pendingInputs.discard(chatId, clientRequestId);
       throw error;
     }
-    if (appended.messages.length === 0) return;
-    try {
-      this.events.appended(chatId, appended.generationId, appended.messages, {
-        clientRequestId,
-        turnId: options.turnId,
-      });
-    } catch (error) {
-      logger.warn('chat-messages listener failed after durable append:', (error as Error).message);
-    }
   }
+
+  async discardKnownNotSent(chatId: string, clientRequestId: string): Promise<void> {
+    const key = inputKey(chatId, clientRequestId);
+    const handle = this.#handles.get(key);
+    if (!handle) return;
+    await handle.discardKnownNotSent();
+    this.#handles.delete(key);
+  }
+
+  settle(chatId: string, clientRequestId: string): void {
+    this.#handles.delete(inputKey(chatId, clientRequestId));
+  }
+}
+
+function inputKey(chatId: string, clientRequestId: string): string {
+  return JSON.stringify([chatId, clientRequestId]);
 }
 
 function normalizeChatImages(images: RunAgentTurnOptions['images']): ChatImage[] | undefined {

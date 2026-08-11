@@ -73,6 +73,7 @@ export interface JournalBackedTranscriptStreamOptions {
 
 interface OpenSegment {
   readonly identity: AgentSegmentIdentity;
+  readonly chat: AgentChatReferenceV4;
   readonly journal: AgentProjectionJournal;
   readonly stream: AgentProjectionEventStream;
   readonly admission: AgentInputAdmissionCoordinator;
@@ -312,12 +313,12 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     await segment.gate.run(async () => {
       const active = segment.stream.current.entries.at(-1);
       if (!active || active.lifetime !== 'active') return;
-      if (active.provenance?.clientRequestId !== operation.clientRequestId) {
+      if (!sameTurnOwner(active.provenance?.turnOwner, operation.turnOwner)) {
         throw new TypeError('Active admission does not belong to the delivered operation');
       }
       await segment.stream.commit([{
         entryId: active.id,
-        source: source ?? admissionSource(operation),
+        source: source ?? admissionSource(active.provenance ?? operation),
       }], []);
     });
   }
@@ -332,6 +333,14 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     if (!options.messages.length) return [];
     const segment = this.#open(options.chat);
     return segment.gate.run(async () => {
+      const active = segment.stream.current.entries.at(-1);
+      if (active?.lifetime === 'active' && options.operation
+          && sameTurnOwner(active.provenance?.turnOwner, options.operation.turnOwner)) {
+        await segment.stream.commit([{
+          entryId: active.id,
+          source: admissionSource(active.provenance ?? options.operation),
+        }], []);
+      }
       const batchId = randomUUID();
       const existingSources = new Set(
         segment.stream.current.entries.flatMap((entry) => entry.source ? [sourceIdentityKey(entry.source)] : []),
@@ -389,6 +398,15 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }): Promise<AgentTerminalEvent> {
     const segment = this.#open(options.chat);
     return segment.gate.run(async () => {
+      const active = segment.stream.current.entries.at(-1);
+      if (active?.lifetime === 'active'
+          && options.sourceSettlement === 'confirmed'
+          && sameTurnOwner(active.provenance?.turnOwner, options.operation.turnOwner)) {
+        await segment.stream.commit([{
+          entryId: active.id,
+          source: admissionSource(active.provenance ?? options.operation),
+        }], []);
+      }
       const attributable = segment.stream.current.entries.filter((entry) => (
         entry.provenance?.turnOwner.clientRequestId === options.operation.turnOwner.clientRequestId
         && entry.provenance.turnOwner.turnId === options.operation.turnOwner.turnId
@@ -404,6 +422,19 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
         sourceSettlement: options.sourceSettlement,
       });
     });
+  }
+
+  referenceForOperation(
+    chatId: string,
+    operation: Pick<AgentOperationIdentityV4, 'agentOwnershipEpoch'>,
+  ): AgentChatReferenceV4 | null {
+    for (const segment of this.#segments.values()) {
+      if (segment.chat.chatId === chatId
+          && segment.chat.agentOwnershipEpoch === operation.agentOwnershipEpoch) {
+        return segment.chat;
+      }
+    }
+    return null;
   }
 
   #createSegment(
@@ -424,6 +455,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     });
     const segment: OpenSegment = {
       identity: segmentIdentity(chat),
+      chat,
       journal,
       stream,
       admission: new AgentInputAdmissionCoordinator(stream),
@@ -525,6 +557,15 @@ function admissionSource(operation: AgentTurnBoundOperationIdentityV4): AgentTra
     itemId: operation.clientRequestId ?? operation.turnId,
     subrowId: 'user',
   };
+}
+
+function sameTurnOwner(
+  left: AgentTurnBoundOperationIdentityV4['turnOwner'] | undefined,
+  right: AgentTurnBoundOperationIdentityV4['turnOwner'],
+): boolean {
+  return left?.agentOwnershipEpoch === right.agentOwnershipEpoch
+    && left.clientRequestId === right.clientRequestId
+    && left.turnId === right.turnId;
 }
 
 function segmentIdentity(chat: AgentChatReferenceV4): AgentSegmentIdentity {

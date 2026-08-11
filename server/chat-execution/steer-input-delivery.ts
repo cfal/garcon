@@ -23,6 +23,7 @@ interface SteerInputDeliveryOptions {
     content: string,
     options: PendingUserInputRegistrationOptions,
   ): Promise<void>;
+  discardProjectedInput(chatId: string, clientRequestId: string): Promise<void>;
 }
 
 export type SteerNotSentDisposition = 'mark-failed' | 'queue-handler-settles';
@@ -68,6 +69,7 @@ export class SteerInputDelivery {
             clientRequestId: options.clientRequestId,
             clientMessageId: options.clientMessageId,
             turnId: target.identity.turnId,
+            commandType: 'steer',
           });
           pendingRegistered = true;
           await afterPendingRegistered(target.identity.turnId);
@@ -76,7 +78,7 @@ export class SteerInputDelivery {
       );
     } catch (error) {
       if (pendingRegistered) {
-        this.#settlePending(
+        await this.#settlePending(
           chatId,
           options.clientRequestId,
           deliveryPrepared ? 'unknown' : 'not-sent',
@@ -98,12 +100,12 @@ export class SteerInputDelivery {
     }
     if (result.kind === 'rejected') {
       if (pendingRegistered) {
-        this.#settlePending(chatId, options.clientRequestId, 'not-sent', notSentDisposition);
+        await this.#settlePending(chatId, options.clientRequestId, 'not-sent', notSentDisposition);
       }
       throw steerRejectionError(result.reason);
     }
     if (pendingRegistered) {
-      this.#settlePending(chatId, options.clientRequestId, result.outcome, notSentDisposition);
+      await this.#settlePending(chatId, options.clientRequestId, result.outcome, notSentDisposition);
     }
     throw new SteerDeliveryError(new Error(result.message), result.outcome);
   }
@@ -128,16 +130,19 @@ export class SteerInputDelivery {
     }
   }
 
-  #settlePending(
+  async #settlePending(
     chatId: string,
     clientRequestId: string,
     outcome: 'not-sent' | 'unknown',
     notSentDisposition: SteerNotSentDisposition,
-  ): void {
+  ): Promise<void> {
     if (outcome === 'unknown') {
       this.options.pendingInputs.markUnconfirmed(chatId, clientRequestId);
     } else if (notSentDisposition === 'mark-failed') {
       this.options.pendingInputs.markFailed(chatId, clientRequestId);
+    }
+    if (outcome === 'not-sent') {
+      await this.options.discardProjectedInput(chatId, clientRequestId);
     }
   }
 }

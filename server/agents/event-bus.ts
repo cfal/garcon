@@ -1,11 +1,17 @@
 import type {
   AgentGoalControlHandoff,
-  AgentExecutionEvent,
-  AgentOperationIdentity,
+  AgentControlEvent,
+  AgentStreamEvent,
+  AgentTranscriptEntry,
+  AgentTurnReceiptOwner,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentExecutionCommandType } from './session-types.js';
-import type { AgentDirectory } from './directory.js';
+import type {
+  AppliedProjectionEvent,
+  AgentProjectionIngress,
+  ProjectionIngressFailure,
+} from './projection-ingress.js';
 import { createLogger } from '../lib/log.js';
 import { matchesTurnIdentity } from '../lib/turn-identity.js';
 
@@ -13,9 +19,13 @@ const logger = createLogger('agents:event-bus');
 
 export interface TurnEventMetadata {
   clientRequestId?: string;
+  clientMessageId?: string;
   commandType?: AgentExecutionCommandType;
   upstreamRequestId?: string;
   turnId?: string;
+  agentOwnershipEpoch?: string;
+  turnOwner?: AgentTurnReceiptOwner;
+  entryIds?: readonly string[];
 }
 
 interface AbortableTurnWaiter {
@@ -29,16 +39,25 @@ export class AgentEventBus {
   readonly #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
   readonly #abortableTurnByChatId = new Map<string, TurnEventMetadata>();
   readonly #abortableWaiters = new Map<string, Set<AbortableTurnWaiter>>();
-  readonly #messageListeners = new Set<(chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void>();
-  readonly #processingListeners = new Set<(chatId: string, processing: boolean) => void>();
-  readonly #sessionListeners = new Set<(chatId: string) => void>();
-  readonly #finishedListeners = new Set<(chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void>();
-  readonly #failedListeners = new Set<(chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void>();
+  readonly #messageListeners = new Set<(chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void | Promise<void>>();
+  readonly #processingListeners = new Set<(chatId: string, processing: boolean) => void | Promise<void>>();
+  readonly #sessionListeners = new Set<(chatId: string) => void | Promise<void>>();
+  readonly #finishedListeners = new Set<(chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void | Promise<void>>();
+  readonly #failedListeners = new Set<(chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void | Promise<void>>();
+  readonly #controlListeners = new Set<(event: AgentControlEvent) => void | Promise<void>>();
+  readonly #inputSettledListeners = new Set<(
+    chatId: string,
+    clientRequestId: string,
+  ) => void | Promise<void>>();
+  readonly #projectionFailureListeners = new Set<(
+    chatId: string,
+    error: unknown,
+    metadata?: TurnEventMetadata,
+  ) => void | Promise<void>>();
 
-  constructor(directory: AgentDirectory) {
-    for (const integration of directory.list()) {
-      integration.execution.subscribe((event) => this.#dispatch(event));
-    }
+  constructor(ingress: AgentProjectionIngress) {
+    ingress.onApply((applied) => this.#dispatch(applied));
+    ingress.onFailure((failure) => this.#dispatchProjectionFailure(failure));
   }
 
   trackTurn(chatId: string, opts: TurnEventMetadata): void {
@@ -135,51 +154,140 @@ export class AgentEventBus {
     });
   }
 
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void): void {
+  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void | Promise<void>): void {
     this.#messageListeners.add(cb);
   }
 
-  onProcessing(cb: (chatId: string, processing: boolean) => void): void {
+  onProcessing(cb: (chatId: string, processing: boolean) => void | Promise<void>): void {
     this.#processingListeners.add(cb);
   }
 
-  onSessionCreated(cb: (chatId: string) => void): void {
+  onSessionCreated(cb: (chatId: string) => void | Promise<void>): void {
     this.#sessionListeners.add(cb);
   }
 
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void | Promise<void>): void {
     this.#finishedListeners.add(cb);
   }
 
-  onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
+  onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void | Promise<void>): void {
     this.#failedListeners.add(cb);
   }
 
-  #dispatch(event: AgentExecutionEvent): void {
-    const metadata = operationMetadata(event.operation);
-    const active = this.#turnMetadataByChatId.get(event.chatId);
-    if (!active || !matchesTurnIdentity(active, metadata)) {
-      logger.warn(`agents: ignored ${event.type} for a non-active turn`, event.chatId);
-      return;
-    }
-    switch (event.type) {
-      case 'messages':
-        for (const listener of this.#messageListeners) listener(event.chatId, [...event.messages], metadata);
+  onControl(cb: (event: AgentControlEvent) => void | Promise<void>): void {
+    this.#controlListeners.add(cb);
+  }
+
+  onInputSettled(cb: (
+    chatId: string,
+    clientRequestId: string,
+  ) => void | Promise<void>): void {
+    this.#inputSettledListeners.add(cb);
+  }
+
+  onProjectionFailure(cb: (
+    chatId: string,
+    error: unknown,
+    metadata?: TurnEventMetadata,
+  ) => void | Promise<void>): void {
+    this.#projectionFailureListeners.add(cb);
+  }
+
+  async #dispatch(applied: AppliedProjectionEvent): Promise<void> {
+    const event = applied.event;
+    switch (event.kind) {
+      case 'commit':
+        for (const promotion of event.promoted) {
+          const admitted = applied.previous.entries.find((entry) => entry.id === promotion.entryId);
+          const clientRequestId = admitted?.provenance?.clientRequestId;
+          if (!clientRequestId) continue;
+          for (const listener of this.#inputSettledListeners) {
+            await listener(event.chatId, clientRequestId);
+          }
+        }
+        await this.#dispatchEntries(event.chatId, event.appended);
         return;
-      case 'processing':
-        for (const listener of this.#processingListeners) listener(event.chatId, event.processing);
+      case 'control': {
+        const metadata = operationMetadata(event.operation);
+        if (!this.#isActive(event, metadata)) return;
+        for (const listener of this.#controlListeners) await listener(event);
         return;
-      case 'session-created':
-        for (const listener of this.#sessionListeners) listener(event.chatId);
+      }
+      case 'session': {
+        const metadata = operationMetadata(event.operation);
+        if (event.operation.turnOwner && !this.#isActive(event, metadata)) return;
+        for (const listener of this.#sessionListeners) await listener(event.chatId);
         return;
-      case 'finished':
+      }
+      case 'terminal': {
+        const metadata = operationMetadata(event.operation);
+        if (!this.#isActive(event, metadata)) return;
         this.#clearAbortability(event.chatId);
-        for (const listener of this.#finishedListeners) listener(event.chatId, event.exitCode, metadata);
+        if (event.outcome.kind === 'finished') {
+          for (const listener of this.#finishedListeners) {
+            await listener(event.chatId, event.outcome.exitCode, metadata);
+          }
+        } else {
+          for (const listener of this.#failedListeners) {
+            await listener(event.chatId, event.outcome.error.message, metadata);
+          }
+        }
         return;
-      case 'failed':
-        this.#clearAbortability(event.chatId);
-        for (const listener of this.#failedListeners) listener(event.chatId, event.error.message, metadata);
+      }
+      case 'reset':
+        return;
     }
+  }
+
+  async #dispatchEntries(chatId: string, entries: readonly AgentTranscriptEntry[]): Promise<void> {
+    let group: AgentTranscriptEntry[] = [];
+    let metadata: TurnEventMetadata | undefined;
+    const flush = async () => {
+      if (!group.length) return;
+      const messages = group.map((entry) => entry.message);
+      const groupedMetadata = metadata
+        ? { ...metadata, entryIds: group.map((entry) => entry.id) }
+        : undefined;
+      for (const listener of this.#messageListeners) {
+        await listener(chatId, messages, groupedMetadata);
+      }
+      group = [];
+    };
+    for (const entry of entries) {
+      const next = entry.provenance ? operationMetadata(entry.provenance) : undefined;
+      if (!sameTurnIdentity(metadata, next)) {
+        await flush();
+        metadata = next;
+      }
+      if (next && !this.#isActiveEntry(chatId, next)) {
+        logger.warn('agents: ignored transcript entry for a non-active turn', chatId);
+        continue;
+      }
+      group.push(entry);
+    }
+    await flush();
+  }
+
+  async #dispatchProjectionFailure(failure: ProjectionIngressFailure): Promise<void> {
+    const metadata = failureMetadata(failure)
+      ?? this.#turnMetadataByChatId.get(failure.chat.chatId);
+    if (!metadata || metadata.agentOwnershipEpoch !== failure.chat.agentOwnershipEpoch) return;
+    if (!this.#isActiveEntry(failure.chat.chatId, metadata)) return;
+    this.#clearAbortability(failure.chat.chatId);
+    for (const listener of this.#projectionFailureListeners) {
+      await listener(failure.chat.chatId, failure.error, metadata);
+    }
+  }
+
+  #isActive(event: AgentStreamEvent, metadata: TurnEventMetadata): boolean {
+    return this.#isActiveEntry(event.chatId, metadata);
+  }
+
+  #isActiveEntry(chatId: string, metadata: TurnEventMetadata): boolean {
+    const active = this.#turnMetadataByChatId.get(chatId);
+    if (active && matchesTurnIdentity(active, metadata)) return true;
+    logger.warn('agents: ignored projection event for a non-active turn', chatId);
+    return false;
   }
 
   #clearAbortability(chatId: string): void {
@@ -198,11 +306,26 @@ export class AgentEventBus {
   }
 }
 
-function operationMetadata(operation: AgentOperationIdentity): TurnEventMetadata {
+function operationMetadata(operation: {
+  readonly commandType: string;
+  readonly clientRequestId: string | null;
+  readonly clientMessageId: string | null;
+  readonly turnId: string;
+  readonly agentOwnershipEpoch: string;
+  readonly turnOwner: AgentTurnReceiptOwner | null;
+  readonly upstreamRequestId?: string | null;
+}): TurnEventMetadata {
   return {
-    commandType: operation.commandType,
-    ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),
-    turnId: operation.turnId,
+    commandType: (operation.turnOwner?.commandType
+      ?? operation.commandType) as AgentExecutionCommandType,
+    ...((operation.turnOwner?.clientRequestId ?? operation.clientRequestId)
+      ? { clientRequestId: operation.turnOwner?.clientRequestId ?? operation.clientRequestId! }
+      : {}),
+    ...(operation.clientMessageId ? { clientMessageId: operation.clientMessageId } : {}),
+    ...(operation.upstreamRequestId ? { upstreamRequestId: operation.upstreamRequestId } : {}),
+    turnId: operation.turnOwner?.turnId ?? operation.turnId,
+    agentOwnershipEpoch: operation.agentOwnershipEpoch,
+    ...(operation.turnOwner ? { turnOwner: operation.turnOwner } : {}),
   };
 }
 
@@ -211,6 +334,10 @@ function turnMetadata(opts: TurnEventMetadata): TurnEventMetadata {
     ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
     ...(opts.commandType ? { commandType: opts.commandType } : {}),
     ...(opts.turnId ? { turnId: opts.turnId } : {}),
+    ...(opts.clientMessageId ? { clientMessageId: opts.clientMessageId } : {}),
+    ...(opts.upstreamRequestId ? { upstreamRequestId: opts.upstreamRequestId } : {}),
+    ...(opts.agentOwnershipEpoch ? { agentOwnershipEpoch: opts.agentOwnershipEpoch } : {}),
+    ...(opts.turnOwner ? { turnOwner: opts.turnOwner } : {}),
   };
 }
 
@@ -219,4 +346,17 @@ function sameTurnIdentity(
   right: TurnEventMetadata | undefined,
 ): boolean {
   return matchesTurnIdentity(left, right) && matchesTurnIdentity(right, left);
+}
+
+function failureMetadata(failure: ProjectionIngressFailure): TurnEventMetadata | undefined {
+  const event = failure.event;
+  if (event.kind === 'control' || event.kind === 'session' || event.kind === 'terminal') {
+    return operationMetadata(event.operation);
+  }
+  if (event.kind === 'commit') {
+    const provenance = event.appended.find((entry) => entry.provenance)?.provenance;
+    return provenance ? operationMetadata(provenance) : undefined;
+  }
+  const active = failure.materialization.entries.at(-1);
+  return active?.provenance ? operationMetadata(active.provenance) : undefined;
 }

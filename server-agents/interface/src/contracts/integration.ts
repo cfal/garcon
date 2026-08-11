@@ -8,13 +8,16 @@ import type {
   AgentCommands,
   AgentEndpoints,
   AgentCompaction,
+  AgentCompactionV4,
   AgentForking,
   AgentGoals,
+  AgentGoalsV4,
   AgentLifecycle,
   AgentMigration,
   AgentSettings,
   AgentSingleQuery,
   AgentSteering,
+  AgentSteeringV4,
 } from './services.js';
 import type { AgentTranscriptIndexModuleReference } from './transcript-index.js';
 import type { AgentTranscript } from './transcript.js';
@@ -51,9 +54,12 @@ export interface AgentIntegrationClass {
 }
 
 export interface AgentIntegrationV4
-  extends Omit<AgentIntegration, 'execution' | 'transcript'> {
+  extends Omit<AgentIntegration, 'execution' | 'transcript' | 'compaction' | 'steering' | 'goals'> {
   readonly execution: AgentExecutionV4;
   readonly transcript: AgentTranscriptStream;
+  readonly compaction: AgentCompactionV4 | null;
+  readonly steering: AgentSteeringV4 | null;
+  readonly goals: AgentGoalsV4 | null;
   readonly transientControls: AgentTransientControlCapabilityV4 | null;
 }
 

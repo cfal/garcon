@@ -1,14 +1,14 @@
 import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevisions,
   type AgentGoalControlHandoff,
-  type AgentExecutionContext,
-  type AgentOperationIdentity,
+  type AgentExecutionContextV4,
+  type AgentTurnOwnerOperationIdentityV4,
   type AgentProjectPathUpdatePreparation,
   type AgentSteerResult,
   type AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import {
@@ -45,6 +45,7 @@ import type {
 import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
+import type { AgentProjectionIngress } from './projection-ingress.js';
 
 const logger = createLogger('agents:runtime-router');
 
@@ -53,6 +54,7 @@ export interface AgentRuntimeRouterOptions {
   directory: AgentDirectory;
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
+  projection: AgentProjectionIngress;
   getCarryOverRevision(entry: AgentChatEntry): string;
   loadCarriedContext(
     chatId: string,
@@ -82,6 +84,7 @@ export class AgentRuntimeRouter {
   readonly #directory: AgentDirectory;
   readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #events: AgentEventBus;
+  readonly #projection: AgentProjectionIngress;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly #loadCarriedContext: (
     chatId: string,
@@ -99,6 +102,7 @@ export class AgentRuntimeRouter {
     this.#directory = options.directory;
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
+    this.#projection = options.projection;
     this.#getCarryOverRevision = options.getCarryOverRevision;
     this.#loadCarriedContext = options.loadCarriedContext;
     this.#getCarryOverMessageCount = options.getCarryOverMessageCount;
@@ -147,7 +151,8 @@ export class AgentRuntimeRouter {
     await this.#validateEndpoint(integration, selection);
     const resolvedPrompt = await resolveFileMentionsInCommand(prompt, entry.projectPath);
     assertExecutionAdmissionOpen(opts);
-    const operation = operationIdentity(opts, opts.commandType ?? 'chat-start');
+    const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
+    await this.#openProjection(integration, chatId, entry, opts.executionAdmission?.signal);
     const request = {
       ...this.#executionContext(chatId, entry, selection, operation, opts),
       prompt: resolvedPrompt,
@@ -249,7 +254,8 @@ export class AgentRuntimeRouter {
     await this.#validateEndpoint(integration, selection);
     const resolvedPrompt = await resolveFileMentionsInCommand(prompt, entry.projectPath);
     assertExecutionAdmissionOpen(opts);
-    const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
+    const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
+    await this.#openProjection(integration, chatId, entry, opts.executionAdmission?.signal);
     this.#events.trackTurn(chatId, operationMetadata(operation));
     try {
       await integration.execution.resume({
@@ -288,6 +294,15 @@ export class AgentRuntimeRouter {
         422,
       );
     }
+    if (!entry.agentOwnershipEpoch) throw new Error('Agent ownership epoch is required');
+    const active = this.#events.getActiveTurn(chatId);
+    if (!active?.turnOwner) {
+      return {
+        kind: 'rejected',
+        reason: 'no-active-turn',
+        message: 'No active turn receipt owner',
+      };
+    }
     return integration.steering.steer({
       chatId,
       projectPath: entry.projectPath,
@@ -296,6 +311,14 @@ export class AgentRuntimeRouter {
       target,
       input,
       clientMessageId: options.clientMessageId,
+      operation: {
+        agentOwnershipEpoch: agentOwnershipEpoch(entry.agentOwnershipEpoch),
+        commandType: 'steer',
+        clientRequestId: options.clientRequestId,
+        clientMessageId: options.clientMessageId,
+        turnId: active.turnOwner.turnId,
+        turnOwner: active.turnOwner,
+      },
       prepareDelivery,
     });
   }
@@ -330,7 +353,7 @@ export class AgentRuntimeRouter {
         opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
     });
     await this.#validateEndpoint(integration, selection);
-    const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
+    const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
     const previousTurn = this.#events.getActiveTurn(chatId);
     return integration.goals.submitControl({
       ...this.#executionContext(chatId, entry, selection, operation, opts),
@@ -375,7 +398,8 @@ export class AgentRuntimeRouter {
         400,
       );
     }
-    const operation = operationIdentity(opts, 'agent-compact');
+    const operation = operationIdentity(entry, opts, 'agent-compact');
+    await this.#openProjection(integration, chatId, entry, opts.executionAdmission?.signal);
     const prompt = opts.instructions?.trim() ? `/compact ${opts.instructions.trim()}` : '/compact';
     this.#events.trackTurn(chatId, operationMetadata(operation));
     try {
@@ -517,7 +541,7 @@ export class AgentRuntimeRouter {
         modelEndpointId: source.modelEndpointId,
       });
       await this.#validateEndpoint(integration, selection);
-      const operation = operationIdentity({}, 'fork-run');
+      const operation = operationIdentity(source, {}, 'fork-run');
       const sourceReference = toAgentChatReference(
         integration,
         args.sourceChatId,
@@ -525,16 +549,18 @@ export class AgentRuntimeRouter {
         this.#getCarryOverRevision(source),
       );
       const sourceSnapshot = args.messageSequence
-        ? await integration.transcript.load({
-            chat: sourceReference,
-            signal: new AbortController().signal,
-          })
+        ? await this.#projection.open(
+            integration,
+            sourceReference,
+            new AbortController().signal,
+          )
         : null;
       const carryOverMessageCount = args.messageSequence
         ? await this.#getCarryOverMessageCount(source)
         : 0;
       if (args.messageSequence) {
-        const messageCount = carryOverMessageCount + (sourceSnapshot?.messages.length ?? 0);
+        const messageCount = carryOverMessageCount
+          + (sourceSnapshot?.kind === 'ready' ? sourceSnapshot.value.entries.length : 0);
         if (args.messageSequence > messageCount) {
           throw new DomainError(
             'TRANSCRIPT_UNAVAILABLE',
@@ -543,20 +569,16 @@ export class AgentRuntimeRouter {
           );
         }
       }
-      const nativePrefixRevision = args.messageSequence
-        ? computeAgentTranscriptRevisions(
-            sourceSnapshot!.messages,
-            Math.max(0, args.messageSequence - carryOverMessageCount),
-          ).prefix
-        : null;
       const result = await integration.forking.fork({
         ...this.#executionContext(args.targetChatId, source, selection, operation, {}),
         source: sourceReference,
         point: args.messageSequence ? {
           messageSequence: args.messageSequence,
           archivedMessageCount: carryOverMessageCount,
-          sourceRevision: {
-            nativePrefix: nativePrefixRevision!,
+            sourceRevision: {
+            nativePrefix: sourceSnapshot?.kind === 'ready'
+              ? sourceSnapshot.value.checkpoint.projection.durableRevision
+              : sourceReference.carryOverRevision,
             carryOver: sourceReference.carryOverRevision,
           },
         } : null,
@@ -660,14 +682,14 @@ export class AgentRuntimeRouter {
     chatId: string,
     entry: ReturnType<typeof requireAgentChatEntry>,
     selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>,
-    operation: AgentOperationIdentity,
+    operation: AgentTurnOwnerOperationIdentityV4,
     opts: {
       permissionMode?: RunAgentTurnOptions['permissionMode'];
       thinkingMode?: RunAgentTurnOptions['thinkingMode'];
       agentSettings?: RunAgentTurnOptions['agentSettings'];
       executionAdmission?: AgentExecutionAdmission;
     },
-  ): AgentExecutionContext {
+  ): AgentExecutionContextV4 {
     const integration = this.#directory.require(entry.agentId);
     const permissionMode = supportedValue(
       integration.descriptor.supportedPermissionModes,
@@ -700,6 +722,33 @@ export class AgentRuntimeRouter {
       },
     };
   }
+
+  async #openProjection(
+    integration: ReturnType<AgentDirectory['require']>,
+    chatId: string,
+    entry: ReturnType<typeof requireAgentChatEntry>,
+    signal = new AbortController().signal,
+  ): Promise<void> {
+    const opened = await this.#projection.open(
+      integration,
+      toAgentChatReference(
+        integration,
+        chatId,
+        entry,
+        this.#getCarryOverRevision(entry),
+      ),
+      signal,
+    );
+    if (opened.kind === 'ready') return;
+    throw new DomainError(
+      'TRANSCRIPT_UNAVAILABLE',
+      opened.kind === 'deferred'
+        ? 'The transcript is busy. Retry after the current execution settles.'
+        : 'The transcript projection is unavailable.',
+      409,
+      true,
+    );
+  }
 }
 
 function requireAgentChatEntryWithModel(
@@ -714,22 +763,37 @@ function requireAgentChatEntryWithModel(
 }
 
 function operationIdentity(
+  entry: Pick<AgentChatEntry, 'agentOwnershipEpoch'>,
   value: { clientRequestId?: string; clientMessageId?: string; turnId?: string },
   commandType: AgentExecutionCommandType,
-): AgentOperationIdentity {
-  return {
+): AgentTurnOwnerOperationIdentityV4 {
+  if (!entry.agentOwnershipEpoch) throw new Error('Agent ownership epoch is required');
+  const clientRequestId = value.clientRequestId ?? crypto.randomUUID();
+  const turnId = value.turnId ?? crypto.randomUUID();
+  const ownershipEpoch = agentOwnershipEpoch(entry.agentOwnershipEpoch);
+  const turnOwner = {
+    agentOwnershipEpoch: ownershipEpoch,
     commandType,
-    clientRequestId: value.clientRequestId ?? null,
+    clientRequestId,
+    turnId,
+  } as const;
+  return {
+    agentOwnershipEpoch: ownershipEpoch,
+    commandType,
+    clientRequestId,
     clientMessageId: value.clientMessageId ?? null,
-    turnId: value.turnId ?? crypto.randomUUID(),
+    turnId,
+    turnOwner,
   };
 }
 
-function operationMetadata(operation: AgentOperationIdentity) {
+function operationMetadata(operation: AgentTurnOwnerOperationIdentityV4) {
   return {
     commandType: operation.commandType,
     ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),
     turnId: operation.turnId,
+    agentOwnershipEpoch: operation.agentOwnershipEpoch,
+    turnOwner: operation.turnOwner,
   };
 }
 

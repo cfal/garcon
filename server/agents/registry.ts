@@ -6,6 +6,12 @@ import type {
   AgentSteerTarget,
   AgentTranscriptPage,
   AgentTranscriptSourceLocation,
+  AgentInputPreparation,
+  AgentTranscriptAdmissionIdentity,
+  AgentChatReferenceV4,
+  AgentIntegrationV4,
+  AgentStreamEvent,
+  AgentTurnReceiptOwner,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
@@ -42,6 +48,10 @@ import { AgentRuntimeRouter, type RunSingleQueryOptions } from './runtime-router
 import { AgentSessionSettingsService } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../lib/log.js';
+import { AgentProjectionIngress } from './projection-ingress.js';
+import type { UserMessage } from '@garcon/common/chat-types';
+import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
+import type { PendingUserInputRegistrationOptions } from '../chat-execution/types.js';
 
 const logger = createLogger('agents:registry');
 
@@ -141,6 +151,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #directory: AgentDirectory;
   readonly #catalog: AgentCatalogService;
   readonly #events: AgentEventBus;
+  readonly #projection: AgentProjectionIngress;
   readonly #runtime: AgentRuntimeRouter;
   readonly #settings: AgentSessionSettingsService;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
@@ -166,12 +177,14 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
     });
-    this.#events = new AgentEventBus(this.#directory);
+    this.#projection = new AgentProjectionIngress(this.#directory.list());
+    this.#events = new AgentEventBus(this.#projection);
     this.#runtime = new AgentRuntimeRouter({
       registry: this.#registry,
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
       events: this.#events,
+      projection: this.#projection,
       getCarryOverRevision: args.getCarryOverRevision,
         loadCarriedContext: args.loadCarriedContext,
         getCarryOverMessageCount: args.getCarryOverMessageCount,
@@ -278,10 +291,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   async getPreview(session: AgentChatEntry | null, chatId = ''): Promise<unknown> {
     if (!session?.agentId) return null;
     const integration = this.#directory.get(session.agentId);
-    return integration?.transcript.preview({
+    if (!integration) return null;
+    const result = await integration.transcript.preview({
       chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
       signal: new AbortController().signal,
-    }) ?? null;
+    });
+    return result.kind === 'ready' ? result.value : null;
   }
 
   async loadMessages(session: AgentChatEntry | null, chatId = ''): Promise<ChatMessage[]> {
@@ -296,10 +311,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!session?.agentId) return { messages: [], revision: transcriptRevision([]) };
     const integration = this.#directory.get(session.agentId);
     if (!integration) return { messages: [], revision: transcriptRevision([]) };
-    return integration.transcript.load({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
-      signal,
-    });
+    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
+    const opened = await this.#projection.open(integration, chat, signal);
+    if (opened.kind !== 'ready') return { messages: [], revision: transcriptRevision([]) };
+    const messages = opened.value.entries.map((entry) => entry.message);
+    return { messages, revision: transcriptRevision(messages) };
   }
 
   async loadMessagePage(
@@ -311,13 +327,29 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   ): Promise<MutableAgentTranscriptPage | null> {
     if (!session?.agentId) return null;
     const integration = this.#directory.get(session.agentId);
-    if (!integration?.transcript.loadPage) return null;
-    const page = await integration.transcript.loadPage({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
-      page: { limit, offset },
+    if (!integration) return null;
+    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
+    const opened = await this.#projection.open(integration, chat, signal);
+    if (opened.kind !== 'ready') return null;
+    const total = opened.value.checkpoint.projection.total;
+    const page = await this.#projection.page({
+      integration,
+      chat,
       signal,
+      limit,
+      beforeOrdinal: Math.max(1, total - offset + 1),
+      expectedProjection: opened.value.checkpoint.projection,
     });
-    return page ? { ...page, messages: [...page.messages] } : null;
+    if (page.kind !== 'ready') return null;
+    const messages = page.page.entries.map((entry) => entry.message);
+    return {
+      messages,
+      total,
+      hasMore: page.page.hasMore,
+      offset,
+      limit,
+      revision: transcriptRevision(opened.value.entries.map((entry) => entry.message)),
+    };
   }
 
   getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
@@ -331,10 +363,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!session.agentSessionId) return null;
     const integration = this.#directory.get(session.agentId);
     if (!integration) return null;
-    const reference = await integration.transcript.resolveNativeSession({
+    const result = await integration.transcript.resolveNativeSession({
       chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
       signal: new AbortController().signal,
     });
+    if (result.kind !== 'ready') return null;
+    const reference = result.value;
     if (reference?.ownerId !== session.agentId && reference !== null) {
       throw new Error(`Native session owner mismatch for ${chatId || session.agentSessionId}`);
     }
@@ -348,10 +382,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const integration = this.#directory.get(session.agentId);
     if (!integration) return null;
     try {
-      const source = await integration.transcript.describeSource({
+      const result = await integration.transcript.describeSource({
         chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
         signal: new AbortController().signal,
       });
+      if (result.kind !== 'ready') return null;
+      const source = result.value;
       if (source === null) return null;
       if ((source.kind !== 'filesystem-path' && source.kind !== 'provider-reference')
           || typeof source.value !== 'string' || source.value.length === 0) {
@@ -413,14 +449,217 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     }));
   }
 
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void): void { this.#events.onMessages(cb); }
-  onProcessing(cb: (chatId: string, processing: boolean) => void): void { this.#events.onProcessing(cb); }
-  onSessionCreated(cb: (chatId: string) => void): void { this.#events.onSessionCreated(cb); }
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void { this.#events.onFinished(cb); }
-  onFailed(cb: (chatId: string, error: string, metadata?: TurnEventMetadata) => void): void { this.#events.onFailed(cb); }
+  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void | Promise<void>): void { this.#events.onMessages(cb); }
+  onProcessing(cb: (chatId: string, processing: boolean) => void | Promise<void>): void { this.#events.onProcessing(cb); }
+  onSessionCreated(cb: (chatId: string) => void | Promise<void>): void { this.#events.onSessionCreated(cb); }
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void | Promise<void>): void { this.#events.onFinished(cb); }
+  onFailed(cb: (chatId: string, error: string, metadata?: TurnEventMetadata) => void | Promise<void>): void { this.#events.onFailed(cb); }
+  onControl(cb: Parameters<AgentEventBus['onControl']>[0]): void { this.#events.onControl(cb); }
+  onInputSettled(cb: Parameters<AgentEventBus['onInputSettled']>[0]): void {
+    this.#events.onInputSettled(cb);
+  }
+  onProjectionFailure(
+    cb: Parameters<AgentEventBus['onProjectionFailure']>[0],
+  ): void { this.#events.onProjectionFailure(cb); }
   settleTurn(chatId: string, turn: TurnEventMetadata): void { this.#events.settleTurn(chatId, turn); }
   discardTurn(chatId: string): void { this.#events.clearTurn(chatId); }
   getActiveTurn(chatId: string): TurnEventMetadata | undefined { return this.#events.getActiveTurn(chatId); }
+  projectionIngress(): AgentProjectionIngress { return this.#projection; }
+
+  async repairProjection(
+    chatId: string,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const session = this.#registry.getChat(chatId);
+    if (!session?.agentId) return false;
+    const integration = this.#directory.get(session.agentId);
+    if (!integration) return false;
+    const chat = toAgentChatReference(
+      integration,
+      chatId,
+      session,
+      this.#getCarryOverRevision(session),
+    );
+    this.#projection.closeSegment(chat);
+    const result = await this.#projection.open(integration, chat, signal);
+    return result.kind === 'ready';
+  }
+
+  async admitInput(
+    chatId: string,
+    message: UserMessage,
+    options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
+  ): Promise<{ discardKnownNotSent(): Promise<void> }> {
+    const session = this.#registry.getChat(chatId);
+    if (!session) throw new Error(`Session not initialized: ${chatId}`);
+    const integration = this.#directory.require(session.agentId);
+    const chat = toAgentChatReference(
+      integration,
+      chatId,
+      session,
+      this.#getCarryOverRevision(session),
+    );
+    const signal = new AbortController().signal;
+    const opened = await this.#projection.open(integration, chat, signal);
+    if (opened.kind !== 'ready') {
+      throw new Error(opened.kind === 'deferred'
+        ? 'TRANSCRIPT_PROJECTION_DEFERRED'
+        : opened.errorCode);
+    }
+    const operation = this.#admissionIdentity(chatId, session, options);
+    if (options.commandType !== 'steer') {
+      this.#events.trackTurn(chatId, {
+        commandType: operation.turnOwner.commandType,
+        clientRequestId: operation.turnOwner.clientRequestId,
+        turnId: operation.turnOwner.turnId,
+        agentOwnershipEpoch: operation.agentOwnershipEpoch,
+        turnOwner: operation.turnOwner,
+      });
+    }
+    const preparation = await integration.transcript.prepareInput({
+      chat,
+      signal,
+      message,
+      operation,
+    });
+    let admission: AdmissionCommitResult;
+    try {
+      admission = await commitAdmission(integration, chat, operation, preparation, signal);
+    } catch (error) {
+      if (error instanceof ProjectionAdmissionAmbiguousError) {
+        this.#projection.fence(chat, error);
+      }
+      throw error;
+    }
+    if (admission.kind === 'event') {
+      await this.#projection.applyReturnedEvent(integration, chat, admission.event);
+    } else {
+      verifySettledAdmission(
+        this.#projection.current(chat)?.entries ?? opened.value.entries,
+        operation,
+        admission,
+      );
+    }
+    return {
+      discardKnownNotSent: async () => {
+        const reset = await preparation.discardCommitted();
+        await this.#projection.applyReturnedEvent(integration, chat, reset);
+      },
+    };
+  }
+
+  #admissionIdentity(
+    chatId: string,
+    session: AgentChatEntry,
+    options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
+  ): AgentTranscriptAdmissionIdentity {
+    if (!session.agentOwnershipEpoch) throw new Error('Agent ownership epoch is required');
+    const ownership = agentOwnershipEpoch(session.agentOwnershipEpoch);
+    const commandType = options.commandType
+      ?? (session.agentSessionId ? 'agent-run' : 'chat-start');
+    if (commandType === 'agent-compact') {
+      throw new TypeError('Compaction does not admit a transcript input');
+    }
+    let owner: AgentTurnReceiptOwner;
+    if (commandType === 'steer') {
+      const active = this.#events.getActiveTurn(chatId);
+      if (!active?.turnOwner) throw new Error('Cannot admit a steer without an active turn owner');
+      owner = active.turnOwner;
+    } else {
+      if (!options.turnId) throw new TypeError('Accepted input is missing a turn ID');
+      owner = {
+        agentOwnershipEpoch: ownership,
+        commandType,
+        clientRequestId: options.clientRequestId,
+        turnId: options.turnId,
+      };
+    }
+    return {
+      agentOwnershipEpoch: ownership,
+      commandType,
+      clientRequestId: options.clientRequestId,
+      clientMessageId: options.clientMessageId ?? null,
+      turnId: owner.turnId,
+      turnOwner: owner,
+    };
+  }
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
   getAgentCatalogEntries() { return this.#catalog.getAgentCatalogEntries(); }
+}
+
+async function commitAdmission(
+  integration: AgentIntegrationV4,
+  chat: AgentChatReferenceV4,
+  operation: AgentTranscriptAdmissionIdentity,
+  preparation: AgentInputPreparation,
+  signal: AbortSignal,
+): Promise<AdmissionCommitResult> {
+  let commitError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return { kind: 'event', event: await preparation.commit() };
+    } catch (error) {
+      commitError ??= error;
+    }
+    let resolved: Awaited<ReturnType<AgentIntegrationV4['transcript']['resolveInputAdmission']>>;
+    try {
+      resolved = await integration.transcript.resolveInputAdmission({ chat, signal, operation });
+    } catch (error) {
+      throw new ProjectionAdmissionAmbiguousError(commitError, error);
+    }
+    switch (resolved.kind) {
+      case 'committed':
+      case 'discarded':
+        return { kind: 'event', event: resolved.event };
+      case 'committed-settled':
+      case 'discarded-settled':
+        return resolved;
+      case 'prepared':
+        continue;
+      case 'rolled-back':
+      case 'absent':
+        throw commitError;
+      case 'degraded':
+        throw new ProjectionAdmissionAmbiguousError(
+          commitError,
+          new Error(resolved.errorCode),
+        );
+    }
+  }
+  throw new ProjectionAdmissionAmbiguousError(
+    commitError,
+    new Error('Projection admission could not prove its commit outcome'),
+  );
+}
+
+type AdmissionCommitResult =
+  | { readonly kind: 'event'; readonly event: AgentStreamEvent }
+  | { readonly kind: 'committed-settled'; readonly entryId: string }
+  | { readonly kind: 'discarded-settled'; readonly entryId: string };
+
+class ProjectionAdmissionAmbiguousError extends Error {
+  constructor(commitError: unknown, resolutionError: unknown) {
+    super('Projection admission outcome is ambiguous', {
+      cause: new AggregateError([commitError, resolutionError]),
+    });
+    this.name = 'ProjectionAdmissionAmbiguousError';
+  }
+}
+
+function verifySettledAdmission(
+  entries: readonly import('@garcon/server-agent-interface').AgentTranscriptEntry[],
+  operation: AgentTranscriptAdmissionIdentity,
+  result: Exclude<AdmissionCommitResult, { readonly kind: 'event' }>,
+): void {
+  const entry = entries.find((candidate) => candidate.id === result.entryId);
+  if (result.kind === 'discarded-settled') {
+    if (entry) throw new TypeError('Discarded admission still exists in the opened projection');
+    return;
+  }
+  if (!entry || entry.lifetime !== 'durable'
+      || entry.provenance?.clientRequestId !== operation.clientRequestId
+      || entry.provenance.turnOwner.turnId !== operation.turnOwner.turnId
+      || entry.provenance.agentOwnershipEpoch !== operation.agentOwnershipEpoch) {
+    throw new TypeError('Settled admission does not match the opened durable projection');
+  }
 }

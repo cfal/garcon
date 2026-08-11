@@ -26,7 +26,7 @@ describe('OpenCodeAgentIntegration', () => {
     const integration = new OpenCodeAgentIntegration(host);
 
     expect(OpenCodeAgentIntegration.integrationId).toBe('opencode');
-    expect(OpenCodeAgentIntegration.apiVersion).toBe(3);
+    expect(OpenCodeAgentIntegration.apiVersion).toBe(4);
     expect(OpenCodeAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('opencode');
     expect(integration.execution).toBeDefined();
@@ -69,11 +69,14 @@ describe('OpenCodeAgentIntegration', () => {
       },
       signal,
     })).resolves.toEqual({
-      ownerId: 'opencode',
-      schemaVersion: 1,
+      kind: 'ready',
       value: {
-        path: '!opencode:session-1',
-        agentSessionId: 'session-1',
+        ownerId: 'opencode',
+        schemaVersion: 1,
+        value: {
+          path: '!opencode:session-1',
+          agentSessionId: 'session-1',
+        },
       },
     });
   });

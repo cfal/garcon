@@ -34,22 +34,11 @@ function createPendingInputs() {
   };
 }
 
-function createChatMessages() {
-  let seq = 0;
+function createInputProjection() {
   return {
-    appendMessages: mock((_chatId, messages) => {
-      const viewMessages = messages.map((message) => {
-        seq += 1;
-        return {
-          seq,
-          message,
-        };
-      });
-      return Promise.resolve({
-        generationId: 'generation-1',
-        messages: viewMessages,
-      });
-    }),
+    admitInput: mock(async () => ({
+      discardKnownNotSent: mock(async () => {}),
+    })),
   };
 }
 
@@ -78,7 +67,7 @@ beforeEach(async () => {
     workspaceDir,
     createStateOnlyAgents(),
     createPendingInputs(),
-    createChatMessages(),
+    createInputProjection(),
     emptyDrainOptions,
     () => true,
     createControlRepository(),
@@ -111,7 +100,7 @@ describe('transcript snapshot ownership', () => {
       workspaceDir,
       agents,
       createPendingInputs(),
-      createChatMessages(),
+      createInputProjection(),
       emptyDrainOptions,
       () => true,
       createControlRepository(),
@@ -133,6 +122,21 @@ describe('transcript snapshot ownership', () => {
     await queue.deleteChatQueueFile('snapshot-chat');
     await queue.waitForExecutionOwners();
     await expect(queue.releaseTranscriptSnapshot(snapshot)).resolves.toBeUndefined();
+  });
+
+  it('atomically replaces a failed turn with a transcript repair reservation', async () => {
+    const turn = { clientRequestId: 'request-repair', turnId: 'turn-repair' };
+    const direct = queue.reserveDirectTurn('repair-chat', turn);
+    const repair = queue.replaceTurnWithTranscriptSnapshotReservation('repair-chat', turn);
+
+    queue.onAgentTurnTerminal('repair-chat', turn);
+    await queue.completeDirectTurn(direct);
+
+    expect(repair).not.toBeNull();
+    expect(queue.ownsExecution('repair-chat')).toBe(true);
+    expect(() => queue.reserveDirectTurn('repair-chat')).toThrow('already owns execution');
+    await queue.releaseTranscriptSnapshot(repair);
+    expect(queue.ownsExecution('repair-chat')).toBe(false);
   });
 });
 
@@ -576,7 +580,7 @@ describe('queue invariants', () => {
       workspaceDir,
       createStateOnlyAgents(),
       createPendingInputs(),
-      createChatMessages(),
+      createInputProjection(),
       emptyDrainOptions,
       () => true,
       undefined,
@@ -659,7 +663,7 @@ describe('orchestration', () => {
       markFailed: mock(() => true),
       markUnconfirmed: mock(() => true),
     };
-    mockChatMessages = createChatMessages();
+    mockChatMessages = createInputProjection();
     mockDrainOptions = mock(() => ({
       permissionMode: 'plan',
       thinkingMode: 'low',
@@ -800,7 +804,7 @@ describe('orchestration', () => {
           waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         createPendingInputs(),
-        createChatMessages(),
+        createInputProjection(),
         emptyDrainOptions,
         () => chatExists,
         createControlRepository(),
@@ -1144,19 +1148,15 @@ describe('orchestration', () => {
       );
     });
 
-    it('appends the accepted user message and emits chat messages', async () => {
-      const batches = [];
-      orchQueue.onChatMessages((chatId, generationId, messages, metadata) => {
-        batches.push({ chatId, generationId, messages, metadata });
-      });
-
+    it('admits the accepted user message through the projection owner', async () => {
       await orchQueue.registerPendingUserInput('c1', 'hello', {
         clientRequestId: 'req-1',
         clientMessageId: 'msg-1',
         turnId: 'turn-1',
       });
 
-      expect(mockChatMessages.appendMessages).toHaveBeenCalledWith('c1', [
+      expect(mockChatMessages.admitInput).toHaveBeenCalledWith(
+        'c1',
         expect.objectContaining({
           content: 'hello',
           metadata: expect.objectContaining({
@@ -1166,29 +1166,12 @@ describe('orchestration', () => {
             deliveryStatus: 'accepted',
           }),
         }),
-      ]);
-      expect(batches[0]).toMatchObject({
-        chatId: 'c1',
-        generationId: 'generation-1',
-        metadata: { clientRequestId: 'req-1', turnId: 'turn-1' },
-      });
-      expect(batches[0].messages[0].message.content).toBe('hello');
-    });
-
-    it('does not emit an empty chat message batch for an idempotent append', async () => {
-      mockChatMessages.appendMessages.mockResolvedValueOnce({
-        generationId: 'generation-1',
-        messages: [],
-      });
-      const emitted = mock();
-      orchQueue.onChatMessages(emitted);
-
-      await orchQueue.registerPendingUserInput('c1', 'already durable', {
-        clientRequestId: 'request-durable',
-        turnId: 'turn-durable',
-      });
-
-      expect(emitted).not.toHaveBeenCalled();
+        expect.objectContaining({
+          clientRequestId: 'req-1',
+          clientMessageId: 'msg-1',
+          turnId: 'turn-1',
+        }),
+      );
     });
 
     it('registers provided metadata for accepted REST turns', async () => {
@@ -1274,7 +1257,7 @@ describe('orchestration', () => {
         turnId: 'turn-1',
       });
 
-      expect(mockChatMessages.appendMessages).not.toHaveBeenCalled();
+      expect(mockChatMessages.admitInput).not.toHaveBeenCalled();
     });
   });
 
@@ -1850,7 +1833,7 @@ describe('orchestration', () => {
       mockPendingInputs.register.mockResolvedValue({
         clientRequestId: 'request-append-failed',
       });
-      mockChatMessages.appendMessages.mockRejectedValue(new Error('chat append failed'));
+      mockChatMessages.admitInput.mockRejectedValue(new Error('chat append failed'));
       mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery(runtimeHandoff());
         delivered = true;
@@ -1874,7 +1857,7 @@ describe('orchestration', () => {
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
     });
 
-    it('continues active delivery once after a post-commit chat listener fails', async () => {
+    it('continues active delivery once after projection admission commits', async () => {
       let deliveries = 0;
       mockAgents.isChatRunning.mockReturnValue(true);
       mockPendingInputs.register.mockResolvedValue({
@@ -1885,17 +1868,13 @@ describe('orchestration', () => {
         deliveries += 1;
         return true;
       });
-      orchQueue.onChatMessages(() => {
-        throw new Error('listener failed');
-      });
-
       const result = await orchQueue.deliverGoalControlInput('c1', 'deliver despite listener', {
         ...goalControlOptions('request-listener-failed'),
       });
 
       expect(result).toBe(true);
       expect(deliveries).toBe(1);
-      expect(mockChatMessages.appendMessages).toHaveBeenCalledTimes(1);
+      expect(mockChatMessages.admitInput).toHaveBeenCalledTimes(1);
       expect(mockPendingInputs.discard).not.toHaveBeenCalled();
       expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
@@ -2869,7 +2848,7 @@ describe('orchestration', () => {
         workspaceDir,
         turnRunner,
         createPendingInputs(),
-        createChatMessages(),
+        createInputProjection(),
         emptyDrainOptions,
         () => chatExists,
         createControlRepository(),

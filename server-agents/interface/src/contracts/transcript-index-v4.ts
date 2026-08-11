@@ -17,6 +17,7 @@ export interface AgentTranscriptIndexEntryV4 {
 export interface AgentTranscriptIndexSourceRefV4 {
   readonly apiVersion: 2;
   readonly ownerId: string;
+  readonly schemaVersion: 2;
   readonly checkpoint: AgentTranscriptIndexCheckpointV4;
   readonly value: JsonObject;
 }

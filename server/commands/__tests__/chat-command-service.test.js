@@ -727,7 +727,7 @@ function makeRealQueue(pendingInputsService, turnRunnerOverrides = {}) {
       ...turnRunnerOverrides,
     },
     pendingInputsService,
-    { appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })) },
+    { admitInput: mock(async () => ({ discardKnownNotSent: async () => {} })) },
     () => ({}),
     () => true,
     new InMemoryChatExecutionControlRepository('server-instance-test'),

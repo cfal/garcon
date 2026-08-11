@@ -21,6 +21,11 @@ import type {
   AgentResumeRequest,
   AgentStartedSession,
 } from './execution.js';
+import type {
+  AgentCompactRequestV4,
+  AgentResumeRequestV4,
+  AgentTranscriptAdmissionIdentity,
+} from './execution-events-v4.js';
 import type { AgentMigrationStore } from './host.js';
 import type { AgentChatReference, AgentNativeSessionRef } from './transcript.js';
 
@@ -65,6 +70,11 @@ export interface AgentSteering {
   steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
 }
 
+export interface AgentSteeringV4 {
+  captureTarget(request: AgentSteerTargetRequest): AgentSteerTarget | null;
+  steer(request: AgentSteerRequestV4): Promise<AgentSteerResult>;
+}
+
 export type AgentSteerTarget = object;
 
 export interface AgentSteerTargetRequest {
@@ -82,6 +92,10 @@ export interface AgentSteerRequest {
   readonly input: string;
   readonly clientMessageId: string;
   readonly prepareDelivery: () => Promise<void>;
+}
+
+export interface AgentSteerRequestV4 extends AgentSteerRequest {
+  readonly operation: AgentTranscriptAdmissionIdentity;
 }
 
 export type AgentSteerRejectionReason =
@@ -108,7 +122,15 @@ export interface AgentGoals {
   submitControl(request: AgentGoalControlRequest): Promise<boolean>;
 }
 
+export interface AgentGoalsV4 {
+  submitControl(request: AgentGoalControlRequestV4): Promise<boolean>;
+}
+
 export interface AgentGoalControlRequest extends AgentResumeRequest {
+  readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
+}
+
+export interface AgentGoalControlRequestV4 extends AgentResumeRequestV4 {
   readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
 }
 
@@ -124,6 +146,10 @@ export interface AgentGoalControlHandoff {
 // fresh session from a projected transcript instead.
 export interface AgentCompaction {
   compact(request: AgentCompactRequest): Promise<void>;
+}
+
+export interface AgentCompactionV4 {
+  compact(request: AgentCompactRequestV4): Promise<void>;
 }
 
 export interface AgentForking {

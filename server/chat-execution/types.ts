@@ -6,18 +6,17 @@ import type {
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import type {
   ChatImage,
-  ChatMessage,
   ChatStopIntent,
   ChatStopOutcome,
   UserMessageDeliveryStatus,
 } from '../../common/chat-types.ts';
-import type { ChatViewMessage } from '../../common/chat-view.ts';
 import type {
   AgentGoalControlHandoff,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
 import type {
+  AgentExecutionCommandType,
   AgentExecutionAdmission,
   AgentSteerOptions,
   RunAgentTurnOptions,
@@ -40,6 +39,7 @@ export type PendingUserInputRegistrationOptions = Pick<
   RunAgentTurnOptions,
   'clientRequestId' | 'clientMessageId' | 'turnId' | 'images'
 > & {
+  commandType?: AgentExecutionCommandType | 'steer';
   deliveryStatus?: UserMessageDeliveryStatus;
 };
 
@@ -268,13 +268,6 @@ export interface PendingInputsPort {
   markUnconfirmed(chatId: string, clientRequestId: string): boolean;
 }
 
-export interface ChatMessagesPort {
-  appendMessages(
-    chatId: string,
-    messages: ChatMessage[],
-  ): Promise<{ generationId: string; messages: ChatViewMessage[] }>;
-}
-
 export type ExecutionControlUpdatedCallback = (
   chatId: string,
   control: StoredChatExecutionControlState,
@@ -301,14 +294,19 @@ export type TurnFailedCallback = (
   options: RunAgentTurnOptions,
 ) => void;
 export type TurnSettledCallback = (chatId: string, turn: TurnIdentity | undefined) => void;
-export type ChatMessagesCallback = (
-  chatId: string,
-  generationId: string,
-  messages: ChatViewMessage[],
-  metadata?: { clientRequestId?: string; turnId?: string },
-) => void;
 export type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
 export type ChatExistsResolver = (chatId: string) => boolean;
+
+export interface ChatExecutionCoordinatorEvents {
+  'execution-control-updated': Parameters<ExecutionControlUpdatedCallback>;
+  dispatching: Parameters<DispatchingCallback>;
+  'session-stop-requested': Parameters<SessionStopRequestedCallback>;
+  'session-stopped': Parameters<SessionStoppedCallback>;
+  'chat-idle': Parameters<ChatIdleCallback>;
+  'turn-failed': Parameters<TurnFailedCallback>;
+  'turn-settled': Parameters<TurnSettledCallback>;
+  'processing-invalidated': Parameters<ProcessingInvalidatedCallback>;
+}
 
 export interface SessionStopInFlight {
   intent: ChatStopIntent;
@@ -346,6 +344,10 @@ export interface ChatExecutionCommands {
   abortForChatDeletion(chatId: string): Promise<boolean>;
   rollbackChatDeletion(chatId: string): void;
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
+  replaceTurnWithTranscriptSnapshotReservation(
+    chatId: string,
+    turn: TurnIdentity,
+  ): TranscriptSnapshotReservation | null;
   releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void>;
   waitForDispatches(): Promise<void>;
   ownsExecution(chatId: string): boolean;
@@ -386,6 +388,7 @@ export interface ChatExecutionService
     command: string,
     options: PendingUserInputRegistrationOptions,
   ): Promise<void>;
+  onAcceptedInputSettled(chatId: string, clientRequestId: string): void;
   reserveDirectTurn(chatId: string, turn?: TurnIdentity): DirectTurnReservation;
   assertDirectTurnReservationActive(reservation: DirectTurnReservation): void;
   releaseDirectTurn(reservation: DirectTurnReservation): Promise<void>;

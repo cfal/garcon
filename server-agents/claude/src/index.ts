@@ -6,6 +6,7 @@ import {
   computeAgentTranscriptRevision,
   type AgentHost,
   type AgentIntegration,
+  type AgentIntegrationV4,
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
@@ -19,6 +20,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
 import { createClaudeConfig } from './config.js';
 import { getClaudeAuthStatus } from './agents/claude/claude-auth.js';
 import {
@@ -65,9 +67,9 @@ const CLAUDE_DESCRIPTOR = {
   ],
 } as const;
 
-export default class ClaudeAgentIntegration implements AgentIntegration {
+export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'claude';
-  static readonly apiVersion = 3 as const;
+  static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -91,10 +93,11 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly commands: NonNullable<AgentIntegration['commands']>;
   readonly compaction = null;
   readonly forking;
-  readonly steering: NonNullable<AgentIntegration['steering']>;
+  readonly steering: NonNullable<AgentIntegrationV4['steering']>;
   readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
     const config = createClaudeConfig(host.environment);
@@ -152,18 +155,26 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
         ],
       }],
     });
-    this.execution = new ClaudeExecution(
+    const legacyExecution = new ClaudeExecution(
       host,
       runtime,
       nativeSessions,
       logger,
       config,
     );
-    this.transcript = createClaudeTranscript({
+    const legacyTranscript = createClaudeTranscript({
       nativeSessions,
       configHomeDir: config.configHomeDir,
       logger,
     });
+    const projection = createLegacyProjectionAdapter({
+      ownerId: 'claude',
+      host,
+      execution: legacyExecution,
+      transcript: legacyTranscript,
+    });
+    this.execution = projection.execution;
+    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CLAUDE_MODELS.DEFAULT,
@@ -195,7 +206,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     };
     this.forking = createJsonlForking({
       supportsWhileRunning: true,
-      transcript: this.transcript,
+      transcript: legacyTranscript,
       nativeSessions,
       rewriteEntry: projectClaudeForkEntry,
       transformEntries: transformClaudeForkTranscript,
@@ -204,7 +215,11 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     });
     this.steering = {
       captureTarget: request => runtime.captureSteerTarget(request.agentSessionId),
-      steer: request => runtime.steer(request),
+      steer: request => projection.deliverSteer(
+        request.chatId,
+        request.operation,
+        () => runtime.steer(request),
+      ),
     };
     this.endpoints = {
       async validate(selection) {

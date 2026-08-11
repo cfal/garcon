@@ -64,7 +64,9 @@ const MAX_LINES = 1000;
 // Answering a lost-response replay from the ledger rather than from live source
 // state adds 4 more, mirroring the ordering ForkCommands already uses so a source
 // deleted after a successful handoff cannot turn the retry into a 404.
-const EXECUTION_FOOTPRINT_BUDGET = 9010;
+// Agent-owned projection admission and fail-closed transcript repair add 153 lines
+// while removing the queue's competing transcript publication path.
+const EXECUTION_FOOTPRINT_BUDGET = 9163;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

@@ -5,6 +5,7 @@ import {
   computeAgentTranscriptRevision,
   type AgentHost,
   type AgentIntegration,
+  type AgentIntegrationV4,
   type AgentTranscript,
   type AgentTranscriptPreview,
 } from '@garcon/server-agent-interface';
@@ -16,6 +17,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
 import { createCursorConfig } from './config.js';
 import { AcpAgentRuntime } from './agents/shared/acp-agent-runtime.js';
 import { createCursorAcpPolicy } from './agents/cursor/cursor-acp-policy.js';
@@ -62,9 +64,9 @@ const CURSOR_DESCRIPTOR = {
   ],
 } as const;
 
-export default class CursorAgentIntegration implements AgentIntegration {
+export default class CursorAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'cursor';
-  static readonly apiVersion = 3 as const;
+  static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -77,7 +79,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
   readonly descriptor = CURSOR_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
-  readonly transcript: AgentTranscript;
+  readonly transcript;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -90,6 +92,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
     const config = createCursorConfig(host.environment);
@@ -107,8 +110,16 @@ export default class CursorAgentIntegration implements AgentIntegration {
       defaults: {},
       descriptors: [],
     });
-    this.execution = new CursorExecution(runtime, nativeSessions);
-    this.transcript = createCursorTranscript(transcriptReader, nativeSessions);
+    const legacyExecution = new CursorExecution(runtime, nativeSessions);
+    const legacyTranscript = createCursorTranscript(transcriptReader, nativeSessions);
+    const projection = createLegacyProjectionAdapter({
+      ownerId: 'cursor',
+      host,
+      execution: legacyExecution,
+      transcript: legacyTranscript,
+    });
+    this.execution = projection.execution;
+    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',

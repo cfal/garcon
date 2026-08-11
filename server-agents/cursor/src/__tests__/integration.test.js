@@ -26,7 +26,7 @@ describe('CursorAgentIntegration', () => {
     const integration = new CursorAgentIntegration(host);
 
     expect(CursorAgentIntegration.integrationId).toBe('cursor');
-    expect(CursorAgentIntegration.apiVersion).toBe(3);
+    expect(CursorAgentIntegration.apiVersion).toBe(4);
     expect(CursorAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('cursor');
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
@@ -65,11 +65,14 @@ describe('CursorAgentIntegration', () => {
       },
       signal,
     })).resolves.toEqual({
-      ownerId: 'cursor',
-      schemaVersion: 1,
+      kind: 'ready',
       value: {
-        path: '!cursor-acp:session-1',
-        agentSessionId: 'session-1',
+        ownerId: 'cursor',
+        schemaVersion: 1,
+        value: {
+          path: '!cursor-acp:session-1',
+          agentSessionId: 'session-1',
+        },
       },
     });
   });

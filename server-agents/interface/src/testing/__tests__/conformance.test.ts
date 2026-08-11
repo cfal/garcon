@@ -1,11 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentIntegration } from '../../index.js';
-import { computeAgentTranscriptRevision } from '../../transcript-revision.js';
+import type { AgentIntegrationV4 } from '../../index.js';
 import { validateAgentIntegration } from '../conformance.js';
 
 const settings = { ownerId: 'other', schemaVersion: 1, values: {} } as const;
-const emptyRevision = computeAgentTranscriptRevision([]);
-
 const integration = {
   descriptor: {
     id: 'other',
@@ -25,16 +22,22 @@ const integration = {
     abort: async () => false,
     isRunning: () => false,
     runningSessions: () => [],
-    subscribe: () => () => {},
   },
   transcript: {
-    resolveNativeSession: async () => null,
-    load: async () => ({ messages: [], revision: emptyRevision }),
-    preview: async () => null,
-    revision: async () => emptyRevision,
-    resolveIndexSource: async () => null,
-    refreshIndexSource: async () => null,
-    describeSource: async () => null,
+    openSegment: async () => { throw new Error('not used'); },
+    subscribe: () => () => {},
+    replay: async () => { throw new Error('not used'); },
+    loadPage: async () => { throw new Error('not used'); },
+    commitOffset: async () => {},
+    prepareInput: async () => { throw new Error('not used'); },
+    resolveInputAdmission: async () => ({ kind: 'absent' as const }),
+    prepareHandoffLease: async () => { throw new Error('not used'); },
+    prepareOwnershipSegment: async () => { throw new Error('not used'); },
+    resolveNativeSession: async () => ({ kind: 'ready' as const, value: null }),
+    preview: async () => ({ kind: 'ready' as const, value: null }),
+    resolveIndexSource: async () => ({ kind: 'ready' as const, value: null }),
+    refreshIndexSource: async () => ({ kind: 'ready' as const, value: null }),
+    describeSource: async () => ({ kind: 'ready' as const, value: null }),
     release: async () => {},
   },
   catalog: {
@@ -62,14 +65,15 @@ const integration = {
   forking: null,
   steering: null,
   goals: null,
+  transientControls: null,
   endpoints: null,
   singleQuery: null,
-} satisfies AgentIntegration;
+} satisfies AgentIntegrationV4;
 
 describe('validateAgentIntegration', () => {
   test('rejects a descriptor and class ID mismatch', () => {
     const integrationClass = {
-      integrationId: 'fake', apiVersion: 3 as const,
+      integrationId: 'fake', apiVersion: 4 as const,
       transcriptIndex: { apiVersion: 1 as const, moduleUrl: import.meta.url },
     };
     expect(() => validateAgentIntegration({
@@ -80,7 +84,7 @@ describe('validateAgentIntegration', () => {
 
   test('rejects duplicate descriptor values', () => {
     const integrationClass = {
-      integrationId: 'other', apiVersion: 3 as const,
+      integrationId: 'other', apiVersion: 4 as const,
       transcriptIndex: { apiVersion: 1 as const, moduleUrl: import.meta.url },
     };
     expect(() => validateAgentIntegration({
@@ -97,7 +101,7 @@ describe('validateAgentIntegration', () => {
 
   test('rejects a steering facet without admission-time target capture', () => {
     const integrationClass = {
-      integrationId: 'other', apiVersion: 3 as const,
+      integrationId: 'other', apiVersion: 4 as const,
       transcriptIndex: { apiVersion: 1 as const, moduleUrl: import.meta.url },
     };
 
@@ -106,7 +110,7 @@ describe('validateAgentIntegration', () => {
       integration: {
         ...integration,
         steering: { steer: async () => ({ kind: 'accepted' as const }) },
-      } as AgentIntegration,
+      } as AgentIntegrationV4,
     })).toThrow('invalid steering facet');
   });
 });

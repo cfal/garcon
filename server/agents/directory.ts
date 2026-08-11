@@ -1,4 +1,4 @@
-import type { AgentIntegration } from '@garcon/server-agent-interface';
+import type { AgentIntegrationV4 } from '@garcon/server-agent-interface';
 import type { IntegrationRegistry } from './integration-registry.js';
 
 export class AgentDirectory {
@@ -8,15 +8,15 @@ export class AgentDirectory {
     return this.integrations.has(agentId);
   }
 
-  get(agentId: string): AgentIntegration | null {
+  get(agentId: string): AgentIntegrationV4 | null {
     return this.integrations.get(agentId);
   }
 
-  require(agentId: string): AgentIntegration {
+  require(agentId: string): AgentIntegrationV4 {
     return this.integrations.require(agentId);
   }
 
-  list(): readonly AgentIntegration[] {
+  list(): readonly AgentIntegrationV4[] {
     return this.integrations.list();
   }
 }

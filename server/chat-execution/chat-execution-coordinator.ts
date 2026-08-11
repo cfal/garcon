@@ -44,9 +44,8 @@ import {
   type AcceptedQueueEntrySteerOutcome,
   type AgentTurnRunnerPort,
   type ChatExecutionService,
+  type ChatExecutionCoordinatorEvents,
   type ChatExistsResolver,
-  type ChatMessagesCallback,
-  type ChatMessagesPort,
   type CapturedSteerTarget,
   type ChatIdleCallback,
   type DirectTurnReservation,
@@ -71,6 +70,7 @@ import { ChatExecutionControlOperations } from './chat-execution-control-operati
 import { ExecutionOwnership } from './execution-ownership.ts';
 import { AcceptedInputHandler } from './accepted-input-handler.ts';
 import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
+import type { AcceptedInputProjectionPort } from './accepted-input-transcript.ts';
 import { GoalControlDelivery } from './goal-control-delivery.ts';
 import { SteerInputDelivery } from './steer-input-delivery.ts';
 import { waitUntilStopAbortable } from './stop-abortability.ts';
@@ -89,18 +89,6 @@ export {
 } from './types.ts';
 
 const logger = createLogger('queue');
-
-interface ChatExecutionCoordinatorEvents {
-  'chat-messages': Parameters<ChatMessagesCallback>;
-  'execution-control-updated': Parameters<ExecutionControlUpdatedCallback>;
-  dispatching: Parameters<DispatchingCallback>;
-  'session-stop-requested': Parameters<SessionStopRequestedCallback>;
-  'session-stopped': Parameters<SessionStoppedCallback>;
-  'chat-idle': Parameters<ChatIdleCallback>;
-  'turn-failed': Parameters<TurnFailedCallback>;
-  'turn-settled': Parameters<TurnSettledCallback>;
-  'processing-invalidated': Parameters<ProcessingInvalidatedCallback>;
-}
 
 interface StopResolution {
   outcome: ChatStopOutcome;
@@ -127,7 +115,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     _workspaceDir: string,
     turnRunner: AgentTurnRunnerPort,
     pendingInputs: PendingInputsPort,
-    chatMessages: ChatMessagesPort,
+    inputProjection: AcceptedInputProjectionPort,
     getDrainOptions: QueueDrainOptionsResolver,
     chatExists: ChatExistsResolver,
     controls: ChatExecutionControlRepository,
@@ -139,7 +127,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       throw new Error('ChatExecutionCoordinator requires an abortable turn-start boundary');
     }
     if (!pendingInputs) throw new Error('ChatExecutionCoordinator requires a pending input service');
-    if (!chatMessages) throw new Error('ChatExecutionCoordinator requires chat message storage');
+    if (!inputProjection) throw new Error('ChatExecutionCoordinator requires input projection');
     if (!getDrainOptions) throw new Error('ChatExecutionCoordinator requires a drain option resolver');
     if (!chatExists) throw new Error('ChatExecutionCoordinator requires a chat existence resolver');
     if (!controls) {
@@ -151,12 +139,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#chatExists = chatExists;
     this.#acceptedInputTranscript = new AcceptedInputTranscript(
       pendingInputs,
-      chatMessages,
-      {
-        appended: (chatId, generationId, messages, metadata) => {
-          this.emit('chat-messages', chatId, generationId, messages, metadata);
-        },
-      },
+      inputProjection,
     );
     this.#controlOperations = new ChatExecutionControlOperations(controls, {
       runExclusive: (chatId, operation) => this.#locks.runExclusive(`chat:${chatId}`, operation),
@@ -175,6 +158,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         content: string,
         options: PendingUserInputRegistrationOptions,
       ) => this.registerPendingUserInput(chatId, content, options),
+      discardProjectedInput: (chatId: string, clientRequestId: string) => (
+        this.#acceptedInputTranscript.discardKnownNotSent(chatId, clientRequestId)
+      ),
     };
     this.#goalControlDelivery = new GoalControlDelivery({
       ...inputDeliveryOptions,
@@ -197,6 +183,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         },
         registerPending: (chatId, content, options) => (
           this.registerPendingUserInput(chatId, content, options)
+        ),
+        discardProjectedInput: (chatId, clientRequestId) => (
+          this.#acceptedInputTranscript.discardKnownNotSent(chatId, clientRequestId)
         ),
         releaseDirect: (reservation) => this.#finishDirect(reservation, 'released'),
         runDirect: (reservation, content, options, dispatch, beforeFailureRelease) => (
@@ -222,6 +211,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         isShuttingDown: () => this.#shuttingDown,
         registerPending: (chatId, content, options) => (
           this.registerPendingUserInput(chatId, content, options)
+        ),
+        discardProjectedInput: (chatId, clientRequestId) => (
+          this.#acceptedInputTranscript.discardKnownNotSent(chatId, clientRequestId)
         ),
         publishDispatching: (chatId, entry) => {
           this.#invalidateProcessing(chatId);
@@ -297,16 +289,19 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#onDirectTerminal(chatId, turn);
   }
 
+  replaceTurnWithTranscriptSnapshotReservation(
+    chatId: string,
+    turn: TurnIdentity,
+  ): TranscriptSnapshotReservation | null {
+    return this.#ownership.replaceTurnWithTranscriptSnapshot(chatId, turn);
+  }
+
   getQueuedTurnFinalization(
     chatId: string,
     turnId: string | undefined,
   ): Promise<QueuedTurnFinalizationOutcome> | null {
     return this.#ownership.finalization(chatId, turnId);
   }
-  onChatMessages(cb: ChatMessagesCallback): void {
-    this.on('chat-messages', cb);
-  }
-
   // Resumes queued work after every turn, including initial turns that bypass
   // runReservedTurn's post-turn drain, unless a drain already owns the chat.
   async checkChatIdle(chatId: string): Promise<void> {
@@ -527,6 +522,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     options: PendingUserInputRegistrationOptions,
   ): Promise<void> {
     await this.#acceptedInputTranscript.register(chatId, command, options);
+  }
+
+  onAcceptedInputSettled(chatId: string, clientRequestId: string): void {
+    this.#acceptedInputTranscript.settle(chatId, clientRequestId);
   }
 
   reserveDirectTurn(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {

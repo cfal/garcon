@@ -27,16 +27,22 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       abort: async () => false,
       isRunning: () => false,
       runningSessions: () => [],
-      subscribe: () => () => {},
     },
     transcript: {
-      resolveNativeSession: async () => null,
-      load: async () => ({ messages: [], revision: 'empty' }),
-      preview: async () => null,
-      revision: async () => 'empty',
-      resolveIndexSource: async () => null,
-      refreshIndexSource: async () => null,
-      describeSource: async () => null,
+      openSegment: async () => { throw new Error('not used'); },
+      subscribe: () => () => {},
+      replay: async () => { throw new Error('not used'); },
+      loadPage: async () => { throw new Error('not used'); },
+      commitOffset: async () => {},
+      prepareInput: async () => { throw new Error('not used'); },
+      resolveInputAdmission: async () => ({ kind: 'absent' }),
+      prepareHandoffLease: async () => { throw new Error('not used'); },
+      prepareOwnershipSegment: async () => { throw new Error('not used'); },
+      resolveNativeSession: async () => ({ kind: 'ready', value: null }),
+      preview: async () => ({ kind: 'ready', value: null }),
+      resolveIndexSource: async () => ({ kind: 'ready', value: null }),
+      refreshIndexSource: async () => ({ kind: 'ready', value: null }),
+      describeSource: async () => ({ kind: 'ready', value: null }),
       release: async () => {},
     },
     catalog: {
@@ -68,6 +74,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     forking: null,
     steering: null,
     goals: null,
+    transientControls: null,
     endpoints: null,
     singleQuery: null,
     testHost: host,
@@ -77,7 +84,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
 function integrationClass(id, options = {}) {
   return class TestIntegration {
     static integrationId = id;
-    static apiVersion = options.apiVersion ?? 3;
+    static apiVersion = options.apiVersion ?? 4;
     static transcriptIndex = { apiVersion: 1, moduleUrl: import.meta.url };
 
     constructor(host) {

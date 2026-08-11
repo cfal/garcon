@@ -5,6 +5,7 @@ import {
   computeAgentTranscriptRevision,
   type AgentHost,
   type AgentIntegration,
+  type AgentIntegrationV4,
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
@@ -19,6 +20,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
 import { createOpenCodeConfig } from './config.js';
 import { OpenCodeExecution } from './agents/opencode/execution.js';
 import {
@@ -45,9 +47,9 @@ const OPENCODE_DESCRIPTOR = {
   }],
 } as const;
 
-export default class OpenCodeAgentIntegration implements AgentIntegration {
+export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'opencode';
-  static readonly apiVersion = 3 as const;
+  static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -60,7 +62,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly descriptor = OPENCODE_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
-  readonly transcript: AgentTranscript;
+  readonly transcript;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -69,10 +71,11 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly commands = null;
   readonly compaction = null;
   readonly forking: NonNullable<AgentIntegration['forking']>;
-  readonly steering: NonNullable<AgentIntegration['steering']>;
+  readonly steering: NonNullable<AgentIntegrationV4['steering']>;
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
     const config = createOpenCodeConfig(host.environment);
@@ -87,12 +90,24 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
       defaults: {},
       descriptors: [],
     });
-    this.execution = new OpenCodeExecution(runtime, nativeSessions);
+    const legacyExecution = new OpenCodeExecution(runtime, nativeSessions);
+    const legacyTranscript = createOpenCodeTranscript(runtime, nativeSessions, sessionId, logger);
+    const projection = createLegacyProjectionAdapter({
+      ownerId: 'opencode',
+      host,
+      execution: legacyExecution,
+      transcript: legacyTranscript,
+    });
+    this.execution = projection.execution;
+    this.transcript = projection.transcript;
     this.steering = {
       captureTarget: (request) => runtime.steering.captureTarget(request.agentSessionId),
-      steer: (request) => runtime.steering.steer(request),
+      steer: (request) => projection.deliverSteer(
+        request.chatId,
+        request.operation,
+        () => runtime.steering.steer(request),
+      ),
     };
-    this.transcript = createOpenCodeTranscript(runtime, nativeSessions, sessionId, logger);
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',

@@ -563,6 +563,45 @@ describe('CommandLedger', () => {
     }))).toBeNull();
   });
 
+  it('keeps the original receipt owner when several steers join one turn', async () => {
+    const ledger = new CommandLedger();
+    await ledger.accept(acceptedInput({
+      commandType: 'agent-run',
+      clientRequestId: 'owner-request',
+      turnId: 'turn-shared',
+    }));
+    await ledger.accept(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-one',
+      turnId: 'turn-shared',
+    }));
+    await ledger.accept(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-two',
+      turnId: 'turn-shared',
+    }));
+    const owner = {
+      agentOwnershipEpoch: 'ownership-1',
+      commandType: 'agent-run',
+      clientRequestId: 'owner-request',
+      turnId: 'turn-shared',
+    };
+
+    await ledger.appendProjectionAssistantMessages('chat-1', owner, ['first', 'second']);
+    await ledger.finalizeProjectionOutput('chat-1', owner);
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-shared')).toMatchObject({
+      commandType: 'agent-run',
+      clientRequestId: 'owner-request',
+      assistantMessages: ['first', 'second'],
+    });
+    expect(await ledger.getTurnRecords('chat-1', 'turn-shared')).toHaveLength(3);
+    expect(await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-one')))
+      .toMatchObject({ assistantMessages: [] });
+    expect(await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-two')))
+      .toMatchObject({ assistantMessages: [] });
+  });
+
   it('does not share records between process-lifetime ledger instances', async () => {
     const first = new CommandLedger('/tmp/workspace');
     await first.accept(acceptedInput());

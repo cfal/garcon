@@ -7,7 +7,11 @@ import {
   parseNativeSeedReceipt,
   type NativeSeedReceipt,
 } from '@garcon/common/transcript-seed';
-import type { AgentChatReference } from '@garcon/server-agent-interface';
+import {
+  agentOwnershipEpoch,
+  type AgentChatReference,
+  type AgentChatReferenceV4,
+} from '@garcon/server-agent-interface';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
@@ -581,7 +585,7 @@ export class AgentOwnershipJournal {
 
   async #releaseTranscript(
     integration: ReturnType<IntegrationRegistry['require']>,
-    request: Omit<Parameters<typeof integration.transcript.release>[0], 'signal'>,
+    request: { readonly chat: AgentChatReference; readonly reason: 'deleted' | 'transferred' },
   ): Promise<void> {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -595,7 +599,11 @@ export class AgentOwnershipJournal {
     });
     try {
       await Promise.race([
-        integration.transcript.release({ ...request, signal: controller.signal }),
+        integration.transcript.release({
+          ...request,
+          chat: releaseReference(request.chat),
+          signal: controller.signal,
+        }),
         deadline,
       ]);
     } finally {
@@ -634,6 +642,18 @@ export class AgentOwnershipJournal {
       throw error;
     }
   }
+}
+
+function releaseReference(reference: AgentChatReference): AgentChatReferenceV4 {
+  if ('agentOwnershipEpoch' in reference
+      && typeof reference.agentOwnershipEpoch === 'string'
+      && reference.agentOwnershipEpoch.length > 0) {
+    return reference as AgentChatReferenceV4;
+  }
+  return {
+    ...reference,
+    agentOwnershipEpoch: agentOwnershipEpoch(`legacy-release:${reference.chatId}`),
+  };
 }
 
 function matchesHandoffSource(

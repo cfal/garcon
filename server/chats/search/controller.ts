@@ -1,4 +1,8 @@
-import type { AgentChatReference, AgentTranscriptIndexSourceRef } from '@garcon/server-agent-interface';
+import type {
+  AgentChatReferenceV4,
+  AgentTranscriptIndexSourceRef,
+  AgentTranscriptIndexSourceRefV4,
+} from '@garcon/server-agent-interface';
 import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
 import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
 import type { IntegrationRegistry } from '../../agents/integration-registry.js';
@@ -19,7 +23,7 @@ const RECONCILE_RETRY_MS = [5_000, 30_000, 5 * 60_000] as const;
 
 export interface TranscriptSearchChatRegistration {
   readonly agentId: string;
-  readonly reference: AgentChatReference;
+  readonly reference: AgentChatReferenceV4;
   readonly updatedAt: string | null;
 }
 
@@ -253,10 +257,17 @@ export class TranscriptSearchController {
       source = { state: 'failed', code: 'INTEGRATION_UNAVAILABLE', retryable: false };
     } else {
       try {
-        const reference = await integration.transcript.resolveIndexSource({
+        const result = await integration.transcript.resolveIndexSource({
           chat: registration.reference,
           signal,
         });
+        if (result.kind !== 'ready') {
+          source = result.kind === 'deferred'
+            ? { state: 'failed', code: 'SOURCE_DEFERRED', retryable: true }
+            : { state: 'failed', code: result.errorCode, retryable: result.retryable };
+          return this.#catalogEntry(registration, source);
+        }
+        const reference = result.value;
         if (!reference) source = { state: 'absent' };
         else {
           validateIndexSource(reference, registration.agentId);
@@ -268,6 +279,13 @@ export class TranscriptSearchController {
         source = { state: 'failed', code: failure.code, retryable: failure.retryable };
       }
     }
+    return this.#catalogEntry(registration, source);
+  }
+
+  #catalogEntry(
+    registration: TranscriptSearchChatRegistration,
+    source: TranscriptSearchCatalogEntry['source'],
+  ): TranscriptSearchCatalogEntry {
     return {
       chatId: registration.reference.chatId,
       agentId: registration.agentId,
@@ -304,13 +322,16 @@ export class TranscriptSearchController {
     const integration = this.#deps.integrations.get(request.agentId);
     if (!registration || !integration) return;
     const signal = AbortSignal.any([request.signal, this.#lifecycleAbort.signal]);
-    const reference = await integration.transcript.refreshIndexSource({
+    if (!isV4IndexSource(request.failedSource)) return;
+    const result = await integration.transcript.refreshIndexSource({
       chat: registration.reference,
       failedSource: request.failedSource,
       failureCode: request.failureCode,
       signal,
     });
     signal.throwIfAborted();
+    if (result.kind !== 'ready') return;
+    const reference = result.value;
     if (reference) validateIndexSource(reference, request.agentId);
     this.#scheduleCatalogReconcile(0);
   }
@@ -333,6 +354,13 @@ function validateIndexSource(reference: AgentTranscriptIndexSourceRef, agentId: 
   if (Buffer.byteLength(JSON.stringify(reference)) > 64 * 1024) {
     throw new Error('INDEX_SOURCE_TOO_LARGE');
   }
+}
+
+function isV4IndexSource(
+  reference: AgentTranscriptIndexSourceRef,
+): reference is AgentTranscriptIndexSourceRefV4 {
+  return (reference as Partial<AgentTranscriptIndexSourceRefV4>).apiVersion === 2
+    && Boolean((reference as Partial<AgentTranscriptIndexSourceRefV4>).checkpoint);
 }
 
 function isJsonValue(value: unknown, ancestors: Set<object>): boolean {

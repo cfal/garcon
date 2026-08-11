@@ -51,6 +51,7 @@ export interface AcceptedInputCoordinator {
     content: string,
     options: PendingUserInputRegistrationOptions,
   ): Promise<void>;
+  discardProjectedInput(chatId: string, clientRequestId: string): Promise<void>;
   releaseDirect(reservation: DirectTurnReservation): Promise<void>;
   runDirect(
     reservation: DirectTurnReservation,
@@ -566,6 +567,7 @@ export class AcceptedInputHandler {
 
   async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation> {
     let reservation: DirectTurnReservation;
+    let inputRegistered = false;
     try {
       reservation = this.#coordinator.reserveDirect(input.command.chatId, input.options);
     } catch (error) {
@@ -584,6 +586,7 @@ export class AcceptedInputHandler {
         reservation,
         this.#coordinator.registerPending(input.command.chatId, input.content, input.options),
       );
+      inputRegistered = true;
       await this.#checkpointAfter(
         reservation,
         input.settlement.markScheduled(input.command, input.options.turnId!),
@@ -597,6 +600,21 @@ export class AcceptedInputHandler {
       let failure: unknown = error;
       let retryable = true;
       let preserveForkPreparation = false;
+      if (inputRegistered) {
+        try {
+          await this.#coordinator.discardProjectedInput(
+            input.command.chatId,
+            input.options.clientRequestId!,
+          );
+        } catch (discardError) {
+          retryable = false;
+          failure = aggregateFailure(
+            failure,
+            discardError,
+            `Failed to discard an unstarted input for ${input.command.chatId}`,
+          );
+        }
+      }
       if (input.preparation) {
         try {
           await input.preparation.compensate();

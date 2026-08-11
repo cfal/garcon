@@ -1,11 +1,14 @@
 import type { AgentAttachment, AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
 import type { AgentOwnershipEpoch } from '../ownership-epoch.js';
 import type {
   AgentExecutionAdmission,
   AgentRunningSession,
+  AgentProjectPathUpdatePreparation,
+  AgentProjectPathUpdateRequest,
   AgentSessionConfiguration,
   AgentStartedSession,
 } from './execution.js';
@@ -75,6 +78,10 @@ export interface AgentResumeRequestV4 extends AgentExecutionContextV4 {
   readonly attachments: readonly AgentAttachment[];
 }
 
+export interface AgentCompactRequestV4 extends AgentResumeRequestV4 {
+  readonly prompt: string;
+}
+
 export interface AgentExecutionV4 {
   start(request: AgentStartRequestV4): Promise<AgentStartedSession>;
   resume(request: AgentResumeRequestV4): Promise<void>;
@@ -85,4 +92,11 @@ export interface AgentExecutionV4 {
     agentSessionId: string,
     configuration: AgentSessionConfiguration,
   ): Promise<void>;
+  respondToPermission?(
+    permissionRequestId: string,
+    decision: PermissionDecisionPayload,
+  ): Promise<void>;
+  prepareProjectPathUpdate?(
+    request: AgentProjectPathUpdateRequest,
+  ): Promise<AgentProjectPathUpdatePreparation | void>;
 }

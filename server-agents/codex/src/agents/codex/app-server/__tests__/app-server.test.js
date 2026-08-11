@@ -1554,7 +1554,7 @@ describe('CodexAppServerRuntime', () => {
         markFailed: () => true,
         markUnconfirmed,
       },
-      { appendMessages: async () => ({ generationId: 'generation-1', messages: [] }) },
+      { admitInput: async () => ({ discardKnownNotSent: async () => {} }) },
       () => ({
         model: 'gpt-5.4-codex',
         permissionMode: 'default',
@@ -4709,9 +4709,7 @@ describe('CodexAppServerRuntime', () => {
         discard: () => true,
         markFailed: () => true,
       },
-      {
-        appendMessages: async () => ({ generationId: 'generation-1', messages: [] }),
-      },
+      { admitInput: async () => ({ discardKnownNotSent: async () => {} }) },
       () => ({
         model: 'gpt-5.4-codex',
         permissionMode: 'default',

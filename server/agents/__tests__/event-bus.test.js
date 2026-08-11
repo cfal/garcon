@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { UserMessage } from '../../../common/chat-types.js';
 import { AgentEventBus } from '../event-bus.js';
@@ -17,12 +17,15 @@ function operation(turnId, clientRequestId = `request-${turnId}`, commandType = 
 }
 
 function makeBus() {
-  let emit;
-  const unsubscribe = mock(() => undefined);
+  let apply;
   const bus = new AgentEventBus({
-    list: () => [{ execution: { subscribe(listener) { emit = listener; return unsubscribe; } } }],
+    onApply(listener) { apply = listener; },
+    onFailure() {},
   });
-  return { bus, emit: (event) => emit(event), unsubscribe };
+  return {
+    bus,
+    emit: (event) => apply({ event: streamEvent(event), previous: {}, current: {} }),
+  };
 }
 
 function terminalHandoff(overrides = {}) {
@@ -34,9 +37,7 @@ function terminalHandoff(overrides = {}) {
 
 describe('AgentEventBus', () => {
   it('resolves an abortable waiter only for its exact active operation', async () => {
-    const { bus, emit } = makeBus();
-    const forwarded = [];
-    bus.onProcessing((chatId, processing) => forwarded.push({ chatId, processing }));
+    const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     let settled = false;
     const abortable = bus.waitUntilTurnAbortable('chat-1', operation('turn-1')).then((value) => {
@@ -50,8 +51,6 @@ describe('AgentEventBus', () => {
     bus.markTurnAbortable('chat-1', operation('turn-1'));
     await expect(abortable).resolves.toBe(true);
 
-    emit({ type: 'processing', chatId: 'chat-1', processing: true, operation: operation('turn-1') });
-    expect(forwarded).toEqual([{ chatId: 'chat-1', processing: true }]);
   });
 
   it('removes an abortability waiter when its owner cancels', async () => {
@@ -107,7 +106,7 @@ describe('AgentEventBus', () => {
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
   });
 
-  it('keeps predecessor output attributable while successor persistence is pending', () => {
+  it('keeps predecessor output attributable while successor persistence is pending', async () => {
     const { bus, emit } = makeBus();
     const forwarded = [];
     bus.onMessages((_chatId, messages, metadata) => {
@@ -121,13 +120,13 @@ describe('AgentEventBus', () => {
       terminalHandoff(),
     );
 
-    emit({
+    await emit({
       type: 'messages',
       chatId: 'chat-1',
       messages: [new UserMessage('2026-07-18T00:00:00.000Z', 'predecessor output')],
       operation: operation('turn-a'),
     });
-    emit({
+    await emit({
       type: 'messages',
       chatId: 'chat-1',
       messages: [new UserMessage('2026-07-18T00:00:01.000Z', 'uncommitted successor output')],
@@ -172,7 +171,7 @@ describe('AgentEventBus', () => {
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-3');
   });
 
-  it('retains exact identity through duplicate terminal events until settlement', () => {
+  it('retains exact identity through duplicate terminal events until settlement', async () => {
     const { bus, emit } = makeBus();
     const terminals = [];
     bus.onFinished((_chatId, _exitCode, turn) => terminals.push({ type: 'finished', turn }));
@@ -180,8 +179,8 @@ describe('AgentEventBus', () => {
     const active = operation('turn-a', 'request-a');
     bus.trackTurn('chat-1', active);
 
-    emit({ type: 'finished', chatId: 'chat-1', exitCode: 0, operation: active });
-    emit({
+    await emit({ type: 'finished', chatId: 'chat-1', exitCode: 0, operation: active });
+    await emit({
       type: 'failed',
       chatId: 'chat-1',
       error: new AgentIntegrationError('PROVIDER_FAILURE', 'duplicate terminal'),
@@ -189,15 +188,15 @@ describe('AgentEventBus', () => {
     });
 
     expect(terminals).toEqual([
-      { type: 'finished', turn: { clientRequestId: 'request-a', commandType: 'agent-run', turnId: 'turn-a' } },
-      { type: 'failed', turn: { clientRequestId: 'request-a', commandType: 'agent-run', turnId: 'turn-a' } },
+      { type: 'finished', turn: expect.objectContaining({ clientRequestId: 'request-a', commandType: 'agent-run', turnId: 'turn-a' }) },
+      { type: 'failed', turn: expect.objectContaining({ clientRequestId: 'request-a', commandType: 'agent-run', turnId: 'turn-a' }) },
     ]);
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-a');
     bus.settleTurn('chat-1', active);
     expect(bus.getActiveTurn('chat-1')).toBeUndefined();
   });
 
-  it('drops stale output and terminals instead of assigning them to a successor', () => {
+  it('drops stale output and terminals instead of assigning them to a successor', async () => {
     const { bus, emit } = makeBus();
     const messages = [];
     const failures = [];
@@ -205,19 +204,19 @@ describe('AgentEventBus', () => {
     bus.onFailed((_chatId, message) => failures.push(message));
     bus.trackTurn('chat-1', operation('turn-b', 'request-b'));
 
-    emit({
+    await emit({
       type: 'messages',
       chatId: 'chat-1',
       messages: [new UserMessage('2026-07-18T00:00:00.000Z', 'stale')],
       operation: operation('turn-a', 'request-a'),
     });
-    emit({
+    await emit({
       type: 'failed',
       chatId: 'chat-1',
       error: new AgentIntegrationError('PROVIDER_FAILURE', 'stale failure'),
       operation: operation('turn-a', 'request-a'),
     });
-    emit({
+    await emit({
       type: 'messages',
       chatId: 'chat-1',
       messages: [new UserMessage('2026-07-18T00:00:01.000Z', 'current')],
@@ -238,3 +237,56 @@ describe('AgentEventBus', () => {
     await expect(waiting).resolves.toBe(false);
   });
 });
+
+let eventOffset = 0;
+
+function streamEvent(event) {
+  eventOffset += 1;
+  const owner = {
+    agentOwnershipEpoch: 'ownership-1',
+    commandType: event.operation.commandType === 'steer'
+      ? 'agent-run'
+      : event.operation.commandType,
+    clientRequestId: event.operation.clientRequestId,
+    turnId: event.operation.turnId,
+  };
+  const projectedOperation = {
+    agentOwnershipEpoch: owner.agentOwnershipEpoch,
+    commandType: event.operation.commandType,
+    clientRequestId: event.operation.clientRequestId,
+    clientMessageId: null,
+    turnId: event.operation.turnId,
+    turnOwner: owner,
+  };
+  const base = {
+    chatId: event.chatId,
+    agentOwnershipEpoch: owner.agentOwnershipEpoch,
+    previous: {},
+    checkpoint: { offset: String(eventOffset) },
+    digest: `digest-${eventOffset}`,
+  };
+  if (event.type === 'messages') {
+    return {
+      ...base,
+      kind: 'commit',
+      promoted: [],
+      appended: event.messages.map((message, index) => ({
+        id: `entry-${eventOffset}-${index}`,
+        lifetime: 'durable',
+        source: { namespace: 'test', itemId: `${eventOffset}`, subrowId: `${index}` },
+        provenance: { ...projectedOperation, upstreamRequestId: null },
+        message,
+      })),
+    };
+  }
+  return {
+    ...base,
+    kind: 'terminal',
+    operation: projectedOperation,
+    outcome: event.type === 'finished'
+      ? { kind: 'finished', exitCode: event.exitCode }
+      : { kind: 'failed', error: event.error },
+    completeness: { acceptedInputEntryIds: [], attributableEntryCount: 0 },
+    sourceSettlement: 'confirmed',
+  };
+}

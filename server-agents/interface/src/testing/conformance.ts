@@ -1,23 +1,23 @@
 import type {
   AgentLogger,
-  AgentIntegration,
-  AgentIntegrationClass,
+  AgentIntegrationClassV4,
+  AgentIntegrationV4,
   AgentTranscriptIndexerModule,
 } from '../index.js';
 
 export interface AgentIntegrationConformanceOptions {
   readonly integrationClass: Pick<
-    AgentIntegrationClass,
+    AgentIntegrationClassV4,
     'integrationId' | 'apiVersion' | 'transcriptIndex'
   >;
-  readonly integration: AgentIntegration;
+  readonly integration: AgentIntegrationV4;
 }
 
 export function validateAgentIntegration(
   options: AgentIntegrationConformanceOptions,
 ): void {
   const { integration, integrationClass } = options;
-  if (integrationClass.apiVersion !== 3) {
+  if (integrationClass.apiVersion !== 4) {
     throw new Error(`Unsupported agent integration API version: ${integrationClass.apiVersion}`);
   }
   if (integrationClass.integrationId !== integration.descriptor.id) {
@@ -155,7 +155,7 @@ export async function runAgentTranscriptIndexerConformance(options: {
 
 function assertSettingsEnvelope(
   agentId: string,
-  value: ReturnType<AgentIntegration['settings']['defaults']>,
+  value: ReturnType<AgentIntegrationV4['settings']['defaults']>,
 ): void {
   if (
     value.ownerId !== agentId

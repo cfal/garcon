@@ -11,6 +11,7 @@ import {
   AgentIntegrationError,
   type AgentHost,
   type AgentIntegration,
+  type AgentIntegrationV4,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
@@ -30,6 +31,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
 
 const SESSIONS_LABEL = 'anthropic-compatible-sessions';
 
@@ -46,9 +48,9 @@ const DESCRIPTOR = {
   configuration: [],
 } as const;
 
-export default class DirectAnthropicCompatibleIntegration implements AgentIntegration {
+export default class DirectAnthropicCompatibleIntegration implements AgentIntegrationV4 {
   static readonly integrationId = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
-  static readonly apiVersion = 3 as const;
+  static readonly apiVersion = 4 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -79,6 +81,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
   readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly transientControls = null;
 
   constructor(host: AgentHost) {
     const nativeSessions = createPathNativeSessionCodec(
@@ -107,12 +110,20 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       defaults: {},
       descriptors: [],
     });
-    this.execution = new DirectExecution(host, runtime, nativeSessions);
-    this.transcript = createDirectTranscript({
+    const legacyExecution = new DirectExecution(host, runtime, nativeSessions);
+    const legacyTranscript = createDirectTranscript({
       ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
       reader,
       nativeSessions,
     });
+    const projection = createLegacyProjectionAdapter({
+      ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      host,
+      execution: legacyExecution,
+      transcript: legacyTranscript,
+    });
+    this.execution = projection.execution;
+    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',
@@ -129,7 +140,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
     };
     this.forking = createJsonlForking({
       supportsWhileRunning: false,
-      transcript: this.transcript,
+      transcript: legacyTranscript,
       nativeSessions,
     });
     this.endpoints = {

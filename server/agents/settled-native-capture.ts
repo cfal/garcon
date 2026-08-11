@@ -1,9 +1,11 @@
 import crypto from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
+import type { ChatMessage } from '@garcon/common/chat-types';
 import {
   AgentIntegrationError,
-  type AgentChatReference,
-  type AgentIntegration,
+  type AgentChatReferenceV4,
+  type AgentIntegrationV4,
+  type AgentProjectionState,
   type AgentTranscriptSnapshot,
 } from '@garcon/server-agent-interface';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
@@ -35,8 +37,8 @@ export class SettledNativeCaptureService {
 
   async loadStable(input: {
     readonly chatId: string;
-    readonly integration: AgentIntegration;
-    readonly reference: AgentChatReference;
+    readonly integration: AgentIntegrationV4;
+    readonly reference: AgentChatReferenceV4;
     readonly signal: AbortSignal;
   }): Promise<AgentTranscriptSnapshot> {
     await this.#pendingInputs.reconcileNativeHistory(input.chatId);
@@ -55,18 +57,20 @@ export class SettledNativeCaptureService {
   }
 
   async assertRevision(input: {
-    readonly integration: AgentIntegration;
-    readonly reference: AgentChatReference;
+    readonly integration: AgentIntegrationV4;
+    readonly reference: AgentChatReferenceV4;
     readonly expectedRevision: string;
     readonly signal: AbortSignal;
   }): Promise<void> {
     input.signal.throwIfAborted();
     let revision: string;
     try {
-      revision = await input.integration.transcript.revision({
+      const opened = await input.integration.transcript.openSegment({
         chat: input.reference,
         signal: input.signal,
       });
+      if (opened.kind !== 'ready') throw accessError(opened);
+      revision = opened.value.checkpoint.projection.durableRevision;
     } catch (error) {
       throw sourceUnavailable(error);
     }
@@ -76,20 +80,62 @@ export class SettledNativeCaptureService {
   }
 
   async #load(input: {
-    readonly integration: AgentIntegration;
-    readonly reference: AgentChatReference;
+    readonly integration: AgentIntegrationV4;
+    readonly reference: AgentChatReferenceV4;
     readonly signal: AbortSignal;
   }): Promise<AgentTranscriptSnapshot> {
     input.signal.throwIfAborted();
     try {
-      return await input.integration.transcript.load({
+      const opened = await input.integration.transcript.openSegment({
         chat: input.reference,
         signal: input.signal,
       });
+      if (opened.kind !== 'ready') throw accessError(opened);
+      return await loadSnapshot(
+        input.integration,
+        input.reference,
+        opened.value.checkpoint.projection,
+        input.signal,
+      );
     } catch (error) {
       throw sourceUnavailable(error);
     }
   }
+}
+
+async function loadSnapshot(
+  integration: AgentIntegrationV4,
+  reference: AgentChatReferenceV4,
+  projection: AgentProjectionState,
+  signal: AbortSignal,
+): Promise<AgentTranscriptSnapshot> {
+  const pages: ChatMessage[][] = [];
+  let beforeOrdinal: number | null = null;
+  do {
+    const result = await integration.transcript.loadPage({
+      chat: reference,
+      signal,
+      limit: 500,
+      beforeOrdinal,
+      expectedProjection: projection,
+    });
+    if (result.kind !== 'ready') throw accessError(result);
+    pages.push(result.page.entries.map((entry) => entry.message));
+    beforeOrdinal = result.page.firstOrdinal;
+    if (!result.page.hasMore) break;
+  } while (beforeOrdinal > 1);
+  return {
+    messages: pages.reverse().flat(),
+    revision: projection.durableRevision,
+  };
+}
+
+function accessError(result: { readonly kind: string; readonly errorCode?: string }): Error {
+  return new AgentIntegrationError(
+    'TRANSCRIPT_UNAVAILABLE',
+    'The authoritative transcript projection is unavailable',
+    true,
+  );
 }
 
 function sameSnapshot(left: AgentTranscriptSnapshot, right: AgentTranscriptSnapshot): boolean {

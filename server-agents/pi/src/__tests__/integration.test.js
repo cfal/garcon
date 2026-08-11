@@ -26,7 +26,7 @@ describe('PiAgentIntegration', () => {
     const integration = new PiAgentIntegration(host);
 
     expect(PiAgentIntegration.integrationId).toBe('pi');
-    expect(PiAgentIntegration.apiVersion).toBe(3);
+    expect(PiAgentIntegration.apiVersion).toBe(4);
     expect(PiAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('pi');
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
@@ -77,6 +77,6 @@ describe('PiAgentIntegration', () => {
         settings: integration.settings.defaults(),
       },
       signal,
-    })).resolves.toEqual(nativeSession);
+    })).resolves.toEqual({ kind: 'ready', value: nativeSession });
   });
 });

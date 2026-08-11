@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { ChatStopOutcome } from '../../common/chat-types.js';
 import type { SteerDeliveryOutcome } from '../../common/chat-command-contracts.ts';
+import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -40,6 +41,8 @@ export interface CommandLedgerRecord {
     | 'too-large'
     | 'retention-pressure'
     | 'recovery'
+    | 'transcript-barrier'
+    | 'projection-reset'
     | 'expired';
   interruptionReason?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
@@ -184,7 +187,8 @@ export class CommandLedger {
   readonly #keysByIdentity = new Map<string, string>();
   readonly #steerIdentityLimit: number;
   #steerIdentityCount = 0;
-  readonly #turnIndex = new Map<string, string>();
+  readonly #turnOwnerIndex = new Map<string, string>();
+  readonly #turnMembership = new Map<string, Set<string>>();
   readonly #pendingChatDeletions = new Set<string>();
   readonly #recordLimit: number;
   readonly #turnResultByteLimit: number;
@@ -217,10 +221,26 @@ export class CommandLedger {
   }
 
   async getTurnRecord(chatId: string, turnId: string): Promise<CommandLedgerRecord | null> {
-    const key = this.#turnIndex.get(turnIndexKey(chatId, turnId));
+    const key = this.#turnOwnerIndex.get(turnIndexKey(chatId, turnId));
     if (!key) return null;
     const record = this.#records.get(key);
     return record ? cloneRecord(record) : null;
+  }
+
+  async getTurnRecords(chatId: string, turnId: string): Promise<readonly CommandLedgerRecord[]> {
+    return [...(this.#turnMembership.get(turnIndexKey(chatId, turnId)) ?? [])]
+      .flatMap((key) => {
+        const record = this.#records.get(key);
+        return record ? [cloneRecord(record)] : [];
+      });
+  }
+
+  async appendProjectionAssistantMessages(
+    chatId: string,
+    owner: AgentTurnReceiptOwner,
+    messages: readonly string[],
+  ): Promise<CommandLedgerRecord | null> {
+    return this.#appendAssistantMessages(this.#recordForOwner(chatId, owner), messages);
   }
 
   async appendAssistantMessages(
@@ -228,7 +248,13 @@ export class CommandLedger {
     turnId: string,
     messages: readonly string[],
   ): Promise<CommandLedgerRecord | null> {
-    const record = this.#recordForTurn(chatId, turnId);
+    return this.#appendAssistantMessages(this.#recordForTurn(chatId, turnId), messages);
+  }
+
+  #appendAssistantMessages(
+    record: CommandLedgerRecord | undefined,
+    messages: readonly string[],
+  ): CommandLedgerRecord | null {
     if (!record || record.publicTerminalAt || record.turnResultAvailability !== 'available') {
       return record ? cloneRecord(record) : null;
     }
@@ -262,12 +288,34 @@ export class CommandLedger {
     return cloneRecord(record);
   }
 
+  async finalizeProjectionOutput(
+    chatId: string,
+    owner: AgentTurnReceiptOwner,
+  ): Promise<CommandLedgerRecord | null> {
+    const record = this.#recordForOwner(chatId, owner);
+    return record ? cloneRecord(record) : null;
+  }
+
+  async markProjectionOutputUnavailable(
+    chatId: string,
+    owner: AgentTurnReceiptOwner,
+    reason: 'transcript-barrier' | 'projection-reset',
+  ): Promise<CommandLedgerRecord | null> {
+    return this.#markOutputUnavailable(this.#recordForOwner(chatId, owner), reason);
+  }
+
   async markTurnOutputUnavailable(
     chatId: string,
     turnId: string,
     reason: 'recovery',
   ): Promise<CommandLedgerRecord | null> {
-    const record = this.#recordForTurn(chatId, turnId);
+    return this.#markOutputUnavailable(this.#recordForTurn(chatId, turnId), reason);
+  }
+
+  #markOutputUnavailable(
+    record: CommandLedgerRecord | undefined,
+    reason: 'recovery' | 'transcript-barrier' | 'projection-reset',
+  ): CommandLedgerRecord | null {
     if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
     this.#discardResult(record);
     record.turnResultAvailability = reason;
@@ -476,6 +524,7 @@ export class CommandLedger {
         turnResultAvailability: 'available' as const,
       } : {}),
     };
+    this.#assertTurnOwnerAvailable(record);
     this.#records.set(key, record);
     this.#keysByIdentity.set(identityKey, key);
     if (input.commandType === 'steer') this.#steerIdentityCount += 1;
@@ -576,18 +625,49 @@ export class CommandLedger {
   }
 
   #recordForTurn(chatId: string, turnId: string): CommandLedgerRecord | undefined {
-    const key = this.#turnIndex.get(turnIndexKey(chatId, turnId));
+    const key = this.#turnOwnerIndex.get(turnIndexKey(chatId, turnId));
     return key ? this.#records.get(key) : undefined;
   }
 
+  #recordForOwner(
+    chatId: string,
+    owner: AgentTurnReceiptOwner,
+  ): CommandLedgerRecord | undefined {
+    if (owner.agentOwnershipEpoch.length === 0) return undefined;
+    const key = commandLedgerKey(owner.commandType, chatId, owner.clientRequestId);
+    const record = this.#records.get(key);
+    return record?.turnId === owner.turnId ? record : undefined;
+  }
+
   #indexTurn(record: CommandLedgerRecord): void {
-    if (record.turnId) this.#turnIndex.set(turnIndexKey(record.chatId, record.turnId), record.key);
+    if (!record.turnId) return;
+    const indexKey = turnIndexKey(record.chatId, record.turnId);
+    const members = this.#turnMembership.get(indexKey) ?? new Set<string>();
+    members.add(record.key);
+    this.#turnMembership.set(indexKey, members);
+    if (record.commandType === 'steer') return;
+    const owner = this.#turnOwnerIndex.get(indexKey);
+    if (owner && owner !== record.key) {
+      throw new Error(`Turn ${record.turnId} already has an immutable receipt owner`);
+    }
+    this.#turnOwnerIndex.set(indexKey, record.key);
+  }
+
+  #assertTurnOwnerAvailable(record: CommandLedgerRecord): void {
+    if (!record.turnId || record.commandType === 'steer') return;
+    const owner = this.#turnOwnerIndex.get(turnIndexKey(record.chatId, record.turnId));
+    if (owner && owner !== record.key) {
+      throw new Error(`Turn ${record.turnId} already has an immutable receipt owner`);
+    }
   }
 
   #removeTurnIndex(record: CommandLedgerRecord): void {
     if (!record.turnId) return;
     const indexKey = turnIndexKey(record.chatId, record.turnId);
-    if (this.#turnIndex.get(indexKey) === record.key) this.#turnIndex.delete(indexKey);
+    const members = this.#turnMembership.get(indexKey);
+    members?.delete(record.key);
+    if (members?.size === 0) this.#turnMembership.delete(indexKey);
+    if (this.#turnOwnerIndex.get(indexKey) === record.key) this.#turnOwnerIndex.delete(indexKey);
   }
 
   #discardResult(record: CommandLedgerRecord): void {
