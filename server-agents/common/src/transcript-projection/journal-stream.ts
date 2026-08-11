@@ -205,21 +205,29 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   // provenance, the ahead fence clears once the provider catches up, and
   // divergence records durably. Committed rows are never reread into the
   // materialization or re-rendered here.
+  //
+  // Evidence is read and audited inside the segment mutation gate so no
+  // journal mutation can land between the snapshot and its application, and
+  // the provider settlement hook runs after the audit under the same gate so
+  // terminal settlement derives from one coherent settled boundary: late
+  // provider persistence can only make the settlement read more complete than
+  // the audit snapshot, never less.
   async refreshNativeContinuity(request: AgentTranscriptRequestV4 & {
     readonly operation?: AgentTurnBoundOperationIdentityV4 | null;
-  }): Promise<void> {
+    readonly sourceSettlement?: () => Promise<'confirmed' | 'unresolved'>;
+  }): Promise<'confirmed' | 'unresolved'> {
+    const settle = request.sourceSettlement ?? (async () => 'confirmed' as const);
     const segment = this.#segments.get(segmentKey(request.chat));
-    if (!segment) return;
-    const evidence = await this.options.bootstrap({ chat: segment.chat, signal: request.signal });
-    if (evidence.kind !== 'ready') return;
-    await segment.gate.run(async () => {
+    if (!segment) return settle();
+    return segment.gate.run(async () => {
+      const evidence = await this.options.bootstrap({ chat: segment.chat, signal: request.signal });
+      if (evidence.kind !== 'ready') return settle();
       const state = segment.journal.state;
       const outcome = auditNativeEvidence({
         ownerId: this.options.ownerId,
         entries: state.entries,
         seeds: evidence.value,
       });
-      if (outcome.kind === 'skipped') return;
       if (outcome.kind === 'diverged') {
         if (state.nativeContinuity !== 'diverged') {
           await segment.journal.updateNativeMetadata({
@@ -228,18 +236,21 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
             nativeContinuity: 'diverged',
           });
         }
-        return;
+        return settle();
       }
-      if (outcome.suffix.length > 0) {
-        const provenance = request.operation
-          ? { ...request.operation, upstreamRequestId: null }
-          : null;
-        await segment.stream.commit([], seedEntries(segment.chat, outcome.suffix).map((entry) => (
-          entry.provenance || !provenance ? entry : { ...entry, provenance }
-        )));
+      if (outcome.kind === 'aligned') {
+        if (outcome.suffix.length > 0) {
+          const provenance = request.operation
+            ? { ...request.operation, upstreamRequestId: null }
+            : null;
+          await segment.stream.commit([], seedEntries(segment.chat, outcome.suffix).map((entry) => (
+            entry.provenance || !provenance ? entry : { ...entry, provenance }
+          )));
+        }
+        await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
+        segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
       }
-      await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
-      segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
+      return settle();
     });
   }
 

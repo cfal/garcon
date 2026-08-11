@@ -125,6 +125,99 @@ describe('AgentOwnedProjection', () => {
     expect(output?.provenance?.clientRequestId).toBe('steer-request');
     expect(output?.provenance?.turnOwner).toEqual(ownerOperation.turnOwner);
   });
+
+  it('withholds terminal success when the settled boundary cannot prove settlement', async () => {
+    const cases: readonly {
+      readonly label: string;
+      readonly settlement?: 'confirmed' | 'unresolved';
+      readonly evidenceFailure?: Error;
+      readonly expectSuccess: boolean;
+    }[] = [
+      { label: 'confirmed settlement', settlement: 'confirmed', expectSuccess: true },
+      { label: 'unresolved settlement', settlement: 'unresolved', expectSuccess: false },
+      {
+        label: 'audit failure',
+        settlement: 'confirmed',
+        evidenceFailure: new Error('evidence store offline'),
+        expectSuccess: false,
+      },
+    ];
+    for (const testCase of cases) {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-owned-projection-'));
+      temporaryDirectories.push(directory);
+      const events = new AgentProjectionProducerEventChannel();
+      const settlementCalls: string[] = [];
+      let boundaryArmed = false;
+      const execution: AgentProjectionRuntimeExecution = {
+        async start(request) {
+          await request.admission.markStarted();
+          return { agentSessionId: 'session', nativeSession: null, nativeSeedReceipt: null };
+        },
+        async resume() {},
+        async abort() { return true; },
+        isRunning() { return false; },
+        runningSessions() { return []; },
+        subscribeProjectionEvents(listener) { return events.subscribe(listener); },
+      };
+      const projection = createAgentOwnedProjection({
+        ownerId: 'test',
+        host: host(directory),
+        execution,
+        nativeEvidence: {
+          ...emptyNativeEvidence(),
+          async load() {
+            settlementCalls.push('evidence');
+            if (boundaryArmed && testCase.evidenceFailure) throw testCase.evidenceFailure;
+            return { messages: [] };
+          },
+        },
+        sourceSettlement: async () => {
+          settlementCalls.push('settlement');
+          return { kind: 'ready', value: testCase.settlement! };
+        },
+      });
+      await projection.transcript.openSegment({ chat, signal: new AbortController().signal });
+      const accepted = await projection.transcript.prepareInput({
+        chat,
+        signal: new AbortController().signal,
+        message: new UserMessage(timestamp(), 'initial'),
+        operation: ownerOperation,
+      });
+      await accepted.commit();
+      const terminals: Array<{ outcome: string; sourceSettlement: string }> = [];
+      projection.transcript.subscribe((event) => {
+        if (event.kind === 'terminal') {
+          terminals.push({
+            outcome: event.outcome.kind,
+            sourceSettlement: event.sourceSettlement,
+          });
+        }
+      });
+      // Genesis bootstrap read happens at open; only the settled boundary
+      // reads below.
+      settlementCalls.length = 0;
+      boundaryArmed = true;
+      await projection.runTracked(chat.chatId, ownerOperation, async () => {
+        events.emit({
+          type: 'finished',
+          chatId: chat.chatId,
+          exitCode: 0,
+          operation: ownerOperation,
+        });
+      });
+
+      expect({ label: testCase.label, terminals }).toEqual({
+        label: testCase.label,
+        terminals: [testCase.expectSuccess
+          ? { outcome: 'finished', sourceSettlement: 'confirmed' }
+          : { outcome: 'failed', sourceSettlement: 'unresolved' }],
+      });
+      if (!testCase.evidenceFailure) {
+        // The provider settlement hook reads at or after the audit snapshot.
+        expect(settlementCalls).toEqual(['evidence', 'settlement']);
+      }
+    }
+  });
 });
 
 const ownershipEpoch = agentOwnershipEpoch('ownership');

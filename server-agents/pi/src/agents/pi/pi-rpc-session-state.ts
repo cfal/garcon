@@ -10,6 +10,13 @@ export interface PiSteerSubmission {
   persisted: boolean;
 }
 
+// Message-entry identities present before the prompt. Unavailable when the
+// file could not be read or held id-less entries, which makes occurrence
+// accounting impossible and keeps the turn unresolved.
+export type PiSettlementBaseline =
+  | { readonly kind: 'ready'; readonly entryIds: ReadonlySet<string> }
+  | { readonly kind: 'unavailable' };
+
 export interface PiActiveTurn {
   turnId: string | undefined;
   stopRequested: boolean;
@@ -18,10 +25,10 @@ export interface PiActiveTurn {
   failureMessage: string | null;
   readonly steerSubmissions: Set<PiSteerSubmission>;
   steeringQueue: readonly string[];
-  // Native rows counted before the prompt was sent and the finalized rows the
-  // turn journalled; settlement verifies the file grew by exactly this
-  // evidence.
-  settlementBaseline: ReadonlyMap<string, number>;
+  // Entry identities captured before the prompt was sent and the per-role
+  // count of finalized message occurrences the turn must persist; settlement
+  // verifies enough new entries appeared beyond the baseline.
+  settlementBaseline: PiSettlementBaseline;
   readonly expectedNative: Map<string, number>;
   settle(): void;
 }
@@ -30,7 +37,7 @@ export interface PiActiveTurn {
 // verdict is computed lazily against the current native file.
 export interface PiTurnSettlementRecord {
   readonly steeringUnresolved: boolean;
-  readonly baseline: ReadonlyMap<string, number>;
+  readonly baseline: PiSettlementBaseline;
   readonly expected: ReadonlyMap<string, number>;
   readonly nativePath: string | null;
 }

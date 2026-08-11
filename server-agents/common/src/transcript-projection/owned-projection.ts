@@ -116,12 +116,37 @@ export function createAgentOwnedProjection(
         case 'finished':
         case 'failed': {
           const projectionFault = faults.get(event.chatId);
-          const settlement = options.sourceSettlement
-            ? await options.sourceSettlement(event)
-            : { kind: 'ready' as const, value: 'confirmed' as const };
-          const sourceSettlement = settlement.kind === 'ready'
-            ? settlement.value
-            : 'unresolved';
+          if ((controls.get(event.chatId)?.size ?? 0) > 0) {
+            await transcript.emitControl(chat, causalOperation, {
+              kind: 'clear',
+            });
+            controls.delete(event.chatId);
+          }
+          // One gated settled boundary: the native audit imports held output
+          // and rebinds aliases, and the provider settlement hook then reads
+          // its evidence at or after that snapshot. A boundary that throws
+          // cannot prove settlement, so a finished provider outcome is
+          // withheld as a retryable failure instead of publishing success the
+          // audit never established.
+          let sourceSettlement: 'confirmed' | 'unresolved' = 'unresolved';
+          let boundaryFailure: unknown = null;
+          try {
+            sourceSettlement = await transcript.refreshNativeContinuity({
+              chat,
+              operation: causalOperation,
+              signal: AbortSignal.timeout(10_000),
+              sourceSettlement: options.sourceSettlement
+                ? async () => {
+                    const settlement = await options.sourceSettlement!(event);
+                    return settlement.kind === 'ready' ? settlement.value : 'unresolved';
+                  }
+                : undefined,
+            });
+          } catch (error) {
+            boundaryFailure = error;
+            options.onProjectionError?.(error, event.chatId);
+          }
+          const settled = sourceSettlement === 'confirmed' && boundaryFailure === null;
           const outcome = projectionFault
             ? {
                 kind: 'failed' as const,
@@ -131,29 +156,23 @@ export function createAgentOwnedProjection(
                   true,
                 ),
               }
-            : event.type === 'finished'
-              ? { kind: 'finished' as const, exitCode: event.exitCode }
-              : { kind: 'failed' as const, error: event.error };
-          if ((controls.get(event.chatId)?.size ?? 0) > 0) {
-            await transcript.emitControl(chat, causalOperation, {
-              kind: 'clear',
-            });
-            controls.delete(event.chatId);
-          }
-          // The settled boundary is where newly persisted live rows gain their
-          // native aliases, held provider output imports under this turn's
-          // provenance, and the projection-ahead fence recomputes; an audit
-          // failure is diagnostic and never blocks the terminal.
-          await transcript.refreshNativeContinuity({
-            chat,
-            operation: causalOperation,
-            signal: AbortSignal.timeout(10_000),
-          }).catch((error) => options.onProjectionError?.(error, event.chatId));
+            : event.type === 'failed'
+              ? { kind: 'failed' as const, error: event.error }
+              : settled
+                ? { kind: 'finished' as const, exitCode: event.exitCode }
+                : {
+                    kind: 'failed' as const,
+                    error: new AgentIntegrationError(
+                      'TRANSCRIPT_UNAVAILABLE',
+                      'The provider transcript was not proven settled for this turn',
+                      true,
+                    ),
+                  };
           await transcript.emitTerminal({
             chat,
             operation: terminalOperation,
             outcome,
-            sourceSettlement: projectionFault ? 'unresolved' : sourceSettlement,
+            sourceSettlement: projectionFault || boundaryFailure ? 'unresolved' : sourceSettlement,
           });
           operations.delete(event.chatId);
           attributions.delete(event.chatId);

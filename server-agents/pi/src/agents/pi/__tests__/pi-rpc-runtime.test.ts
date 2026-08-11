@@ -719,6 +719,59 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
+  it('withholds settlement for a tool-only turn until its entries persist', async () => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    const runtime = createRuntime();
+    const turn = runtime.runTurn(baseResumeRequest());
+    await waitForActive(runtime);
+
+    const fake = fakes[0];
+    // The finalized assistant carries only a tool call and renders no text,
+    // and the tool result finalizes as its own native message.
+    fake.pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'call-1', name: 'bash', arguments: { command: 'true' } }],
+        stopReason: 'toolUse',
+        timestamp: 0,
+      },
+    });
+    fake.pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'toolResult',
+        content: [{ type: 'text', text: '' }],
+        toolCallId: 'call-1',
+        timestamp: 0,
+      },
+    });
+    fake.pushEvent({ type: 'agent_settled' });
+    await turn;
+
+    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
+    const entries = [
+      { type: 'session', version: 3, id: 'pi-session-1', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
+      { type: 'message', id: 'turn-user', parentId: null, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'user', content: 'continue', timestamp: 0 } },
+      { type: 'message', id: 'turn-assistant', parentId: 'turn-user', timestamp: '2026-01-01T00:00:02.000Z', message: { role: 'assistant', content: [{ type: 'toolCall', id: 'call-1', name: 'bash', arguments: { command: 'true' } }], api: 'anthropic-messages', provider: 'anthropic', model: 'test', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, stopReason: 'toolUse', timestamp: 0 } },
+    ];
+    await fs.writeFile(
+      baseResumeRequest().nativePath,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+      'utf8',
+    );
+    // The tool result entry is still missing from the file.
+    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
+    entries.push({ type: 'message', id: 'turn-result', parentId: 'turn-assistant', timestamp: '2026-01-01T00:00:03.000Z', message: { role: 'toolResult', content: [{ type: 'text', text: '' }], toolCallId: 'call-1', timestamp: 0 } } as never);
+    await fs.writeFile(
+      baseResumeRequest().nativePath,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+      'utf8',
+    );
+    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('confirmed');
+    await runtime.shutdown();
+  });
+
   it('settles the turn even when a lifecycle listener throws', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();

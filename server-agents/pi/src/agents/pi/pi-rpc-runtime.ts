@@ -64,8 +64,8 @@ import type {
   PiTurnSettlementRecord,
 } from './pi-rpc-session-state.js';
 import {
-  addExpectedNativeRow,
-  countPiNativeRows,
+  addExpectedNativeMessage,
+  snapshotPiSettlementBaseline,
   verifyPiTurnSettlement,
 } from './pi-turn-settlement.js';
 import { convertPiToolUse } from './tool-use-converter.js';
@@ -605,12 +605,12 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       failureMessage: null,
       steerSubmissions: new Set(),
       steeringQueue: [],
-      settlementBaseline: await countPiNativeRows(session.nativePath),
+      settlementBaseline: await snapshotPiSettlementBaseline(session.nativePath),
       expectedNative: new Map(),
       settle: resolveSettle,
     };
     if (typeof prompt.message === 'string' && prompt.message.length > 0) {
-      addExpectedNativeRow(turn.expectedNative, 'user-message', prompt.message);
+      addExpectedNativeMessage(turn.expectedNative, 'user');
     }
     assertPiExecutionOpen(request);
     if (request.executionAdmission) await markPiExecutionStarted(request);
@@ -689,18 +689,18 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
         this.#observeSteeringPersistence(session, message);
         return;
       }
+      // Every finalized non-user message persists one session entry, whether
+      // or not it renders: tool-only assistant and toolResult occurrences
+      // count by role, never by content.
+      if (session.turn && typeof role === 'string') {
+        addExpectedNativeMessage(session.turn.expectedNative, role);
+      }
       const messages = convertPiMessage(message, {
         includeToolCalls: false,
         includeToolResults: false,
         includeUser: false,
       });
       if (messages.length > 0) this.emitMessages(session.chatId, messages, session.eventMetadata);
-      for (const finalized of messages) {
-        if (finalized.type === 'assistant-message' && typeof finalized.content === 'string'
-            && finalized.content.length > 0 && session.turn) {
-          addExpectedNativeRow(session.turn.expectedNative, 'assistant-message', finalized.content);
-        }
-      }
 
       const stopReason = message && typeof message === 'object'
         ? (message as Record<string, unknown>).stopReason
@@ -781,7 +781,10 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     const persisted = Array.from(turn.steerSubmissions).find(
       (submission) => submission.delivered && !submission.persisted && submission.input === input,
     );
-    if (persisted) persisted.persisted = true;
+    if (persisted) {
+      persisted.persisted = true;
+      addExpectedNativeMessage(turn.expectedNative, 'user');
+    }
   }
 
   #handleSettle(session: PiRpcSession): void {
