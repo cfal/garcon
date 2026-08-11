@@ -472,7 +472,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     }));
   }
 
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void | Promise<void>): void { this.#events.onMessages(cb); }
   onProcessing(cb: (chatId: string, processing: boolean) => void | Promise<void>): void { this.#events.onProcessing(cb); }
   onSessionCreated(cb: (chatId: string) => void | Promise<void>): void { this.#events.onSessionCreated(cb); }
   onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void | Promise<void>): void { this.#events.onFinished(cb); }

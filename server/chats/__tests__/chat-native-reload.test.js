@@ -3,7 +3,7 @@ import { ChatNativeReloader } from '../chat-native-reload.js';
 import { ChatViewStore } from '../chat-view-store.js';
 import { AssistantMessage, ErrorMessage, UserMessage } from '../../../common/chat-types.js';
 import {
-  transcriptLoader,
+  projectionAppender,
   transcriptSnapshot,
 } from './chat-transcript-test-helpers.js';
 
@@ -31,11 +31,7 @@ describe('ChatNativeReloader', () => {
       ])),
     };
     const reloader = new ChatNativeReloader(views, nativeSource, () => false);
-    const before = await views.appendAfterEnsuringGeneration(
-      'chat-1',
-      transcriptLoader(async () => []),
-      [user('old')],
-    );
+    const before = await projectionAppender(views, 'chat-1')([user('old')]);
 
     const replacement = await reloader.reloadFromNative('chat-1', 'manual-reload');
 
@@ -56,7 +52,7 @@ describe('ChatNativeReloader', () => {
         { loadSnapshot: async () => transcriptSnapshot([assistant('native')]) },
         () => false,
       );
-      const before = await views.appendToCurrentOrEmpty('chat-1', [assistant('live')]);
+      const before = await projectionAppender(views, 'chat-1')([assistant('live')]);
 
       const replacement = await reloader.reloadFromNative('chat-1', 'manual-reload');
 
@@ -133,7 +129,7 @@ describe('ChatNativeReloader', () => {
       releaseNative = resolve;
     });
     const views = new ChatViewStore(() => active);
-    const original = await views.appendToCurrentOrEmpty('chat-1', [assistant('original')]);
+    const original = await projectionAppender(views, 'chat-1')([assistant('original')]);
     const nativeSource = {
       loadSnapshot: mock(async () => {
         await nativeGate;

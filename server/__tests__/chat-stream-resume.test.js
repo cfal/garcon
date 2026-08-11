@@ -1,21 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-import { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
-import { PendingUserInputService } from '../chats/pending-user-input-service.js';
-import { ChatProcessErrorRecovery } from '../chats/chat-process-error-recovery.js';
+import { AssistantMessage, UserMessage } from '../../common/chat-types.js';
 import {
-  AgentRunFailedMessage,
-  ChatGenerationResetMessage,
-  ChatMessagesMessage,
-} from '../../common/ws-events.ts';
-import { AssistantMessage, ErrorMessage, UserMessage } from '../../common/chat-types.js';
-import {
-  snapshotLoader,
-  transcriptLoader,
+  historyPage,
+  projectionAppender,
+  testProjectionState,
+  transcriptSnapshot,
 } from '../chats/__tests__/chat-transcript-test-helpers.js';
 
 const TS = '2026-06-01T00:00:00.000Z';
-const RELOAD_FAILED_NOTICE = 'The process died. Reloading chat history failed.';
 
 function user(content, metadata = {}) {
   return new UserMessage(TS, content, undefined, metadata);
@@ -33,24 +26,13 @@ describe('chat stream resume integration', () => {
   it('replays missed same-generation output after reconnect', async () => {
     const views = new ChatViewStore(() => false);
     const turn = { clientRequestId: 'req-1', turnId: 'turn-1' };
+    const append = projectionAppender(views, 'chat-1');
 
-    await views.appendAfterEnsuringGeneration(
-      'chat-1',
-      transcriptLoader(async () => []),
-      [user('hello', { ...turn, deliveryStatus: 'accepted' })],
-    );
-    const first = await views.appendAfterEnsuringGeneration(
-      'chat-1',
-      transcriptLoader(async () => []),
-      [assistant('first')],
-    );
+    await append([user('hello', { ...turn, deliveryStatus: 'accepted' })]);
+    const first = await append([assistant('first')]);
     const cursor = { generationId: first.generationId, lastSeq: first.lastSeq };
 
-    await views.appendAfterEnsuringGeneration(
-      'chat-1',
-      transcriptLoader(async () => []),
-      [assistant('missed')],
-    );
+    await append([assistant('missed')]);
 
     const replay = views.readReplay('chat-1', cursor.generationId, cursor.lastSeq);
 
@@ -66,132 +48,53 @@ describe('chat stream resume integration', () => {
       staleNonActiveMs: 10,
       now: () => now,
     });
-    const watched = await views.appendAfterEnsuringGeneration(
-      'chat-1',
-      transcriptLoader(async () => []),
-      [assistant('first')],
-    );
-    await views.appendAfterEnsuringGeneration(
-      'chat-2',
-      transcriptLoader(async () => []),
-      [assistant('other')],
-    );
+    const appendWatched = projectionAppender(views, 'chat-1');
+    const watched = await appendWatched([assistant('first')]);
+    await projectionAppender(views, 'chat-2')([assistant('other')]);
     views.readReplay('chat-1', watched.generationId, watched.lastSeq);
 
     now = 11;
     views.prune();
     expect(views.getCursor('chat-2')).toBeNull();
-    await views.appendAfterEnsuringGeneration(
-      'chat-1',
-      transcriptLoader(async () => []),
-      [assistant('missed')],
-    );
+    await appendWatched([assistant('missed')]);
 
     const replay = views.readReplay('chat-1', watched.generationId, watched.lastSeq);
     expect(replay.mode).toBe('delta');
     expect(contents(replay)).toEqual(['missed']);
   });
 
-  it('process failure reload resets generation and prevents stale late output', async () => {
+  it('relists into a fresh generation and ignores an already-applied late commit', async () => {
     const views = new ChatViewStore(() => false);
-    const nativeReloader = new ChatNativeReloader(
-      views,
-      { loadSnapshot: snapshotLoader(async () => [assistant('last native message')]) },
-      () => true,
-    );
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: async () => [],
-      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
-    });
-    const broadcasts = [];
-    const turn = { clientRequestId: 'req-1', turnId: 'turn-1' };
-    const staleFence = views.captureFence('chat-1');
+    const history = [assistant('durable one'), assistant('durable two')];
+    const currentState = testProjectionState(2);
+    const loader = {
+      loadAll: async () => transcriptSnapshot(history, { projectionState: currentState }),
+      loadPage: async (limit, offset) => (
+        historyPage(history, limit, offset, { projectionState: currentState })
+      ),
+    };
+    const stale = await views.getOrCreatePage('chat-1', {
+      loadAll: async () => transcriptSnapshot([assistant('durable one')], {
+        projectionState: testProjectionState(1, { epoch: 'stream-epoch-0' }),
+      }),
+    }, 20);
 
-    await pendingInputs.register('chat-1', 'lost prompt', turn);
-    const recovery = new ChatProcessErrorRecovery(views, nativeReloader, pendingInputs);
-    const result = await recovery.recover('chat-1', 'process died');
-    expect(result.kind).toBe('generation-reset');
-    const reload = result.reload;
-    broadcasts.push(new ChatGenerationResetMessage(
-      'chat-1',
-      reload.generationId,
-      'process-error',
-      reload.lastSeq,
-    ));
-    broadcasts.push(new AgentRunFailedMessage('chat-1', 'process died', turn.turnId, turn.clientRequestId));
+    const relisted = await views.applyProjectionCommit('chat-1', {
+      previousProjection: testProjectionState(1),
+      checkpointProjection: currentState,
+      appendedMessages: [assistant('durable two')],
+      carryOverMessageCount: 0,
+    }, loader);
+    expect(relisted.kind).toBe('relisted');
+    expect(relisted.generationId).not.toBe(stale.generationId);
 
-    const late = await views.appendAfterEnsuringGeneration(
-      'chat-1',
-      transcriptLoader(async () => []),
-      [assistant('late')],
-      { fence: staleFence },
-    );
-    const page = views.readPage('chat-1', 100);
-
-    expect(late.skipped).toBe(true);
-    expect(contents(page)).toEqual(['last native message', 'process died']);
-    expect(pendingInputs.listForChat('chat-1')).toMatchObject([{
-      clientRequestId: 'req-1',
-      deliveryStatus: 'unconfirmed',
-    }]);
-    expect(broadcasts).toContainEqual(expect.objectContaining({
-      type: 'chat-generation-reset',
-      generationId: reload.generationId,
-      reason: 'process-error',
-      lastSeq: 2,
-    }));
-    expect(broadcasts).toContainEqual(expect.objectContaining({
-      type: 'agent-run-failed',
-      clientRequestId: 'req-1',
-      turnId: 'turn-1',
-    }));
-  });
-
-  it('process failure reload failure broadcasts an explanatory in-generation error message', async () => {
-    const views = new ChatViewStore(() => false);
-    const nativeReloader = new ChatNativeReloader(
-      views,
-      { loadSnapshot: snapshotLoader(async () => { throw new Error('native read failed'); }) },
-      () => true,
-    );
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: async () => [],
-      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
-    });
-    const recovery = new ChatProcessErrorRecovery(views, nativeReloader, pendingInputs);
-    const broadcasts = [];
-
-    const original = await views.appendAfterEnsuringGeneration(
-      'chat-1',
-      transcriptLoader(async () => []),
-      [assistant('warm output')],
-    );
-    const result = await recovery.recover('chat-1', 'process died');
-    expect(result.kind).toBe('fallback-appended');
-    const appended = result.appended;
-    broadcasts.push(new ChatMessagesMessage(
-      'chat-1',
-      appended.generationId,
-      appended.messages,
-      'turn-1',
-      'req-1',
-    ));
-    broadcasts.push(new AgentRunFailedMessage('chat-1', 'process died', 'turn-1', 'req-1'));
-
-    const page = views.readPage('chat-1', 100);
-    const replay = views.readReplay('chat-1', original.generationId, original.lastSeq);
-
-    expect(page.generationId).toBe(original.generationId);
-    expect(contents(page)).toEqual(['warm output', RELOAD_FAILED_NOTICE]);
-    expect(replay).toMatchObject({
-      mode: 'delta',
-      generationId: original.generationId,
-    });
-    expect(contents(replay)).toEqual([RELOAD_FAILED_NOTICE]);
-    expect(broadcasts).toContainEqual(expect.objectContaining({
-      type: 'chat-messages',
-      generationId: original.generationId,
-      messages: [expect.objectContaining({ message: expect.any(ErrorMessage) })],
-    }));
+    const late = await views.applyProjectionCommit('chat-1', {
+      previousProjection: testProjectionState(1),
+      checkpointProjection: currentState,
+      appendedMessages: [assistant('durable two')],
+      carryOverMessageCount: 0,
+    }, loader);
+    expect(late.kind).toBe('already-applied');
+    expect(contents(views.readPage('chat-1', 20))).toEqual(['durable one', 'durable two']);
   });
 });

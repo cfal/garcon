@@ -10,7 +10,6 @@ import {
 } from '../lib/transcript-revision.js';
 import {
   exactMessageIdentityKeys,
-  matchingRetainedMessagesByDeliveryIdentity,
   preserveRetainedUserIdentities,
   reconcileLiveMessageAppends,
   retainedMessageMatchesNative,
@@ -150,16 +149,6 @@ export class ChatViewStore {
     return view.messages
       .filter((entry) => entry.seq <= view.historyLastSeq)
       .map((entry) => entry.message);
-  }
-
-  async getOrCreateMessages(
-    chatId: string,
-    loadSnapshot: () => Promise<ChatTranscriptSnapshot>,
-  ): Promise<ChatMessage[]> {
-    return this.#withChat(chatId, async () => {
-      const loaded = await this.#loadFullView(chatId, loadSnapshot);
-      return loaded.messages;
-    });
   }
 
   async reconcileNativeSnapshot(
@@ -356,63 +345,6 @@ export class ChatViewStore {
     });
   }
 
-  async appendAfterEnsuringGeneration(
-    chatId: string,
-    loader: ChatViewLoader,
-    messages: ChatMessage[],
-    options: { fence?: number } = {},
-  ): Promise<AppendedChatViewMessages> {
-    return this.#withChat(chatId, async () => {
-      const view = await this.#getOrCreateAppendView(chatId, loader);
-      if (options.fence !== undefined && options.fence !== view.streamFence) {
-        return { generationId: view.generationId, messages: [], lastSeq: view.lastSeq, skipped: true };
-      }
-      const published = this.#appendLiveForPublication(view, messages);
-      return {
-        generationId: view.generationId,
-        messages: published,
-        lastSeq: view.lastSeq,
-      };
-    });
-  }
-
-  async appendToCurrentOrEmpty(
-    chatId: string,
-    messages: ChatMessage[],
-  ): Promise<AppendedChatViewMessages> {
-    return this.#withChat(chatId, async () => {
-      let view = this.#views.get(chatId);
-      if (!view) {
-        view = this.#createGeneration(chatId, [], { reason: 'initial-live-append' });
-        this.#views.set(chatId, view);
-      }
-      const appended = this.#appendLiveForPublication(view, messages);
-      return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
-    });
-  }
-
-  async appendToCurrentOrProvisional(
-    chatId: string,
-    messages: ChatMessage[],
-  ): Promise<AppendedChatViewMessages> {
-    return this.#withChat(chatId, async () => {
-      let view = this.#views.get(chatId);
-      if (!view) {
-        view = this.#createGeneration(chatId, [], { reason: 'initial-provisional-append' });
-        view.complete = false;
-        view.loadedFromFullHistory = false;
-        view.compositeRevision = undefined;
-        view.carryOverRevision = undefined;
-        view.agentOwnershipEpoch = undefined;
-        view.archivedLogicalCount = 0;
-        view.nativePrefixDigest = null;
-        this.#views.set(chatId, view);
-      }
-      const appended = this.#appendLiveForPublication(view, messages);
-      return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
-    });
-  }
-
   readPage(chatId: string, limit: number, beforeSeq?: number): ChatViewPage | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
@@ -533,71 +465,6 @@ export class ChatViewStore {
     });
   }
 
-  async #getOrCreateAppendView(
-    chatId: string,
-    loader: ChatViewLoader,
-  ): Promise<ChatView> {
-    let view = this.#views.get(chatId);
-    if (!view) {
-      const page = await loader.loadPage?.(
-        Math.min(this.#messageLimit, this.#replayLimit),
-        0,
-      );
-      if (page) {
-        view = this.#createGenerationFromPage(chatId, page);
-        this.#views.set(chatId, view);
-        return view;
-      }
-      return (await this.#loadFullView(chatId, () => loader.loadAll())).view;
-    }
-    if (view.loadedFromFullHistory || this.#isChatActive(chatId)) {
-      this.#touch(view);
-      return view;
-    }
-
-    const page = await loader.loadPage?.(
-      Math.min(this.#messageLimit, Math.max(this.#replayLimit, view.messages.length)),
-      0,
-    );
-    if (!page) return (await this.#loadFullView(chatId, () => loader.loadAll())).view;
-    if (
-      page.total === view.historyLastSeq
-      && revisionsMatch(view.compositeRevision, page.compositeRevision)
-    ) {
-      this.#touch(view);
-      return view;
-    }
-    return this.#reconcilePageForAppend(chatId, view, page);
-  }
-
-  #reconcilePageForAppend(
-    chatId: string,
-    previous: ChatView,
-    page: ChatHistoryPage,
-  ): ChatView {
-    const reconciledPage = {
-      ...page,
-      messages: preserveRetainedUserIdentities(previous.messages, page.messages),
-    };
-    const view = this.#createGenerationFromPage(chatId, reconciledPage);
-    const persistedIdentities = new Set(
-      reconciledPage.messages.flatMap(exactMessageIdentityKeys),
-    );
-    const unpersistedLive = previous.messages
-      .filter((entry) => entry.seq > previous.historyLastSeq && entry.seq > page.total)
-      .filter((entry) => {
-        const identities = exactMessageIdentityKeys(entry.message);
-        return !identities.some((identity) => persistedIdentities.has(identity));
-      })
-      .map((entry) => entry.message);
-    if (unpersistedLive.length > 0) {
-      this.#appendLiveToView(view, unpersistedLive, 'native-wins');
-    }
-    transferPublishedLiveEntries(previous, view);
-    this.#views.set(chatId, view);
-    return view;
-  }
-
   // Rebuilds the view from the authoritative projection under a new generation.
   // The fence invalidation drops any in-flight legacy append against the old
   // generation before its rows could interleave with the relisted state.
@@ -621,18 +488,6 @@ export class ChatViewStore {
     });
     this.#views.set(chatId, view);
     return view;
-  }
-
-  async #loadFullView(
-    chatId: string,
-    loadSnapshot: () => Promise<ChatTranscriptSnapshot>,
-  ): Promise<{ view: ChatView; messages: ChatMessage[] }> {
-    let view = this.#views.get(chatId);
-    if (view?.complete) {
-      this.#touch(view);
-      return { view, messages: view.messages.map((entry) => entry.message) };
-    }
-    return this.#reconcileFullView(chatId, await loadSnapshot());
   }
 
   #reconcileFullView(
@@ -838,18 +693,6 @@ export class ChatViewStore {
       logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${identity}`);
     }
     return this.#appendToView(view, reconciled.messages);
-  }
-
-  #appendLiveForPublication(
-    view: ChatView,
-    messages: ChatMessage[],
-  ): ChatViewMessage[] {
-    const retained = matchingRetainedMessagesByDeliveryIdentity(view.messages, messages)
-      .filter((entry) => !view.publishedLiveEntries.has(entry));
-    const appended = this.#appendLiveToView(view, messages);
-    const published = [...retained, ...appended].sort((left, right) => left.seq - right.seq);
-    for (const entry of published) view.publishedLiveEntries.add(entry);
-    return published;
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {

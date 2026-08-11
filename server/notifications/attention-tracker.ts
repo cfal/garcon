@@ -9,12 +9,11 @@
 import {
   AssistantMessage,
   isAbortAcknowledged,
-  PermissionCancelledMessage,
   PermissionRequestMessage,
-  PermissionResolvedMessage,
   type ChatMessage,
   type ChatStopOutcome,
 } from '../../common/chat-types.js';
+import type { AppliedProjectionEvent } from '../agents/projection-ingress.js';
 import type { TelegramNotifier } from './telegram.js';
 import { createLogger } from '../lib/log.js';
 
@@ -52,7 +51,7 @@ function userMessageContent(message: ChatMessage): string | null {
 // classes and keeps the module unit-testable with plain mocks.
 
 interface AgentRegistryDep {
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onProjectionApplied(cb: (applied: AppliedProjectionEvent) => void): void;
   onProcessing(cb: (chatId: string, processing: boolean) => void): void;
   onFinished(cb: (chatId: string, exitCode: number) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
@@ -108,7 +107,7 @@ export class AttentionTracker {
   // include the reason text.
   #lastTurnResult = new Map<string, TurnResult>();
 
-  // Tracks the last assistant response per chat from onMessages.
+  // Tracks the last assistant response per chat from applied commit events.
   #lastAssistantMessage = new Map<string, string>();
 
   // Prevents repeated idle events for one settle from composing duplicate notifications.
@@ -135,7 +134,7 @@ export class AttentionTracker {
   }
 
   #wire(): void {
-    this.#agents.onMessages((chatId, messages) => this.#handleMessages(chatId, messages));
+    this.#agents.onProjectionApplied((applied) => this.#handleProjection(applied));
     this.#agents.onProcessing((chatId, processing) => {
       if (processing) this.#idleNotified.delete(chatId);
     });
@@ -151,19 +150,37 @@ export class AttentionTracker {
     });
   }
 
-  #handleMessages(chatId: string, messages: unknown[]): void {
-    this.#idleNotified.delete(chatId);
-    for (const msg of messages) {
-      if (msg instanceof AssistantMessage) {
-        this.#lastAssistantMessage.set(chatId, msg.content);
-      } else if (msg instanceof PermissionRequestMessage) {
-        this.#trackPermission(chatId, msg.permissionRequestId, toolDisplayName(msg.requestedTool));
-      } else if (msg instanceof PermissionResolvedMessage) {
-        this.#clearPermission(chatId, msg.permissionRequestId);
-      } else if (msg instanceof PermissionCancelledMessage) {
-        this.#clearPermission(chatId, msg.permissionRequestId);
+  // Transcript commits carry assistant output; permission lifecycles are
+  // transient control rows keyed by their permission request ID.
+  #handleProjection(applied: AppliedProjectionEvent): void {
+    const event = applied.event;
+    if (event.kind === 'commit') {
+      this.#idleNotified.delete(event.chatId);
+      for (const entry of event.appended) {
+        if (entry.message instanceof AssistantMessage) {
+          this.#lastAssistantMessage.set(event.chatId, entry.message.content);
+        }
       }
+      return;
     }
+    if (event.kind !== 'control') return;
+    const mutation = event.mutation;
+    if (mutation.kind === 'upsert') {
+      const message = mutation.row.message;
+      if (message instanceof PermissionRequestMessage) {
+        this.#trackPermission(
+          event.chatId,
+          mutation.row.id,
+          toolDisplayName(message.requestedTool),
+        );
+      }
+      return;
+    }
+    if (mutation.kind === 'remove') {
+      this.#clearPermission(event.chatId, mutation.id);
+      return;
+    }
+    this.#pendingPermissions.delete(event.chatId);
   }
 
   // Reads the last user message from the history cache. This covers both

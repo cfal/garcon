@@ -76,3 +76,45 @@ export function pagedTranscriptLoader(historyRef, options = {}) {
     loadPage: async (limit, offset) => historyPage(historyRef.current, limit, offset, options),
   };
 }
+
+// Deterministic projection state derived from the durable total so loaders and
+// commit chains built independently in one test still agree on identity.
+export function testProjectionState(total, overrides = {}) {
+  const durableCount = overrides.durableCount ?? total;
+  return {
+    epoch: 'test-stream-epoch-1',
+    contentEpoch: 'test-content-epoch-1',
+    total,
+    durableCount,
+    durableRevision: `test-durable-rev-${durableCount}`,
+    stateRevision: `test-state-rev-${total}`,
+    ...overrides,
+  };
+}
+
+// Drives live rows into a view store the way the projection fanout does:
+// each call is one exact commit event chained from the previous state. The
+// loader serves the post-commit projection so a relist lands on the same
+// materialization the chain describes.
+export function projectionAppender(store, chatId, options = {}) {
+  const history = options.historyRef ?? { current: [] };
+  let state = options.initial ?? testProjectionState(history.current.length);
+  const carryOverMessageCount = options.carryOverMessageCount ?? 0;
+  const loader = {
+    loadAll: async () => transcriptSnapshot(history.current, { projectionState: state }),
+    loadPage: async (limit, offset) => (
+      historyPage(history.current, limit, offset, { projectionState: state })
+    ),
+  };
+  return async (messages) => {
+    const previous = state;
+    state = testProjectionState(previous.total + messages.length);
+    history.current = [...history.current, ...messages];
+    return store.applyProjectionCommit(chatId, {
+      previousProjection: previous,
+      checkpointProjection: state,
+      appendedMessages: messages,
+      carryOverMessageCount,
+    }, loader);
+  };
+}

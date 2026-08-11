@@ -31,6 +31,72 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function projectionState(overrides = {}) {
+  const total = overrides.total ?? 0;
+  const durableCount = overrides.durableCount ?? total;
+  return {
+    epoch: 'stream-epoch-1',
+    contentEpoch: 'content-epoch-1',
+    total,
+    durableCount,
+    durableRevision: `durable-rev-${durableCount}`,
+    stateRevision: `state-rev-${total}`,
+    ...overrides,
+  };
+}
+
+function commitEntry(message, provenance = null, lifetime = 'durable') {
+  return {
+    id: `entry-${message.timestamp}-${message.content ?? ''}`,
+    lifetime,
+    source: null,
+    provenance,
+    message,
+  };
+}
+
+function entryProvenance(owner, overrides = {}) {
+  return {
+    agentOwnershipEpoch: owner.agentOwnershipEpoch,
+    commandType: owner.commandType,
+    clientRequestId: owner.clientRequestId,
+    clientMessageId: null,
+    turnId: owner.turnId,
+    turnOwner: owner,
+    upstreamRequestId: null,
+    ...overrides,
+  };
+}
+
+function appliedCommit({
+  chatId = 'chat-1',
+  agentOwnershipEpoch = 'ownership-1',
+  previous,
+  appended = [],
+  promoted = [],
+}) {
+  const checkpoint = projectionState({
+    epoch: previous.epoch,
+    contentEpoch: previous.contentEpoch,
+    total: previous.total + appended.length,
+    durableCount: previous.durableCount
+      + promoted.length
+      + appended.filter((entry) => entry.lifetime === 'durable').length,
+  });
+  return {
+    event: {
+      kind: 'commit',
+      chatId,
+      agentOwnershipEpoch,
+      previous: { chatId, agentOwnershipEpoch, offset: '1', projection: previous },
+      checkpoint: { chatId, agentOwnershipEpoch, offset: '2', projection: checkpoint },
+      digest: 'digest-1',
+      promoted,
+      appended,
+    },
+  };
+}
+
 function createWiringFixture(overrides = {}) {
   const agentListeners = {};
   const queueListeners = {};
@@ -42,7 +108,6 @@ function createWiringFixture(overrides = {}) {
     getRetainedHistoryMessages: mock(() => []),
   });
   const agentRegistry = {
-    onMessages: mock((callback) => { agentListeners.messages = callback; }),
     onProcessing: mock((callback) => { agentListeners.processing = callback; }),
     onSessionCreated: noOpSubscription,
     onFinished: mock((callback) => { agentListeners.finished = callback; }),
@@ -80,7 +145,8 @@ function createWiringFixture(overrides = {}) {
     getCursor: mock(() => ({ generationId: 'generation-1', lastSeq: 0 })),
     getOrCreatePage: mock(async () => ({ generationId: 'generation-1' })),
     replaceFromProjection: mock(async () => ({ generationId: 'generation-2' })),
-    appendAfterEnsuringGeneration: mock(async () => ({
+    applyProjectionCommit: mock(async () => ({
+      kind: 'applied',
       generationId: 'generation-1',
       messages: [],
       lastSeq: 0,
@@ -135,13 +201,6 @@ function createWiringFixture(overrides = {}) {
     transientFeeds: overrides.transientFeeds
       ?? new ChatTransientFeedStore('server-instance-test'),
     idleReconciler,
-    chatNativeReloader: overrides.chatNativeReloader ?? {
-      reloadFromNative: mock(async () => ({
-        generationId: 'generation-2',
-        messages: [],
-        lastSeq: 0,
-      })),
-    },
     pendingInputs,
     pendingRecovery: { waitForSettlements: mock(async () => undefined) },
     commandLedger,
@@ -173,46 +232,22 @@ function createWiringFixture(overrides = {}) {
 }
 
 describe('server event wiring', () => {
-  it('publishes ahead-imported rows with their original turn metadata before reconciliation', async () => {
+  it('publishes exact commit rows with their original turn metadata', async () => {
     const history = [
       new AssistantMessage('2026-06-01T00:00:00.000Z', 'older one'),
       new AssistantMessage('2026-06-01T00:00:01.000Z', 'older two'),
     ];
+    const initialState = projectionState({ total: 2 });
     const chatViews = new ChatViewStore(() => false);
     await chatViews.getOrCreatePage('chat-1', {
-      loadAll: async () => transcriptSnapshot(history),
-      loadPage: async (limit, offset) => historyPage(history, limit, offset),
-    }, 1);
-    const firstSource = {
-      entryId: 'turn:turn-1:item:message-1',
-      withinSourceOrdinal: 0,
-    };
-    const secondSource = {
-      entryId: 'turn:turn-2:item:message-2',
-      withinSourceOrdinal: 0,
-    };
-    const firstNative = attachNativeMessageSource(
-      new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted first'),
-      firstSource,
-    );
-    const secondNative = attachNativeMessageSource(
-      new AssistantMessage('2026-06-01T00:00:03.000Z', 'persisted second'),
-      secondSource,
-    );
-    const firstLive = attachNativeMessageSource(
-      new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted first'),
-      firstSource,
-    );
-    const secondLive = attachNativeMessageSource(
-      new AssistantMessage('2026-06-01T00:00:03.000Z', 'persisted second'),
-      secondSource,
-    );
-    history.push(firstNative, secondNative);
+      loadAll: async () => transcriptSnapshot(history, { projectionState: initialState }),
+      loadPage: async (limit, offset) => (
+        historyPage(history, limit, offset, { projectionState: initialState })
+      ),
+    }, 20);
     const published = [];
     const fixture = createWiringFixture({
       chatViewsInstance: chatViews,
-      loadChatSnapshot: async () => transcriptSnapshot(history),
-      loadChatPage: async (_chatId, limit, offset) => historyPage(history, limit, offset),
       server: {
         publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
       },
@@ -230,19 +265,33 @@ describe('server event wiring', () => {
       clientRequestId: 'request-2',
       turnId: 'turn-2',
     };
-    fixture.agentListeners.messages('chat-1', [firstLive], { turnId: 'turn-1', turnOwner: firstOwner });
-    fixture.agentListeners.messages('chat-1', [secondLive], { turnId: 'turn-2', turnOwner: secondOwner });
-    fixture.agentListeners.messages('chat-1', [secondLive], { turnId: 'turn-2', turnOwner: secondOwner });
+    const firstCommit = appliedCommit({
+      previous: initialState,
+      appended: [commitEntry(
+        new AssistantMessage('2026-06-01T00:00:02.000Z', 'persisted first'),
+        entryProvenance(firstOwner),
+      )],
+    });
+    const secondCommit = appliedCommit({
+      previous: firstCommit.event.checkpoint.projection,
+      appended: [commitEntry(
+        new AssistantMessage('2026-06-01T00:00:03.000Z', 'persisted second'),
+        entryProvenance(secondOwner),
+      )],
+    });
+    await fixture.agentListeners.projectionApplied(firstCommit);
+    await fixture.agentListeners.projectionApplied(secondCommit);
     await fixture.wiring.waitForIdle();
 
     const emitted = published.filter((message) => message.type === 'chat-messages');
     expect(emitted).toHaveLength(2);
     expect(emitted.map((message) => ({
       turnId: message.turnId,
-      contents: message.messages.map((entry) => entry.message.content),
+      clientRequestId: message.clientRequestId,
+      rows: message.messages.map((entry) => [entry.seq, entry.message.content]),
     }))).toEqual([
-      { turnId: 'turn-1', contents: ['persisted first'] },
-      { turnId: 'turn-2', contents: ['persisted second'] },
+      { turnId: 'turn-1', clientRequestId: 'request-1', rows: [[3, 'persisted first']] },
+      { turnId: 'turn-2', clientRequestId: 'request-2', rows: [[4, 'persisted second']] },
     ]);
     expect(fixture.commandLedger.appendProjectionAssistantMessages.mock.calls).toEqual([
       ['chat-1', firstOwner, ['persisted first']],
@@ -254,9 +303,81 @@ describe('server event wiring', () => {
       'persisted first',
       'persisted second',
     ]);
-    expect(chatViews.readPage('chat-1', 20).messages.slice(-2).map((entry) => (
-      getNativeMessageRevisionSource(entry.message)
-    ))).toEqual([firstSource, secondSource]);
+  });
+
+  it('applies a commit whose checkpoint the view already holds without rebroadcasting', async () => {
+    const initialState = projectionState({ total: 1 });
+    const history = [new AssistantMessage('2026-06-01T00:00:00.000Z', 'existing')];
+    const chatViews = new ChatViewStore(() => false);
+    await chatViews.getOrCreatePage('chat-1', {
+      loadAll: async () => transcriptSnapshot(history, { projectionState: initialState }),
+      loadPage: async (limit, offset) => (
+        historyPage(history, limit, offset, { projectionState: initialState })
+      ),
+    }, 20);
+    const published = [];
+    const fixture = createWiringFixture({
+      chatViewsInstance: chatViews,
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    const commit = appliedCommit({
+      previous: projectionState({ total: 0 }),
+      appended: [commitEntry(history[0])],
+    });
+    await fixture.agentListeners.projectionApplied(commit);
+    await fixture.wiring.waitForIdle();
+
+    expect(published.filter((message) => message.type === 'chat-messages')).toEqual([]);
+    expect(chatViews.readPage('chat-1', 20).messages).toHaveLength(1);
+  });
+
+  it('relists through a compound generation transition when the view state is unknown', async () => {
+    const staleState = projectionState({ total: 1, epoch: 'stream-epoch-0' });
+    const history = [new AssistantMessage('2026-06-01T00:00:00.000Z', 'stale')];
+    const chatViews = new ChatViewStore(() => false);
+    await chatViews.getOrCreatePage('chat-1', {
+      loadAll: async () => transcriptSnapshot(history, { projectionState: staleState }),
+      loadPage: async (limit, offset) => (
+        historyPage(history, limit, offset, { projectionState: staleState })
+      ),
+    }, 20);
+    const staleGeneration = chatViews.getCursor('chat-1').generationId;
+    const commit = appliedCommit({
+      previous: projectionState({ total: 1 }),
+      appended: [commitEntry(new AssistantMessage('2026-06-01T00:00:01.000Z', 'fresh'))],
+    });
+    const current = [
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'stale'),
+      new AssistantMessage('2026-06-01T00:00:01.000Z', 'fresh'),
+    ];
+    const currentState = commit.event.checkpoint.projection;
+    const published = [];
+    const fixture = createWiringFixture({
+      chatViewsInstance: chatViews,
+      loadChatSnapshot: async () => transcriptSnapshot(current, { projectionState: currentState }),
+      loadChatPage: async (_chatId, limit, offset) => (
+        historyPage(current, limit, offset, { projectionState: currentState })
+      ),
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    await fixture.agentListeners.projectionApplied(commit);
+    await fixture.wiring.waitForIdle();
+
+    expect(published.filter((message) => message.type === 'chat-messages')).toEqual([]);
+    const transition = published.find((message) => (
+      message.type === 'chat-projection-generation-transition'
+    ));
+    expect(transition).toBeDefined();
+    expect(transition.previousGenerationId).toBe(staleGeneration);
+    expect(transition.generationId).toBe(chatViews.getCursor('chat-1').generationId);
+    expect(chatViews.readPage('chat-1', 20).messages.map((entry) => entry.message.content))
+      .toEqual(['stale', 'fresh']);
   });
 
   it('broadcasts the server instance with execution control updates', () => {
@@ -466,7 +587,7 @@ describe('server event wiring', () => {
       },
       processing: { phase: mock(() => phase) },
       chatViews: {
-        appendAfterEnsuringGeneration: mock(() => append.promise),
+        applyProjectionCommit: mock(() => append.promise),
       },
       queue: {
         onProcessingInvalidated: mock((callback) => { invalidate = callback; }),
@@ -483,9 +604,13 @@ describe('server event wiring', () => {
       clientRequestId: 'request-1',
       turnId: 'turn-1',
     };
-    fixture.agentListeners.messages('chat-1', [finalReply], { turnId: 'turn-1', turnOwner: owner });
+    void fixture.agentListeners.projectionApplied(appliedCommit({
+      previous: projectionState({ total: 0 }),
+      appended: [commitEntry(finalReply, entryProvenance(owner))],
+    }));
     fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1', turnOwner: owner });
     append.resolve({
+      kind: 'applied',
       generationId: 'generation-1',
       messages: [{ seq: 1, message: finalReply }],
       lastSeq: 1,
@@ -637,7 +762,7 @@ describe('server event wiring', () => {
     expect(published.some((message) => message.type === 'agent-run-finished')).toBe(true);
   });
 
-  it('makes recovered native output unavailable instead of reporting an empty success', async () => {
+  it('keeps ledger output from the serialized event when the view application fails', async () => {
     const ledger = new CommandLedger();
     await ledger.accept({
       commandType: 'agent-run',
@@ -646,45 +771,43 @@ describe('server event wiring', () => {
       turnId: 'turn-1',
       payload: { command: 'work' },
     });
+    const viewFailure = new Error('view application failed');
     const fixture = createWiringFixture({
       commandLedgerInstance: ledger,
       chatViews: {
-        appendAfterEnsuringGeneration: mock(async () => {
-          throw new Error('view append failed');
+        applyProjectionCommit: mock(async () => {
+          throw viewFailure;
         }),
       },
-      chatNativeReloader: {
-        reloadFromNative: mock(async () => ({
-          mode: 'process-error',
-          generationId: 'generation-2',
-          messages: [{ seq: 1, message: new AssistantMessage(
-            '2026-06-01T00:00:00.000Z',
-            'recovered result',
-          ) }],
-          lastSeq: 1,
-          pageOldestSeq: 1,
-          hasMore: false,
-        })),
-      },
     });
-    const turn = {
+    const owner = {
+      agentOwnershipEpoch: 'ownership-1',
       commandType: 'agent-run',
       clientRequestId: 'req-1',
       turnId: 'turn-1',
     };
 
-    fixture.agentListeners.messages('chat-1', [
-      new AssistantMessage('2026-06-01T00:00:00.000Z', 'recovered result'),
-    ], turn);
-    fixture.agentListeners.finished('chat-1', 0, turn);
-    await fixture.wiring.waitForIdle();
+    await fixture.agentListeners.projectionApplied(appliedCommit({
+      previous: projectionState({ total: 0 }),
+      appended: [commitEntry(
+        new AssistantMessage('2026-06-01T00:00:00.000Z', 'authoritative result'),
+        entryProvenance(owner),
+      )],
+    }));
+    fixture.agentListeners.finished('chat-1', 0, {
+      commandType: 'agent-run',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+      turnOwner: owner,
+    });
+    await expect(fixture.wiring.waitForIdle()).rejects.toBe(viewFailure);
 
     const record = await ledger.getTurnRecord('chat-1', 'turn-1');
     expect(projectAgentTurnReceipt(record)).toMatchObject({
       kind: 'found',
       receipt: {
         state: 'completed',
-        output: { availability: 'unavailable', reason: 'recovery' },
+        output: expect.objectContaining({ availability: 'available' }),
       },
     });
   });
@@ -905,7 +1028,7 @@ describe('server event wiring', () => {
       },
       processing: { phase: mock(() => phase) },
       chatViews: {
-        appendAfterEnsuringGeneration: mock(() => append.promise),
+        applyProjectionCommit: mock(() => append.promise),
       },
       queue: {
         onProcessingInvalidated: mock((callback) => { invalidate = callback; }),
@@ -916,7 +1039,10 @@ describe('server event wiring', () => {
       },
     });
 
-    fixture.agentListeners.messages('chat-1', [finalReply], { turnId: 'turn-1' });
+    void fixture.agentListeners.projectionApplied(appliedCommit({
+      previous: projectionState({ total: 0 }),
+      appended: [commitEntry(finalReply)],
+    }));
     invalidate('chat-1');
     fixture.queueListeners.sessionStopped(
       'chat-1',
@@ -927,6 +1053,7 @@ describe('server event wiring', () => {
     );
     fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1' });
     append.resolve({
+      kind: 'applied',
       generationId: 'generation-1',
       messages: [{ seq: 1, message: finalReply }],
       lastSeq: 1,
@@ -958,7 +1085,7 @@ describe('server event wiring', () => {
       },
       processing: { phase: mock(() => phase) },
       chatViews: {
-        appendAfterEnsuringGeneration: mock(() => append.promise),
+        applyProjectionCommit: mock(() => append.promise),
       },
       queue: {
         onProcessingInvalidated: mock((callback) => { invalidate = callback; }),
@@ -969,9 +1096,13 @@ describe('server event wiring', () => {
       },
     });
 
-    fixture.agentListeners.messages('chat-1', [finalReply], { turnId: 'turn-1' });
+    void fixture.agentListeners.projectionApplied(appliedCommit({
+      previous: projectionState({ total: 0 }),
+      appended: [commitEntry(finalReply)],
+    }));
     fixture.agentListeners.failed('chat-1', 'provider failed', { turnId: 'turn-1' });
     append.resolve({
+      kind: 'applied',
       generationId: 'generation-1',
       messages: [{ seq: 1, message: finalReply }],
       lastSeq: 1,
@@ -1000,18 +1131,17 @@ describe('server event wiring', () => {
         getChat: mock(() => chatExists ? {} : null),
       },
       chatViews: {
-        appendAfterEnsuringGeneration: mock(() => {
+        applyProjectionCommit: mock(() => {
           appendStarted.resolve();
           return append.promise;
         }),
       },
     });
 
-    fixture.agentListeners.messages(
-      'chat-1',
-      [new AssistantMessage('2026-06-01T00:00:00.000Z', 'final reply')],
-      { turnId: 'turn-1' },
-    );
+    void fixture.agentListeners.projectionApplied(appliedCommit({
+      previous: projectionState({ total: 0 }),
+      appended: [commitEntry(new AssistantMessage('2026-06-01T00:00:00.000Z', 'final reply'))],
+    }));
     await appendStarted.promise;
     fixture.queueListeners.processing('chat-1');
     fixture.queueListeners.sessionStopped(
@@ -1023,6 +1153,7 @@ describe('server event wiring', () => {
     );
     chatExists = false;
     append.resolve({
+      kind: 'applied',
       generationId: 'generation-1',
       messages: [],
       lastSeq: 0,
@@ -1082,19 +1213,33 @@ describe('server event wiring', () => {
     );
   });
 
-  it('indexes only messages committed by transcript deduplication', async () => {
+  it('dirties search only for durable ledger changes', async () => {
     const fixture = createWiringFixture();
 
-    fixture.agentListeners.messages('chat-1', [new UserMessage(
-      '2026-06-01T00:00:00.000Z',
-      'duplicate',
-      undefined,
-      { clientRequestId: 'req-duplicate' },
-    )]);
+    await fixture.agentListeners.projectionApplied(appliedCommit({
+      previous: projectionState({ total: 0 }),
+      appended: [commitEntry(
+        new UserMessage('2026-06-01T00:00:00.000Z', 'admitted', undefined, {
+          clientRequestId: 'req-active',
+        }),
+        null,
+        'active',
+      )],
+    }));
     await fixture.wiring.waitForIdle();
 
-    expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
+    expect(fixture.metadata.updateFromAppendedMessages).toHaveBeenCalledTimes(1);
     expect(fixture.searchIndex.sourceMayHaveChanged).not.toHaveBeenCalled();
+
+    await fixture.agentListeners.projectionApplied(appliedCommit({
+      previous: projectionState({ total: 1, durableCount: 0 }),
+      appended: [],
+      promoted: [{ entryId: 'entry-1', source: { namespace: 'n', itemId: 'i', subrowId: 's' } }],
+    }));
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.metadata.updateFromAppendedMessages).toHaveBeenCalledTimes(1);
+    expect(fixture.searchIndex.sourceMayHaveChanged).toHaveBeenCalledTimes(1);
   });
 
   it('reports terminal settlement failures to the shutdown drain', async () => {
@@ -1136,7 +1281,6 @@ describe('server event wiring', () => {
     const agentListeners = {};
     const queueListeners = {};
     const agentRegistry = {
-      onMessages: mock(() => undefined),
       onProcessing: mock(() => undefined),
       onSessionCreated: mock(() => undefined),
       onFinished: mock((callback) => { agentListeners.finished = callback; }),
@@ -1202,7 +1346,6 @@ describe('server event wiring', () => {
         ensureReconciled: async () => undefined,
         ensureHistoryChangeReconciled: async () => undefined,
       },
-      chatNativeReloader: {},
       pendingInputs,
       pendingRecovery: { waitForSettlements: mock(async () => undefined) },
       commandLedger: {
@@ -1253,16 +1396,7 @@ describe('server event wiring', () => {
     const published = [];
     const agentListeners = {};
     const queueListeners = {};
-    const reloadFromNative = mock(async () => ({
-      mode: 'process-error',
-      generationId: 'generation-2',
-      messages: [],
-      lastSeq: 0,
-      pageOldestSeq: 1,
-      hasMore: false,
-    }));
     const agentRegistry = {
-      onMessages: mock(() => undefined),
       onProcessing: mock(() => undefined),
       onSessionCreated: mock(() => undefined),
       onFinished: mock(() => undefined),
@@ -1317,14 +1451,13 @@ describe('server event wiring', () => {
       queue,
       processing: { phase: mock(() => null) },
       metadata: {},
-      chatViews: { appendToCurrentOrProvisional: mock(async () => ({ messages: [] })) },
+      chatViews: {},
       idleReconciler: {
         noteIdle: () => undefined,
         noteHistoryChanged: () => undefined,
         ensureReconciled: async () => undefined,
         ensureHistoryChangeReconciled: async () => undefined,
       },
-      chatNativeReloader: { reloadFromNative },
       pendingInputs,
       pendingRecovery: { waitForSettlements: mock(async () => undefined) },
       commandLedger: {
@@ -1349,17 +1482,11 @@ describe('server event wiring', () => {
     agentListeners.failed(chatId, 'provider failed independently', turn);
     await Promise.resolve();
 
-    expect(reloadFromNative).not.toHaveBeenCalled();
     expect(published.some((message) => message.type === 'agent-run-failed')).toBe(false);
 
     queueListeners.sessionStopped(chatId, 'failed', 'stop', 'stop-a', 7);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(reloadFromNative).toHaveBeenCalledWith(
-      chatId,
-      'process-error',
-      'provider failed independently',
-    );
     expect(published).toContainEqual(expect.objectContaining({
       type: 'agent-run-failed',
       chatId,
@@ -1385,7 +1512,7 @@ describe('server event wiring', () => {
       noticeType: 'warning',
       content: 'Carryover context was compacted.',
     }));
-    expect(fixture.chatViews.appendAfterEnsuringGeneration).not.toHaveBeenCalled();
+    expect(fixture.chatViews.applyProjectionCommit).not.toHaveBeenCalled();
   });
 
   it('drops operational notices for removed chats', async () => {

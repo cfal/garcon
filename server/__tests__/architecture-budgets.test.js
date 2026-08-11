@@ -67,8 +67,12 @@ const MAX_LINES = 1000;
 // Agent-owned projection admission and fail-closed transcript repair add 153 lines
 // while removing the queue's competing transcript publication path.
 // Ordered transient permission actions add 13 lines for server-instance, ownership,
-// turn-owner, and incarnation fencing before provider resolution.
-const EXECUTION_FOOTPRINT_BUDGET = 9176;
+// turn-owner, and incarnation fencing before provider resolution, plus 3 lines the
+// durable-admission fence needed to thread its ownership epoch through admission.
+// The queue drainer's terminal-frontier admission fence adds 11 lines so a
+// completed provider call cannot admit the next queued entry before its ordered
+// terminal event retires the turn.
+const EXECUTION_FOOTPRINT_BUDGET = 9190;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

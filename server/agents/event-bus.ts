@@ -2,10 +2,8 @@ import type {
   AgentGoalControlHandoff,
   AgentControlEvent,
   AgentStreamEvent,
-  AgentTranscriptEntry,
   AgentTurnReceiptOwner,
 } from '@garcon/server-agent-interface';
-import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentExecutionCommandType } from './session-types.js';
 import type {
   AppliedProjectionEvent,
@@ -39,7 +37,6 @@ export class AgentEventBus {
   readonly #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
   readonly #abortableTurnByChatId = new Map<string, TurnEventMetadata>();
   readonly #abortableWaiters = new Map<string, Set<AbortableTurnWaiter>>();
-  readonly #messageListeners = new Set<(chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void | Promise<void>>();
   readonly #processingListeners = new Set<(chatId: string, processing: boolean) => void | Promise<void>>();
   readonly #sessionListeners = new Set<(chatId: string) => void | Promise<void>>();
   readonly #finishedListeners = new Set<(chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void | Promise<void>>();
@@ -157,10 +154,6 @@ export class AgentEventBus {
     });
   }
 
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void | Promise<void>): void {
-    this.#messageListeners.add(cb);
-  }
-
   onProcessing(cb: (chatId: string, processing: boolean) => void | Promise<void>): void {
     this.#processingListeners.add(cb);
   }
@@ -214,7 +207,6 @@ export class AgentEventBus {
             await listener(event.chatId, clientRequestId);
           }
         }
-        await this.#dispatchEntries(event.chatId, event.appended);
         await this.#dispatchProjection(applied);
         return;
       case 'control': {
@@ -255,35 +247,6 @@ export class AgentEventBus {
 
   async #dispatchProjection(applied: AppliedProjectionEvent): Promise<void> {
     for (const listener of this.#projectionListeners) await listener(applied);
-  }
-
-  async #dispatchEntries(chatId: string, entries: readonly AgentTranscriptEntry[]): Promise<void> {
-    let group: AgentTranscriptEntry[] = [];
-    let metadata: TurnEventMetadata | undefined;
-    const flush = async () => {
-      if (!group.length) return;
-      const messages = group.map((entry) => entry.message);
-      const groupedMetadata = metadata
-        ? { ...metadata, entryIds: group.map((entry) => entry.id) }
-        : undefined;
-      for (const listener of this.#messageListeners) {
-        await listener(chatId, messages, groupedMetadata);
-      }
-      group = [];
-    };
-    for (const entry of entries) {
-      const next = entry.provenance ? operationMetadata(entry.provenance) : undefined;
-      if (!sameTurnIdentity(metadata, next)) {
-        await flush();
-        metadata = next;
-      }
-      if (next && !this.#isActiveEntry(chatId, next)) {
-        logger.warn('agents: ignored transcript entry for a non-active turn', chatId);
-        continue;
-      }
-      group.push(entry);
-    }
-    await flush();
   }
 
   async #dispatchProjectionFailure(failure: ProjectionIngressFailure): Promise<void> {

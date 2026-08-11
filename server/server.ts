@@ -644,7 +644,6 @@ export async function startServer(): Promise<void> {
         chatViews,
         transientFeeds,
         idleReconciler,
-        chatNativeReloader: indexedNativeReloader,
         pendingInputs,
         commandLedger,
         shareStore,

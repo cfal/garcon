@@ -1,16 +1,63 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { EventEmitter } from 'events';
 import { AttentionTracker } from '../../notifications/attention-tracker.js';
-import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, UserMessage, AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
+import { PermissionRequestMessage, AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
+
+function commitApplied(chatId, messages) {
+  return {
+    event: {
+      kind: 'commit',
+      chatId,
+      agentOwnershipEpoch: 'ownership-1',
+      promoted: [],
+      appended: messages.map((message, index) => ({
+        id: `entry-${index}`,
+        lifetime: 'durable',
+        source: null,
+        provenance: null,
+        message,
+      })),
+    },
+  };
+}
+
+function controlApplied(chatId, mutation) {
+  return {
+    event: {
+      kind: 'control',
+      chatId,
+      agentOwnershipEpoch: 'ownership-1',
+      mutation,
+    },
+  };
+}
 
 function createMockAgentRegistry() {
   const emitter = new EventEmitter();
   return {
-    onMessages: (cb) => emitter.on('messages', cb),
+    onProjectionApplied: (cb) => emitter.on('projection', cb),
     onProcessing: (cb) => emitter.on('processing', cb),
     onFinished: (cb) => emitter.on('finished', cb),
     onFailed: (cb) => emitter.on('failed', cb),
-    emitMessages: (chatId, msgs) => emitter.emit('messages', chatId, msgs),
+    emitAssistant: (chatId, msgs) => emitter.emit('projection', commitApplied(chatId, msgs)),
+    emitPermissionRequest: (chatId, message) => emitter.emit('projection', controlApplied(chatId, {
+      kind: 'upsert',
+      row: {
+        id: message.permissionRequestId,
+        incarnation: 'incarnation-1',
+        anchorEntryId: null,
+        displayOrder: 0,
+        message,
+      },
+    })),
+    emitPermissionRemoved: (chatId, permissionRequestId) => emitter.emit('projection', controlApplied(chatId, {
+      kind: 'remove',
+      id: permissionRequestId,
+      incarnation: 'incarnation-1',
+    })),
+    emitPermissionCleared: (chatId) => emitter.emit('projection', controlApplied(chatId, {
+      kind: 'clear',
+    })),
     emitProcessing: (chatId, processing) => emitter.emit('processing', chatId, processing),
     emitFinished: (chatId, exitCode) => emitter.emit('finished', chatId, exitCode),
     emitFailed: (chatId, msg) => emitter.emit('failed', chatId, msg),
@@ -85,12 +132,12 @@ describe('AttentionTracker', () => {
     return new AttentionTracker(agents, queue, settings, registry, history, telegram, telegramSettings);
   }
 
-  // Simulates a conversation round: adds messages to history and emits
-  // the assistant message through onMessages (as the real provider does).
+  // Simulates a conversation round: adds messages to history and applies
+  // the assistant row through a projection commit (as the real ingress does).
   function simulateConversation(chatId, userText, assistantText) {
     historyMessages.push({ type: 'user-message', content: userText });
     historyMessages.push({ type: 'assistant-message', content: assistantText });
-    agents.emitMessages(chatId, [new AssistantMessage('2024-01-01T00:00:01Z', assistantText)]);
+    agents.emitAssistant(chatId, [new AssistantMessage('2024-01-01T00:00:01Z', assistantText)]);
   }
 
   describe('permission notifications', () => {
@@ -99,7 +146,7 @@ describe('AttentionTracker', () => {
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
+      agents.emitPermissionRequest('c1', msg);
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
@@ -118,7 +165,7 @@ describe('AttentionTracker', () => {
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
+      agents.emitPermissionRequest('c1', msg);
 
       await new Promise(r => setTimeout(r, 10));
       const [, html] = telegram.send.mock.calls[0];
@@ -129,21 +176,20 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
-      agents.emitMessages('c1', [msg]);
+      agents.emitPermissionRequest('c1', msg);
+      agents.emitPermissionRequest('c1', msg);
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
     });
 
-    it('clears pending permission on resolved', async () => {
+    it('clears pending permission on control removal', async () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      const resMsg = new PermissionResolvedMessage('2024-01-01T00:00:01Z', 'perm-1', true);
 
-      agents.emitMessages('c1', [reqMsg]);
-      agents.emitMessages('c1', [resMsg]);
+      agents.emitPermissionRequest('c1', reqMsg);
+      agents.emitPermissionRemoved('c1', 'perm-1');
 
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
@@ -152,14 +198,13 @@ describe('AttentionTracker', () => {
       expect(telegram.send).toHaveBeenCalledTimes(2);
     });
 
-    it('clears pending permission on cancelled', async () => {
+    it('clears pending permissions on a control clear', async () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      const cancelMsg = new PermissionCancelledMessage('2024-01-01T00:00:01Z', 'perm-1', 'cancelled');
 
-      agents.emitMessages('c1', [reqMsg]);
-      agents.emitMessages('c1', [cancelMsg]);
+      agents.emitPermissionRequest('c1', reqMsg);
+      agents.emitPermissionCleared('c1');
 
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
@@ -260,7 +305,7 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
+      agents.emitPermissionRequest('c1', msg);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -271,7 +316,7 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
+      agents.emitPermissionRequest('c1', msg);
       registry.emitChatRemoved('c1');
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');

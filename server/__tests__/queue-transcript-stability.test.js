@@ -15,8 +15,8 @@ import {
   CommandLedger,
 } from '../commands/command-ledger.js';
 import {
+  projectionAppender,
   snapshotLoader,
-  transcriptLoader,
 } from '../chats/__tests__/chat-transcript-test-helpers.js';
 
 function deferred() {
@@ -34,14 +34,18 @@ function controlRepository(serverInstanceId = 'server-instance-test') {
 }
 
 function projectionPort(views, loadMessages = async () => []) {
+  const appenders = new Map();
   return {
     admitInput: async (chatId, message) => {
       if (views) {
-        await views.appendAfterEnsuringGeneration(
-          chatId,
-          transcriptLoader(loadMessages),
-          [message],
-        );
+        let append = appenders.get(chatId);
+        if (!append) {
+          append = projectionAppender(views, chatId, {
+            historyRef: { current: await loadMessages() },
+          });
+          appenders.set(chatId, append);
+        }
+        await append([message]);
       }
       return { discardKnownNotSent: async () => {} };
     },
@@ -372,7 +376,9 @@ describe('queue and transcript stability', () => {
           waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         pendingInputs,
-        projectionPort(views),
+        // The interrupted input is discarded as known-not-sent in production, so
+        // its row never survives into retained history for settlement to match.
+        projectionPort(null),
         () => ({}),
         () => true,
         controlRepository(),
@@ -543,6 +549,14 @@ describe('queue and transcript stability', () => {
                 turnId: options.turnId,
               },
             ));
+            // The ordered terminal event retires the turn after the provider
+            // call resolves, exactly as the projection stream delivers it.
+            setTimeout(() => {
+              void executionCoordinator?.onAgentTurnTerminal(chatId, {
+                clientRequestId: options.clientRequestId,
+                turnId: options.turnId,
+              });
+            }, 0);
             await pendingInputs.reconcileNativeHistory(chatId);
           }),
           abortSession: mock(async () => false),
@@ -577,6 +591,7 @@ describe('queue and transcript stability', () => {
 
       releaseFirstTurn.resolve();
       await drain;
+      await queue.waitForExecutionOwners();
 
       expect(ownsExecution(chatId)).toBe(false);
       expect((await queue.readChatExecutionControl(chatId)).entries).toEqual([]);

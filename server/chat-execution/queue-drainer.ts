@@ -90,6 +90,21 @@ export class QueueDrainer {
 
   async run(chatId: string): Promise<void> {
     while (!this.#shouldHalt(chatId)) {
+      const lingering = this.#ownership.attempt(chatId);
+      if (lingering) {
+        // A completed provider call retires only at its ordered terminal
+        // frontier, so queued admission stays fenced until that turn settles.
+        // With nothing left to dispatch the drain exits instead; the terminal
+        // path re-triggers it through checkChatIdle.
+        const control = await this.#controls.read(chatId);
+        if (!control.entries.some((entry) => (
+          entry.status === 'queued' || entry.status === 'sending' || entry.status === 'steering'
+        ))) {
+          return;
+        }
+        await lingering.waitUntilSettled();
+        continue;
+      }
       const result = await this.#controls.pop(chatId);
       if (!result) {
         const control = await this.#controls.read(chatId);

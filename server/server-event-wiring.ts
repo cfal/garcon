@@ -1,19 +1,15 @@
 import crypto from 'node:crypto';
 import {
   isAbortAcknowledged,
-  parseChatMessages,
   type ChatStopIntent,
   type ChatMessage,
 } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import type { AgentProjectionState } from '@garcon/server-agent-interface';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
+import { createProjectionEventFanout } from './projection-event-fanout.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
-import {
-  attachNativeMessageSource,
-  getNativeMessageRevisionSource,
-} from './agents/shared/native-message-source.js';
 import type { ChatRegistry } from './chats/store.js';
 import type { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import type { MetadataIndex } from './chats/metadata-store.js';
@@ -23,7 +19,6 @@ import type {
   ChatViewStore,
 } from './chats/chat-view-store.js';
 import type { IdleNativeReconciler } from './chats/idle-native-reconciler.js';
-import type { ChatNativeReloader } from './chats/chat-native-reload.js';
 import type { PendingUserInputService } from './chats/pending-user-input-service.js';
 import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
@@ -37,16 +32,12 @@ import type { SnippetService } from './snippets/service.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
-import { ChatProcessErrorRecovery } from './chats/chat-process-error-recovery.js';
 import { UserAbortLifecycleCoordinator } from './chats/user-abort-lifecycle-coordinator.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
-  ChatMessagesMessage,
-  ChatGenerationResetMessage,
   ChatOperationalNoticeMessage,
   ChatProjectionGenerationTransitionMessage,
-  ChatTransientFeedMutationMessage,
   ChatSessionCreatedMessage,
   ChatProjectPathUpdatedMessage,
   ChatProcessingUpdatedMessage,
@@ -67,17 +58,6 @@ import {
 
 const logger = createLogger('server-events');
 
-function normalizeAgentMessages(messages: readonly ChatMessage[]): ChatMessage[] {
-  const normalized: ChatMessage[] = [];
-  for (const message of messages) {
-    const source = getNativeMessageRevisionSource(message);
-    for (const parsed of parseChatMessages([message])) {
-      normalized.push(attachNativeMessageSource(parsed, source));
-    }
-  }
-  return normalized;
-}
-
 interface WebSocketPublisher {
   publish(topic: string, payload: string): unknown;
 }
@@ -87,8 +67,6 @@ interface ChatSearchEventIndex {
   catalogMayHaveChanged(chatId?: string): void;
   deleteChat(chatId: string): void;
 }
-
-type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 
 export interface ServerEventWiringDeps {
   server: WebSocketPublisher;
@@ -101,7 +79,6 @@ export interface ServerEventWiringDeps {
   chatViews: ChatViewStore;
   transientFeeds: ChatTransientFeedStore;
   idleReconciler: IdleNativeReconciler;
-  chatNativeReloader: NativeReloaderDep;
   pendingInputs: PendingUserInputService;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
@@ -143,7 +120,6 @@ export function wireServerEvents({
   chatViews,
   transientFeeds,
   idleReconciler,
-  chatNativeReloader,
   pendingInputs,
   commandLedger,
   shareStore,
@@ -180,11 +156,6 @@ export function wireServerEvents({
       };
   const deferredTerminalFailures = new Map<string, DeferredTerminalFailure>();
   const processFailureDedupeMs = 30_000;
-  const processErrorRecovery = new ChatProcessErrorRecovery(
-    chatViews,
-    chatNativeReloader,
-    pendingInputs,
-  );
   const userAbortLifecycle = new UserAbortLifecycleCoordinator(pendingInputs, {
     onSettlementError: (err) => {
       logger.warn('pending-inputs: reconcile after stop failed:', errorMessage(err));
@@ -417,63 +388,20 @@ export function wireServerEvents({
     });
   }
 
-  async function reloadAfterProcessError(
-    chatId: string,
-    message: string,
-    turnMetadata?: TurnEventMetadata,
-  ): Promise<void> {
-    markProcessFailure(chatId, turnMetadata);
-    const recovery = await processErrorRecovery.recover(chatId, message);
-    if (recovery.settlementError !== undefined) {
-      logger.warn(
-        'pending-inputs: process-error settlement failed:',
-        errorMessage(recovery.settlementError),
-      );
-    }
-    if (recovery.kind === 'generation-reset') {
-      broadcast(
-        new ChatGenerationResetMessage(
-          chatId,
-          recovery.reload.generationId,
-          'process-error',
-          recovery.reload.lastSeq,
-        ),
-      );
-    } else if (recovery.kind === 'fallback-appended') {
-      logger.warn(
-        'chat-view: process-error reload failed:',
-        errorMessage(recovery.reloadError),
-      );
-      if (recovery.appended.messages.length > 0) {
-        markSearchChatDirty(chatId);
-        broadcast(
-          new ChatMessagesMessage(
-            chatId,
-            recovery.appended.generationId,
-            recovery.appended.messages,
-            turnMetadata?.turnId,
-            turnMetadata?.clientRequestId,
-            turnMetadata?.upstreamRequestId,
-          ),
-        );
-      }
-    } else {
-      logger.warn(
-        'chat-view: process-error reload and fallback failed:',
-        errorMessage(recovery.reloadError),
-        errorMessage(recovery.fallbackError),
-      );
-    }
-  }
-
+  // A provider failure is a terminal outcome, not a transcript invalidation.
+  // The ledger already holds every committed row, so the view is left intact
+  // and only command, pending-input, and lifecycle state settle.
   async function handleAgentFailure(
     chatId: string,
     agentErrorMessage: string,
     turnMetadata?: TurnEventMetadata,
   ): Promise<void> {
+    markProcessFailure(chatId, turnMetadata);
     await settleExecutionCommand(chatId, turnMetadata, 'failed', agentErrorMessage);
-    await reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
-    await idleReconciler.ensureHistoryChangeReconciled(chatId);
+    if (turnMetadata?.clientRequestId) {
+      pendingInputs.markFailed(chatId, turnMetadata.clientRequestId);
+    }
+    await pendingInputs.reconcileNativeHistory(chatId);
     broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
     await markPublicTurnTerminal(chatId, turnMetadata);
   }
@@ -518,165 +446,23 @@ export function wireServerEvents({
     idleReconciler.noteIdle(chatId);
   });
 
-  agentRegistry.onMessages((chatId, messages, turnMetadata) => {
-    if (!chatExists(chatId)) return;
-    const fence = chatViews.captureFence(chatId);
-    return scheduleChatTask(chatId, 'chat-view: message ingestion failed', async () => {
-      if (!chatExists(chatId)) return;
-      try {
-        const parsed = normalizeAgentMessages(messages);
-        const appended = await chatViews.appendAfterEnsuringGeneration(
-          chatId,
-          {
-            loadAll: () => loadChatSnapshot(chatId),
-            loadPage: (limit, offset) => loadChatPage(chatId, limit, offset),
-          },
-          parsed,
-          { fence },
-        );
-        if (appended.skipped) return;
-        const committedMessages = appended.messages.map((entry) => entry.message);
-        if (committedMessages.length > 0) {
-          metadata.updateFromAppendedMessages(chatId, committedMessages);
-          markSearchChatDirty(chatId);
-        }
-        if (appended.messages.length > 0) {
-          if (turnMetadata?.turnOwner) {
-            await commandLedger.appendProjectionAssistantMessages(
-              chatId,
-              turnMetadata.turnOwner,
-              committedMessages.flatMap((message) => (
-                message.type === 'assistant-message' && message.content.length > 0
-                  ? [message.content]
-                  : []
-              )),
-            );
-          }
-          broadcast(
-            new ChatMessagesMessage(
-              chatId,
-              appended.generationId,
-              appended.messages,
-              turnMetadata?.turnId,
-              turnMetadata?.clientRequestId,
-              turnMetadata?.upstreamRequestId,
-            ),
-          );
-        }
-        await pendingInputs.reconcileRetainedHistory(chatId);
-      } catch (err) {
-        logger.warn(
-          'chat-view: append failed; reloading from native:',
-          errorMessage(err),
-        );
-        if (turnMetadata?.turnId) {
-          await commandLedger.markTurnOutputUnavailable(
-            chatId,
-            turnMetadata.turnId,
-            'recovery',
-          );
-        }
-        await reloadAfterProcessError(chatId, errorMessage(err), turnMetadata);
-      }
-    });
-  });
-  agentRegistry.onProjectionApplied((applied) => {
-    const event = applied.event;
-    if (event.kind === 'commit' || event.kind === 'session' || !chatExists(event.chatId)) {
-      return;
-    }
-    return scheduleChatTask(event.chatId, 'transient-feed: projection failed', async () => {
-      if (!chatExists(event.chatId)) return;
-      let cursor = chatViews.getCursor(event.chatId);
-      if (!cursor) {
-        await chatViews.getOrCreatePage(
-          event.chatId,
-          {
-            loadAll: () => loadChatSnapshot(event.chatId),
-            loadPage: (limit, offset) => loadChatPage(event.chatId, limit, offset),
-          },
-          1,
-        );
-        cursor = chatViews.getCursor(event.chatId);
-      }
-      if (!cursor) throw new Error('TRANSIENT_FEED_GENERATION_UNAVAILABLE');
-
-      const carryOverMessageCount = await getCarryOverMessageCount(event.chatId);
-      if (event.kind === 'reset') {
-        const registered = chatRegistry.getChat(event.chatId);
-        if (!registered || registered.agentOwnershipEpoch !== event.agentOwnershipEpoch) {
-          throw new Error('PROJECTION_RESET_STALE_OWNER');
-        }
-        if (registered.transcriptContentEpoch !== event.checkpoint.projection.contentEpoch) {
-          await chatRegistry.updateChat(
-            event.chatId,
-            { transcriptContentEpoch: event.checkpoint.projection.contentEpoch },
-            { flush: true },
-          );
-        }
-        const snapshot = await composeProjectionSnapshot(
-          event.chatId,
-          applied.current.entries.map((entry) => entry.message),
-          event.checkpoint.projection.stateRevision,
-          event.checkpoint.projection,
-        );
-        const page = await chatViews.replaceFromProjection(event.chatId, snapshot);
-        const projected = transientFeeds.apply(applied, {
-          previousGenerationId: cursor.generationId,
-          generationId: page.generationId,
-          carryOverMessageCount,
-        });
-        if (projected.kind !== 'generation-transition') {
-          throw new TypeError('Projection reset did not produce a compound transition');
-        }
-        const value = projected.value;
-        broadcast(new ChatProjectionGenerationTransitionMessage(
-          value.resetTransactionId,
-          value.serverInstanceId,
-          value.chatId,
-          value.agentOwnershipEpoch,
-          value.previousGenerationId,
-          value.generationId,
-          value.transientRevision,
-          value.stateDigest,
-          value.rows,
-        ));
-        markSearchCatalogDirty(event.chatId);
-        return;
-      }
-
-      const projected = transientFeeds.apply(applied, {
-        generationId: cursor.generationId,
-        carryOverMessageCount,
-      });
-      if (projected.kind === 'generation-transition') {
-        const value = projected.value;
-        broadcast(new ChatProjectionGenerationTransitionMessage(
-          value.resetTransactionId,
-          value.serverInstanceId,
-          value.chatId,
-          value.agentOwnershipEpoch,
-          value.previousGenerationId,
-          value.generationId,
-          value.transientRevision,
-          value.stateDigest,
-          value.rows,
-        ));
-        return;
-      }
-      if (projected.kind !== 'mutation') return;
-      const value = projected.value;
-      broadcast(new ChatTransientFeedMutationMessage(
-        value.serverInstanceId,
-        value.chatId,
-        value.agentOwnershipEpoch,
-        value.generationId,
-        value.transientRevision,
-        value.stateDigest,
-        value.mutation,
-      ));
-    });
-  });
+  agentRegistry.onProjectionApplied(createProjectionEventFanout({
+    chatExists,
+    scheduleChatTask: (chatId, label, task) => scheduleChatTask(chatId, label, task),
+    broadcast,
+    chatRegistry,
+    chatViews,
+    transientFeeds,
+    metadata,
+    commandLedger,
+    pendingInputs,
+    markSearchChatDirty,
+    markSearchCatalogDirty,
+    getCarryOverMessageCount,
+    composeProjectionSnapshot,
+    loadChatSnapshot,
+    loadChatPage,
+  }));
   agentRegistry.onInputSettled((chatId, clientRequestId) => {
     queue.onAcceptedInputSettled(chatId, clientRequestId);
   });
