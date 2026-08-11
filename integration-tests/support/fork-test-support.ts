@@ -56,16 +56,43 @@ export function forkAfterSourceSettles(
   );
 }
 
+// Retries a message-point fork while the provider file trails the settled
+// projection; the fork attempt itself re-audits, so the retry converges as
+// soon as the provider persists the pinned prefix.
+export function forkAtMessageWhenPersisted(
+  fixture: IntegrationFixture,
+  sourceChatId: string,
+  chatId: string,
+  upToSeq: number,
+): Promise<void> {
+  return forkWithRetry(
+    fixture,
+    sourceChatId,
+    chatId,
+    new Set([
+      TRANSCRIPT_NOT_YET_PERSISTED,
+      'MESSAGE_NOT_IN_NATIVE_HISTORY',
+      'SOURCE_REVISION_CHANGED',
+    ]),
+    upToSeq,
+  );
+}
+
 async function forkWithRetry(
   fixture: IntegrationFixture,
   sourceChatId: string,
   chatId: string,
   retryableErrorCodes: ReadonlySet<string>,
+  upToSeq?: number,
 ): Promise<void> {
   const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
-      await fixture.client.forkChat({ sourceChatId, chatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId,
+        ...(upToSeq === undefined ? {} : { upToSeq }),
+      });
       return;
     } catch (error) {
       const errorCode = forkErrorCode(error);

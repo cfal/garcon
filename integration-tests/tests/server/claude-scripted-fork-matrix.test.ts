@@ -218,7 +218,9 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await reloadUntilNativeContains(fixture, sourceChatId, reply);
 
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      // The projection settles before the provider JSONL flushes, so the fork
+      // retries its typed not-yet-persisted refusal until the file exists.
+      await forkAfterSourceSettles(fixture, sourceChatId, forkChatId);
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([prompt]);
       expect(assistantContents(fork.messages)).toContain(reply);
@@ -313,6 +315,9 @@ describe('scripted Claude fork lifecycle matrix', () => {
         afterIndex: cursor,
       });
       await reloadUntilNativeContains(fixture, sourceChatId, reply);
+      // The projection settles before the provider JSONL flushes; the appended
+      // microcompaction needs the actual native file.
+      await waitForNativeFileContains(fixture.dirs.workspace, sourceChatId, reply);
       const persisted = await readClaudeChat(fixture.dirs.workspace, sourceChatId);
       await appendMicrocompaction(persisted);
 
@@ -353,6 +358,9 @@ describe('scripted Claude fork lifecycle matrix', () => {
         afterIndex: sourceCursor,
       });
       await reloadUntilNativeContains(fixture, sourceChatId, sourceReply);
+      // The injected out-of-order hook rows need the actual native file, which
+      // flushes after the projection settles.
+      await waitForNativeFileContains(fixture.dirs.workspace, sourceChatId, sourceReply);
       const source = await readClaudeChat(fixture.dirs.workspace, sourceChatId);
       const hookUuids = await injectOutOfOrderHookAttachments(source);
 

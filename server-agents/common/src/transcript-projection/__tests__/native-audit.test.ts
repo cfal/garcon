@@ -402,6 +402,61 @@ describe('existing-journal native audit', () => {
       .toBe(after.checkpoint.projection.durableRevision);
   });
 
+  it('re-audits once at fork resolution when the provider persisted after settle', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new UserMessage('2026-06-01T00:00:00.000Z', 'streamed')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'item-1', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+    const before = await openContents(stream);
+
+    // The provider flushed after the settled boundary; the fork attempt itself
+    // performs the idle audit instead of fencing until the next open.
+    persisted = [nativeMessage('item-1', 'streamed')];
+    const resolved = await stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(before.checkpoint, before.entries[0]!.id),
+    });
+    expect(resolved.kind).toBe('ready');
+
+    // The resolution-time audit only binds: trailing native rows the stream
+    // has not delivered stay out until a settled boundary imports them.
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new UserMessage('2026-06-01T00:00:01.000Z', 'second')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'item-2', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+    const pinned = await openContents(stream);
+    persisted = [
+      nativeMessage('item-1', 'streamed'),
+      nativeMessage('item-2', 'second'),
+      nativeMessage('item-3', 'held output'),
+    ];
+    const bound = await stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(pinned.checkpoint, pinned.entries[1]!.id),
+    });
+    expect(bound.kind).toBe('ready');
+    expect((await openContents(stream)).contents).toEqual(['streamed', 'second']);
+
+    await stream.refreshNativeContinuity({ chat, signal: signal() });
+    expect((await openContents(stream)).contents).toEqual(['streamed', 'second', 'held output']);
+  });
+
   it('serves the committed journal unchanged when evidence is unavailable or empty', async () => {
     const directory = await createDirectory();
     const first = await openContents(streamOver(directory, () => [

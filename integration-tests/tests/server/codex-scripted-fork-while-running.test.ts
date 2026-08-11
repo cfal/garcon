@@ -65,12 +65,21 @@ describe('scripted Codex fork while running', () => {
         expect(messagesOfType(wholeFork.messages, 'assistant-message')
           .some((message) => message.content.includes(reply))).toBe(false);
 
-        await expectNativeHistoryRefusal(fixture.client.forkChat({
+        // Codex persists ItemCompleted before notifying it, so a finalized
+        // streamed point is already line-cut forkable while the reply is held.
+        const streamedForkId = fixture.newChatId();
+        await fixture.client.forkChat({
           sourceChatId,
-          chatId: fixture.newChatId(),
+          chatId: streamedForkId,
           upToSeq: streamedBash.seq,
           generationId: streamedBash.generationId,
-        }));
+        });
+        const streamedFork = await fixture.client.getMessages(streamedForkId);
+        expect(userContents(streamedFork.messages)).toEqual([prompt]);
+        expect(messagesOfType(streamedFork.messages, 'bash-tool-use')
+          .some((message) => message.command === command)).toBe(true);
+        expect(messagesOfType(streamedFork.messages, 'assistant-message')
+          .some((message) => message.content.includes(reply))).toBe(false);
       } finally {
         heldReply.release();
       }
@@ -132,9 +141,6 @@ async function waitForBash(
   throw new Error(`Codex never rendered ${command}.`);
 }
 
-async function expectNativeHistoryRefusal(promise: Promise<unknown>): Promise<void> {
-  return expectForkRefusal(promise, 'MESSAGE_NOT_IN_NATIVE_HISTORY');
-}
 
 async function expectForkRefusal(
   promise: Promise<unknown>,

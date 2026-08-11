@@ -215,6 +215,11 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   async refreshNativeContinuity(request: AgentTranscriptRequestV4 & {
     readonly operation?: AgentTurnBoundOperationIdentityV4 | null;
     readonly sourceSettlement?: () => Promise<'confirmed' | 'unresolved'>;
+    // A bind-only audit rebinds aliases and recomputes fences without
+    // importing trailing native rows; resolution-time audits use it because a
+    // mid-turn import would duplicate persist-before-notify rows whose stream
+    // events have not arrived yet.
+    readonly importSuffix?: boolean;
   }): Promise<'confirmed' | 'unresolved'> {
     const settle = request.sourceSettlement ?? (async () => 'confirmed' as const);
     const segment = this.#segments.get(segmentKey(request.chat));
@@ -239,7 +244,8 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
         return settle();
       }
       if (outcome.kind === 'aligned') {
-        if (outcome.suffix.length > 0) {
+        const importSuffix = request.importSuffix ?? true;
+        if (importSuffix && outcome.suffix.length > 0) {
           const provenance = request.operation
             ? { ...request.operation, upstreamRequestId: null }
             : null;
@@ -247,7 +253,11 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
             entry.provenance || !provenance ? entry : { ...entry, provenance }
           )));
         }
-        await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
+        await applyAuditMetadata(
+          segment.journal,
+          outcome,
+          importSuffix ? aliasesFromSeeds(outcome.suffix) : {},
+        );
         segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
       }
       return settle();
@@ -449,6 +459,26 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }
 
   async resolveNativeForkPoint(request: AgentTranscriptRequestV4 & {
+    readonly point: AgentForkPoint;
+  }): Promise<AgentNativeForkResolution> {
+    const resolution = await this.#resolveNativeForkPointOnce(request);
+    if (resolution.kind !== 'unavailable'
+        || resolution.reason !== 'projection-ahead-of-provider') {
+      return resolution;
+    }
+    // The provider may have persisted the committed tail after the settled
+    // boundary already ran, so a fork attempt re-audits once instead of
+    // fencing until the next open. The re-audit only binds: importing here
+    // could run mid-turn and duplicate persist-before-notify rows.
+    await this.refreshNativeContinuity({
+      chat: request.chat,
+      signal: request.signal,
+      importSuffix: false,
+    });
+    return this.#resolveNativeForkPointOnce(request);
+  }
+
+  async #resolveNativeForkPointOnce(request: AgentTranscriptRequestV4 & {
     readonly point: AgentForkPoint;
   }): Promise<AgentNativeForkResolution> {
     request.signal.throwIfAborted();

@@ -36,36 +36,39 @@ export function auditNativeEvidence(options: {
   readonly seeds: readonly AgentTranscriptSeedEntry[];
 }): NativeAuditOutcome {
   const namespace = `${options.ownerId}:native`;
-  // Admission rows anchor by identity and order rather than native source key:
-  // providers that never notify user items still persist the admitted input as
-  // a native user row, which the admission row claims without content
-  // comparison so the audit can align around it and bind its alias.
+  // Rows without a canonical native identity anchor by order rather than
+  // source key, never by content: an admission row claims the next native
+  // user occurrence, and a row journalled from a live event under a
+  // process-local identity claims the next native occurrence of its exact
+  // message type. Claiming instead of importing is what keeps a stream-
+  // rendered row from being duplicated by the audit, and the bound alias is
+  // what makes it line-cut forkable.
   const journal = options.entries.flatMap(
-    (entry, index): { ordinal: number; key: string; kind: 'exact' | 'admission' }[] => {
+    (entry, index): {
+      ordinal: number;
+      key: string;
+      kind: 'exact' | 'admission' | 'stream';
+      messageType: string;
+    }[] => {
       const source = entry.source;
       if (entry.lifetime !== 'durable' || source === null) return [];
+      const messageType = entry.message.type;
       if (comparableSource(source, namespace)) {
-        return [{ ordinal: index + 1, key: sourceIdentityKey(source), kind: 'exact' }];
+        return [{ ordinal: index + 1, key: sourceIdentityKey(source), kind: 'exact', messageType }];
       }
-      if (source.namespace === 'garcon:admission' && entry.message.type === 'user-message') {
-        return [{ ordinal: index + 1, key: sourceIdentityKey(source), kind: 'admission' }];
+      if (source.namespace === 'garcon:admission' && messageType === 'user-message') {
+        return [{ ordinal: index + 1, key: sourceIdentityKey(source), kind: 'admission', messageType }];
+      }
+      if (source.namespace === namespace && source.itemId.startsWith('event:')) {
+        return [{ ordinal: index + 1, key: sourceIdentityKey(source), kind: 'stream', messageType }];
       }
       return [];
     },
   );
-  // A populated journal without any comparable identity or admission anchor
-  // offers nothing to match against, and importing anything could duplicate
-  // rows imported at genesis under process-local fallback identities.
+  // A populated journal without any anchor offers nothing to match against,
+  // and importing anything could duplicate rows imported at genesis under
+  // process-local fallback identities.
   if (journal.length === 0 && options.entries.length > 0) return { kind: 'skipped' };
-  // Durable rows journalled under process-local event identities have no
-  // native counterpart to match, so any import decision around them could
-  // duplicate the very rows they represent.
-  const hasFallbackRows = options.entries.some((entry) => (
-    entry.lifetime === 'durable'
-    && entry.source?.namespace === namespace
-    && entry.source.itemId.startsWith('event:')
-  ));
-  if (hasFallbackRows) return { kind: 'skipped' };
 
   const native: { readonly key: string; readonly seed: AgentTranscriptSeedEntry }[] = [];
   const nativePositions = new Map<string, number>();
@@ -96,9 +99,10 @@ export function auditNativeEvidence(options: {
         return { kind: 'diverged' };
       }
     } else {
+      const claimableType = committed.kind === 'admission' ? 'user-message' : committed.messageType;
       for (let candidate = lastMatchedNativePosition + 1; candidate < native.length; candidate += 1) {
         if (claimed.has(candidate)) continue;
-        if (native[candidate]!.seed.message.type !== 'user-message') continue;
+        if (native[candidate]!.seed.message.type !== claimableType) continue;
         position = candidate;
         break;
       }

@@ -4,7 +4,7 @@ import {
   claudeText,
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
-import { GarconApiError } from '../../support/garcon-client.js';
+import { forkAtMessageWhenPersisted } from '../../support/fork-test-support.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
@@ -66,11 +66,20 @@ describe('scripted Claude fork while running', () => {
       expect(messagesOfType(wholeFork.messages, 'assistant-message')
         .some((message) => message.content.includes(reply))).toBe(false);
 
-      await expectNativeHistoryRefusal(fixture.client.forkChat({
+      // Claude persists tool rows before notifying them, so a streamed point
+      // is already line-cut forkable while the turn is still running.
+      const streamedForkId = fixture.newChatId();
+      await fixture.client.forkChat({
         sourceChatId,
-        chatId: fixture.newChatId(),
+        chatId: streamedForkId,
         upToSeq: streamedBash.seq,
-      }));
+      });
+      const streamedFork = await fixture.client.getMessages(streamedForkId);
+      expect(userContents(streamedFork.messages)).toEqual([prompt]);
+      expect(messagesOfType(streamedFork.messages, 'bash-tool-use')
+        .some((message) => message.command === command)).toBe(true);
+      expect(messagesOfType(streamedFork.messages, 'assistant-message')
+        .some((message) => message.content.includes(reply))).toBe(false);
 
       await waitForVisibleResponse({
         fixture,
@@ -85,11 +94,9 @@ describe('scripted Claude fork while running', () => {
       if (!persistedBash) throw new Error('Claude did not persist the scripted command.');
 
       const recoveredForkId = fixture.newChatId();
-      await fixture.client.forkChat({
-        sourceChatId,
-        chatId: recoveredForkId,
-        upToSeq: persistedBash.seq,
-      });
+      // The provider file can trail the settled projection; the point fork
+      // retries its typed refusal until the pinned prefix persists.
+      await forkAtMessageWhenPersisted(fixture, sourceChatId, recoveredForkId, persistedBash.seq);
       const recovered = await fixture.client.getMessages(recoveredForkId);
       expect(userContents(recovered.messages)).toEqual([prompt]);
       expect(messagesOfType(recovered.messages, 'bash-tool-use')
@@ -119,19 +126,3 @@ async function waitForBash(
   throw new Error(`Claude never rendered ${command}.`);
 }
 
-async function expectNativeHistoryRefusal(promise: Promise<unknown>): Promise<void> {
-  let failure: unknown;
-  try {
-    await promise;
-  } catch (error) {
-    failure = error;
-  }
-  expect(failure).toBeInstanceOf(GarconApiError);
-  expect(failure).toMatchObject({
-    status: 409,
-    body: {
-      errorCode: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      retryable: true,
-    },
-  });
-}
