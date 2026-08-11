@@ -65,21 +65,15 @@ describe('scripted Codex fork while running', () => {
         expect(messagesOfType(wholeFork.messages, 'assistant-message')
           .some((message) => message.content.includes(reply))).toBe(false);
 
-        // Codex persists ItemCompleted before notifying it, so a finalized
-        // streamed point is already line-cut forkable while the reply is held.
-        const streamedForkId = fixture.newChatId();
-        await fixture.client.forkChat({
+        // A streamed point has no bound native position until the settled
+        // boundary proves it: the mid-run attempt is refused with the typed
+        // retry contract and triggers no provider-native repair.
+        await expectForkRefusal(fixture.client.forkChat({
           sourceChatId,
-          chatId: streamedForkId,
+          chatId: fixture.newChatId(),
           upToSeq: streamedBash.seq,
           generationId: streamedBash.generationId,
-        });
-        const streamedFork = await fixture.client.getMessages(streamedForkId);
-        expect(userContents(streamedFork.messages)).toEqual([prompt]);
-        expect(messagesOfType(streamedFork.messages, 'bash-tool-use')
-          .some((message) => message.command === command)).toBe(true);
-        expect(messagesOfType(streamedFork.messages, 'assistant-message')
-          .some((message) => message.content.includes(reply))).toBe(false);
+        }), 'MESSAGE_NOT_IN_NATIVE_HISTORY');
       } finally {
         heldReply.release();
       }

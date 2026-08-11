@@ -4,7 +4,10 @@ import {
   claudeText,
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
-import { forkAtMessageWhenPersisted } from '../../support/fork-test-support.js';
+import {
+  expectMessageNotYetInNativeHistory,
+  forkAtMessageWhenPersisted,
+} from '../../support/fork-test-support.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
@@ -66,20 +69,15 @@ describe('scripted Claude fork while running', () => {
       expect(messagesOfType(wholeFork.messages, 'assistant-message')
         .some((message) => message.content.includes(reply))).toBe(false);
 
-      // Claude persists tool rows before notifying them, so a streamed point
-      // is already line-cut forkable while the turn is still running.
+      // A streamed point has no bound native position until the settled
+      // boundary proves it: the mid-run attempt is refused with the typed
+      // retry contract and triggers no provider-native repair.
       const streamedForkId = fixture.newChatId();
-      await fixture.client.forkChat({
+      await expectMessageNotYetInNativeHistory(fixture.client.forkChat({
         sourceChatId,
         chatId: streamedForkId,
         upToSeq: streamedBash.seq,
-      });
-      const streamedFork = await fixture.client.getMessages(streamedForkId);
-      expect(userContents(streamedFork.messages)).toEqual([prompt]);
-      expect(messagesOfType(streamedFork.messages, 'bash-tool-use')
-        .some((message) => message.command === command)).toBe(true);
-      expect(messagesOfType(streamedFork.messages, 'assistant-message')
-        .some((message) => message.content.includes(reply))).toBe(false);
+      }));
 
       await waitForVisibleResponse({
         fixture,
@@ -93,9 +91,17 @@ describe('scripted Claude fork while running', () => {
         entry.message.type === 'bash-tool-use' && entry.message.command === command);
       if (!persistedBash) throw new Error('Claude did not persist the scripted command.');
 
+      // The refused streamed point becomes forkable after the settled
+      // boundary binds its native alias, with no fork-time repair.
+      await forkAtMessageWhenPersisted(fixture, sourceChatId, streamedForkId, streamedBash.seq);
+      const streamedFork = await fixture.client.getMessages(streamedForkId);
+      expect(userContents(streamedFork.messages)).toEqual([prompt]);
+      expect(messagesOfType(streamedFork.messages, 'bash-tool-use')
+        .some((message) => message.command === command)).toBe(true);
+      expect(messagesOfType(streamedFork.messages, 'assistant-message')
+        .some((message) => message.content.includes(reply))).toBe(false);
+
       const recoveredForkId = fixture.newChatId();
-      // The provider file can trail the settled projection; the point fork
-      // retries its typed refusal until the pinned prefix persists.
       await forkAtMessageWhenPersisted(fixture, sourceChatId, recoveredForkId, persistedBash.seq);
       const recovered = await fixture.client.getMessages(recoveredForkId);
       expect(userContents(recovered.messages)).toEqual([prompt]);

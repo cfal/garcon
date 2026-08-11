@@ -56,9 +56,28 @@ export function forkAfterSourceSettles(
   );
 }
 
+export async function expectMessageNotYetInNativeHistory(
+  promise: Promise<unknown>,
+): Promise<void> {
+  let failure: unknown;
+  try {
+    await promise;
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(GarconApiError);
+  expect(failure).toMatchObject({
+    status: 409,
+    body: {
+      errorCode: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
+      retryable: true,
+    },
+  });
+}
+
 // Retries a message-point fork while the provider file trails the settled
-// projection; the fork attempt itself re-audits, so the retry converges as
-// soon as the provider persists the pinned prefix.
+// projection; the settled boundary binds the point's native alias, so the
+// retry converges once the turn settles with the pinned prefix persisted.
 export function forkAtMessageWhenPersisted(
   fixture: IntegrationFixture,
   sourceChatId: string,
