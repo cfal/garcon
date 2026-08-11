@@ -100,10 +100,17 @@ export function auditNativeEvidence(options: {
   // and importing anything could duplicate rows imported at genesis under
   // process-local fallback identities.
   if (journal.length === 0 && options.entries.length > 0) return { kind: 'skipped' };
+  // A live-emitted row without canonical identity may have a native
+  // counterpart the audit cannot match by identity, such as a provider error
+  // rendered live and also persisted natively. Any such row suppresses
+  // suffix imports and hole-divergence conclusions so the counterpart is not
+  // re-imported. Both the legacy owner-native event: fallback and the current
+  // owner event namespace mark these rows.
+  const eventNamespace = `${options.ownerId}:event`;
   const importSuppressed = options.entries.some((entry) => (
     entry.lifetime === 'durable'
-    && entry.source?.namespace === namespace
-    && entry.source.itemId.startsWith('event:')
+    && ((entry.source?.namespace === namespace && entry.source.itemId.startsWith('event:'))
+      || entry.source?.namespace === eventNamespace)
   ));
 
   const native: { readonly key: string; readonly seed: AgentTranscriptSeedEntry }[] = [];

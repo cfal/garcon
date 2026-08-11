@@ -509,7 +509,7 @@ describe('existing-journal native audit', () => {
     expect((await openContents(stream)).contents).toEqual(['legacy assistant', 'identified']);
   });
 
-  it('keeps identity-less surface rows out of the audit entirely', async () => {
+  it('suppresses imports while an identity-less surface row could shadow native output', async () => {
     const directory = await createDirectory();
     let persisted: ChatMessage[] = [];
     const stream = streamOver(directory, () => persisted);
@@ -523,8 +523,10 @@ describe('existing-journal native audit', () => {
         nativeAlias: null,
       }],
     });
-    // A provider-error banner has no native counterpart; it lives in the
-    // event namespace and must neither suppress imports nor read as a hole.
+    // A live-emitted provider banner without canonical identity lands in the
+    // event namespace. Its native counterpart cannot be matched by identity,
+    // so while it exists suffix imports are suppressed rather than risk
+    // re-importing the same occurrence.
     await stream.appendMessages({
       chat,
       operation: null,
@@ -537,7 +539,46 @@ describe('existing-journal native audit', () => {
     await expect(stream.settleNativeBoundary({ chat, signal: signal() }))
       .resolves.toBe('confirmed');
     expect((await openContents(stream)).contents)
-      .toEqual(['identified', 'surface banner', 'held output']);
+      .toEqual(['identified', 'surface banner']);
+  });
+
+  it('reads evidence from the relocated reference after updateNativeReference', async () => {
+    const directory = await createDirectory();
+    const evidenceByPath = new Map<string, ChatMessage[]>([
+      ['old-path', []],
+      ['new-path', [nativeMessage('item-1', 'streamed')]],
+    ]);
+    const stream = new JournalBackedAgentTranscriptStream({
+      ownerId: 'test',
+      directory: async () => directory,
+      bootstrap: async (request) => {
+        const path = (request.chat.nativeSession as { value?: { path?: string } } | null)?.value?.path
+          ?? 'old-path';
+        return { kind: 'ready', value: transcriptSeedEntries('test', evidenceByPath.get(path) ?? []) };
+      },
+    });
+    const oldRef = { ...chat, nativeSession: { ownerId: 'test', schemaVersion: 1, value: { path: 'old-path' } } };
+    await stream.openSegment({ chat: oldRef, signal: signal() });
+    await stream.appendMessages({
+      chat: oldRef,
+      operation: null,
+      messages: [new UserMessage('2026-06-01T00:00:00.000Z', 'streamed')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'item-1', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+
+    // The native session moved: settling against the stale reference cannot
+    // prove persistence, but after the reference update it reads the new path.
+    await expect(stream.settleNativeBoundary({ chat: oldRef, signal: signal() }))
+      .resolves.toBe('unresolved');
+    stream.updateNativeReference({
+      ...chat,
+      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { path: 'new-path' } },
+    });
+    await expect(stream.settleNativeBoundary({ chat: oldRef, signal: signal() }))
+      .resolves.toBe('confirmed');
   });
 
   it('settles the turn owner input on promotion but a steer only on native binding', async () => {
