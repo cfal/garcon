@@ -211,11 +211,17 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c1',
+							contentEpoch: 'content-1',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [
 								{
 									messageOrdinal: 2,
+									anchor: {
+										kind: 'current-entry',
+										agentOwnershipEpoch: 'owner-1',
+										entryId: 'entry-2',
+									},
 									role: 'assistant',
 									timestamp: null,
 									text: 'needle appears in the transcript',
@@ -277,6 +283,7 @@ describe('SidebarSearchStore', () => {
 			});
 			store.transcriptSearchResults = [{
 				chatId: 'c1',
+				contentEpoch: 'content-1',
 				score: 1,
 				matchedMessageCount: 1,
 				snippets: [],
@@ -419,6 +426,7 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c1',
+							contentEpoch: 'content-1',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [],
@@ -511,11 +519,17 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c2',
+							contentEpoch: 'content-2',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [
 								{
 									messageOrdinal: 4,
+									anchor: {
+										kind: 'current-entry',
+										agentOwnershipEpoch: 'owner-2',
+										entryId: 'entry-4',
+									},
 									role: 'user',
 									timestamp: null,
 									text: 'needle was only in the chat body',
@@ -549,6 +563,7 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c1',
+							contentEpoch: 'content-1',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [],
@@ -591,11 +606,17 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c2',
+							contentEpoch: 'content-2',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [
 								{
 									messageOrdinal: 4,
+									anchor: {
+										kind: 'current-entry',
+										agentOwnershipEpoch: 'owner-2',
+										entryId: 'entry-4',
+									},
 									role: 'user',
 									timestamp: null,
 									text: 'needle was only in the chat body',
