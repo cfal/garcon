@@ -508,6 +508,14 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
             }))),
             firstLine,
             lineCounts,
+            // Admission rows render differently from the provider file, so an
+            // exact projection-digest comparison only holds for a prefix the
+            // provider itself rendered.
+            rendering: prefix.every((candidate) => (
+              candidate.source?.namespace === `${this.options.ownerId}:native`
+            ))
+              ? 'native'
+              : 'mixed',
           },
         },
       },

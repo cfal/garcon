@@ -3,6 +3,7 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import { retargetNativeSeedReceiptIfPreserved } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
+  getNativeMessageRevisionSource,
   orderedTranscriptDigest,
   type AgentForkRequestV4,
   type AgentForkOutcome,
@@ -94,6 +95,7 @@ async function forkProjectionJsonlAtPoint(
   let leadingLineCount = 0;
   let retainedMessageCounts: ReadonlyMap<number, number> | undefined;
   let expectedForkDigest: string | null = null;
+  let prefixRendering: 'native' | 'mixed' = 'native';
   const sourceSnapshot = request.point ? await snapshotJsonlSource(sourcePath) : undefined;
   if (request.point) {
     const nativePoint = parseProjectionNativePoint(request.point.native, options.ownerId);
@@ -103,6 +105,7 @@ async function forkProjectionJsonlAtPoint(
       : Math.max(0, nativePoint.firstLine - 1);
     retainedMessageCounts = nativePoint.lineCounts;
     expectedForkDigest = nativePoint.semanticDigest;
+    prefixRendering = nativePoint.rendering;
   }
 
   const result = await forkJsonlTranscript({
@@ -131,9 +134,16 @@ async function forkProjectionJsonlAtPoint(
       agentSessionId: result.agentSessionId,
       modelEndpointId: request.endpoint?.endpointId ?? sourceNative.modelEndpointId,
     });
-    const expectedDigest = result.expectedSemanticDigest ?? expectedForkDigest;
+    const expectedDigest = result.expectedSemanticDigest
+      ?? (prefixRendering === 'native' ? expectedForkDigest : null);
+    // Structural transforms reorder or rewrite lines, so only an untransformed
+    // line cut can be proven against the source's own native window.
+    const verifyAgainstSourceWindow = expectedDigest === null
+      && expectedForkDigest !== null
+      && prefixRendering === 'mixed'
+      && options.transformEntries === undefined;
     let forkedMessages: readonly ChatMessage[] | null = null;
-    if (expectedDigest !== null || request.source.nativeSeedReceipt) {
+    if (expectedDigest !== null || verifyAgainstSourceWindow || request.source.nativeSeedReceipt) {
       const forked = await options.nativeEvidence.load({
         chat: {
           chatId: request.chatId,
@@ -149,12 +159,22 @@ async function forkProjectionJsonlAtPoint(
         signal: request.admission.signal,
       });
       forkedMessages = forked.messages;
-      const actualDigest = expectedDigest === null
-        ? null
-        : options.semanticDigest
-          ? options.semanticDigest(forked.messages)
-          : forkTranscriptDigest(forked.messages);
-      if (expectedDigest !== null && actualDigest !== expectedDigest) {
+      const digestOf = options.semanticDigest ?? forkTranscriptDigest;
+      let mismatch = false;
+      if (expectedDigest !== null) {
+        mismatch = digestOf(forked.messages) !== expectedDigest;
+      } else if (verifyAgainstSourceWindow && cutoffLine !== null) {
+        // The projection prefix renders admission rows differently from the
+        // provider file, so line-cut exactness is proven against the source's
+        // own native rendering of the retained line window.
+        const source = await options.nativeEvidence.load({
+          chat: request.source,
+          signal: request.admission.signal,
+        });
+        mismatch = digestOf(nativeWindow(forked.messages, cutoffLine))
+          !== digestOf(nativeWindow(source.messages, cutoffLine));
+      }
+      if (mismatch) {
         throw new AgentIntegrationError(
           'TRANSCRIPT_UNAVAILABLE',
           'The provider-native fork did not preserve the selected projection prefix',
@@ -190,6 +210,7 @@ function parseProjectionNativePoint(
   readonly firstLine: number | null;
   readonly lineCounts: ReadonlyMap<number, number>;
   readonly semanticDigest: string;
+  readonly rendering: 'native' | 'mixed';
 } {
   if (reference.ownerId !== ownerId || reference.schemaVersion !== 1) {
     throw sourceRevisionChanged();
@@ -221,7 +242,13 @@ function parseProjectionNativePoint(
   }
   const representedEntries = [...lineCounts.values()].reduce((total, count) => total + count, 0);
   if (!lineCounts.has(lineNumber) || representedEntries !== ordinal) throw sourceRevisionChanged();
-  return { lineNumber, firstLine, lineCounts, semanticDigest };
+  return {
+    lineNumber,
+    firstLine,
+    lineCounts,
+    semanticDigest,
+    rendering: prefix?.rendering === 'mixed' ? 'mixed' : 'native',
+  };
 }
 
 async function resolveProjectionSourceReference(
@@ -246,6 +273,16 @@ function positiveSafeInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
     ? value
     : null;
+}
+
+function nativeWindow(
+  messages: readonly ChatMessage[],
+  cutoffLine: number,
+): ChatMessage[] {
+  return messages.filter((message) => {
+    const line = getNativeMessageRevisionSource(message)?.lineNumber;
+    return typeof line === 'number' && line <= cutoffLine;
+  });
 }
 
 function forkTranscriptDigest(messages: readonly ChatMessage[]): string {
