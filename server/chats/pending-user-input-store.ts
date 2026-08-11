@@ -67,9 +67,12 @@ export class PendingUserInputStore extends EventEmitter<PendingUserInputEvents> 
     const index = records.findIndex((record) => record.clientRequestId === input.clientRequestId);
     const next: PendingUserInputRecord = { ...input };
     if (index >= 0) {
+      // The first registration fixes createdAt so a dispatch retry rebuilds a
+      // byte-identical admission message for the same identity.
       records[index] = {
         ...records[index],
         ...next,
+        createdAt: records[index].createdAt,
       };
     } else {
       records.push(next);

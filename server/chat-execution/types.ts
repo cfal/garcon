@@ -41,6 +41,9 @@ export type PendingUserInputRegistrationOptions = Pick<
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
   deliveryStatus?: UserMessageDeliveryStatus;
+  // Anchors the admitted message timestamp so an idempotent dispatch retry
+  // rebuilds the byte-identical admission payload.
+  createdAt?: string;
 };
 
 export class QueueEntryMutationError extends DomainError {

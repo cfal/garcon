@@ -48,13 +48,15 @@ export interface QueueDispatchDeps {
 function optionsForQueuedTurn(
   options: RunAgentTurnOptions,
   entry: StoredQueueEntry,
-): RunAgentTurnOptions {
+): RunAgentTurnOptions & { createdAt: string } {
   const delivery = entry.delivery ?? {
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),
     turnId: crypto.randomUUID(),
   };
-  return { ...options, ...delivery };
+  // The entry's creation time anchors the admitted message so a retry of the
+  // same delivery identity is idempotent rather than a payload conflict.
+  return { ...options, ...delivery, createdAt: entry.createdAt };
 }
 
 export class QueueDrainer {

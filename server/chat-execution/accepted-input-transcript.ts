@@ -44,17 +44,23 @@ export class AcceptedInputTranscript {
         turnId: options.turnId,
         images,
         deliveryStatus,
+        ...(options.createdAt ? { createdAt: options.createdAt } : {}),
       });
       const record = registered && typeof registered === 'object'
-        ? registered as { clientRequestId?: unknown }
+        ? registered as { clientRequestId?: unknown; createdAt?: unknown }
         : null;
       clientRequestId = typeof record?.clientRequestId === 'string'
         ? record.clientRequestId
         : options.clientRequestId;
       if (!clientRequestId) throw new TypeError('Accepted input is missing a client request ID');
+      // Admission is idempotent by identity, so a dispatch retry must rebuild
+      // the exact registered message; a fresh timestamp would be a typed
+      // payload conflict.
+      const createdAt = options.createdAt
+        ?? (typeof record?.createdAt === 'string' ? record.createdAt : new Date().toISOString());
       const handle = await this.projection.admitInput(
         chatId,
-        new UserMessage(new Date().toISOString(), content, images, {
+        new UserMessage(createdAt, content, images, {
           clientRequestId,
           upstreamRequestId: options.clientMessageId,
           turnId: options.turnId,
