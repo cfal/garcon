@@ -27,7 +27,7 @@ export interface AgentTranscriptSeedEntry {
 export function transcriptSeedEntries(
   ownerId: string,
   messages: readonly ChatMessage[],
-  sourceNamespace = `${ownerId}:native`,
+  sourceNamespace?: string,
 ): readonly AgentTranscriptSeedEntry[] {
   const batchId = randomUUID();
   return messages.map((message, index) => ({
@@ -66,6 +66,10 @@ export function deterministicEntryId(
     .digest('hex')}`);
 }
 
+// Rows carrying provider-native identity claim the owner's native namespace;
+// rows without one are event-channel observations that make no claim about
+// native storage, so they live in the event namespace where audits ignore
+// them instead of mistaking them for unproven native records.
 export function messageSource(
   ownerId: string,
   namespace: string | undefined,
@@ -76,12 +80,11 @@ export function messageSource(
   const native = getNativeMessageRevisionSource(message);
   const itemId = native?.entryId
     ?? (native?.byteOffset !== undefined ? `byte:${native.byteOffset}` : null)
-    ?? (native?.lineNumber !== undefined ? `line:${native.lineNumber}` : null)
-    ?? `event:${fallbackBatchId}`;
+    ?? (native?.lineNumber !== undefined ? `line:${native.lineNumber}` : null);
   const subrow = native?.withinSourceOrdinal ?? index;
   return {
-    namespace: namespace ?? `${ownerId}:native`,
-    itemId,
+    namespace: namespace ?? (itemId !== null ? `${ownerId}:native` : `${ownerId}:event`),
+    itemId: itemId ?? `event:${fallbackBatchId}`,
     subrowId: `row:${subrow}`,
   };
 }

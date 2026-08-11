@@ -8,7 +8,7 @@ import type {
   AgentTranscriptSourceIdentity,
   AgentTurnOwnerOperationIdentityV4,
 } from '@garcon/server-agent-interface';
-import { getNativeMessageRevisionSource } from '@garcon/server-agent-interface';
+import { messageSource, nativeAlias } from '../transcript-projection/seed-entries.js';
 
 export interface AgentProjectionProducerMessage {
   readonly message: ChatMessage;
@@ -70,30 +70,12 @@ export class AgentProjectionProducerEventChannel {
 export function projectionProducerMessages(
   ownerId: string,
   messages: readonly ChatMessage[],
-  sourceNamespace = `${ownerId}:native`,
+  sourceNamespace?: string,
 ): readonly AgentProjectionProducerMessage[] {
   const batchId = randomUUID();
-  return messages.map((message, index) => {
-    const native = getNativeMessageRevisionSource(message);
-    const itemId = native?.entryId
-      ?? (native?.byteOffset !== undefined ? `byte:${native.byteOffset}` : null)
-      ?? (native?.lineNumber !== undefined ? `line:${native.lineNumber}` : null)
-      ?? `event:${batchId}`;
-    return {
-      message,
-      source: {
-        namespace: sourceNamespace,
-        itemId,
-        subrowId: `row:${native?.withinSourceOrdinal ?? index}`,
-      },
-      nativeAlias: native ? {
-        ...(native.entryId ? { entryId: native.entryId } : {}),
-        ...(native.lineNumber !== undefined ? { lineNumber: native.lineNumber } : {}),
-        ...(native.byteOffset !== undefined ? { byteOffset: native.byteOffset } : {}),
-        ...(native.withinSourceOrdinal !== undefined
-          ? { withinSourceOrdinal: native.withinSourceOrdinal }
-          : {}),
-      } : null,
-    };
-  });
+  return messages.map((message, index) => ({
+    message,
+    source: messageSource(ownerId, sourceNamespace, message, index, batchId),
+    nativeAlias: nativeAlias(message),
+  }));
 }

@@ -342,7 +342,7 @@ describe('existing-journal native audit', () => {
 
     // Provider persistence observed at the settled boundary binds the alias.
     persisted = [nativeMessage('item-1', 'streamed')];
-    await stream.refreshNativeContinuity({ chat, signal: signal() });
+    await stream.settleNativeBoundary({ chat, signal: signal() });
     const after = await openContents(stream);
     expect(after.contents).toEqual(['streamed']);
     expect(after.checkpoint.projection.durableRevision)
@@ -380,7 +380,7 @@ describe('existing-journal native audit', () => {
         { entryId: 'item-2', lineNumber: 2, withinSourceOrdinal: 0 },
       ),
     ];
-    await stream.refreshNativeContinuity({ chat, operation, signal: signal() });
+    await stream.settleNativeBoundary({ chat, operation, signal: signal() });
 
     const after = await openContents(stream);
     // The admission row is claimed rather than duplicated, and the held
@@ -395,17 +395,25 @@ describe('existing-journal native audit', () => {
     expect(anchor.kind).toBe('ready');
 
     // A repeated settled audit is a no-op.
-    await stream.refreshNativeContinuity({ chat, operation, signal: signal() });
+    await stream.settleNativeBoundary({ chat, operation, signal: signal() });
     const again = await openContents(stream);
     expect(again.contents).toEqual(['held prompt', 'held answer']);
     expect(again.checkpoint.projection.durableRevision)
       .toBe(after.checkpoint.projection.durableRevision);
   });
 
-  it('re-audits once at fork resolution when the provider persisted after settle', async () => {
+  it('needs no fork-time repair after a settled boundary and reads no provider IO to resolve', async () => {
     const directory = await createDirectory();
     let persisted: ChatMessage[] = [];
-    const stream = streamOver(directory, () => persisted);
+    let evidenceReads = 0;
+    const stream = new JournalBackedAgentTranscriptStream({
+      ownerId: 'test',
+      directory: async () => directory,
+      bootstrap: async () => {
+        evidenceReads += 1;
+        return { kind: 'ready', value: transcriptSeedEntries('test', persisted) };
+      },
+    });
     await openContents(stream);
     await stream.appendMessages({
       chat,
@@ -416,20 +424,30 @@ describe('existing-journal native audit', () => {
         nativeAlias: null,
       }],
     });
-    const before = await openContents(stream);
 
-    // The provider flushed after the settled boundary; the fork attempt itself
-    // performs the idle audit instead of fencing until the next open.
+    // Persistence became visible only after the first attempted read: the
+    // proof-then-audit boundary still binds the alias and confirms together.
+    persisted = [];
+    await expect(stream.settleNativeBoundary({ chat, signal: signal() }))
+      .resolves.toBe('unresolved');
     persisted = [nativeMessage('item-1', 'streamed')];
+    await expect(stream.settleNativeBoundary({ chat, signal: signal() }))
+      .resolves.toBe('confirmed');
+
+    // Resolution succeeds from the bound journal alone: no repair, no
+    // provider IO, no continuity mutation on the fork path.
+    const readsBeforeResolution = evidenceReads;
+    const after = await openContents(stream);
     const resolved = await stream.resolveNativeForkPoint({
       chat,
       signal: signal(),
-      point: forkPointFor(before.checkpoint, before.entries[0]!.id),
+      point: forkPointFor(after.checkpoint, after.entries[0]!.id),
     });
     expect(resolved.kind).toBe('ready');
+    expect(evidenceReads).toBe(readsBeforeResolution);
 
-    // The resolution-time audit only binds: trailing native rows the stream
-    // has not delivered stay out until a settled boundary imports them.
+    // Persistence after the boundary stays fenced until the next boundary
+    // rather than being repaired opportunistically by a fork attempt.
     await stream.appendMessages({
       chat,
       operation: null,
@@ -440,21 +458,154 @@ describe('existing-journal native audit', () => {
       }],
     });
     const pinned = await openContents(stream);
-    persisted = [
-      nativeMessage('item-1', 'streamed'),
-      nativeMessage('item-2', 'second'),
-      nativeMessage('item-3', 'held output'),
-    ];
-    const bound = await stream.resolveNativeForkPoint({
+    persisted = [nativeMessage('item-1', 'streamed'), nativeMessage('item-2', 'second')];
+    await expect(stream.resolveNativeForkPoint({
       chat,
       signal: signal(),
       point: forkPointFor(pinned.checkpoint, pinned.entries[1]!.id),
-    });
-    expect(bound.kind).toBe('ready');
-    expect((await openContents(stream)).contents).toEqual(['streamed', 'second']);
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'projection-ahead-of-provider' });
+    await stream.settleNativeBoundary({ chat, signal: signal() });
+    await expect(stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(pinned.checkpoint, pinned.entries[1]!.id),
+    })).resolves.toMatchObject({ kind: 'ready' });
+  });
 
-    await stream.refreshNativeContinuity({ chat, signal: signal() });
-    expect((await openContents(stream)).contents).toEqual(['streamed', 'second', 'held output']);
+  it('suppresses imports and hole divergence around event-identified legacy rows', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+    // A grandfathered journal row persisted before adapters owed canonical
+    // identity: native namespace under a process-local event identity.
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new AssistantMessage('2026-06-01T00:00:00.000Z', 'legacy assistant')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'event:legacy-1', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new UserMessage('2026-06-01T00:00:01.000Z', 'identified')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'item-2', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+    // Native holds an unmatchable assistant row plus trailing output; neither
+    // may be imported or read as divergence while a legacy row exists.
+    persisted = [
+      nativeMessage('item-1', 'legacy assistant'),
+      nativeMessage('item-2', 'identified'),
+      nativeMessage('item-3', 'trailing'),
+    ];
+    await expect(stream.settleNativeBoundary({ chat, signal: signal() }))
+      .resolves.toBe('confirmed');
+    expect((await openContents(stream)).contents).toEqual(['legacy assistant', 'identified']);
+  });
+
+  it('keeps identity-less surface rows out of the audit entirely', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new UserMessage('2026-06-01T00:00:00.000Z', 'identified')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'item-1', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+    // A provider-error banner has no native counterpart; it lives in the
+    // event namespace and must neither suppress imports nor read as a hole.
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new AssistantMessage('2026-06-01T00:00:01.000Z', 'surface banner')],
+    });
+    persisted = [
+      nativeMessage('item-1', 'identified'),
+      nativeMessage('item-2', 'held output'),
+    ];
+    await expect(stream.settleNativeBoundary({ chat, signal: signal() }))
+      .resolves.toBe('confirmed');
+    expect((await openContents(stream)).contents)
+      .toEqual(['identified', 'surface banner', 'held output']);
+  });
+
+  it('matches occurrence-identified rows through the settlement proof and persists the binding', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+
+    // Admission commits the user row; the provider notifies the assistant
+    // occurrence under a durable integration occurrence identity whose native
+    // entry ID is unknowable until the provider persists it.
+    const operation = admissionOperation();
+    const preparation = await stream.prepareInput({
+      chat,
+      signal: signal(),
+      message: new UserMessage('2026-06-01T00:00:00.000Z', 'prompt'),
+      operation,
+    });
+    await preparation.commit();
+    await stream.promoteActiveInput(chat, operation);
+    await stream.appendMessages({
+      chat,
+      operation,
+      messages: [new AssistantMessage('2026-06-01T00:00:01.000Z', 'answer')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'turn:t1:end:1', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+
+    persisted = [
+      nativeMessage('entry-1', 'prompt'),
+      attachNativeMessageSource(
+        new AssistantMessage('2026-06-01T00:00:01.000Z', 'answer'),
+        { entryId: 'entry-2', lineNumber: 2, withinSourceOrdinal: 0 },
+      ),
+    ];
+    await expect(stream.settleNativeBoundary({
+      chat,
+      operation,
+      signal: signal(),
+      sourceSettlement: async () => ({
+        verdict: 'confirmed',
+        itemAliases: new Map([['turn:t1:end:1', 'entry-2']]),
+      }),
+    })).resolves.toBe('confirmed');
+
+    // The binding proves the occurrence: nothing imports twice and the fork
+    // point resolves from the journal alone.
+    const after = await openContents(stream);
+    expect(after.contents).toEqual(['prompt', 'answer']);
+    const resolved = await stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(after.checkpoint, after.entries[1]!.id),
+    });
+    expect(resolved.kind).toBe('ready');
+
+    // A restart audits through the persisted binding without the proof and
+    // without duplicating or fencing the occurrence rows.
+    const reopened = await openContents(streamOver(directory, () => persisted));
+    expect(reopened.contents).toEqual(['prompt', 'answer']);
+    const reresolved = await streamOver(directory, () => persisted).resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(reopened.checkpoint, reopened.entries[1]!.id),
+    });
+    expect(reresolved.kind).toBe('ready');
   });
 
   it('serves the committed journal unchanged when evidence is unavailable or empty', async () => {

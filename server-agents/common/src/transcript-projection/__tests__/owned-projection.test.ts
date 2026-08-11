@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
+  AgentIntegrationError,
   agentOwnershipEpoch,
   type AgentChatReferenceV4,
   type AgentHost,
@@ -131,6 +132,7 @@ describe('AgentOwnedProjection', () => {
       readonly label: string;
       readonly settlement?: 'confirmed' | 'unresolved';
       readonly evidenceFailure?: Error;
+      readonly evidenceDegraded?: boolean;
       readonly expectSuccess: boolean;
     }[] = [
       { label: 'confirmed settlement', settlement: 'confirmed', expectSuccess: true },
@@ -139,6 +141,13 @@ describe('AgentOwnedProjection', () => {
         label: 'audit failure',
         settlement: 'confirmed',
         evidenceFailure: new Error('evidence store offline'),
+        expectSuccess: false,
+      },
+      // A hook-less provider requires the evidence audit itself to complete.
+      { label: 'hook-less audit completes', expectSuccess: true },
+      {
+        label: 'hook-less audit degraded',
+        evidenceDegraded: true,
         expectSuccess: false,
       },
     ];
@@ -168,13 +177,20 @@ describe('AgentOwnedProjection', () => {
           async load() {
             settlementCalls.push('evidence');
             if (boundaryArmed && testCase.evidenceFailure) throw testCase.evidenceFailure;
+            if (boundaryArmed && testCase.evidenceDegraded) {
+              throw new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', 'degraded evidence', true);
+            }
             return { messages: [] };
           },
         },
-        sourceSettlement: async () => {
-          settlementCalls.push('settlement');
-          return { kind: 'ready', value: testCase.settlement! };
-        },
+        ...(testCase.settlement
+          ? {
+              sourceSettlement: async () => {
+                settlementCalls.push('settlement');
+                return { kind: 'ready' as const, value: { verdict: testCase.settlement! } };
+              },
+            }
+          : {}),
       });
       await projection.transcript.openSegment({ chat, signal: new AbortController().signal });
       const accepted = await projection.transcript.prepareInput({
@@ -212,9 +228,12 @@ describe('AgentOwnedProjection', () => {
           ? { outcome: 'finished', sourceSettlement: 'confirmed' }
           : { outcome: 'failed', sourceSettlement: 'unresolved' }],
       });
-      if (!testCase.evidenceFailure) {
-        // The provider settlement hook reads at or after the audit snapshot.
-        expect(settlementCalls).toEqual(['evidence', 'settlement']);
+      if (!testCase.evidenceFailure && !testCase.evidenceDegraded) {
+        // The provider persistence proof runs first; the audited evidence is
+        // read at or after that proof.
+        expect(settlementCalls).toEqual(
+          testCase.settlement ? ['settlement', 'evidence'] : ['evidence'],
+        );
       }
     }
   });

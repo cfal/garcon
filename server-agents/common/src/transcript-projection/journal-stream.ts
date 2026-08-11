@@ -66,6 +66,15 @@ import { AgentProjectionPager } from './paging.js';
 import { createProjectionMaterialization } from './state.js';
 import { AgentProjectionEventStream } from './stream.js';
 
+// Provider persistence proof for one finished turn: the verdict decides
+// whether terminal success may publish, and itemAliases carries the
+// integration-private translation from live ledger item identities to the
+// provider's proven durable native identities for this boundary.
+export interface AgentProviderSettlement {
+  readonly verdict: 'confirmed' | 'unresolved';
+  readonly itemAliases?: ReadonlyMap<string, string>;
+}
+
 export interface JournalBackedTranscriptStreamOptions {
   readonly ownerId: string;
   readonly directory: () => Promise<string>;
@@ -183,6 +192,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       ownerId: this.options.ownerId,
       entries: state.entries,
       seeds: evidence.value,
+      aliases: state.aliases,
     });
     if (outcome.kind === 'skipped') return null;
     if (outcome.kind === 'diverged') {
@@ -202,41 +212,50 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     return outcome.aheadFromOrdinal;
   }
 
-  // Rebinds native continuity for an open segment at a settled provider
-  // boundary: a newly persisted live row gains its native alias without a
-  // process restart, held provider output the stream never notified imports
-  // exactly once as the missing native suffix under the settling turn's
-  // provenance, the ahead fence clears once the provider catches up, and
-  // divergence records durably. Committed rows are never reread into the
+  // Settles the native boundary for one finished provider turn as one gated
+  // operation. The provider persistence proof runs first, evidence is read at
+  // or after that proof, and the audit then applies against it, so a newly
+  // persisted live row gains its native alias, held output the stream never
+  // notified imports exactly once under the settling turn's provenance, the
+  // ahead fence recomputes, and divergence records durably, all before the
+  // terminal publishes. Committed rows are never reread into the
   // materialization or re-rendered here.
   //
-  // Evidence is read and audited inside the segment mutation gate so no
-  // journal mutation can land between the snapshot and its application, and
-  // the provider settlement hook runs after the audit under the same gate so
-  // terminal settlement derives from one coherent settled boundary: late
-  // provider persistence can only make the settlement read more complete than
-  // the audit snapshot, never less.
-  async refreshNativeContinuity(request: AgentTranscriptRequestV4 & {
+  // Settlement of the terminal derives from the applicable proof: a provider
+  // with its own persistence hook decides through it, while a provider
+  // without one requires this evidence audit to complete, because unavailable
+  // or ambiguous evidence cannot exclude missed output for the just-finished
+  // suffix. A completed audit that concludes divergence keeps the committed
+  // rendering and only degrades native continuity.
+  async settleNativeBoundary(request: AgentTranscriptRequestV4 & {
     readonly operation?: AgentTurnBoundOperationIdentityV4 | null;
-    readonly sourceSettlement?: () => Promise<'confirmed' | 'unresolved'>;
-    // A bind-only audit rebinds aliases and recomputes fences without
-    // importing trailing native rows; resolution-time audits use it because a
-    // mid-turn import would duplicate persist-before-notify rows whose stream
-    // events have not arrived yet.
-    readonly importSuffix?: boolean;
+    readonly sourceSettlement?: () => Promise<AgentProviderSettlement>;
   }): Promise<'confirmed' | 'unresolved'> {
-    const settle = request.sourceSettlement ?? (async () => 'confirmed' as const);
     const segment = this.#segments.get(segmentKey(request.chat));
-    if (!segment) return settle();
+    if (!segment) {
+      return request.sourceSettlement
+        ? (await request.sourceSettlement()).verdict
+        : 'unresolved';
+    }
     return segment.gate.run(async () => {
+      const proof = request.sourceSettlement
+        ? await request.sourceSettlement()
+        : null;
+      const settlement = proof?.verdict ?? null;
       const evidence = await this.options.bootstrap({ chat: segment.chat, signal: request.signal });
-      if (evidence.kind !== 'ready') return settle();
+      if (evidence.kind !== 'ready') return settlement ?? 'unresolved';
       const state = segment.journal.state;
       const outcome = auditNativeEvidence({
         ownerId: this.options.ownerId,
         entries: state.entries,
         seeds: evidence.value,
+        aliases: state.aliases,
+        itemAliases: proof?.itemAliases,
       });
+      if (outcome.kind === 'skipped') {
+        const trivial = state.entries.length === 0 && evidence.value.length === 0;
+        return settlement ?? (trivial ? 'confirmed' : 'unresolved');
+      }
       if (outcome.kind === 'diverged') {
         if (state.nativeContinuity !== 'diverged') {
           await segment.journal.updateNativeMetadata({
@@ -245,26 +264,19 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
             nativeContinuity: 'diverged',
           });
         }
-        return settle();
+        return settlement ?? 'confirmed';
       }
-      if (outcome.kind === 'aligned') {
-        const importSuffix = request.importSuffix ?? true;
-        if (importSuffix && outcome.suffix.length > 0) {
-          const provenance = request.operation
-            ? { ...request.operation, upstreamRequestId: null }
-            : null;
-          await segment.stream.commit([], seedEntries(segment.chat, outcome.suffix).map((entry) => (
-            entry.provenance || !provenance ? entry : { ...entry, provenance }
-          )));
-        }
-        await applyAuditMetadata(
-          segment.journal,
-          outcome,
-          importSuffix ? aliasesFromSeeds(outcome.suffix) : {},
-        );
-        segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
+      if (outcome.suffix.length > 0) {
+        const provenance = request.operation
+          ? { ...request.operation, upstreamRequestId: null }
+          : null;
+        await segment.stream.commit([], seedEntries(segment.chat, outcome.suffix).map((entry) => (
+          entry.provenance || !provenance ? entry : { ...entry, provenance }
+        )));
       }
-      return settle();
+      await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
+      segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
+      return settlement ?? 'confirmed';
     });
   }
 
@@ -470,23 +482,13 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   async resolveNativeForkPoint(request: AgentTranscriptRequestV4 & {
     readonly point: AgentForkPoint;
   }): Promise<AgentNativeForkResolution> {
-    const resolution = await this.#resolveNativeForkPointOnce(request);
-    if (resolution.kind !== 'unavailable'
-        || resolution.reason !== 'projection-ahead-of-provider') {
-      return resolution;
-    }
-    // The provider may have persisted the committed tail after the settled
-    // boundary already ran, so a fork attempt re-audits once instead of
-    // fencing until the next open. The re-audit only binds: importing here
-    // could run mid-turn and duplicate persist-before-notify rows.
-    await this.refreshNativeContinuity({
-      chat: request.chat,
-      signal: request.signal,
-      importSuffix: false,
-    });
     return this.#resolveNativeForkPointOnce(request);
   }
 
+  // Resolution reads only the committed journal and its bound aliases: the
+  // settled boundary already audited provider evidence before the terminal,
+  // so a successful turn needs no fork-time repair, and resolution never
+  // performs provider IO or mutates continuity as a read side effect.
   async #resolveNativeForkPointOnce(request: AgentTranscriptRequestV4 & {
     readonly point: AgentForkPoint;
   }): Promise<AgentNativeForkResolution> {

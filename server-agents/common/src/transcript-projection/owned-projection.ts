@@ -20,6 +20,7 @@ import type { AgentNativeEvidenceSource } from './evidence-source.js';
 import {
   JournalBackedAgentTranscriptStream,
   transcriptSeedEntries,
+  type AgentProviderSettlement,
 } from './journal-stream.js';
 import type {
   AgentProjectionProducerMessage,
@@ -35,8 +36,8 @@ export interface AgentOwnedProjectionOptions {
   readonly sourceSettlement?: (
     event: Extract<AgentProjectionProducerEvent, { readonly type: 'finished' | 'failed' }>,
   ) =>
-    | AgentTranscriptAccessResult<'confirmed' | 'unresolved'>
-    | Promise<AgentTranscriptAccessResult<'confirmed' | 'unresolved'>>;
+    | AgentTranscriptAccessResult<AgentProviderSettlement>
+    | Promise<AgentTranscriptAccessResult<AgentProviderSettlement>>;
   readonly onProjectionError?: (error: unknown, chatId: string) => void;
 }
 
@@ -122,23 +123,26 @@ export function createAgentOwnedProjection(
             });
             controls.delete(event.chatId);
           }
-          // One gated settled boundary: the native audit imports held output
-          // and rebinds aliases, and the provider settlement hook then reads
-          // its evidence at or after that snapshot. A boundary that throws
+          // One gated settled boundary: the provider persistence proof runs
+          // first, and the audited evidence is read at or after it, so the
+          // boundary leaves aliases, fences, and imported missed output
+          // coherent before the terminal publishes. A boundary that throws
           // cannot prove settlement, so a finished provider outcome is
           // withheld as a retryable failure instead of publishing success the
           // audit never established.
           let sourceSettlement: 'confirmed' | 'unresolved' = 'unresolved';
           let boundaryFailure: unknown = null;
           try {
-            sourceSettlement = await transcript.refreshNativeContinuity({
+            sourceSettlement = await transcript.settleNativeBoundary({
               chat,
               operation: causalOperation,
               signal: AbortSignal.timeout(10_000),
               sourceSettlement: options.sourceSettlement
                 ? async () => {
                     const settlement = await options.sourceSettlement!(event);
-                    return settlement.kind === 'ready' ? settlement.value : 'unresolved';
+                    return settlement.kind === 'ready'
+                      ? settlement.value
+                      : { verdict: 'unresolved' as const };
                   }
                 : undefined,
             });
