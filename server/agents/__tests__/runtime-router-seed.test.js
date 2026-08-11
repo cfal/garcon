@@ -123,6 +123,7 @@ function makeRouter(overrides = {}) {
     },
     endpointResolver,
     events,
+    projection: { open: mock(async () => ({ kind: 'ready', value: {} })) },
     getCarryOverRevision: () => 'carry-1',
     loadCarriedContext: async () => carriedContext,
     getCarryOverMessageCount: async () => 1,
@@ -167,10 +168,17 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       prompt: expect.stringContaining('USER FILE BODY'),
       carriedContext,
       operation: {
+        agentOwnershipEpoch: 'epoch-1',
         commandType: 'agent-run',
         clientRequestId: 'request-1',
         clientMessageId: 'message-1',
         turnId: 'turn-1',
+        turnOwner: {
+          agentOwnershipEpoch: 'epoch-1',
+          commandType: 'agent-run',
+          clientRequestId: 'request-1',
+          turnId: 'turn-1',
+        },
       },
     }));
   });
@@ -399,9 +407,16 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
 
   it('routes steering through its facet without handing off the active operation', async () => {
     const activeTurn = {
+      agentOwnershipEpoch: 'epoch-1',
       clientRequestId: 'request-active',
       commandType: 'agent-run',
       turnId: 'turn-active',
+      turnOwner: {
+        agentOwnershipEpoch: 'epoch-1',
+        commandType: 'agent-run',
+        clientRequestId: 'request-active',
+        turnId: 'turn-active',
+      },
     };
     const { router, events, captureTarget, providerTarget, steer } = makeRouter({
       entry: { agentSessionId: 'native-1' },
