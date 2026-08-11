@@ -175,7 +175,7 @@ describe('AgentHandoffService', () => {
       completeHandoff: mock(async () => { calls.push('complete'); activeIntent = null; }),
       abortHandoff: mock(async () => { calls.push('abort'); activeIntent = null; }),
     };
-    const settledCapture = {
+    const capture = {
       loadStable: mock(async () => { throw new Error('native capture is forbidden'); }),
       assertRevision: mock(async () => { throw new Error('native recheck is forbidden'); }),
     };
@@ -183,7 +183,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership,
       carryOver,
-      settledCapture,
+      capture,
       integrations: projectedIntegrations({ outgoing, incoming, calls }),
     });
 
@@ -207,7 +207,7 @@ describe('AgentHandoffService', () => {
       'outgoing-commit',
       'complete',
     ]);
-    expect(settledCapture.loadStable).not.toHaveBeenCalled();
+    expect(capture.loadStable).not.toHaveBeenCalled();
     expect(current).toMatchObject({ agentId: 'target-agent', agentOwnershipEpoch: 'target-epoch' });
     expect(await segmentDirectories(workspaceDir)).toHaveLength(1);
   });
@@ -287,7 +287,7 @@ describe('AgentHandoffService', () => {
       incomingCheckpoint: checkpoint('target-epoch', 'target-content', 0),
     });
     existing = { ...existing, phase: 'commit-decided' };
-    const settledCapture = {
+    const capture = {
       loadStable: mock(async () => { throw new Error('unexpected capture'); }),
       assertRevision: mock(async () => {}),
     };
@@ -302,7 +302,7 @@ describe('AgentHandoffService', () => {
     const service = createService({
       registry,
       carryOver,
-      settledCapture,
+      capture,
       ownership: {
         findHandoff: () => existing,
         beginHandoff: mock(async () => { throw new Error('unexpected begin'); }),
@@ -332,7 +332,7 @@ describe('AgentHandoffService', () => {
 
     await preparation.prepare(context());
 
-    expect(settledCapture.loadStable).not.toHaveBeenCalled();
+    expect(capture.loadStable).not.toHaveBeenCalled();
     expect(applyHandoffDecision).toHaveBeenCalledWith('existing-operation');
     expect(await segmentDirectories(workspaceDir)).toEqual([segmentId]);
   });
@@ -486,7 +486,7 @@ function createService({
   registry,
   ownership,
   carryOver,
-  settledCapture,
+  capture,
   integrations: integrationRegistry,
   endpointResolver,
   catalog,
@@ -499,7 +499,7 @@ function createService({
     registry,
     ownership,
     carryOver,
-    settledCapture: settledCapture ?? {
+    capture: capture ?? {
       loadStable: mock(async () => ({
         messages: [new UserMessage(timestamp, 'captured')],
         revision: 'native-r1',

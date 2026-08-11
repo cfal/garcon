@@ -43,7 +43,7 @@ import { createLogger } from '../lib/log.js';
 import type { IntegrationRegistry } from './integration-registry.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
-import type { SettledNativeCaptureService } from './settled-native-capture.js';
+import type { ProjectionCaptureService } from './projection-capture.js';
 
 const logger = createLogger('agents:handoff');
 
@@ -62,7 +62,7 @@ export class AgentHandoffService {
       getAgentCatalogEntry(agentId: string): Promise<AgentCatalogEntry | null>;
     };
     readonly carryOver: CarryOverTranscriptStore;
-    readonly settledCapture: SettledNativeCaptureService;
+    readonly capture: ProjectionCaptureService;
     readonly ownership: AgentOwnershipJournal;
     readonly onCommitted?: (chatId: string) => void | Promise<void>;
   }) {}
@@ -107,7 +107,7 @@ export class AgentHandoffService {
       ),
     );
     const snapshot = source.agentSessionId
-      ? await this.deps.settledCapture.loadStable({
+      ? await this.deps.capture.loadStable({
           chatId: input.chatId,
           integration,
           reference,
@@ -142,7 +142,7 @@ export class AgentHandoffService {
       prepared: staged.prepared,
       assertUnchanged: async (signal) => {
         if (!snapshot) return;
-        await this.deps.settledCapture.assertRevision({
+        await this.deps.capture.assertRevision({
           integration,
           reference,
           expectedRevision: snapshot.revision,

@@ -102,7 +102,7 @@ import {
 } from './chats/chat-carryover-rollback.js';
 import { OrderedChatTranscriptReader } from './chats/ordered-chat-transcript-reader.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
-import { SettledNativeCaptureService } from './agents/settled-native-capture.js';
+import { ProjectionCaptureService } from './agents/projection-capture.js';
 import { SnippetStore } from './snippets/store.js';
 import {
   SnippetProjectPathService,
@@ -500,7 +500,7 @@ export async function startServer(): Promise<void> {
       endpointResolver,
       catalog: agentRegistry,
       carryOver,
-      settledCapture: new SettledNativeCaptureService({ pendingInputs }),
+      capture: new ProjectionCaptureService(),
       ownership: agentOwnership,
       onCommitted(chatId) {
         eventWiring?.notifyAgentHandoff(chatId);
