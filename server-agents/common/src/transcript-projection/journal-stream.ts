@@ -50,17 +50,21 @@ import {
 } from './identity.js';
 import { AgentProjectionJournal } from './journal.js';
 import { auditNativeEvidence } from './native-audit.js';
+import {
+  aliasesFromSeeds,
+  deterministicEntryId,
+  messageSource,
+  nativeAlias,
+  nativeAliasLineNumber,
+  seedEntries,
+  type AgentTranscriptSeedEntry,
+} from './seed-entries.js';
+
+export { transcriptSeedEntries } from './seed-entries.js';
+export type { AgentTranscriptSeedEntry } from './seed-entries.js';
 import { AgentProjectionPager } from './paging.js';
 import { createProjectionMaterialization } from './state.js';
 import { AgentProjectionEventStream } from './stream.js';
-
-export interface AgentTranscriptSeedEntry {
-  readonly message: ChatMessage;
-  readonly source: AgentTranscriptSourceIdentity;
-  readonly nativeAlias?: JsonObject | null;
-  readonly provenance?: AgentTranscriptProvenance | null;
-  readonly entryId?: AgentTranscriptEntry['id'];
-}
 
 export interface JournalBackedTranscriptStreamOptions {
   readonly ownerId: string;
@@ -854,68 +858,6 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }
 }
 
-export function transcriptSeedEntries(
-  ownerId: string,
-  messages: readonly ChatMessage[],
-  sourceNamespace = `${ownerId}:native`,
-): readonly AgentTranscriptSeedEntry[] {
-  const batchId = randomUUID();
-  return messages.map((message, index) => ({
-    message,
-    source: messageSource(ownerId, sourceNamespace, message, index, batchId),
-    nativeAlias: nativeAlias(message),
-  }));
-}
-
-function seedEntries(
-  chat: AgentChatReferenceV4,
-  seeds: readonly AgentTranscriptSeedEntry[],
-): readonly AgentTranscriptEntry[] {
-  const identity = segmentIdentity(chat);
-  const seenSources = new Set<string>();
-  return seeds.map((seed) => {
-    const sourceKey = sourceIdentityKey(seed.source);
-    if (seenSources.has(sourceKey)) throw new TypeError('Bootstrap source identities must be unique');
-    seenSources.add(sourceKey);
-    return {
-      id: seed.entryId ?? deterministicEntryId(identity, seed.source),
-      lifetime: 'durable' as const,
-      source: seed.source,
-      provenance: seed.provenance ?? null,
-      message: seed.message,
-    };
-  });
-}
-
-function deterministicEntryId(
-  identity: AgentSegmentIdentity,
-  source: AgentTranscriptSourceIdentity,
-): AgentTranscriptEntry['id'] {
-  return agentTranscriptEntryId(`entry-v1:${createHash('sha256')
-    .update(`${identity.chatId}\0${identity.agentOwnershipEpoch}\0${sourceIdentityKey(source)}`)
-    .digest('hex')}`);
-}
-
-function messageSource(
-  ownerId: string,
-  namespace: string | undefined,
-  message: ChatMessage,
-  index: number,
-  fallbackBatchId: string,
-): AgentTranscriptSourceIdentity {
-  const native = getNativeMessageRevisionSource(message);
-  const itemId = native?.entryId
-    ?? (native?.byteOffset !== undefined ? `byte:${native.byteOffset}` : null)
-    ?? (native?.lineNumber !== undefined ? `line:${native.lineNumber}` : null)
-    ?? `event:${fallbackBatchId}`;
-  const subrow = native?.withinSourceOrdinal ?? index;
-  return {
-    namespace: namespace ?? `${ownerId}:native`,
-    itemId,
-    subrowId: `row:${subrow}`,
-  };
-}
-
 function admissionSource(operation: AgentTurnBoundOperationIdentityV4): AgentTranscriptSourceIdentity {
   return {
     namespace: 'garcon:admission',
@@ -988,13 +930,6 @@ async function applyAuditMetadata(
   }
 }
 
-function aliasesFromSeeds(seeds: readonly AgentTranscriptSeedEntry[]): JsonObject {
-  return Object.fromEntries(seeds.flatMap((seed) => {
-    const alias = seed.nativeAlias === undefined ? nativeAlias(seed.message) : seed.nativeAlias;
-    return alias ? [[sourceIdentityKey(seed.source), alias] as const] : [];
-  }));
-}
-
 async function persistNativeAliases(
   segment: OpenSegment,
   entries: readonly AgentTranscriptEntry[],
@@ -1014,25 +949,4 @@ async function persistNativeAliases(
     nativeRetentionFloor: state.nativeRetentionFloor,
     aliases: { ...state.aliases, ...Object.fromEntries(additions) },
   });
-}
-
-function nativeAlias(message: ChatMessage): JsonObject | null {
-  const source = getNativeMessageRevisionSource(message);
-  if (!source) return null;
-  return {
-    ...(source.entryId ? { entryId: source.entryId } : {}),
-    ...(source.lineNumber !== undefined ? { lineNumber: source.lineNumber } : {}),
-    ...(source.byteOffset !== undefined ? { byteOffset: source.byteOffset } : {}),
-    ...(source.withinSourceOrdinal !== undefined
-      ? { withinSourceOrdinal: source.withinSourceOrdinal }
-      : {}),
-  };
-}
-
-function nativeAliasLineNumber(value: unknown): number | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const lineNumber = (value as Record<string, unknown>).lineNumber;
-  return typeof lineNumber === 'number' && Number.isSafeInteger(lineNumber) && lineNumber > 0
-    ? lineNumber
-    : null;
 }

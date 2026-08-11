@@ -843,6 +843,7 @@ describe('openTranscriptResult', () => {
 				role: 'assistant' as const,
 				text: 'needle',
 				highlights: [],
+				timestamp: '2026-01-01T00:00:00.000Z',
 			}],
 		};
 	}
@@ -881,7 +882,7 @@ describe('openTranscriptResult', () => {
 
 	it('removes a stale result, requeries, and opens without a seq', async () => {
 		const navigate = vi.fn(async () => {
-			throw new ApiError('stale', 409, 'SEARCH_RESULT_STALE');
+			throw new ApiError(409, 'stale', 'SEARCH_RESULT_STALE');
 		});
 		const search = vi.fn(async () => ({
 			query: 'needle',
