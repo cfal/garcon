@@ -29,3 +29,21 @@ export interface PendingInputHistoryReader {
 export interface ChatViewPageReader {
   getOrCreatePage(chatId: string, limit: number, beforeSeq?: number): Promise<ChatViewPage>;
 }
+
+// Complete point-in-time capture of the durable composite ledger: immutable
+// carryover plus the current segment's durable rows, excluding the active
+// streaming suffix. Share and export artifacts record its identity so a
+// published copy names exactly which transcript content produced it.
+export interface CompositeDurableSnapshot {
+  readonly messages: readonly ChatMessage[];
+  readonly contentEpoch: string | null;
+  readonly compositeRevision: string;
+  readonly carryOverRevision: string;
+  readonly agentOwnershipEpoch: string;
+  readonly durableCount: number;
+  readonly archivedLogicalCount: number;
+}
+
+export interface CompositeSnapshotPort {
+  captureDurableSnapshot(chatId: string): Promise<CompositeDurableSnapshot>;
+}

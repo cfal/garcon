@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import createShareRoutes from '../shares.ts';
+import { DomainError } from '../../lib/domain-error.ts';
 
 function createSnapshot(overrides = {}) {
   return {
@@ -40,19 +41,44 @@ function createSnapshot(overrides = {}) {
   };
 }
 
-function createRoutes(snapshot = createSnapshot(), appTitle = null) {
-  return createShareRoutes(
-    {
-      getShare: mock((token) =>
-        token === snapshot.shareToken ? snapshot : null,
-      ),
-      getShareByChatId: mock(() => null),
-      createShare: mock(() => Promise.resolve(snapshot)),
-      updateShare: mock(() => Promise.resolve(snapshot)),
-      revokeShareByChatId: mock(() => Promise.resolve(true)),
-      init: mock(() => Promise.resolve(undefined)),
-    },
-    { getChat: mock(() => null) },
+function createCapture(overrides = {}) {
+  return {
+    messages: [
+      {
+        type: 'user-message',
+        timestamp: '2025-01-02T03:04:05.000Z',
+        content: 'durable prompt',
+      },
+    ],
+    contentEpoch: 'search-content-v1:abc',
+    compositeRevision: 'composite-rev-1',
+    carryOverRevision: 'carry-v1:0',
+    agentOwnershipEpoch: 'owner-1',
+    durableCount: 1,
+    archivedLogicalCount: 0,
+    ...overrides,
+  };
+}
+
+function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = {}) {
+  const shareStore = {
+    getShare: mock((token) =>
+      token === snapshot.shareToken ? snapshot : null,
+    ),
+    getShareByChatId: mock(() => null),
+    createShare: mock(() => Promise.resolve(snapshot)),
+    updateShare: mock(() => Promise.resolve(snapshot)),
+    revokeShareByChatId: mock(() => Promise.resolve(true)),
+    init: mock(() => Promise.resolve(undefined)),
+    ...overrides.shareStore,
+  };
+  const compositeSnapshots = {
+    captureDurableSnapshot: mock(() => Promise.resolve(createCapture())),
+    ...overrides.compositeSnapshots,
+  };
+  const routes = createShareRoutes(
+    shareStore,
+    { getChat: mock(() => overrides.session ?? null) },
     {
       getChatName: mock(() => null),
       getUiSettings: mock(() =>
@@ -61,23 +87,77 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null) {
       getRemoteSettingsVersion: mock(() => (appTitle ? 3 : 0)),
     },
     { getChatMetadata: mock(() => null) },
-    {
-      getOrCreatePage: mock(() =>
-        Promise.resolve({
-          messages: [],
-          generationId: 'generation-1',
-          lastSeq: 0,
-          pageOldestSeq: 0,
-          hasMore: false,
-        }),
-      ),
-    },
+    compositeSnapshots,
   );
+  return { routes, shareStore, compositeSnapshots };
 }
+
+describe('share creation route', () => {
+  it('creates the share from one pinned durable snapshot and records its origin', async () => {
+    const created = [];
+    const { routes, compositeSnapshots } = createRoutes(createSnapshot(), null, {
+      session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },
+      shareStore: {
+        createShare: mock((chatId, partial) => {
+          created.push(partial);
+          return Promise.resolve({ ...partial, shareToken: 'new-token' });
+        }),
+      },
+    });
+
+    const response = await routes['/api/v1/chats/share'].POST(
+      new Request('http://localhost/api/v1/chats/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatId: '123' }),
+      }),
+      new URL('http://localhost/api/v1/chats/share'),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      success: true,
+      shareToken: 'new-token',
+      shareUrl: '/shared/new-token',
+    });
+    expect(compositeSnapshots.captureDurableSnapshot).toHaveBeenCalledWith('123');
+    expect(created).toHaveLength(1);
+    expect(created[0].messages.map((message) => message.content)).toEqual(['durable prompt']);
+    expect(created[0].origin).toEqual({
+      contentEpoch: 'search-content-v1:abc',
+      compositeRevision: 'composite-rev-1',
+      durableCount: 1,
+    });
+  });
+
+  it('maps a still-racing capture to its domain status instead of 500', async () => {
+    const { routes } = createRoutes(createSnapshot(), null, {
+      session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },
+      compositeSnapshots: {
+        captureDurableSnapshot: mock(() => Promise.reject(
+          new DomainError('SOURCE_REVISION_CHANGED', 'Chat ownership changed.', 409, true),
+        )),
+      },
+    });
+
+    const response = await routes['/api/v1/chats/share'].POST(
+      new Request('http://localhost/api/v1/chats/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatId: '123' }),
+      }),
+      new URL('http://localhost/api/v1/chats/share'),
+    );
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).success).toBe(false);
+  });
+});
 
 describe('shared transcript routes', () => {
   it('renders plain text transcript at /shared/llm/:token', async () => {
-    const routes = createRoutes();
+    const { routes } = createRoutes();
     const response = await routes['/shared/llm/:token'].GET(
       new Request('http://localhost/shared/llm/share-token'),
       new URL('http://localhost/shared/llm/share-token'),
@@ -93,7 +173,7 @@ describe('shared transcript routes', () => {
   });
 
   it('returns 404 when the shared transcript does not exist', async () => {
-    const routes = createRoutes();
+    const { routes } = createRoutes();
     const response = await routes['/shared/llm/:token'].GET(
       new Request('http://localhost/shared/llm/missing-token'),
       new URL('http://localhost/shared/llm/missing-token'),
@@ -105,7 +185,7 @@ describe('shared transcript routes', () => {
   });
 
   it('rejects malformed percent-encoded share tokens without throwing', async () => {
-    const routes = createRoutes();
+    const { routes } = createRoutes();
     const response = await routes['/shared/llm/:token'].GET(
       new Request('http://localhost/shared/llm/%'),
       new URL('http://localhost/shared/llm/%'),
@@ -124,7 +204,7 @@ describe('shared chat snapshot route', () => {
       timestamp: '2025-01-02T03:05:05.000Z',
       content: `message-${index}`,
     }));
-    const routes = createRoutes(createSnapshot({ messages }));
+    const { routes } = createRoutes(createSnapshot({ messages }));
     const response = await routes['/api/v1/shared'].GET(
       new Request('http://localhost/api/v1/shared?token=share-token&limit=200'),
       new URL('http://localhost/api/v1/shared?token=share-token&limit=200'),
@@ -153,7 +233,7 @@ describe('shared chat snapshot route', () => {
       timestamp: '2025-01-02T03:05:05.000Z',
       content: `message-${index}`,
     }));
-    const routes = createRoutes(createSnapshot({ messages }));
+    const { routes } = createRoutes(createSnapshot({ messages }));
     const response = await routes['/api/v1/shared'].GET(
       new Request(
         'http://localhost/api/v1/shared?token=share-token&limit=200&before=50&version=2025-01-02T03%3A04%3A05.000Z',
@@ -184,7 +264,7 @@ describe('shared chat snapshot route', () => {
         content: `message-${index}`,
       })),
     });
-    const routes = createRoutes(snapshot);
+    const { routes } = createRoutes(snapshot);
 
     const firstResponse = await routes['/api/v1/shared'].GET(
       new Request('http://localhost/api/v1/shared?token=share-token&limit=200'),
@@ -229,7 +309,7 @@ describe('shared chat snapshot route', () => {
       timestamp: '2025-01-02T03:05:05.000Z',
       content: `message-${index}`,
     }));
-    const routes = createRoutes(createSnapshot({ messages }));
+    const { routes } = createRoutes(createSnapshot({ messages }));
     const response = await routes['/api/v1/shared'].GET(
       new Request('http://localhost/api/v1/shared?token=share-token'),
       new URL('http://localhost/api/v1/shared?token=share-token'),
@@ -249,7 +329,7 @@ describe('shared chat snapshot route', () => {
 
 describe('shared chat page route', () => {
   it('serves bounded HTML with metadata and machine-readable transcript links', async () => {
-    const routes = createRoutes();
+    const { routes } = createRoutes();
     const response = await routes['/shared/:token'].GET(
       new Request('http://localhost/shared/share-token', {
         headers: { Accept: 'text/html' },
@@ -279,7 +359,7 @@ describe('shared chat page route', () => {
 
   it('keeps canonical HTML size independent of transcript size', async () => {
     const largeContent = 'large transcript content '.repeat(100_000);
-    const routes = createRoutes(
+    const { routes } = createRoutes(
       createSnapshot({
         messages: [
           {
@@ -303,7 +383,7 @@ describe('shared chat page route', () => {
   });
 
   it('serves plain text from the canonical URL when explicitly requested', async () => {
-    const routes = createRoutes();
+    const { routes } = createRoutes();
     const request = new Request('http://localhost/shared/share-token', {
       headers: { Accept: 'text/plain' },
     });
@@ -319,7 +399,7 @@ describe('shared chat page route', () => {
   });
 
   it('negotiates weighted and generic Accept headers without serving rejected types', async () => {
-    const routes = createRoutes();
+    const { routes } = createRoutes();
     const cases = [
       { accept: undefined, status: 200, type: 'text/plain' },
       { accept: '*/*', status: 200, type: 'text/plain' },
@@ -355,7 +435,7 @@ describe('shared chat page route', () => {
   });
 
   it('uses the remote app title in shared-page metadata', async () => {
-    const routes = createRoutes(createSnapshot(), 'Garcon - Work');
+    const { routes } = createRoutes(createSnapshot(), 'Garcon - Work');
     const response = await routes['/shared/:token'].GET(
       new Request('http://localhost/shared/share-token', {
         headers: { Accept: 'text/html' },
@@ -380,7 +460,7 @@ describe('shared chat page route', () => {
     const snapshot = createSnapshot({
       title: 'Bug <img src=x onerror=alert(1)>',
     });
-    const routes = createRoutes(snapshot);
+    const { routes } = createRoutes(snapshot);
     const response = await routes['/shared/:token'].GET(
       new Request('http://localhost/shared/share-token', {
         headers: { Accept: 'text/html' },
@@ -394,7 +474,7 @@ describe('shared chat page route', () => {
   });
 
   it('serves the not-found path without throwing when the token is unknown', async () => {
-    const routes = createRoutes();
+    const { routes } = createRoutes();
     const response = await routes['/shared/:token'].GET(
       new Request('http://localhost/shared/missing-token'),
       new URL('http://localhost/shared/missing-token'),

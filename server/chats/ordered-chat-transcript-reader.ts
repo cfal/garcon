@@ -4,7 +4,11 @@ import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js'
 import { DomainError } from '../lib/domain-error.js';
 import { transcriptRevision } from '../lib/transcript-revision.js';
 import type { CarryOverTranscriptStore } from './carryover-transcript-store.js';
-import type { NativeTranscriptWindow } from './chat-message-reader.js';
+import type {
+  CompositeDurableSnapshot,
+  NativeTranscriptWindow,
+} from './chat-message-reader.js';
+import { compositeContentEpoch } from './composite-content-epoch.js';
 import type {
   ChatHistoryPage,
   ChatTranscriptSnapshot,
@@ -23,6 +27,14 @@ export class OrderedChatTranscriptReader {
       ): Promise<{
         readonly messages: readonly ChatMessage[];
         readonly revision: string;
+        readonly projectionState: AgentProjectionState | null;
+      }>;
+      loadDurableTranscriptSnapshot(
+        session: ChatRegistryEntry | null,
+        chatId?: string,
+        signal?: AbortSignal,
+      ): Promise<{
+        readonly messages: readonly ChatMessage[];
         readonly projectionState: AgentProjectionState | null;
       }>;
       loadMessagePage(
@@ -195,6 +207,67 @@ export class OrderedChatTranscriptReader {
       currentRevision,
       projectionState,
     );
+  }
+
+  // Captures the pinned durable composite snapshot for share/export. A pin
+  // expired by a concurrent ownership or carryover change retries from a new
+  // complete snapshot instead of mixing versions.
+  async captureDurableSnapshot(chatId: string): Promise<CompositeDurableSnapshot> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.#captureDurableSnapshotOnce(chatId);
+      } catch (error) {
+        const expiredPin = error instanceof DomainError
+          && error.code === 'SOURCE_REVISION_CHANGED'
+          && attempt < 2;
+        if (!expiredPin) throw error;
+      }
+    }
+  }
+
+  async #captureDurableSnapshotOnce(chatId: string): Promise<CompositeDurableSnapshot> {
+    const entry = this.#requireReadableEntry(chatId);
+    if (!entry) {
+      return {
+        messages: [],
+        contentEpoch: null,
+        compositeRevision: emptySnapshot().compositeRevision,
+        carryOverRevision: 'carry-v1:0',
+        agentOwnershipEpoch: 'missing',
+        durableCount: 0,
+        archivedLogicalCount: 0,
+      };
+    }
+    const [archived, durable] = await Promise.all([
+      this.deps.carryOver.loadAll(entry.carryOverSegments),
+      this.deps.agents.loadDurableTranscriptSnapshot(entry, chatId),
+    ]);
+    this.#assertEntryUnchanged(chatId, entry);
+    const native = this.#sanitizeNativeMessages(entry, durable.messages);
+    const carryOverRevision = this.deps.carryOver.revision(
+      entry.carryOverSegments,
+      entry.carryOverMigrationQuarantine,
+    );
+    const projection = durable.projectionState;
+    return {
+      messages: [...archived, ...native],
+      contentEpoch: projection
+        ? compositeContentEpoch({
+            carryOverRevision,
+            agentOwnershipEpoch: entry.agentOwnershipEpoch,
+            segmentContentEpoch: projection.contentEpoch,
+          })
+        : null,
+      compositeRevision: serializeCompositeTranscriptRevision({
+        carryOver: carryOverRevision,
+        native: projection?.durableRevision ?? transcriptRevision([]),
+        agentOwnershipEpoch: entry.agentOwnershipEpoch,
+      }),
+      carryOverRevision,
+      agentOwnershipEpoch: entry.agentOwnershipEpoch,
+      durableCount: projection?.durableCount ?? native.length,
+      archivedLogicalCount: archived.length,
+    };
   }
 
   async loadPage(chatId: string, limit: number, offset: number): Promise<ChatHistoryPage | null> {

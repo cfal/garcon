@@ -1,5 +1,13 @@
 // Shared types for the chat sharing feature.
 
+// Identity of the pinned composite-ledger snapshot a share was captured from.
+// Absent only on shares written before capture pinning existed.
+export interface SharedChatOrigin {
+  contentEpoch: string | null;
+  compositeRevision: string;
+  durableCount: number;
+}
+
 export interface SharedChatSnapshot {
   shareToken: string;
   chatId: string;
@@ -8,6 +16,7 @@ export interface SharedChatSnapshot {
   model: string;
   projectPath: string;
   sharedAt: string;
+  origin?: SharedChatOrigin;
   messages: unknown[];
 }
 

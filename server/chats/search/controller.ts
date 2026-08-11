@@ -1,12 +1,13 @@
-import { createHash } from 'node:crypto';
 import type {
   AgentChatReferenceV4,
   AgentTranscriptIndexSourceRefV4,
 } from '@garcon/server-agent-interface';
 import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
 import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
-import { stableJsonStringify } from '@garcon/common/json';
+import { compositeContentEpoch as compositeSearchContentEpoch } from '../composite-content-epoch.js';
 import type { IntegrationRegistry } from '../../agents/integration-registry.js';
+
+export { compositeContentEpoch as compositeSearchContentEpoch } from '../composite-content-epoch.js';
 import type {
   TranscriptSearchCatalogEntry,
   TranscriptSearchGeneration,
@@ -439,19 +440,6 @@ function validateIndexSource(
   if (Buffer.byteLength(JSON.stringify(reference)) > 64 * 1024) {
     throw new Error('INDEX_SOURCE_TOO_LARGE');
   }
-}
-
-export function compositeSearchContentEpoch(input: {
-  readonly carryOverRevision: string;
-  readonly agentOwnershipEpoch: string;
-  readonly segmentContentEpoch: string;
-}): string {
-  return `search-content-v1:${createHash('sha256').update(stableJsonStringify({
-    version: 1,
-    carryOverRevision: input.carryOverRevision,
-    agentOwnershipEpoch: input.agentOwnershipEpoch,
-    segmentContentEpoch: input.segmentContentEpoch,
-  })).digest('hex')}`;
 }
 
 function isJsonValue(value: unknown, ancestors: Set<object>): boolean {

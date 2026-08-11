@@ -140,6 +140,7 @@ function createWiringFixture(overrides = {}) {
   };
   const metadata = {
     updateFromAppendedMessages: mock(() => undefined),
+    rebuildFromProjectionReset: mock(() => undefined),
   };
   const chatViews = overrides.chatViewsInstance ?? {
     captureFence: mock(() => 0),
@@ -211,6 +212,7 @@ function createWiringFixture(overrides = {}) {
         transcriptSnapshot(messages, { projectionState: projectionState ?? null })
       )),
     getCarryOverMessageCount: overrides.getCarryOverMessageCount ?? mock(async () => 0),
+    getCarryOverRevision: overrides.getCarryOverRevision ?? mock(() => 'carry-v1:0'),
     loadChatPage: overrides.loadChatPage ?? mock(async () => historyPage([], 100, 0)),
     searchIndex,
   });

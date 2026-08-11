@@ -13,6 +13,7 @@ import {
 } from '../common/ws-events.ts';
 import type { AppliedProjectionEvent } from './agents/projection-ingress.js';
 import type { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
+import type { ChatMetadataIdentity } from './chats/metadata-store.js';
 import type {
   ChatHistoryPage,
   ChatTranscriptSnapshot,
@@ -40,7 +41,19 @@ export interface ProjectionEventFanoutDeps {
     'getCursor' | 'getOrCreatePage' | 'replaceFromProjection' | 'applyProjectionCommit'
   >;
   transientFeeds: Pick<ChatTransientFeedStore, 'apply' | 'currentSnapshot' | 'rebaseGeneration'>;
-  metadata: { updateFromAppendedMessages(chatId: string, messages: ChatMessage[]): void };
+  metadata: {
+    updateFromAppendedMessages(
+      chatId: string,
+      messages: ChatMessage[],
+      identity?: ChatMetadataIdentity,
+    ): void;
+    rebuildFromProjectionReset(
+      chatId: string,
+      messages: readonly ChatMessage[],
+      identity: ChatMetadataIdentity,
+    ): void;
+  };
+  getCarryOverRevision(chatId: string): string;
   commandLedger: {
     appendProjectionAssistantMessages(
       chatId: string,
@@ -96,7 +109,12 @@ async function applyCommit(
   const chatId = event.chatId;
   const appendedMessages = event.appended.map((entry) => entry.message);
   if (appendedMessages.length > 0) {
-    deps.metadata.updateFromAppendedMessages(chatId, appendedMessages);
+    deps.metadata.updateFromAppendedMessages(chatId, appendedMessages, {
+      carryOverRevision: deps.getCarryOverRevision(chatId),
+      agentOwnershipEpoch: event.agentOwnershipEpoch,
+      contentEpoch: event.checkpoint.projection.contentEpoch,
+      durableRevision: event.checkpoint.projection.durableRevision,
+    });
   }
   if (event.promoted.length > 0
       || event.appended.some((entry) => entry.lifetime === 'durable')) {
@@ -234,6 +252,14 @@ async function applyTransient(
       event.checkpoint.projection.stateRevision,
       event.checkpoint.projection,
     );
+    // A destructive reset invalidates the preview cache: preview text is
+    // recomputed from the surviving composite rows under the new identity.
+    deps.metadata.rebuildFromProjectionReset(chatId, snapshot.messages, {
+      carryOverRevision: snapshot.carryOverRevision,
+      agentOwnershipEpoch: event.agentOwnershipEpoch,
+      contentEpoch: event.checkpoint.projection.contentEpoch,
+      durableRevision: event.checkpoint.projection.durableRevision,
+    });
     const page = await deps.chatViews.replaceFromProjection(chatId, snapshot);
     const projected = deps.transientFeeds.apply(applied, {
       previousGenerationId: cursor.generationId,

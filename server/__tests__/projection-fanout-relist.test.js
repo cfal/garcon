@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { AgentProjectionIngress } from '../agents/projection-ingress.js';
 import { createProjectionEventFanout } from '../projection-event-fanout.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
@@ -110,6 +110,10 @@ async function fixture({ carryOver = [] } = {}) {
   const transientFeeds = new ChatTransientFeedStore('server-instance-test');
   const broadcasts = [];
   const tasks = { tail: Promise.resolve() };
+  const metadata = {
+    updateFromAppendedMessages: mock(() => undefined),
+    rebuildFromProjectionReset: mock(() => undefined),
+  };
   const composite = (messages, projectionState) => transcriptSnapshot(
     [...carryOver, ...messages],
     { archivedLogicalCount: carryOver.length, projectionState },
@@ -128,7 +132,8 @@ async function fixture({ carryOver = [] } = {}) {
     },
     chatViews: views,
     transientFeeds,
-    metadata: { updateFromAppendedMessages: () => undefined },
+    metadata,
+    getCarryOverRevision: () => 'carry-v1:0',
     commandLedger: { appendProjectionAssistantMessages: async () => undefined },
     pendingInputs: { reconcileRetainedHistory: async () => undefined },
     markSearchChatDirty: () => undefined,
@@ -153,7 +158,7 @@ async function fixture({ carryOver = [] } = {}) {
   });
   const opened = await ingress.open(integration, chat, new AbortController().signal);
   expect(opened.kind).toBe('ready');
-  return { stream, views, broadcasts, tasks, ingress, chat };
+  return { stream, views, broadcasts, tasks, ingress, chat, metadata };
 }
 
 async function settle(tasks) {
@@ -236,6 +241,46 @@ describe('projection fanout relist under real ingress ordering', () => {
     expect(rows[0].generationId).toBe(views.getCursor(CHAT_ID).generationId);
     expect(rows[0].messages.map((row) => [row.seq, row.message.content]))
       .toEqual([[3, 'missing without fix']]);
+  });
+
+  it('invalidates preview metadata on durable append and reset only', async () => {
+    const { stream, tasks, metadata } = await fixture();
+
+    await stream.commit([], [entry('entry-1', new AssistantMessage(TS, 'durable row'))]);
+    await settle(tasks);
+    expect(metadata.updateFromAppendedMessages).toHaveBeenCalledTimes(1);
+    const [, , commitIdentity] = metadata.updateFromAppendedMessages.mock.calls[0];
+    expect(commitIdentity).toEqual({
+      carryOverRevision: 'carry-v1:0',
+      agentOwnershipEpoch: OWNERSHIP,
+      contentEpoch: 'fake-content-epoch-1',
+      durableRevision: expect.any(String),
+    });
+
+    // Control and terminal events keep the cached preview untouched.
+    await stream.control(provenance(turnOwner('turn-control')), { kind: 'clear' });
+    await stream.terminal({
+      operation: provenance(turnOwner('turn-1')),
+      outcome: { kind: 'finished' },
+      completeness: { attributableEntryCount: 1, acceptedInputEntryIds: [] },
+      sourceSettlement: 'confirmed',
+    });
+    await settle(tasks);
+    expect(metadata.updateFromAppendedMessages).toHaveBeenCalledTimes(1);
+    expect(metadata.rebuildFromProjectionReset).not.toHaveBeenCalled();
+
+    await stream.reset({
+      reason: 'fork-truncate',
+      epoch: 'fake-stream-epoch-2',
+      contentEpoch: 'fake-content-epoch-2',
+      entries: [entry('entry-kept', new UserMessage(TS, 'surviving prompt'))],
+    });
+    await settle(tasks);
+    expect(metadata.rebuildFromProjectionReset).toHaveBeenCalledTimes(1);
+    const [, resetMessages, resetIdentity] = metadata.rebuildFromProjectionReset.mock.calls[0];
+    expect(resetMessages.map((message) => message.content)).toEqual(['surviving prompt']);
+    expect(resetIdentity.contentEpoch).toBe('fake-content-epoch-2');
+    expect(resetIdentity.agentOwnershipEpoch).toBe(OWNERSHIP);
   });
 
   it('advances a relisted view to the checkpoint of a promotion-only commit', async () => {

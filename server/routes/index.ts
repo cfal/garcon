@@ -23,7 +23,7 @@ import type { SettingsStore } from '../settings/store.js';
 import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { MetadataIndex } from '../chats/metadata-store.js';
-import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
+import type { ChatViewPageReader, CompositeSnapshotPort } from '../chats/chat-message-reader.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
@@ -51,6 +51,7 @@ export default function createAllRoutes({
   pathCache,
   metadata,
   chatViews,
+  compositeSnapshots,
   agents,
   pendingInputs,
   telegramNotifier,
@@ -78,6 +79,7 @@ export default function createAllRoutes({
   pathCache: PathCache;
   metadata: MetadataIndex;
   chatViews: ChatViewPageReader;
+  compositeSnapshots: CompositeSnapshotPort;
   agents: AgentRegistry;
   pendingInputs: PendingUserInputServiceContract;
   telegramNotifier: TelegramNotifier;
@@ -128,7 +130,7 @@ export default function createAllRoutes({
       searchIndex,
       notifyHistoryChanged,
     }),
-    ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
+    ...createShareRoutes(shareStore, registry, settings, metadata, compositeSnapshots),
     ...createFilesRoutes(registry),
     ...createCommandsRoutes({ registry, agents }),
     ...createWorkspaceRoutes(

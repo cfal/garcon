@@ -92,6 +92,7 @@ export interface ServerEventWiringDeps {
     projectionState: AgentProjectionState,
   ): Promise<ChatTranscriptSnapshot>;
   getCarryOverMessageCount(chatId: string): Promise<number>;
+  getCarryOverRevision(chatId: string): string;
   loadChatPage(chatId: string, limit: number, offset: number): Promise<ChatHistoryPage | null>;
   searchIndex?: ChatSearchEventIndex;
 }
@@ -127,6 +128,7 @@ export function wireServerEvents({
   loadChatSnapshot,
   composeProjectionSnapshot,
   getCarryOverMessageCount,
+  getCarryOverRevision,
   loadChatPage,
   searchIndex,
 }: ServerEventWiringDeps): ServerEventWiring {
@@ -446,6 +448,7 @@ export function wireServerEvents({
     markSearchChatDirty,
     markSearchCatalogDirty,
     getCarryOverMessageCount,
+    getCarryOverRevision,
     composeProjectionSnapshot,
     loadChatSnapshot,
     loadChatPage,

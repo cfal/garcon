@@ -312,15 +312,27 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.discoverSlashCommands(agentId, projectPath);
   }
 
-  async getPreview(session: AgentChatEntry | null, chatId = ''): Promise<unknown> {
+  // Returns the durable segment preview together with the ledger identity it
+  // was read under so the metadata cache can be keyed by content, not chat id.
+  async getPreview(session: AgentChatEntry | null, chatId = ''): Promise<{
+    preview: unknown;
+    contentEpoch: string | null;
+    durableRevision: string | null;
+  } | null> {
     if (!session?.agentId) return null;
     const integration = this.#directory.get(session.agentId);
     if (!integration) return null;
-    const result = await integration.transcript.preview({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
-      signal: new AbortController().signal,
-    });
-    return result.kind === 'ready' ? result.value : null;
+    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
+    const signal = new AbortController().signal;
+    const opened = await this.#projection.open(integration, chat, signal);
+    const result = await integration.transcript.preview({ chat, signal });
+    if (result.kind !== 'ready') return null;
+    const projection = opened.kind === 'ready' ? opened.value.checkpoint.projection : null;
+    return {
+      preview: result.value,
+      contentEpoch: projection?.contentEpoch ?? null,
+      durableRevision: projection?.durableRevision ?? null,
+    };
   }
 
   async loadMessages(session: AgentChatEntry | null, chatId = ''): Promise<ChatMessage[]> {
@@ -346,6 +358,31 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return {
       messages,
       revision: transcriptRevision(messages),
+      projectionState: opened.value.checkpoint.projection,
+    };
+  }
+
+  // Loads only durable-lifetime ledger rows for share/export capture. The
+  // active streaming suffix is excluded so a published artifact never contains
+  // rows the provider could still retract before settlement.
+  async loadDurableTranscriptSnapshot(
+    session: AgentChatEntry | null,
+    chatId = '',
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<{
+    readonly messages: readonly ChatMessage[];
+    readonly projectionState: AgentProjectionState | null;
+  }> {
+    if (!session?.agentId) return { messages: [], projectionState: null };
+    const integration = this.#directory.get(session.agentId);
+    if (!integration) return { messages: [], projectionState: null };
+    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
+    const opened = await this.#projection.open(integration, chat, signal);
+    if (opened.kind !== 'ready') throw transcriptAccessFailure(opened);
+    return {
+      messages: opened.value.entries
+        .filter((entry) => entry.lifetime === 'durable')
+        .map((entry) => entry.message),
       projectionState: opened.value.checkpoint.projection,
     };
   }

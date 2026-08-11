@@ -62,10 +62,22 @@ function fixture(options = {}) {
     nativePage(native, limit, offset)
   ));
   const loadNativeSnapshot = mock(async () => ({ messages: native, revision: 'native-r1' }));
+  const loadDurableSnapshot = options.loadDurableSnapshot ?? mock(async () => ({
+    messages: native.slice(0, 3),
+    projectionState: {
+      epoch: 'stream-epoch-1',
+      contentEpoch: 'segment-content-1',
+      total: native.length,
+      durableCount: 3,
+      durableRevision: 'durable-r1',
+      stateRevision: 'state-r1',
+    },
+  }));
   const reader = new OrderedChatTranscriptReader({
     registry: { getChat: () => entry },
     agents: {
       loadTranscriptSnapshot: loadNativeSnapshot,
+      loadDurableTranscriptSnapshot: loadDurableSnapshot,
       loadMessagePage: loadNativePage,
     },
     carryOver: {
@@ -83,6 +95,7 @@ function fixture(options = {}) {
     loadArchivedPage,
     loadNativePage,
     loadNativeSnapshot,
+    loadDurableSnapshot,
   };
 }
 
@@ -198,6 +211,47 @@ describe('OrderedChatTranscriptReader', () => {
       'first prompt',
       'reply 1',
     ]);
+  });
+
+  it('captures the durable composite snapshot without the active suffix', async () => {
+    const { reader, loadNativeSnapshot } = fixture();
+
+    const capture = await reader.captureDurableSnapshot('chat-1');
+
+    expect(capture.messages.map((message) => message.content)).toEqual([
+      'a1', 'a2', 'a3', 'n1', 'n2', 'n3',
+    ]);
+    expect(capture.durableCount).toBe(3);
+    expect(capture.archivedLogicalCount).toBe(3);
+    expect(capture.agentOwnershipEpoch).toBe('epoch-1');
+    expect(capture.carryOverRevision).toBe(`carry-v5:${segmentId}`);
+    expect(capture.contentEpoch).toMatch(/^search-content-v1:/);
+    expect(capture.compositeRevision.length).toBeGreaterThan(0);
+    expect(loadNativeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('retries an expired pin from a new complete snapshot', async () => {
+    const state = fixture();
+    const durableResult = {
+      messages: state.native.slice(0, 3),
+      projectionState: {
+        epoch: 'stream-epoch-1',
+        contentEpoch: 'segment-content-2',
+        total: state.native.length,
+        durableCount: 3,
+        durableRevision: 'durable-r2',
+        stateRevision: 'state-r2',
+      },
+    };
+    state.loadDurableSnapshot.mockImplementationOnce(async () => {
+      state.entry.agentOwnershipEpoch = 'epoch-2';
+      return durableResult;
+    });
+
+    const capture = await state.reader.captureDurableSnapshot('chat-1');
+
+    expect(state.loadDurableSnapshot).toHaveBeenCalledTimes(2);
+    expect(capture.agentOwnershipEpoch).toBe('epoch-2');
   });
 
   it('rejects a mixed read when ownership changes inside a provider page load', async () => {

@@ -320,7 +320,7 @@ export async function startServer(): Promise<void> {
     await settings.reconcileWithRegistry(chatRegistry);
 
     // Chat infrastructure uses the agent registry through narrow injected APIs.
-    const metadata = new MetadataIndex(chatRegistry, agentRegistry, {
+    const metadata = new MetadataIndex(chatRegistry, agentRegistry, carryOver, {
       metadataPath: path.join(workspaceDir, 'chat-metadata.json'),
     });
     await metadata.init();
@@ -610,6 +610,12 @@ export async function startServer(): Promise<void> {
           const entry = chatRegistry.getChat(chatId);
           return entry ? carryOver.logicalMessageCount(entry.carryOverSegments) : 0;
         },
+        getCarryOverRevision: (chatId) => {
+          const entry = chatRegistry.getChat(chatId);
+          return entry
+            ? carryOver.revision(entry.carryOverSegments, entry.carryOverMigrationQuarantine)
+            : 'carry-v1:0';
+        },
         loadChatPage: (chatId, limit, offset) => transcripts.loadPage(chatId, limit, offset),
         searchIndex: chatSearch,
       }),
@@ -625,6 +631,7 @@ export async function startServer(): Promise<void> {
       pathCache,
       metadata,
       chatViews: chatViewPages,
+      compositeSnapshots: transcripts,
       agents: agentRegistry,
       pendingInputs,
       telegramNotifier,
