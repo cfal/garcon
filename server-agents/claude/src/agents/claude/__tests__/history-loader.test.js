@@ -4,9 +4,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadClaudeChatMessages } from '../history-loader.js';
-import { PendingUserInputService } from '../../../../../../server/chats/pending-user-input-service.js';
 import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
 import { CLAUDE_STEERING_PROMPT_PREFIX } from '../user-input.js';
 
 async function withTempJsonl(lines, fn) {
@@ -20,26 +18,18 @@ async function withTempJsonl(lines, fn) {
   }
 }
 
-describe('Claude pending-input evidence', () => {
-  it('preserves a captured CLI entity-bearing input through native reconciliation', async () => {
+describe('Claude native user-input conversion', () => {
+  it('preserves a captured CLI entity-bearing input with its native identity', async () => {
     const fixturePath = fileURLToPath(new URL('./fixtures/claude-user-message-entities.jsonl', import.meta.url));
     const content = 'Fixture capture only. Do not inspect or modify files. Preserve this marker as the literal user input in the session transcript: &amp; &lt; &gt; &quot; &#39; <literal>. Reply only: acknowledged';
-    const service = new PendingUserInputService({
-      loadNativeMessages: () => loadClaudeChatMessages(fixturePath),
-      getRetainedHistoryMessages: () => [],
-    });
-    await service.register('chat-1', content, {
-      clientRequestId: 'request-1',
-      createdAt: '2026-07-17T15:20:02.700Z',
-    });
-
     const nativeMessages = await loadClaudeChatMessages(fixturePath);
     expect(nativeMessages).toMatchObject([{ type: 'user-message', content }]);
-    await service.reconcileNativeHistory('chat-1');
-    expect(service.listForChat('chat-1')).toEqual([]);
+    // Entity-bearing content never participates in identity: the row carries
+    // its uuid, which is what the projection settles against.
+    expect(getNativeMessageSource(nativeMessages[0])).toMatchObject({ entryId: expect.any(String) });
   });
 
-  it('reconciles a user input persisted only as a queued command attachment', async () => {
+  it('converts a user input persisted only as a queued command attachment', async () => {
     const content = 'it finished now';
     const queuedCommand = {
       sessionId: 'session-1',
@@ -55,15 +45,6 @@ describe('Claude pending-input evidence', () => {
     };
 
     await withTempJsonl([JSON.stringify(queuedCommand)], async (filePath) => {
-      const service = new PendingUserInputService({
-        loadNativeMessages: () => loadClaudeChatMessages(filePath),
-        getRetainedHistoryMessages: () => [],
-      });
-      await service.register('chat-1', content, {
-        clientRequestId: 'request-1',
-        createdAt: '2026-07-21T14:00:00.500Z',
-      });
-
       const messages = await loadClaudeChatMessages(filePath);
       expect(messages).toMatchObject([{
         type: 'user-message',
@@ -74,9 +55,6 @@ describe('Claude pending-input evidence', () => {
         entryId: 'queued-1',
         lineNumber: 1,
       });
-
-      await service.reconcileNativeHistory('chat-1');
-      expect(service.listForChat('chat-1')).toEqual([]);
     });
   });
 
@@ -184,23 +162,6 @@ describe('Claude steering history projection', () => {
         filtered,
         '<system-reminder>literal guidance</system-reminder>',
       ]);
-
-      const service = new PendingUserInputService({
-        loadNativeMessages: () => loadClaudeChatMessages(filePath),
-        getRetainedHistoryMessages: () => [],
-      });
-      await service.register('chat-1', spaced, {
-        clientRequestId: 'request-spaced',
-        createdAt: '2026-07-21T14:00:00.500Z',
-        deliveryStatus: 'accepted',
-      });
-      await service.register('chat-1', filtered, {
-        clientRequestId: 'request-filtered',
-        createdAt: '2026-07-21T14:00:00.500Z',
-        deliveryStatus: 'accepted',
-      });
-      await service.reconcileNativeHistory('chat-1');
-      expect(service.listForChat('chat-1')).toEqual([]);
     });
   });
 

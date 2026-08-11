@@ -540,6 +540,100 @@ describe('existing-journal native audit', () => {
       .toEqual(['identified', 'surface banner', 'held output']);
   });
 
+  it('settles the turn owner input on promotion but a steer only on native binding', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+
+    const owner = admissionOperation();
+    const ownerPrep = await stream.prepareInput({
+      chat,
+      signal: signal(),
+      message: new UserMessage('2026-06-01T00:00:00.000Z', 'owner prompt'),
+      operation: owner,
+    });
+    await ownerPrep.commit();
+    await stream.promoteActiveInput(chat, owner);
+
+    // A mid-turn steer shares the turn owner but carries its own request id.
+    const steerOwner = { ...owner.turnOwner };
+    const steer = {
+      agentOwnershipEpoch: owner.agentOwnershipEpoch,
+      commandType: 'steer' as const,
+      clientRequestId: 'steer-request',
+      clientMessageId: 'steer-message',
+      turnId: owner.turnId,
+      turnOwner: steerOwner,
+    };
+    await stream.appendMessages({
+      chat,
+      operation: steer,
+      messages: [new UserMessage('2026-06-01T00:00:01.000Z', 'steer text')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'event:steer', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+
+    // Routine settlement clears the turn owner immediately; the steer, not yet
+    // native-bound, holds until proven persisted.
+    const routine = await stream.settledInputRequests({ chat, signal: signal() });
+    expect(routine).toEqual({ kind: 'ready', value: ['held-request'] });
+    // The stop cohort holds even the owner to the persistence proof.
+    const cohort = await stream.settledInputRequests({
+      chat,
+      signal: signal(),
+      requireNativeBinding: true,
+    });
+    expect(cohort).toEqual({ kind: 'ready', value: [] });
+  });
+
+  it('settles a line-identified turn where native evidence orders the row after the user', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+
+    // A byte/line provider: admission commits the user row, and the finalized
+    // assistant row carries only its line identity, emitted alone.
+    const operation = admissionOperation();
+    const preparation = await stream.prepareInput({
+      chat,
+      signal: signal(),
+      message: new UserMessage('2026-06-01T00:00:00.000Z', 'prompt'),
+      operation,
+    });
+    await preparation.commit();
+    await stream.promoteActiveInput(chat, operation);
+    await stream.appendMessages({
+      chat,
+      operation,
+      messages: [attachNativeMessageSource(
+        new AssistantMessage('2026-06-01T00:00:01.000Z', 'answer'),
+        { lineNumber: 2 },
+      )],
+    });
+
+    // The native file lists the user at line 1 and the assistant at line 2, so
+    // the assistant is the second array row; its subrow must still be zero, or
+    // the committed row and its evidence would never match.
+    persisted = [
+      attachNativeMessageSource(new UserMessage('2026-06-01T00:00:00.000Z', 'prompt'), { lineNumber: 1 }),
+      attachNativeMessageSource(new AssistantMessage('2026-06-01T00:00:01.000Z', 'answer'), { lineNumber: 2 }),
+    ];
+    await expect(stream.settleNativeBoundary({ chat, operation, signal: signal() }))
+      .resolves.toBe('confirmed');
+    const after = await openContents(stream);
+    expect(after.contents).toEqual(['prompt', 'answer']);
+    const resolved = await stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(after.checkpoint, after.entries[1]!.id),
+    });
+    expect(resolved.kind).toBe('ready');
+  });
+
   it('matches occurrence-identified rows through the settlement proof and persists the binding', async () => {
     const directory = await createDirectory();
     let persisted: ChatMessage[] = [];

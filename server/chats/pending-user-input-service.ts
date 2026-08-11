@@ -40,10 +40,15 @@ interface NativeReconcileRun {
   promise: Promise<void>;
 }
 
-// Answers which client-request identities the projection has bound to proven
-// provider-native evidence for a chat.
+// Answers which client-request identities the projection has settled for a
+// chat. Routine settlement clears on promotion to a durable ledger row; the
+// stop-cohort path requires proven provider-native binding, so a promoted
+// but unpersisted input on a stopped turn surfaces as unconfirmed.
 export interface SettledInputRequestReader {
-  settledInputRequests(chatId: string): Promise<ReadonlySet<string>>;
+  settledInputRequests(
+    chatId: string,
+    options?: { readonly requireNativeBinding?: boolean },
+  ): Promise<ReadonlySet<string>>;
 }
 
 export interface PendingUserInputServiceContract {
@@ -194,7 +199,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     await this.#settleLock.runExclusive(cohort.chatId, async () => {
       if (this.#currentCohortRecords(cohort).length === 0) return;
       try {
-        await this.#clearSettled(cohort.chatId, this.#currentCohortRecords(cohort));
+        await this.#clearSettled(cohort.chatId, this.#currentCohortRecords(cohort), true);
       } catch (error) {
         logger.warn('pending cohort settlement read failed', {
           chatId: cohort.chatId,
@@ -216,9 +221,16 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     });
   }
 
-  async #clearSettled(chatId: string, records: readonly PendingUserInputRecord[]): Promise<void> {
+  async #clearSettled(
+    chatId: string,
+    records: readonly PendingUserInputRecord[],
+    requireNativeBinding = false,
+  ): Promise<void> {
     if (records.length === 0) return;
-    const settled = await this.#settled.settledInputRequests(chatId);
+    const settled = await this.#settled.settledInputRequests(
+      chatId,
+      requireNativeBinding ? { requireNativeBinding: true } : undefined,
+    );
     for (const record of records) {
       if (!settled.has(record.clientRequestId)) continue;
       this.store.clear(chatId, record.clientRequestId, 'persisted');

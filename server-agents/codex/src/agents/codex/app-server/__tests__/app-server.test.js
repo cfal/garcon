@@ -17,7 +17,6 @@ import { CodexAppServerRuntime } from '../runtime.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
 import { ChatExecutionCoordinator } from '../../../../../../../server/chat-execution/chat-execution-coordinator.ts';
 import { InMemoryChatExecutionControlRepository } from '../../../../../../../server/chat-execution/chat-execution-control-repository.ts';
-import { PendingUserInputService } from '../../../../../../../server/chats/pending-user-input-service.ts';
 import {
   buildThreadForkParams,
   buildThreadResumeParams,
@@ -4634,10 +4633,6 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: () => loadCodexChatMessages(nativePath),
-      getRetainedHistoryMessages: () => [],
-    });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4650,21 +4645,15 @@ describe('CodexAppServerRuntime', () => {
       clientMessageId: 'message-steer',
       nativePath,
     }), async (handoff) => {
-      await pendingInputs.register('chat-1', content, {
-        clientRequestId: 'request-steer',
-        clientMessageId: 'message-steer',
-        createdAt: '2026-06-01T00:00:00.000Z',
-      });
       handoff.validate();
       handoff.commit();
     })).resolves.toBe(true);
 
-    expect(pendingInputs.listForChat('chat-1')).toHaveLength(1);
+    // The goal-control steer delivers its text to the running goal client and
+    // the client persists it to native history.
     expect(await loadCodexChatMessages(nativePath)).toMatchObject([
       { type: 'user-message', content },
     ]);
-    await pendingInputs.reconcileNativeHistory('chat-1');
-    expect(pendingInputs.listForChat('chat-1')).toEqual([]);
   });
 
   it('routes a running-chat queue submission into the active goal client', async () => {

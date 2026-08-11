@@ -5,22 +5,24 @@ import { PendingUserInputService } from '../pending-user-input-service.js';
 // reports its client-request identity bound to proven provider-native
 // evidence, and a stop-captured cohort that cannot prove persistence is
 // marked unconfirmed rather than cleared.
-function createService(initialSettled = []) {
+function createService(initialSettled = [], initialNativeBound = null) {
   const settled = new Set(initialSettled);
+  const nativeBound = new Set(initialNativeBound ?? initialSettled);
   const reads = [];
   let gate = null;
   const service = new PendingUserInputService({
-    async settledInputRequests(chatId) {
+    async settledInputRequests(chatId, options) {
       reads.push(chatId);
       if (gate) await gate.promise;
       if (settledError) throw settledError;
-      return new Set(settled);
+      return new Set(options?.requireNativeBinding ? nativeBound : settled);
     },
   });
   let settledError = null;
   return {
     service,
     settled,
+    nativeBound,
     reads,
     failWith(error) { settledError = error; },
     holdReads() {
@@ -146,8 +148,8 @@ describe('PendingUserInputService', () => {
     expect(service.listForChat('chat-1')).toMatchObject([{ clientRequestId: 'req-1' }]);
   });
 
-  it('settles a stopped cohort: proven identities clear, the rest go unconfirmed', async () => {
-    const { service, settled } = createService();
+  it('settles a stopped cohort by native binding: proven persist clears, the rest go unconfirmed', async () => {
+    const { service, nativeBound } = createService();
     await service.register('chat-1', 'delivered', { clientRequestId: 'req-delivered' });
     await service.register('chat-1', 'queued', { clientRequestId: 'req-queued' });
     await service.register('chat-1', 'failed', {
@@ -156,12 +158,27 @@ describe('PendingUserInputService', () => {
     });
     const cohort = service.captureCohort('chat-1');
 
-    settled.add('req-delivered');
+    // Only the delivered input is bound to native evidence; a promoted but
+    // unpersisted queued input on a stopped turn is unconfirmed.
+    nativeBound.add('req-delivered');
     await service.settleNativeCohort(cohort);
 
     expect(service.listForChat('chat-1')).toMatchObject([
       { clientRequestId: 'req-queued', deliveryStatus: 'unconfirmed' },
       { clientRequestId: 'req-failed', deliveryStatus: 'failed' },
+    ]);
+  });
+
+  it('marks a promoted but unpersisted stopped input unconfirmed', async () => {
+    const { service, settled } = createService();
+    await service.register('chat-1', 'promoted', { clientRequestId: 'req-1' });
+    const cohort = service.captureCohort('chat-1');
+    // Promoted to the ledger (routine settle would clear it) but never bound
+    // to native evidence; the stop cohort keeps it unconfirmed.
+    settled.add('req-1');
+    await service.settleNativeCohort(cohort);
+    expect(service.listForChat('chat-1')).toMatchObject([
+      { clientRequestId: 'req-1', deliveryStatus: 'unconfirmed' },
     ]);
   });
 

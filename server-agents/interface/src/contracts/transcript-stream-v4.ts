@@ -282,7 +282,7 @@ export interface AgentTranscriptStream {
   // Client-request identities of durable user rows whose admission identity
   // is bound to proven provider-native evidence. Pending-input settlement
   // consumes these instead of scanning native user-message text.
-  settledInputRequests(request: AgentTranscriptRequestV4): Promise<AgentTranscriptAccessResult<readonly string[]>>;
+  settledInputRequests(request: AgentTranscriptRequestV4 & { readonly requireNativeBinding?: boolean }): Promise<AgentTranscriptAccessResult<readonly string[]>>;
   preview(request: AgentTranscriptRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptPreview | null>>;
   resolveIndexSource(request: AgentTranscriptRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptIndexSourceRefV4 | null>>;
   refreshIndexSource(request: AgentTranscriptIndexRefreshRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptIndexSourceRefV4 | null>>;

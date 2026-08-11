@@ -344,13 +344,18 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   async listSettledInputRequests(
     session: AgentChatEntry | null,
     chatId = '',
+    requireNativeBinding = false,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<readonly string[]> {
     if (!session?.agentId) return [];
     const integration = this.#directory.get(session.agentId);
     if (!integration) return [];
     const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
-    const settled = await integration.transcript.settledInputRequests({ chat, signal });
+    const settled = await integration.transcript.settledInputRequests({
+      chat,
+      signal,
+      ...(requireNativeBinding ? { requireNativeBinding: true } : {}),
+    });
     if (settled.kind !== 'ready') throw transcriptAccessFailure(settled);
     return settled.value;
   }

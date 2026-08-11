@@ -60,6 +60,12 @@ import {
   type AgentTranscriptSeedEntry,
 } from './seed-entries.js';
 
+import {
+  admissionSource,
+  applyAuditMetadata,
+  hasNativeBinding,
+  persistNativeAliases,
+} from './journal-metadata.js';
 export { transcriptSeedEntries } from './seed-entries.js';
 export type { AgentTranscriptSeedEntry } from './seed-entries.js';
 import { AgentProjectionPager } from './paging.js';
@@ -350,11 +356,16 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     this.#open(request.chat).stream.commitOffset(request.commit);
   }
 
-  // A user row's admission identity settles once it is bound to proven
-  // provider-native evidence: a native-claimed source or an audit-bound
-  // alias. Promotion alone is acceptance, not persistence proof.
+  // A user input's pending overlay clears once its admission is settled. The
+  // turn owner's own input is settled by promotion to a durable ledger row:
+  // it defines the turn and is part of the conversation. An auxiliary input
+  // such as a mid-turn steer is settled only when bound to proven
+  // provider-native evidence, since a promoted but unpersisted steer whose
+  // turn stopped never reached the provider. The stop-cohort path passes
+  // requireNativeBinding to hold every input, owner included, to that same
+  // persistence proof.
   async settledInputRequests(
-    request: AgentTranscriptRequestV4,
+    request: AgentTranscriptRequestV4 & { readonly requireNativeBinding?: boolean },
   ): Promise<AgentTranscriptAccessResult<readonly string[]>> {
     request.signal.throwIfAborted();
     const opened = await this.#requireOpen(request);
@@ -364,8 +375,12 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     const namespace = `${this.options.ownerId}:native`;
     const settled = segment.stream.current.entries.flatMap((entry) => {
       if (entry.lifetime !== 'durable' || entry.message.type !== 'user-message') return [];
-      const clientRequestId = entry.provenance?.clientRequestId;
-      if (!clientRequestId || !entry.source) return [];
+      const provenance = entry.provenance;
+      const clientRequestId = provenance?.clientRequestId;
+      if (!clientRequestId) return [];
+      const isTurnOwnerInput = clientRequestId === provenance!.turnOwner.clientRequestId;
+      if (!request.requireNativeBinding && isTurnOwnerInput) return [clientRequestId];
+      if (!entry.source) return [];
       const claimedNative = entry.source.namespace === namespace
         && !entry.source.itemId.startsWith('event:');
       return claimedNative || hasNativeBinding(aliases[sourceIdentityKey(entry.source)])
@@ -747,7 +762,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
             ? [[sourceIdentityKey(record.source), record.nativeAlias] as const]
             : []
         )) ?? []);
-        await persistNativeAliases(segment, appended, serializedAliases);
+        await persistNativeAliases(segment.journal, appended, serializedAliases);
       }
       return appended;
     });
@@ -934,22 +949,6 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function hasNativeBinding(alias: unknown): boolean {
-  if (!alias || typeof alias !== 'object' || Array.isArray(alias)) return false;
-  const record = alias as Record<string, unknown>;
-  return (typeof record.entryId === 'string' && record.entryId.length > 0)
-    || (typeof record.lineNumber === 'number' && Number.isSafeInteger(record.lineNumber) && record.lineNumber > 0)
-    || (typeof record.byteOffset === 'number' && Number.isSafeInteger(record.byteOffset) && record.byteOffset >= 0);
-}
-
-function admissionSource(operation: AgentTurnBoundOperationIdentityV4): AgentTranscriptSourceIdentity {
-  return {
-    namespace: 'garcon:admission',
-    itemId: operation.clientRequestId ?? operation.turnId,
-    subrowId: 'user',
-  };
-}
-
 function sameTurnOwner(
   left: AgentTurnBoundOperationIdentityV4['turnOwner'] | undefined,
   right: AgentTurnBoundOperationIdentityV4['turnOwner'],
@@ -984,53 +983,3 @@ function messageTimestamp(message: ChatMessage): string | null {
     : null;
 }
 
-// Binds matched aliases and an explained retention-floor advance from one
-// audit outcome. Only identities without a native line binding are rebound.
-async function applyAuditMetadata(
-  journal: AgentProjectionJournal,
-  outcome: Extract<ReturnType<typeof auditNativeEvidence>, { kind: 'aligned' }>,
-  importedAliases: JsonObject,
-): Promise<void> {
-  const state = journal.state;
-  const boundAliases = Object.fromEntries(
-    [...outcome.matchedAliases]
-      .filter(([key]) => state.aliases[key] === undefined
-        || nativeAliasLineNumber(state.aliases[key]) === null)
-      .flatMap(([key, seed]) => {
-        const alias = seed.nativeAlias === undefined ? nativeAlias(seed.message) : seed.nativeAlias;
-        return alias ? [[key, alias] as const] : [];
-      }),
-  );
-  const floor = outcome.nativeRetentionFloor;
-  if (Object.keys(importedAliases).length > 0
-      || Object.keys(boundAliases).length > 0
-      || (floor !== null && floor > state.nativeRetentionFloor)) {
-    await journal.updateNativeMetadata({
-      nativeRetentionFloor: floor !== null && floor > state.nativeRetentionFloor
-        ? floor
-        : state.nativeRetentionFloor,
-      aliases: { ...state.aliases, ...boundAliases, ...importedAliases },
-    });
-  }
-}
-
-async function persistNativeAliases(
-  segment: OpenSegment,
-  entries: readonly AgentTranscriptEntry[],
-  serializedAliases: ReadonlyMap<string, JsonObject> = new Map(),
-): Promise<void> {
-  const additions = entries.flatMap((entry) => {
-    const alias = entry.source
-      ? serializedAliases.get(sourceIdentityKey(entry.source)) ?? nativeAlias(entry.message)
-      : null;
-    return alias && entry.source
-      ? [[sourceIdentityKey(entry.source), alias] as const]
-      : [];
-  });
-  if (!additions.length) return;
-  const state = segment.journal.state;
-  await segment.journal.updateNativeMetadata({
-    nativeRetentionFloor: state.nativeRetentionFloor,
-    aliases: { ...state.aliases, ...Object.fromEntries(additions) },
-  });
-}

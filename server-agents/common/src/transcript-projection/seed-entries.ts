@@ -81,7 +81,11 @@ export function messageSource(
   const itemId = native?.entryId
     ?? (native?.byteOffset !== undefined ? `byte:${native.byteOffset}` : null)
     ?? (native?.lineNumber !== undefined ? `line:${native.lineNumber}` : null);
-  const subrow = native?.withinSourceOrdinal ?? index;
+  // A row with its own native identity is its own occurrence, so its subrow is
+  // zero unless the adapter renders several rows from one identity and sets an
+  // explicit ordinal. Only event-batch rows, which share one fallback itemId,
+  // separate by their position in the batch.
+  const subrow = native?.withinSourceOrdinal ?? (itemId !== null ? 0 : index);
   return {
     namespace: namespace ?? (itemId !== null ? `${ownerId}:native` : `${ownerId}:event`),
     itemId: itemId ?? `event:${fallbackBatchId}`,

@@ -22,7 +22,11 @@ import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import { attachNativeMessageSource } from '@garcon/server-agent-interface';
 import { AgentInputAdmissionCoordinator } from '../admission.js';
 import { applyProjectionEvent } from '../apply.js';
-import { AgentProjectionMutationGate } from '../handoff.js';
+import {
+  AgentProjectionMutationGate,
+  prepareIncomingOwnershipSegment,
+  prepareOutgoingHandoffLease,
+} from '../handoff.js';
 import { AgentProjectionJournal } from '../journal.js';
 import {
   agentHandoffDecision,
@@ -225,6 +229,108 @@ describe('AgentProjectionMutationGate', () => {
     expect(applied).toEqual(['buffered']);
     expect(ran).toBe(false);
     expect(violations).toBe(2);
+  });
+});
+
+describe('handoff conformance', () => {
+  it('refuses to freeze an active transcript suffix and leaves the gate usable', async () => {
+    const directory = await tempDirectory();
+    const identity = projection().identity;
+    const chat = chatReference(identity);
+    const stream = journalStream(directory);
+    expect((await stream.openSegment({ chat, signal: AbortSignal.timeout(1_000) })).kind).toBe('ready');
+    const operation = operationIdentity(identity.agentOwnershipEpoch);
+    const preparation = await stream.prepareInput({
+      chat,
+      signal: AbortSignal.timeout(1_000),
+      message: new UserMessage(timestamp(), 'still active'),
+      operation,
+    });
+    await preparation.commit();
+
+    await expect(stream.prepareHandoffLease({
+      chat,
+      handoffOperationId: 'handoff-active',
+      signal: AbortSignal.timeout(1_000),
+    })).rejects.toThrow('active transcript suffix');
+    // The refused freeze rolled its gate lease back; ordinary mutations run.
+    await stream.promoteActiveInput(chat, operation);
+    const lease = await stream.prepareHandoffLease({
+      chat,
+      handoffOperationId: 'handoff-idle',
+      signal: AbortSignal.timeout(1_000),
+    });
+    expect(lease.kind).toBe('ready');
+    if (lease.kind === 'ready') await lease.value.rollbackBeforeDecision();
+  });
+
+  it('drains in-flight mutations before granting the freeze lease', async () => {
+    const gate = new AgentProjectionMutationGate();
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const inFlight = gate.run(async () => {
+      await held;
+      order.push('mutation');
+    });
+    const acquiring = gate.acquire().then((lease) => {
+      order.push('lease');
+      return lease;
+    });
+    release();
+    await inFlight;
+    const lease = await acquiring;
+    expect(order).toEqual(['mutation', 'lease']);
+    await lease.rollback();
+  });
+
+  it('keeps the boundary fenced when the decision write fails after commit', async () => {
+    const gate = new AgentProjectionMutationGate();
+    const lease = await prepareOutgoingHandoffLease({
+      operationId: 'handoff-1',
+      gate,
+      materialization: () => projection().stream.current,
+      afterDecision: async () => {
+        throw new Error('decision write lost power');
+      },
+    });
+    const seal = lease.sealForDecision();
+    await expect(lease.commitAfterDecision(seal, agentHandoffDecision({
+      operationId: 'handoff-1',
+      targetOwnershipEpoch: agentOwnershipEpoch('target'),
+    }))).rejects.toThrow('decision write lost power');
+    // The seal committed before the write, so the boundary stays fenced and a
+    // decided handoff can never roll back.
+    await expect(gate.run(async () => undefined)).rejects.toThrow('sealed handoff boundary');
+    await expect(lease.rollbackBeforeDecision()).rejects.toThrow('decided handoff cannot roll back');
+  });
+
+  it('makes incoming preparation commit and rollback idempotent and mutually exclusive', async () => {
+    const commit = mock(async () => undefined);
+    const rollback = mock(async () => undefined);
+    const decision = agentHandoffDecision({
+      operationId: 'handoff-1',
+      targetOwnershipEpoch: agentOwnershipEpoch('target'),
+    });
+    const committed = prepareIncomingOwnershipSegment({
+      checkpoint: projection().stream.current.checkpoint,
+      commit,
+      rollback,
+    });
+    await committed.commitAfterDecision(decision);
+    await committed.commitAfterDecision(decision);
+    expect(commit).toHaveBeenCalledTimes(1);
+    await expect(committed.rollbackBeforeDecision()).rejects.toThrow('cannot roll back');
+
+    const rolledBack = prepareIncomingOwnershipSegment({
+      checkpoint: projection().stream.current.checkpoint,
+      commit,
+      rollback,
+    });
+    await rolledBack.rollbackBeforeDecision();
+    await rolledBack.rollbackBeforeDecision();
+    expect(rollback).toHaveBeenCalledTimes(1);
+    await expect(rolledBack.commitAfterDecision(decision)).rejects.toThrow('cannot commit');
   });
 });
 

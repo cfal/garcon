@@ -468,10 +468,11 @@ export async function startServer(): Promise<void> {
       },
     };
     const pendingInputs = new PendingUserInputService({
-      async settledInputRequests(chatId) {
+      async settledInputRequests(chatId, options) {
         return new Set(await agentRegistry.listSettledInputRequests(
           chatRegistry.getChat(chatId) ?? null,
           chatId,
+          Boolean(options?.requireNativeBinding),
         ));
       },
     });
