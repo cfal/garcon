@@ -86,7 +86,7 @@ describe('PromptComposer focus', () => {
 		expect(composer?.className).not.toContain('shadow-sm');
 	});
 
-	it('previews and persists composer resizing while the selected chat is processing', async () => {
+	it('keeps manual resizing live after content auto-expands while the selected chat is processing', async () => {
 		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
@@ -98,17 +98,19 @@ describe('PromptComposer focus', () => {
 		slider.setPointerCapture = vi.fn();
 		slider.hasPointerCapture = vi.fn(() => true);
 		slider.releasePointerCapture = vi.fn();
+		Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 420 });
 
-		expect(textarea.style.minHeight).toBe('140px');
+		await fireEvent.input(textarea, { target: { value: 'A long prompt' } });
+		expect(textarea.style.height).toBe('300px');
 		await fireEvent.pointerDown(slider, {
 			pointerId: 11,
 			clientY: 400,
 			button: 0,
 			isPrimary: true,
 		});
-		await fireEvent.pointerMove(slider, { pointerId: 11, clientY: 300 });
+		await fireEvent.pointerMove(slider, { pointerId: 11, clientY: 540 });
 
-		expect(textarea.style.minHeight).toBe('240px');
+		expect(textarea.style.height).toBe('160px');
 		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.composerHeight)).toBeNull();
 
 		await rerender({
@@ -118,12 +120,32 @@ describe('PromptComposer focus', () => {
 			isSubmitting: false,
 			quickCommitRefreshing: true,
 		});
-		expect(textarea.style.minHeight).toBe('240px');
+		expect(textarea.style.height).toBe('160px');
 
-		await fireEvent.pointerUp(slider, { pointerId: 11, clientY: 300 });
+		await fireEvent.pointerUp(slider, { pointerId: 11, clientY: 540 });
 
-		expect(textarea.style.minHeight).toBe('240px');
-		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.composerHeight)).toBe('240');
+		expect(textarea.style.height).toBe('160px');
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.composerHeight)).toBe('160');
+	});
+
+	it('removes stale content height when the draft is cleared programmatically', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-programmatic-clear',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		Object.defineProperty(textarea, 'scrollHeight', {
+			configurable: true,
+			get: () => (textarea.value ? 420 : 48),
+		});
+
+		await fireEvent.input(textarea, { target: { value: 'A long prompt' } });
+		expect(textarea.style.height).toBe('300px');
+
+		await fireEvent.click(screen.getByTestId('clear-draft'));
+
+		expect(textarea.value).toBe('');
+		expect(textarea.style.height).toBe('140px');
 	});
 
 	it('opens a live expanded editor and restores directional selection on Escape', async () => {
