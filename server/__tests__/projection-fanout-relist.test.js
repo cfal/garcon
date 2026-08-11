@@ -179,16 +179,25 @@ describe('projection fanout relist under real ingress ordering', () => {
       message.type === 'chat-projection-generation-transition'
     ));
     expect(transition).toBeDefined();
-    expect(transition.generationId).toBe(views.getCursor(CHAT_ID).generationId);
+    const relistedGeneration = views.getCursor(CHAT_ID).generationId;
+    expect(transition.generationId).toBe(relistedGeneration);
+    // A cold first admission still broadcasts its committed row so observers
+    // and background caches see it before provider execution starts.
+    const coldRows = broadcasts.filter((message) => message.type === 'chat-messages');
+    expect(coldRows).toHaveLength(1);
+    expect(coldRows[0].generationId).toBe(relistedGeneration);
+    expect(coldRows[0].messages.map((row) => [row.seq, row.message.content]))
+      .toEqual([[1, 'first row']]);
+    expect(broadcasts.indexOf(transition)).toBeLessThan(broadcasts.indexOf(coldRows[0]));
 
     // The relisted view holds the checkpoint state, so the next commit applies
-    // exactly and broadcasts its row instead of relisting again.
+    // exactly and broadcasts its row without relisting again.
     await stream.commit([], [entry('entry-2', new AssistantMessage(TS, 'second row'))]);
     await settle(tasks);
     expect(viewContents(views)).toEqual(['first row', 'second row']);
     const rows = broadcasts.filter((message) => message.type === 'chat-messages');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].messages.map((row) => [row.seq, row.message.content]))
+    expect(rows).toHaveLength(2);
+    expect(rows[1].messages.map((row) => [row.seq, row.message.content]))
       .toEqual([[2, 'second row']]);
   });
 
@@ -217,10 +226,16 @@ describe('projection fanout relist under real ingress ordering', () => {
       'existing row',
       'missing without fix',
     ]);
-    expect(broadcasts.filter((message) => message.type === 'chat-messages')).toHaveLength(0);
     expect(broadcasts.some((message) => (
       message.type === 'chat-projection-generation-transition'
     ))).toBe(true);
+    // The relist rebroadcasts the applied commit rows at their carryover-based
+    // seqs under the fresh generation.
+    const rows = broadcasts.filter((message) => message.type === 'chat-messages');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].generationId).toBe(views.getCursor(CHAT_ID).generationId);
+    expect(rows[0].messages.map((row) => [row.seq, row.message.content]))
+      .toEqual([[3, 'missing without fix']]);
   });
 
   it('advances a relisted view to the checkpoint of a promotion-only commit', async () => {
@@ -253,6 +268,8 @@ describe('projection fanout relist under real ingress ordering', () => {
     expect(broadcasts.some((message) => (
       message.type === 'chat-projection-generation-transition'
     ))).toBe(true);
+    // A promotion-only relist has no appended rows to rebroadcast.
+    expect(broadcasts.filter((message) => message.type === 'chat-messages')).toHaveLength(0);
 
     // The promotion checkpoint is now the view state, so the next append is exact.
     await stream.commit([], [entry('entry-next', new AssistantMessage(TS, 'after promotion'))]);

@@ -5,6 +5,7 @@ import type {
   AgentTranscriptProvenance,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '../common/chat-types.js';
+import type { ChatViewMessage } from '../common/chat-view.js';
 import {
   ChatMessagesMessage,
   ChatProjectionGenerationTransitionMessage,
@@ -131,20 +132,7 @@ async function applyCommit(
     ),
   });
   if (application.kind === 'applied' && application.messages.length > 0) {
-    let offset = 0;
-    for (const group of groupEntriesByProvenance(event.appended)) {
-      const rows = application.messages.slice(offset, offset + group.entries.length);
-      offset += group.entries.length;
-      const provenance = group.provenance;
-      deps.broadcast(new ChatMessagesMessage(
-        chatId,
-        application.generationId,
-        rows,
-        provenance?.turnOwner.turnId ?? provenance?.turnId,
-        provenance?.turnOwner.clientRequestId ?? provenance?.clientRequestId ?? undefined,
-        provenance?.upstreamRequestId ?? undefined,
-      ));
-    }
+    broadcastCommitRows(deps, event, application.generationId, application.messages);
   } else if (application.kind === 'relisted') {
     const previousGenerationId = deps.transientFeeds.currentSnapshot(chatId)?.generationId
       ?? application.previousGenerationId
@@ -166,8 +154,44 @@ async function applyCommit(
       transition.stateDigest,
       transition.rows,
     ));
+    // The relisted generation already contains this commit's rows, so their
+    // browser seqs are fixed by the commit predecessor. Broadcasting them keeps
+    // admission step order, observers, and background caches fed even when no
+    // view was loaded; a client holding the relisted snapshot drops them as
+    // already-applied by seq.
+    if (appendedMessages.length > 0) {
+      const baseSeq = carryOverMessageCount + event.previous.projection.total;
+      broadcastCommitRows(
+        deps,
+        event,
+        application.generationId,
+        appendedMessages.map((message, index) => ({ seq: baseSeq + index + 1, message })),
+      );
+    }
   }
   await deps.pendingInputs.reconcileRetainedHistory(chatId);
+}
+
+function broadcastCommitRows(
+  deps: ProjectionEventFanoutDeps,
+  event: AgentTranscriptCommitEvent,
+  generationId: string,
+  rows: readonly ChatViewMessage[],
+): void {
+  let offset = 0;
+  for (const group of groupEntriesByProvenance(event.appended)) {
+    const groupRows = rows.slice(offset, offset + group.entries.length);
+    offset += group.entries.length;
+    const provenance = group.provenance;
+    deps.broadcast(new ChatMessagesMessage(
+      event.chatId,
+      generationId,
+      groupRows,
+      provenance?.turnOwner.turnId ?? provenance?.turnId,
+      provenance?.turnOwner.clientRequestId ?? provenance?.clientRequestId ?? undefined,
+      provenance?.upstreamRequestId ?? undefined,
+    ));
+  }
 }
 
 async function applyTransient(

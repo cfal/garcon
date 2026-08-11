@@ -360,13 +360,19 @@ describe('server event wiring', () => {
     await fixture.agentListeners.projectionApplied(commit);
     await fixture.wiring.waitForIdle();
 
-    expect(published.filter((message) => message.type === 'chat-messages')).toEqual([]);
     const transition = published.find((message) => (
       message.type === 'chat-projection-generation-transition'
     ));
     expect(transition).toBeDefined();
     expect(transition.previousGenerationId).toBe(staleGeneration);
     expect(transition.generationId).toBe(chatViews.getCursor('chat-1').generationId);
+    // The relist still rebroadcasts the applied commit rows under the fresh
+    // generation so observers and background caches see them.
+    const rows = published.filter((message) => message.type === 'chat-messages');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].generationId).toBe(transition.generationId);
+    expect(rows[0].messages.map((entry) => [entry.seq, entry.message.content]))
+      .toEqual([[2, 'fresh']]);
     expect(chatViews.readPage('chat-1', 20).messages.map((entry) => entry.message.content))
       .toEqual(['stale', 'fresh']);
   });
