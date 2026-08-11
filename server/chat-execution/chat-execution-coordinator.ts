@@ -285,8 +285,17 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     void task.finally(() => this.#dispatchTasks.delete(task));
   }
 
-  onAgentTurnTerminal(chatId: string, turn: TurnIdentity | undefined): Promise<void> {
-    return this.#onDirectTerminal(chatId, turn);
+  async onAgentTurnTerminal(chatId: string, turn: TurnIdentity | undefined): Promise<void> {
+    const attempt = this.#ownership.attempt(chatId);
+    if (!attempt?.matches(turn)) {
+      // A terminal for an already-retired attempt still clears a resolved
+      // interrupt latch and resumes queued work.
+      await this.checkChatIdle(chatId);
+      return;
+    }
+    attempt.markTerminalObserved();
+    this.#settleDirectAttempt(chatId, attempt);
+    await attempt.waitUntilSettled();
   }
 
   replaceTurnWithTranscriptSnapshotReservation(
@@ -296,10 +305,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#ownership.replaceTurnWithTranscriptSnapshot(chatId, turn);
   }
 
-  getQueuedTurnFinalization(
-    chatId: string,
-    turnId: string | undefined,
-  ): Promise<QueuedTurnFinalizationOutcome> | null {
+  getQueuedTurnFinalization(chatId: string, turnId: string | undefined): Promise<QueuedTurnFinalizationOutcome> | null {
     return this.#ownership.finalization(chatId, turnId);
   }
   // Resumes queued work after every turn, including initial turns that bypass
@@ -741,14 +747,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     } finally {
       await this.#finishDirect(reservation, outcome);
     }
-  }
-
-  async #onDirectTerminal(chatId: string, turn: TurnIdentity | undefined): Promise<void> {
-    const attempt = this.#ownership.attempt(chatId);
-    if (!attempt?.matches(turn)) return;
-    attempt.markTerminalObserved();
-    this.#settleDirectAttempt(chatId, attempt);
-    await attempt.waitUntilSettled();
   }
 
   #settleDirectAttempt(chatId: string, attempt: QueueExecutionAttempt): void {

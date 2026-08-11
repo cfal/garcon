@@ -5009,20 +5009,6 @@ describe('ChatCommandService', () => {
       createdAt: '2026-06-01T00:00:01.000Z',
       deliveryStatus: 'failed',
     });
-    await views.appendAfterEnsuringGeneration(
-      SOURCE_CHAT_ID,
-      transcriptLoader(async () => []),
-      [new UserMessage(
-        '2026-06-01T00:00:00.000Z',
-        'interrupted input',
-        undefined,
-        {
-          clientRequestId: 'req-unconfirmed',
-          turnId: 'turn-unconfirmed',
-          deliveryStatus: 'accepted',
-        },
-      )],
-    );
     await pendingInputsService.reconcileRetainedHistory(SOURCE_CHAT_ID);
     expect(pendingInputsService.hasInFlightForChat(SOURCE_CHAT_ID)).toBe(true);
     pendingInputsService.settleRetainedCohort(
