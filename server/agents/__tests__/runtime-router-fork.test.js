@@ -56,6 +56,14 @@ function makeRouter(fork) {
     },
     forking: { fork, discard: mock(async () => undefined) },
   };
+  const projection = {
+    open: mock(async () => ({
+      kind: 'ready',
+      value: {
+        entries: messages.map((message, index) => ({ id: `entry-${index + 1}`, message })),
+      },
+    })),
+  };
   const entries = new Map([['source-chat', entry]]);
   const registry = {
     getChat: mock((chatId) => entries.get(chatId) ?? null),
@@ -84,11 +92,12 @@ function makeRouter(fork) {
       resolveEndpointReference: mock(() => null),
     },
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
+    projection,
     getCarryOverRevision: () => 'carry-1',
     loadCarriedContext: async () => null,
     getCarryOverMessageCount: async () => 0,
   });
-  return { router, entry, entries, execution, messages, integration };
+  return { router, entry, entries, execution, messages, integration, projection };
 }
 
 describe('AgentRuntimeRouter forks', () => {
@@ -190,8 +199,8 @@ describe('AgentRuntimeRouter forks', () => {
 
   it('maps transcript-load failures before provider fork dispatch', async () => {
     const fork = mock(async () => null);
-    const { router, entry, integration } = makeRouter(fork);
-    integration.transcript.load.mockRejectedValue(new AgentIntegrationError(
+    const { router, entry, projection } = makeRouter(fork);
+    projection.open.mockRejectedValue(new AgentIntegrationError(
       'TRANSCRIPT_UNAVAILABLE',
       'Source transcript is missing',
       false,

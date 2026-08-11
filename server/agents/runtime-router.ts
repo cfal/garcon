@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
+  computeAgentTranscriptRevisions,
   type AgentGoalControlHandoff,
   type AgentExecutionContextV4,
   type AgentTurnOwnerOperationIdentityV4,
@@ -502,20 +503,17 @@ export class AgentRuntimeRouter {
       .reduce((total, integration) => total + integration.execution.runningSessions().length, 0);
   }
 
-  resolvePermission(
+  async resolvePermission(
     chatId: string,
     permissionRequestId: string,
     decision: PermissionDecisionPayload,
-  ): void {
+  ): Promise<void> {
     const entry = this.#registry.getChat(chatId);
     const execution = entry ? this.#directory.get(entry.agentId)?.execution : null;
-    if (!execution?.respondToPermission || !permissionRequestId) return;
-    Promise.resolve(execution.respondToPermission(permissionRequestId, decision)).catch((error) => {
-      logger.warn(
-        'agents: permission reply failed:',
-        error instanceof Error ? error.message : String(error),
-      );
-    });
+    if (!execution?.respondToPermission || !permissionRequestId) {
+      throw new Error('The active integration cannot resolve this permission request');
+    }
+    await execution.respondToPermission(permissionRequestId, decision);
   }
 
   async forkAgentSession(args: {
@@ -559,8 +557,16 @@ export class AgentRuntimeRouter {
         ? await this.#getCarryOverMessageCount(source)
         : 0;
       if (args.messageSequence) {
+        if (sourceSnapshot?.kind !== 'ready') {
+          throw new AgentIntegrationError(
+            'TRANSCRIPT_UNAVAILABLE',
+            'Source transcript is unavailable',
+            sourceSnapshot?.kind === 'deferred'
+              || (sourceSnapshot?.kind === 'degraded' && sourceSnapshot.retryable),
+          );
+        }
         const messageCount = carryOverMessageCount
-          + (sourceSnapshot?.kind === 'ready' ? sourceSnapshot.value.entries.length : 0);
+          + sourceSnapshot.value.entries.length;
         if (args.messageSequence > messageCount) {
           throw new DomainError(
             'TRANSCRIPT_UNAVAILABLE',
@@ -569,16 +575,20 @@ export class AgentRuntimeRouter {
           );
         }
       }
+      const nativePrefixRevision = args.messageSequence && sourceSnapshot?.kind === 'ready'
+        ? computeAgentTranscriptRevisions(
+            sourceSnapshot.value.entries.map((entry) => entry.message),
+            Math.max(0, args.messageSequence - carryOverMessageCount),
+          ).prefix
+        : null;
       const result = await integration.forking.fork({
         ...this.#executionContext(args.targetChatId, source, selection, operation, {}),
         source: sourceReference,
         point: args.messageSequence ? {
           messageSequence: args.messageSequence,
           archivedMessageCount: carryOverMessageCount,
-            sourceRevision: {
-            nativePrefix: sourceSnapshot?.kind === 'ready'
-              ? sourceSnapshot.value.checkpoint.projection.durableRevision
-              : sourceReference.carryOverRevision,
+          sourceRevision: {
+            nativePrefix: nativePrefixRevision!,
             carryOver: sourceReference.carryOverRevision,
           },
         } : null,
