@@ -248,6 +248,25 @@ function collect(runtime) {
   return seen;
 }
 
+async function writePiSessionRows(
+  nativePath: string,
+  rows: readonly { role: 'user' | 'assistant'; text: string }[],
+): Promise<void> {
+  const entries = [
+    { type: 'session', version: 3, id: 'pi-session-1', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
+    ...rows.map((row, index) => ({
+      type: 'message',
+      id: `row-${index + 1}`,
+      parentId: index === 0 ? null : `row-${index}`,
+      timestamp: `2026-01-01T00:00:0${index + 1}.000Z`,
+      message: row.role === 'user'
+        ? { role: 'user', content: row.text, timestamp: 1767225601000 + index }
+        : { role: 'assistant', content: [{ type: 'text', text: row.text }], api: 'anthropic-messages', provider: 'anthropic', model: 'test', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, stopReason: 'stop', timestamp: 1767225601000 + index },
+    })),
+  ];
+  await fs.writeFile(nativePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+}
+
 async function settleIo() {
   for (let index = 0; index < 10; index += 1) await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 5));
@@ -689,7 +708,14 @@ describe('PiRpcRuntime', () => {
     await turn;
     expect(seen.finished).toEqual(['chat-2']);
     expect(seen.messages.flatMap((entry) => entry.messages)).toHaveLength(3);
-    expect(runtime.turnSettlement('chat-2')).toBe('confirmed');
+    // The journalled assistant row is not in the native file yet, so
+    // settlement stays unresolved until Pi persists it.
+    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
+    await writePiSessionRows(baseResumeRequest().nativePath, [
+      { role: 'user', text: 'continue' },
+      { role: 'assistant', text: 'done' },
+    ]);
+    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('confirmed');
     await runtime.shutdown();
   });
 
@@ -1070,7 +1096,7 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
-    expect(runtime.turnSettlement('chat-2')).toBe('unresolved');
+    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
 
     const nextTurn = runtime.runTurn(baseResumeRequest());
     await waitForActive(runtime);
@@ -1101,7 +1127,7 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
-    expect(runtime.turnSettlement('chat-2')).toBe('unresolved');
+    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
     await runtime.shutdown();
   });
 

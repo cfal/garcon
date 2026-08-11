@@ -103,12 +103,13 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
       host,
       execution: providerExecution,
       nativeEvidence,
-      // Pi finishes turns only on agent_settled, but accepted steering without
-      // observed persistence leaves native settlement unresolved, which
-      // withholds terminal success until audit or repair.
-      sourceSettlement: (event) => (
+      // Pi finishes turns only on agent_settled, and success additionally
+      // requires the native session file to contain every finalized row the
+      // turn journalled; any journal-ahead window withholds terminal success
+      // until audit or repair.
+      sourceSettlement: async (event) => (
         event.type === 'finished'
-          ? { kind: 'ready', value: runtime.turnSettlement(event.chatId) }
+          ? { kind: 'ready', value: await runtime.verifyTurnSettlement(event.chatId) }
           : { kind: 'ready', value: 'unresolved' }
       ),
     });

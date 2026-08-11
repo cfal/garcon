@@ -34,7 +34,9 @@ export interface AgentOwnedProjectionOptions {
   readonly nativeEvidence: AgentNativeEvidenceSource;
   readonly sourceSettlement?: (
     event: Extract<AgentProjectionProducerEvent, { readonly type: 'finished' | 'failed' }>,
-  ) => AgentTranscriptAccessResult<'confirmed' | 'unresolved'>;
+  ) =>
+    | AgentTranscriptAccessResult<'confirmed' | 'unresolved'>
+    | Promise<AgentTranscriptAccessResult<'confirmed' | 'unresolved'>>;
   readonly onProjectionError?: (error: unknown, chatId: string) => void;
 }
 
@@ -114,8 +116,9 @@ export function createAgentOwnedProjection(
         case 'finished':
         case 'failed': {
           const projectionFault = faults.get(event.chatId);
-          const settlement = options.sourceSettlement?.(event)
-            ?? { kind: 'ready' as const, value: 'confirmed' as const };
+          const settlement = options.sourceSettlement
+            ? await options.sourceSettlement(event)
+            : { kind: 'ready' as const, value: 'confirmed' as const };
           const sourceSettlement = settlement.kind === 'ready'
             ? settlement.value
             : 'unresolved';

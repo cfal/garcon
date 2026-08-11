@@ -61,7 +61,9 @@ import type {
   PiRetireOptions,
   PiRpcSession,
   PiSteerSubmission,
+  PiTurnSettlementRecord,
 } from './pi-rpc-session-state.js';
+import { loadPiChatMessages } from './history-loader.js';
 import { convertPiToolUse } from './tool-use-converter.js';
 
 export interface PiModelReader {
@@ -73,9 +75,9 @@ const STEER_RESPONSE_TIMEOUT_MS = 15_000;
 
 export class PiRpcRuntime extends AgentEventEmitterRuntime {
   // Settlement evidence for the most recently finished turn per chat. A turn
-  // finishes only on agent_settled, but accepted steering that Pi never
-  // observably persisted leaves native continuity unresolved.
-  readonly #turnSettlements = new Map<string, 'confirmed' | 'unresolved'>();
+  // finishes only on agent_settled, and success additionally requires the
+  // native session file to contain every finalized row the turn journalled.
+  readonly #turnSettlements = new Map<string, PiTurnSettlementRecord>();
 
   readonly #config: PiConfig;
   readonly #logger: AgentLogger;
@@ -599,8 +601,13 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       failureMessage: null,
       steerSubmissions: new Set(),
       steeringQueue: [],
+      settlementBaseline: await this.#countNativeRows(session.nativePath),
+      expectedNative: new Map(),
       settle: resolveSettle,
     };
+    if (typeof prompt.message === 'string' && prompt.message.length > 0) {
+      addExpectedNativeRow(turn.expectedNative, 'user-message', prompt.message);
+    }
     assertPiExecutionOpen(request);
     if (request.executionAdmission) await markPiExecutionStarted(request);
     session.turn = turn;
@@ -684,6 +691,12 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
         includeUser: false,
       });
       if (messages.length > 0) this.emitMessages(session.chatId, messages, session.eventMetadata);
+      for (const finalized of messages) {
+        if (finalized.type === 'assistant-message' && typeof finalized.content === 'string'
+            && finalized.content.length > 0 && session.turn) {
+          addExpectedNativeRow(session.turn.expectedNative, 'assistant-message', finalized.content);
+        }
+      }
 
       const stopReason = message && typeof message === 'object'
         ? (message as Record<string, unknown>).stopReason
@@ -786,18 +799,50 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       (submission) => submission.accepted && !submission.persisted,
     );
     const hasQueuedSteering = turn.steeringQueue.length > 0;
-    this.#turnSettlements.set(
-      session.chatId,
-      hasUnpersistedSteer || hasQueuedSteering ? 'unresolved' : 'confirmed',
-    );
+    this.#turnSettlements.set(session.chatId, {
+      steeringUnresolved: hasUnpersistedSteer || hasQueuedSteering,
+      baseline: turn.settlementBaseline,
+      expected: new Map(turn.expectedNative),
+      nativePath: session.nativePath,
+    });
     this.#completeTurn(session, turn, 'finished');
     if (hasUnpersistedSteer || hasQueuedSteering) {
       this.#retireInBackground(session, 'steering remained uncertain at settle');
     }
   }
 
-  turnSettlement(chatId: string): 'confirmed' | 'unresolved' {
-    return this.#turnSettlements.get(chatId) ?? 'unresolved';
+  // Verifies the last finished turn against the native session file: every
+  // finalized row the turn journalled must have been persisted beyond the
+  // pre-prompt baseline, or settlement stays unresolved and terminal success
+  // is withheld.
+  async verifyTurnSettlement(chatId: string): Promise<'confirmed' | 'unresolved'> {
+    const record = this.#turnSettlements.get(chatId);
+    if (!record || record.steeringUnresolved) return 'unresolved';
+    if (record.expected.size === 0) return 'confirmed';
+    if (!record.nativePath || isArtificialNativePath(record.nativePath)) return 'unresolved';
+    const current = await this.#countNativeRows(record.nativePath);
+    for (const [key, expected] of record.expected) {
+      if ((current.get(key) ?? 0) - (record.baseline.get(key) ?? 0) < expected) {
+        return 'unresolved';
+      }
+    }
+    return 'confirmed';
+  }
+
+  async #countNativeRows(nativePath: string | null): Promise<ReadonlyMap<string, number>> {
+    if (!nativePath || isArtificialNativePath(nativePath)) return new Map();
+    try {
+      const counts = new Map<string, number>();
+      for (const message of await loadPiChatMessages(nativePath)) {
+        if ((message.type === 'user-message' || message.type === 'assistant-message')
+            && typeof message.content === 'string' && message.content.length > 0) {
+          addExpectedNativeRow(counts, message.type, message.content);
+        }
+      }
+      return counts;
+    } catch {
+      return new Map();
+    }
   }
 
   #handleExit(session: PiRpcSession, generation: number, code: number): void {
@@ -961,4 +1006,13 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       // Stream closed.
     }
   }
+}
+
+function addExpectedNativeRow(
+  counts: Map<string, number>,
+  type: 'user-message' | 'assistant-message',
+  content: string,
+): void {
+  const key = `${type}\u0000${content}`;
+  counts.set(key, (counts.get(key) ?? 0) + 1);
 }

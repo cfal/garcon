@@ -18,7 +18,21 @@ export interface PiActiveTurn {
   failureMessage: string | null;
   readonly steerSubmissions: Set<PiSteerSubmission>;
   steeringQueue: readonly string[];
+  // Native rows counted before the prompt was sent and the finalized rows the
+  // turn journalled; settlement verifies the file grew by exactly this
+  // evidence.
+  settlementBaseline: ReadonlyMap<string, number>;
+  readonly expectedNative: Map<string, number>;
   settle(): void;
+}
+
+// Settlement evidence captured when a turn finishes on agent_settled; the
+// verdict is computed lazily against the current native file.
+export interface PiTurnSettlementRecord {
+  readonly steeringUnresolved: boolean;
+  readonly baseline: ReadonlyMap<string, number>;
+  readonly expected: ReadonlyMap<string, number>;
+  readonly nativePath: string | null;
 }
 
 export interface PiRpcSession {

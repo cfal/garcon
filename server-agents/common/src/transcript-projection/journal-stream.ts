@@ -370,6 +370,17 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }
 
   async resolveNativeSession(request: AgentTranscriptRequestV4) {
+    // Resume continuity is typed degraded while the provider lacks committed
+    // rows or has diverged; resuming would silently drop ledger content.
+    const segment = this.#segments.get(segmentKey(request.chat));
+    if (segment) {
+      if (segment.journal.state.nativeContinuity === 'diverged') {
+        return { kind: 'degraded' as const, errorCode: 'PROJECTION_NATIVE_DIVERGENCE', retryable: false };
+      }
+      if (segment.nativeAheadFromOrdinal !== null) {
+        return { kind: 'degraded' as const, errorCode: 'PROJECTION_AHEAD_OF_PROVIDER', retryable: true };
+      }
+    }
     if (!this.options.resolveNativeSession) return { kind: 'ready' as const, value: null };
     return this.options.resolveNativeSession(request);
   }

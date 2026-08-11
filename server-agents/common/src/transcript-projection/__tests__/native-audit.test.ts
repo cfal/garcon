@@ -238,6 +238,30 @@ describe('existing-journal native audit', () => {
     })).resolves.toEqual({ kind: 'unavailable', reason: 'source-diverged' });
   });
 
+  it('degrades resume continuity while ahead and restores it on catch-up', async () => {
+    const directory = await createDirectory();
+    await openContents(streamOver(directory, () => [
+      nativeMessage('item-1', 'first'),
+      nativeMessage('item-2', 'second'),
+    ]));
+
+    const behind = streamOver(directory, () => [nativeMessage('item-1', 'first')]);
+    await openContents(behind);
+    await expect(behind.resolveNativeSession({ chat, signal: signal() })).resolves.toMatchObject({
+      kind: 'degraded',
+      errorCode: 'PROJECTION_AHEAD_OF_PROVIDER',
+      retryable: true,
+    });
+
+    const caughtUp = streamOver(directory, () => [
+      nativeMessage('item-1', 'first'),
+      nativeMessage('item-2', 'second'),
+    ]);
+    await openContents(caughtUp);
+    await expect(caughtUp.resolveNativeSession({ chat, signal: signal() }))
+      .resolves.toEqual({ kind: 'ready', value: null });
+  });
+
   it('fences fork continuity while the provider has not persisted the committed tail', async () => {
     const directory = await createDirectory();
     await openContents(streamOver(directory, () => [
