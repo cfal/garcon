@@ -212,6 +212,7 @@ export class QueueDrainer {
     attempt: QueueExecutionAttempt,
   ): Promise<void> {
     const abortableWaitController = new AbortController();
+    let completed = false;
     const abortable = this.#turnRunner.waitUntilTurnAbortable(
       chatId,
       attempt.identity(),
@@ -228,10 +229,13 @@ export class QueueDrainer {
       void Promise.race([abortable, run.then(() => false, () => false)])
         .finally(() => abortableWaitController.abort());
       await run;
+      completed = true;
     } finally {
       abortableWaitController.abort();
       attempt.markRunSettled();
-      if (!this.#turnRunner.isChatRunning(chatId)) attempt.markTerminalObserved();
+      // Provider idle is not the transcript terminal frontier. A successful
+      // run remains owned until core applies the exact ordered terminal event.
+      if (!completed) attempt.markTerminalObserved();
       this.#callbacks.settleAttempt(chatId, attempt);
     }
   }

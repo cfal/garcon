@@ -773,7 +773,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const attempt = this.#ownership.attempt(reservation.chatId);
     if (attempt) {
       attempt.markRunSettled();
-      if (outcome === 'released' || !this.#turnRunner.isChatRunning(reservation.chatId)) {
+      if (outcome !== 'completed') {
         attempt.markTerminalObserved();
       }
       this.#settleDirectAttempt(reservation.chatId, attempt);

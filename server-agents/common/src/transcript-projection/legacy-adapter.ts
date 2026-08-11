@@ -159,7 +159,12 @@ export function createLegacyProjectionAdapter(
     }
     operations.set(chatId, operation);
     try {
-      return await action();
+      const result = await action();
+      // Blocking legacy runtimes emit their terminal callback before their
+      // execution promise resolves. Flush that already-enqueued frontier so
+      // core cannot observe provider idle ahead of projection persistence.
+      await (chains.get(chatId) ?? Promise.resolve());
+      return result;
     } catch (error) {
       if (operations.get(chatId) === operation) operations.delete(chatId);
       throw error;

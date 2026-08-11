@@ -648,8 +648,10 @@ describe('orchestration', () => {
   let mockChatMessages;
   let mockDrainOptions;
   let orchQueue;
+  let autoTerminal;
 
   beforeEach(async () => {
+    autoTerminal = true;
     mockAgents = {
       runAgentTurn: mock(() => Promise.resolve()),
       captureSteerTarget: mock(() => ({ provider: 'target' })),
@@ -671,9 +673,25 @@ describe('orchestration', () => {
       ampAgentMode: 'deep',
       model: 'persisted-model',
     }));
+    const turnRunner = {
+      runAgentTurn: async (chatId, content, options) => {
+        const result = await mockAgents.runAgentTurn(chatId, content, options);
+        if (autoTerminal) {
+          const turn = orchQueue.captureSteerTarget(chatId)?.identity;
+          orchQueue.onAgentTurnTerminal(chatId, turn);
+        }
+        return result;
+      },
+      captureSteerTarget: (...args) => mockAgents.captureSteerTarget(...args),
+      steerInput: (...args) => mockAgents.steerInput(...args),
+      submitGoalControl: (...args) => mockAgents.submitGoalControl(...args),
+      abortSession: (...args) => mockAgents.abortSession(...args),
+      isChatRunning: (...args) => mockAgents.isChatRunning(...args),
+      waitUntilTurnAbortable: (...args) => mockAgents.waitUntilTurnAbortable(...args),
+    };
     orchQueue = new ChatExecutionCoordinator(
       workspaceDir,
-      mockAgents,
+      turnRunner,
       mockPendingInputs,
       mockChatMessages,
       mockDrainOptions,
@@ -873,6 +891,7 @@ describe('orchestration', () => {
     });
 
     it('keeps a nonblocking runtime attempt until its exact terminal event', async () => {
+      autoTerminal = false;
       let running = false;
       mockAgents.isChatRunning.mockImplementation(() => running);
       const settled = [];
@@ -1404,6 +1423,7 @@ describe('orchestration', () => {
       await prepared.promise;
 
       await orchQueue.completeDirectTurn(reservation);
+      orchQueue.onAgentTurnTerminal('c1', target.identity);
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       expect(idleChats).toEqual([]);
 
