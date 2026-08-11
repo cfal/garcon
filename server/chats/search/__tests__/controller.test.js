@@ -26,8 +26,8 @@ function integration(agentId, source = null) {
   return {
     descriptor: { id: agentId },
     transcript: {
-      resolveIndexSource: mock(async () => source),
-      refreshIndexSource: mock(async () => source),
+      resolveIndexSource: mock(async () => ({ kind: 'ready', value: source })),
+      refreshIndexSource: mock(async () => ({ kind: 'ready', value: source })),
     },
   };
 }
@@ -94,7 +94,10 @@ describe('TranscriptSearchController', () => {
       signal: expect.any(AbortSignal),
     });
     expect(service.reconcile).not.toHaveBeenCalled();
-    release({ ownerId: 'claude', schemaVersion: 1, value: { nativePath: '/tmp/chat.jsonl' } });
+    release({
+      kind: 'ready',
+      value: { ownerId: 'claude', schemaVersion: 1, value: { nativePath: '/tmp/chat.jsonl' } },
+    });
     await Bun.sleep(10);
     expect(service.reconcile).toHaveBeenCalledWith({
       generation: { epoch: 'operation-epoch', sequence: 1 },
