@@ -46,9 +46,12 @@ interface DirectSessionFileRevision {
   size: number;
   mtimeMs: number;
   ctimeMs: number;
+  // Line count of the validated content; appended entries derive their
+  // stable line identity from it without rereading the file.
+  lineCount: number;
 }
 
-function fileRevision(stat: { size: number; mtimeMs: number; ctimeMs: number }): DirectSessionFileRevision {
+function fileRevision(stat: { size: number; mtimeMs: number; ctimeMs: number }): Omit<DirectSessionFileRevision, 'lineCount'> {
   return {
     size: stat.size,
     mtimeMs: stat.mtimeMs,
@@ -56,9 +59,20 @@ function fileRevision(stat: { size: number; mtimeMs: number; ctimeMs: number }):
   };
 }
 
+// Malformed persisted lines still occupy line numbers, so identity counts
+// raw lines, not parsed messages; an unterminated trailing message is a line.
+function countSessionLines(raw: string): number {
+  if (raw.length === 0) return 0;
+  let count = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    if (raw.charCodeAt(index) === 10) count += 1;
+  }
+  return raw.endsWith('\n') ? count : count + 1;
+}
+
 function fileRevisionsMatch(
   left: DirectSessionFileRevision | undefined,
-  right: DirectSessionFileRevision,
+  right: Omit<DirectSessionFileRevision, 'lineCount'>,
 ): boolean {
   return left?.size === right.size
     && left.mtimeMs === right.mtimeMs
@@ -96,7 +110,7 @@ export class DirectSessionStore {
     role: DirectConversationRole,
     content: string,
     identity: DirectMessageIdentity = {},
-  ): Promise<void> {
+  ): Promise<{ lineNumber: number }> {
     await this.#fileSystem.mkdir(this.config.getSessionDir(), { recursive: true });
     const entry: PersistedDirectMessage = {
       role,
@@ -117,10 +131,13 @@ export class DirectSessionStore {
       await file.close().catch(() => {});
     }
     if (!prepared.fileExisted) await this.#syncDirectory(this.config.getSessionDir());
+    const lineNumber = prepared.lineCount + 1;
     await this.#rememberFileRevision(
       sessionFilePath,
       prepared.fileLength + Buffer.byteLength(serialized),
+      lineNumber,
     );
+    return { lineNumber };
   }
 
   async delete(sessionId: string): Promise<void> {
@@ -185,7 +202,7 @@ export class DirectSessionStore {
 
     const messages = parseDirectSession(raw);
     if (raw.endsWith('\n')) {
-      await this.#rememberFileRevision(sessionFilePath, Buffer.byteLength(raw));
+      await this.#rememberFileRevision(sessionFilePath, Buffer.byteLength(raw), countSessionLines(raw));
     }
 
     return messages.length > 0 ? messages : null;
@@ -193,19 +210,22 @@ export class DirectSessionStore {
 
   async #prepareFileForAppend(
     sessionFilePath: string,
-  ): Promise<{ separator: string; fileLength: number; fileExisted: boolean }> {
+  ): Promise<{ separator: string; fileLength: number; fileExisted: boolean; lineCount: number }> {
     try {
       const stat = await this.#fileSystem.stat(sessionFilePath);
-      if (fileRevisionsMatch(
-        this.#validatedFileRevisions.get(sessionFilePath),
-        fileRevision(stat),
-      )) {
-        return { separator: '', fileLength: stat.size, fileExisted: true };
+      const validated = this.#validatedFileRevisions.get(sessionFilePath);
+      if (validated && fileRevisionsMatch(validated, fileRevision(stat))) {
+        return {
+          separator: '',
+          fileLength: stat.size,
+          fileExisted: true,
+          lineCount: validated.lineCount,
+        };
       }
     } catch (error: unknown) {
       if (hasNodeErrorCode(error, 'ENOENT')) {
         this.#validatedFileRevisions.delete(sessionFilePath);
-        return { separator: '', fileLength: 0, fileExisted: false };
+        return { separator: '', fileLength: 0, fileExisted: false, lineCount: 0 };
       }
       throw error;
     }
@@ -215,23 +235,29 @@ export class DirectSessionStore {
       raw = await this.#fileSystem.readFile(sessionFilePath);
     } catch (error: unknown) {
       if (hasNodeErrorCode(error, 'ENOENT')) {
-        return { separator: '', fileLength: 0, fileExisted: false };
+        return { separator: '', fileLength: 0, fileExisted: false, lineCount: 0 };
       }
       throw error;
     }
-    if (raw.length === 0) return { separator: '', fileLength: 0, fileExisted: true };
+    if (raw.length === 0) return { separator: '', fileLength: 0, fileExisted: true, lineCount: 0 };
 
     const lastNewline = raw.lastIndexOf(0x0a);
     const completeLength = lastNewline + 1;
     const complete = raw.subarray(0, completeLength).toString('utf8');
     parseDirectSession(complete);
+    const completeLines = countSessionLines(complete);
     if (completeLength === raw.length) {
-      return { separator: '', fileLength: raw.length, fileExisted: true };
+      return { separator: '', fileLength: raw.length, fileExisted: true, lineCount: completeLines };
     }
 
     const trailing = raw.subarray(completeLength).toString('utf8');
     if (parseDirectMessageLine(trailing)) {
-      return { separator: '\n', fileLength: raw.length, fileExisted: true };
+      return {
+        separator: '\n',
+        fileLength: raw.length,
+        fileExisted: true,
+        lineCount: completeLines + 1,
+      };
     }
     const file = await this.#fileSystem.open(sessionFilePath, 'r+');
     try {
@@ -240,13 +266,22 @@ export class DirectSessionStore {
     } finally {
       await file.close().catch(() => {});
     }
-    return { separator: '', fileLength: completeLength, fileExisted: true };
+    return {
+      separator: '',
+      fileLength: completeLength,
+      fileExisted: true,
+      lineCount: completeLines,
+    };
   }
 
-  async #rememberFileRevision(sessionFilePath: string, expectedSize: number): Promise<void> {
+  async #rememberFileRevision(
+    sessionFilePath: string,
+    expectedSize: number,
+    lineCount: number,
+  ): Promise<void> {
     const stat = await this.#fileSystem.stat(sessionFilePath);
     if (stat.size === expectedSize) {
-      this.#validatedFileRevisions.set(sessionFilePath, fileRevision(stat));
+      this.#validatedFileRevisions.set(sessionFilePath, { ...fileRevision(stat), lineCount });
     } else {
       this.#validatedFileRevisions.delete(sessionFilePath);
     }

@@ -4,6 +4,7 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import { AssistantMessage } from '@garcon/common/chat-types';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { SharedModelOption } from '@garcon/common/models';
 import {
   assertDirectExecutionOpen,
@@ -311,15 +312,20 @@ export abstract class DirectChatRuntimeBase<
       }
 
       session.isFinalizing = true;
-      await this.#sessionStore.append(
+      const appended = await this.#sessionStore.append(
         session.id,
         'assistant',
         response,
         turnIdentity,
       );
       session.messages.push(this.buildAssistantMessage(response));
+      // The row is emitted only after its fsynced append, so the persisted
+      // line is its canonical native identity.
       this.emitMessages(session.chatId, [
-        new AssistantMessage(new Date().toISOString(), response),
+        attachNativeMessageSource(
+          new AssistantMessage(new Date().toISOString(), response),
+          { lineNumber: appended.lineNumber },
+        ),
       ], eventMetadata);
       this.#markSessionIdle(session);
       this.emitFinished(session.chatId, 0, eventMetadata);
