@@ -15,12 +15,16 @@ export interface ChatViewPage {
   hasMore: boolean;
 }
 
+// Deferred is a typed non-error wait state, not exhaustion: the projection
+// store cannot serve a safe read yet, and cold selection retries once on the
+// matching execution-to-idle transition.
 export type ChatHistoryState =
   | { readonly kind: 'complete' }
+  | { readonly kind: 'deferred'; readonly retry: 'execution-settled' }
   | {
       readonly kind: 'degraded';
-      readonly errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE';
-      readonly retryable: false;
+      readonly errorCode: string;
+      readonly retryable: boolean;
     };
 
 export interface CompleteChatHistoryResponse extends ChatViewPage {
@@ -30,8 +34,8 @@ export interface CompleteChatHistoryResponse extends ChatViewPage {
   readonly limit: number;
 }
 
-export interface DegradedChatHistoryResponse {
-  readonly historyState: Extract<ChatHistoryState, { readonly kind: 'degraded' }>;
+export interface UnavailableChatHistoryResponse {
+  readonly historyState: Exclude<ChatHistoryState, { readonly kind: 'complete' }>;
   readonly chatId: string;
   readonly messages: readonly [];
   readonly generationId?: never;
@@ -44,28 +48,38 @@ export interface DegradedChatHistoryResponse {
 
 export type ChatHistoryResponse =
   | CompleteChatHistoryResponse
-  | DegradedChatHistoryResponse;
+  | UnavailableChatHistoryResponse;
 
-export function isDegradedChatHistoryResponse(
+export function isUnavailableChatHistoryResponse(
   response: ChatHistoryResponse,
-): response is DegradedChatHistoryResponse {
-  return response.historyState.kind === 'degraded';
+): response is UnavailableChatHistoryResponse {
+  return response.historyState.kind !== 'complete';
 }
+
+const HISTORY_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 export function parseChatHistoryState(value: unknown): ChatHistoryState | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   if (raw.kind === 'complete' && Object.keys(raw).length === 1) return { kind: 'complete' };
   if (
+    raw.kind === 'deferred'
+    && raw.retry === 'execution-settled'
+    && Object.keys(raw).length === 2
+  ) {
+    return { kind: 'deferred', retry: 'execution-settled' };
+  }
+  if (
     raw.kind === 'degraded'
-    && raw.errorCode === 'CARRYOVER_HISTORY_UNAVAILABLE'
-    && raw.retryable === false
+    && typeof raw.errorCode === 'string'
+    && HISTORY_ERROR_CODE_PATTERN.test(raw.errorCode)
+    && typeof raw.retryable === 'boolean'
     && Object.keys(raw).length === 3
   ) {
     return {
       kind: 'degraded',
-      errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
-      retryable: false,
+      errorCode: raw.errorCode,
+      retryable: raw.retryable,
     };
   }
   return null;

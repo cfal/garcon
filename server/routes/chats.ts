@@ -48,6 +48,7 @@ import {
 } from '../lib/domain-error.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
+import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import type { ChatReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
@@ -64,7 +65,7 @@ import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
 import type {
   CompleteChatHistoryResponse,
-  DegradedChatHistoryResponse,
+  UnavailableChatHistoryResponse,
 } from '../../common/chat-view.js';
 import {
   archivedLogicalCount,
@@ -668,7 +669,17 @@ export default function createChatRoutes({
           },
           chatId,
           messages: [],
-        } satisfies DegradedChatHistoryResponse);
+        } satisfies UnavailableChatHistoryResponse);
+      }
+      // A non-ready projection read is a typed history state, not exhaustion:
+      // deferred retries once on the execution-to-idle transition and degraded
+      // carries the store's own failure code.
+      if (error instanceof TranscriptHistoryUnavailableError) {
+        return Response.json({
+          historyState: error.historyState,
+          chatId,
+          messages: [],
+        } satisfies UnavailableChatHistoryResponse);
       }
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
         return jsonError(

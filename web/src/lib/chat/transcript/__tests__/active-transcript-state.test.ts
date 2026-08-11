@@ -130,6 +130,50 @@ describe('ActiveTranscriptState', () => {
 			.toBe('gap-detected');
 	});
 
+	it('holds deferred history and retries exactly once on the idle transition', async () => {
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			historyState: { kind: 'deferred', retry: 'execution-settled' },
+			chatId: 'chat-1',
+			messages: [],
+		});
+		const chat = new ActiveTranscriptState();
+
+		await chat.loadMessages('chat-1');
+
+		expect(chat.historyState).toEqual({ kind: 'deferred', retry: 'execution-settled' });
+		expect(chat.entries).toEqual([]);
+		// Deferred is not exhaustion: live rows cannot apply against it.
+		expect(chat.applyMessages('chat-1', 'generation-new', [entry(1, assistant('ignored'))]))
+			.toBe('gap-detected');
+		// Only the deferred chat's idle transition consumes the single retry.
+		expect(chat.consumeDeferredHistoryRetry('chat-2')).toBe(false);
+		expect(chat.consumeDeferredHistoryRetry('chat-1')).toBe(true);
+		expect(chat.consumeDeferredHistoryRetry('chat-1')).toBe(false);
+
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			...page({ generationId: 'generation-2' }),
+			chatId: 'chat-1',
+			limit: 50,
+		});
+		await chat.loadMessages('chat-1');
+		expect(chat.historyState).toEqual({ kind: 'complete' });
+		expect(chat.consumeDeferredHistoryRetry('chat-1')).toBe(false);
+	});
+
+	it('drops the deferred retry when another chat activates first', async () => {
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			historyState: { kind: 'deferred', retry: 'execution-settled' },
+			chatId: 'chat-1',
+			messages: [],
+		});
+		const chat = new ActiveTranscriptState();
+		await chat.loadMessages('chat-1');
+
+		chat.activateChat('chat-2');
+
+		expect(chat.consumeDeferredHistoryRetry('chat-1')).toBe(false);
+	});
+
 	it('records applied feed mutations by provenance without counting duplicates', () => {
 		const chat = new ActiveTranscriptState();
 

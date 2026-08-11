@@ -1,5 +1,5 @@
 import {
-	isDegradedChatHistoryResponse,
+	isUnavailableChatHistoryResponse,
 	type ChatHistoryResponse,
 	type ChatViewMessage,
 } from '$shared/chat-view';
@@ -56,7 +56,7 @@ export class BackgroundTranscriptLoader {
 		this.#cache.markStale(chatId);
 		try {
 			const page = await this.#loadPage(chatId);
-			if (isDegradedChatHistoryResponse(page)) {
+			if (isUnavailableChatHistoryResponse(page)) {
 				this.#cache.remove(chatId);
 				this.#pending.delete(chatId);
 				return false;

@@ -1,6 +1,6 @@
 import {
 	applyChatViewMessages,
-	isDegradedChatHistoryResponse,
+	isUnavailableChatHistoryResponse,
 	type ChatHistoryState,
 	type ChatViewMessage,
 	type ChatViewPage,
@@ -86,6 +86,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#snapshotBuffer: SnapshotBatch[] | null = null;
 	#loadEpoch = 0;
 	#notices = new TranscriptNoticeFeed();
+	#deferredRetryChatId: string | null = null;
 	#pendingUserInputsRevision = 0;
 	#pendingUserInputsRevisionAtLoadStart = 0;
 	#pageLoadPromise: Promise<TranscriptPageLoadResult> | null = null;
@@ -254,7 +255,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		messages: ChatViewMessage[],
 		noticeRevision = this.#notices.revision,
 	): MessageApplyResult {
-		if (this.historyState.kind === 'degraded') {
+		if (this.historyState.kind !== 'complete') {
 			this.transcriptCache.markStale(chatId);
 			return 'gap-detected';
 		}
@@ -494,9 +495,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 					this.abortSnapshotLoad(epoch);
 					return this.chatMessages;
 				}
-				if (isDegradedChatHistoryResponse(page)) {
+				if (isUnavailableChatHistoryResponse(page)) {
 					if (epoch !== this.#loadEpoch) return this.chatMessages;
-					this.#setDegradedHistory(chatId, page.historyState);
+					this.#setUnavailableHistory(chatId, page.historyState);
 					return [];
 				}
 				const result = this.setFromPage(chatId, page, epoch);
@@ -590,8 +591,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (!this.#isCurrentPageLoad(chatId, generationId, operationEpoch)) {
 				return 'invalidated';
 			}
-			if (isDegradedChatHistoryResponse(page)) {
-				this.#setDegradedHistory(chatId, page.historyState);
+			if (isUnavailableChatHistoryResponse(page)) {
+				this.#setUnavailableHistory(chatId, page.historyState);
 				return 'invalidated';
 			}
 			if (page.generationId !== generationId) {
@@ -854,8 +855,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			) {
 				return 'invalidated';
 			}
-			if (isDegradedChatHistoryResponse(page)) {
-				this.#setDegradedHistory(chatId, page.historyState);
+			if (isUnavailableChatHistoryResponse(page)) {
+				this.#setUnavailableHistory(chatId, page.historyState);
 				return 'loaded';
 			}
 			if (page.generationId !== generationId) {
@@ -923,9 +924,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.isUserScrolledUp = false;
 	}
 
-	#setDegradedHistory(
+	#setUnavailableHistory(
 		chatId: string,
-		historyState: Extract<ChatHistoryState, { kind: 'degraded' }>,
+		historyState: Exclude<ChatHistoryState, { kind: 'complete' }>,
 	): void {
 		this.#invalidatePageLoad();
 		this.#preserveExpandedVisibleWindow = false;
@@ -947,7 +948,20 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.historyState = historyState;
+		this.#deferredRetryChatId = historyState.kind === 'deferred' ? chatId : null;
 		this.#recordFeedMutation('replacement');
+	}
+
+	// A deferred history response retries exactly once, on the matching
+	// execution-to-idle transition; the caller performs the reload.
+	consumeDeferredHistoryRetry(chatId: string): boolean {
+		if (this.#deferredRetryChatId !== chatId || this.activeChatId !== chatId) return false;
+		if (this.historyState.kind !== 'deferred') {
+			this.#deferredRetryChatId = null;
+			return false;
+		}
+		this.#deferredRetryChatId = null;
+		return true;
 	}
 
 	activateChat(chatId: string | null): ChatRestoreResult | null {

@@ -26,6 +26,7 @@ import type {
   AgentAuthLoginStatus,
 } from '../../common/agent-auth.js';
 import type { IChatRegistry } from '../chats/store.js';
+import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { transcriptRevision } from '../lib/transcript-revision.js';
@@ -334,9 +335,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     }
     const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
     const opened = await this.#projection.open(integration, chat, signal);
-    if (opened.kind !== 'ready') {
-      return { messages: [], revision: transcriptRevision([]), projectionState: null };
-    }
+    if (opened.kind !== 'ready') throw transcriptAccessFailure(opened);
     const messages = opened.value.entries.map((entry) => entry.message);
     return {
       messages,
@@ -357,7 +356,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!integration) return null;
     const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
     const opened = await this.#projection.open(integration, chat, signal);
-    if (opened.kind !== 'ready') return null;
+    if (opened.kind !== 'ready') throw transcriptAccessFailure(opened);
     const total = opened.value.checkpoint.projection.total;
     const page = await this.#projection.page({
       integration,
@@ -367,7 +366,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       beforeOrdinal: Math.max(1, total - offset + 1),
       expectedProjection: opened.value.checkpoint.projection,
     });
-    if (page.kind !== 'ready') return null;
+    // An expired page names a superseded projection state; the caller relists
+    // through the full snapshot instead of treating it as missing history.
+    if (page.kind === 'expired') return null;
+    if (page.kind !== 'ready') throw transcriptAccessFailure(page);
     const messages = page.page.entries.map((entry) => entry.message);
     return {
       messages,
@@ -703,6 +705,16 @@ class ProjectionAdmissionAmbiguousError extends Error {
     });
     this.name = 'ProjectionAdmissionAmbiguousError';
   }
+}
+
+function transcriptAccessFailure(
+  result:
+    | { readonly kind: 'deferred'; readonly retry: 'execution-settled' }
+    | { readonly kind: 'degraded'; readonly errorCode: string; readonly retryable: boolean },
+): TranscriptHistoryUnavailableError {
+  return new TranscriptHistoryUnavailableError(result.kind === 'deferred'
+    ? { kind: 'deferred', retry: 'execution-settled' }
+    : { kind: 'degraded', errorCode: result.errorCode, retryable: result.retryable });
 }
 
 function verifySettledAdmission(

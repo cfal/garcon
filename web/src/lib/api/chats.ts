@@ -417,9 +417,9 @@ export async function getChatMessages(params: {
 	const historyState = parseChatHistoryState(response.historyState);
 	if (historyState === null) throw new Error('Invalid chat messages page: historyState');
 	const chatId = requireNonEmptyString(response.chatId, 'chatId');
-	if (historyState.kind === 'degraded') {
+	if (historyState.kind !== 'complete') {
 		if (!Array.isArray(response.messages) || response.messages.length !== 0) {
-			throw new Error('Invalid degraded chat history: messages');
+			throw new Error('Invalid unavailable chat history: messages');
 		}
 		for (const field of [
 			'generationId',
@@ -430,7 +430,7 @@ export async function getChatMessages(params: {
 			'limit',
 		] as const) {
 			if (response[field] !== undefined) {
-				throw new Error(`Invalid degraded chat history: ${field}`);
+				throw new Error(`Invalid unavailable chat history: ${field}`);
 			}
 		}
 		return { historyState, chatId, messages: [] };

@@ -17,6 +17,7 @@
 		INITIAL_VISIBLE_MESSAGES,
 	} from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { ChatViewMessage } from '$shared/chat-view';
+	import type { ChatProcessingPhase } from '$shared/chat-types';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
 	import type { SplitPanePreviewCursor } from '$lib/chat/split/split-pane-preview-store.svelte.js';
@@ -164,11 +165,24 @@
 		get currentChatId() {
 			return lifecycle.currentChatId;
 		},
-		applyProcessingPhase: (chatId, phase) => lifecycle.applyProcessingPhase(chatId, phase),
-		applyProcessingSnapshotPhase: (chatId, phase, sentAt) =>
-			lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt),
+		applyProcessingPhase: (chatId, phase) => {
+			lifecycle.applyProcessingPhase(chatId, phase);
+			retryDeferredHistoryOnIdle(chatId, phase);
+		},
+		applyProcessingSnapshotPhase: (chatId, phase, sentAt) => {
+			lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt);
+			retryDeferredHistoryOnIdle(chatId, phase);
+		},
 		clearTurnPermissionRequests: () => conversationUi.clearTurnPermissionRequests(),
 	});
+
+	// A deferred history response is a typed wait state; it retries exactly once
+	// on the matching execution-to-idle transition rather than polling.
+	function retryDeferredHistoryOnIdle(chatId: string, phase: ChatProcessingPhase | null): void {
+		if (phase !== null) return;
+		if (!chatState.consumeDeferredHistoryRetry(chatId)) return;
+		void chatState.loadMessages(chatId).catch(() => {});
+	}
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
 	let composerEditorOpenRequestId = $state(0);

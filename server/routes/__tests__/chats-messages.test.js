@@ -18,6 +18,7 @@ import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import { CarryOverHistoryUnavailableError } from '../../chats/carryover-transcript-store.ts';
+import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
 import {
   historyPage,
   snapshotLoader,
@@ -224,6 +225,58 @@ describe('GET /api/v1/chats/messages', () => {
     expect(body.errorCode).toBe('VALIDATION_FAILED');
     expect(body.error).toBe('beforeSeq must be a positive integer');
     expect(chatViews.getOrCreatePage).not.toHaveBeenCalled();
+  });
+
+  it('returns a typed deferred history state instead of an empty page', async () => {
+    const { pendingInputs, routes } = createRoutesFixture({
+      chatViews: {
+        getOrCreatePage: mock(async () => {
+          throw new TranscriptHistoryUnavailableError({
+            kind: 'deferred',
+            retry: 'execution-settled',
+          });
+        }),
+      },
+    });
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123');
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      historyState: { kind: 'deferred', retry: 'execution-settled' },
+      chatId: '123',
+      messages: [],
+    });
+    expect(pendingInputs.reconcileRetainedHistory).not.toHaveBeenCalled();
+  });
+
+  it('returns the projection store failure code as degraded history state', async () => {
+    const { routes } = createRoutesFixture({
+      chatViews: {
+        getOrCreatePage: mock(async () => {
+          throw new TranscriptHistoryUnavailableError({
+            kind: 'degraded',
+            errorCode: 'PROJECTION_REPAIR_REQUIRED',
+            retryable: true,
+          });
+        }),
+      },
+    });
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123');
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      historyState: {
+        kind: 'degraded',
+        errorCode: 'PROJECTION_REPAIR_REQUIRED',
+        retryable: true,
+      },
+      chatId: '123',
+      messages: [],
+    });
   });
 
   it('returns a retryable transcript error instead of an empty successful page', async () => {

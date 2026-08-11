@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.js';
 import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { OrderedChatTranscriptReader } from '../ordered-chat-transcript-reader.js';
+import { TranscriptHistoryUnavailableError } from '../errors.js';
 
 const timestamp = '2026-08-07T00:00:00.000Z';
 const segmentId = '11111111-1111-4111-8111-111111111111';
@@ -86,6 +87,26 @@ function fixture(options = {}) {
 }
 
 describe('OrderedChatTranscriptReader', () => {
+  it('propagates a typed deferred read instead of composing empty history', async () => {
+    const deferred = new TranscriptHistoryUnavailableError({
+      kind: 'deferred',
+      retry: 'execution-settled',
+    });
+    const state = fixture({
+      loadNativePage: mock(async () => {
+        throw deferred;
+      }),
+    });
+    state.loadNativeSnapshot.mockImplementation(async () => {
+      throw deferred;
+    });
+
+    await expect(state.reader.loadPage('chat-1', 3, 0)).rejects.toBe(deferred);
+    await expect(state.reader.loadAll('chat-1')).rejects.toMatchObject({
+      code: 'TRANSCRIPT_DEFERRED',
+    });
+  });
+
   it('keeps native paging enabled while translating composite offsets', async () => {
     const { reader, loadArchivedPage, loadNativePage, loadNativeSnapshot } = fixture();
 
