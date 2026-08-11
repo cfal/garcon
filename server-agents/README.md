@@ -185,7 +185,7 @@ exist inside the package, and match the package's real build needs.
 
 ## Behavioral Requirements
 
-Execution must preserve the `AgentOperationIdentity` supplied by core on every
+Execution must preserve the `AgentOperationIdentityV4` supplied by core on every
 emitted event. Respect the request `AbortSignal` and the admission transitions;
 do not make a session externally abortable before the provider runtime can
 actually stop it. Normalize provider failures to `AgentIntegrationError` and

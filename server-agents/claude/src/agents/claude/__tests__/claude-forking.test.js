@@ -2,9 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { access, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
+import { createProjectionJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { computeAgentTranscriptRevision } from '@garcon/server-agent-interface';
 import {
   claudeForkSemanticDigest,
   projectClaudeForkEntry,
@@ -80,14 +79,14 @@ describe('Claude JSONL forking', () => {
     await writeFile(sourcePath, sourceContent);
 
     const nativeSessions = createPathNativeSessionCodec('claude');
-    const transcript = {
+    const nativeEvidence = {
       async resolveNativeSession({ chat }) {
         return chat.nativeSession;
       },
       async load({ chat }) {
         const nativePath = nativeSessions.decode(chat.nativeSession).path;
         const messages = await loadClaudeChatMessages(nativePath, undefined, { throwOnError: true });
-        return { messages, revision: computeAgentTranscriptRevision(messages) };
+        return { messages };
       },
     };
     const sourceNativeSession = nativeSessions.encode({
@@ -127,9 +126,11 @@ describe('Claude JSONL forking', () => {
       },
       point: null,
     };
-    const forking = createJsonlForking({
+    const forking = createProjectionJsonlForking({
+      ownerId: 'claude',
+      projection: { resolveNativeForkPoint: async () => ({ kind: 'unavailable', reason: 'no-native-source' }) },
       supportsWhileRunning: true,
-      transcript,
+      nativeEvidence,
       nativeSessions,
       rewriteEntry: projectClaudeForkEntry,
       transformEntries: transformClaudeForkTranscript,
@@ -193,9 +194,11 @@ describe('Claude JSONL forking', () => {
       modelEndpointId: null,
     });
     const settings = { ownerId: 'claude', schemaVersion: 1, values: {} };
-    const forking = createJsonlForking({
+    const forking = createProjectionJsonlForking({
+      ownerId: 'claude',
+      projection: { resolveNativeForkPoint: async () => ({ kind: 'unavailable', reason: 'no-native-source' }) },
       supportsWhileRunning: true,
-      transcript: {
+      nativeEvidence: {
         async resolveNativeSession({ chat }) {
           return chat.nativeSession;
         },

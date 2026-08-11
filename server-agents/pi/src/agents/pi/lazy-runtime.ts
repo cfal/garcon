@@ -1,6 +1,6 @@
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
-  AgentSteerRequest,
+  AgentSteerRequestV4,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -17,7 +17,7 @@ export interface PiRuntime {
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null;
-  steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
+  steer(request: AgentSteerRequestV4): Promise<AgentSteerResult>;
   startPurgeTimer(): void;
   shutdown(): Promise<void>;
   onMessages(callback: Parameters<AgentEventEmitterRuntime['onMessages']>[0]): void;
@@ -73,7 +73,7 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
     return this.#runtime?.captureSteerTarget(agentSessionId) ?? null;
   }
 
-  steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
+  steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
     return this.#runAfterLoad(request.agentSessionId, (runtime) => runtime.steer(request));
   }
 

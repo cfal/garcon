@@ -1,5 +1,5 @@
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
+import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 
 export interface FactoryCommandImage {
   readonly data: string;
@@ -53,7 +53,7 @@ export async function markFactoryExecutionStarted(
 
 export function factoryEventMetadata(
   request: Pick<FactoryExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentOperationIdentity['commandType'],
+  commandType?: AgentTurnReceiptOwner['commandType'],
 ) {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

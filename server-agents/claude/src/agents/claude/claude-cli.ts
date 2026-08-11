@@ -11,7 +11,7 @@ import {
 } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
   AgentLogger,
-  AgentSteerRequest,
+  AgentSteerRequestV4,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -816,7 +816,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     return this.#steering.captureTarget(agentSessionId);
   }
 
-  steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
+  steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
     return this.#steering.steer(request);
   }
 

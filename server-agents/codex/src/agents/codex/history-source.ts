@@ -2,21 +2,14 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import {
   AgentIntegrationError,
   type AgentLogger,
-  type AgentTranscriptPage,
-  type AgentTranscriptPreview,
 } from '@garcon/server-agent-interface';
-import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
 import type { CodexAppServerClientOptions } from './app-server/client.js';
 import { CodexAppServerClient } from './app-server/client.js';
 import {
   PaginatedCodexHistorySource,
   type CodexPaginatedHistoryClient,
 } from './app-server/paginated-history-source.js';
-import {
-  getCodexPreviewFromNativePath,
-  loadCodexChatMessagePage,
-  loadCodexChatMessages,
-} from './history-loader.js';
+import { loadCodexChatMessages } from './history-loader.js';
 import {
   inspectCodexHistoryProfile,
   type CodexHistoryProfile,
@@ -64,44 +57,6 @@ export class CodexHistoryService {
       });
     }
     return this.#paginated(profile).load(signal);
-  }
-
-  async loadPage(
-    session: CodexChatEntry,
-    page: { readonly limit: number; readonly offset: number },
-    signal: AbortSignal = NEVER_ABORTED,
-  ): Promise<AgentTranscriptPage | null> {
-    const profile = await this.inspect(session, signal);
-    if (!profile) return null;
-    if (profile.mode === 'legacy') {
-      return loadCodexChatMessagePage(
-        profile.nativePath,
-        page.limit,
-        page.offset,
-        this.#logger,
-        signal,
-      );
-    }
-    return this.#paginated(profile).loadPage(page, signal);
-  }
-
-  async preview(
-    session: CodexChatEntry,
-    signal: AbortSignal = NEVER_ABORTED,
-  ): Promise<AgentTranscriptPreview | null> {
-    const profile = await this.inspect(session, signal);
-    if (!profile) return null;
-    if (profile.mode === 'legacy') {
-      return getCodexPreviewFromNativePath(profile.nativePath, this.#logger, signal);
-    }
-    return this.#paginated(profile).preview(signal);
-  }
-
-  async revision(
-    session: CodexChatEntry,
-    signal: AbortSignal = NEVER_ABORTED,
-  ): Promise<string> {
-    return transcriptRevision(await this.load(session, signal));
   }
 
   #paginated(

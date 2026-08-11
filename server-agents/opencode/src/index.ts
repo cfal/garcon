@@ -2,12 +2,11 @@ import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/cha
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
+  type AgentChatReference,
   type AgentHost,
-  type AgentIntegration,
   type AgentIntegrationV4,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import {
@@ -23,10 +22,7 @@ import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/si
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createOpenCodeConfig } from './config.js';
 import { OpenCodeExecution } from './agents/opencode/execution.js';
-import {
-  getOpenCodePreviewFromSessionId,
-  loadOpenCodeChatMessages,
-} from './agents/opencode/history-loader.js';
+import { loadOpenCodeChatMessages } from './agents/opencode/history-loader.js';
 import { getOpenCodeAuthStatus } from './agents/opencode/opencode-auth.js';
 import { OpenCodeRuntime } from './agents/opencode/opencode.js';
 
@@ -67,14 +63,14 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking: NonNullable<AgentIntegrationV4['forking']>;
   readonly steering: NonNullable<AgentIntegrationV4['steering']>;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
   readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
@@ -91,12 +87,12 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const providerExecution = new OpenCodeExecution(runtime, nativeSessions);
-    const nativeTranscript = createOpenCodeTranscript(runtime, nativeSessions, sessionId, logger);
+    const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId, logger);
     const projection = createAgentOwnedProjection({
       ownerId: 'opencode',
       host,
       execution: providerExecution,
-      transcript: nativeTranscript,
+      nativeEvidence,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -199,8 +195,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
 }
 
 type NativeSessionCodec = ReturnType<typeof createPathNativeSessionCodec>;
-type ChatReference = Parameters<AgentTranscript['load']>[0]['chat'];
-type SessionReference = Pick<ChatReference, 'nativeSession'> & {
+type SessionReference = Pick<AgentChatReference, 'nativeSession'> & {
   readonly agentSessionId?: string | null;
 };
 
@@ -213,33 +208,12 @@ function createSessionIdResolver(nativeSessions: NativeSessionCodec) {
   };
 }
 
-function createOpenCodeTranscript(
+function createOpenCodeNativeEvidence(
   runtime: OpenCodeRuntime,
   nativeSessions: NativeSessionCodec,
   sessionId: (chat: SessionReference) => string | null,
   logger: AgentHost['logger'],
-): AgentTranscript {
-  const loadMessages = async (chat: ChatReference, signal: AbortSignal) => {
-    const id = sessionId(chat);
-    if (!id) return [];
-    return runtime.withClientLease((client) => (
-      loadOpenCodeChatMessages(id, async () => client, {
-        directory: chat.projectPath,
-        signal,
-        logger,
-      })
-    ));
-  };
-  const resolveIndexSource = async (chat: ChatReference, signal: AbortSignal) => {
-    const id = sessionId(chat);
-    if (!id) return null;
-    const baseUrl = await runtime.getTranscriptIndexEndpoint(signal);
-    return {
-      ownerId: 'opencode',
-      schemaVersion: 1,
-      value: { baseUrl, sessionId: id, directory: chat.projectPath },
-    } as const;
-  };
+): AgentNativeEvidenceSource {
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -253,39 +227,16 @@ function createOpenCodeTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat, signal);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
       const id = sessionId(chat);
-      if (!id) return null;
-      return runtime.withClientLease((client) => (
-        getOpenCodePreviewFromSessionId(id, async () => client, {
-          directory: chat.projectPath,
-          signal,
-          logger,
-        })
-      ));
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat, signal));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      return resolveIndexSource(chat, signal);
-    },
-    async refreshIndexSource({ chat, failedSource, signal }) {
-      signal.throwIfAborted();
-      const failedBaseUrl = failedSource.value.baseUrl;
-      if (typeof failedBaseUrl !== 'string') return resolveIndexSource(chat, signal);
-      const id = sessionId(chat);
-      if (!id) return null;
-      const baseUrl = await runtime.refreshTranscriptIndexEndpoint(failedBaseUrl, signal);
+      if (!id) return { messages: [] };
       return {
-        ownerId: 'opencode',
-        schemaVersion: 1,
-        value: { baseUrl, sessionId: id, directory: chat.projectPath },
+        messages: await runtime.withClientLease((client) => (
+          loadOpenCodeChatMessages(id, async () => client, {
+            directory: chat.projectPath,
+            signal,
+            logger,
+          })
+        )),
       };
     },
     async describeSource({ chat, signal }) {

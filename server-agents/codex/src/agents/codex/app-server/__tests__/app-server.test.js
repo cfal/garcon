@@ -6244,44 +6244,6 @@ describe('CodexAppServerRuntime', () => {
 
   });
 
-  it('loads previews from native Codex JSONL', async () => {
-    const nativePath = path.join(tmpDir, 'preview-thread.jsonl');
-    await writeJsonl(nativePath, [
-      {
-        type: 'session_meta',
-        timestamp: '2026-02-21T09:59:59.000Z',
-        payload: { id: 'thread-1', history_mode: 'legacy' },
-      },
-      {
-        type: 'event_msg',
-        timestamp: '2026-02-21T10:00:00.000Z',
-        payload: { type: 'user_message', message: 'Preview prompt' },
-      },
-      {
-        type: 'response_item',
-        timestamp: '2026-02-21T10:00:01.000Z',
-        payload: {
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: 'Preview answer' }],
-        },
-      },
-    ]);
-    const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-
-    const preview = await provider.getPreview({
-      provider: 'codex',
-      agentSessionId: 'thread-1',
-      nativePath,
-      projectPath: '/repo',
-    });
-
-    expect(preview.firstMessage).toBe('Preview prompt');
-    expect(preview.lastMessage).toBe('Preview answer');
-    expect(fake.connect).toHaveBeenCalledTimes(0);
-  });
-
   it('uses an operation-scoped client with effective env and config for forks', async () => {
     const nativePath = path.join(tmpDir, 'forked-thread.jsonl');
     const operationClient = new FakeClient({

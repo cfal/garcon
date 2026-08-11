@@ -15,12 +15,7 @@ import type { AgentModelOption } from '@garcon/common/agents';
 import type { ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
 import type { SlashCommand } from '@garcon/common/slash-commands';
-import type {
-  AgentCompactRequest,
-  AgentExecutionContext,
-  AgentResumeRequest,
-  AgentStartedSession,
-} from './execution.js';
+import type { AgentStartedSession } from './execution.js';
 import type {
   AgentCompactRequestV4,
   AgentExecutionContextV4,
@@ -72,11 +67,6 @@ export interface AgentCommands {
   discover(projectPath: string, signal: AbortSignal): Promise<readonly SlashCommand[]>;
 }
 
-export interface AgentSteering {
-  captureTarget(request: AgentSteerTargetRequest): AgentSteerTarget | null;
-  steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
-}
-
 export interface AgentSteeringV4 {
   captureTarget(request: AgentSteerTargetRequest): AgentSteerTarget | null;
   steer(request: AgentSteerRequestV4): Promise<AgentSteerResult>;
@@ -90,7 +80,7 @@ export interface AgentSteerTargetRequest {
   readonly nativeSession: AgentNativeSessionRef | null;
 }
 
-export interface AgentSteerRequest {
+export interface AgentSteerRequestV4 {
   readonly chatId: string;
   readonly projectPath: string;
   readonly agentSessionId: string;
@@ -99,9 +89,6 @@ export interface AgentSteerRequest {
   readonly input: string;
   readonly clientMessageId: string;
   readonly prepareDelivery: () => Promise<void>;
-}
-
-export interface AgentSteerRequestV4 extends AgentSteerRequest {
   readonly operation: AgentTranscriptAdmissionIdentity;
 }
 
@@ -125,16 +112,8 @@ export type AgentSteerResult =
       readonly message: string;
     };
 
-export interface AgentGoals {
-  submitControl(request: AgentGoalControlRequest): Promise<boolean>;
-}
-
 export interface AgentGoalsV4 {
   submitControl(request: AgentGoalControlRequestV4): Promise<boolean>;
-}
-
-export interface AgentGoalControlRequest extends AgentResumeRequest {
-  readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
 }
 
 export interface AgentGoalControlRequestV4 extends AgentResumeRequestV4 {
@@ -151,25 +130,14 @@ export interface AgentGoalControlHandoff {
 // cached reads, plan state, MCP connections, session permission grants. Absent
 // this facet the chat can still shed context through `/handoff`, which starts a
 // fresh session from a projected transcript instead.
-export interface AgentCompaction {
-  compact(request: AgentCompactRequest): Promise<void>;
-}
-
 export interface AgentCompactionV4 {
   compact(request: AgentCompactRequestV4): Promise<void>;
 }
 
-export interface AgentForking {
+export interface AgentForkingV4 {
   readonly supportsAtMessage: boolean;
   // Gates both whole-session and at-message forks: a running provider session must tolerate
   // having its transcript read and copied while it is still appending to it.
-  readonly supportsWhileRunning: boolean;
-  fork(request: AgentForkRequest): Promise<AgentForkOutcome>;
-  discard(session: AgentStartedSession, signal: AbortSignal): Promise<void>;
-}
-
-export interface AgentForkingV4 {
-  readonly supportsAtMessage: boolean;
   readonly supportsWhileRunning: boolean;
   resolvePoint(request: AgentForkPointResolutionRequestV4): Promise<AgentNativeForkResolution>;
   fork(request: AgentForkRequestV4): Promise<AgentForkOutcome>;
@@ -194,15 +162,6 @@ export interface AgentForkRequestV4 extends AgentExecutionContextV4 {
 export type AgentForkOutcome =
   | { readonly kind: 'materialized'; readonly session: AgentStartedSession }
   | { readonly kind: 'unmaterialized' };
-
-export interface AgentForkRequest extends AgentExecutionContext {
-  readonly source: AgentChatReference;
-  readonly point: {
-    readonly messageSequence: number;
-    readonly archivedMessageCount: number;
-    readonly sourceRevision: { readonly nativePrefix: string; readonly carryOver: string };
-  } | null;
-}
 
 export interface AgentLifecycle {
   start(): Promise<void>;

@@ -3,12 +3,11 @@ import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 import { CLAUDE_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
+  type AgentChatReference,
   type AgentHost,
-  type AgentIntegration,
   type AgentIntegrationV4,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
@@ -38,11 +37,7 @@ import {
   projectClaudeForkEntry,
   transformClaudeForkTranscript,
 } from './agents/claude/fork-transcript.js';
-import {
-  getClaudePreviewFromNativePath,
-  loadClaudeChatMessagePage,
-  loadClaudeChatMessages,
-} from './agents/claude/history-loader.js';
+import { loadClaudeChatMessages } from './agents/claude/history-loader.js';
 import {
   createClaudeNativePath,
   resolveClaudeNativePath,
@@ -89,14 +84,14 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegration['auth']>;
-  readonly commands: NonNullable<AgentIntegration['commands']>;
+  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
+  readonly commands: NonNullable<AgentIntegrationV4['commands']>;
   readonly compaction = null;
   readonly forking;
   readonly steering: NonNullable<AgentIntegrationV4['steering']>;
   readonly goals = null;
-  readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
-  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly endpoints: NonNullable<AgentIntegrationV4['endpoints']>;
+  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
   readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
@@ -162,7 +157,7 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
       logger,
       config,
     );
-    const nativeTranscript = createClaudeTranscript({
+    const nativeEvidence = createClaudeNativeEvidence({
       nativeSessions,
       configHomeDir: config.configHomeDir,
       logger,
@@ -171,7 +166,7 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
       ownerId: 'claude',
       host,
       execution: providerExecution,
-      transcript: nativeTranscript,
+      nativeEvidence,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -208,7 +203,7 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
       ownerId: 'claude',
       projection: projection.transcript,
       supportsWhileRunning: true,
-      transcript: nativeTranscript,
+      nativeEvidence,
       nativeSessions,
       rewriteEntry: projectClaudeForkEntry,
       transformEntries: transformClaudeForkTranscript,
@@ -271,12 +266,12 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
   }
 }
 
-function createClaudeTranscript(options: {
+function createClaudeNativeEvidence(options: {
   readonly nativeSessions: ReturnType<typeof createPathNativeSessionCodec>;
   readonly configHomeDir: () => string | null;
   readonly logger: AgentHost['logger'];
-}): AgentTranscript {
-  const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+}): AgentNativeEvidenceSource {
+  const reference = (chat: AgentChatReference) => {
     const native = options.nativeSessions.decode(chat.nativeSession);
     return {
       projectPath: chat.projectPath,
@@ -284,7 +279,7 @@ function createClaudeTranscript(options: {
       nativePath: native.path,
     };
   };
-  const derivedPath = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+  const derivedPath = async (chat: AgentChatReference) => {
     const value = reference(chat);
     return value.nativePath ?? (value.agentSessionId
       ? createClaudeNativePath(chat.projectPath, value.agentSessionId, {
@@ -292,19 +287,6 @@ function createClaudeTranscript(options: {
           logger: options.logger,
         })
       : null);
-  };
-  const loadMessages = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
-    loadClaudeChatMessages(await derivedPath(chat), options.logger)
-  );
-  const resolveIndexSource = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-  ) => {
-    const nativePath = await derivedPath(chat);
-    return nativePath ? {
-      ownerId: 'claude',
-      schemaVersion: 1,
-      value: { nativePath },
-    } as const : null;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -324,42 +306,7 @@ function createClaudeTranscript(options: {
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async loadPage({ chat, page, signal }) {
-      signal.throwIfAborted();
-      return loadClaudeChatMessagePage(
-        await derivedPath(chat),
-        page.limit,
-        page.offset,
-        options.logger,
-      );
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      const nativePath = await derivedPath(chat);
-      if (!nativePath) return null;
-      const preview = await getClaudePreviewFromNativePath(nativePath, options.logger);
-      if (!preview) return null;
-      return {
-        firstMessage: preview.firstMessage,
-        lastMessage: preview.lastMessage,
-        createdAt: typeof preview.createdAt === 'string' ? preview.createdAt : null,
-        lastActivity: preview.lastActivity,
-      };
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      return { messages: await loadClaudeChatMessages(await derivedPath(chat), options.logger) };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

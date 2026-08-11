@@ -3,7 +3,6 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
 import { PaginatedCodexHistorySource } from '../paginated-history-source.ts';
 
 const profile = {
@@ -86,12 +85,6 @@ describe('PaginatedCodexHistorySource', () => {
     expect(messages[1]).toMatchObject({ type: 'bash-tool-use', command: 'pwd' });
     expect(messages[3].timestamp).toBe(profile.createdAt);
     expect(shutdown).toHaveBeenCalledTimes(1);
-
-    const page = await source.loadPage({ limit: 2, offset: 1 }, new AbortController().signal);
-    expect(page.messages).toEqual(messages.slice(1, 3));
-    expect(page).toMatchObject({ total: 4, hasMore: true, offset: 1, limit: 2 });
-    expect(page.revision).toBe(transcriptRevision(messages));
-    expect(shutdown).toHaveBeenCalledTimes(2);
   });
 
   it('fails repeated cursors and always shuts down the client', async () => {
@@ -112,36 +105,6 @@ describe('PaginatedCodexHistorySource', () => {
       },
     });
     expect(shutdown).toHaveBeenCalledTimes(1);
-  });
-
-  it('uses the newest rendered item timestamp for preview activity', async () => {
-    const pages = new Map([['first', {
-      data: [
-        turn('turn-1', [
-          { type: 'userMessage', id: 'user-1', content: [{ type: 'text', text: 'hello' }] },
-          { type: 'agentMessage', id: 'assistant-1', text: 'done', phase: null, memoryCitation: null },
-        ], 1_753_056_000),
-        turn('turn-2', [{
-          type: 'commandExecution', id: 'command-1', command: 'pwd', cwd: '/repo',
-          processId: null, source: 'agent', status: 'completed', commandActions: [],
-          aggregatedOutput: '/repo', exitCode: 0, durationMs: 4,
-        }], 1_753_056_100),
-      ],
-      nextCursor: null,
-      backwardsCursor: null,
-    }]]);
-    const source = new PaginatedCodexHistorySource(
-      profile,
-      () => clientForPages(pages),
-      async () => [],
-    );
-
-    await expect(source.preview(new AbortController().signal)).resolves.toEqual({
-      firstMessage: 'hello',
-      lastMessage: 'done',
-      createdAt: profile.createdAt,
-      lastActivity: '2025-07-21T00:01:40.000Z',
-    });
   });
 
   it('supplements paginated history with exact client ids from rollout item events', async () => {

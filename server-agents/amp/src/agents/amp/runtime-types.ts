@@ -1,5 +1,5 @@
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
+import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 
 export interface AmpExecutionAdmission {
   readonly signal: AbortSignal;
@@ -46,7 +46,7 @@ export async function markAmpExecutionStarted(
 
 export function ampEventMetadata(
   request: Pick<AmpExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentOperationIdentity['commandType'],
+  commandType?: AgentTurnReceiptOwner['commandType'],
 ) {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

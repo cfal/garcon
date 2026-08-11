@@ -2,13 +2,11 @@ import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/cha
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
+  type AgentChatReference,
   type AgentHost,
-  type AgentIntegration,
   type AgentIntegrationV4,
-  type AgentTranscript,
-  type AgentTranscriptPreview,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
@@ -84,14 +82,14 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking: NonNullable<AgentIntegrationV4['forking']>;
   readonly steering = null;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
   readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
@@ -111,12 +109,12 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const providerExecution = new CursorExecution(runtime, nativeSessions);
-    const nativeTranscript = createCursorTranscript(transcriptReader, nativeSessions);
+    const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions);
     const projection = createAgentOwnedProjection({
       ownerId: 'cursor',
       host,
       execution: providerExecution,
-      transcript: nativeTranscript,
+      nativeEvidence,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -203,8 +201,7 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
 }
 
 type NativeSessionCodec = ReturnType<typeof createPathNativeSessionCodec>;
-type ChatReference = Parameters<AgentTranscript['load']>[0]['chat'];
-type CursorReferenceInput = Pick<ChatReference, 'projectPath' | 'nativeSession'> & {
+type CursorReferenceInput = Pick<AgentChatReference, 'projectPath' | 'nativeSession'> & {
   readonly agentSessionId?: string | null;
 };
 
@@ -218,27 +215,10 @@ function cursorReference(chat: CursorReferenceInput, nativeSessions: NativeSessi
   };
 }
 
-function createCursorTranscript(
+function createCursorNativeEvidence(
   reader: ReturnType<typeof createCursorTranscriptSource>,
   nativeSessions: NativeSessionCodec,
-): AgentTranscript {
-  const loadMessages = (chat: ChatReference) => reader.loadMessages(
-    cursorReference(chat, nativeSessions),
-    { chatId: chat.chatId },
-  );
-  const resolveIndexSource = (chat: ChatReference) => {
-    const reference = cursorReference(chat, nativeSessions);
-    if (!reference.agentSessionId) return null;
-    return {
-      ownerId: 'cursor',
-      schemaVersion: 1,
-      value: {
-        sessionId: reference.agentSessionId,
-        projectPath: reference.projectPath,
-        storePath: cursorStoreDbPath(reference.agentSessionId, reference.projectPath),
-      },
-    } as const;
-  };
+): AgentNativeEvidenceSource {
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -252,49 +232,24 @@ function createCursorTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      return normalizePreview(await reader.getPreview(cursorReference(chat, nativeSessions)));
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      return {
+        messages: await reader.loadMessages(
+          cursorReference(chat, nativeSessions),
+          { chatId: chat.chatId },
+        ),
+      };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();
-      const source = resolveIndexSource(chat);
-      const storePath = source?.value.storePath;
-      return typeof storePath === 'string'
-        ? { kind: 'filesystem-path', value: storePath }
-        : null;
+      const reference = cursorReference(chat, nativeSessions);
+      if (!reference.agentSessionId) return null;
+      return {
+        kind: 'filesystem-path',
+        value: cursorStoreDbPath(reference.agentSessionId, reference.projectPath),
+      };
     },
     async release({ signal }) {
       signal.throwIfAborted();
     },
-  };
-}
-
-function normalizePreview(value: unknown): AgentTranscriptPreview | null {
-  if (!value || typeof value !== 'object') return null;
-  const preview = value as Record<string, unknown>;
-  if (typeof preview.firstMessage !== 'string') return null;
-  return {
-    firstMessage: preview.firstMessage,
-    lastMessage: typeof preview.lastMessage === 'string'
-      ? preview.lastMessage
-      : preview.firstMessage,
-    createdAt: typeof preview.createdAt === 'string' ? preview.createdAt : null,
-    lastActivity: typeof preview.lastActivity === 'string' ? preview.lastActivity : null,
   };
 }

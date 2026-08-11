@@ -1,31 +1,24 @@
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
+  type AgentChatReference,
   type AgentLogger,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import type { CodexConfig } from '../../config.js';
 import type { CodexAppServerRuntime } from './app-server/runtime.js';
-import { inspectCodexHistoryProfile } from './history-profile.js';
 import { resolveCodexNativePath } from './native-path.js';
 
 type CodexTranscriptRuntime = Pick<
   CodexAppServerRuntime,
-  | 'getPreview'
-  | 'loadMessagePage'
-  | 'loadMessages'
-  | 'requestNativePathDiscoveryRefresh'
-  | 'resolveNativePath'
+  'loadMessages' | 'requestNativePathDiscoveryRefresh' | 'resolveNativePath'
 >;
 
-export function createCodexTranscript(
+export function createCodexNativeEvidence(
   runtime: CodexTranscriptRuntime,
   nativeSessions: PathNativeSessionCodec,
-  config: CodexConfig,
   logger: AgentLogger,
-): AgentTranscript {
-  const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+): AgentNativeEvidenceSource {
+  const reference = (chat: AgentChatReference) => {
     const native = nativeSessions.decode(chat.nativeSession);
     return {
       projectPath: chat.projectPath,
@@ -34,10 +27,7 @@ export function createCodexTranscript(
       nativePath: native.path,
     };
   };
-  const resolvePath = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-    signal: AbortSignal,
-  ) => {
+  const resolvePath = async (chat: AgentChatReference, signal: AbortSignal) => {
     const value = reference(chat);
     return resolveCodexNativePath(
       {
@@ -51,10 +41,7 @@ export function createCodexTranscript(
       },
     );
   };
-  const resolvedReference = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-    signal: AbortSignal,
-  ) => {
+  const resolvedReference = async (chat: AgentChatReference, signal: AbortSignal) => {
     const value = reference(chat);
     const nativePath = await resolvePath(chat, signal);
     if (value.agentSessionId && !nativePath) {
@@ -71,10 +58,7 @@ export function createCodexTranscript(
     }
     return { ...value, nativePath };
   };
-  const retryableReference = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-    signal: AbortSignal,
-  ) => {
+  const retryableReference = async (chat: AgentChatReference, signal: AbortSignal) => {
     const value = reference(chat);
     try {
       return await resolvedReference(chat, signal);
@@ -89,37 +73,6 @@ export function createCodexTranscript(
       }
       throw error;
     }
-  };
-  const loadMessages = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-    signal: AbortSignal,
-  ) => runtime.loadMessages(await resolvedReference(chat, signal), signal);
-  const loadRetryableMessages = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-    signal: AbortSignal,
-  ) => runtime.loadMessages(await retryableReference(chat, signal), signal);
-  const resolveIndexSource = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-    signal: AbortSignal,
-  ) => {
-    const nativePath = await resolvePath(chat, signal);
-    if (!nativePath) return null;
-    const value = reference(chat);
-    const profile = await inspectCodexHistoryProfile({
-      nativePath,
-      expectedThreadId: value.agentSessionId,
-      signal,
-    });
-    return {
-      ownerId: 'codex',
-      schemaVersion: 2,
-      value: {
-        nativePath,
-        threadId: profile.threadId,
-        historyMode: profile.mode,
-        codexHome: config.home(),
-      },
-    } as const;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -149,30 +102,7 @@ export function createCodexTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadRetryableMessages(chat, signal);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async loadPage({ chat, page, signal }) {
-      signal.throwIfAborted();
-      return runtime.loadMessagePage(await retryableReference(chat, signal), page, signal);
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      return normalizeCodexPreview(
-        await runtime.getPreview(await resolvedReference(chat, signal), signal),
-      );
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat, signal));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat, signal);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat, signal);
+      return { messages: await runtime.loadMessages(await retryableReference(chat, signal), signal) };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();
@@ -182,20 +112,5 @@ export function createCodexTranscript(
     async release({ signal }) {
       signal.throwIfAborted();
     },
-  };
-}
-
-function normalizeCodexPreview(value: unknown) {
-  const preview =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
-  if (!preview || typeof preview.firstMessage !== 'string') return null;
-  return {
-    firstMessage: preview.firstMessage,
-    lastMessage:
-      typeof preview.lastMessage === 'string' ? preview.lastMessage : preview.firstMessage,
-    createdAt: typeof preview.createdAt === 'string' ? preview.createdAt : null,
-    lastActivity: typeof preview.lastActivity === 'string' ? preview.lastActivity : null,
   };
 }

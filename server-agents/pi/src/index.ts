@@ -3,12 +3,11 @@ import { PI_MODELS } from '@garcon/common/models';
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
+  type AgentChatReference,
   type AgentHost,
-  type AgentIntegration,
   type AgentIntegrationV4,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import {
@@ -71,14 +70,14 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking: NonNullable<AgentIntegrationV4['forking']>;
   readonly steering: NonNullable<AgentIntegrationV4['steering']>;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
   readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
@@ -98,12 +97,12 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const providerExecution = new PiExecution(runtime, nativeSessions);
-    const nativeTranscript = createPiTranscript(config, nativeSessions);
+    const nativeEvidence = createPiNativeEvidence(config, nativeSessions);
     const projection = createAgentOwnedProjection({
       ownerId: 'pi',
       host,
       execution: providerExecution,
-      transcript: nativeTranscript,
+      nativeEvidence,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -206,8 +205,7 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
 
 type PiConfig = ReturnType<typeof createPiConfig>;
 type NativeSessionCodec = ReturnType<typeof createPathNativeSessionCodec>;
-type ChatReference = Parameters<AgentTranscript['load']>[0]['chat'];
-type PiReferenceInput = Pick<ChatReference, 'projectPath' | 'nativeSession'> & {
+type PiReferenceInput = Pick<AgentChatReference, 'projectPath' | 'nativeSession'> & {
   readonly agentSessionId?: string | null;
 };
 
@@ -240,15 +238,11 @@ async function loadPiMessages(
   );
 }
 
-function createPiTranscript(
+function createPiNativeEvidence(
   config: PiConfig,
   nativeSessions: NativeSessionCodec,
-): AgentTranscript {
-  const loadMessages = (chat: ChatReference) => loadPiMessages(
-    piReference(chat, nativeSessions),
-    config,
-  );
-  const resolvePath = async (chat: ChatReference) => {
+): AgentNativeEvidenceSource {
+  const resolvePath = async (chat: AgentChatReference) => {
     const reference = piReference(chat, nativeSessions);
     if (hasRealPiPath(reference)) return reference.nativePath!;
     if (!reference.agentSessionId) return null;
@@ -258,14 +252,6 @@ function createPiTranscript(
       reference.projectPath,
       config,
     );
-  };
-  const resolveIndexSource = async (chat: ChatReference) => {
-    const nativePath = await resolvePath(chat);
-    return nativePath ? {
-      ownerId: 'pi',
-      schemaVersion: 1,
-      value: { nativePath },
-    } as const : null;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -293,34 +279,7 @@ function createPiTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      const reference = piReference(chat, nativeSessions);
-      const history = await import('./agents/pi/history-loader.js');
-      if (hasRealPiPath(reference)) {
-        return history.getPiPreviewFromSessionPath(reference.nativePath!);
-      }
-      if (!reference.agentSessionId) return null;
-      return history.getPiPreviewFromSessionId(
-        reference.agentSessionId,
-        reference.projectPath,
-        config,
-      );
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      return { messages: await loadPiMessages(piReference(chat, nativeSessions), config) };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

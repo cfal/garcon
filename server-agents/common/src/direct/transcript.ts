@@ -1,39 +1,22 @@
-import {
-  computeAgentTranscriptRevision,
-  type AgentTranscript,
-} from '@garcon/server-agent-interface';
+import type { AgentChatReference } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '../transcript-projection/evidence-source.js';
 import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
 import type {
   DirectCompatibleTranscriptReader,
   DirectTranscriptReference,
 } from './transcript-source.js';
 
-export function createDirectTranscript(options: {
-  readonly ownerId: string;
+export function createDirectNativeEvidence(options: {
   readonly reader: DirectCompatibleTranscriptReader;
   readonly nativeSessions: PathNativeSessionCodec;
-}): AgentTranscript {
-  const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']): DirectTranscriptReference => {
+}): AgentNativeEvidenceSource {
+  const reference = (chat: AgentChatReference): DirectTranscriptReference => {
     const native = options.nativeSessions.decode(chat.nativeSession);
     return {
       agentSessionId: chat.agentSessionId ?? native.agentSessionId,
       modelEndpointId: native.modelEndpointId,
       nativePath: native.path,
     };
-  };
-  const loadMessages = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
-    options.reader.loadMessages(reference(chat))
-  );
-  const resolvePath = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
-    options.reader.resolveNativePath(reference(chat))
-  );
-  const resolveIndexSource = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const nativePath = await resolvePath(chat);
-    return nativePath ? {
-      ownerId: options.ownerId,
-      schemaVersion: 1,
-      value: { nativePath },
-    } as const : null;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -49,28 +32,11 @@ export function createDirectTranscript(options: {
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      return options.reader.getPreview(reference(chat));
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      return { messages: await options.reader.loadMessages(reference(chat)) };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();
-      const nativePath = await resolvePath(chat);
+      const nativePath = await options.reader.resolveNativePath(reference(chat));
       return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
     async release({ chat, signal }) {

@@ -2,12 +2,11 @@ import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/cha
 import { AMP_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
-  type AgentIntegration,
+  type AgentChatReference,
   type AgentIntegrationV4,
   type AgentHost,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
@@ -22,7 +21,7 @@ import { createAmpConfig } from './config.js';
 import { getAmpAuthStatus } from './agents/amp/amp-auth.js';
 import { AmpCliRuntime, runSingleQuery } from './agents/amp/amp-cli.js';
 import { AmpExecution } from './agents/amp/execution.js';
-import { getAmpPreview, loadAmpChatMessages } from './agents/amp/history-loader.js';
+import { loadAmpChatMessages } from './agents/amp/history-loader.js';
 
 const AMP_DESCRIPTOR = {
   id: 'amp',
@@ -57,14 +56,14 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
   readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
@@ -89,12 +88,12 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
       }],
     });
     const providerExecution = new AmpExecution(runtime, nativeSessions);
-    const nativeTranscript = createAmpTranscript(runtime, nativeSessions, config.binary);
+    const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
     const projection = createAgentOwnedProjection({
       ownerId: 'amp',
       host,
       execution: providerExecution,
-      transcript: nativeTranscript,
+      nativeEvidence,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -149,29 +148,15 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
   }
 }
 
-function createAmpTranscript(
+function createAmpNativeEvidence(
   runtime: AmpCliRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
-  binary: () => string,
-): AgentTranscript {
-  const threadId = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+): AgentNativeEvidenceSource {
+  const threadId = (chat: AgentChatReference) => {
     const native = nativeSessions.decode(chat.nativeSession);
     return chat.agentSessionId
       ?? native.agentSessionId
       ?? getArtificialAgentSessionId(native.path, 'amp');
-  };
-  const loadMessages = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const id = threadId(chat);
-    if (!id) return [];
-    return loadAmpChatMessages(await runtime.exportThread(id, { cwd: chat.projectPath }));
-  };
-  const resolveIndexSource = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const id = threadId(chat);
-    return id ? {
-      ownerId: 'amp',
-      schemaVersion: 1,
-      value: { threadId: id, projectPath: chat.projectPath, binary: binary() },
-    } as const : null;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -185,26 +170,11 @@ function createAmpTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
       const id = threadId(chat);
-      if (!id) return null;
-      return getAmpPreview(await runtime.exportThread(id, { cwd: chat.projectPath }));
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      if (!id) return { messages: [] };
+      return {
+        messages: loadAmpChatMessages(await runtime.exportThread(id, { cwd: chat.projectPath })),
+      };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

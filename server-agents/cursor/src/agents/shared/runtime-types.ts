@@ -1,6 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
+import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface AcpExecutionAdmission {
@@ -65,7 +65,7 @@ export async function markAcpExecutionStarted(
 
 export function acpEventMetadata(
   request: Pick<AcpExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentOperationIdentity['commandType'],
+  commandType?: AgentTurnReceiptOwner['commandType'],
 ): RuntimeEventMetadata {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

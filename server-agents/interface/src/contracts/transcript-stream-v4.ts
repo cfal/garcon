@@ -13,7 +13,6 @@ import type {
   AgentChatReference,
   AgentNativeSessionRef,
   AgentTranscriptPreview,
-  AgentTranscriptReleaseRequest,
   AgentTranscriptSourceLocation,
 } from './transcript.js';
 import type {
@@ -284,7 +283,7 @@ export interface AgentTranscriptStream {
   resolveIndexSource(request: AgentTranscriptRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptIndexSourceRefV4 | null>>;
   refreshIndexSource(request: AgentTranscriptIndexRefreshRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptIndexSourceRefV4 | null>>;
   describeSource(request: AgentTranscriptRequestV4): Promise<AgentTranscriptAccessResult<AgentTranscriptSourceLocation | null>>;
-  release(request: Omit<AgentTranscriptReleaseRequest, 'chat'> & { readonly chat: AgentChatReferenceV4 }): Promise<void>;
+  release(request: AgentTranscriptRequestV4 & { readonly reason: 'deleted' | 'transferred' }): Promise<void>;
 }
 
 export interface AgentForkPoint {

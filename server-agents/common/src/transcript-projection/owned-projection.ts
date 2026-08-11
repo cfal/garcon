@@ -4,7 +4,6 @@ import type {
   AgentOperationIdentityV4,
   AgentStartedSession,
   AgentSteerResult,
-  AgentTranscript,
   AgentTranscriptAccessResult,
   AgentTranscriptRequestV4,
   AgentTurnBoundOperationIdentityV4,
@@ -17,6 +16,7 @@ import {
   PermissionResolvedMessage,
 } from '@garcon/common/chat-types';
 import { randomUUID } from 'node:crypto';
+import type { AgentNativeEvidenceSource } from './evidence-source.js';
 import {
   JournalBackedAgentTranscriptStream,
   transcriptSeedEntries,
@@ -31,7 +31,7 @@ export interface AgentOwnedProjectionOptions {
   readonly ownerId: string;
   readonly host: AgentHost;
   readonly execution: AgentProjectionRuntimeExecution;
-  readonly transcript: AgentTranscript;
+  readonly nativeEvidence: AgentNativeEvidenceSource;
   readonly sourceSettlement?: (
     event: Extract<AgentProjectionProducerEvent, { readonly type: 'finished' | 'failed' }>,
   ) => AgentTranscriptAccessResult<'confirmed' | 'unresolved'>;
@@ -64,12 +64,12 @@ export function createAgentOwnedProjection(
     ownerId: options.ownerId,
     directory: () => options.host.storage.directory('transcript-projection-v4'),
     bootstrap: async (request) => access(async () => {
-      const snapshot = await options.transcript.load(request);
+      const snapshot = await options.nativeEvidence.load(request);
       return transcriptSeedEntries(options.ownerId, snapshot.messages);
     }),
-    resolveNativeSession: (request) => access(() => options.transcript.resolveNativeSession(request)),
-    describeSource: (request) => access(() => options.transcript.describeSource(request)),
-    releaseProvider: (request) => options.transcript.release(request),
+    resolveNativeSession: (request) => access(() => options.nativeEvidence.resolveNativeSession(request)),
+    describeSource: (request) => access(() => options.nativeEvidence.describeSource(request)),
+    releaseProvider: (request) => options.nativeEvidence.release(request),
   });
   const operations = new Map<string, AgentTurnOwnerOperationIdentityV4>();
   const attributions = new Map<string, AgentTurnBoundOperationIdentityV4>();

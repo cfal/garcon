@@ -1,6 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentOperationIdentity, AgentTranscriptPage } from '@garcon/server-agent-interface';
+import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { CodexGoalCommand } from './goal-command.js';
 
@@ -68,7 +68,6 @@ export interface CodexForkSessionRequest {
   readonly codexConfig?: CodexProviderConfig;
 }
 
-export type CodexTranscriptPage = AgentTranscriptPage;
 
 export function assertCodexExecutionOpen(
   request: { readonly executionAdmission?: CodexExecutionAdmission },
@@ -85,7 +84,7 @@ export async function markCodexExecutionStarted(
 
 export function codexEventMetadata(
   request: Pick<CodexExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentOperationIdentity['commandType'],
+  commandType?: AgentTurnReceiptOwner['commandType'],
 ): RuntimeEventMetadata {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

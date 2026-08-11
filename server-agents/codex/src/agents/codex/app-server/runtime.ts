@@ -4,7 +4,7 @@ import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/ev
 import type {
   AgentGoalControlHandoff,
   AgentLogger,
-  AgentSteerRequest,
+  AgentSteerRequestV4,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -18,7 +18,6 @@ import {
   type CodexResumeRequest,
   type CodexStartedSession,
   type CodexStartRequest,
-  type CodexTranscriptPage,
 } from '../runtime-types.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
@@ -416,7 +415,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     return target;
   }
 
-  async steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
+  async steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
     const session = this.#sessions.get(request.agentSessionId);
     if (!session || isTerminalSessionStatus(session.status) || hasTerminalPendingFinish(session)) {
       return rejectedCodexSteer('no-active-turn', 'No active Codex turn');
@@ -855,18 +854,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async loadMessages(session: CodexChatEntry, signal?: AbortSignal): Promise<ChatMessage[]> {
     return this.#history.load(session, signal);
-  }
-
-  async loadMessagePage(
-    session: CodexChatEntry,
-    page: { limit: number; offset: number },
-    signal?: AbortSignal,
-  ): Promise<CodexTranscriptPage | null> {
-    return this.#history.loadPage(session, page, signal);
-  }
-
-  async getPreview(session: CodexChatEntry, signal?: AbortSignal): Promise<unknown> {
-    return this.#history.preview(session, signal);
   }
 
   async forkSession(args: CodexForkSessionRequest): Promise<CodexStartedSession | null> {

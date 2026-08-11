@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { UserMessage } from '@garcon/common/chat-types';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { createCodexTranscript } from '../transcript.ts';
+import { createCodexNativeEvidence } from '../transcript.ts';
 
 const signal = new AbortController().signal;
 
@@ -44,8 +44,6 @@ function createRuntime({ discoveredPath = null } = {}) {
     discover: 0,
     requestDiscoveryRefresh: [],
     load: [],
-    page: [],
-    preview: [],
   };
   return {
     calls,
@@ -63,21 +61,6 @@ function createRuntime({ discoveredPath = null } = {}) {
           ? [new UserMessage('2026-07-24T00:00:01.000Z', 'native message')]
           : [];
       },
-      async loadMessagePage(reference) {
-        calls.page.push(reference);
-        return null;
-      },
-      async getPreview(reference) {
-        calls.preview.push(reference);
-        return reference.nativePath
-          ? {
-              firstMessage: 'first',
-              lastMessage: 'last',
-              createdAt: '2026-07-24T00:00:00.000Z',
-              lastActivity: '2026-07-24T00:00:01.000Z',
-            }
-          : null;
-      },
     },
   };
 }
@@ -85,10 +68,9 @@ function createRuntime({ discoveredPath = null } = {}) {
 function createFixture(directory, nativeSession, runtimeOptions) {
   const nativeSessions = createPathNativeSessionCodec('codex');
   const { calls, runtime } = createRuntime(runtimeOptions);
-  const transcript = createCodexTranscript(
+  const transcript = createCodexNativeEvidence(
     runtime,
     nativeSessions,
-    { home: () => directory },
     createLogger(),
   );
   const chat = {
@@ -104,7 +86,7 @@ function createFixture(directory, nativeSession, runtimeOptions) {
   return { calls, chat, nativeSessions, transcript };
 }
 
-describe('createCodexTranscript', () => {
+describe('createCodexNativeEvidence', () => {
   it('returns the exact stored reference without consulting discovery', async () => {
     await withDirectory(async (directory) => {
       const nativePath = await writeTranscript(directory, 'stored.jsonl');
@@ -218,36 +200,16 @@ describe('createCodexTranscript', () => {
         messages: [{ content: 'native message' }],
       });
       await expect(
-        fixture.transcript.loadPage({
-          chat: fixture.chat,
-          page: { limit: 10, offset: 0 },
-          signal,
-        }),
-      ).resolves.toBeNull();
-      await expect(
-        fixture.transcript.preview({ chat: fixture.chat, signal }),
-      ).resolves.toMatchObject({ firstMessage: 'first', lastMessage: 'last' });
-      await expect(
-        fixture.transcript.revision({ chat: fixture.chat, signal }),
-      ).resolves.toBeString();
-      await expect(
         fixture.transcript.describeSource({ chat: fixture.chat, signal }),
       ).resolves.toEqual({ kind: 'filesystem-path', value: nativePath });
-      await expect(
-        fixture.transcript.resolveIndexSource({ chat: fixture.chat, signal }),
-      ).resolves.toMatchObject({
-        ownerId: 'codex',
-        value: { nativePath, threadId: 'thread-1' },
-      });
 
-      const references = [...fixture.calls.load, ...fixture.calls.page, ...fixture.calls.preview];
-      expect(references).toHaveLength(4);
-      expect(references.every((reference) => reference.nativePath === nativePath)).toBe(true);
+      expect(fixture.calls.load).toHaveLength(1);
+      expect(fixture.calls.load.every((reference) => reference.nativePath === nativePath)).toBe(true);
       expect(fixture.calls.discover).toBe(0);
     });
   });
 
-  it('fails every read closed and requests refresh only for full and paged loads', async () => {
+  it('fails the evidence load closed and requests a discovery refresh', async () => {
     await withDirectory(async (directory) => {
       const codec = createPathNativeSessionCodec('codex');
       const fixture = createFixture(
@@ -258,34 +220,23 @@ describe('createCodexTranscript', () => {
           modelEndpointId: null,
         }),
       );
-      const requests = [
-        () => fixture.transcript.load({ chat: fixture.chat, signal }),
-        () =>
-          fixture.transcript.loadPage({
-            chat: fixture.chat,
-            page: { limit: 10, offset: 0 },
-            signal,
-          }),
-        () => fixture.transcript.preview({ chat: fixture.chat, signal }),
-        () => fixture.transcript.revision({ chat: fixture.chat, signal }),
-      ];
-
-      for (const request of requests) {
-        await expect(request()).rejects.toMatchObject({
-          code: 'TRANSCRIPT_UNAVAILABLE',
-          retryable: true,
-          details: { provider: 'codex', reason: 'not-found' },
-        });
-      }
-      expect(fixture.calls.discover).toBe(requests.length);
-      expect(fixture.calls.requestDiscoveryRefresh).toEqual(['thread-1', 'thread-1']);
+      await expect(fixture.transcript.load({ chat: fixture.chat, signal })).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        retryable: true,
+        details: { provider: 'codex', reason: 'not-found' },
+      });
+      expect(fixture.calls.discover).toBe(1);
+      expect(fixture.calls.requestDiscoveryRefresh).toEqual(['thread-1']);
+      await expect(
+        fixture.transcript.describeSource({ chat: fixture.chat, signal }),
+      ).resolves.toBeNull();
       await expect(
         fixture.transcript.resolveNativeSession({
           chat: fixture.chat,
           signal,
         }),
       ).resolves.toBe(fixture.chat.nativeSession);
-      expect(fixture.calls.discover).toBe(requests.length + 1);
+      expect(fixture.calls.discover).toBe(3);
     });
   });
 

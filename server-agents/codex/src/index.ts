@@ -8,7 +8,6 @@ import {
   AgentIntegrationError,
   type AgentForkRequestV4,
   type AgentHost,
-  type AgentIntegration,
   type AgentIntegrationV4,
 } from '@garcon/server-agent-interface';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
@@ -33,7 +32,7 @@ import {
 } from './agents/codex/codex-forking.js';
 import { createCodexForkTargetPath } from './agents/codex/fork-target-path.js';
 import { inspectCodexHistoryProfile } from './agents/codex/history-profile.js';
-import { createCodexTranscript } from './agents/codex/transcript.js';
+import { createCodexNativeEvidence } from './agents/codex/transcript.js';
 import {
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
@@ -83,14 +82,14 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegration['auth']>;
-  readonly commands: NonNullable<AgentIntegration['commands']>;
+  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
+  readonly commands: NonNullable<AgentIntegrationV4['commands']>;
   readonly compaction: NonNullable<AgentIntegrationV4['compaction']>;
   readonly forking;
   readonly steering: NonNullable<AgentIntegrationV4['steering']>;
   readonly goals: NonNullable<AgentIntegrationV4['goals']>;
-  readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
-  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly endpoints: NonNullable<AgentIntegrationV4['endpoints']>;
+  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
   readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
@@ -129,12 +128,12 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const execution = new CodexExecution(host, runtime, nativeSessions, config);
-    const nativeTranscript = createCodexTranscript(runtime, nativeSessions, config, logger);
+    const nativeEvidence = createCodexNativeEvidence(runtime, nativeSessions, logger);
     const projection = createAgentOwnedProjection({
       ownerId: 'codex',
       host,
       execution,
-      transcript: nativeTranscript,
+      nativeEvidence,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -199,7 +198,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
       ownerId: 'codex',
       projection: projection.transcript,
       supportsWhileRunning: true,
-      transcript: nativeTranscript,
+      nativeEvidence,
       nativeSessions,
       createTargetPath: createCodexForkTargetPath,
       createRewriteEntry: createCodexForkTranscriptRewriter,
@@ -218,7 +217,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
         let reference = request.source.nativeSession;
         let source = nativeSessions.decode(reference);
         if (!source.path) {
-          reference = await nativeTranscript.resolveNativeSession({
+          reference = await nativeEvidence.resolveNativeSession({
             chat: request.source,
             signal: request.admission.signal,
           });

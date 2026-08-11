@@ -3,7 +3,7 @@ import type {
   AgentEndpointSelection,
 } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
+import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '../shared/event-emitter-runtime.js';
 
 export interface DirectEndpointRuntime {
@@ -59,7 +59,7 @@ export async function markDirectExecutionStarted(
 
 export function directEventMetadata(
   request: Pick<DirectExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentOperationIdentity['commandType'],
+  commandType?: AgentTurnReceiptOwner['commandType'],
 ): RuntimeEventMetadata {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

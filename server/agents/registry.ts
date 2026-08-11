@@ -4,7 +4,6 @@ import type {
   AgentProjectPathUpdatePreparation,
   AgentSteerResult,
   AgentSteerTarget,
-  AgentTranscriptPage,
   AgentTranscriptSourceLocation,
   AgentInputPreparation,
   AgentTranscriptAdmissionIdentity,
@@ -128,10 +127,16 @@ export interface AgentRegistryServiceContract {
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
-type MutableAgentTranscriptPage = Omit<AgentTranscriptPage, 'messages'> & {
+// Composite page assembled from V4 projection pages for the transcript reader.
+interface MutableAgentTranscriptPage {
   messages: ChatMessage[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
+  revision: string;
   projectionState: AgentProjectionState;
-};
+}
 
 interface StartSessionOptions {
   images?: AgentCommandImage[];

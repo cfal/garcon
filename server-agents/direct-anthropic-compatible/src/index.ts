@@ -10,7 +10,6 @@ import {
 import {
   AgentIntegrationError,
   type AgentHost,
-  type AgentIntegration,
   type AgentIntegrationV4,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
@@ -20,9 +19,7 @@ import { DirectExecution } from '@garcon/server-agent-common/direct/execution';
 import { relocateLegacySessionDirectory } from '@garcon/server-agent-common/direct/legacy-session-relocation';
 import { createDirectAnthropicRuntime } from '@garcon/server-agent-common/direct/router';
 import { createDirectSessionPaths } from '@garcon/server-agent-common/direct/session-paths';
-import {
-  createDirectTranscript,
-} from '@garcon/server-agent-common/direct/transcript';
+import { createDirectNativeEvidence } from '@garcon/server-agent-common/direct/transcript';
 import { createDirectCompatibleTranscriptSource } from '@garcon/server-agent-common/direct/transcript-source';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createProjectionJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
@@ -73,14 +70,14 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking;
   readonly steering = null;
   readonly goals = null;
-  readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
-  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly endpoints: NonNullable<AgentIntegrationV4['endpoints']>;
+  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
   readonly transientControls = null;
 
   constructor(host: AgentHost) {
@@ -111,8 +108,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       descriptors: [],
     });
     const providerExecution = new DirectExecution(host, runtime, nativeSessions);
-    const nativeTranscript = createDirectTranscript({
-      ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+    const nativeEvidence = createDirectNativeEvidence({
       reader,
       nativeSessions,
     });
@@ -120,7 +116,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
       host,
       execution: providerExecution,
-      transcript: nativeTranscript,
+      nativeEvidence,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -142,7 +138,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
       projection: projection.transcript,
       supportsWhileRunning: false,
-      transcript: nativeTranscript,
+      nativeEvidence,
       nativeSessions,
     });
     this.endpoints = {

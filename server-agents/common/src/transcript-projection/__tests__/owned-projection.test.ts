@@ -5,12 +5,11 @@ import path from 'node:path';
 import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
   agentOwnershipEpoch,
-  computeAgentTranscriptRevision,
   type AgentChatReferenceV4,
   type AgentHost,
-  type AgentTranscript,
   type AgentTurnOwnerOperationIdentityV4,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '../evidence-source.js';
 import {
   AgentProjectionProducerEventChannel,
   projectionProducerMessages,
@@ -58,7 +57,7 @@ describe('AgentOwnedProjection', () => {
       ownerId: 'test',
       host: host(directory),
       execution,
-      transcript: emptyNativeTranscript(),
+      nativeEvidence: emptyNativeEvidence(),
     });
     await projection.transcript.openSegment({ chat, signal: new AbortController().signal });
 
@@ -179,15 +178,10 @@ function host(directory: string): AgentHost {
   };
 }
 
-function emptyNativeTranscript(): AgentTranscript {
-  const revision = computeAgentTranscriptRevision([]);
+function emptyNativeEvidence(): AgentNativeEvidenceSource {
   return {
     async resolveNativeSession() { return null; },
-    async load() { return { messages: [], revision }; },
-    async preview() { return null; },
-    async revision() { return revision; },
-    async resolveIndexSource() { return null; },
-    async refreshIndexSource() { return null; },
+    async load() { return { messages: [] }; },
     async describeSource() { return null; },
     async release() {},
   };

@@ -14,7 +14,7 @@ import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-sessi
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
   AgentLogger,
-  AgentSteerRequest,
+  AgentSteerRequestV4,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -302,7 +302,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     return target;
   }
 
-  async steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
+  async steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
     // Rejects command syntax because Pi expands slash-prefixed steering before enqueue.
     if (request.input.trimStart().startsWith('/')) {
       return rejectedPiSteer(
@@ -407,7 +407,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
   }
 
   #validateSteerTarget(
-    request: AgentSteerRequest,
+    request: AgentSteerRequestV4,
     captured: CapturedPiSteerTarget,
   ): AgentSteerResult | null {
     const { session, turn } = captured;

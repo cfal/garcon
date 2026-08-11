@@ -1,72 +1,16 @@
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
-import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
-import type { AgentTranscriptIndexSourceRef } from './transcript-index.js';
-import type { AgentTranscriptRevision } from '../transcript-revision.js';
-
-export interface AgentTranscript {
-  /**
-   * Returns a provider-validated reference that is at least as recoverable as the
-   * current reference, or null when no safe update is available.
-   */
-  resolveNativeSession(request: AgentTranscriptRequest): Promise<AgentNativeSessionRef | null>;
-  load(request: AgentTranscriptRequest): Promise<AgentTranscriptSnapshot>;
-  loadPage?(
-    request: AgentTranscriptRequest & { readonly page: { readonly limit: number; readonly offset: number } },
-  ): Promise<AgentTranscriptPage | null>;
-  preview(request: AgentTranscriptRequest): Promise<AgentTranscriptPreview | null>;
-  revision(request: AgentTranscriptRequest): Promise<AgentTranscriptRevision>;
-  resolveIndexSource(
-    request: AgentTranscriptRequest,
-  ): Promise<AgentTranscriptIndexSourceRef | null>;
-  refreshIndexSource(
-    request: AgentTranscriptIndexRefreshRequest,
-  ): Promise<AgentTranscriptIndexSourceRef | null>;
-  describeSource(
-    request: AgentTranscriptRequest,
-  ): Promise<AgentTranscriptSourceLocation | null>;
-  release(request: AgentTranscriptReleaseRequest): Promise<void>;
-}
-
-export interface AgentTranscriptIndexRefreshRequest extends AgentTranscriptRequest {
-  readonly failedSource: AgentTranscriptIndexSourceRef;
-  readonly failureCode: string;
-}
 
 export type AgentTranscriptSourceLocation =
   | { readonly kind: 'filesystem-path'; readonly value: string }
   | { readonly kind: 'provider-reference'; readonly value: string };
-
-export interface AgentTranscriptSnapshot {
-  readonly messages: readonly ChatMessage[];
-  readonly revision: AgentTranscriptRevision;
-}
-
-export interface AgentTranscriptRequest {
-  readonly chat: AgentChatReference;
-  readonly signal: AbortSignal;
-}
 
 export interface AgentTranscriptPreview {
   readonly firstMessage: string;
   readonly lastMessage: string;
   readonly createdAt: string | null;
   readonly lastActivity: string | null;
-}
-
-export interface AgentTranscriptPage {
-  readonly messages: readonly ChatMessage[];
-  readonly total: number;
-  readonly hasMore: boolean;
-  readonly offset: number;
-  readonly limit: number;
-  /** Canonically identifies the complete rendered transcript, independent of the requested window. */
-  readonly revision: AgentTranscriptRevision;
-}
-
-export interface AgentTranscriptReleaseRequest extends AgentTranscriptRequest {
-  readonly reason: 'deleted' | 'transferred';
 }
 
 export interface AgentNativeSessionRef {

@@ -2,13 +2,11 @@ import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/cha
 import { FACTORY_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
+  type AgentChatReference,
   type AgentHost,
-  type AgentIntegration,
   type AgentIntegrationV4,
-  type AgentTranscript,
-  type AgentTranscriptPreview,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
@@ -62,14 +60,14 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
   readonly transientControls = { protocol: 'ordered-stream-v1' as const };
 
   constructor(host: AgentHost) {
@@ -87,12 +85,12 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const providerExecution = new FactoryExecution(runtime, nativeSessions);
-    const nativeTranscript = createFactoryTranscript(transcriptReader, nativeSessions);
+    const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions);
     const projection = createAgentOwnedProjection({
       ownerId: 'factory',
       host,
       execution: providerExecution,
-      transcript: nativeTranscript,
+      nativeEvidence,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -145,29 +143,14 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
   }
 }
 
-function createFactoryTranscript(
+function createFactoryNativeEvidence(
   reader: ReturnType<typeof createFactoryTranscriptSource>,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
-): AgentTranscript {
-  const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => ({
+): AgentNativeEvidenceSource {
+  const reference = (chat: AgentChatReference) => ({
     agentSessionId: chat.agentSessionId,
     nativePath: nativeSessions.decode(chat.nativeSession).path,
   });
-  const loadMessages = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
-    reader.loadMessages(reference(chat))
-  );
-  const resolvePath = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const current = reference(chat);
-    return current.nativePath ?? reader.resolveNativePath(current);
-  };
-  const resolveIndexSource = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const nativePath = await resolvePath(chat);
-    return nativePath ? {
-      ownerId: 'factory',
-      schemaVersion: 1,
-      value: { nativePath },
-    } as const : null;
-  };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -182,46 +165,16 @@ function createFactoryTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      return normalizePreview(await reader.getPreview(reference(chat)));
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      return { messages: await reader.loadMessages(reference(chat)) };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();
-      const nativePath = await resolvePath(chat);
+      const current = reference(chat);
+      const nativePath = current.nativePath ?? await reader.resolveNativePath(current);
       return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();
     },
-  };
-}
-
-function normalizePreview(value: unknown): AgentTranscriptPreview | null {
-  if (!value || typeof value !== 'object' || !('firstMessage' in value)) return null;
-  const preview = value as Record<string, unknown>;
-  if (typeof preview.firstMessage !== 'string') return null;
-  return {
-    firstMessage: preview.firstMessage,
-    lastMessage: typeof preview.lastMessage === 'string'
-      ? preview.lastMessage
-      : preview.firstMessage,
-    createdAt: typeof preview.createdAt === 'string' ? preview.createdAt : null,
-    lastActivity: typeof preview.lastActivity === 'string' ? preview.lastActivity : null,
   };
 }

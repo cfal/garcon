@@ -67,10 +67,6 @@ export async function snapshotJsonlSource(sourcePath: string): Promise<JsonlSour
   return { content: await fs.readFile(sourcePath) };
 }
 
-export function jsonlSourceLineCount(snapshot: JsonlSourceSnapshot, sourcePath: string): number {
-  return normalizeJsonl(snapshot.content.toString('utf8'), sourcePath).lineCount;
-}
-
 export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<ForkJsonlOutcome> {
   const targetAgentSessionId = crypto.randomUUID();
   const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;

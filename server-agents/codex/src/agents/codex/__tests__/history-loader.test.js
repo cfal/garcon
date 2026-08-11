@@ -3,9 +3,8 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { loadCodexChatMessages, loadCodexChatMessagePage } from '../history-loader.js';
+import { loadCodexChatMessages } from '../history-loader.js';
 import { getNativeMessageRevisionSource, getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
 
 async function withTempJsonl(lines, fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-load-test-'));
@@ -60,7 +59,7 @@ describe('loadCodexChatMessages', () => {
     ]);
   });
 
-  it('projects shell-only Code Mode entries across full and paginated history', async () => {
+  it('projects shell-only Code Mode entries with per-command identity', async () => {
     const lines = [
       JSON.stringify({
         type: 'response_item',
@@ -91,7 +90,6 @@ describe('loadCodexChatMessages', () => {
 
     await withTempJsonl(lines, async (filePath) => {
       const full = await loadCodexChatMessages(filePath);
-      const page = await loadCodexChatMessagePage(filePath, 2, 0);
 
       expect(full.map((message) => [message.type, message.toolId])).toEqual([
         ['bash-tool-use', 'codex-code-mode:outer:0'],
@@ -106,10 +104,6 @@ describe('loadCodexChatMessages', () => {
         lineNumber: 1,
         withinSourceOrdinal: 1,
       });
-      expect(page.messages).toEqual(full.slice(1));
-      expect(page.total).toBe(3);
-      expect(page.hasMore).toBe(true);
-      expect(page.revision).toBe(transcriptRevision(full));
     });
   });
 
@@ -166,7 +160,6 @@ describe('loadCodexChatMessages', () => {
 
     await withTempJsonl(lines, async (filePath) => {
       const full = await loadCodexChatMessages(filePath);
-      const page = await loadCodexChatMessagePage(filePath, 10, 0);
 
       expect(full.map((message) => [message.type, message.toolId])).toEqual([
         ['exec-tool-use', 'outer'],
@@ -174,8 +167,6 @@ describe('loadCodexChatMessages', () => {
         ['tool-result', 'inner'],
         ['tool-result', 'outer'],
       ]);
-      expect(page.messages).toEqual(full);
-      expect(page.revision).toBe(transcriptRevision(full));
     });
   });
 
@@ -676,176 +667,12 @@ describe('loadCodexChatMessages', () => {
     await withTempJsonl(lines, async (filePath) => {
       const first = await loadCodexChatMessages(filePath);
       const second = await loadCodexChatMessages(filePath);
-      const firstPage = await loadCodexChatMessagePage(filePath, 2, 0);
-      const secondPage = await loadCodexChatMessagePage(filePath, 2, 0);
 
       expect(second).toEqual(first);
       expect(first.map((message) => message.timestamp)).toEqual([
         '2000-01-01T00:00:00.001Z',
         '2000-01-01T00:00:00.002Z',
       ]);
-      expect(secondPage.revision).toBe(firstPage.revision);
-      expect(firstPage.revision).toBe(transcriptRevision(first));
-    });
-  });
-
-  it('loads the initial page from tail canonical entries', async () => {
-    const lines = Array.from({ length: 12 }, (_, index) => JSON.stringify({
-      type: 'response_item',
-      timestamp: `2026-02-21T10:00:${String(index).padStart(2, '0')}.000Z`,
-      payload: {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text: `reply ${index}` }],
-      },
-    }));
-
-    const page = await withTempJsonl(lines, (filePath) => loadCodexChatMessagePage(filePath, 3, 0));
-
-    expect(page).toMatchObject({ hasMore: true, offset: 0, limit: 3 });
-    expect(page.messages.map((message) => message.content)).toEqual(['reply 9', 'reply 10', 'reply 11']);
-  });
-
-  it('keeps synthetic web search IDs stable between tail pages and full loads', async () => {
-    const fillerLines = Array.from({ length: 520 }, (_, index) => JSON.stringify({
-      type: 'response_item',
-      timestamp: `2026-02-21T16:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}.000Z`,
-      payload: {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text: `reply ${index}` }],
-      },
-    }));
-    const webSearchLine = JSON.stringify({
-      type: 'response_item',
-      timestamp: '2026-02-21T17:00:00.000Z',
-      payload: {
-        type: 'web_search_call',
-        status: 'completed',
-        action: {
-          type: 'search',
-          query: 'Codex duplicate keyed each',
-          queries: ['Codex duplicate keyed each'],
-        },
-      },
-    });
-    const lines = [...fillerLines, webSearchLine];
-
-    await withTempJsonl(lines, async (filePath) => {
-      const fullMessages = await loadCodexChatMessages(filePath);
-      const page = await loadCodexChatMessagePage(filePath, 5, 0);
-      expect(page).not.toBeNull();
-      if (!page) throw new Error('expected tail page');
-
-      const fullWebSearch = fullMessages.find((message) => message.type === 'web-search-tool-use');
-      const pageWebSearch = page.messages.find((message) => message.type === 'web-search-tool-use');
-      expect(fullWebSearch).toBeTruthy();
-      expect(pageWebSearch).toBeTruthy();
-      if (!fullWebSearch || !pageWebSearch) throw new Error('expected web search in full and tail loads');
-
-      expect(page.hasMore).toBe(true);
-      expect(pageWebSearch.toolId).toBe(fullWebSearch.toolId);
-    });
-  });
-
-  it('loads older pages with an exact total without retaining full messages', async () => {
-    const lines = Array.from({ length: 600 }, (_, index) => JSON.stringify({
-      type: 'response_item',
-      timestamp: new Date(Date.UTC(2026, 1, 21, 10, 0, index)).toISOString(),
-      payload: {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text: `reply ${index} ${'x'.repeat(800)}` }],
-      },
-    }));
-
-    const page = await withTempJsonl(lines, (filePath) => loadCodexChatMessagePage(filePath, 3, 5));
-
-    expect(page).toMatchObject({ total: 600, hasMore: true, offset: 5, limit: 3 });
-    expect(page.messages.map((message) => message.content.slice(0, 9))).toEqual([
-      'reply 592', 'reply 593', 'reply 594',
-    ]);
-  });
-
-  it('keeps canonical whole-transcript revisions across windows and off-window changes', async () => {
-    const timestamps = [5, 0, 1, 2, 3, 4];
-    const lines = timestamps.map((second, index) => JSON.stringify({
-      type: 'response_item',
-      timestamp: `2026-02-21T10:00:0${second}.000Z`,
-      payload: {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text: `reply ${index}` }],
-      },
-    }));
-
-    await withTempJsonl(lines, async (filePath) => {
-      const full = await loadCodexChatMessages(filePath);
-      const latestPage = await loadCodexChatMessagePage(filePath, 2, 0);
-      for (const offset of [0, 2]) {
-        const page = await loadCodexChatMessagePage(filePath, 2, offset);
-        const end = full.length - offset;
-        expect(page.messages).toEqual(full.slice(end - 2, end));
-        expect(page.revision).toBe(transcriptRevision(full));
-      }
-
-      const changedLines = [...lines];
-      const changedEntry = JSON.parse(changedLines[1]);
-      changedEntry.payload.content = [{ type: 'output_text', text: 'changed outside the latest page' }];
-      changedLines[1] = JSON.stringify(changedEntry);
-      await fs.writeFile(filePath, `${changedLines.join('\n')}\n`, 'utf8');
-
-      const changedFull = await loadCodexChatMessages(filePath);
-      const changedPage = await loadCodexChatMessagePage(filePath, 2, 0);
-      expect(changedPage.messages).toEqual(latestPage.messages);
-      expect(changedPage.revision).not.toBe(latestPage.revision);
-      expect(changedPage.revision).toBe(transcriptRevision(changedFull));
-    });
-  });
-
-  it('matches full ordering with mixed invalid and missing timestamps', async () => {
-    const timestamps = ['2026-02-21T10:00:03.000Z', 'invalid', undefined,
-      '2026-02-21T10:00:01.000Z', '2026-02-21T10:00:02.000Z'];
-    const lines = timestamps.map((timestamp, index) => JSON.stringify({
-      type: 'response_item',
-      ...(timestamp === undefined ? {} : { timestamp }),
-      payload: {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text: `reply ${index}` }],
-      },
-    }));
-
-    await withTempJsonl(lines, async (filePath) => {
-      const expected = (await loadCodexChatMessages(filePath)).map((message) => message.content);
-      for (const offset of [0, 1, 3]) {
-        const page = await loadCodexChatMessagePage(filePath, 2, offset);
-        const end = expected.length - offset;
-        expect(page.messages.map((message) => message.content)).toEqual(
-          expected.slice(Math.max(0, end - 2), end),
-        );
-      }
-    });
-  });
-
-  it('preserves stable ordering for equal timestamps at multiple offsets', async () => {
-    const lines = Array.from({ length: 6 }, (_, index) => JSON.stringify({
-      type: 'response_item',
-      timestamp: '2026-02-21T10:00:00.000Z',
-      payload: {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text: `reply ${index}` }],
-      },
-    }));
-
-    await withTempJsonl(lines, async (filePath) => {
-      for (const offset of [0, 2, 4]) {
-        const page = await loadCodexChatMessagePage(filePath, 2, offset);
-        expect(page.messages.map((message) => message.content)).toEqual(
-          [`reply ${4 - offset}`, `reply ${5 - offset}`],
-        );
-      }
     });
   });
 });
