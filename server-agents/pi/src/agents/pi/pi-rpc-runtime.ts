@@ -54,71 +54,29 @@ import {
 } from './pi-session-paths.js';
 import { convertPiMessage } from './message-converter.js';
 import { terminatePiProcess } from './pi-process-lifecycle.js';
+import type {
+  CapturedPiSteerTarget,
+  PiActiveTurn,
+  PiPromptDispatch,
+  PiRetireOptions,
+  PiRpcSession,
+  PiSteerSubmission,
+} from './pi-rpc-session-state.js';
 import { convertPiToolUse } from './tool-use-converter.js';
 
 export interface PiModelReader {
   getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
 }
 
-type PiRpcSessionState = 'starting' | 'idle' | 'prompting' | 'active' | 'retiring';
-
-interface PiSteerSubmission {
-  readonly input: string;
-  accepted: boolean;
-  delivered: boolean;
-  persisted: boolean;
-}
-
-interface PiActiveTurn {
-  turnId: string | undefined;
-  stopRequested: boolean;
-  settleObserved: boolean;
-  completion: 'pending' | 'finished' | 'failed' | 'stopped' | 'shutdown';
-  failureMessage: string | null;
-  readonly steerSubmissions: Set<PiSteerSubmission>;
-  steeringQueue: readonly string[];
-  settle(): void;
-}
-
-interface PiRpcSession {
-  generation: number;
-  state: PiRpcSessionState;
-  id: string;
-  chatId: string;
-  nativePath: string | null;
-  model: string;
-  thinking: string | undefined;
-  process: ReturnType<typeof Bun.spawn> | null;
-  client: PiRpcClient | null;
-  turn: PiActiveTurn | null;
-  deliveryReservations: number;
-  pendingFinish: (() => void) | null;
-  startTime: number;
-  lastActivityAt: number;
-  eventMetadata: ReturnType<typeof piEventMetadata>;
-  exitPromise: Promise<void> | null;
-}
-
-interface CapturedPiSteerTarget {
-  session: PiRpcSession;
-  generation: number;
-  turn: PiActiveTurn;
-}
-
-interface PiRetireOptions {
-  readonly turnOutcome?: 'failed' | 'stopped' | 'shutdown' | 'preserve';
-  readonly failureMessage?: string;
-}
-
-interface PiPromptDispatch {
-  readonly accepted: Promise<void>;
-  readonly settle: Promise<void>;
-}
-
 const READY_TIMEOUT_MS = 60_000;
 const STEER_RESPONSE_TIMEOUT_MS = 15_000;
 
 export class PiRpcRuntime extends AgentEventEmitterRuntime {
+  // Settlement evidence for the most recently finished turn per chat. A turn
+  // finishes only on agent_settled, but accepted steering that Pi never
+  // observably persisted leaves native continuity unresolved.
+  readonly #turnSettlements = new Map<string, 'confirmed' | 'unresolved'>();
+
   readonly #config: PiConfig;
   readonly #logger: AgentLogger;
   readonly #models: PiModelReader;
@@ -632,6 +590,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     const settle = new Promise<void>((resolve) => {
       resolveSettle = resolve;
     });
+    this.#turnSettlements.delete(session.chatId);
     const turn: PiActiveTurn = {
       turnId: request.turnId,
       stopRequested: false,
@@ -827,10 +786,18 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       (submission) => submission.accepted && !submission.persisted,
     );
     const hasQueuedSteering = turn.steeringQueue.length > 0;
+    this.#turnSettlements.set(
+      session.chatId,
+      hasUnpersistedSteer || hasQueuedSteering ? 'unresolved' : 'confirmed',
+    );
     this.#completeTurn(session, turn, 'finished');
     if (hasUnpersistedSteer || hasQueuedSteering) {
       this.#retireInBackground(session, 'steering remained uncertain at settle');
     }
+  }
+
+  turnSettlement(chatId: string): 'confirmed' | 'unresolved' {
+    return this.#turnSettlements.get(chatId) ?? 'unresolved';
   }
 
   #handleExit(session: PiRpcSession, generation: number, code: number): void {

@@ -17,6 +17,7 @@ export interface PiRuntime {
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null;
+  turnSettlement(chatId: string): 'confirmed' | 'unresolved';
   steer(request: AgentSteerRequestV4): Promise<AgentSteerResult>;
   startPurgeTimer(): void;
   shutdown(): Promise<void>;
@@ -71,6 +72,10 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
   // Avoids loading Pi when no live process can exist yet.
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null {
     return this.#runtime?.captureSteerTarget(agentSessionId) ?? null;
+  }
+
+  turnSettlement(chatId: string): 'confirmed' | 'unresolved' {
+    return this.#runtime?.turnSettlement(chatId) ?? 'unresolved';
   }
 
   steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {

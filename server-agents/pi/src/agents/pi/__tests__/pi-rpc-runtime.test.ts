@@ -689,6 +689,7 @@ describe('PiRpcRuntime', () => {
     await turn;
     expect(seen.finished).toEqual(['chat-2']);
     expect(seen.messages.flatMap((entry) => entry.messages)).toHaveLength(3);
+    expect(runtime.turnSettlement('chat-2')).toBe('confirmed');
     await runtime.shutdown();
   });
 
@@ -1069,6 +1070,7 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
+    expect(runtime.turnSettlement('chat-2')).toBe('unresolved');
 
     const nextTurn = runtime.runTurn(baseResumeRequest());
     await waitForActive(runtime);
@@ -1099,6 +1101,7 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
+    expect(runtime.turnSettlement('chat-2')).toBe('unresolved');
     await runtime.shutdown();
   });
 
