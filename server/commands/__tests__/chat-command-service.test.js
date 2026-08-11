@@ -23,6 +23,7 @@ import {
 } from '../../chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../../chat-execution/chat-execution-control-repository.ts';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
+import { TransientControlActionError } from '../../chats/chat-transient-feed.ts';
 import { transcriptLoader } from '../../chats/__tests__/chat-transcript-test-helpers.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
@@ -691,6 +692,9 @@ function makeService(overrides = {}) {
     carryOver,
     ownership,
     handoffs,
+    transientFeeds: overrides.transientFeeds ?? {
+      validateAction: mock(() => undefined),
+    },
     chatMutationLock: overrides.chatMutationLock,
   });
   activeServices.push(service);
@@ -2948,6 +2952,19 @@ describe('ChatCommandService', () => {
       alwaysAllow: false,
       response,
       clientRequestId: 'req-perm-1',
+      control: {
+        serverInstanceId: 'server-instance-test',
+        chatId: SOURCE_CHAT_ID,
+        agentOwnershipEpoch: 'epoch-1',
+        turnOwner: {
+          agentOwnershipEpoch: 'epoch-1',
+          commandType: 'agent-run',
+          clientRequestId: 'req-run-1',
+          turnId: 'turn-1',
+        },
+        id: 'perm-1',
+        incarnation: 'incarnation-1',
+      },
     });
 
     expect(agents.resolvePermission).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'perm-1', {
@@ -2958,6 +2975,43 @@ describe('ChatCommandService', () => {
 
     const record = await readLedgerRecord(ledger, 'permission-decision', 'req-perm-1');
     expect(record).toMatchObject({ status: 'finished', payload: {} });
+  });
+
+  it('fails a stale permission action once and does not re-enter provider IO on retry', async () => {
+    const validateAction = mock(() => {
+      throw new TransientControlActionError('TRANSIENT_CONTROL_STALE');
+    });
+    const { service, agents } = makeService({ transientFeeds: { validateAction } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      permissionRequestId: 'perm-stale',
+      allow: true,
+      alwaysAllow: false,
+      clientRequestId: 'req-perm-stale',
+      control: {
+        serverInstanceId: 'server-instance-test',
+        chatId: SOURCE_CHAT_ID,
+        agentOwnershipEpoch: 'epoch-1',
+        turnOwner: {
+          agentOwnershipEpoch: 'epoch-1',
+          commandType: 'agent-run',
+          clientRequestId: 'req-run-1',
+          turnId: 'turn-1',
+        },
+        id: 'perm-stale',
+        incarnation: 'incarnation-1',
+      },
+    };
+
+    await expect(service.submitPermissionDecision(input)).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 409,
+    });
+    await expect(service.submitPermissionDecision(input)).resolves.toMatchObject({
+      status: 'duplicate',
+    });
+    expect(validateAction).toHaveBeenCalledTimes(1);
+    expect(agents.resolvePermission).not.toHaveBeenCalled();
   });
 
   it('routes /compact to the agent compaction dispatch', async () => {

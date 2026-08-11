@@ -41,6 +41,7 @@ import type { TranscriptSearchController } from '../chats/search/controller.js';
 import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settings-coordinator.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { CommandLedger } from '../commands/command-ledger.js';
+import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 
 export default function createAllRoutes({
   registry,
@@ -67,6 +68,7 @@ export default function createAllRoutes({
   transcriptSearchSettings,
   runtimeState,
   commandLedger,
+  transientFeeds,
   notifyHistoryChanged,
 }: {
   registry: IChatRegistry;
@@ -93,6 +95,7 @@ export default function createAllRoutes({
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
   runtimeState: ServerRuntimeState;
   commandLedger: CommandLedger;
+  transientFeeds: ChatTransientFeedStore;
   notifyHistoryChanged: (chatId: string) => void;
 }): RouteMap {
   return {
@@ -103,6 +106,7 @@ export default function createAllRoutes({
       execution: queue,
       chatViews,
       pendingInputs,
+      transientFeeds,
     }),
     ...createStaticRoutes(settings),
     ...authRoutes,

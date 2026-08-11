@@ -10,6 +10,7 @@ import { toClientChatExecutionControlState } from '../chat-execution/control-sta
 import type { ChatExecutionQueries } from '../chat-execution/types.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
+import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import { transcriptUnavailableMessage } from '../lib/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
@@ -22,6 +23,7 @@ interface ChatSnapshotRouteDeps {
   summaries: Pick<ChatListProjector, 'buildSummary'>;
   execution: Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
   chatViews: Pick<ChatViewPageReader, 'getOrCreatePage'>;
+  transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
   pendingInputs: Pick<
     PendingUserInputServiceContract,
     'reconcileRetainedHistory' | 'listForTransport'
@@ -54,6 +56,15 @@ export function createChatSnapshotRoutes(deps: ChatSnapshotRouteDeps): RouteMap 
             await deps.execution.readChatExecutionControl(chatId),
           );
           const transcript = await readTranscript(deps, chatId, messageLimit);
+          const generationId = transcript.availability === 'available'
+            ? transcript.generationId
+            : deps.transientFeeds.currentSnapshot(chatId)?.generationId
+              ?? `pending:${summary.chat.agentOwnershipEpoch}`;
+          const transientFeed = deps.transientFeeds.snapshot({
+            chatId,
+            agentOwnershipEpoch: summary.chat.agentOwnershipEpoch,
+            generationId,
+          });
           await deps.pendingInputs.reconcileRetainedHistory(chatId);
           const response = {
             observedAt,
@@ -61,6 +72,7 @@ export function createChatSnapshotRoutes(deps: ChatSnapshotRouteDeps): RouteMap 
             chat: summary.chat,
             processingPhase: summary.processingPhase,
             control,
+            transientFeed,
             pendingUserInputs: deps.pendingInputs.listForTransport(chatId),
             transcript,
           } satisfies ChatSnapshotResponse;

@@ -81,4 +81,9 @@ export interface PendingPermissionRequest {
 	requestedTool: import('$shared/chat-types').ToolUseChatMessage;
 	chatId?: string | null;
 	receivedAt?: Date;
+	control?: import('$shared/chat-transient-feed').ChatTransientControlAction;
+	transcript?: {
+		generationId: string;
+		afterSeq: number;
+	};
 }

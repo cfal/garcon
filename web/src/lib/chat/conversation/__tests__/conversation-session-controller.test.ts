@@ -274,6 +274,9 @@ function createDeps(chat = createRunningChat()) {
 		clearPendingPermissionRequests: vi.fn(() => {
 			conversationUi.pendingPermissionRequests = [];
 		}),
+		activateTransientFeed: vi.fn((chatId: string | null) => {
+			if (!chatId) conversationUi.pendingPermissionRequests = [];
+		}),
 		setPendingPermissionRequests: vi.fn(
 			(
 				update:
@@ -818,7 +821,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.clearImages).toHaveBeenCalled();
 		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalled();
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith(null);
-		expect(deps.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
+		expect(deps.conversationUi.activateTransientFeed).toHaveBeenCalledWith(null);
 		expect(deps.setIsViewportPinnedToBottom).toHaveBeenCalledWith(true);
 		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
 		expect(mockGetChatExecutionControl).not.toHaveBeenCalled();

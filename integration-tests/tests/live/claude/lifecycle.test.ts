@@ -332,22 +332,14 @@ describe('live Claude lifecycle', () => {
         command: prompt,
       }));
 
-      const permissionEvent = await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'permission-request'
-            && entry.message.requestedTool.type === 'bash-tool-use'
-            && entry.message.requestedTool.command.includes(toolCommand)),
-        'live Claude Bash permission request',
+      const permissionRequest = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'bash-tool-use'
+          && row.message.requestedTool.command.includes(toolCommand),
         { afterIndex: cursor, timeoutMs: TURN_TIMEOUT_MS },
       );
-      const permissionRequest = permissionEvent.messages.find((entry) =>
-        entry.message.type === 'permission-request'
-        && entry.message.requestedTool.type === 'bash-tool-use'
-        && entry.message.requestedTool.command.includes(toolCommand));
-      if (permissionRequest?.message.type !== 'permission-request') {
+      if (permissionRequest.message.type !== 'permission-request') {
         throw new Error('Live Claude permission request was not found.');
       }
       const permissionRequestId = permissionRequest.message.permissionRequestId;
@@ -381,7 +373,7 @@ describe('live Claude lifecycle', () => {
       const result = messagesOfType(beforeRestart.messages, 'tool-result').find(
         (message) => message.toolId === bash.toolId,
       );
-      expect(permission?.requestedTool.type).toBe('bash-tool-use');
+      expect(permission).toBeUndefined();
       expect(resolution?.allowed).toBe(true);
       expect(result?.isError).toBe(false);
       expect(JSON.stringify(result?.content)).toContain(toolMarker);
@@ -421,22 +413,14 @@ describe('live Claude lifecycle', () => {
         chatId,
         command: deniedPrompt,
       }));
-      const deniedPermissionEvent = await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'permission-request'
-            && entry.message.requestedTool.type === 'bash-tool-use'
-            && entry.message.requestedTool.command.includes(deniedToolCommand)),
-        'live Claude denied Bash permission request',
+      const deniedPermission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'bash-tool-use'
+          && row.message.requestedTool.command.includes(deniedToolCommand),
         { afterIndex: deniedCursor, timeoutMs: TURN_TIMEOUT_MS },
       );
-      const deniedPermission = deniedPermissionEvent.messages.find((entry) =>
-        entry.message.type === 'permission-request'
-        && entry.message.requestedTool.type === 'bash-tool-use'
-        && entry.message.requestedTool.command.includes(deniedToolCommand));
-      if (deniedPermission?.message.type !== 'permission-request') {
+      if (deniedPermission.message.type !== 'permission-request') {
         throw new Error('Live Claude denied permission request was not found.');
       }
       const deniedPermissionId = deniedPermission.message.permissionRequestId;

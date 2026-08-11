@@ -1319,6 +1319,19 @@ describe('REST chat command routes', () => {
       allow: true,
       alwaysAllow: false,
       response: { outcome: { outcome: 'accepted' } },
+      control: {
+        serverInstanceId: 'server-instance-test',
+        chatId: CHAT_ID,
+        agentOwnershipEpoch: 'epoch-1',
+        turnOwner: {
+          agentOwnershipEpoch: 'epoch-1',
+          commandType: 'agent-run',
+          clientRequestId: 'req-run-1',
+          turnId: 'turn-1',
+        },
+        id: 'perm-1',
+        incarnation: 'incarnation-1',
+      },
     };
 
     const first = await callJson(handler, decision);

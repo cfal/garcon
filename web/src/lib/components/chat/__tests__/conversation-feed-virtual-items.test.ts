@@ -30,8 +30,9 @@ function build(transcriptItems: ReconciledConversationFeedRenderItem[]) {
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
 		surfaceIdentity: 'chat-1:generation-1',
+		transcriptGenerationId: 'generation-1',
 		transcriptItems,
-		floatingPermissions: [],
+		pendingPermissions: [],
 	});
 }
 
@@ -60,8 +61,9 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			surfaceIdentity: 'chat-2:generation-1',
+			transcriptGenerationId: 'generation-1',
 			transcriptItems: [item],
-			floatingPermissions: [],
+			pendingPermissions: [],
 		});
 
 		expect(first.items[0]?.key).not.toBe(second.items[0]?.key);
@@ -83,8 +85,9 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			surfaceIdentity: 'chat-1:generation-1',
+			transcriptGenerationId: 'generation-1',
 			transcriptItems: [],
-			floatingPermissions: [],
+			pendingPermissions: [],
 		}).items[1];
 
 		expect(estimateConversationFeedItemSize(transcript, 0.7)).toBeCloseTo(78.4);
@@ -104,8 +107,9 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: false,
 			reserveComposerTraySpace: true,
 			surfaceIdentity: 'chat-1:generation-1',
+			transcriptGenerationId: 'generation-1',
 			transcriptItems: [userItem(1)],
-			floatingPermissions: [permission, { ...permission, permissionRequestId: 'permission-2' }],
+			pendingPermissions: [permission, { ...permission, permissionRequestId: 'permission-2' }],
 		});
 
 		expect(model.items.map((item) => item.kind)).toEqual([
@@ -118,6 +122,66 @@ describe('conversation virtual feed model', () => {
 		expect(model.items[2]).toMatchObject({ leadingSpacing: true, spacingAfter: 'responsive-feed' });
 		expect(model.items[3]).toMatchObject({ leadingSpacing: false, spacingAfter: 'none' });
 		expect(estimateConversationFeedItemSize(model.items.at(-1), 1)).toBe(56);
+	});
+
+	it('moves a transient permission inline only when its exact generation anchor is loaded', () => {
+		const permission: PendingPermissionRequest = {
+			chatId: 'chat-1',
+			permissionRequestId: 'permission-1',
+			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
+			transcript: { generationId: 'generation-1', afterSeq: 1 },
+			control: {
+				serverInstanceId: 'server-1',
+				chatId: 'chat-1',
+				agentOwnershipEpoch: 'owner-1',
+				turnOwner: {
+					agentOwnershipEpoch: 'owner-1',
+					commandType: 'agent-run',
+					clientRequestId: 'request-1',
+					turnId: 'turn-1',
+				},
+				id: 'permission-1',
+				incarnation: 'incarnation-1',
+			},
+		};
+		const inline = buildConversationVirtualFeedModel({
+			showTopToolbarSpacer: false,
+			showRefreshError: false,
+			showEarlierBoundary: false,
+			showLaterBoundary: false,
+			reserveComposerTraySpace: false,
+			surfaceIdentity: 'chat-1:generation-1',
+			transcriptGenerationId: 'generation-1',
+			transcriptItems: [userItem(1), userItem(2)],
+			pendingPermissions: [permission],
+		});
+		expect(inline.items.map((item) => item.kind)).toEqual([
+			'viewport-start-spacer',
+			'transcript',
+			'permission',
+			'transcript',
+			'viewport-end-spacer',
+		]);
+		expect(inline.items[2]?.key).toContain('permission-1:incarnation-1');
+
+		const detached = buildConversationVirtualFeedModel({
+			showTopToolbarSpacer: false,
+			showRefreshError: false,
+			showEarlierBoundary: false,
+			showLaterBoundary: false,
+			reserveComposerTraySpace: false,
+			surfaceIdentity: 'chat-1:generation-2',
+			transcriptGenerationId: 'generation-2',
+			transcriptItems: [userItem(1), userItem(2)],
+			pendingPermissions: [permission],
+		});
+		expect(detached.items.map((item) => item.kind)).toEqual([
+			'viewport-start-spacer',
+			'transcript',
+			'transcript',
+			'permission',
+			'viewport-end-spacer',
+		]);
 	});
 
 	it('updates suffix indexes when transcript items append incrementally', () => {
@@ -133,8 +197,9 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: true,
 			reserveComposerTraySpace: false,
 			surfaceIdentity: 'chat-1:generation-1',
+			transcriptGenerationId: 'generation-1',
 			transcriptItems: [userItem(1)],
-			floatingPermissions: [permission],
+			pendingPermissions: [permission],
 		});
 		const priorEndKey = model.items.at(-1)!.key;
 		const priorEndIndex = model.items.length - 1;

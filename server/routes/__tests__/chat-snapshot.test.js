@@ -102,15 +102,29 @@ function fixture(overrides = {}) {
       attachments: [{ name: 'image.png', mimeType: 'image/png' }],
     }]),
   };
+  const transientFeeds = overrides.transientFeeds ?? {
+    currentSnapshot: mock(() => null),
+    snapshot: mock(({ chatId, agentOwnershipEpoch, generationId }) => ({
+      serverInstanceId: 'instance-1',
+      chatId,
+      agentOwnershipEpoch,
+      generationId,
+      resetTransactionId: null,
+      transientRevision: 0,
+      stateDigest: 'transient-v1:empty',
+      rows: [],
+    })),
+  };
   const routes = createChatSnapshotRoutes({
     summaries,
     execution,
     chatViews,
+    transientFeeds,
     pendingInputs,
     logger: routeLogger,
     now: () => new Date(TIMESTAMP),
   });
-  return { calls, summaries, execution, chatViews, pendingInputs, routes };
+  return { calls, summaries, execution, chatViews, transientFeeds, pendingInputs, routes };
 }
 
 async function getSnapshot(testFixture, query) {
@@ -137,6 +151,10 @@ describe('GET /api/v1/chats/snapshot', () => {
       control: {
         serverInstanceId: 'instance-1',
         queue: { entries: [{ id: 'queued-1', content: 'Queued work' }] },
+      },
+      transientFeed: {
+        generationId: 'generation-1',
+        rows: [],
       },
       pendingUserInputs: [{ attachments: [{ name: 'image.png' }] }],
       transcript: { availability: 'available', generationId: 'generation-1' },

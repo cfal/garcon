@@ -4,8 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   AssistantMessage,
+  BashToolUseMessage,
   CompactionMessage,
   parseChatMessage,
+  PermissionRequestMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
 import type {
@@ -84,7 +86,7 @@ describe('AgentProjectionEventStream', () => {
         operation: fixture.operation,
         anchorEntryId: active.id,
         displayOrder: 0,
-        message: new UserMessage(timestamp(), 'permission'),
+        message: permissionRequest('permission'),
       },
     });
     const terminal = await fixture.stream.terminal({
@@ -126,7 +128,7 @@ describe('AgentProjectionEventStream', () => {
         operation: fixture.operation,
         anchorEntryId: null,
         displayOrder: 0,
-        message: new UserMessage(timestamp(), 'permission'),
+        message: permissionRequest('permission'),
       },
     });
     const oldEpoch = fixture.stream.current.checkpoint.projection.epoch;
@@ -307,6 +309,14 @@ function entry(
 
 function source(itemId: string) {
   return { namespace: 'test', itemId, subrowId: 'message' };
+}
+
+function permissionRequest(id: string): PermissionRequestMessage {
+  return new PermissionRequestMessage(
+    timestamp(),
+    id,
+    new BashToolUseMessage(timestamp(), `tool-${id}`, 'true'),
+  );
 }
 
 function timestamp(): string {

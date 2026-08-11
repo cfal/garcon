@@ -27,7 +27,12 @@ export interface IdleNativeReconcilerOptions {
   views: ReconcilableViews;
   source: NativeHistorySource;
   ownsExecution(chatId: string): boolean;
-  onGenerationReset(chatId: string, generationId: string, lastSeq: number): void;
+  onGenerationReset(
+    chatId: string,
+    previousGenerationId: string,
+    generationId: string,
+    lastSeq: number,
+  ): void;
   debounceMs?: number;
   settleMs?: number;
 }
@@ -41,7 +46,7 @@ export class IdleNativeReconciler {
   readonly #views: ReconcilableViews;
   readonly #source: NativeHistorySource;
   readonly #ownsExecution: (chatId: string) => boolean;
-  readonly #onGenerationReset: (chatId: string, generationId: string, lastSeq: number) => void;
+  readonly #onGenerationReset: IdleNativeReconcilerOptions['onGenerationReset'];
   readonly #debounceMs: number;
   readonly #settleMs: number;
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -137,7 +142,7 @@ export class IdleNativeReconciler {
       }
       const after = this.#views.getCursor(chatId);
       if (this.#stopped || !after || before.generationId === after.generationId) return;
-      this.#onGenerationReset(chatId, after.generationId, after.lastSeq);
+      this.#onGenerationReset(chatId, before.generationId, after.generationId, after.lastSeq);
     } catch (error) {
       // A turn that started during the load owns the view again; the next idle signal retries.
       if (error instanceof ChatRunningError) return;

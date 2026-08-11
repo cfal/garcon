@@ -14,6 +14,7 @@ import {
   getNativeMessageRevisionSource,
 } from './agents/shared/native-message-source.js';
 import type { ChatRegistry } from './chats/store.js';
+import type { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import type { MetadataIndex } from './chats/metadata-store.js';
 import type {
   ChatHistoryPage,
@@ -42,6 +43,8 @@ import {
   AgentRunFailedMessage,
   ChatMessagesMessage,
   ChatGenerationResetMessage,
+  ChatProjectionGenerationTransitionMessage,
+  ChatTransientFeedMutationMessage,
   ChatSessionCreatedMessage,
   ChatProjectPathUpdatedMessage,
   ChatProcessingUpdatedMessage,
@@ -94,6 +97,7 @@ export interface ServerEventWiringDeps {
   processing: ChatProcessingActivity;
   metadata: MetadataIndex;
   chatViews: ChatViewStore;
+  transientFeeds: ChatTransientFeedStore;
   idleReconciler: IdleNativeReconciler;
   chatNativeReloader: NativeReloaderDep;
   pendingInputs: PendingUserInputService;
@@ -104,6 +108,12 @@ export interface ServerEventWiringDeps {
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
   loadChatSnapshot(chatId: string): Promise<ChatTranscriptSnapshot>;
+  composeProjectionSnapshot(
+    chatId: string,
+    messages: readonly ChatMessage[],
+    revision: string,
+  ): Promise<ChatTranscriptSnapshot>;
+  getCarryOverMessageCount(chatId: string): Promise<number>;
   loadChatPage(chatId: string, limit: number, offset: number): Promise<ChatHistoryPage | null>;
   searchIndex?: ChatSearchEventIndex;
 }
@@ -123,6 +133,7 @@ export function wireServerEvents({
   processing,
   metadata,
   chatViews,
+  transientFeeds,
   idleReconciler,
   chatNativeReloader,
   pendingInputs,
@@ -133,6 +144,8 @@ export function wireServerEvents({
   scheduledPrompts,
   snippets,
   loadChatSnapshot,
+  composeProjectionSnapshot,
+  getCarryOverMessageCount,
   loadChatPage,
   searchIndex,
 }: ServerEventWiringDeps): ServerEventWiring {
@@ -209,16 +222,32 @@ export function wireServerEvents({
 
   function notifyAgentHandoff(chatId: string): void {
     scheduleChatTask(chatId, 'server-events: agent handoff invalidation failed', () => {
-      if (!chatExists(chatId)) return;
+      const entry = chatRegistry.getChat(chatId);
+      if (!entry) return;
+      const previousGenerationId = chatViews.getCursor(chatId)?.generationId
+        ?? transientFeeds.currentSnapshot(chatId)?.generationId
+        ?? crypto.randomUUID();
+      const generationId = crypto.randomUUID();
       chatViews.invalidateFence(chatId);
       chatViews.invalidate(chatId);
       markSearchCatalogDirty(chatId);
       broadcast(new ChatListRefreshRequestedMessage('agent-handoff', chatId));
-      broadcast(new ChatGenerationResetMessage(
+      const transition = transientFeeds.resetEmptyGeneration({
         chatId,
-        crypto.randomUUID(),
-        'agent-handoff',
-        0,
+        agentOwnershipEpoch: entry.agentOwnershipEpoch,
+        previousGenerationId,
+        generationId,
+      });
+      broadcast(new ChatProjectionGenerationTransitionMessage(
+        transition.resetTransactionId,
+        transition.serverInstanceId,
+        transition.chatId,
+        transition.agentOwnershipEpoch,
+        transition.previousGenerationId,
+        transition.generationId,
+        transition.transientRevision,
+        transition.stateDigest,
+        transition.rows,
       ));
     });
   }
@@ -527,6 +556,90 @@ export function wireServerEvents({
       }
     });
   });
+  agentRegistry.onProjectionApplied((applied) => {
+    const event = applied.event;
+    if (event.kind === 'commit' || event.kind === 'session' || !chatExists(event.chatId)) {
+      return;
+    }
+    return scheduleChatTask(event.chatId, 'transient-feed: projection failed', async () => {
+      if (!chatExists(event.chatId)) return;
+      let cursor = chatViews.getCursor(event.chatId);
+      if (!cursor) {
+        await chatViews.getOrCreatePage(
+          event.chatId,
+          {
+            loadAll: () => loadChatSnapshot(event.chatId),
+            loadPage: (limit, offset) => loadChatPage(event.chatId, limit, offset),
+          },
+          1,
+        );
+        cursor = chatViews.getCursor(event.chatId);
+      }
+      if (!cursor) throw new Error('TRANSIENT_FEED_GENERATION_UNAVAILABLE');
+
+      const carryOverMessageCount = await getCarryOverMessageCount(event.chatId);
+      if (event.kind === 'reset') {
+        const snapshot = await composeProjectionSnapshot(
+          event.chatId,
+          applied.current.entries.map((entry) => entry.message),
+          event.checkpoint.projection.stateRevision,
+        );
+        const page = await chatViews.replaceFromProjection(event.chatId, snapshot);
+        const projected = transientFeeds.apply(applied, {
+          previousGenerationId: cursor.generationId,
+          generationId: page.generationId,
+          carryOverMessageCount,
+        });
+        if (projected.kind !== 'generation-transition') {
+          throw new TypeError('Projection reset did not produce a compound transition');
+        }
+        const value = projected.value;
+        broadcast(new ChatProjectionGenerationTransitionMessage(
+          value.resetTransactionId,
+          value.serverInstanceId,
+          value.chatId,
+          value.agentOwnershipEpoch,
+          value.previousGenerationId,
+          value.generationId,
+          value.transientRevision,
+          value.stateDigest,
+          value.rows,
+        ));
+        return;
+      }
+
+      const projected = transientFeeds.apply(applied, {
+        generationId: cursor.generationId,
+        carryOverMessageCount,
+      });
+      if (projected.kind === 'generation-transition') {
+        const value = projected.value;
+        broadcast(new ChatProjectionGenerationTransitionMessage(
+          value.resetTransactionId,
+          value.serverInstanceId,
+          value.chatId,
+          value.agentOwnershipEpoch,
+          value.previousGenerationId,
+          value.generationId,
+          value.transientRevision,
+          value.stateDigest,
+          value.rows,
+        ));
+        return;
+      }
+      if (projected.kind !== 'mutation') return;
+      const value = projected.value;
+      broadcast(new ChatTransientFeedMutationMessage(
+        value.serverInstanceId,
+        value.chatId,
+        value.agentOwnershipEpoch,
+        value.generationId,
+        value.transientRevision,
+        value.stateDigest,
+        value.mutation,
+      ));
+    });
+  });
   agentRegistry.onInputSettled((chatId, clientRequestId) => {
     queue.onAcceptedInputSettled(chatId, clientRequestId);
   });
@@ -740,6 +853,7 @@ export function wireServerEvents({
       if (key.startsWith(`${chatId}:`)) deferredTerminalFailures.delete(key);
     }
     pendingInputs.clearChat(chatId, 'chat-removed');
+    transientFeeds.deleteChat(chatId);
     chatViews.deleteChatView(chatId);
     deleteSearchChat(chatId);
     scheduleChatTask(chatId, 'server-events: chat removal settlement failed', async () => {

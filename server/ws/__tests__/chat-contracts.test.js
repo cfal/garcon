@@ -18,7 +18,26 @@ const mockProcessing = {
 };
 
 const mockRegistry = {
-  getChat: mock(() => ({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' })),
+  getChat: mock(() => ({
+    agentId: 'claude',
+    nativePath: '/tmp/session.jsonl',
+    agentSessionId: 'abc',
+    agentOwnershipEpoch: 'epoch-1',
+  })),
+};
+
+const mockTransientFeeds = {
+  currentSnapshot: mock(() => null),
+  snapshot: mock(({ chatId, agentOwnershipEpoch, generationId }) => ({
+    serverInstanceId: 'server-instance-test',
+    chatId,
+    agentOwnershipEpoch,
+    generationId,
+    resetTransactionId: null,
+    transientRevision: 0,
+    stateDigest: 'transient-v1:empty',
+    rows: [],
+  })),
 };
 
 const mockChatViews = {
@@ -69,6 +88,8 @@ const injectedMocks = [
   mockNativeReloader.reloadFromNative,
   mockQueue.readChatExecutionControl,
   mockPendingInputs.listForTransport,
+  mockTransientFeeds.currentSnapshot,
+  mockTransientFeeds.snapshot,
 ];
 
 const moduleMocks = [sendWebSocketJson];
@@ -81,6 +102,7 @@ function createHandler() {
     nativeReloader: mockNativeReloader,
     queue: mockQueue,
     pendingInputs: mockPendingInputs,
+    transientFeeds: mockTransientFeeds,
     registry: mockRegistry,
   });
   return instance.createHandler();
@@ -119,7 +141,12 @@ describe('chat WebSocket handler', () => {
     injectedMocks.forEach((fn) => fn.mockClear());
     moduleMocks.forEach((fn) => fn.mockClear());
     mockProcessing.snapshot.mockReturnValue([{ chatId: 'chat-running', phase: 'running' }]);
-    mockRegistry.getChat.mockReturnValue({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' });
+    mockRegistry.getChat.mockReturnValue({
+      agentId: 'claude',
+      nativePath: '/tmp/session.jsonl',
+      agentSessionId: 'abc',
+      agentOwnershipEpoch: 'epoch-1',
+    });
     mockQueue.readChatExecutionControl.mockResolvedValue(storedQueue());
     mockChatViews.readReplay.mockReturnValue({
       generationId: 'generation-1',

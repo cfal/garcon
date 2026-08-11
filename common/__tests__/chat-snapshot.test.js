@@ -41,6 +41,16 @@ function snapshot(overrides = {}) {
       version: 0,
       updatedAt: null,
     },
+    transientFeed: {
+      serverInstanceId: 'instance-1',
+      chatId: CHAT_ID,
+      agentOwnershipEpoch: 'epoch-1',
+      generationId: 'generation-1',
+      resetTransactionId: null,
+      transientRevision: 0,
+      stateDigest: 'transient-v1:empty',
+      rows: [],
+    },
     pendingUserInputs: [],
     transcript: {
       availability: 'available',
@@ -106,7 +116,20 @@ describe('chat snapshot contract', () => {
         pageOldestSeq: 17,
         hasMore: true,
       },
+      transientFeed: {
+        ...snapshot().transientFeed,
+        generationId: 'generation-2',
+      },
     })).transcript).toMatchObject({ lastSeq: 42, pageOldestSeq: 17, hasMore: true });
+  });
+
+  test('requires transcript and transient state to share one browser generation', () => {
+    expect(() => parseChatSnapshotResponse(snapshot({
+      transientFeed: {
+        ...snapshot().transientFeed,
+        generationId: 'generation-2',
+      },
+    }))).toThrow('generations differ');
   });
 
   test.each([

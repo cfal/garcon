@@ -8,6 +8,8 @@ import type { ServerWsMessage, EventKey } from '$shared/ws-events';
 import {
 	ChatMessagesMessage,
 	ChatGenerationResetMessage,
+	ChatProjectionGenerationTransitionMessage,
+	ChatTransientFeedMutationMessage,
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
@@ -36,6 +38,7 @@ import {
 } from '$lib/chat/conversation/pending-chat-handoff.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import { getChatSnapshot } from '$lib/api/chats.js';
 
 import { untrack } from 'svelte';
 import { normalizeEvent } from '$lib/ws/normalize';
@@ -304,6 +307,38 @@ function buildDispatch(
 		removeChatTranscript: stores.chatState.removeChatTranscript,
 	};
 
+	const refreshTransientFeed = (chatId: string) => {
+		const previousGenerationId = stores.conversationUi.getTransientFeed(chatId)?.generationId;
+		void getChatSnapshot(chatId, 1)
+			.then((snapshot) => {
+				const result = stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
+				if (result.kind === 'applied' && previousGenerationId
+					&& previousGenerationId !== snapshot.transientFeed.generationId) {
+					handleGenerationTransition(chatId, snapshot.transientFeed.generationId);
+				}
+			})
+			.catch(() => undefined);
+	};
+
+	const handleGenerationTransition = (chatId: string, generationId: string) => {
+		messagesAccumulator.flush();
+		const selectedChatId = stores.sessions.selectedChat?.id ?? null;
+		if (selectedChatId === chatId) {
+			const cursor = stores.chatState.getCursor();
+			if (cursor.generationId !== generationId) {
+				stores.chatState.reloadChatTranscript(chatId);
+			} else {
+				stores.chatState.markChatTranscriptValidated(chatId);
+			}
+			return;
+		}
+		if (stores.chatState.isVisiblePreviewChat(chatId)) {
+			stores.chatState.markVisibleChatPreviewStale(chatId);
+			void stores.chatState.loadVisibleChatPreview(chatId);
+		}
+		stores.chatState.markChatTranscriptStale(chatId);
+	};
+
 	return {
 		'chat-messages': (msg) => {
 			if (!(msg instanceof ChatMessagesMessage)) return;
@@ -314,22 +349,22 @@ function buildDispatch(
 		},
 		'chat-generation-reset': (msg) => {
 			if (!(msg instanceof ChatGenerationResetMessage)) return;
-			messagesAccumulator.flush();
-			const selectedChatId = stores.sessions.selectedChat?.id ?? null;
-			if (selectedChatId === msg.chatId) {
-				const cursor = stores.chatState.getCursor();
-				if (cursor.generationId !== msg.generationId) {
-					stores.chatState.reloadChatTranscript(msg.chatId);
-				} else {
-					stores.chatState.markChatTranscriptValidated(msg.chatId);
-				}
-				return;
+			handleGenerationTransition(msg.chatId, msg.generationId);
+		},
+		'chat-transient-feed-mutation': (msg) => {
+			if (!(msg instanceof ChatTransientFeedMutationMessage)) return;
+			const result = stores.conversationUi.applyTransientFeedMutation(msg);
+			if (result.kind === 'snapshot-required' || result.kind === 'corrupt') {
+				refreshTransientFeed(msg.chatId);
 			}
-			if (stores.chatState.isVisiblePreviewChat(msg.chatId)) {
-				stores.chatState.markVisibleChatPreviewStale(msg.chatId);
-				void stores.chatState.loadVisibleChatPreview(msg.chatId);
+		},
+		'chat-projection-generation-transition': (msg) => {
+			if (!(msg instanceof ChatProjectionGenerationTransitionMessage)) return;
+			const result = stores.conversationUi.applyProjectionGenerationTransition(msg);
+			if (result.kind === 'snapshot-required' || result.kind === 'corrupt') {
+				refreshTransientFeed(msg.chatId);
 			}
-			stores.chatState.markChatTranscriptStale(msg.chatId);
+			if (result.kind === 'applied') handleGenerationTransition(msg.chatId, msg.generationId);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
@@ -400,7 +435,10 @@ function buildDispatch(
 				handleChatProjectPathUpdated(msg, sidebarCtx);
 		},
 		'chat-session-deleted': (msg) => {
-			if (msg instanceof ChatSessionDeletedWsMessage) handleChatDeleted(msg, sidebarCtx);
+			if (msg instanceof ChatSessionDeletedWsMessage) {
+				stores.conversationUi.removeTransientFeed(msg.chatId);
+				handleChatDeleted(msg, sidebarCtx);
+			}
 		},
 		'chat-read-updated-v1': (msg) => {
 			if (msg instanceof ChatReadUpdatedV1Message) handleChatReadUpdated(msg, sidebarCtx);

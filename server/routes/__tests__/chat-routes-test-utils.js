@@ -77,6 +77,7 @@ export function createRouteCommandService({
 	chatListProjector,
   forkChatFileCopy: forkChatFileCopyOverride,
   ownership,
+  transientFeeds,
 }) {
   return new ChatCommandService({
     chats: registry,
@@ -94,6 +95,7 @@ export function createRouteCommandService({
     agents,
     ledger: commandLedger,
     pendingInputs,
+    transientFeeds: transientFeeds ?? { validateAction: () => undefined },
 	handoffs: handoffs ?? {
 		resolveTarget: async ({ handoff }) => ({
 			agentId: handoff.target.agentId,

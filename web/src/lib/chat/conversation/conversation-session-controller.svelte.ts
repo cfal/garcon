@@ -1,7 +1,5 @@
-// Chat session controller. Owns chat lifecycle transitions, message
-// submission, permission decisions, queue control, and mode persistence.
-// No direct DOM access -- all viewport operations are delegated via
-// callback functions supplied through the deps interface.
+// Owns chat lifecycle, submission, permission, queue, and mode transitions.
+// Delegates all viewport operations through the dependency interface.
 
 import {
 	sendPermissionDecision,
@@ -132,7 +130,7 @@ type SessionConversationUiState = Pick<
 	ConversationUiPort,
 	| 'pendingPermissionRequests'
 	| 'previousPermissionMode'
-	| 'clearPendingPermissionRequests'
+	| 'activateTransientFeed'
 	| 'getExecutionControl'
 	| 'setExecutionControlFromLiveUpdate'
 	| 'setExecutionControlFromRefresh'
@@ -142,7 +140,6 @@ type SessionConversationUiState = Pick<
 >;
 
 type SessionStartupCoordinator = Pick<StartupCoordinator, 'beginLocalStartup' | 'completeStartup'>;
-
 interface DirectAdmissionBarrier {
 	settled: Promise<void>;
 	release: () => void;
@@ -338,7 +335,7 @@ export class ConversationSessionController {
 		deps.composerState.clearImages();
 		if (currentChatId) deps.lifecycle.clearTurnStatus(currentChatId);
 		deps.lifecycle.setCurrentChatId(null);
-		deps.conversationUi.clearPendingPermissionRequests();
+		deps.conversationUi.activateTransientFeed(null);
 		deps.setIsViewportPinnedToBottom(true);
 		deps.setInitialBottomRestorePending(null);
 	}
@@ -382,7 +379,7 @@ export class ConversationSessionController {
 		deps.composerState.clearImages();
 		const previousChatId = deps.lifecycle.currentChatId;
 		if (previousChatId) deps.lifecycle.clearTurnStatus(previousChatId);
-		deps.conversationUi.clearPendingPermissionRequests();
+		deps.conversationUi.activateTransientFeed(chatId);
 		deps.setIsViewportPinnedToBottom(true);
 
 		const activeSelection = this.#executionDraft.activate(chatId);
@@ -795,10 +792,21 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return;
+		const request = deps.conversationUi.pendingPermissionRequests.find(
+			(entry) => entry.permissionRequestId === permissionRequestId,
+		);
+		if (!request?.control) {
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_permission_decision({ detail: 'Permission request is stale' }),
+			);
+			return;
+		}
 		void sendPermissionDecision({
 			clientRequestId: createClientCommandId(),
 			chatId,
 			permissionRequestId,
+			control: request.control,
 			allow: decision.allow,
 			alwaysAllow: Boolean(decision.alwaysAllow),
 			response: decision.response,
@@ -820,6 +828,9 @@ export class ConversationSessionController {
 
 	handleExitPlanMode(permissionRequestId: string, choice: string, plan: string): void {
 		const { deps } = this;
+		const permissionControl = deps.conversationUi.pendingPermissionRequests.find(
+			(request) => request.permissionRequestId === permissionRequestId,
+		)?.control;
 		deps.conversationUi.setPendingPermissionRequests(
 			deps.conversationUi.pendingPermissionRequests.filter(
 				(r) => r.permissionRequestId !== permissionRequestId,
@@ -884,11 +895,12 @@ export class ConversationSessionController {
 				resumeWithApproval('acceptEdits');
 				break;
 			case 'deny': {
-				if (chatId) {
+				if (chatId && permissionControl) {
 					void sendPermissionDecision({
 						clientRequestId: createClientCommandId(),
 						chatId,
 						permissionRequestId,
+						control: permissionControl,
 						allow: false,
 						alwaysAllow: false,
 					}).catch((error) => {
@@ -897,6 +909,11 @@ export class ConversationSessionController {
 							m.chat_notice_failed_deny_permission({ detail: errorDetail(error) }),
 						);
 					});
+				} else if (chatId) {
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_deny_permission({ detail: 'Permission request is stale' }),
+					);
 				}
 				break;
 			}

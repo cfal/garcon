@@ -13,7 +13,7 @@ const TS = '2026-08-03T00:00:00.000Z';
 type ProjectionInput = Parameters<ConversationFeedProjectionState['reconcile']>[0];
 
 const NO_HIDDEN_TOOL_TYPES: ProjectionInput['hiddenToolTypes'] = [];
-const NO_FLOATING_PERMISSIONS: ProjectionInput['floatingPermissions'] = [];
+const NO_PENDING_PERMISSIONS: ProjectionInput['pendingPermissions'] = [];
 
 function clock(
 	dataRevision: number,
@@ -58,7 +58,8 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 		showEarlierBoundary: false,
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
-		floatingPermissions: NO_FLOATING_PERMISSIONS,
+		transcriptGenerationId: 'generation-1',
+		pendingPermissions: NO_PENDING_PERMISSIONS,
 		...overrides,
 	};
 }

@@ -13,6 +13,10 @@ import {
 import type { ChatProcessingPhase } from './chat-types.js';
 import { parseChatViewMessages, type ChatViewMessage } from './chat-view.js';
 import {
+  parseChatTransientFeedSnapshot,
+  type ChatTransientFeedSnapshot,
+} from './chat-transient-feed.js';
+import {
   normalizePendingUserInput,
   type PendingUserInput,
 } from './pending-user-input.js';
@@ -72,6 +76,7 @@ export interface ChatSnapshotResponse {
   chat: ChatSnapshotChat;
   processingPhase: ChatProcessingPhase | null;
   control: ChatExecutionControlState;
+  transientFeed: ChatTransientFeedSnapshot;
   pendingUserInputs: PendingUserInput[];
   transcript: ChatSnapshotTranscript;
 }
@@ -95,6 +100,12 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
       : fail('processingPhase is invalid');
   const control = parseChatExecutionControlState(raw.control);
   if (!control) fail('control is invalid');
+  const transientFeed = parseChatTransientFeedSnapshot(raw.transientFeed);
+  if (!transientFeed) fail('transientFeed is invalid');
+  if (transientFeed.chatId !== chat.id
+      || transientFeed.agentOwnershipEpoch !== chat.agentOwnershipEpoch) {
+    fail('transientFeed belongs to another chat ownership epoch');
+  }
   if (!Array.isArray(raw.pendingUserInputs)) {
     fail('pendingUserInputs must be an array');
   }
@@ -105,6 +116,11 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
   if (pendingUserInputs.some((input) => input?.chatId !== chat.id)) {
     fail('pendingUserInputs contains another chat');
   }
+  const transcript = parseTranscript(raw.transcript, messageLimit);
+  if (transcript.availability === 'available'
+      && transcript.generationId !== transientFeed.generationId) {
+    fail('transientFeed and transcript generations differ');
+  }
 
   return {
     observedAt,
@@ -112,8 +128,9 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
     chat,
     processingPhase,
     control,
+    transientFeed,
     pendingUserInputs: pendingUserInputs as PendingUserInput[],
-    transcript: parseTranscript(raw.transcript, messageLimit),
+    transcript,
   };
 }
 

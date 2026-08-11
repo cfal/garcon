@@ -43,6 +43,7 @@ import {
 } from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
+import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import { IdleNativeReconciler } from './chats/idle-native-reconciler.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
@@ -74,7 +75,10 @@ import {
   waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
-import { ChatGenerationResetMessage, WsFaultMessage } from '../common/ws-events.ts';
+import {
+  ChatProjectionGenerationTransitionMessage,
+  WsFaultMessage,
+} from '../common/ws-events.ts';
 import { ErrorMessage } from '../common/chat-types.ts';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
@@ -337,6 +341,7 @@ export async function startServer(): Promise<void> {
         : executionCoordinator.ownsExecution(chatId)
     );
     const chatViews = new ChatViewStore(ownsExecution);
+    const transientFeeds = new ChatTransientFeedStore(runtimeState.identity.instanceId);
     carryOverWarnings = (chatId, message) => {
       void chatViews.appendOperationalNotice(
         chatId,
@@ -517,16 +522,29 @@ export async function startServer(): Promise<void> {
         loadFullSnapshot: (chatId) => transcripts.loadAll(chatId),
       },
       ownsExecution,
-      onGenerationReset: (chatId, generationId, lastSeq) => {
+      onGenerationReset: (chatId, previousGenerationId, generationId) => {
         if (!webSocketPublisher) return;
+        const entry = chatRegistry.getChat(chatId);
+        if (!entry) return;
+        const transition = transientFeeds.resetEmptyGeneration({
+          chatId,
+          agentOwnershipEpoch: entry.agentOwnershipEpoch,
+          previousGenerationId,
+          generationId,
+        });
         publishWebSocketPayload(
           webSocketPublisher,
           'chat',
-          JSON.stringify(new ChatGenerationResetMessage(
-            chatId,
-            generationId,
-            'idle-reconcile',
-            lastSeq,
+          JSON.stringify(new ChatProjectionGenerationTransitionMessage(
+            transition.resetTransactionId,
+            transition.serverInstanceId,
+            transition.chatId,
+            transition.agentOwnershipEpoch,
+            transition.previousGenerationId,
+            transition.generationId,
+            transition.transientRevision,
+            transition.stateDigest,
+            transition.rows,
           )),
         );
       },
@@ -560,6 +578,7 @@ export async function startServer(): Promise<void> {
       pathCache,
       ownership: agentOwnership,
       handoffs,
+      transientFeeds,
       chatMutationLock,
     });
 
@@ -616,6 +635,7 @@ export async function startServer(): Promise<void> {
         processing: chatProcessingActivity,
         metadata,
         chatViews,
+        transientFeeds,
         idleReconciler,
         chatNativeReloader: indexedNativeReloader,
         pendingInputs,
@@ -626,6 +646,13 @@ export async function startServer(): Promise<void> {
         scheduledPrompts,
         snippets,
         loadChatSnapshot,
+        composeProjectionSnapshot: (chatId, messages, revision) => (
+          transcripts.composeProjectionSnapshot(chatId, messages, revision)
+        ),
+        getCarryOverMessageCount: async (chatId) => {
+          const entry = chatRegistry.getChat(chatId);
+          return entry ? carryOver.logicalMessageCount(entry.carryOverSegments) : 0;
+        },
         loadChatPage: (chatId, limit, offset) => transcripts.loadPage(chatId, limit, offset),
         searchIndex: chatSearch,
       }),
@@ -658,6 +685,7 @@ export async function startServer(): Promise<void> {
       transcriptSearchSettings,
       runtimeState,
       commandLedger,
+      transientFeeds,
       notifyHistoryChanged(chatId) {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },
@@ -674,6 +702,7 @@ export async function startServer(): Promise<void> {
       nativeReloader: indexedNativeReloader,
       queue,
       pendingInputs,
+      transientFeeds,
       registry: chatRegistry,
     });
     const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);

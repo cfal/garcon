@@ -44,9 +44,7 @@ export function applyProjectionEvent(
       const controls = new Map(current.controls);
       const retired = new Set(current.retiredControlIncarnations);
       for (const [id, row] of controls) {
-        if (row.operation.turnOwner.turnId !== event.operation.turnOwner.turnId
-            || row.operation.turnOwner.clientRequestId
-              !== event.operation.turnOwner.clientRequestId) continue;
+        if (!sameTurnOwner(row.operation.turnOwner, event.operation.turnOwner)) continue;
         controls.delete(id);
         retired.add(controlIdentity(row.id, row.incarnation));
       }
@@ -185,8 +183,11 @@ function applyControl(
   const retired = new Set(current.retiredControlIncarnations);
   const mutation = event.mutation;
   if (mutation.kind === 'clear') {
-    for (const row of controls.values()) retired.add(controlIdentity(row.id, row.incarnation));
-    controls.clear();
+    for (const [id, row] of controls) {
+      if (!sameTurnOwner(row.operation.turnOwner, event.operation.turnOwner)) continue;
+      retired.add(controlIdentity(row.id, row.incarnation));
+      controls.delete(id);
+    }
   } else if (mutation.kind === 'remove') {
     const row = controls.get(mutation.id);
     if (!row || row.incarnation !== mutation.incarnation) {
@@ -202,6 +203,11 @@ function applyControl(
     if (existing && existing.incarnation !== mutation.row.incarnation) {
       retired.add(controlIdentity(existing.id, existing.incarnation));
     }
+    for (const control of controls.values()) {
+      if (!sameTurnOwner(control.operation.turnOwner, event.operation.turnOwner)) {
+        throw new TypeError('One projection control fold cannot contain multiple turn owners');
+      }
+    }
     controls.set(mutation.row.id, mutation.row);
   }
   return {
@@ -213,13 +219,27 @@ function applyControl(
 }
 
 function validateControlRow(event: AgentControlEvent, row: AgentControlRow): void {
-  if (!row.id || !row.incarnation || !Number.isSafeInteger(row.displayOrder)) {
+  if (!row.id || !row.incarnation || !Number.isSafeInteger(row.displayOrder)
+      || row.displayOrder < 0) {
     throw new TypeError('Control row identity and display order are required');
   }
-  if (row.operation.turnOwner.turnId !== event.operation.turnOwner.turnId
-      || row.operation.agentOwnershipEpoch !== event.agentOwnershipEpoch) {
+  if (stableJsonStringify(row.operation) !== stableJsonStringify(event.operation)) {
     throw new TypeError('Control row operation does not match its event');
   }
+  if (row.message.type !== 'permission-request'
+      || row.message.permissionRequestId !== row.id) {
+    throw new TypeError('Control row must contain its matching permission request');
+  }
+}
+
+function sameTurnOwner(
+  left: AgentControlRow['operation']['turnOwner'],
+  right: AgentControlRow['operation']['turnOwner'],
+): boolean {
+  return left.agentOwnershipEpoch === right.agentOwnershipEpoch
+    && left.commandType === right.commandType
+    && left.clientRequestId === right.clientRequestId
+    && left.turnId === right.turnId;
 }
 
 function cloneEntry(entry: AgentTranscriptEntry): AgentTranscriptEntry {

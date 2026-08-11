@@ -193,6 +193,18 @@ export class OrderedChatTranscriptReader {
     return this.#snapshot(entry, archived, native.messages, native.revision);
   }
 
+  async composeProjectionSnapshot(
+    chatId: string,
+    currentMessages: readonly ChatMessage[],
+    currentRevision: string,
+  ): Promise<ChatTranscriptSnapshot> {
+    const entry = this.#requireReadableEntry(chatId);
+    if (!entry) return emptySnapshot();
+    const archived = await this.deps.carryOver.loadAll(entry.carryOverSegments);
+    this.#assertEntryUnchanged(chatId, entry);
+    return this.#snapshot(entry, archived, [...currentMessages], currentRevision);
+  }
+
   async loadPage(chatId: string, limit: number, offset: number): Promise<ChatHistoryPage | null> {
     const entry = this.#requireReadableEntry(chatId);
     if (!entry) return null;

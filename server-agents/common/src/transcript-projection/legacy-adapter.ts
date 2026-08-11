@@ -278,6 +278,7 @@ async function projectMessages(options: {
       });
       byId?.delete(message.permissionRequestId);
       if (byId?.size === 0) options.controls.delete(options.chat.chatId);
+      durable.push(message);
       continue;
     }
     durable.push(message);

@@ -49,6 +49,19 @@ function messageJson(seq: number, content: string) {
 	};
 }
 
+function transientFeed(chatId: string, generationId: string) {
+	return {
+		serverInstanceId: 'server-instance-test',
+		chatId,
+		agentOwnershipEpoch: 'ownership-1',
+		generationId,
+		resetTransactionId: null,
+		transientRevision: 0,
+		stateDigest: 'empty-feed',
+		rows: [],
+	};
+}
+
 function reconnectStateResponse(
 	runningIds: string[] = [],
 	chatIds: string[] = [],
@@ -87,6 +100,7 @@ function deltaResponse(
 		messages,
 		lastSeq: typeof last?.seq === 'number' ? last.seq : 0,
 		pendingUserInputs,
+		transientFeed: transientFeed(chatId, generationId),
 	};
 }
 
@@ -103,6 +117,7 @@ function snapshotRequiredResponse(
 		messages: [],
 		lastSeq: 0,
 		pendingUserInputs: [],
+		transientFeed: transientFeed(chatId, generationId ?? `pending:${chatId}`),
 	};
 }
 
@@ -180,6 +195,7 @@ function createReconnectDeps(
 		setExecutionControlFromRefresh: vi.fn(),
 		markExecutionControlSocketDisconnected: vi.fn(),
 		confirmExecutionControlSocketInstance: vi.fn(),
+		setTransientFeedFromSnapshot: vi.fn(),
 	};
 	const addMessageConsumer = vi.fn<(consumer: WsMessageConsumer) => () => void>(() => vi.fn());
 

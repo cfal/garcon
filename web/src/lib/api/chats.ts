@@ -9,6 +9,10 @@ import {
 	type ThinkingMode,
 } from '$shared/chat-modes';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
+import {
+	parseChatSnapshotResponse,
+	type ChatSnapshotResponse,
+} from '$shared/chat-snapshot';
 import type { ApiProtocol } from '$shared/api-providers';
 import {
 	parseChatHistoryState,
@@ -228,6 +232,16 @@ export async function sendPermissionDecision(
 	params: PermissionDecisionCommandRequest,
 ): Promise<CommandAcceptedResponse> {
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params);
+}
+
+export async function getChatSnapshot(
+	chatId: string,
+	messageLimit = 1,
+): Promise<ChatSnapshotResponse> {
+	const value = await apiGet<unknown>(
+		`/api/v1/chats/snapshot?chatId=${encodeURIComponent(chatId)}&limit=${messageLimit}`,
+	);
+	return parseChatSnapshotResponse(value);
 }
 
 export async function createQueuedInput(

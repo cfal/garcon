@@ -35,8 +35,13 @@ function harness(overrides = {}) {
     views,
     source,
     ownsExecution: overrides.ownsExecution ?? (() => false),
-    onGenerationReset: overrides.onGenerationReset ?? ((chatId, generationId, lastSeq) => {
-      resets.push({ chatId, generationId, lastSeq });
+    onGenerationReset: overrides.onGenerationReset ?? ((
+      chatId,
+      previousGenerationId,
+      generationId,
+      lastSeq,
+    ) => {
+      resets.push({ chatId, previousGenerationId, generationId, lastSeq });
     }),
     debounceMs: 0,
     settleMs: 0,
@@ -51,7 +56,12 @@ describe('IdleNativeReconciler', () => {
     await reconciler.ensureReconciled(CHAT_ID);
 
     expect(views.reconcileNativeSnapshot).toHaveBeenCalledTimes(1);
-    expect(resets).toEqual([{ chatId: CHAT_ID, generationId: 'gen-2', lastSeq: 2 }]);
+    expect(resets).toEqual([{
+      chatId: CHAT_ID,
+      previousGenerationId: 'gen-1',
+      generationId: 'gen-2',
+      lastSeq: 2,
+    }]);
   });
 
   it('still validates native content when the view and native totals match', async () => {
@@ -78,7 +88,12 @@ describe('IdleNativeReconciler', () => {
     expect(source.loadNativeSnapshot).not.toHaveBeenCalled();
     expect(views.reconcileFullSnapshot).toHaveBeenCalledTimes(1);
     expect(views.reconcileNativeSnapshot).not.toHaveBeenCalled();
-    expect(resets).toEqual([{ chatId: CHAT_ID, generationId: 'gen-3', lastSeq: 3 }]);
+    expect(resets).toEqual([{
+      chatId: CHAT_ID,
+      previousGenerationId: 'gen-1',
+      generationId: 'gen-3',
+      lastSeq: 3,
+    }]);
   });
 
   it('retains a changed-history request until two full snapshots agree', async () => {

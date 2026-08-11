@@ -553,16 +553,42 @@ describe('chats API contract', () => {
 			clientRequestId: 'req-perm',
 			chatId: 'c-1',
 			permissionRequestId: 'perm-1',
+			control: {
+				serverInstanceId: 'server-instance-test',
+				chatId: 'c-1',
+				agentOwnershipEpoch: 'ownership-1',
+				turnOwner: {
+					agentOwnershipEpoch: 'ownership-1',
+					commandType: 'agent-run',
+					clientRequestId: 'turn-request-1',
+					turnId: 'turn-1',
+				},
+				id: 'perm-1',
+				incarnation: 'incarnation-1',
+			},
 			allow: true,
 			alwaysAllow: false,
 			response: { outcome: { outcome: 'accepted' } },
 		});
 
 		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/permissions/decision');
-		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+			expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
 			clientRequestId: 'req-perm',
 			chatId: 'c-1',
 			permissionRequestId: 'perm-1',
+			control: {
+				serverInstanceId: 'server-instance-test',
+				chatId: 'c-1',
+				agentOwnershipEpoch: 'ownership-1',
+				turnOwner: {
+					agentOwnershipEpoch: 'ownership-1',
+					commandType: 'agent-run',
+					clientRequestId: 'turn-request-1',
+					turnId: 'turn-1',
+				},
+				id: 'perm-1',
+				incarnation: 'incarnation-1',
+			},
 			allow: true,
 			alwaysAllow: false,
 			response: { outcome: { outcome: 'accepted' } },

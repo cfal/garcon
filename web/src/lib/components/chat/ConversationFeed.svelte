@@ -185,7 +185,7 @@
 			(request) => !request.chatId || request.chatId === chatState.activeChatId,
 		),
 	);
-	const floatingPendingPermissionRequests = $derived(
+	const projectedPendingPermissionRequests = $derived(
 		visiblePendingPermissionRequests(chatState.visibleRows, activePendingPermissionRequests),
 	);
 	const projectionState = new ConversationFeedProjectionState();
@@ -212,9 +212,10 @@
 				chatState.pageStates.earlier.error !== null),
 		showLaterBoundary: chatState.canLoadLater || chatState.pageStates.later.status !== 'idle',
 		reserveComposerTraySpace,
-		floatingPermissions:
-			floatingPendingPermissionRequests.length > 0 && onPermissionDecision
-				? floatingPendingPermissionRequests
+		transcriptGenerationId: chatState.getCursor().generationId,
+		pendingPermissions:
+			projectedPendingPermissionRequests.length > 0 && onPermissionDecision
+				? projectedPendingPermissionRequests
 				: EMPTY_PENDING_PERMISSIONS,
 	});
 	let projection = $state.raw(projectionState.reconcile(untrack(() => projectionInput)));
@@ -230,7 +231,7 @@
 			isLiveWindow: !chatState.hasLaterMessages,
 			detachedStatus: m.chat_feed_new_response_available(),
 			hiddenToolTypes: localSettings.hiddenToolTypes,
-			floatingPermissionIds: projectionInput.floatingPermissions.map(
+			floatingPermissionIds: projectionInput.pendingPermissions.map(
 				(request) => request.permissionRequestId,
 			),
 		};

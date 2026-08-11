@@ -1,6 +1,15 @@
 import type { ChatGenerationResetReason, ChatViewMessage } from './chat-view';
 import { parseChatViewMessages } from './chat-view';
 import {
+  parseChatProjectionGenerationTransition,
+  parseChatTransientFeedMutation,
+  parseChatTransientFeedSnapshot,
+  type ChatProjectionGenerationTransition,
+  type ChatTransientFeedMutation,
+  type ChatTransientFeedSnapshot,
+  type TransientFeedRow,
+} from './chat-transient-feed';
+import {
   CHAT_STOP_OUTCOMES,
   CHAT_PROCESSING_PHASES,
   type ChatProcessingEntry,
@@ -55,6 +64,7 @@ export class ChatSubscribedMessage {
     public messages: ChatViewMessage[],
     public lastSeq: number,
     public pendingUserInputs: PendingUserInput[],
+    public transientFeed: ChatTransientFeedSnapshot,
   ) {}
 }
 
@@ -65,6 +75,35 @@ export class ChatGenerationResetMessage {
     public generationId: string,
     public reason: ChatGenerationResetReason,
     public lastSeq: number,
+  ) {}
+}
+
+export class ChatTransientFeedMutationMessage implements ChatTransientFeedMutation {
+  readonly type = 'chat-transient-feed-mutation' as const;
+  constructor(
+    public serverInstanceId: string,
+    public chatId: string,
+    public agentOwnershipEpoch: string,
+    public generationId: string,
+    public transientRevision: number,
+    public stateDigest: string,
+    public mutation: ChatTransientFeedMutation['mutation'],
+  ) {}
+}
+
+export class ChatProjectionGenerationTransitionMessage
+implements ChatProjectionGenerationTransition {
+  readonly type = 'chat-projection-generation-transition' as const;
+  constructor(
+    public resetTransactionId: string,
+    public serverInstanceId: string,
+    public chatId: string,
+    public agentOwnershipEpoch: string,
+    public previousGenerationId: string,
+    public generationId: string,
+    public transientRevision: number,
+    public stateDigest: string,
+    public rows: readonly TransientFeedRow[],
   ) {}
 }
 
@@ -328,6 +367,8 @@ export type ServerWsMessage =
   | ChatMessagesMessage
   | ChatSubscribedMessage
   | ChatGenerationResetMessage
+  | ChatTransientFeedMutationMessage
+  | ChatProjectionGenerationTransitionMessage
   | ChatReloadedMessage
   | AgentRunFinishedMessage
   | AgentRunFailedMessage
@@ -493,7 +534,10 @@ export function parseServerWsMessage(
       if (mode === 'delta' && generationId === null) return null;
       const messages = parseChatViewMessages(data.messages);
       const pendingUserInputs = parsePendingUserInputs(data.pendingUserInputs);
-      if (messages === null || pendingUserInputs === null) return null;
+      const transientFeed = parseChatTransientFeedSnapshot(data.transientFeed);
+      if (messages === null || pendingUserInputs === null || !transientFeed) return null;
+      if (transientFeed.chatId !== chatId
+          || (generationId !== null && transientFeed.generationId !== generationId)) return null;
       return new ChatSubscribedMessage(
         clientRequestId,
         chatId,
@@ -502,6 +546,7 @@ export function parseServerWsMessage(
         messages,
         lastSeq,
         pendingUserInputs,
+        transientFeed,
       );
     }
     case 'chat-generation-reset': {
@@ -516,6 +561,36 @@ export function parseServerWsMessage(
         reason,
         lastSeq,
       );
+    }
+    case 'chat-transient-feed-mutation': {
+      const parsed = parseChatTransientFeedMutation(data);
+      return parsed
+        ? new ChatTransientFeedMutationMessage(
+            parsed.serverInstanceId,
+            parsed.chatId,
+            parsed.agentOwnershipEpoch,
+            parsed.generationId,
+            parsed.transientRevision,
+            parsed.stateDigest,
+            parsed.mutation,
+          )
+        : null;
+    }
+    case 'chat-projection-generation-transition': {
+      const parsed = parseChatProjectionGenerationTransition(data);
+      return parsed
+        ? new ChatProjectionGenerationTransitionMessage(
+            parsed.resetTransactionId,
+            parsed.serverInstanceId,
+            parsed.chatId,
+            parsed.agentOwnershipEpoch,
+            parsed.previousGenerationId,
+            parsed.generationId,
+            parsed.transientRevision,
+            parsed.stateDigest,
+            parsed.rows,
+          )
+        : null;
     }
     case 'chat-reloaded': {
       const clientRequestId = requiredStr(data.clientRequestId);

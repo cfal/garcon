@@ -339,6 +339,40 @@ describe('chat command request parsers', () => {
     })).toThrow('allow must be a boolean');
   });
 
+  it('binds permission decisions to the exact transient control incarnation', () => {
+    const control = {
+      serverInstanceId: 'server-1',
+      chatId: CHAT_ID,
+      agentOwnershipEpoch: 'owner-1',
+      turnOwner: {
+        agentOwnershipEpoch: 'owner-1',
+        commandType: 'agent-run',
+        clientRequestId: 'run-1',
+        turnId: 'turn-1',
+      },
+      id: 'permission-1',
+      incarnation: 'incarnation-1',
+    };
+    const request = {
+      clientRequestId: 'decision-1',
+      chatId: CHAT_ID,
+      permissionRequestId: 'permission-1',
+      allow: true,
+      alwaysAllow: false,
+      control,
+    };
+
+    expect(parsePermissionDecisionCommandRequest(request).control).toEqual(control);
+    expect(() => parsePermissionDecisionCommandRequest({
+      ...request,
+      permissionRequestId: 'permission-2',
+    })).toThrow('control does not match');
+    expect(() => parsePermissionDecisionCommandRequest({
+      ...request,
+      control: { ...control, agentOwnershipEpoch: 'owner-2' },
+    })).toThrow('control is invalid');
+  });
+
   it('parses queue entry moves with explicit concurrency preconditions', () => {
     expect(parseQueueEntryMoveCommandRequest({
       clientRequestId: ' request-move ',

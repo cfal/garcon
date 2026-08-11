@@ -110,7 +110,11 @@ export interface AgentRegistryServiceContract {
   }): Promise<boolean>;
   runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
-  resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
+  resolvePermission(
+    chatId: string,
+    permissionRequestId: string,
+    decision: PermissionDecisionPayload,
+  ): Promise<void>;
   prepareProjectPathUpdate(
     agentId: string,
     request: PrepareProjectPathUpdateRequest,
@@ -258,8 +262,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   getRunningSessions() { return this.#runtime.getRunningSessions(); }
   getRunningChatIdsSnapshot(): string[] { return this.#runtime.getRunningChatIdsSnapshot(); }
   getRunningSessionCount(): number { return this.#runtime.getRunningSessionCount(); }
-  resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
-    this.#runtime.resolvePermission(chatId, permissionRequestId, decision);
+  resolvePermission(
+    chatId: string,
+    permissionRequestId: string,
+    decision: PermissionDecisionPayload,
+  ): Promise<void> {
+    return this.#runtime.resolvePermission(chatId, permissionRequestId, decision);
   }
   prepareProjectPathUpdate(
     agentId: string,
@@ -455,6 +463,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void | Promise<void>): void { this.#events.onFinished(cb); }
   onFailed(cb: (chatId: string, error: string, metadata?: TurnEventMetadata) => void | Promise<void>): void { this.#events.onFailed(cb); }
   onControl(cb: Parameters<AgentEventBus['onControl']>[0]): void { this.#events.onControl(cb); }
+  onProjectionApplied(
+    cb: Parameters<AgentEventBus['onProjectionApplied']>[0],
+  ): void { this.#events.onProjectionApplied(cb); }
   onInputSettled(cb: Parameters<AgentEventBus['onInputSettled']>[0]): void {
     this.#events.onInputSettled(cb);
   }

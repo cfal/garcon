@@ -296,6 +296,17 @@ export class ChatViewStore {
       return this.#readPageFromView(view, Number.MAX_SAFE_INTEGER);
     });
   }
+  async replaceFromProjection(chatId: string, snapshot: ChatTranscriptSnapshot): Promise<ChatViewPage> {
+    return this.#withChat(chatId, async () => {
+      const previous = this.#views.get(chatId);
+      this.invalidateFence(chatId);
+      const view = this.#createGeneration(chatId, snapshot.messages, {
+        reason: 'projection-reset', previousGenerationId: previous?.generationId, persistence: snapshot,
+      });
+      this.#views.set(chatId, view);
+      return this.#readPageFromView(view, Number.MAX_SAFE_INTEGER);
+    });
+  }
 
   async appendAfterEnsuringGeneration(
     chatId: string,

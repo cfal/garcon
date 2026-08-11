@@ -11,32 +11,41 @@ import type { JsonObject } from './json.js';
 import type { AgentCommandImage } from './ws-requests.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { ChatExecutionControlState } from './chat-execution-control.js';
+import { parseChatTransientControlAction, type ChatTransientControlAction } from './chat-transient-feed.js';
 import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
-import { InvalidChatIdError, parseChatId } from './chat-id.js';
 import type { ChatStopOutcome } from './chat-types.js';
 import type { RepairHistoryAcceptNativeRequest } from './chat-history-repair.js';
+import {
+  CommandRequestValidationError,
+  optionalGenerationId,
+  optionalNonEmptyString,
+  optionalNullableString,
+  optionalRecord,
+  optionalString,
+  requestRecord,
+  requiredChatId,
+  requiredCommandCorrelationId,
+  requiredContent,
+  requiredQueueEntryId,
+  requiredString,
+} from './command-request-validation.js';
 
 export type {
   RepairHistoryAcceptNativeRequest,
   RepairHistoryAcceptNativeResponse,
 } from './chat-history-repair.js';
+export {
+  COMMAND_CORRELATION_ID_MAX_BYTES,
+  QUEUE_ENTRY_ID_MAX_BYTES,
+  CommandRequestValidationError,
+  isCommandCorrelationIdWithinLimit,
+  isQueueEntryIdWithinLimit,
+} from './command-request-validation.js';
 
 export type CommandStatus = 'accepted' | 'duplicate';
-
-export const COMMAND_CORRELATION_ID_MAX_BYTES = 256;
-export const QUEUE_ENTRY_ID_MAX_BYTES = 128;
-const utf8Encoder = new TextEncoder();
-
-export function isCommandCorrelationIdWithinLimit(value: string): boolean {
-  return utf8Encoder.encode(value).byteLength <= COMMAND_CORRELATION_ID_MAX_BYTES;
-}
-
-export function isQueueEntryIdWithinLimit(value: string): boolean {
-  return utf8Encoder.encode(value).byteLength <= QUEUE_ENTRY_ID_MAX_BYTES;
-}
 
 export type CommandErrorCode = Extract<
   ErrorCode,
@@ -338,12 +347,12 @@ export interface PermissionDecisionPayload {
   alwaysAllow?: boolean;
   response?: Record<string, unknown>;
 }
-
 export interface PermissionDecisionCommandRequest extends PermissionDecisionPayload {
   clientRequestId: string;
   chatId: string;
   permissionRequestId: string;
   alwaysAllow: boolean;
+  control: ChatTransientControlAction;
 }
 
 export interface AgentStopCommandRequest {
@@ -423,13 +432,6 @@ export interface ProjectPathPatchResponse {
 
 export interface RunningChatsResponse {
   sessions: Record<string, Array<{ id: string; [key: string]: unknown }>>;
-}
-
-export class CommandRequestValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CommandRequestValidationError';
-  }
 }
 
 export function parseStartChatCommandRequest(value: unknown): StartChatCommandRequest {
@@ -770,19 +772,23 @@ export function parseQueueResumeRequest(value: unknown): QueueResumeRequest {
 
 export function parsePermissionDecisionCommandRequest(value: unknown): PermissionDecisionCommandRequest {
   const body = requestRecord(value);
-  if (typeof body.allow !== 'boolean') {
-    throw new CommandRequestValidationError('allow must be a boolean');
-  }
-  if (typeof body.alwaysAllow !== 'boolean') {
-    throw new CommandRequestValidationError('alwaysAllow must be a boolean');
-  }
+  if (typeof body.allow !== 'boolean') throw new CommandRequestValidationError('allow must be a boolean');
+  if (typeof body.alwaysAllow !== 'boolean') throw new CommandRequestValidationError('alwaysAllow must be a boolean');
   const response = optionalRecord(body.response, 'response');
+  const control = parseChatTransientControlAction(body.control);
+  if (!control) throw new CommandRequestValidationError('control is invalid');
+  const chatId = requiredChatId(body, 'chatId');
+  const permissionRequestId = requiredString(body, 'permissionRequestId');
+  if (control.chatId !== chatId || control.id !== permissionRequestId) {
+    throw new CommandRequestValidationError('control does not match the permission request');
+  }
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
-    chatId: requiredChatId(body, 'chatId'),
-    permissionRequestId: requiredString(body, 'permissionRequestId'),
+    chatId,
+    permissionRequestId,
     allow: body.allow,
     alwaysAllow: body.alwaysAllow,
+    control,
     ...(response === undefined ? {} : { response }),
   };
 }
@@ -819,61 +825,6 @@ export function parseProjectPathPatchRequest(value: unknown): ProjectPathPatchRe
   };
 }
 
-function requestRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new CommandRequestValidationError('request body must be an object');
-  }
-  return value as Record<string, unknown>;
-}
-
-function requiredString(body: Record<string, unknown>, field: string): string {
-  const value = body[field];
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new CommandRequestValidationError(`${field} is required`);
-  }
-  return value.trim();
-}
-
-function requiredCommandCorrelationId(body: Record<string, unknown>, field: string): string {
-  const value = requiredString(body, field);
-  if (!isCommandCorrelationIdWithinLimit(value)) {
-    throw new CommandRequestValidationError(
-      `${field} must be at most ${COMMAND_CORRELATION_ID_MAX_BYTES} bytes`,
-    );
-  }
-  return value;
-}
-
-function requiredQueueEntryId(body: Record<string, unknown>, field: string): string {
-  const value = requiredString(body, field);
-  if (!isQueueEntryIdWithinLimit(value)) {
-    throw new CommandRequestValidationError(
-      `${field} must be at most ${QUEUE_ENTRY_ID_MAX_BYTES} bytes`,
-    );
-  }
-  return value;
-}
-
-function requiredChatId(body: Record<string, unknown>, field: string): string {
-  const value = requiredString(body, field);
-  try {
-    return parseChatId(value);
-  } catch (error) {
-    if (!(error instanceof InvalidChatIdError)) throw error;
-    throw new CommandRequestValidationError(
-      `${field} must be a valid 16-digit Unix-microsecond timestamp`,
-    );
-  }
-}
-
-function requiredContent(body: Record<string, unknown>, field: string): string {
-  const value = body[field];
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new CommandRequestValidationError(`${field} is required`);
-  }
-  return value;
-}
-
 function contentOrImages(
   body: Record<string, unknown>,
   field: string,
@@ -882,30 +833,6 @@ function contentOrImages(
   const value = typeof body[field] === 'string' ? body[field] : '';
   if (!value.trim() && (!images || images.length === 0)) {
     throw new CommandRequestValidationError(`${field} or images are required`);
-  }
-  return value;
-}
-
-function optionalString(
-  body: Record<string, unknown>,
-  field: string,
-  trim = true,
-): string | undefined {
-  const value = body[field];
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string') {
-    throw new CommandRequestValidationError(`${field} must be a string`);
-  }
-  return trim ? value.trim() : value;
-}
-
-function optionalNonEmptyString(
-  body: Record<string, unknown>,
-  field: string,
-): string | undefined {
-  const value = optionalString(body, field);
-  if (value !== undefined && value.length === 0) {
-    throw new CommandRequestValidationError(`${field} must not be empty`);
   }
   return value;
 }
@@ -924,26 +851,6 @@ function optionalThinkingMode(value: unknown): ThinkingMode | undefined {
     throw new CommandRequestValidationError('thinkingMode is invalid');
   }
   return value;
-}
-
-function optionalGenerationId(body: Record<string, unknown>): string | undefined {
-  const generationId = optionalString(body, 'generationId');
-  if (generationId !== undefined && generationId.length === 0) {
-    throw new CommandRequestValidationError('generationId must not be empty');
-  }
-  return generationId;
-}
-
-function optionalNullableString(
-  body: Record<string, unknown>,
-  field: string,
-): string | null | undefined {
-  const value = body[field];
-  if (value === undefined || value === null) return value;
-  if (typeof value !== 'string') {
-    throw new CommandRequestValidationError(`${field} must be a string or null`);
-  }
-  return value.trim();
 }
 
 function optionalApiProtocol(value: unknown): ApiProtocol | null | undefined {
@@ -986,12 +893,4 @@ function optionalImages(value: unknown): AgentCommandImage[] | undefined {
       ...(image.mimeType === undefined ? {} : { mimeType: image.mimeType }),
     };
   });
-}
-
-function optionalRecord(value: unknown, field: string): Record<string, unknown> | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    throw new CommandRequestValidationError(`${field} must be an object`);
-  }
-  return value as Record<string, unknown>;
 }

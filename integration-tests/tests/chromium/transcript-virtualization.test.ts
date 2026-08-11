@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser, Page } from 'playwright';
-import type { ChatGenerationResetMessage, ChatMessagesMessage } from '../../../common/ws-events.js';
+import type { ChatGenerationResetMessage } from '../../../common/ws-events.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
   closeChromiumBrowser,
@@ -2572,15 +2572,12 @@ async function seedPermissionTranscript(
       permissionMode: 'bypassPermissions',
     }),
   );
-  const event = await fixture.integration.client.waitForEvent(
-    (candidate): candidate is ChatMessagesMessage =>
-      candidate.type === 'chat-messages' &&
-      candidate.chatId === chatId &&
-      candidate.messages.some((entry) => entry.message.type === 'permission-request'),
-    'the Chromium permission request',
+  const permission = await fixture.integration.client.waitForTransientPermission(
+    chatId,
+    () => true,
     { afterIndex: cursor, timeoutMs: 30_000 },
   );
-  expect(event.messages.some((entry) => entry.message.type === 'permission-request')).toBe(true);
+  expect(permission.message.type).toBe('permission-request');
   return chatId;
 }
 

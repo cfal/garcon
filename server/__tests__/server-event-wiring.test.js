@@ -1,6 +1,12 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { AssistantMessage, UserMessage } from '../../common/chat-types.js';
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+  PermissionRequestMessage,
+  UserMessage,
+} from '../../common/chat-types.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
+import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import {
   historyPage,
   transcriptSnapshot,
@@ -41,6 +47,7 @@ function createWiringFixture(overrides = {}) {
     onSessionCreated: noOpSubscription,
     onFinished: mock((callback) => { agentListeners.finished = callback; }),
     onFailed: mock((callback) => { agentListeners.failed = callback; }),
+    onProjectionApplied: mock((callback) => { agentListeners.projectionApplied = callback; }),
     onInputSettled: mock((callback) => { agentListeners.inputSettled = callback; }),
     onProjectionFailure: mock((callback) => { agentListeners.projectionFailure = callback; }),
     repairProjection: mock(async () => true),
@@ -70,6 +77,9 @@ function createWiringFixture(overrides = {}) {
   const chatViews = overrides.chatViewsInstance ?? {
     captureFence: mock(() => 0),
     deleteChatView: mock(() => undefined),
+    getCursor: mock(() => ({ generationId: 'generation-1', lastSeq: 0 })),
+    getOrCreatePage: mock(async () => ({ generationId: 'generation-1' })),
+    replaceFromProjection: mock(async () => ({ generationId: 'generation-2' })),
     appendAfterEnsuringGeneration: mock(async () => ({
       generationId: 'generation-1',
       messages: [],
@@ -101,7 +111,7 @@ function createWiringFixture(overrides = {}) {
     ...overrides.idleReconciler,
   };
   const chatRegistry = {
-    getChat: mock(() => ({})),
+    getChat: mock(() => ({ agentOwnershipEpoch: 'ownership-1' })),
     onChatAdded: noOpSubscription,
     onChatRemoved: mock((callback) => { chatRegistryListeners.removed = callback; }),
     onChatReadUpdated: noOpSubscription,
@@ -122,6 +132,8 @@ function createWiringFixture(overrides = {}) {
     processing: overrides.processing ?? { phase: mock(() => null) },
     metadata,
     chatViews,
+    transientFeeds: overrides.transientFeeds
+      ?? new ChatTransientFeedStore('server-instance-test'),
     idleReconciler,
     chatNativeReloader: overrides.chatNativeReloader ?? {
       reloadFromNative: mock(async () => ({
@@ -140,6 +152,9 @@ function createWiringFixture(overrides = {}) {
     snippets: { onInvalidated: noOpSubscription },
     loadNativeMessages: mock(async () => []),
     loadChatSnapshot: overrides.loadChatSnapshot ?? mock(async () => transcriptSnapshot([])),
+    composeProjectionSnapshot: overrides.composeProjectionSnapshot
+      ?? mock(async (_chatId, messages) => transcriptSnapshot(messages)),
+    getCarryOverMessageCount: overrides.getCarryOverMessageCount ?? mock(async () => 0),
     loadChatPage: overrides.loadChatPage ?? mock(async () => historyPage([], 100, 0)),
     searchIndex,
   });
@@ -317,11 +332,16 @@ describe('server event wiring', () => {
         chatId: 'chat-1',
       },
       {
-        type: 'chat-generation-reset',
+        type: 'chat-projection-generation-transition',
         chatId: 'chat-1',
+        serverInstanceId: 'server-instance-test',
+        agentOwnershipEpoch: 'ownership-1',
+        previousGenerationId: 'generation-1',
         generationId: expect.any(String),
-        reason: 'agent-handoff',
-        lastSeq: 0,
+        resetTransactionId: expect.any(String),
+        transientRevision: 1,
+        stateDigest: expect.stringMatching(/^transient-v1:/),
+        rows: [],
       },
     ]);
   });
@@ -488,6 +508,81 @@ describe('server event wiring', () => {
       'turn-1',
       undefined,
     );
+  });
+
+  it('broadcasts transient control clearing before terminal lifecycle state', async () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+    const turnOwner = {
+      agentOwnershipEpoch: 'ownership-1',
+      commandType: 'agent-run',
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+    };
+    const operation = {
+      ...turnOwner,
+      clientMessageId: 'message-1',
+      turnOwner,
+    };
+    const controlRow = {
+      id: 'permission-1',
+      incarnation: 'incarnation-1',
+      operation,
+      anchorEntryId: null,
+      displayOrder: 0,
+      message: new PermissionRequestMessage(
+        '2026-08-11T00:00:00.000Z',
+        'permission-1',
+        new BashToolUseMessage('2026-08-11T00:00:00.000Z', 'tool-1', 'true'),
+      ),
+    };
+    const materialization = (controls) => ({
+      entries: [],
+      controls,
+      checkpoint: { projection: { durableCount: 0 } },
+    });
+    const controlCurrent = materialization(new Map([['permission-1', controlRow]]));
+    await fixture.agentListeners.projectionApplied({
+      event: {
+        kind: 'control',
+        chatId: 'chat-1',
+        agentOwnershipEpoch: 'ownership-1',
+        operation,
+        mutation: { kind: 'upsert', row: controlRow },
+      },
+      previous: materialization(new Map()),
+      current: controlCurrent,
+    });
+    await fixture.agentListeners.projectionApplied({
+      event: {
+        kind: 'terminal',
+        chatId: 'chat-1',
+        agentOwnershipEpoch: 'ownership-1',
+        operation,
+        outcome: { kind: 'finished', exitCode: 0 },
+      },
+      previous: controlCurrent,
+      current: materialization(new Map()),
+    });
+    fixture.agentListeners.finished('chat-1', 0, {
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+      turnOwner,
+    });
+    await fixture.wiring.waitForIdle();
+
+    const types = published.map((message) => message.type);
+    const clearIndex = published.findIndex((message) => (
+      message.type === 'chat-transient-feed-mutation'
+      && message.mutation.kind === 'clear-operation'
+    ));
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(types.indexOf('agent-run-finished'));
+    expect(clearIndex).toBeLessThan(types.lastIndexOf('chat-processing-updated'));
   });
 
   it('settles a pending transcript composition change before publishing turn completion', async () => {
@@ -1019,6 +1114,7 @@ describe('server event wiring', () => {
       onSessionCreated: mock(() => undefined),
       onFinished: mock((callback) => { agentListeners.finished = callback; }),
       onFailed: mock(() => undefined),
+      onProjectionApplied: mock(() => undefined),
       onInputSettled: mock(() => undefined),
       onProjectionFailure: mock(() => undefined),
       repairProjection: mock(async () => true),
@@ -1144,6 +1240,7 @@ describe('server event wiring', () => {
       onSessionCreated: mock(() => undefined),
       onFinished: mock(() => undefined),
       onFailed: mock((callback) => { agentListeners.failed = callback; }),
+      onProjectionApplied: mock(() => undefined),
       onInputSettled: mock(() => undefined),
       onProjectionFailure: mock(() => undefined),
       repairProjection: mock(async () => true),

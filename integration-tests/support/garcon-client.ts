@@ -44,6 +44,11 @@ import type {
 } from '../../common/chat-list.js';
 import type { ChatSearchRequest, ChatSearchResponse } from '../../common/chat-search.js';
 import {
+  parseChatSnapshotResponse,
+  type ChatSnapshotResponse,
+} from '../../common/chat-snapshot.js';
+import type { TransientFeedRow } from '../../common/chat-transient-feed.js';
+import {
   parseReorderChatResponse,
   type ReorderChatRequest,
   type ReorderChatResponse,
@@ -69,6 +74,7 @@ import type {
   UpdateRemoteSettingsInput,
 } from '../../common/settings.js';
 import {
+  ChatTransientFeedMutationMessage,
   parseServerWsMessage,
   type AgentRunFailedMessage,
   type AgentRunFinishedMessage,
@@ -592,13 +598,46 @@ export class GarconTestClient {
     return this.post<ForkRunCommandResponse>('/api/v1/chats/fork-run', request);
   }
 
-  sendPermissionDecision(
-    request: PermissionDecisionCommandRequest,
+  async sendPermissionDecision(
+    request: Omit<PermissionDecisionCommandRequest, 'control'> & {
+      readonly control?: PermissionDecisionCommandRequest['control'];
+    },
   ): Promise<CommandAcceptedResponse> {
+    const control = request.control ?? await this.#permissionControl(
+      request.chatId,
+      request.permissionRequestId,
+    );
     return this.post<CommandAcceptedResponse>(
       '/api/v1/chats/permissions/decision',
-      request,
+      { ...request, control },
     );
+  }
+
+  async getChatSnapshot(chatId: string, messageLimit = 1): Promise<ChatSnapshotResponse> {
+    const query = new URLSearchParams({ chatId, limit: String(messageLimit) });
+    return parseChatSnapshotResponse(
+      await this.get<unknown>(`/api/v1/chats/snapshot?${query}`),
+    );
+  }
+
+  async #permissionControl(
+    chatId: string,
+    permissionRequestId: string,
+  ): Promise<PermissionDecisionCommandRequest['control']> {
+    const snapshot = await this.getChatSnapshot(chatId, 0);
+    const row = snapshot.transientFeed.rows.find((candidate) => (
+      candidate.id === permissionRequestId
+      && candidate.message.type === 'permission-request'
+    ));
+    if (!row) throw new Error(`Transient permission not found: ${permissionRequestId}`);
+    return {
+      serverInstanceId: snapshot.transientFeed.serverInstanceId,
+      chatId,
+      agentOwnershipEpoch: snapshot.transientFeed.agentOwnershipEpoch,
+      turnOwner: row.turnOwner,
+      id: row.id,
+      incarnation: row.incarnation,
+    };
   }
 
   updateProjectPath(request: ProjectPathPatchRequest): Promise<ProjectPathPatchResponse> {
@@ -813,6 +852,28 @@ export class GarconTestClient {
       `${chatId} terminal turn ${turnId ?? '(any)'}`,
       options,
     );
+  }
+
+  async waitForTransientPermission(
+    chatId: string,
+    predicate: (row: TransientFeedRow) => boolean = () => true,
+    options: { afterIndex?: number; timeoutMs?: number } = {},
+  ): Promise<TransientFeedRow> {
+    const event = await this.waitForEvent(
+      (message): message is ChatTransientFeedMutationMessage => (
+        message instanceof ChatTransientFeedMutationMessage
+        && message.chatId === chatId
+        && message.mutation.kind === 'upsert'
+        && message.mutation.row.message.type === 'permission-request'
+        && predicate(message.mutation.row)
+      ),
+      `${chatId} transient permission`,
+      options,
+    );
+    if (event.mutation.kind !== 'upsert') {
+      throw new Error('Transient permission event lost its upsert mutation');
+    }
+    return event.mutation.row;
   }
 
   async waitForEvent<T extends ServerWsMessage>(

@@ -40,6 +40,7 @@ export type ReconnectConversationUiState = Pick<
 	| 'setExecutionControlFromRefresh'
 	| 'markExecutionControlSocketDisconnected'
 	| 'confirmExecutionControlSocketInstance'
+	| 'setTransientFeedFromSnapshot'
 >;
 
 export interface ChatReconnectCoordinatorOptions {
@@ -397,6 +398,7 @@ export class ChatReconnectCoordinator {
 		if (!(message instanceof ChatSubscribedMessage) || message.chatId !== chatId) {
 			throw new Error('Unexpected chat-subscribe response');
 		}
+		this.options.conversationUi.setTransientFeedFromSnapshot(message.transientFeed);
 		return message;
 	}
 }

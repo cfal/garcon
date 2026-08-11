@@ -3,6 +3,7 @@ import {
 	AgentRunFailedMessage,
 	AgentRunFinishedMessage,
 	ChatGenerationResetMessage,
+	ChatProjectionGenerationTransitionMessage,
 	ChatListRefreshRequestedMessage,
 	ChatMessagesMessage,
 	ChatProcessingUpdatedMessage,
@@ -13,6 +14,7 @@ import {
 	ChatSessionDeletedWsMessage,
 	ChatSessionStoppedMessage,
 	ChatSubscribedMessage,
+	ChatTransientFeedMutationMessage,
 	ClientRequestErrorMessage,
 	PendingUserInputClearedMessage,
 	PendingUserInputStatusUpdatedMessage,
@@ -39,6 +41,19 @@ const chatViewMessage = {
 	seq: 1,
 	message: { type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' },
 };
+
+function transientFeed(generationId = 'generation-1') {
+	return {
+		serverInstanceId: 'server-instance-test',
+		chatId: 'c-1',
+		agentOwnershipEpoch: 'owner-1',
+		generationId,
+		resetTransactionId: null,
+		transientRevision: 0,
+		stateDigest: 'transient-v1:empty',
+		rows: [],
+	};
+}
 
 function emptyExecutionControl(version = 4, serverInstanceId = 'server-instance-test') {
 	return {
@@ -162,6 +177,7 @@ describe('parseServerWsMessage', () => {
 			mode: 'delta',
 			messages: [chatViewMessage],
 			lastSeq: 1,
+			transientFeed: transientFeed(),
 			pendingUserInputs: [
 				{
 					chatId: 'c-1',
@@ -191,11 +207,54 @@ describe('parseServerWsMessage', () => {
 			mode: 'snapshot-required',
 			messages: [],
 			lastSeq: 0,
+			transientFeed: transientFeed('pending:owner-1'),
 			pendingUserInputs: [],
 		});
 
 		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
 		expect((msg as ChatSubscribedMessage).generationId).toBeNull();
+	});
+
+	it('rejects chat-subscribe transient state for another chat or transcript generation', () => {
+		const response = {
+			type: 'chat-subscribed',
+			clientRequestId: 'req-subscribe',
+			chatId: 'c-1',
+			generationId: 'generation-1',
+			mode: 'delta',
+			messages: [],
+			lastSeq: 0,
+			pendingUserInputs: [],
+		};
+		expect(parseServerWsMessage({
+			...response,
+			transientFeed: { ...transientFeed(), chatId: 'c-2' },
+		})).toBeNull();
+		expect(parseServerWsMessage({
+			...response,
+			transientFeed: transientFeed('generation-2'),
+		})).toBeNull();
+	});
+
+	it('parses ordered transient mutations and compound generation transitions', () => {
+		const mutation = parseServerWsMessage({
+			type: 'chat-transient-feed-mutation',
+			...transientFeed(),
+			transientRevision: 1,
+			stateDigest: 'digest-1',
+			mutation: { kind: 'remove', id: 'permission-1', incarnation: 'one' },
+		});
+		expect(mutation).toBeInstanceOf(ChatTransientFeedMutationMessage);
+
+		const transition = parseServerWsMessage({
+			type: 'chat-projection-generation-transition',
+			...transientFeed('generation-2'),
+			resetTransactionId: 'reset-1',
+			previousGenerationId: 'generation-1',
+			transientRevision: 2,
+			stateDigest: 'digest-2',
+		});
+		expect(transition).toBeInstanceOf(ChatProjectionGenerationTransitionMessage);
 	});
 
 	it('rejects chat-subscribe responses without a valid pending-input snapshot', () => {

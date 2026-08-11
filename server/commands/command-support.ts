@@ -42,6 +42,7 @@ import type { PathCache } from '../chats/path-cache.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
+import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import {
   CommandExecutionControlError,
   withCurrentExecutionControl,
@@ -168,6 +169,7 @@ export interface ChatCommandServiceDeps {
     AgentHandoffService,
     'resolveTarget' | 'createPreparation' | 'captureContinuationSegments'
   >;
+  transientFeeds: Pick<ChatTransientFeedStore, 'validateAction'>;
   chatMutationLock?: KeyedPromiseLock;
 }
 

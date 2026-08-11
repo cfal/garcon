@@ -51,8 +51,9 @@ export interface ConversationVirtualFeedInput {
 	showLaterBoundary: boolean;
 	reserveComposerTraySpace: boolean;
 	surfaceIdentity: string;
+	transcriptGenerationId: string;
 	transcriptItems: ReconciledConversationFeedRenderItem[];
-	floatingPermissions: PendingPermissionRequest[];
+	pendingPermissions: PendingPermissionRequest[];
 }
 
 function namespacedKey(surfaceIdentity: string, localKey: string): string {
@@ -104,16 +105,39 @@ export function buildConversationVirtualFeedModel(
 		});
 	}
 	const transcriptStartIndex = items.length;
+	const permissionByAnchor = new Map<number, PendingPermissionRequest[]>();
+	const detachedPermissions: PendingPermissionRequest[] = [];
+	for (const permission of input.pendingPermissions) {
+		const anchor = permission.transcript;
+		if (!anchor || anchor.generationId !== input.transcriptGenerationId) {
+			detachedPermissions.push(permission);
+			continue;
+		}
+		const anchored = permissionByAnchor.get(anchor.afterSeq) ?? [];
+		anchored.push(permission);
+		permissionByAnchor.set(anchor.afterSeq, anchored);
+	}
 
 	for (const [transcriptIndex, item] of input.transcriptItems.entries()) {
+		const seqs = transcriptItemSequences(item);
+		const anchored = seqs.flatMap((seq) => permissionByAnchor.get(seq) ?? []);
+		for (const seq of seqs) permissionByAnchor.delete(seq);
 		items.push({
 			kind: 'transcript',
 			key: key(`transcript:${item.virtualKey}`),
 			item,
 			spacingAfter:
-				transcriptIndex < input.transcriptItems.length - 1 ? 'scaled-transcript' : 'none',
+				anchored.length === 0 && transcriptIndex < input.transcriptItems.length - 1
+					? 'scaled-transcript'
+					: 'none',
 		});
+		for (const [permissionIndex, request] of anchored.entries()) {
+			items.push(permissionItem(key, request, permissionIndex === 0, (
+				permissionIndex < anchored.length - 1 || transcriptIndex < input.transcriptItems.length - 1
+			)));
+		}
 	}
+	for (const permissions of permissionByAnchor.values()) detachedPermissions.push(...permissions);
 	const transcriptEndIndex = items.length;
 
 	if (input.showLaterBoundary) {
@@ -123,15 +147,13 @@ export function buildConversationVirtualFeedModel(
 			spacingAfter: 'none',
 		});
 	}
-	for (const [permissionIndex, request] of input.floatingPermissions.entries()) {
-		items.push({
-			kind: 'permission',
-			key: key(`suffix:permission:${request.permissionRequestId}`),
+	for (const [permissionIndex, request] of detachedPermissions.entries()) {
+		items.push(permissionItem(
+			key,
 			request,
-			leadingSpacing: permissionIndex === 0,
-			spacingAfter:
-				permissionIndex < input.floatingPermissions.length - 1 ? 'responsive-feed' : 'none',
-		});
+			permissionIndex === 0,
+			permissionIndex < detachedPermissions.length - 1,
+		));
 	}
 	items.push({
 		kind: 'viewport-end-spacer',
@@ -169,6 +191,29 @@ export function buildConversationVirtualFeedModel(
 		transcriptStartIndex,
 		transcriptEndIndex,
 	};
+}
+
+function permissionItem(
+	key: (localKey: string) => string,
+	request: PendingPermissionRequest,
+	leadingSpacing: boolean,
+	trailingSpacing: boolean,
+): ConversationVirtualFeedItem {
+	return {
+		kind: 'permission',
+		key: key(`permission:${request.permissionRequestId}:${request.control?.incarnation ?? 'legacy'}`),
+		request,
+		leadingSpacing,
+		spacingAfter: trailingSpacing ? 'responsive-feed' : 'none',
+	};
+}
+
+function transcriptItemSequences(item: ReconciledConversationFeedRenderItem): number[] {
+	if (item.kind === 'message') return item.seq === undefined ? [] : [item.seq];
+	if (item.kind === 'bash-group' || item.kind === 'read-group') {
+		return item.rows.flatMap((row) => row.seq === undefined ? [] : [row.seq]);
+	}
+	return [];
 }
 
 export function appendConversationVirtualTranscriptTail(

@@ -1,7 +1,6 @@
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   chatCompletionsText,
@@ -250,18 +249,12 @@ async function waitForBashPermissionRequest(
   chatId: string,
   cursor: number,
 ): Promise<string> {
-  const request = await client.waitForEvent(
-    (event): event is ChatMessagesMessage =>
-      event.type === 'chat-messages'
-      && event.chatId === chatId
-      && event.messages.some((entry) => entry.message.type === 'permission-request'),
-    'opencode bash permission request',
+  const permission = await client.waitForTransientPermission(
+    chatId,
+    () => true,
     { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
   );
-  const permission = request.messages.find(
-    (entry) => entry.message.type === 'permission-request',
-  );
-  if (permission?.message.type !== 'permission-request') {
+  if (permission.message.type !== 'permission-request') {
     throw new Error('OpenCode bash permission request was not found.');
   }
   expect(permission.message.requestedTool.type).toBe('request-permissions-tool-use');

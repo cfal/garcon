@@ -45,6 +45,9 @@ export class AgentEventBus {
   readonly #finishedListeners = new Set<(chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void | Promise<void>>();
   readonly #failedListeners = new Set<(chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void | Promise<void>>();
   readonly #controlListeners = new Set<(event: AgentControlEvent) => void | Promise<void>>();
+  readonly #projectionListeners = new Set<(
+    applied: AppliedProjectionEvent,
+  ) => void | Promise<void>>();
   readonly #inputSettledListeners = new Set<(
     chatId: string,
     clientRequestId: string,
@@ -178,6 +181,12 @@ export class AgentEventBus {
     this.#controlListeners.add(cb);
   }
 
+  onProjectionApplied(
+    cb: (applied: AppliedProjectionEvent) => void | Promise<void>,
+  ): void {
+    this.#projectionListeners.add(cb);
+  }
+
   onInputSettled(cb: (
     chatId: string,
     clientRequestId: string,
@@ -206,16 +215,19 @@ export class AgentEventBus {
           }
         }
         await this.#dispatchEntries(event.chatId, event.appended);
+        await this.#dispatchProjection(applied);
         return;
       case 'control': {
         const metadata = operationMetadata(event.operation);
         if (!this.#isActive(event, metadata)) return;
         for (const listener of this.#controlListeners) await listener(event);
+        await this.#dispatchProjection(applied);
         return;
       }
       case 'session': {
         const metadata = operationMetadata(event.operation);
         if (event.operation.turnOwner && !this.#isActive(event, metadata)) return;
+        await this.#dispatchProjection(applied);
         for (const listener of this.#sessionListeners) await listener(event.chatId);
         return;
       }
@@ -223,6 +235,7 @@ export class AgentEventBus {
         const metadata = operationMetadata(event.operation);
         if (!this.#isActive(event, metadata)) return;
         this.#clearAbortability(event.chatId);
+        await this.#dispatchProjection(applied);
         if (event.outcome.kind === 'finished') {
           for (const listener of this.#finishedListeners) {
             await listener(event.chatId, event.outcome.exitCode, metadata);
@@ -235,8 +248,13 @@ export class AgentEventBus {
         return;
       }
       case 'reset':
+        await this.#dispatchProjection(applied);
         return;
     }
+  }
+
+  async #dispatchProjection(applied: AppliedProjectionEvent): Promise<void> {
+    for (const listener of this.#projectionListeners) await listener(applied);
   }
 
   async #dispatchEntries(chatId: string, entries: readonly AgentTranscriptEntry[]): Promise<void> {

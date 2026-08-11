@@ -33,6 +33,7 @@ import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatExecutionQueries } from '../chat-execution/chat-execution-coordinator.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
@@ -58,6 +59,7 @@ interface ChatHandlerDeps {
   nativeReloader: NativeReloaderDep;
   queue: QueueDep;
   pendingInputs: PendingInputsDep;
+  transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
   registry: IChatRegistry;
 }
 
@@ -116,6 +118,7 @@ export class ChatHandler {
   #nativeReloader: NativeReloaderDep;
   #queue: QueueDep;
   #pendingInputs: PendingInputsDep;
+  #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
   #registry: IChatRegistry;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
@@ -126,6 +129,7 @@ export class ChatHandler {
     nativeReloader,
     queue,
     pendingInputs,
+    transientFeeds,
     registry,
   }: ChatHandlerDeps) {
     this.#serverInstanceId = serverInstanceId;
@@ -134,6 +138,7 @@ export class ChatHandler {
     this.#nativeReloader = nativeReloader;
     this.#queue = queue;
     this.#pendingInputs = pendingInputs;
+    this.#transientFeeds = transientFeeds;
     this.#registry = registry;
     this.#requestHandlers = this.#createRequestHandlers();
   }
@@ -241,6 +246,12 @@ export class ChatHandler {
       }
       const replay = this.#chatViews.readReplay(chatId, data.generationId, data.afterSeq);
       if (!replay) {
+        const transientFeed = this.#transientFeeds.currentSnapshot(chatId)
+          ?? this.#transientFeeds.snapshot({
+            chatId,
+            agentOwnershipEpoch: session.agentOwnershipEpoch,
+            generationId: `pending:${session.agentOwnershipEpoch}`,
+          });
         writer.send(new ChatSubscribedMessage(
           clientRequestId,
           chatId,
@@ -249,6 +260,7 @@ export class ChatHandler {
           [],
           0,
           this.#pendingInputs.listForTransport(chatId),
+          transientFeed,
         ));
         return;
       }
@@ -260,6 +272,11 @@ export class ChatHandler {
         replay.messages,
         replay.lastSeq,
         this.#pendingInputs.listForTransport(chatId),
+        this.#transientFeeds.snapshot({
+          chatId,
+          agentOwnershipEpoch: session.agentOwnershipEpoch,
+          generationId: replay.generationId,
+        }),
       ));
     } catch (error: unknown) {
       this.#sendRequestError(writer, {

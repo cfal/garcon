@@ -29,6 +29,7 @@ import {
   type UpdateProjectPathInput,
 } from './command-support.js';
 import type { CommandLedgerRecord } from './command-ledger.js';
+import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 
 const logger = createLogger('commands:session');
 
@@ -192,13 +193,15 @@ export class SessionCommands {
         permissionRequestId: input.permissionRequestId,
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
+        control: input.control,
         ...(input.response ? { response: input.response } : {}),
       },
     });
     this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
     if (ledger.kind !== 'duplicate') {
       try {
-        this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
+        this.deps.transientFeeds.validateAction(input.control);
+        await this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
           allow: input.allow,
           alwaysAllow: input.alwaysAllow,
           response: input.response,
@@ -208,6 +211,14 @@ export class SessionCommands {
         await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
           error: error instanceof Error ? error.message : String(error),
         });
+        if (error instanceof TransientControlActionError) {
+          throw new CommandValidationError(
+            'VALIDATION_FAILED',
+            'This permission request is no longer actionable',
+            409,
+            false,
+          );
+        }
         throw error;
       }
     }

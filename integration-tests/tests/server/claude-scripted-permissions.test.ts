@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
   claudeText,
   claudeToolUse,
@@ -59,18 +58,12 @@ describe('scripted Claude permissions', () => {
         // AskUserQuestion remains interactive while every other tool bypasses approval.
         permissionMode: 'bypassPermissions',
       }));
-      const request = await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) => entry.message.type === 'permission-request'),
-        'scripted AskUserQuestion permission request',
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        () => true,
         { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
-      const permission = request.messages.find(
-        (entry) => entry.message.type === 'permission-request',
-      );
-      if (permission?.message.type !== 'permission-request') {
+      if (permission.message.type !== 'permission-request') {
         throw new Error('Scripted AskUserQuestion permission request was not found.');
       }
       const permissionRequestId = permission.message.permissionRequestId;
