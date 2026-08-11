@@ -381,6 +381,11 @@
 	onclick={() => composer.appendDraftBlock(selectedChatId, 'Appended review block')}
 	>Append draft</button
 >
+<button
+	type="button"
+	data-testid="clear-draft"
+	onclick={() => composer.clearAfterSubmit(selectedChatId)}>Clear draft</button
+>
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
 {#each notifications.items as notification (notification.id)}

@@ -39,6 +39,12 @@
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import {
+		COMPOSER_DEFAULT_HEIGHT,
+		COMPOSER_MAX_HEIGHT,
+		COMPOSER_MIN_HEIGHT,
+		PromptComposerHeightState,
+	} from './prompt-composer-height-state.svelte.js';
+	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
@@ -273,16 +279,36 @@
 		imageAttachments.revokeAll();
 	});
 
-	// Auto-resize textarea to content height. On mobile, caps lower to
-	// preserve message feed visibility; on desktop uses the stored height.
-	const MOBILE_AUTO_MAX = 150;
-	const DESKTOP_AUTO_MAX = 300;
+	const composerHeight = new PromptComposerHeightState();
 
-	function autoResize() {
-		if (!textarea) return;
-		const cap = appShell.isMobile ? MOBILE_AUTO_MAX : DESKTOP_AUTO_MAX;
-		textarea.style.height = 'auto';
-		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
+	function autoResize(): void {
+		if (!textarea || !isVisible) return;
+		composerHeight.fitToContent(textarea, appShell.isMobile);
+	}
+
+	// Programmatic draft changes do not emit input events. The effect measures
+	// the updated DOM value while Svelte remains the sole owner of its height.
+	$effect(() => {
+		const target = textarea;
+		const inputText = composerState.inputText;
+		const mobile = appShell.isMobile;
+		const visible = isVisible;
+		if (!target || !visible || target.value !== inputText) return;
+		untrack(() => composerHeight.fitToContent(target, mobile));
+	});
+
+	onMount(() => {
+		const stored = getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight);
+		if (stored === null || stored.trim() === '') return;
+		const parsed = Number(stored);
+		if (!Number.isFinite(parsed)) return;
+		composerHeight.restorePreferredHeight(parsed);
+		if (appShell.isMobile) autoResize();
+	});
+
+	function commitComposerHeight(height: number): void {
+		const committedHeight = composerHeight.commit(height);
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(committedHeight)));
 	}
 
 	// Reveals blocks appended from another surface without moving focus away from that surface.
@@ -691,35 +717,6 @@
 			'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]',
 		),
 	);
-
-	const COMPOSER_DEFAULT_HEIGHT = 140;
-	const COMPOSER_MIN_HEIGHT = 52;
-	const COMPOSER_MAX_HEIGHT = 500;
-
-	function clampHeight(h: number): number {
-		return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, h));
-	}
-
-	let composerHeight = $state(COMPOSER_DEFAULT_HEIGHT);
-	let composerHeightPreview = $state<number | null>(null);
-	const renderedComposerHeight = $derived(composerHeightPreview ?? composerHeight);
-
-	onMount(() => {
-		const stored = getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight);
-		if (stored === null || stored.trim() === '') return;
-		const parsed = Number(stored);
-		if (Number.isFinite(parsed)) composerHeight = clampHeight(parsed);
-	});
-
-	function previewComposerHeight(height: number): void {
-		composerHeightPreview = clampHeight(height);
-	}
-
-	function commitComposerHeight(height: number): void {
-		composerHeight = clampHeight(height);
-		composerHeightPreview = null;
-		setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(composerHeight)));
-	}
 </script>
 
 {#snippet composerSurface()}
@@ -854,8 +851,7 @@
 						readonly={snippetExpansion.pending}
 						aria-busy={snippetExpansion.pending}
 						class={textareaClass}
-						style:min-height={appShell.isMobile ? undefined : `${renderedComposerHeight}px`}
-					></textarea>
+						style:height={`${composerHeight.renderedHeight}px`}></textarea>
 				</div>
 			</div>
 
@@ -954,13 +950,13 @@
 		/>
 		{#if !appShell.isMobile}
 			<ComposerResizeHandle
-				value={renderedComposerHeight}
+				value={composerHeight.renderedHeight}
 				minimum={COMPOSER_MIN_HEIGHT}
 				maximum={COMPOSER_MAX_HEIGHT}
 				label={m.chat_composer_resize()}
-				onPreview={previewComposerHeight}
+				onPreview={(height) => composerHeight.preview(height)}
 				onCommit={commitComposerHeight}
-				onCancel={() => (composerHeightPreview = null)}
+				onCancel={() => composerHeight.cancelPreview()}
 				onReset={() => commitComposerHeight(COMPOSER_DEFAULT_HEIGHT)}
 			/>
 		{/if}
