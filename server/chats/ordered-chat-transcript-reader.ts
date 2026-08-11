@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../common/chat-types.js';
+import type { AgentProjectionState } from '@garcon/server-agent-interface';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import { DomainError } from '../lib/domain-error.js';
 import { transcriptRevision } from '../lib/transcript-revision.js';
@@ -20,7 +21,11 @@ export class OrderedChatTranscriptReader {
         session: ChatRegistryEntry | null,
         chatId?: string,
         signal?: AbortSignal,
-      ): Promise<{ readonly messages: readonly ChatMessage[]; readonly revision: string }>;
+      ): Promise<{
+        readonly messages: readonly ChatMessage[];
+        readonly revision: string;
+        readonly projectionState: AgentProjectionState | null;
+      }>;
       loadMessagePage(
         session: ChatRegistryEntry | null,
         limit: number,
@@ -34,6 +39,7 @@ export class OrderedChatTranscriptReader {
         readonly offset: number;
         readonly limit: number;
         readonly revision: string;
+        readonly projectionState: AgentProjectionState;
       } | null>;
     };
     readonly carryOver: CarryOverTranscriptStore;
@@ -49,7 +55,13 @@ export class OrderedChatTranscriptReader {
 
   async loadCurrentNativeSnapshot(chatId: string) {
     const entry = this.#captureEntry(chatId);
-    if (!entry) return { messages: [] as ChatMessage[], revision: transcriptRevision([]) };
+    if (!entry) {
+      return {
+        messages: [] as ChatMessage[],
+        revision: transcriptRevision([]),
+        projectionState: null,
+      };
+    }
     const native = await this.#loadCurrentNativeSnapshot(entry, chatId);
     this.#assertEntryUnchanged(chatId, entry);
     return native;
@@ -72,6 +84,7 @@ export class OrderedChatTranscriptReader {
         totalNativeMessages: 0,
         offsetFromNewest: 0,
         nativeRevision: transcriptRevision([]),
+        projectionState: null,
       };
     }
     const page = await this.deps.agents.loadMessagePage(
@@ -97,6 +110,7 @@ export class OrderedChatTranscriptReader {
         totalNativeMessages: page.total,
         offsetFromNewest: page.offset,
         nativeRevision: page.revision,
+        projectionState: page.projectionState,
       };
     }
     const native = await this.#loadCurrentNativeSnapshot(
@@ -111,6 +125,7 @@ export class OrderedChatTranscriptReader {
       totalNativeMessages: native.messages.length,
       offsetFromNewest: 0,
       nativeRevision: native.revision,
+      projectionState: native.projectionState,
     };
   }
 
@@ -125,6 +140,7 @@ export class OrderedChatTranscriptReader {
         agentOwnershipEpoch: snapshot.agentOwnershipEpoch,
         archivedLogicalCount: 0,
         nativePrefixDigest: snapshot.nativePrefixDigest,
+        projectionState: null,
       };
     }
     const [archivedLogicalCount, native] = await Promise.all([
@@ -147,6 +163,7 @@ export class OrderedChatTranscriptReader {
       agentOwnershipEpoch: entry.agentOwnershipEpoch,
       archivedLogicalCount,
       nativePrefixDigest: transcriptRevision(native.messages),
+      projectionState: native.projectionState,
     };
   }
 
@@ -159,6 +176,7 @@ export class OrderedChatTranscriptReader {
     return {
       messages: this.#sanitizeNativeMessages(entry, native.messages),
       revision: native.revision,
+      projectionState: native.projectionState,
     };
   }
 
@@ -190,19 +208,32 @@ export class OrderedChatTranscriptReader {
       this.#loadCurrentNativeSnapshot(entry, chatId),
     ]);
     this.#assertEntryUnchanged(chatId, entry);
-    return this.#snapshot(entry, archived, native.messages, native.revision);
+    return this.#snapshot(
+      entry,
+      archived,
+      native.messages,
+      native.revision,
+      native.projectionState,
+    );
   }
 
   async composeProjectionSnapshot(
     chatId: string,
     currentMessages: readonly ChatMessage[],
     currentRevision: string,
+    projectionState: AgentProjectionState,
   ): Promise<ChatTranscriptSnapshot> {
     const entry = this.#requireReadableEntry(chatId);
     if (!entry) return emptySnapshot();
     const archived = await this.deps.carryOver.loadAll(entry.carryOverSegments);
     this.#assertEntryUnchanged(chatId, entry);
-    return this.#snapshot(entry, archived, [...currentMessages], currentRevision);
+    return this.#snapshot(
+      entry,
+      archived,
+      [...currentMessages],
+      currentRevision,
+      projectionState,
+    );
   }
 
   async loadPage(chatId: string, limit: number, offset: number): Promise<ChatHistoryPage | null> {
@@ -260,6 +291,7 @@ export class OrderedChatTranscriptReader {
       agentOwnershipEpoch: entry.agentOwnershipEpoch,
       archivedLogicalCount: archivedCount,
       nativePrefixDigest,
+      projectionState: native.projectionState,
     };
   }
 
@@ -293,6 +325,7 @@ export class OrderedChatTranscriptReader {
     archived: readonly ChatMessage[],
     native: ChatMessage[],
     nativeRevision: string,
+    projectionState: AgentProjectionState | null,
   ): ChatTranscriptSnapshot {
     const carryOverRevision = this.deps.carryOver.revision(
       entry.carryOverSegments,
@@ -310,6 +343,7 @@ export class OrderedChatTranscriptReader {
       agentOwnershipEpoch: entry.agentOwnershipEpoch,
       archivedLogicalCount: archived.length,
       nativePrefixDigest: transcriptRevision(native),
+      projectionState,
     };
   }
 
@@ -382,5 +416,6 @@ function emptySnapshot(): ChatTranscriptSnapshot {
     agentOwnershipEpoch: 'missing',
     archivedLogicalCount: 0,
     nativePrefixDigest: nativeRevision,
+    projectionState: null,
   };
 }

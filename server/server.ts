@@ -659,8 +659,8 @@ export async function startServer(): Promise<void> {
         scheduledPrompts,
         snippets,
         loadChatSnapshot,
-        composeProjectionSnapshot: (chatId, messages, revision) => (
-          transcripts.composeProjectionSnapshot(chatId, messages, revision)
+        composeProjectionSnapshot: (chatId, messages, revision, projectionState) => (
+          transcripts.composeProjectionSnapshot(chatId, messages, revision, projectionState)
         ),
         getCarryOverMessageCount: async (chatId) => {
           const entry = chatRegistry.getChat(chatId);

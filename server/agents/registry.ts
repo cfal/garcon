@@ -10,6 +10,7 @@ import type {
   AgentTranscriptAdmissionIdentity,
   AgentChatReferenceV4,
   AgentIntegrationV4,
+  AgentProjectionState,
   AgentStreamEvent,
   AgentTurnReceiptOwner,
 } from '@garcon/server-agent-interface';
@@ -127,7 +128,10 @@ export interface AgentRegistryServiceContract {
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
-type MutableAgentTranscriptPage = Omit<AgentTranscriptPage, 'messages'> & { messages: ChatMessage[] };
+type MutableAgentTranscriptPage = Omit<AgentTranscriptPage, 'messages'> & {
+  messages: ChatMessage[];
+  projectionState: AgentProjectionState;
+};
 
 interface StartSessionOptions {
   images?: AgentCommandImage[];
@@ -316,14 +320,24 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     chatId = '',
     signal: AbortSignal = new AbortController().signal,
   ) {
-    if (!session?.agentId) return { messages: [], revision: transcriptRevision([]) };
+    if (!session?.agentId) {
+      return { messages: [], revision: transcriptRevision([]), projectionState: null };
+    }
     const integration = this.#directory.get(session.agentId);
-    if (!integration) return { messages: [], revision: transcriptRevision([]) };
+    if (!integration) {
+      return { messages: [], revision: transcriptRevision([]), projectionState: null };
+    }
     const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
     const opened = await this.#projection.open(integration, chat, signal);
-    if (opened.kind !== 'ready') return { messages: [], revision: transcriptRevision([]) };
+    if (opened.kind !== 'ready') {
+      return { messages: [], revision: transcriptRevision([]), projectionState: null };
+    }
     const messages = opened.value.entries.map((entry) => entry.message);
-    return { messages, revision: transcriptRevision(messages) };
+    return {
+      messages,
+      revision: transcriptRevision(messages),
+      projectionState: opened.value.checkpoint.projection,
+    };
   }
 
   async loadMessagePage(
@@ -357,6 +371,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       offset,
       limit,
       revision: transcriptRevision(opened.value.entries.map((entry) => entry.message)),
+      projectionState: opened.value.checkpoint.projection,
     };
   }
 

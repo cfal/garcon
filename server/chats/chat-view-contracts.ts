@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewMessage, ChatViewPage } from '../../common/chat-view.js';
+import type { AgentProjectionState } from '@garcon/server-agent-interface';
 
 export interface ChatHistoryPage {
   messages: ChatMessage[];
@@ -12,6 +13,7 @@ export interface ChatHistoryPage {
   agentOwnershipEpoch: string;
   archivedLogicalCount: number;
   nativePrefixDigest: string | null;
+  projectionState: AgentProjectionState | null;
 }
 
 export interface ChatTranscriptSnapshot {
@@ -22,6 +24,7 @@ export interface ChatTranscriptSnapshot {
   readonly agentOwnershipEpoch: string;
   readonly archivedLogicalCount: number;
   readonly nativePrefixDigest: string;
+  readonly projectionState: AgentProjectionState | null;
 }
 
 export interface ChatViewLoader {

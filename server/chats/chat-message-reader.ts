@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewPage } from '../../common/chat-view.js';
+import type { AgentProjectionState } from '@garcon/server-agent-interface';
 import type { NativeSnapshotReconciliation } from './chat-view-store.js';
 
 interface NativeTranscriptWindowBase {
@@ -7,6 +8,7 @@ interface NativeTranscriptWindowBase {
   readonly totalNativeMessages: number;
   readonly offsetFromNewest: number;
   readonly nativeRevision: string;
+  readonly projectionState: AgentProjectionState | null;
 }
 
 export type NativeTranscriptWindow =

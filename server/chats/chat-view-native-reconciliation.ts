@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewMessage } from '../../common/chat-view.js';
+import type { AgentProjectionState } from '@garcon/server-agent-interface';
 import {
   OrderedTranscriptDigest,
   orderedTranscriptDigest,
@@ -19,6 +20,7 @@ export interface NativeSnapshotReconciliation {
   readonly agentOwnershipEpoch: string;
   readonly archivedLogicalCount: number;
   readonly nativePrefixDigest: string;
+  readonly projectionState: AgentProjectionState | null;
 }
 
 export interface MutableChatView {
@@ -37,6 +39,7 @@ export interface MutableChatView {
   agentOwnershipEpoch?: string;
   archivedLogicalCount: number;
   nativePrefixDigest: string | null;
+  projectionState: AgentProjectionState | null;
   evictedLiveStartSeq?: number;
   evictedLiveEndSeq?: number;
   evictedLiveDigest: OrderedTranscriptDigest;
@@ -70,6 +73,7 @@ export interface ChatViewGenerationTransition {
     | 'carryOverRevision'
     | 'compositeRevision'
     | 'nativePrefixDigest'
+    | 'projectionState'
   >;
 }
 
@@ -255,6 +259,7 @@ function createNativeOnlyGeneration(input: ReconcileNativeViewInput & {
     agentOwnershipEpoch: input.snapshot.agentOwnershipEpoch,
     archivedLogicalCount: input.snapshot.archivedLogicalCount,
     nativePrefixDigest: input.snapshot.nativePrefixDigest,
+    projectionState: input.snapshot.projectionState,
     evictedLiveDigest: new OrderedTranscriptDigest(),
     publishedLiveEntries: new WeakSet(),
     streamFence: input.streamFence,

@@ -6,6 +6,7 @@ import {
   type ChatMessage,
 } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
+import type { AgentProjectionState } from '@garcon/server-agent-interface';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
@@ -112,6 +113,7 @@ export interface ServerEventWiringDeps {
     chatId: string,
     messages: readonly ChatMessage[],
     revision: string,
+    projectionState: AgentProjectionState,
   ): Promise<ChatTranscriptSnapshot>;
   getCarryOverMessageCount(chatId: string): Promise<number>;
   loadChatPage(chatId: string, limit: number, offset: number): Promise<ChatHistoryPage | null>;
@@ -594,6 +596,7 @@ export function wireServerEvents({
           event.chatId,
           applied.current.entries.map((entry) => entry.message),
           event.checkpoint.projection.stateRevision,
+          event.checkpoint.projection,
         );
         const page = await chatViews.replaceFromProjection(event.chatId, snapshot);
         const projected = transientFeeds.apply(applied, {
