@@ -63,7 +63,11 @@ import type {
   PiSteerSubmission,
   PiTurnSettlementRecord,
 } from './pi-rpc-session-state.js';
-import { loadPiChatMessages } from './history-loader.js';
+import {
+  addExpectedNativeRow,
+  countPiNativeRows,
+  verifyPiTurnSettlement,
+} from './pi-turn-settlement.js';
 import { convertPiToolUse } from './tool-use-converter.js';
 
 export interface PiModelReader {
@@ -601,7 +605,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       failureMessage: null,
       steerSubmissions: new Set(),
       steeringQueue: [],
-      settlementBaseline: await this.#countNativeRows(session.nativePath),
+      settlementBaseline: await countPiNativeRows(session.nativePath),
       expectedNative: new Map(),
       settle: resolveSettle,
     };
@@ -811,38 +815,10 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  // Verifies the last finished turn against the native session file: every
-  // finalized row the turn journalled must have been persisted beyond the
-  // pre-prompt baseline, or settlement stays unresolved and terminal success
-  // is withheld.
+  // Verifies the last finished turn's native persistence evidence; failure
+  // stays unresolved and withholds terminal success.
   async verifyTurnSettlement(chatId: string): Promise<'confirmed' | 'unresolved'> {
-    const record = this.#turnSettlements.get(chatId);
-    if (!record || record.steeringUnresolved) return 'unresolved';
-    if (record.expected.size === 0) return 'confirmed';
-    if (!record.nativePath || isArtificialNativePath(record.nativePath)) return 'unresolved';
-    const current = await this.#countNativeRows(record.nativePath);
-    for (const [key, expected] of record.expected) {
-      if ((current.get(key) ?? 0) - (record.baseline.get(key) ?? 0) < expected) {
-        return 'unresolved';
-      }
-    }
-    return 'confirmed';
-  }
-
-  async #countNativeRows(nativePath: string | null): Promise<ReadonlyMap<string, number>> {
-    if (!nativePath || isArtificialNativePath(nativePath)) return new Map();
-    try {
-      const counts = new Map<string, number>();
-      for (const message of await loadPiChatMessages(nativePath)) {
-        if ((message.type === 'user-message' || message.type === 'assistant-message')
-            && typeof message.content === 'string' && message.content.length > 0) {
-          addExpectedNativeRow(counts, message.type, message.content);
-        }
-      }
-      return counts;
-    } catch {
-      return new Map();
-    }
+    return verifyPiTurnSettlement(this.#turnSettlements.get(chatId));
   }
 
   #handleExit(session: PiRpcSession, generation: number, code: number): void {
@@ -1006,13 +982,4 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       // Stream closed.
     }
   }
-}
-
-function addExpectedNativeRow(
-  counts: Map<string, number>,
-  type: 'user-message' | 'assistant-message',
-  content: string,
-): void {
-  const key = `${type}\u0000${content}`;
-  counts.set(key, (counts.get(key) ?? 0) + 1);
 }
