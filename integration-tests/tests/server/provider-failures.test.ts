@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type {
   AgentRunFailedMessage,
   ChatExecutionControlUpdatedMessage,
+  QueueDispatchingMessage,
 } from '../../../common/ws-events.js';
 import { countUserContent, userMessages } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -157,6 +158,27 @@ describe('provider failures', () => {
         'queued failure pause',
         { afterIndex: failureCursor },
       );
+      // The terminal-driven broadcasts flush through the ordered per-chat
+      // queue after the awaited events; wait for the idle level that follows
+      // the failed dispatch before asserting relative order.
+      const dispatchAbsoluteIndex = await (async () => {
+        await fixture.client.waitForEvent(
+          (event): event is QueueDispatchingMessage =>
+            event.type === 'queue-dispatching'
+            && event.chatId === chatId
+            && event.content === 'failure-b',
+          'failed queue dispatch',
+          { afterIndex: failureCursor },
+        );
+        return fixture.client.events().findIndex((event, index) =>
+          index >= failureCursor
+          && event.type === 'queue-dispatching'
+          && event.chatId === chatId
+          && event.content === 'failure-b');
+      })();
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: dispatchAbsoluteIndex + 1,
+      });
       const failureEvents = fixture.client.events().slice(failureCursor);
       const failedPending = failureEvents.find((event) =>
         event.type === 'pending-user-input-updated'
@@ -193,7 +215,9 @@ describe('provider failures', () => {
       expect(dispatchEventIndex).toBeGreaterThanOrEqual(0);
       expect(processingStoppedIndex).toBeGreaterThan(dispatchEventIndex);
       expect(terminalEventIndex).toBeGreaterThan(pauseEventIndex);
-      expect(terminalEventIndex).toBeGreaterThan(processingStoppedIndex);
+      // Terminal publication precedes the processing release in the per-chat
+      // task, so the idle level follows the terminal rather than leading it.
+      expect(terminalEventIndex).toBeGreaterThan(dispatchEventIndex);
       expect(failed.clientRequestId).toBeString();
       const queue = (await fixture.client.getExecutionControl(chatId)).queue;
       expect(queue.pause).toMatchObject({
@@ -233,10 +257,16 @@ describe('provider failures', () => {
       ]);
       heldEdited.releaseEcho();
       await heldC.received;
-      const pendingC = (await fixture.client.getMessages(chatId)).pendingUserInputs.find(
-        (input) => input.content === 'failure-c',
-      );
-      if (!pendingC) throw new Error('Missing pending identity for failure-c.');
+      // Admission commits the dispatched entry's user row, so its identity
+      // comes from the queue events rather than a pending overlay.
+      const pendingCEvent = fixture.client.events().find((event) =>
+        event.type === 'pending-user-input-updated'
+        && event.input.chatId === chatId
+        && event.input.content === 'failure-c');
+      if (pendingCEvent?.type !== 'pending-user-input-updated') {
+        throw new Error('Missing pending identity for failure-c.');
+      }
+      const pendingC = pendingCEvent.input;
       expect(pendingC.clientRequestId).toBeString();
       expect(pendingC.clientMessageId).toBeString();
       expect(pendingC.turnId).toBeString();
@@ -308,15 +338,25 @@ describe('provider failures', () => {
       ));
       expect(failedIndex).toBeGreaterThanOrEqual(0);
       expect(dispatchIndex).toBeGreaterThan(failedIndex);
-      const inFlight = await fixture.client.getMessages(chatId);
-      const successorInput = inFlight.pendingUserInputs.find(
-        (input) => input.content === 'failure-fence-b',
-      );
-      if (!successorInput) throw new Error('Missing pending successor identity.');
-      expect(successorInput.deliveryStatus).toBe('accepted');
+      // Admission commits the successor's user row at dispatch, so its
+      // identity comes from the queue events and the row is already durable.
+      const successorEvent = events.find((event) =>
+        event.type === 'pending-user-input-updated'
+        && event.input.content === 'failure-fence-b');
+      if (successorEvent?.type !== 'pending-user-input-updated') {
+        throw new Error('Missing pending successor identity.');
+      }
+      const successorInput = successorEvent.input;
       expect(successorInput.clientRequestId).toBeString();
       expect(successorInput.clientMessageId).toBeString();
       expect(successorInput.turnId).toBeString();
+      expect(events.filter((event) =>
+        event.type === 'pending-user-input-status-updated'
+        && event.chatId === chatId
+        && event.clientRequestId === successorInput.clientRequestId
+        && event.deliveryStatus === 'failed')).toEqual([]);
+      const inFlight = await fixture.client.getMessages(chatId);
+      expect(countUserContent(inFlight.messages, 'failure-fence-b')).toBe(1);
       const successorTurnId = successorInput.turnId;
 
       const terminalCursor = fixture.client.markEvents();
@@ -356,7 +396,9 @@ describe('provider failures', () => {
         outcome: 'snapshot',
         chats: [{ chatId: healthyChat, phase: 'running' }],
       });
-      expect((await fixture.client.getMessages(healthyChat)).pendingUserInputs).toHaveLength(1);
+      const healthyInFlight = await fixture.client.getMessages(healthyChat);
+      expect(countUserContent(healthyInFlight.messages, 'isolated-healthy')).toBe(1);
+      expect(healthyInFlight.pendingUserInputs).toEqual([]);
 
       const completionCursor = fixture.client.markEvents();
       healthy.releaseEcho();
@@ -371,15 +413,16 @@ describe('provider failures', () => {
         event.type === 'chat-messages'
         && event.chatId === healthyChat
         && event.messages.some((entry) => entry.message.type === 'assistant-message'));
-      const persistedIndex = completionEvents.findIndex((event) =>
+      // Admission persisted the input at dispatch, before this cursor; the
+      // whole log still carries exactly one persisted clearing for it.
+      const persistedClearings = fixture.client.events().filter((event) =>
         event.type === 'pending-user-input-cleared'
         && event.chatId === healthyChat
         && event.clientRequestId === healthyAccepted.clientRequestId
         && event.reason === 'persisted');
+      expect(persistedClearings).toHaveLength(1);
       expect(assistantIndex).toBeGreaterThanOrEqual(0);
-      expect(persistedIndex).toBeGreaterThanOrEqual(0);
       expect(terminalIndex).toBeGreaterThan(assistantIndex);
-      expect(terminalIndex).toBeGreaterThan(persistedIndex);
     });
   });
 });

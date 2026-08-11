@@ -59,7 +59,7 @@ interface ChatHandlerDeps {
   projectionReload: ProjectionReload;
   queue: QueueDep;
   pendingInputs: PendingInputsDep;
-  transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
+  transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot' | 'rebaseGeneration'>;
   registry: IChatRegistry;
 }
 
@@ -118,7 +118,7 @@ export class ChatHandler {
   #projectionReload: ProjectionReload;
   #queue: QueueDep;
   #pendingInputs: PendingInputsDep;
-  #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
+  #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot' | 'rebaseGeneration'>;
   #registry: IChatRegistry;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
@@ -303,7 +303,18 @@ export class ChatHandler {
         });
         return;
       }
+      const previousFeed = this.#transientFeeds.currentSnapshot(chatId);
       const reload = await this.#projectionReload(chatId);
+      // The reload replaced the browser generation; carry the transient rows
+      // into it so later subscribes see one matching snapshot.
+      if (previousFeed && previousFeed.generationId !== reload.generationId) {
+        this.#transientFeeds.rebaseGeneration({
+          chatId,
+          agentOwnershipEpoch: session.agentOwnershipEpoch,
+          previousGenerationId: previousFeed.generationId,
+          generationId: reload.generationId,
+        });
+      }
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,

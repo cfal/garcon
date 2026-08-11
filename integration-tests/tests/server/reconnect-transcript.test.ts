@@ -33,8 +33,9 @@ describe('reconnect and transcript stability', () => {
       await held.received;
       const beforeReconnect = await fixture.client.getMessages(chatId);
       expect(countUserContent(beforeReconnect.messages, 'reconnect-a')).toBe(1);
-      expect(beforeReconnect.pendingUserInputs).toHaveLength(1);
-      expect(beforeReconnect.pendingUserInputs[0].deliveryStatus).toBe('accepted');
+      // Admission committed the input at dispatch, so no pending overlay
+      // remains while the provider holds the turn.
+      expect(beforeReconnect.pendingUserInputs).toEqual([]);
 
       await fixture.client.disconnect();
       await fixture.client.reconnect();
@@ -54,7 +55,7 @@ describe('reconnect and transcript stability', () => {
       );
       expect(subscription.mode).toBe('delta');
       expect(subscription.generationId).toBe(beforeReconnect.generationId);
-      expect(subscription.pendingUserInputs).toHaveLength(1);
+      expect(subscription.pendingUserInputs).toEqual([]);
       expect(fixture.client.events().slice(reconnectCursor).filter((event) =>
         event.type === 'chat-generation-reset' && event.chatId === chatId)).toEqual([]);
 
@@ -86,8 +87,7 @@ describe('reconnect and transcript stability', () => {
       expect(new Set(pages.map((page) => page.generationId)).size).toBe(1);
       for (const page of pages) {
         expect(countUserContent(page.messages, 'repeated-read')).toBe(1);
-        expect(page.pendingUserInputs).toHaveLength(1);
-        expect(page.pendingUserInputs[0].deliveryStatus).toBe('accepted');
+        expect(page.pendingUserInputs).toEqual([]);
       }
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
       await fixture.client.ping();
