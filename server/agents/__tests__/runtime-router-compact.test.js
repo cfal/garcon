@@ -48,6 +48,7 @@ function makeRouter(compaction) {
       resolveEndpointReference: mock(() => null),
     },
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
+    projection: { open: mock(async () => ({ kind: 'ready', value: {} })) },
     getCarryOverRevision: () => 'carry-1',
     loadCarriedContext: async () => null,
     getCarryOverMessageCount: async () => 0,
