@@ -763,6 +763,13 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	clearMessages(): void {
+		this.#resetToEmptyTranscript();
+		this.loadStatus = 'idle';
+		this.historyState = { kind: 'complete' };
+		this.#recordFeedMutation('replacement');
+	}
+
+	#resetToEmptyTranscript(): void {
 		this.#invalidatePageLoad();
 		this.#preserveExpandedVisibleWindow = false;
 		this.#loadEpoch += 1;
@@ -775,12 +782,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#notices.reset();
 		this.hasEarlierMessages = false;
 		this.totalMessages = 0;
-		this.loadStatus = 'idle';
 		this.loadError = null;
-		this.historyState = { kind: 'complete' };
 		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
-		this.#recordFeedMutation('replacement');
 	}
 
 	compactToRecentMessages(): boolean {
@@ -928,25 +932,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		chatId: string,
 		historyState: Exclude<ChatHistoryState, { kind: 'complete' }>,
 	): void {
-		this.#invalidatePageLoad();
-		this.#preserveExpandedVisibleWindow = false;
 		this.activeChatId = chatId;
-		this.#loadEpoch += 1;
-		this.#snapshotBuffer = null;
 		this.transcriptCache.remove(chatId);
-		this.windowRevision += 1;
-		this.entries = [];
-		this.generationId = '';
-		this.lastSeq = 0;
-		this.oldestSeq = 0;
-		this.#replacePendingUserInputs([]);
-		this.#notices.reset();
-		this.hasEarlierMessages = false;
-		this.totalMessages = 0;
+		this.#resetToEmptyTranscript();
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.loadStatus = 'loaded';
-		this.loadError = null;
-		this.isLoadingMessages = false;
 		this.historyState = historyState;
 		this.#deferredRetryChatId = historyState.kind === 'deferred' ? chatId : null;
 		this.#recordFeedMutation('replacement');
