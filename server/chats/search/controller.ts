@@ -20,6 +20,10 @@ const MAX_LIMIT = 100;
 const DEFAULT_SEARCH_TIMEOUT_MS = 5_000;
 const RECONCILE_DELAY_MS = 100;
 const SOURCE_RESOLUTION_CONCURRENCY = 8;
+// First resolution of a cold chat opens its segment, which may run the
+// one-time native import; the per-integration lane keeps that burst from
+// serializing one provider's entire history behind the global pool.
+const PER_INTEGRATION_SOURCE_RESOLUTION_CONCURRENCY = 2;
 const RECONCILE_RETRY_MS = [5_000, 30_000, 5 * 60_000] as const;
 
 export interface TranscriptSearchChatRegistration {
@@ -243,15 +247,28 @@ export class TranscriptSearchController {
   ): Promise<TranscriptSearchCatalogEntry[]> {
     const registrations = [...this.#deps.listChats()];
     const results = new Array<TranscriptSearchCatalogEntry>(registrations.length);
-    let cursor = 0;
+    const pending = registrations.map((registration, index) => ({ registration, index }));
+    const inFlightByAgent = new Map<string, number>();
     const workers = Array.from(
       { length: Math.min(SOURCE_RESOLUTION_CONCURRENCY, registrations.length) },
       async () => {
-        while (cursor < registrations.length) {
-          const index = cursor++;
-          const registration = registrations[index];
+        while (pending.length > 0) {
           signal.throwIfAborted();
-          results[index] = await this.#resolveCatalogEntry(registration, signal);
+          const slot = pending.findIndex(({ registration }) => (
+            (inFlightByAgent.get(registration.agentId) ?? 0)
+              < PER_INTEGRATION_SOURCE_RESOLUTION_CONCURRENCY
+          ));
+          if (slot === -1) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            continue;
+          }
+          const { registration, index } = pending.splice(slot, 1)[0];
+          inFlightByAgent.set(registration.agentId, (inFlightByAgent.get(registration.agentId) ?? 0) + 1);
+          try {
+            results[index] = await this.#resolveCatalogEntry(registration, signal);
+          } finally {
+            inFlightByAgent.set(registration.agentId, (inFlightByAgent.get(registration.agentId) ?? 0) - 1);
+          }
         }
       },
     );

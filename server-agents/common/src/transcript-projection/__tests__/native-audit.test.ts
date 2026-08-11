@@ -103,6 +103,36 @@ function forkPointFor(
 }
 
 describe('existing-journal native audit', () => {
+  it('coalesces concurrent segment opens onto one journal bind', async () => {
+    const directory = await createDirectory();
+    await openContents(streamOver(directory, () => [
+      nativeMessage('item-1', 'first'),
+      nativeMessage('item-2', 'second'),
+    ]));
+
+    let loads = 0;
+    const stream = streamOver(directory, () => {
+      loads += 1;
+      return [
+        nativeMessage('item-1', 'first'),
+        nativeMessage('item-2', 'second'),
+        nativeMessage('item-3', 'third'),
+      ];
+    });
+    const [first, second, third] = await Promise.all([
+      stream.openSegment({ chat, signal: signal() }),
+      stream.openSegment({ chat, signal: signal() }),
+      stream.openSegment({ chat, signal: signal() }),
+    ]);
+    expect(first.kind).toBe('ready');
+    expect(second).toEqual(first);
+    expect(third).toEqual(first);
+    // One audit ran, and the suffix imported exactly once.
+    expect(loads).toBe(1);
+    const contents = await openContents(stream);
+    expect(contents.contents).toEqual(['first', 'second', 'third']);
+  });
+
   it('imports a crash-missed native suffix exactly once', async () => {
     const directory = await createDirectory();
     await openContents(streamOver(directory, () => [

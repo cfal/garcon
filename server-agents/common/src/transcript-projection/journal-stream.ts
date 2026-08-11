@@ -101,6 +101,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   readonly #segments = new Map<string, OpenSegment>();
   readonly #listeners = new Set<(event: AgentStreamEvent) => void>();
   readonly #preparations = new Map<string, OpenSegment>();
+  readonly #opening = new Map<string, Promise<AgentTranscriptAccessResult<AgentSegmentOpenResult>>>();
 
   constructor(private readonly options: JournalBackedTranscriptStreamOptions) {}
 
@@ -118,6 +119,21 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     if (existing) {
       return { kind: 'ready', value: { checkpoint: existing.stream.current.checkpoint, idle: true } };
     }
+    // Concurrent callers coalesce onto one bind: a second open racing the first
+    // would bootstrap, audit, and append against the same journal twice.
+    const inFlight = this.#opening.get(key);
+    if (inFlight) return inFlight;
+    const opening = this.#openSegmentExclusive(request).finally(() => {
+      this.#opening.delete(key);
+    });
+    this.#opening.set(key, opening);
+    return opening;
+  }
+
+  async #openSegmentExclusive(
+    request: AgentTranscriptRequestV4,
+  ): Promise<AgentTranscriptAccessResult<AgentSegmentOpenResult>> {
+    const key = segmentKey(request.chat);
     const directory = await this.options.directory();
     request.signal.throwIfAborted();
     const exists = await AgentProjectionJournal.exists({ directory, ...segmentIdentity(request.chat) });

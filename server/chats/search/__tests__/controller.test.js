@@ -215,6 +215,37 @@ describe('TranscriptSearchController', () => {
     await controller.close();
   });
 
+  it('caps concurrent source resolution per integration during the catalog sweep', async () => {
+    const inFlight = new Map();
+    const peaks = new Map();
+    const provider = (agentId) => {
+      const entry = integration(agentId);
+      entry.transcript.resolveIndexSource = mock(async ({ chat }) => {
+        inFlight.set(agentId, (inFlight.get(agentId) ?? 0) + 1);
+        peaks.set(agentId, Math.max(peaks.get(agentId) ?? 0, inFlight.get(agentId)));
+        await Bun.sleep(10);
+        inFlight.set(agentId, inFlight.get(agentId) - 1);
+        return { kind: 'ready', value: source(agentId, chat.chatId) };
+      });
+      return entry;
+    };
+    const registrations = ['claude', 'codex'].flatMap((agentId) => (
+      Array.from({ length: 6 }, (_, index) => registration(agentId, `${agentId}-${index}`))
+    ));
+    const { controller, service } = controllerFixture(
+      [provider('claude'), provider('codex')],
+      registrations,
+    );
+
+    await controller.start();
+    while (service.reconcile.mock.calls.length === 0) await Bun.sleep(5);
+
+    expect(peaks.get('claude')).toBeLessThanOrEqual(2);
+    expect(peaks.get('codex')).toBeLessThanOrEqual(2);
+    expect(service.reconcile.mock.calls[0][0].chats).toHaveLength(12);
+    await controller.close();
+  });
+
   it('reports failed admission as retryable and permits a later retry', async () => {
     const service = createService();
     service.enable.mockImplementationOnce(async () => {
