@@ -218,6 +218,60 @@ describe('Claude steering history projection', () => {
   });
 });
 
+describe('Claude JSONL microcompaction', () => {
+  it('renders a re-appended entry once and keeps the first occurrence identity', async () => {
+    // Microcompaction re-appends retained entries with their original uuids,
+    // differing only in parent rechaining. The first occurrence is canonical
+    // and later copies must not render again.
+    const entries = [
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'user-1',
+        parentUuid: null,
+        timestamp: '2026-07-21T14:00:00.000Z',
+        message: { role: 'user', content: 'keep me' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'assistant',
+        uuid: 'assistant-1',
+        parentUuid: 'user-1',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'user-1',
+        parentUuid: 'assistant-1',
+        timestamp: '2026-07-21T14:00:03.000Z',
+        message: { role: 'user', content: 'keep me' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'assistant',
+        uuid: 'assistant-1',
+        parentUuid: 'user-1',
+        timestamp: '2026-07-21T14:00:04.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+      },
+    ];
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      expect(messages.map((message) => [message.type, message.content])).toEqual([
+        ['user-message', 'keep me'],
+        ['assistant-message', 'answer'],
+      ]);
+      // The rendered rows keep the first occurrence's uuid, the identity the
+      // projection settles against; the re-append does not mint a new one.
+      expect(getNativeMessageSource(messages[0])).toMatchObject({ entryId: 'user-1' });
+      expect(getNativeMessageSource(messages[1])).toMatchObject({ entryId: 'assistant-1' });
+    });
+  });
+});
+
 describe('Claude JSONL conversion', () => {
   it('preserves AskUserQuestion toolUseResult metadata from JSONL tool results', async () => {
     const lines = [
