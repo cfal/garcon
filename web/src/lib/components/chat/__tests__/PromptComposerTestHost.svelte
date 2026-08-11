@@ -12,6 +12,7 @@
 		setRemoteSettings,
 		setSnippets,
 		setTransientLayers,
+		setWorkspaceShortcuts,
 	} from '$lib/context';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
@@ -32,6 +33,10 @@
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
+	import {
+		WorkspaceShortcutDispatcher,
+		type WorkspaceShortcutDeps,
+	} from '$lib/workspace/workspace-shortcuts.js';
 
 	interface Props {
 		selectedChatId?: string;
@@ -41,7 +46,9 @@
 		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
 		isVisible?: boolean;
+		isPresented?: boolean;
 		focusRequestToken?: number;
+		composerEditorOpenRequestId?: number;
 		selectableAgents?: SessionAgentId[];
 		recentAgentSettings?: RecentAgentSetting[];
 		allowDirectChats?: boolean;
@@ -67,7 +74,9 @@
 		selectedIsProcessing = false,
 		isSubmitting = false,
 		isVisible = true,
+		isPresented,
 		focusRequestToken = 0,
+		composerEditorOpenRequestId = 0,
 		selectableAgents = ['claude'],
 		recentAgentSettings = [],
 		allowDirectChats = false,
@@ -326,6 +335,29 @@
 	);
 	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
 	setTransientLayers(transientLayers);
+	const shortcutWorkspace = {
+		focusOwner: { kind: 'surface' as const, surfaceId: 'singleton:chat' },
+		isSurfacePresented: () => true,
+		focusPreviousTabInFocusedHost: () => false,
+		focusNextTabInFocusedHost: () => false,
+		toggleFocusBetweenMainAndSidebar: () => undefined,
+		layout: {
+			surface: () => ({ id: 'singleton:chat', type: 'singleton' as const, kind: 'chat' as const }),
+		},
+	} satisfies WorkspaceShortcutDeps['workspace'];
+	setWorkspaceShortcuts(
+		new WorkspaceShortcutDispatcher({
+			workspace: shortcutWorkspace,
+			transients: transientLayers,
+			appShell,
+			navigation: {
+				requestNavigateChatAbove: () => undefined,
+				requestNavigateChatBelow: () => undefined,
+			},
+			files: { save: async () => true },
+			localSettings: { globalShortcuts: {} },
+		}),
+	);
 </script>
 
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
@@ -333,6 +365,8 @@
 	{onsubmit}
 	{onSteerPreferredSubmit}
 	{isVisible}
+	{isPresented}
+	{composerEditorOpenRequestId}
 	{quickCommitTrayVisible}
 	{quickCommitRefreshing}
 	{quickCommitSummary}

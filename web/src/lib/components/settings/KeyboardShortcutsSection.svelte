@@ -4,7 +4,13 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import * as m from '$lib/paraglide/messages.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
-	import { GLOBAL_SHORTCUTS, SLASH_COMMANDS } from './keyboard-shortcut-entries.js';
+	import {
+		COMPOSER_SHORTCUTS,
+		CONFIGURABLE_SHORTCUTS,
+		GLOBAL_SHORTCUTS,
+		SLASH_COMMANDS,
+		type ShortcutEntry,
+	} from './keyboard-shortcut-entries.js';
 	import {
 		assignGlobalShortcut,
 		disableGlobalShortcut,
@@ -44,7 +50,7 @@
 	});
 
 	function shortcutLabel(id: GlobalShortcutId): string {
-		return GLOBAL_SHORTCUTS.find((entry) => entry.id === id)?.label() ?? id;
+		return CONFIGURABLE_SHORTCUTS.find((entry) => entry.id === id)?.label() ?? id;
 	}
 
 	function startRecording(id: GlobalShortcutId): void {
@@ -131,7 +137,73 @@
 	</div>
 {/snippet}
 
+{#snippet configurableShortcutRow(entry: ShortcutEntry)}
+	{@const binding = getEffectiveGlobalShortcut(entry.id, ls.globalShortcuts)}
+	{@const hasOverride = Object.hasOwn(ls.globalShortcuts, entry.id)}
+	<div
+		class="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+		role="group"
+		aria-label={entry.label()}
+	>
+		<div class="min-w-0">
+			<div class="text-sm font-medium text-foreground">{entry.label()}</div>
+			<div class="mt-0.5 text-xs text-muted-foreground">
+				{#if binding === null}
+					{m.settings_shortcut_disabled()}
+				{:else if hasOverride}
+					{m.settings_shortcut_custom()}
+				{:else}
+					{m.settings_shortcut_system_default()}
+				{/if}
+			</div>
+		</div>
+		<div class="flex flex-wrap items-center gap-2">
+			<Button
+				variant={recordingId === entry.id ? 'default' : 'outline'}
+				size="sm"
+				class="min-w-28 font-mono"
+				onclick={() => startRecording(entry.id)}
+				onkeydown={(event) => handleBindingKeydown(event, entry.id)}
+				onblur={() => stopRecording(entry.id)}
+				aria-label={m.settings_shortcut_change_aria({ command: entry.label() })}
+			>
+				{#if recordingId === entry.id}
+					{m.settings_shortcut_press_keys()}
+				{:else if binding}
+					{@render keyCombo(formatGlobalShortcut(binding, isMac))}
+				{:else}
+					{m.settings_shortcut_unassigned()}
+				{/if}
+			</Button>
+			<Button
+				variant="ghost"
+				size="sm"
+				disabled={binding === null}
+				onclick={() => removeShortcut(entry.id)}
+			>
+				{m.settings_shortcut_remove()}
+			</Button>
+			<Button
+				variant="ghost"
+				size="sm"
+				disabled={!hasOverride}
+				onclick={() => resetShortcut(entry.id)}
+			>
+				{m.settings_shortcut_reset()}
+			</Button>
+		</div>
+	</div>
+{/snippet}
+
 <div class="space-y-6" bind:this={sectionElement}>
+	{#if feedback}
+		<div
+			class="rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground"
+			role="status"
+		>
+			{feedback}
+		</div>
+	{/if}
 	<section class="space-y-2">
 		<h3 class="text-sm font-semibold text-foreground">
 			{m.settings_shortcuts_group_composer()}
@@ -146,6 +218,9 @@
 				() => ls.toggle('steerWithCtrlEnter'),
 			)}
 			{@render shortcutRow(m.settings_shortcut_send_message(), sendMessageKeys)}
+			{#each COMPOSER_SHORTCUTS as entry (entry.id)}
+				{@render configurableShortcutRow(entry)}
+			{/each}
 		</div>
 	</section>
 
@@ -154,70 +229,10 @@
 			{m.settings_shortcuts_group_global()}
 		</h3>
 		<p class="text-xs text-muted-foreground">{m.settings_shortcuts_edit_hint()}</p>
-		{#if feedback}
-			<div
-				class="rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground"
-				role="status"
-			>
-				{feedback}
-			</div>
-		{/if}
 		<div class="divide-y divide-border rounded-lg border border-border bg-muted/50">
 			{#each GLOBAL_SHORTCUTS as entry (entry.id)}
-				{@const binding = getEffectiveGlobalShortcut(entry.id, ls.globalShortcuts)}
-				{@const hasOverride = Object.hasOwn(ls.globalShortcuts, entry.id)}
-				<div
-					class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-					role="group"
-					aria-label={entry.label()}
-				>
-					<div class="min-w-0">
-						<div class="text-sm font-medium text-foreground">{entry.label()}</div>
-						<div class="mt-0.5 text-xs text-muted-foreground">
-							{#if binding === null}
-								{m.settings_shortcut_disabled()}
-							{:else if hasOverride}
-								{m.settings_shortcut_custom()}
-							{:else}
-								{m.settings_shortcut_system_default()}
-							{/if}
-						</div>
-					</div>
-					<div class="flex flex-wrap items-center gap-2">
-						<Button
-							variant={recordingId === entry.id ? 'default' : 'outline'}
-							size="sm"
-							class="min-w-28 font-mono"
-							onclick={() => startRecording(entry.id)}
-							onkeydown={(event) => handleBindingKeydown(event, entry.id)}
-							onblur={() => stopRecording(entry.id)}
-							aria-label={m.settings_shortcut_change_aria({ command: entry.label() })}
-						>
-							{#if recordingId === entry.id}
-								{m.settings_shortcut_press_keys()}
-							{:else if binding}
-								{@render keyCombo(formatGlobalShortcut(binding, isMac))}
-							{:else}
-								{m.settings_shortcut_unassigned()}
-							{/if}
-						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							disabled={binding === null}
-							onclick={() => removeShortcut(entry.id)}
-						>
-							{m.settings_shortcut_remove()}
-						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							disabled={!hasOverride}
-							onclick={() => resetShortcut(entry.id)}
-						>
-							{m.settings_shortcut_reset()}
-						</Button>
-					</div>
+				<div class="px-4">
+					{@render configurableShortcutRow(entry)}
 				</div>
 			{/each}
 		</div>

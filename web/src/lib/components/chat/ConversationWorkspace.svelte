@@ -111,6 +111,7 @@
 		markVisiblePreviewStale?: (chatId: string) => void;
 		textScale?: number;
 		isVisible?: boolean;
+		isPresented?: boolean;
 	}
 
 	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
@@ -133,7 +134,9 @@
 		markVisiblePreviewStale,
 		textScale = 1,
 		isVisible = true,
+		isPresented: isPresentedOverride,
 	}: ConversationWorkspaceProps = $props();
+	const isPresented = $derived(isPresentedOverride ?? isVisible);
 
 	function getInitialTranscriptCache(): ChatTranscriptCache {
 		return providedTranscriptCache ?? fallbackTranscriptCache;
@@ -168,6 +171,7 @@
 	});
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
+	let composerEditorOpenRequestId = $state(0);
 	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
 	const dialogQueue = $derived(dialogControl?.queue ?? null);
 	const queuedInputEditor = new QueuedInputEditorState({
@@ -507,6 +511,21 @@
 	});
 
 	function handleWorkspaceShortcut(event: KeyboardEvent): boolean {
+		if (!isPresented) return false;
+		const targetsPresentedComposerEditor =
+			event.target instanceof Element &&
+			Boolean(event.target.closest('[data-composer-editor-dialog]'));
+		if (
+			(isVisible || targetsPresentedComposerEditor) &&
+			!event.repeat &&
+			!event.isComposing &&
+			sessions.selectedChatId &&
+			workspaceShortcuts.matchesGlobalShortcut('open-composer-editor', event)
+		) {
+			event.preventDefault();
+			composerEditorOpenRequestId += 1;
+			return true;
+		}
 		if (!isVisible) return false;
 		if (
 			event.key === 'Escape' &&
@@ -709,7 +728,9 @@
 
 	<PromptComposer
 		{isVisible}
+		{isPresented}
 		{directAdmissionPending}
+		{composerEditorOpenRequestId}
 		onsubmit={onSubmit}
 		{onSteerPreferredSubmit}
 		onModelChange={(next) => controller.handleModelSelectionChange(next)}

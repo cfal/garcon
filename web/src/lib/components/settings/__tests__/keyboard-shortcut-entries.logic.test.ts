@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GLOBAL_SHORTCUTS, SLASH_COMMANDS } from '../keyboard-shortcut-entries';
+import { COMPOSER_SHORTCUTS, GLOBAL_SHORTCUTS, SLASH_COMMANDS } from '../keyboard-shortcut-entries';
 import { formatGlobalShortcut, getEffectiveGlobalShortcut } from '$lib/workspace/global-shortcuts';
 
 describe('keyboard shortcut entries', () => {
@@ -30,6 +30,15 @@ describe('keyboard shortcut entries', () => {
 		expect(SLASH_COMMANDS).toEqual(
 			expect.arrayContaining([expect.objectContaining({ command: '/in <duration> <prompt>' })]),
 		);
+	});
+
+	it('keeps the expanded composer opener with composer shortcuts', () => {
+		const entry = COMPOSER_SHORTCUTS.find((candidate) => candidate.id === 'open-composer-editor');
+		const binding = entry ? getEffectiveGlobalShortcut(entry.id, {}) : null;
+
+		expect(entry?.label()).toBe('Open expanded composer');
+		expect(binding ? formatGlobalShortcut(binding) : []).toEqual(['Ctrl', 'Shift', 'E']);
+		expect(GLOBAL_SHORTCUTS.some((candidate) => candidate.id === entry?.id)).toBe(false);
 	});
 
 	it('documents the optional fork prompt argument', () => {

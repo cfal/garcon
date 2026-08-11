@@ -280,12 +280,12 @@
 	const conversationWorkspaceHeight = $derived(
 		isSplitWorkspaceActive ? `${focusedOverlayRect?.height ?? 0}px` : undefined,
 	);
-	const conversationWorkspaceVisible = $derived(
+	const conversationWorkspacePresented = $derived(
 		isVisible &&
-			isInteractive &&
 			canRenderConversation &&
 			(!isSplitWorkspaceActive || Boolean(focusedOverlayRect)),
 	);
+	const conversationWorkspaceVisible = $derived(conversationWorkspacePresented && isInteractive);
 	let prepareConversationHide: (() => void) | null = $state(null);
 	const conversationWorkspaceTextScale = $derived(isSplitWorkspaceActive ? splitPaneTextScale : 1);
 
@@ -419,6 +419,7 @@
 			>
 				<ConversationWorkspace
 					{subagentToolbar}
+					isPresented={conversationWorkspacePresented}
 					onRegisterSubmit={handleRegisterSubmit}
 					onRegisterUserMessageNavigator={handleRegisterUserMessageNavigator}
 					onRegisterPrepareHide={(prepare) => (prepareConversationHide = prepare)}

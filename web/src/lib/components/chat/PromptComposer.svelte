@@ -4,6 +4,7 @@
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
+	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
@@ -108,6 +109,8 @@
 		// active). Focus requests must not be consumed while hidden, since
 		// focusing a display:none textarea is a silent no-op.
 		isVisible?: boolean;
+		isPresented?: boolean;
+		composerEditorOpenRequestId?: number;
 	}
 
 	let {
@@ -126,7 +129,10 @@
 		onQuickCommit = null,
 		directAdmissionPending = false,
 		isVisible = true,
+		isPresented: isPresentedOverride,
+		composerEditorOpenRequestId = 0,
 	}: Props = $props();
+	const isPresented = $derived(isPresentedOverride ?? isVisible);
 
 	const composerState = getComposerState();
 	const lifecycle = getConversationLifecycle();
@@ -153,6 +159,7 @@
 	});
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
+	let expandedEditor: { open: () => boolean } | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
@@ -610,6 +617,7 @@
 	);
 	const isQueueMode = $derived(selectedIsProcessing);
 	const isDisabled = $derived(isDraftStartupSubmitting);
+
 	const canSubmit = $derived(
 		canSubmitComposer(
 			isDisabled || directAdmissionPending || snippetExpansion.pending,
@@ -789,13 +797,13 @@
 											<img src={url} alt={file.name} class="w-full h-full object-cover" />
 										{/if}
 									{:else}
-										<div class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground">
+									<div class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground">
 											{#if isVideoChatAttachment(file)}
 												<FileVideo class="h-5 w-5" aria-hidden="true" />
 											{:else}
 												<FileText class="h-5 w-5" aria-hidden="true" />
 											{/if}
-											<span class="w-full truncate text-center text-[10px] leading-tight">{file.name}</span>
+										<span class="w-full truncate text-center text-[10px] leading-tight">{file.name}</span>
 										</div>
 									{/if}
 								</div>
@@ -856,6 +864,7 @@
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={handleImagePick}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
+				onOpenExpandedEditor={() => expandedEditor?.open()}
 				addMenuDisabled={isDisabled}
 				isPromptTransformPending={snippetExpansion.pending}
 				{permissionOptions}
@@ -964,3 +973,15 @@
 		{@render composerFrame()}
 	</div>
 </div>
+
+<PromptComposerEditor
+	bind:this={expandedEditor}
+	{ui}
+	{textarea}
+	{isVisible}
+	{isPresented}
+	{isDisabled}
+	promptTransformPending={snippetExpansion.pending}
+	openRequestId={composerEditorOpenRequestId}
+	resizeTextarea={autoResize}
+/>

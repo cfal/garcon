@@ -164,6 +164,7 @@
 
 	const subagentToolbar = new SubagentToolbarState();
 	let showTestLayer = $state(false);
+	let testLayerIsComposerEditor = $state(false);
 	let testLayerElement = $state<HTMLElement | null>(null);
 	$effect(() => {
 		if (!showTestLayer || !testLayerElement) return;
@@ -182,7 +183,20 @@
 </script>
 
 <KeyboardShortcuts />
-<button type="button" onclick={() => (showTestLayer = true)}>Open test layer</button>
+<button
+	type="button"
+	onclick={() => {
+		testLayerIsComposerEditor = false;
+		showTestLayer = true;
+	}}>Open test layer</button
+>
+<button
+	type="button"
+	onclick={() => {
+		testLayerIsComposerEditor = true;
+		showTestLayer = true;
+	}}>Open composer editor layer</button
+>
 <button type="button" onclick={() => (selectedChat.agentId = 'claude')}>Use Claude</button>
 <button type="button" onclick={() => (selectedChat.agentId = 'codex')}>Use Codex</button>
 <button type="button" onclick={() => (selectedChat.agentId = 'opencode')}>Use unsupported agent</button>
@@ -194,6 +208,17 @@
 	}}
 >Toggle processing</button>
 {#if showTestLayer}
-	<div bind:this={testLayerElement} role="dialog" tabindex="-1" aria-label="Test dialog"></div>
+	<div
+		bind:this={testLayerElement}
+		role="dialog"
+		tabindex="-1"
+		aria-label="Test dialog"
+		data-workspace-surface-id={testLayerIsComposerEditor ? 'singleton:chat' : undefined}
+		data-composer-editor-dialog={testLayerIsComposerEditor ? '' : undefined}
+	>
+		{#if testLayerIsComposerEditor}
+			<button type="button" aria-label="Composer editor chrome">Editor chrome</button>
+		{/if}
+	</div>
 {/if}
-<ConversationWorkspace isVisible={true} {subagentToolbar} />
+<ConversationWorkspace isVisible={!showTestLayer} isPresented={true} {subagentToolbar} />

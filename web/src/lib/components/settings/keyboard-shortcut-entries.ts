@@ -15,6 +15,10 @@ export interface SlashCommandEntry {
 	description: () => string;
 }
 
+export const COMPOSER_SHORTCUTS: readonly ShortcutEntry[] = [
+	{ id: 'open-composer-editor', label: m.settings_shortcut_open_composer_editor },
+];
+
 export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
 	{ id: 'toggle-command-palette', label: m.settings_shortcut_toggle_command_palette },
 	{ id: 'open-sidebar-search', label: m.settings_shortcut_open_sidebar_search },
@@ -32,6 +36,11 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
 	{ id: 'open-settings', label: m.settings_shortcut_open_settings },
 	{ id: 'scroll-half-page-up', label: m.settings_shortcut_scroll_half_page_up },
 	{ id: 'scroll-half-page-down', label: m.settings_shortcut_scroll_half_page_down },
+];
+
+export const CONFIGURABLE_SHORTCUTS: readonly ShortcutEntry[] = [
+	...COMPOSER_SHORTCUTS,
+	...GLOBAL_SHORTCUTS,
 ];
 
 export const SLASH_COMMANDS: readonly SlashCommandEntry[] = [

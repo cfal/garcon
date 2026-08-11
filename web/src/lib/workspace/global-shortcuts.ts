@@ -2,6 +2,7 @@ export const GLOBAL_SHORTCUT_IDS = [
 	'toggle-command-palette',
 	'open-sidebar-search',
 	'new-chat',
+	'open-composer-editor',
 	'rename-chat',
 	'delete-chat',
 	'navigate-tab-left',
@@ -38,6 +39,10 @@ export const GLOBAL_SHORTCUT_DEFINITIONS: readonly GlobalShortcutDefinition[] = 
 	{ id: 'toggle-command-palette', defaultBinding: { key: 'p', primary: true } },
 	{ id: 'open-sidebar-search', defaultBinding: { key: 's', primary: true } },
 	{ id: 'new-chat', defaultBinding: { key: 'n', ctrl: true } },
+	{
+		id: 'open-composer-editor',
+		defaultBinding: { key: 'e', ctrl: true, shift: true },
+	},
 	{ id: 'rename-chat', defaultBinding: { key: 'r', ctrl: true } },
 	{ id: 'delete-chat', defaultBinding: { key: 'd', ctrl: true, shift: true } },
 	{ id: 'navigate-tab-left', defaultBinding: { key: 'j', ctrl: true, shift: true } },

@@ -19,19 +19,38 @@ import {
 } from './workspace-scroll-region.js';
 
 export type WorkspaceSurfaceShortcutHandler = (event: KeyboardEvent) => boolean;
+export type WorkspaceLocalShortcutOwner = (event: KeyboardEvent) => boolean;
 type WorkspaceScrollInteraction = 'focus' | 'pointer' | 'wheel';
 
-interface WorkspaceShortcutDeps {
-	workspace: WorkspaceCoordinator;
-	transients: TransientLayerRegistry;
-	appShell: AppShellStore;
-	navigation: NavigationStore;
-	files: FileSessionRegistry;
+export interface WorkspaceShortcutDeps {
+	workspace: Pick<
+		WorkspaceCoordinator,
+		| 'focusOwner'
+		| 'isSurfacePresented'
+		| 'focusPreviousTabInFocusedHost'
+		| 'focusNextTabInFocusedHost'
+		| 'toggleFocusBetweenMainAndSidebar'
+	> & { layout: Pick<WorkspaceCoordinator['layout'], 'surface'> };
+	transients: Pick<
+		TransientLayerRegistry,
+		'makesMainInert' | 'handleEscape' | 'ownsTopModalTarget'
+	>;
+	appShell: Pick<
+		AppShellStore,
+		| 'openSettings'
+		| 'requestNewChat'
+		| 'openSidebarSearch'
+		| 'requestDeleteSelectedChat'
+		| 'requestRenameSelectedChat'
+	>;
+	navigation: Pick<NavigationStore, 'requestNavigateChatAbove' | 'requestNavigateChatBelow'>;
+	files: Pick<FileSessionRegistry, 'save'>;
 	localSettings: Pick<LocalSettingsStore, 'globalShortcuts'>;
 }
 
 export class WorkspaceShortcutDispatcher {
 	readonly #handlers = new Map<string, Set<WorkspaceSurfaceShortcutHandler>>();
+	readonly #localOwners = new Map<HTMLElement, Set<WorkspaceLocalShortcutOwner>>();
 	#toggleCommandMenu: (() => void) | null = null;
 	#lastInteractedScrollRegion: HTMLElement | null = null;
 	#pendingPointerFocus: { region: HTMLElement } | null = null;
@@ -52,6 +71,19 @@ export class WorkspaceShortcutDispatcher {
 		return () => {
 			handlers?.delete(handler);
 			if (handlers?.size === 0) this.#handlers.delete(surfaceId);
+		};
+	}
+
+	registerLocalShortcutOwner(element: HTMLElement, owner: WorkspaceLocalShortcutOwner): () => void {
+		let owners = this.#localOwners.get(element);
+		if (!owners) {
+			owners = new Set();
+			this.#localOwners.set(element, owners);
+		}
+		owners.add(owner);
+		return () => {
+			owners?.delete(owner);
+			if (owners?.size === 0) this.#localOwners.delete(element);
 		};
 	}
 
@@ -81,19 +113,22 @@ export class WorkspaceShortcutDispatcher {
 		this.#lastInteractedScrollRegion = availableRegion;
 	}
 
+	matchesGlobalShortcut(id: GlobalShortcutId, event: KeyboardEvent): boolean {
+		const binding = getEffectiveGlobalShortcut(id, this.deps.localSettings.globalShortcuts);
+		return binding ? globalShortcutMatchesEvent(binding, event) : false;
+	}
+
 	handle(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
 		if (event.key === 'Escape' && this.deps.transients.handleEscape(event)) return;
-		const matches = (id: GlobalShortcutId) => {
-			const binding = getEffectiveGlobalShortcut(id, this.deps.localSettings.globalShortcuts);
-			return binding ? globalShortcutMatchesEvent(binding, event) : false;
-		};
+		const matches = (id: GlobalShortcutId) => this.matchesGlobalShortcut(id, event);
 		const explicitOwner = this.#ownerForTarget(event.target);
 		const modalSurfaceOwnsTarget =
 			explicitOwner?.kind === 'surface' && this.deps.transients.ownsTopModalTarget(event.target);
 		if (this.deps.transients.makesMainInert && !modalSurfaceOwnsTarget) {
 			return;
 		}
+		if (this.#isLocallyOwned(event)) return;
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
 		const ownerDescriptor =
 			owner.kind === 'surface' || owner.kind === 'host-chrome'
@@ -262,5 +297,22 @@ export class WorkspaceShortcutDispatcher {
 			if (target.closest('[data-workspace-chat-list]')) return { kind: 'chat-list' as const };
 		}
 		return null;
+	}
+
+	#isLocallyOwned(event: KeyboardEvent): boolean {
+		if (this.#localOwners.size === 0) return false;
+		const visited = new Set<HTMLElement>();
+		for (const candidate of event.composedPath()) {
+			if (!(candidate instanceof HTMLElement)) continue;
+			visited.add(candidate);
+			const owners = this.#localOwners.get(candidate);
+			if (owners && [...owners].some((owner) => owner(event))) return true;
+		}
+		if (!(event.target instanceof Node)) return false;
+		for (const [element, owners] of this.#localOwners) {
+			if (visited.has(element)) continue;
+			if (element.contains(event.target) && [...owners].some((owner) => owner(event))) return true;
+		}
+		return false;
 	}
 }
