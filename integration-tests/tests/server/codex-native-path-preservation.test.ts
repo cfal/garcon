@@ -292,23 +292,22 @@ describe('Codex native transcript path preservation', () => {
         ).toEqual([]);
         expect(await readFile(callLogPath, 'utf8')).toBe('thread/list\n');
 
-        const firstFailure = await captureApiError(fixture.client.getMessages(chatIds[0]!));
+        // An unresolved native session is a typed degraded history state, not
+        // a transport failure.
+        const firstFailure = await captureHistoryUnavailable(fixture.client.getMessages(chatIds[0]!));
         expect(firstFailure).toMatchObject({
-          status: 503,
-          body: {
+          chatId: chatIds[0]!,
+          historyState: {
+            kind: 'degraded',
             errorCode: 'TRANSCRIPT_UNAVAILABLE',
             retryable: true,
           },
         });
         expect(await readFile(callLogPath, 'utf8')).toBe('thread/list\n');
 
-        const retryFailure = await captureApiError(fixture.client.getMessages(chatIds[0]!));
+        const retryFailure = await captureHistoryUnavailable(fixture.client.getMessages(chatIds[0]!));
         expect(retryFailure).toMatchObject({
-          status: 503,
-          body: {
-            errorCode: 'TRANSCRIPT_UNAVAILABLE',
-            retryable: true,
-          },
+          historyState: { kind: 'degraded', retryable: true },
         });
         expect(await readFile(callLogPath, 'utf8')).toBe('thread/list\nthread/list\n');
       },
@@ -341,25 +340,25 @@ describe('Codex native transcript path preservation', () => {
           '.codex',
           'integration-discovery-mode',
         );
-        const providerFailure = await captureApiError(fixture.client.getMessages(chatId));
+        // A provider discovery error degrades the typed history state; the
+        // provider's private details never reach the client body.
+        const providerFailure = await captureHistoryUnavailable(fixture.client.getMessages(chatId));
         expect(providerFailure).toMatchObject({
-          status: 500,
-          body: {
-            success: false,
-            error: 'Internal server error',
-            errorCode: 'INTERNAL_ERROR',
+          chatId,
+          historyState: {
+            kind: 'degraded',
+            errorCode: 'UNAVAILABLE',
             retryable: true,
           },
         });
-        expect(JSON.stringify(providerFailure.body)).not.toContain('/home/private');
+        expect(JSON.stringify(providerFailure.historyState)).not.toContain('/home/private');
 
         await writeFile(discoveryModePath, 'miss');
-        const cleanMiss = await captureApiError(fixture.client.getMessages(chatId));
+        const cleanMiss = await captureHistoryUnavailable(fixture.client.getMessages(chatId));
         expect(cleanMiss).toMatchObject({
-          status: 503,
-          body: {
-            success: false,
-            error: 'Chat transcript is temporarily unavailable. Retry the request.',
+          chatId,
+          historyState: {
+            kind: 'degraded',
             errorCode: 'TRANSCRIPT_UNAVAILABLE',
             retryable: true,
           },
@@ -654,6 +653,18 @@ async function waitForNativeSessionPath(
     await new Promise<void>((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for chat ${chatId} to persist its native path`);
+}
+
+async function captureHistoryUnavailable(
+  request: Promise<unknown>,
+): Promise<UnavailableChatHistoryError> {
+  try {
+    await request;
+  } catch (error) {
+    if (error instanceof UnavailableChatHistoryError) return error;
+    throw error;
+  }
+  throw new Error('Expected the read to report unavailable history');
 }
 
 async function captureApiError(request: Promise<unknown>): Promise<GarconApiError> {

@@ -329,6 +329,11 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     readonly handoffOperationId: string;
   }) {
     request.signal.throwIfAborted();
+    // An outgoing lease requires the authoritative segment; a source whose
+    // projection cannot open reports its typed access state so the handoff
+    // maps it instead of failing on a missing in-memory segment.
+    const opened = await this.openSegment(request);
+    if (opened.kind !== 'ready') return opened;
     const segment = this.#open(request.chat);
     if (segment.handoffHealth.operationId
         && segment.handoffHealth.operationId !== request.handoffOperationId) {

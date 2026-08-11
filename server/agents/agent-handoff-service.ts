@@ -576,13 +576,22 @@ function requireHandoffAccess<T>(
   role: 'incoming' | 'outgoing',
 ): T {
   if (result.kind === 'ready') return result.value;
+  if (result.kind === 'deferred') {
+    throw new DomainError(
+      'SOURCE_TRANSCRIPT_UNAVAILABLE',
+      `The ${role} transcript is busy. Retry the handoff once execution settles.`,
+      409,
+      true,
+    );
+  }
   throw new DomainError(
     'SOURCE_TRANSCRIPT_UNAVAILABLE',
-    result.kind === 'deferred'
-      ? `The ${role} transcript is busy.`
-      : `The ${role} transcript is unavailable (${result.errorCode}).`,
-    409,
-    true,
+    result.retryable
+      ? 'The source transcript is temporarily unavailable. Retry the handoff.'
+      : 'The source transcript is unavailable.',
+    422,
+    result.retryable,
+    { cause: new Error(`${role} transcript degraded (${result.errorCode})`) },
   );
 }
 

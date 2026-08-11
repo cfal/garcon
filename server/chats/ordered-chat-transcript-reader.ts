@@ -200,10 +200,12 @@ export class OrderedChatTranscriptReader {
     if (!entry) return emptySnapshot();
     const archived = await this.deps.carryOver.loadAll(entry.carryOverSegments);
     this.#assertEntryUnchanged(chatId, entry);
+    // Projection entries render the recorded carried-context seed verbatim;
+    // every composite surface strips it under the same receipt.
     return this.#snapshot(
       entry,
       archived,
-      [...currentMessages],
+      this.#sanitizeNativeMessages(entry, currentMessages),
       currentRevision,
       projectionState,
     );
