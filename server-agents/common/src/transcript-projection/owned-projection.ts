@@ -1,6 +1,4 @@
 import type {
-  AgentExecution,
-  AgentExecutionEvent,
   AgentExecutionV4,
   AgentHost,
   AgentOperationIdentityV4,
@@ -24,19 +22,23 @@ import {
   JournalBackedAgentTranscriptStream,
   transcriptSeedEntries,
 } from './journal-stream.js';
+import type {
+  AgentProjectionProducerEvent,
+  AgentProjectionRuntimeExecution,
+} from '../execution/projection-events.js';
 
-export interface LegacyProjectionAdapterOptions {
+export interface AgentOwnedProjectionOptions {
   readonly ownerId: string;
   readonly host: AgentHost;
-  readonly execution: AgentExecution;
+  readonly execution: AgentProjectionRuntimeExecution;
   readonly transcript: AgentTranscript;
   readonly sourceSettlement?: (
-    event: Extract<AgentExecutionEvent, { readonly type: 'finished' | 'failed' }>,
+    event: Extract<AgentProjectionProducerEvent, { readonly type: 'finished' | 'failed' }>,
   ) => AgentTranscriptAccessResult<'confirmed' | 'unresolved'>;
   readonly onProjectionError?: (error: unknown, chatId: string) => void;
 }
 
-export interface LegacyProjectionAdapter {
+export interface AgentOwnedProjection {
   readonly execution: AgentExecutionV4;
   readonly transcript: JournalBackedAgentTranscriptStream;
   runTracked<T>(
@@ -55,9 +57,9 @@ export interface LegacyProjectionAdapter {
   ): void;
 }
 
-export function createLegacyProjectionAdapter(
-  options: LegacyProjectionAdapterOptions,
-): LegacyProjectionAdapter {
+export function createAgentOwnedProjection(
+  options: AgentOwnedProjectionOptions,
+): AgentOwnedProjection {
   const transcript = new JournalBackedAgentTranscriptStream({
     ownerId: options.ownerId,
     directory: () => options.host.storage.directory('transcript-projection-v4'),
@@ -85,7 +87,7 @@ export function createLegacyProjectionAdapter(
     return next;
   };
 
-  options.execution.subscribe((event) => {
+  options.execution.subscribeProjectionEvents((event) => {
     const operation = operations.get(event.chatId);
     if (!operation) return;
     void enqueue(event.chatId, async () => {
@@ -160,7 +162,7 @@ export function createLegacyProjectionAdapter(
     operations.set(chatId, operation);
     try {
       const result = await action();
-      // Blocking legacy runtimes emit their terminal callback before their
+      // Blocking provider runtimes emit their terminal callback before their
       // execution promise resolves. Flush that already-enqueued frontier so
       // core cannot observe provider idle ahead of projection persistence.
       await (chains.get(chatId) ?? Promise.resolve());

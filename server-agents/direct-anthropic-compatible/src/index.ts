@@ -31,7 +31,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
+import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 
 const SESSIONS_LABEL = 'anthropic-compatible-sessions';
 
@@ -110,17 +110,17 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       defaults: {},
       descriptors: [],
     });
-    const legacyExecution = new DirectExecution(host, runtime, nativeSessions);
-    const legacyTranscript = createDirectTranscript({
+    const providerExecution = new DirectExecution(host, runtime, nativeSessions);
+    const nativeTranscript = createDirectTranscript({
       ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
       reader,
       nativeSessions,
     });
-    const projection = createLegacyProjectionAdapter({
+    const projection = createAgentOwnedProjection({
       ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
       host,
-      execution: legacyExecution,
-      transcript: legacyTranscript,
+      execution: providerExecution,
+      transcript: nativeTranscript,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -142,7 +142,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
       projection: projection.transcript,
       supportsWhileRunning: false,
-      transcript: legacyTranscript,
+      transcript: nativeTranscript,
       nativeSessions,
     });
     this.endpoints = {

@@ -22,7 +22,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
+import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createPiConfig } from './config.js';
 import { PiExecution } from './agents/pi/execution.js';
 import { LazyPiRuntime } from './agents/pi/lazy-runtime.js';
@@ -97,13 +97,13 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
       defaults: {},
       descriptors: [],
     });
-    const legacyExecution = new PiExecution(runtime, nativeSessions);
-    const legacyTranscript = createPiTranscript(config, nativeSessions);
-    const projection = createLegacyProjectionAdapter({
+    const providerExecution = new PiExecution(runtime, nativeSessions);
+    const nativeTranscript = createPiTranscript(config, nativeSessions);
+    const projection = createAgentOwnedProjection({
       ownerId: 'pi',
       host,
-      execution: legacyExecution,
-      transcript: legacyTranscript,
+      execution: providerExecution,
+      transcript: nativeTranscript,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;

@@ -1,20 +1,20 @@
 import type {
   AgentGoalControlHandoff,
-  AgentOperationIdentity,
+  AgentTurnOwnerOperationIdentityV4,
 } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '../shared/event-emitter-runtime.js';
 
 export class AgentOperationTracker {
-  readonly #operations = new Map<string, AgentOperationIdentity>();
+  readonly #operations = new Map<string, AgentTurnOwnerOperationIdentityV4>();
 
-  register(chatId: string, operation: AgentOperationIdentity): void {
+  register(chatId: string, operation: AgentTurnOwnerOperationIdentityV4): void {
     this.#operations.set(chatId, operation);
   }
 
   handoff(
     chatId: string,
-    predecessor: AgentOperationIdentity | null,
-    successor: AgentOperationIdentity,
+    predecessor: AgentTurnOwnerOperationIdentityV4 | null,
+    successor: AgentTurnOwnerOperationIdentityV4,
     downstream: AgentGoalControlHandoff,
   ): AgentGoalControlHandoff {
     const validate = () => {
@@ -38,7 +38,7 @@ export class AgentOperationTracker {
   current(
     chatId: string,
     metadata?: RuntimeEventMetadata,
-  ): AgentOperationIdentity | null {
+  ): AgentTurnOwnerOperationIdentityV4 | null {
     const operation = this.#operations.get(chatId);
     if (!operation) return null;
     if (metadata?.turnId && metadata.turnId !== operation.turnId) return null;
@@ -49,7 +49,7 @@ export class AgentOperationTracker {
     return operation;
   }
 
-  finish(chatId: string, operation: AgentOperationIdentity): void {
+  finish(chatId: string, operation: AgentTurnOwnerOperationIdentityV4): void {
     if (this.#operations.get(chatId) === operation) this.#operations.delete(chatId);
   }
 }

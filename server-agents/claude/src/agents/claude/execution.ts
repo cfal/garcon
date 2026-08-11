@@ -3,13 +3,15 @@ import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type { ClaudeThinkingMode } from '@garcon/common/chat-modes';
 import {
   AgentIntegrationError,
-  type AgentExecution,
-  type AgentExecutionContext,
+  type AgentExecutionContextV4,
   type AgentHost,
   type AgentLogger,
   type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
-import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
+import {
+  AgentProjectionProducerEventChannel,
+  type AgentProjectionRuntimeExecution,
+} from '@garcon/server-agent-common/execution/projection-events';
 import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
@@ -25,8 +27,8 @@ import { claudeEventMetadata } from './runtime-types.js';
 import type { ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeConfig } from '../../config.js';
 
-export class ClaudeExecution implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
+export class ClaudeExecution implements AgentProjectionRuntimeExecution {
+  readonly #events = new AgentProjectionProducerEventChannel();
   readonly #operations = new AgentOperationTracker();
 
   constructor(
@@ -63,7 +65,7 @@ export class ClaudeExecution implements AgentExecution {
     });
   }
 
-  async start(request: Parameters<AgentExecution['start']>[0]) {
+  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
     this.#operations.register(request.chatId, request.operation);
     try {
       request.admission.signal.throwIfAborted();
@@ -116,7 +118,7 @@ export class ClaudeExecution implements AgentExecution {
     }
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
+  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
     this.#operations.register(request.chatId, request.operation);
     try {
       await this.runtime.runClaudeTurn({
@@ -151,7 +153,7 @@ export class ClaudeExecution implements AgentExecution {
 
   async applySessionConfiguration(
     agentSessionId: string,
-    configuration: Parameters<NonNullable<AgentExecution['applySessionConfiguration']>>[1],
+    configuration: Parameters<NonNullable<AgentProjectionRuntimeExecution['applySessionConfiguration']>>[1],
   ): Promise<void> {
     this.runtime.setInternalPermissionMode(agentSessionId, configuration.permissionMode);
     this.runtime.setInternalThinkingMode(agentSessionId, configuration.thinkingMode);
@@ -163,13 +165,13 @@ export class ClaudeExecution implements AgentExecution {
 
   async respondToPermission(
     permissionRequestId: string,
-    decision: Parameters<NonNullable<AgentExecution['respondToPermission']>>[1],
+    decision: Parameters<NonNullable<AgentProjectionRuntimeExecution['respondToPermission']>>[1],
   ): Promise<void> {
     this.runtime.resolveInternalToolApproval(permissionRequestId, decision);
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<NonNullable<AgentExecution['prepareProjectPathUpdate']>>[0],
+    request: Parameters<NonNullable<AgentProjectionRuntimeExecution['prepareProjectPathUpdate']>>[0],
   ): Promise<AgentProjectPathUpdatePreparation | void> {
     request.signal.throwIfAborted();
     const agentSessionId = request.chat.agentSessionId;
@@ -205,11 +207,13 @@ export class ClaudeExecution implements AgentExecution {
     };
   }
 
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
+  subscribeProjectionEvents(
+    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  ): () => void {
     return this.#events.subscribe(listener);
   }
 
-  async #endpointEnvironment(request: AgentExecutionContext) {
+  async #endpointEnvironment(request: AgentExecutionContextV4) {
     const endpoint = await resolveAgentEndpoint(
       this.host,
       request.endpoint,
@@ -229,7 +233,7 @@ export class ClaudeExecution implements AgentExecution {
   }
 }
 
-function executionFields(request: AgentExecutionContext) {
+function executionFields(request: AgentExecutionContextV4) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,

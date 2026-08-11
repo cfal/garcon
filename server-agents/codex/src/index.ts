@@ -22,7 +22,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
+import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createCodexConfig, type CodexConfig } from './config.js';
 import { getCodexAuthStatus } from './agents/codex/codex-auth.js';
 import { CodexExecution } from './agents/codex/execution.js';
@@ -129,12 +129,12 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const execution = new CodexExecution(host, runtime, nativeSessions, config);
-    const legacyTranscript = createCodexTranscript(runtime, nativeSessions, config, logger);
-    const projection = createLegacyProjectionAdapter({
+    const nativeTranscript = createCodexTranscript(runtime, nativeSessions, config, logger);
+    const projection = createAgentOwnedProjection({
       ownerId: 'codex',
       host,
       execution,
-      transcript: legacyTranscript,
+      transcript: nativeTranscript,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;
@@ -199,7 +199,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
       ownerId: 'codex',
       projection: projection.transcript,
       supportsWhileRunning: true,
-      transcript: legacyTranscript,
+      transcript: nativeTranscript,
       nativeSessions,
       createTargetPath: createCodexForkTargetPath,
       createRewriteEntry: createCodexForkTranscriptRewriter,
@@ -218,7 +218,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
         let reference = request.source.nativeSession;
         let source = nativeSessions.decode(reference);
         if (!source.path) {
-          reference = await legacyTranscript.resolveNativeSession({
+          reference = await nativeTranscript.resolveNativeSession({
             chat: request.source,
             signal: request.admission.signal,
           });

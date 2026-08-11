@@ -17,7 +17,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
+import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createCursorConfig } from './config.js';
 import { AcpAgentRuntime } from './agents/shared/acp-agent-runtime.js';
 import { createCursorAcpPolicy } from './agents/cursor/cursor-acp-policy.js';
@@ -110,13 +110,13 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
       defaults: {},
       descriptors: [],
     });
-    const legacyExecution = new CursorExecution(runtime, nativeSessions);
-    const legacyTranscript = createCursorTranscript(transcriptReader, nativeSessions);
-    const projection = createLegacyProjectionAdapter({
+    const providerExecution = new CursorExecution(runtime, nativeSessions);
+    const nativeTranscript = createCursorTranscript(transcriptReader, nativeSessions);
+    const projection = createAgentOwnedProjection({
       ownerId: 'cursor',
       host,
-      execution: legacyExecution,
-      transcript: legacyTranscript,
+      execution: providerExecution,
+      transcript: nativeTranscript,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;

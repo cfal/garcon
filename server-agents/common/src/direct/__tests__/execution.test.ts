@@ -1,5 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test';
-import type { AgentExecutionContext, AgentHost } from '@garcon/server-agent-interface';
+import {
+  agentOwnershipEpoch,
+  type AgentExecutionContextV4,
+  type AgentHost,
+} from '@garcon/server-agent-interface';
 import { createPathNativeSessionCodec } from '../../native-session/path-native-session.js';
 import { DirectExecution } from '../execution.js';
 
@@ -32,7 +36,13 @@ function host(): AgentHost {
   };
 }
 
-function request(modelEndpointId: string): AgentExecutionContext {
+function request(modelEndpointId: string): AgentExecutionContextV4 {
+  const turnOwner = {
+    agentOwnershipEpoch: agentOwnershipEpoch('ownership-1'),
+    commandType: 'agent-run' as const,
+    clientRequestId: 'request-1',
+    turnId: 'turn-1',
+  };
   return {
     chatId: 'chat-1',
     projectPath: '/tmp',
@@ -42,10 +52,9 @@ function request(modelEndpointId: string): AgentExecutionContext {
     settings: { ownerId: 'direct-test', schemaVersion: 1, values: {} },
     endpoint: endpoint(modelEndpointId),
     operation: {
-      commandType: 'agent-run',
-      clientRequestId: 'request-1',
+      ...turnOwner,
       clientMessageId: 'message-1',
-      turnId: 'turn-1',
+      turnOwner,
     },
     prompt: 'continue',
     attachments: [],

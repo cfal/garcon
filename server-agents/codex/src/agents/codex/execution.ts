@@ -1,13 +1,15 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentCompactRequest,
-  type AgentExecution,
-  type AgentExecutionContext,
-  type AgentGoalControlRequest,
+  type AgentCompactRequestV4,
+  type AgentExecutionContextV4,
+  type AgentGoalControlRequestV4,
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
+import {
+  AgentProjectionProducerEventChannel,
+  type AgentProjectionRuntimeExecution,
+} from '@garcon/server-agent-common/execution/projection-events';
 import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
@@ -29,8 +31,8 @@ interface CodexRuntimeConfiguration {
   readonly codexConfig?: CodexProviderConfig;
 }
 
-export class CodexExecution implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
+export class CodexExecution implements AgentProjectionRuntimeExecution {
+  readonly #events = new AgentProjectionProducerEventChannel();
   readonly #operations = new AgentOperationTracker();
 
   constructor(
@@ -66,7 +68,7 @@ export class CodexExecution implements AgentExecution {
     });
   }
 
-  async start(request: Parameters<AgentExecution['start']>[0]) {
+  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
     this.#operations.register(request.chatId, request.operation);
     try {
       const configuration = await this.#runtimeConfiguration(request);
@@ -98,12 +100,12 @@ export class CodexExecution implements AgentExecution {
     }
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
+  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
     return this.#resume(request, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
   }
 
   async submitGoalControl(
-    request: AgentGoalControlRequest,
+    request: AgentGoalControlRequestV4,
   ): Promise<boolean> {
     const predecessor = this.#operations.current(request.chatId);
     const runtimeRequest = prepareResumeRequest(
@@ -122,7 +124,7 @@ export class CodexExecution implements AgentExecution {
     );
   }
 
-  async compact(request: AgentCompactRequest): Promise<void> {
+  async compact(request: AgentCompactRequestV4): Promise<void> {
     return this.#resume(request, (runtimeRequest) => this.runtime.compact(runtimeRequest));
   }
 
@@ -144,7 +146,7 @@ export class CodexExecution implements AgentExecution {
 
   async applySessionConfiguration(
     agentSessionId: string,
-    configuration: Parameters<NonNullable<AgentExecution['applySessionConfiguration']>>[1],
+    configuration: Parameters<NonNullable<AgentProjectionRuntimeExecution['applySessionConfiguration']>>[1],
   ): Promise<void> {
     this.runtime.updateSessionSettings(agentSessionId, {
       permissionMode: configuration.permissionMode,
@@ -153,17 +155,19 @@ export class CodexExecution implements AgentExecution {
 
   async respondToPermission(
     permissionRequestId: string,
-    decision: Parameters<NonNullable<AgentExecution['respondToPermission']>>[1],
+    decision: Parameters<NonNullable<AgentProjectionRuntimeExecution['respondToPermission']>>[1],
   ): Promise<void> {
     await this.runtime.resolvePermission(permissionRequestId, decision);
   }
 
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
+  subscribeProjectionEvents(
+    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  ): () => void {
     return this.#events.subscribe(listener);
   }
 
   async #resume(
-    request: Parameters<AgentExecution['resume']>[0],
+    request: Parameters<AgentProjectionRuntimeExecution['resume']>[0],
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,
   ): Promise<void> {
     this.#operations.register(request.chatId, request.operation);
@@ -180,7 +184,7 @@ export class CodexExecution implements AgentExecution {
   }
 
   async #runtimeConfiguration(
-    request: AgentExecutionContext,
+    request: AgentExecutionContextV4,
   ): Promise<CodexRuntimeConfiguration> {
     const endpoint = await resolveAgentEndpoint(
       this.host,
@@ -205,7 +209,7 @@ export class CodexExecution implements AgentExecution {
   }
 }
 
-function executionFields(request: AgentExecutionContext) {
+function executionFields(request: AgentExecutionContextV4) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
@@ -224,7 +228,7 @@ function executionFields(request: AgentExecutionContext) {
 }
 
 function prepareStartRequest(
-  request: Parameters<AgentExecution['start']>[0],
+  request: Parameters<AgentProjectionRuntimeExecution['start']>[0],
   configuration: CodexRuntimeConfiguration,
 ): CodexStartRequest {
   const goal = parseCodexGoalCommand(request.prompt);
@@ -247,7 +251,7 @@ function prepareStartRequest(
 }
 
 function prepareResumeRequest(
-  request: Parameters<AgentExecution['resume']>[0],
+  request: Parameters<AgentProjectionRuntimeExecution['resume']>[0],
   configuration: CodexRuntimeConfiguration,
   nativeSessions: PathNativeSessionCodec,
 ): CodexResumeRequest {

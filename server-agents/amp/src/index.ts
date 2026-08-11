@@ -17,7 +17,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
+import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAmpConfig } from './config.js';
 import { getAmpAuthStatus } from './agents/amp/amp-auth.js';
 import { AmpCliRuntime, runSingleQuery } from './agents/amp/amp-cli.js';
@@ -88,13 +88,13 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
         ],
       }],
     });
-    const legacyExecution = new AmpExecution(runtime, nativeSessions);
-    const legacyTranscript = createAmpTranscript(runtime, nativeSessions, config.binary);
-    const projection = createLegacyProjectionAdapter({
+    const providerExecution = new AmpExecution(runtime, nativeSessions);
+    const nativeTranscript = createAmpTranscript(runtime, nativeSessions, config.binary);
+    const projection = createAgentOwnedProjection({
       ownerId: 'amp',
       host,
-      execution: legacyExecution,
-      transcript: legacyTranscript,
+      execution: providerExecution,
+      transcript: nativeTranscript,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;

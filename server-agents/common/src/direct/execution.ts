@@ -1,19 +1,21 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentExecution,
-  type AgentExecutionContext,
+  type AgentExecutionContextV4,
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import { AgentExecutionEventChannel } from '../execution/event-channel.js';
+import {
+  AgentProjectionProducerEventChannel,
+  type AgentProjectionRuntimeExecution,
+} from '../execution/projection-events.js';
 import { AgentOperationTracker } from '../execution/operation-tracker.js';
 import { resolveAgentEndpoint } from '../execution/resolve-endpoint.js';
 import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
 import type { DirectEndpointRouterRuntime, DirectCompatibleRuntime } from './router.js';
 
 export class DirectExecution<TRuntime extends DirectCompatibleRuntime>
-implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
+implements AgentProjectionRuntimeExecution {
+  readonly #events = new AgentProjectionProducerEventChannel();
   readonly #operations = new AgentOperationTracker();
 
   constructor(
@@ -48,7 +50,7 @@ implements AgentExecution {
     });
   }
 
-  async start(request: Parameters<AgentExecution['start']>[0]) {
+  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
     const endpoint = await this.#endpoint(request);
     this.#operations.register(request.chatId, request.operation);
     const seed = request.carriedContext?.prefix ?? '';
@@ -81,7 +83,7 @@ implements AgentExecution {
     }
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
+  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
     const endpoint = await this.#endpoint(request);
     const nativeSession = this.nativeSessions.decode(request.nativeSession);
     if (
@@ -127,16 +129,18 @@ implements AgentExecution {
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<NonNullable<AgentExecution['prepareProjectPathUpdate']>>[0],
+    request: Parameters<NonNullable<AgentProjectionRuntimeExecution['prepareProjectPathUpdate']>>[0],
   ): Promise<void> {
     request.signal.throwIfAborted();
   }
 
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
+  subscribeProjectionEvents(
+    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  ): () => void {
     return this.#events.subscribe(listener);
   }
 
-  async #endpoint(request: AgentExecutionContext) {
+  async #endpoint(request: AgentExecutionContextV4) {
     const endpoint = await resolveAgentEndpoint(
       this.host,
       request.endpoint,
@@ -153,7 +157,7 @@ implements AgentExecution {
   }
 }
 
-function executionFields(request: AgentExecutionContext) {
+function executionFields(request: AgentExecutionContextV4) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,

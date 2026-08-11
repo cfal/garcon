@@ -20,7 +20,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
+import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createOpenCodeConfig } from './config.js';
 import { OpenCodeExecution } from './agents/opencode/execution.js';
 import {
@@ -90,13 +90,13 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
       defaults: {},
       descriptors: [],
     });
-    const legacyExecution = new OpenCodeExecution(runtime, nativeSessions);
-    const legacyTranscript = createOpenCodeTranscript(runtime, nativeSessions, sessionId, logger);
-    const projection = createLegacyProjectionAdapter({
+    const providerExecution = new OpenCodeExecution(runtime, nativeSessions);
+    const nativeTranscript = createOpenCodeTranscript(runtime, nativeSessions, sessionId, logger);
+    const projection = createAgentOwnedProjection({
       ownerId: 'opencode',
       host,
-      execution: legacyExecution,
-      transcript: legacyTranscript,
+      execution: providerExecution,
+      transcript: nativeTranscript,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;

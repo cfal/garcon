@@ -1,17 +1,19 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentExecution,
-  type AgentExecutionContext,
+  type AgentExecutionContextV4,
 } from '@garcon/server-agent-interface';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
-import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
+import {
+  AgentProjectionProducerEventChannel,
+  type AgentProjectionRuntimeExecution,
+} from '@garcon/server-agent-common/execution/projection-events';
 import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { OpenCodeRuntime } from './opencode.js';
 
-export class OpenCodeExecution implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
+export class OpenCodeExecution implements AgentProjectionRuntimeExecution {
+  readonly #events = new AgentProjectionProducerEventChannel();
   readonly #operations = new AgentOperationTracker();
 
   constructor(
@@ -45,7 +47,7 @@ export class OpenCodeExecution implements AgentExecution {
     });
   }
 
-  async start(request: Parameters<AgentExecution['start']>[0]) {
+  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
     this.#operations.register(request.chatId, request.operation);
     const seed = request.carriedContext?.prefix ?? '';
     try {
@@ -76,7 +78,7 @@ export class OpenCodeExecution implements AgentExecution {
     }
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
+  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
     this.#operations.register(request.chatId, request.operation);
     try {
       await this.runtime.runTurn({
@@ -109,7 +111,7 @@ export class OpenCodeExecution implements AgentExecution {
 
   async applySessionConfiguration(
     agentSessionId: string,
-    configuration: Parameters<NonNullable<AgentExecution['applySessionConfiguration']>>[1],
+    configuration: Parameters<NonNullable<AgentProjectionRuntimeExecution['applySessionConfiguration']>>[1],
   ): Promise<void> {
     this.runtime.updateSessionSettings(agentSessionId, {
       model: configuration.model,
@@ -120,17 +122,19 @@ export class OpenCodeExecution implements AgentExecution {
 
   async respondToPermission(
     permissionRequestId: string,
-    decision: Parameters<NonNullable<AgentExecution['respondToPermission']>>[1],
+    decision: Parameters<NonNullable<AgentProjectionRuntimeExecution['respondToPermission']>>[1],
   ): Promise<void> {
     await this.runtime.resolvePermission(permissionRequestId, decision);
   }
 
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
+  subscribeProjectionEvents(
+    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  ): () => void {
     return this.#events.subscribe(listener);
   }
 }
 
-function executionFields(request: AgentExecutionContext) {
+function executionFields(request: AgentExecutionContextV4) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
@@ -138,6 +142,7 @@ function executionFields(request: AgentExecutionContext) {
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
     clientRequestId: request.operation.clientRequestId ?? undefined,
+    clientMessageId: request.operation.clientMessageId ?? undefined,
     turnId: request.operation.turnId,
     executionAdmission: {
       signal: request.admission.signal,

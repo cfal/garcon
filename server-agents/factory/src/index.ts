@@ -17,7 +17,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createLegacyProjectionAdapter } from '@garcon/server-agent-common/transcript-projection/legacy-adapter';
+import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createFactoryConfig } from './config.js';
 import { getFactoryAuthStatus } from './agents/factory/factory-auth.js';
 import { FactoryCliRuntime, runSingleQuery } from './agents/factory/factory-cli.js';
@@ -86,13 +86,13 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
       defaults: {},
       descriptors: [],
     });
-    const legacyExecution = new FactoryExecution(runtime, nativeSessions);
-    const legacyTranscript = createFactoryTranscript(transcriptReader, nativeSessions);
-    const projection = createLegacyProjectionAdapter({
+    const providerExecution = new FactoryExecution(runtime, nativeSessions);
+    const nativeTranscript = createFactoryTranscript(transcriptReader, nativeSessions);
+    const projection = createAgentOwnedProjection({
       ownerId: 'factory',
       host,
-      execution: legacyExecution,
-      transcript: legacyTranscript,
+      execution: providerExecution,
+      transcript: nativeTranscript,
     });
     this.execution = projection.execution;
     this.transcript = projection.transcript;

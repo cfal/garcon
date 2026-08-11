@@ -1,15 +1,17 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentExecution,
 } from '@garcon/server-agent-interface';
-import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
+import {
+  AgentProjectionProducerEventChannel,
+  type AgentProjectionRuntimeExecution,
+} from '@garcon/server-agent-common/execution/projection-events';
 import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { AmpCliRuntime } from './amp-cli.js';
 
-export class AmpExecution implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
+export class AmpExecution implements AgentProjectionRuntimeExecution {
+  readonly #events = new AgentProjectionProducerEventChannel();
   readonly #operations = new AgentOperationTracker();
 
   constructor(
@@ -43,7 +45,7 @@ export class AmpExecution implements AgentExecution {
     });
   }
 
-  async start(request: Parameters<AgentExecution['start']>[0]) {
+  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
     this.#operations.register(request.chatId, request.operation);
     request.admission.signal.throwIfAborted();
     const seed = request.carriedContext?.prefix ?? '';
@@ -85,7 +87,7 @@ export class AmpExecution implements AgentExecution {
     }
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
+  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
     this.#operations.register(request.chatId, request.operation);
     try {
       await this.runtime.runTurn({
@@ -126,7 +128,9 @@ export class AmpExecution implements AgentExecution {
     }));
   }
 
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
+  subscribeProjectionEvents(
+    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  ): () => void {
     return this.#events.subscribe(listener);
   }
 }

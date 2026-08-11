@@ -1,16 +1,18 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentExecution,
-  type AgentExecutionContext,
+  type AgentExecutionContextV4,
 } from '@garcon/server-agent-interface';
-import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
+import {
+  AgentProjectionProducerEventChannel,
+  type AgentProjectionRuntimeExecution,
+} from '@garcon/server-agent-common/execution/projection-events';
 import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { AcpAgentRuntime } from '../shared/acp-agent-runtime.js';
 
-export class CursorExecution implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
+export class CursorExecution implements AgentProjectionRuntimeExecution {
+  readonly #events = new AgentProjectionProducerEventChannel();
   readonly #operations = new AgentOperationTracker();
 
   constructor(
@@ -44,7 +46,7 @@ export class CursorExecution implements AgentExecution {
     });
   }
 
-  async start(request: Parameters<AgentExecution['start']>[0]) {
+  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
     this.#operations.register(request.chatId, request.operation);
     const seed = request.carriedContext?.prefix ?? '';
     try {
@@ -75,7 +77,7 @@ export class CursorExecution implements AgentExecution {
     }
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
+  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
     this.#operations.register(request.chatId, request.operation);
     try {
       await this.runtime.runTurn({
@@ -109,7 +111,7 @@ export class CursorExecution implements AgentExecution {
 
   async applySessionConfiguration(
     agentSessionId: string,
-    configuration: Parameters<NonNullable<AgentExecution['applySessionConfiguration']>>[1],
+    configuration: Parameters<NonNullable<AgentProjectionRuntimeExecution['applySessionConfiguration']>>[1],
   ): Promise<void> {
     this.runtime.updateSessionSettings(agentSessionId, {
       model: configuration.model,
@@ -120,13 +122,13 @@ export class CursorExecution implements AgentExecution {
 
   async respondToPermission(
     permissionRequestId: string,
-    decision: Parameters<NonNullable<AgentExecution['respondToPermission']>>[1],
+    decision: Parameters<NonNullable<AgentProjectionRuntimeExecution['respondToPermission']>>[1],
   ): Promise<void> {
     this.runtime.resolvePermission(permissionRequestId, decision);
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<NonNullable<AgentExecution['prepareProjectPathUpdate']>>[0],
+    request: Parameters<NonNullable<AgentProjectionRuntimeExecution['prepareProjectPathUpdate']>>[0],
   ): Promise<void> {
     await this.runtime.prepareProjectPathUpdate({
       chatId: request.chat.chatId,
@@ -137,12 +139,14 @@ export class CursorExecution implements AgentExecution {
     });
   }
 
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
+  subscribeProjectionEvents(
+    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  ): () => void {
     return this.#events.subscribe(listener);
   }
 }
 
-function executionFields(request: AgentExecutionContext) {
+function executionFields(request: AgentExecutionContextV4) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
