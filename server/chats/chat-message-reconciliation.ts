@@ -330,7 +330,9 @@ function canonicalNativeMessageSource(message: ChatMessage): {
   withinSourceOrdinal: number;
 } | null {
   const source = getNativeMessageRevisionSource(message);
-  return source?.entryId && source.withinSourceOrdinal !== undefined ? source : null;
+  return source?.entryId && source.withinSourceOrdinal !== undefined
+    ? { entryId: source.entryId, withinSourceOrdinal: source.withinSourceOrdinal }
+    : null;
 }
 
 function nativeMessageSourcesConflict(left: ChatMessage, right: ChatMessage): boolean {
