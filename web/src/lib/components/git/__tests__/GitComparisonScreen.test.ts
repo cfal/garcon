@@ -58,6 +58,17 @@ describe('GitComparisonScreen', () => {
 		expect(screen.queryByText('Loading comparison')).toBeNull();
 	});
 
+	it('shows the compared revisions without a redundant screen title', () => {
+		const comparison = new GitComparisonController();
+		comparison.snapshot = readySnapshot();
+
+		renderScreen(comparison, false);
+
+		expect(screen.getByText('HEAD~1')).toBeTruthy();
+		expect(screen.getByText('Working Tree')).toBeTruthy();
+		expect(screen.queryByText('Compare revisions')).toBeNull();
+	});
+
 	it('offers local back navigation without exposing the standalone Edit action', async () => {
 		const comparison = new GitComparisonController();
 		comparison.error = 'Revision older was not found.';

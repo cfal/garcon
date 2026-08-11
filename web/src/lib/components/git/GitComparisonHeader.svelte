@@ -49,8 +49,7 @@
 			</button>
 		{/if}
 		<div class="min-w-0 flex-1">
-			<h3 class="text-sm font-semibold text-foreground">{m.git_compare_title()}</h3>
-			<div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+			<div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
 				<span class="truncate" title={snapshot.from.label}>{snapshot.from.label}</span>
 				<span class="shrink-0 font-mono text-[10px]">{snapshot.from.shortHash}</span>
 				<ArrowRight class="h-3.5 w-3.5" aria-hidden="true" />

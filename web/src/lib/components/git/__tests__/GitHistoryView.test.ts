@@ -883,7 +883,8 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
 
 		expect(onOpenSelectedComparison).toHaveBeenCalledOnce();
-		expect(await screen.findByText('Compare revisions')).toBeTruthy();
+		expect(await screen.findByText('newer')).toBeTruthy();
+		expect(screen.queryByText('Compare revisions')).toBeNull();
 		expect(getGitComparisonSnapshot).toHaveBeenCalledWith(
 			'/project',
 			{ kind: 'revision', revision: 'older' },
