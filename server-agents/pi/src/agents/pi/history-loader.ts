@@ -1,11 +1,13 @@
 import { promises as fs } from 'fs';
 import {
-  buildSessionContext,
+  buildContextEntries,
   parseSessionEntries,
+  sessionEntryToContextMessages,
   type FileEntry,
   type SessionEntry,
   type SessionHeader,
 } from '@earendil-works/pi-coding-agent';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
@@ -54,8 +56,22 @@ async function readPiSessionFile(sessionPath: string): Promise<{
   const header = findHeader(entries);
   const sessionEntries = entries.filter(isSessionEntry);
   assertAcyclicActivePath(sessionEntries);
-  const context = buildSessionContext(sessionEntries);
-  const messages = context.messages.flatMap((message) => convertPiMessage(message));
+  // buildContextEntries plus sessionEntryToContextMessages is exactly the
+  // decomposition buildSessionContext performs, kept explicit here so each
+  // rendered row retains its session entry identity for the projection audit.
+  const messages = buildContextEntries(sessionEntries).flatMap((entry) => {
+    const entryId = typeof entry.id === 'string' && entry.id.length > 0 ? entry.id : null;
+    let withinSourceOrdinal = 0;
+    return sessionEntryToContextMessages(entry).flatMap((message) => (
+      convertPiMessage(message).map((rendered) => {
+        if (entryId === null) return rendered;
+        return attachNativeMessageSource(rendered, {
+          entryId,
+          withinSourceOrdinal: withinSourceOrdinal++,
+        });
+      })
+    ));
+  });
   return { entries, header, messages };
 }
 

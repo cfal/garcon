@@ -46,16 +46,22 @@ async function writeEntries(file: string, entries: readonly RawEntry[]): Promise
 
 function record(input: {
   baseline: PiTurnSettlementRecord['baseline'];
-  expected: readonly (readonly [string, number])[];
+  expected: readonly string[];
   nativePath: string;
   steeringUnresolved?: boolean;
+  turnId?: string;
 }): PiTurnSettlementRecord {
   return {
     steeringUnresolved: input.steeringUnresolved ?? false,
     baseline: input.baseline,
-    expected: new Map(input.expected),
+    expected: [...input.expected],
     nativePath: input.nativePath,
+    turnId: input.turnId ?? null,
   };
+}
+
+async function verdictOf(settlement: PiTurnSettlementRecord): Promise<'confirmed' | 'unresolved'> {
+  return (await verifyPiTurnSettlement(settlement)).verdict;
 }
 
 describe('pi turn settlement evidence', () => {
@@ -68,13 +74,13 @@ describe('pi turn settlement evidence', () => {
     const baseline = await snapshotPiSettlementBaseline(file);
     const settlement = record({
       baseline,
-      expected: [['user', 1], ['assistant', 1]],
+      expected: ['user', 'assistant'],
       nativePath: file,
     });
 
     // The file still holds only the equal-content occurrences from before the
     // turn, so nothing this turn produced has persisted.
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('unresolved');
+    await expect(verdictOf(settlement)).resolves.toBe('unresolved');
 
     await writeEntries(file, [
       { id: 'old-user', role: 'user', content: 'same text' },
@@ -82,7 +88,7 @@ describe('pi turn settlement evidence', () => {
       { id: 'new-user', role: 'user', content: 'same text' },
       { id: 'new-assistant', role: 'assistant', content: [{ type: 'text', text: 'same text' }] },
     ]);
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('confirmed');
+    await expect(verdictOf(settlement)).resolves.toBe('confirmed');
   });
 
   it('counts tool-only and tool-result occurrences without rendered content', async () => {
@@ -91,7 +97,7 @@ describe('pi turn settlement evidence', () => {
     const baseline = await snapshotPiSettlementBaseline(file);
     const settlement = record({
       baseline,
-      expected: [['user', 1], ['assistant', 1], ['toolResult', 1]],
+      expected: ['user', 'assistant', 'toolResult'],
       nativePath: file,
     });
 
@@ -104,7 +110,7 @@ describe('pi turn settlement evidence', () => {
       },
     ]);
     // The tool result has not persisted yet.
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('unresolved');
+    await expect(verdictOf(settlement)).resolves.toBe('unresolved');
 
     await writeEntries(file, [
       { id: 'turn-user', role: 'user', content: 'run the tool' },
@@ -119,7 +125,7 @@ describe('pi turn settlement evidence', () => {
         content: [{ type: 'text', text: '' }],
       },
     ]);
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('confirmed');
+    await expect(verdictOf(settlement)).resolves.toBe('confirmed');
   });
 
   it('stays unresolved when the baseline could not identify existing entries', async () => {
@@ -130,7 +136,7 @@ describe('pi turn settlement evidence', () => {
 
     const settlement = record({
       baseline,
-      expected: [['user', 1]],
+      expected: ['user'],
       nativePath: file,
     });
     await writeEntries(file, [
@@ -138,7 +144,7 @@ describe('pi turn settlement evidence', () => {
       { id: 'new-user', role: 'user', content: 'unidentified occurrence' },
     ]);
     // Growth cannot be attributed without a fully identified baseline.
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('unresolved');
+    await expect(verdictOf(settlement)).resolves.toBe('unresolved');
   });
 
   it('treats a missing file as a genuinely empty baseline', async () => {
@@ -146,10 +152,10 @@ describe('pi turn settlement evidence', () => {
     const baseline = await snapshotPiSettlementBaseline(file);
     expect(baseline).toEqual({ kind: 'ready', entryIds: new Set() });
 
-    const settlement = record({ baseline, expected: [['user', 1]], nativePath: file });
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('unresolved');
+    const settlement = record({ baseline, expected: ['user'], nativePath: file });
+    await expect(verdictOf(settlement)).resolves.toBe('unresolved');
     await writeEntries(file, [{ id: 'first-user', role: 'user', content: 'hello' }]);
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('confirmed');
+    await expect(verdictOf(settlement)).resolves.toBe('confirmed');
   });
 
   it('requires nothing when the turn finalized no occurrences', async () => {
@@ -158,8 +164,96 @@ describe('pi turn settlement evidence', () => {
       expected: [],
       nativePath: '/nonexistent',
     });
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('confirmed');
-    addExpectedNativeMessage(settlement.expected as Map<string, number>, 'assistant');
-    await expect(verifyPiTurnSettlement(settlement)).resolves.toBe('unresolved');
+    await expect(verdictOf(settlement)).resolves.toBe('confirmed');
+    addExpectedNativeMessage(settlement.expected as string[], 'assistant');
+    await expect(verdictOf(settlement)).resolves.toBe('unresolved');
+  });
+
+  it('rejects reversed roles and lets interposed rows only extend, not substitute', async () => {
+    const file = await sessionFile();
+    await writeEntries(file, []);
+    const baseline = await snapshotPiSettlementBaseline(file);
+    const settlement = record({
+      baseline,
+      expected: ['user', 'assistant'],
+      nativePath: file,
+    });
+
+    // Reversed provider order cannot satisfy the expected sequence.
+    await writeEntries(file, [
+      { id: 'new-assistant', role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+      { id: 'new-user', role: 'user', content: 'u' },
+    ]);
+    await expect(verdictOf(settlement)).resolves.toBe('unresolved');
+
+    // Interposed provider entries are tolerated around the ordered sequence.
+    await writeEntries(file, [
+      { id: 'extra-1', role: 'toolResult', content: [{ type: 'text', text: '' }] },
+      { id: 'new-user', role: 'user', content: 'u' },
+      { id: 'extra-2', role: 'toolResult', content: [{ type: 'text', text: '' }] },
+      { id: 'new-assistant', role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+    ]);
+    await expect(verdictOf(settlement)).resolves.toBe('confirmed');
+  });
+
+  it('requires each equal-role adjacent occurrence separately', async () => {
+    const file = await sessionFile();
+    await writeEntries(file, []);
+    const baseline = await snapshotPiSettlementBaseline(file);
+    const settlement = record({
+      baseline,
+      expected: ['assistant', 'assistant'],
+      nativePath: file,
+    });
+    await writeEntries(file, [
+      { id: 'only-one', role: 'assistant', content: [{ type: 'text', text: 'same' }] },
+    ]);
+    await expect(verdictOf(settlement)).resolves.toBe('unresolved');
+    await writeEntries(file, [
+      { id: 'only-one', role: 'assistant', content: [{ type: 'text', text: 'same' }] },
+      { id: 'second', role: 'assistant', content: [{ type: 'text', text: 'same' }] },
+    ]);
+    await expect(verdictOf(settlement)).resolves.toBe('confirmed');
+  });
+
+  it('binds each live occurrence identity to its proven native entry in file order', async () => {
+    const file = await sessionFile();
+    await writeEntries(file, [
+      { id: 'prior-user', role: 'user', content: 'earlier' },
+    ]);
+    const baseline = await snapshotPiSettlementBaseline(file);
+    const settlement = record({
+      baseline,
+      expected: ['user', 'assistant', 'toolResult', 'assistant'],
+      nativePath: file,
+      turnId: 'turn-9',
+    });
+    await writeEntries(file, [
+      { id: 'prior-user', role: 'user', content: 'earlier' },
+      { id: 'new-user', role: 'user', content: 'go' },
+      { id: 'new-a1', role: 'assistant', content: [{ type: 'text', text: 'first' }] },
+      { id: 'new-result', role: 'toolResult', content: [{ type: 'text', text: '' }] },
+      { id: 'new-a2', role: 'assistant', content: [{ type: 'text', text: 'second' }] },
+    ]);
+    const proof = await verifyPiTurnSettlement(settlement);
+    expect(proof.verdict).toBe('confirmed');
+    expect([...proof.itemAliases!]).toEqual([
+      ['turn:turn-9:end:0', 'new-user'],
+      ['turn:turn-9:end:1', 'new-a1'],
+      ['turn:turn-9:end:2', 'new-result'],
+      ['turn:turn-9:end:3', 'new-a2'],
+    ]);
+  });
+
+  it('rejects duplicate native entry ids as ambiguous evidence', async () => {
+    const file = await sessionFile();
+    await writeEntries(file, []);
+    const baseline = await snapshotPiSettlementBaseline(file);
+    const settlement = record({ baseline, expected: ['user'], nativePath: file });
+    await writeEntries(file, [
+      { id: 'dup', role: 'user', content: 'u' },
+      { id: 'dup', role: 'user', content: 'u' },
+    ]);
+    await expect(verdictOf(settlement)).resolves.toBe('unresolved');
   });
 });

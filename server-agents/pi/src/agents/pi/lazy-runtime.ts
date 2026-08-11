@@ -9,6 +9,7 @@ import type {
   PiStartedSession,
   PiStartRequest,
 } from './runtime-types.js';
+import type { PiTurnSettlementProof } from './pi-turn-settlement.js';
 
 export interface PiRuntime {
   startSession(request: PiStartRequest): Promise<PiStartedSession>;
@@ -17,7 +18,7 @@ export interface PiRuntime {
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null;
-  verifyTurnSettlement(chatId: string): Promise<'confirmed' | 'unresolved'>;
+  verifyTurnSettlement(chatId: string): Promise<PiTurnSettlementProof>;
   steer(request: AgentSteerRequestV4): Promise<AgentSteerResult>;
   startPurgeTimer(): void;
   shutdown(): Promise<void>;
@@ -74,8 +75,10 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
     return this.#runtime?.captureSteerTarget(agentSessionId) ?? null;
   }
 
-  async verifyTurnSettlement(chatId: string): Promise<'confirmed' | 'unresolved'> {
-    return this.#runtime ? this.#runtime.verifyTurnSettlement(chatId) : 'unresolved';
+  async verifyTurnSettlement(chatId: string): Promise<PiTurnSettlementProof> {
+    return this.#runtime
+      ? this.#runtime.verifyTurnSettlement(chatId)
+      : { verdict: 'unresolved' };
   }
 
   steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {

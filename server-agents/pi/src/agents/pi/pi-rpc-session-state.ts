@@ -25,21 +25,24 @@ export interface PiActiveTurn {
   failureMessage: string | null;
   readonly steerSubmissions: Set<PiSteerSubmission>;
   steeringQueue: readonly string[];
-  // Entry identities captured before the prompt was sent and the per-role
-  // count of finalized message occurrences the turn must persist; settlement
-  // verifies enough new entries appeared beyond the baseline.
+  // Entry identities captured before the prompt was sent and the ordered
+  // roles of finalized message occurrences the turn must persist; settlement
+  // verifies that sequence appeared among the new entries beyond the
+  // baseline in provider order.
   settlementBaseline: PiSettlementBaseline;
-  readonly expectedNative: Map<string, number>;
+  readonly expectedNative: string[];
   settle(): void;
 }
 
 // Settlement evidence captured when a turn finishes on agent_settled; the
-// verdict is computed lazily against the current native file.
+// verdict is computed lazily against the current native file. The turn ID
+// keys the live occurrence identities the proof binds to native entry IDs.
 export interface PiTurnSettlementRecord {
   readonly steeringUnresolved: boolean;
   readonly baseline: PiSettlementBaseline;
-  readonly expected: ReadonlyMap<string, number>;
+  readonly expected: readonly string[];
   readonly nativePath: string | null;
+  readonly turnId: string | null;
 }
 
 export interface PiRpcSession {

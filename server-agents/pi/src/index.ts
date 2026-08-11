@@ -106,11 +106,12 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
       // Pi finishes turns only on agent_settled, and success additionally
       // requires the native session file to contain every finalized row the
       // turn journalled; any journal-ahead window withholds terminal success
-      // until audit or repair.
+      // until audit or repair. The proof also binds live occurrence
+      // identities to the persisted native entry IDs for the audit.
       sourceSettlement: async (event) => (
         event.type === 'finished'
           ? { kind: 'ready', value: await runtime.verifyTurnSettlement(event.chatId) }
-          : { kind: 'ready', value: 'unresolved' }
+          : { kind: 'ready', value: { verdict: 'unresolved' } }
       ),
     });
     this.execution = projection.execution;

@@ -1,7 +1,9 @@
 import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 import type { PiConfig } from '../../config.js';
+import { resolvePiConfiguredSessionDir } from './pi-session-paths.js';
 
 const PI_OFFLINE_ENV = 'PI_OFFLINE';
 const PI_SKIP_VERSION_CHECK_ENV = 'PI_SKIP_VERSION_CHECK';
@@ -83,6 +85,55 @@ export function buildPiCliEnv(
   }
   delete env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV];
   return env;
+}
+
+// Builds the argv for one interactive RPC session process.
+export function buildPiRpcSpawnCommand(options: {
+  readonly config: PiConfig;
+  readonly model: string;
+  readonly thinking: ModelThinkingLevel | undefined;
+  readonly permissionMode: PermissionMode;
+  readonly projectPath: string;
+  readonly resumePath: string | null;
+}): string[] {
+  const args = ['--mode', 'rpc', '--model', options.model];
+  if (options.thinking) args.push('--thinking', options.thinking);
+  if (options.permissionMode === 'plan') {
+    args.push('--tools', PI_READ_ONLY_TOOLS.join(','));
+  }
+  const configuredSessionDir = resolvePiConfiguredSessionDir(options.projectPath, options.config);
+  if (configuredSessionDir) args.push('--session-dir', configuredSessionDir);
+  if (options.resumePath) args.push('--session', options.resumePath);
+  return [options.config.binary(), ...args];
+}
+
+// Forwards a Pi process's stderr lines to the logger until the stream closes.
+export async function pipePiStderr(
+  logger: AgentLogger,
+  sessionId: string,
+  proc: ReturnType<typeof Bun.spawn>,
+): Promise<void> {
+  const stderr = proc.stderr;
+  if (!stderr) return;
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    const reader = (stderr as ReadableStream<Uint8Array>).getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim()) logger.info('Pi stderr output', { sessionId, line });
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) logger.info('Pi stderr output', { sessionId, line: buffer });
+  } catch {
+    // Stream closed.
+  }
 }
 
 async function runPiCommand(

@@ -710,12 +710,12 @@ describe('PiRpcRuntime', () => {
     expect(seen.messages.flatMap((entry) => entry.messages)).toHaveLength(3);
     // The journalled assistant row is not in the native file yet, so
     // settlement stays unresolved until Pi persists it.
-    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
+    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
     await writePiSessionRows(baseResumeRequest().nativePath, [
       { role: 'user', text: 'continue' },
       { role: 'assistant', text: 'done' },
     ]);
-    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('confirmed');
+    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('confirmed');
     await runtime.shutdown();
   });
 
@@ -749,7 +749,7 @@ describe('PiRpcRuntime', () => {
     fake.pushEvent({ type: 'agent_settled' });
     await turn;
 
-    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
+    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
     const entries = [
       { type: 'session', version: 3, id: 'pi-session-1', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
       { type: 'message', id: 'turn-user', parentId: null, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'user', content: 'continue', timestamp: 0 } },
@@ -761,14 +761,14 @@ describe('PiRpcRuntime', () => {
       'utf8',
     );
     // The tool result entry is still missing from the file.
-    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
+    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
     entries.push({ type: 'message', id: 'turn-result', parentId: 'turn-assistant', timestamp: '2026-01-01T00:00:03.000Z', message: { role: 'toolResult', content: [{ type: 'text', text: '' }], toolCallId: 'call-1', timestamp: 0 } } as never);
     await fs.writeFile(
       baseResumeRequest().nativePath,
       `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
       'utf8',
     );
-    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('confirmed');
+    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('confirmed');
     await runtime.shutdown();
   });
 
@@ -1149,7 +1149,7 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
-    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
+    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
 
     const nextTurn = runtime.runTurn(baseResumeRequest());
     await waitForActive(runtime);
@@ -1180,7 +1180,7 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
-    await expect(runtime.verifyTurnSettlement('chat-2')).resolves.toBe('unresolved');
+    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
     await runtime.shutdown();
   });
 

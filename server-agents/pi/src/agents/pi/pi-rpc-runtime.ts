@@ -12,6 +12,7 @@ import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type {
   AgentLogger,
   AgentSteerRequestV4,
@@ -22,8 +23,9 @@ import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { PiConfig } from '../../config.js';
 import {
   buildPiCliEnv,
+  buildPiRpcSpawnCommand,
   mapThinkingMode,
-  PI_READ_ONLY_TOOLS,
+  pipePiStderr,
   requireExplicitPiModel,
 } from './pi-cli.js';
 import {
@@ -48,10 +50,7 @@ import {
   type PiStartedSession,
   type PiStartRequest,
 } from './runtime-types.js';
-import {
-  canonicalExistingPiSessionPath,
-  resolvePiConfiguredSessionDir,
-} from './pi-session-paths.js';
+import { canonicalExistingPiSessionPath } from './pi-session-paths.js';
 import { convertPiMessage } from './message-converter.js';
 import { terminatePiProcess } from './pi-process-lifecycle.js';
 import type {
@@ -67,6 +66,7 @@ import {
   addExpectedNativeMessage,
   snapshotPiSettlementBaseline,
   verifyPiTurnSettlement,
+  type PiTurnSettlementProof,
 } from './pi-turn-settlement.js';
 import { convertPiToolUse } from './tool-use-converter.js';
 
@@ -92,11 +92,13 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
   readonly #steerTargets = new WeakMap<AgentSteerTarget, CapturedPiSteerTarget>();
   #shuttingDown = false;
   readonly #idlePurger: IdleSessionPurger<PiRpcSession>;
+  readonly #settlementWaitMs: number;
 
   constructor(options: {
     readonly config: PiConfig;
     readonly logger: AgentLogger;
     readonly models: PiModelReader;
+    readonly settlementWaitMs?: number;
     readonly idlePurgeTiming?: {
       readonly intervalMs?: number;
       readonly maxIdleMs?: number;
@@ -106,6 +108,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     this.#config = options.config;
     this.#logger = options.logger;
     this.#models = options.models;
+    this.#settlementWaitMs = options.settlementWaitMs ?? 1_500;
     this.#idlePurger = new IdleSessionPurger<PiRpcSession>(
       {
         sessions: () => this.#sessions.entries(),
@@ -434,16 +437,14 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     this.#assertAcceptingOperations();
     const model = requireExplicitPiModel(request.model);
     const thinking = mapThinkingMode(request.thinkingMode);
-    const args = ['--mode', 'rpc', '--model', model];
-    if (thinking) args.push('--thinking', thinking);
-    if (request.permissionMode === 'plan') {
-      args.push('--tools', PI_READ_ONLY_TOOLS.join(','));
-    }
-    const configuredSessionDir = resolvePiConfiguredSessionDir(request.projectPath, this.#config);
-    if (configuredSessionDir) args.push('--session-dir', configuredSessionDir);
-    if (resume) args.push('--session', resume.nativePath);
-
-    const proc = Bun.spawn([this.#config.binary(), ...args], {
+    const proc = Bun.spawn(buildPiRpcSpawnCommand({
+      config: this.#config,
+      model,
+      thinking,
+      permissionMode: request.permissionMode,
+      projectPath: request.projectPath,
+      resumePath: resume?.nativePath ?? null,
+    }), {
       cwd: request.projectPath,
       env: buildPiCliEnv(request.envOverrides),
       stdin: 'pipe',
@@ -491,7 +492,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       }),
     });
     session.client = client;
-    void this.#pipeStderr(session, proc);
+    void pipePiStderr(this.#logger, session.id, proc);
     void client.exited
       .then((code) => this.#handleExit(session, generation, code))
       .catch((error) => {
@@ -606,7 +607,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       steerSubmissions: new Set(),
       steeringQueue: [],
       settlementBaseline: await snapshotPiSettlementBaseline(session.nativePath),
-      expectedNative: new Map(),
+      expectedNative: [],
       settle: resolveSettle,
     };
     if (typeof prompt.message === 'string' && prompt.message.length > 0) {
@@ -691,7 +692,10 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       }
       // Every finalized non-user message persists one session entry, whether
       // or not it renders: tool-only assistant and toolResult occurrences
-      // count by role, never by content.
+      // count by role, never by content. The occurrence index doubles as the
+      // durable integration identity for the rendered rows, so a repeated
+      // notification cannot mint a second identity for the same occurrence.
+      const occurrenceOrdinal = session.turn?.expectedNative.length ?? null;
       if (session.turn && typeof role === 'string') {
         addExpectedNativeMessage(session.turn.expectedNative, role);
       }
@@ -700,6 +704,14 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
         includeToolResults: false,
         includeUser: false,
       });
+      if (occurrenceOrdinal !== null && session.turn?.turnId) {
+        messages.forEach((rendered, withinSourceOrdinal) => {
+          attachNativeMessageSource(rendered, {
+            entryId: `turn:${session.turn!.turnId}:end:${occurrenceOrdinal}`,
+            withinSourceOrdinal,
+          });
+        });
+      }
       if (messages.length > 0) this.emitMessages(session.chatId, messages, session.eventMetadata);
 
       const stopReason = message && typeof message === 'object'
@@ -809,8 +821,9 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     this.#turnSettlements.set(session.chatId, {
       steeringUnresolved: hasUnpersistedSteer || hasQueuedSteering,
       baseline: turn.settlementBaseline,
-      expected: new Map(turn.expectedNative),
+      expected: [...turn.expectedNative],
       nativePath: session.nativePath,
+      turnId: turn.turnId ?? null,
     });
     this.#completeTurn(session, turn, 'finished');
     if (hasUnpersistedSteer || hasQueuedSteering) {
@@ -818,10 +831,20 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  // Verifies the last finished turn's native persistence evidence; failure
-  // stays unresolved and withholds terminal success.
-  async verifyTurnSettlement(chatId: string): Promise<'confirmed' | 'unresolved'> {
-    return verifyPiTurnSettlement(this.#turnSettlements.get(chatId));
+  // Verifies the last finished turn's native persistence evidence with a
+  // bounded wait: Pi appends the session entry after message_end, so the
+  // proof polls briefly for occurrence-safe persistence instead of failing a
+  // write that is still flushing. Unresolved steering never resolves by
+  // waiting, and failure withholds terminal success.
+  async verifyTurnSettlement(chatId: string): Promise<PiTurnSettlementProof> {
+    const record = this.#turnSettlements.get(chatId);
+    if (!record || record.steeringUnresolved) return verifyPiTurnSettlement(record);
+    const deadline = Date.now() + this.#settlementWaitMs;
+    for (;;) {
+      const proof = await verifyPiTurnSettlement(record);
+      if (proof.verdict === 'confirmed' || Date.now() >= deadline) return proof;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   }
 
   #handleExit(session: PiRpcSession, generation: number, code: number): void {
@@ -962,27 +985,4 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  async #pipeStderr(session: PiRpcSession, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
-    const stderr = proc.stderr;
-    if (!stderr) return;
-    const decoder = new TextDecoder();
-    let buffer = '';
-    try {
-      const reader = (stderr as ReadableStream<Uint8Array>).getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          if (line.trim()) this.#logger.info('Pi stderr output', { sessionId: session.id, line });
-        }
-      }
-      buffer += decoder.decode();
-      if (buffer.trim()) this.#logger.info('Pi stderr output', { sessionId: session.id, line: buffer });
-    } catch {
-      // Stream closed.
-    }
-  }
 }
