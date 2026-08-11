@@ -34,6 +34,8 @@ export interface ActiveTranscriptPort {
 	): 'applied' | 'generation-changed' | 'gap-detected';
 	loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]>;
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
+	appendServerNotice(chatId: string, noticeType: LocalNoticeType, content: string): void;
+	discardServerNotices(chatId: string): void;
 	clearLocalNotices(): void;
 	setPendingUserInputs(inputs: PendingUserInput[]): void;
 	upsertPendingUserInput(input: PendingUserInput): void;

@@ -2581,3 +2581,74 @@ describe('ActiveTranscriptState', () => {
 		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([3, 4]);
 	});
 });
+
+describe('server notices', () => {
+	it('appends immediately for the active chat', () => {
+		const chat = new ActiveTranscriptState();
+		chat.activateChat('chat-1');
+
+		chat.appendServerNotice('chat-1', 'warning', 'active warning');
+
+		expect(chat.localNotices.map((notice) => notice.content)).toEqual(['active warning']);
+	});
+
+	it('retains a background notice and surfaces it exactly once on activation', () => {
+		const chat = new ActiveTranscriptState();
+		chat.activateChat('chat-1');
+
+		chat.appendServerNotice('chat-2', 'warning', 'background warning');
+		expect(chat.localNotices).toEqual([]);
+
+		chat.activateChat('chat-2');
+		expect(chat.localNotices.map((notice) => [notice.noticeType, notice.content])).toEqual([
+			['warning', 'background warning'],
+		]);
+
+		chat.activateChat('chat-1');
+		expect(chat.localNotices).toEqual([]);
+		chat.activateChat('chat-2');
+		expect(chat.localNotices).toEqual([]);
+	});
+
+	it('never surfaces a notice in another chat during rapid switching', () => {
+		const chat = new ActiveTranscriptState();
+		chat.activateChat('chat-1');
+		chat.activateChat('chat-2');
+
+		chat.appendServerNotice('chat-1', 'error', 'late failure for chat-1');
+		expect(chat.localNotices).toEqual([]);
+
+		chat.activateChat('chat-3');
+		expect(chat.localNotices).toEqual([]);
+
+		chat.activateChat('chat-1');
+		expect(chat.localNotices.map((notice) => [notice.noticeType, notice.content])).toEqual([
+			['error', 'late failure for chat-1'],
+		]);
+	});
+
+	it('bounds retained notices per background chat to the newest entries', () => {
+		const chat = new ActiveTranscriptState();
+		chat.activateChat('chat-1');
+		for (let index = 0; index < 10; index += 1) {
+			chat.appendServerNotice('chat-2', 'warning', `notice-${index}`);
+		}
+
+		chat.activateChat('chat-2');
+
+		expect(chat.localNotices.map((notice) => notice.content)).toEqual(
+			Array.from({ length: 8 }, (_, index) => `notice-${index + 2}`),
+		);
+	});
+
+	it('drops retained notices with the chat', () => {
+		const chat = new ActiveTranscriptState();
+		chat.activateChat('chat-1');
+		chat.appendServerNotice('chat-2', 'warning', 'orphaned');
+
+		chat.discardServerNotices('chat-2');
+		chat.activateChat('chat-2');
+
+		expect(chat.localNotices).toEqual([]);
+	});
+});

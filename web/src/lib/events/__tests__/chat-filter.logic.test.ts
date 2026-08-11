@@ -40,6 +40,20 @@ describe('filterByChat', () => {
 		expect(result).toEqual({ action: 'process' });
 	});
 
+	it('processes chat-operational-notice for a background chat so its handler can retain it', () => {
+		const result = filterByChat(
+			'chat-operational-notice',
+			{
+				type: 'chat-operational-notice',
+				chatId: 'chat-b',
+				noticeType: 'warning',
+				content: 'background warning',
+			} as never,
+			ctx,
+		);
+		expect(result).toEqual({ action: 'process' });
+	});
+
 	it('processes chat-execution-control-updated as a global event regardless of chat ID', () => {
 		const result = filterByChat(
 			'chat-execution-control-updated',

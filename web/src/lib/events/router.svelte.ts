@@ -98,6 +98,7 @@ export type EventRouterChatStateStore = Pick<
 	ActiveTranscriptPort,
 	| 'getCursor'
 	| 'appendLocalNotice'
+	| 'appendServerNotice'
 	| 'upsertPendingUserInput'
 	| 'clearPendingUserInput'
 	| 'updatePendingUserInputDeliveryStatus'
@@ -255,7 +256,7 @@ function buildDispatch(
 	const lifecycleCtx: LifecycleContext = {
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
-		appendLocalNotice: stores.chatState.appendLocalNotice,
+		appendServerNotice: stores.chatState.appendServerNotice,
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
 		clearTurnStatus,
@@ -397,7 +398,7 @@ function buildDispatch(
 		},
 		'chat-operational-notice': (msg) => {
 			if (!(msg instanceof ChatOperationalNoticeMessage)) return;
-			stores.chatState.appendLocalNotice(msg.noticeType, msg.content);
+			stores.chatState.appendServerNotice(msg.chatId, msg.noticeType, msg.content);
 		},
 		'queue-dispatching': (msg) => {
 			if (!(msg instanceof QueueDispatchingMessage)) return;

@@ -10,7 +10,7 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 	return {
 		getCurrentChatId: () => 'chat-1',
 		setCurrentChatId: vi.fn(),
-		appendLocalNotice: vi.fn(),
+		appendServerNotice: vi.fn(),
 		setIsSystemChatChange: vi.fn(),
 		conversationUi: {
 			clearPendingPermissionRequests: vi.fn(),
@@ -85,12 +85,12 @@ describe('handleAgentComplete', () => {
 });
 
 describe('handleAgentError', () => {
-	it('clears selected-turn metadata and appends error message', () => {
+	it('clears selected-turn metadata and appends the error to its own chat', () => {
 		const ctx = createCtx();
 		handleAgentError(new AgentRunFailedMessage('chat-1', 'Something broke'), ctx);
 
 		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
-		expect(ctx.appendLocalNotice).toHaveBeenCalledWith('error', 'Something broke');
+		expect(ctx.appendServerNotice).toHaveBeenCalledWith('chat-1', 'error', 'Something broke');
 		expect(ctx.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
 	});
 

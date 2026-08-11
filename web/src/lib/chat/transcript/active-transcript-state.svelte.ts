@@ -45,6 +45,7 @@ export type {
 export type { ChatTranscriptRow } from './transcript-row-projection.js';
 
 const MESSAGES_PER_PAGE = 50;
+const SERVER_NOTICE_RETENTION_LIMIT = 8;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
 type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
@@ -94,6 +95,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#loadEpoch = 0;
 	#localNoticeRevision = 0;
 	#localNoticeRevisionAtLoadStart = 0;
+	#retainedServerNotices = new Map<string, LocalNoticeRow[]>();
 	#pendingUserInputsRevision = 0;
 	#pendingUserInputsRevisionAtLoadStart = 0;
 	#pageLoadPromise: Promise<TranscriptPageLoadResult> | null = null;
@@ -709,6 +711,42 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#recordFeedMutation('presentation-structure');
 	}
 
+	// Routes a server-issued overlay notice by its chat identity: the active
+	// conversation shows it immediately, any other chat retains it until that
+	// chat activates. Retention is bounded per chat and dropped with the chat.
+	appendServerNotice(chatId: string, noticeType: LocalNoticeType, content: string): void {
+		if (chatId === this.activeChatId) {
+			this.appendLocalNotice(noticeType, content);
+			return;
+		}
+		const retained = this.#retainedServerNotices.get(chatId) ?? [];
+		retained.push({
+			kind: 'local-notice',
+			id: `server_${createRandomId()}`,
+			noticeType,
+			content,
+			timestamp: new Date().toISOString(),
+		});
+		if (retained.length > SERVER_NOTICE_RETENTION_LIMIT) retained.shift();
+		this.#retainedServerNotices.set(chatId, retained);
+	}
+
+	discardServerNotices(chatId: string): void {
+		this.#retainedServerNotices.delete(chatId);
+	}
+
+	#drainServerNotices(chatId: string): void {
+		const retained = this.#retainedServerNotices.get(chatId);
+		if (!retained?.length) return;
+		this.#retainedServerNotices.delete(chatId);
+		this.localNotices = [
+			...this.localNotices,
+			...retained.map((notice) => ({ ...notice, revision: ++this.#localNoticeRevision })),
+		];
+		this.#growExpandedVisibleWindow();
+		this.#recordFeedMutation('presentation-structure');
+	}
+
 	clearLocalNotices(throughRevision = this.#localNoticeRevision): void {
 		const next = this.localNotices.filter((notice) => notice.revision > throughRevision);
 		if (next.length === this.localNotices.length) return;
@@ -952,6 +990,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.activeChatId = chatId;
 		this.resetForNewChat();
 		if (!chatId) return null;
+		this.#drainServerNotices(chatId);
 		// Publishes the bounded cache window atomically; the virtual feed limits mounted row work.
 		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;

@@ -24,6 +24,9 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-project-path-updated',
 	'chat-read-updated-v1',
 	'chat-list-refresh-requested',
+	// Routed by chat identity in its handler so a background chat retains its
+	// notice instead of leaking it into the active conversation.
+	'chat-operational-notice',
 	'ws-fault',
 ] satisfies EventKey[]);
 

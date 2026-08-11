@@ -123,13 +123,18 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 			},
 			appendLocalNotice: (noticeType, content) =>
 				deps.chatState.appendLocalNotice(noticeType, content),
+			appendServerNotice: (chatId, noticeType, content) =>
+				deps.chatState.appendServerNotice(chatId, noticeType, content),
 			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
 			clearPendingUserInput: (clientRequestId) =>
 				deps.chatState.clearPendingUserInput(clientRequestId),
 			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
 				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
-			removeChatTranscript: (chatId) => transcriptCache.remove(chatId),
+			removeChatTranscript: (chatId) => {
+				transcriptCache.remove(chatId);
+				deps.chatState.discardServerNotices(chatId);
+			},
 			markChatTranscriptStale: (chatId) => transcriptCache.markStale(chatId),
 			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},

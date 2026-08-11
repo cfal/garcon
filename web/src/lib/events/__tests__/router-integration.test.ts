@@ -87,6 +87,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			loadVisibleChatPreview: vi.fn(),
 			markVisibleChatPreviewStale: vi.fn(),
 			appendLocalNotice: vi.fn(),
+			appendServerNotice: vi.fn(),
 			upsertPendingUserInput: vi.fn(),
 			clearPendingUserInput: vi.fn(),
 			updatePendingUserInputDeliveryStatus: vi.fn(),
@@ -178,6 +179,44 @@ describe('event router integration', () => {
 		renderRouterWithRawMessages([{ type: 'ws-fault', error: 'socket failed' }], stores);
 
 		expect(stores.chatState.appendLocalNotice).toHaveBeenCalledWith('error', 'socket failed');
+	});
+
+	it('routes operational notices by their own chat identity', () => {
+		const stores = createStores();
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-operational-notice',
+					chatId: 'chat-a',
+					noticeType: 'warning',
+					content: 'active chat warning',
+					timestamp: TS,
+				},
+				{
+					type: 'chat-operational-notice',
+					chatId: 'chat-background',
+					noticeType: 'warning',
+					content: 'background warning',
+					timestamp: TS,
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.appendServerNotice).toHaveBeenNthCalledWith(
+			1,
+			'chat-a',
+			'warning',
+			'active chat warning',
+		);
+		expect(stores.chatState.appendServerNotice).toHaveBeenNthCalledWith(
+			2,
+			'chat-background',
+			'warning',
+			'background warning',
+		);
+		expect(stores.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
 
 	it('patches project path updates from raw payloads', () => {

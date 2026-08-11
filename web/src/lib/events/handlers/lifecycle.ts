@@ -15,7 +15,7 @@ function agentReportedFailure(exitCode: number | undefined): boolean {
 export interface LifecycleContext {
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
+	appendServerNotice: (chatId: string, noticeType: LocalNoticeType, content: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiPort,
@@ -65,6 +65,6 @@ export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleConte
 
 	if (!successorIsProcessing) ctx.clearTurnStatus(errorChatId);
 
-	ctx.appendLocalNotice('error', msg.error || m.chat_notice_agent_error());
+	ctx.appendServerNotice(msg.chatId, 'error', msg.error || m.chat_notice_agent_error());
 	if (!successorIsProcessing) ctx.conversationUi.clearPendingPermissionRequests();
 }
