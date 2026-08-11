@@ -22,6 +22,7 @@ function makeRouter(overrides = {}) {
   const prepareProjectPathUpdate = mock(() => Promise.resolve(preparation));
   const entry = {
     agentId: 'claude',
+    agentOwnershipEpoch: 'epoch-1',
     agentSessionId: 'session-1',
     nativeSession: storedNativeSession,
     projectPath: '/old',
