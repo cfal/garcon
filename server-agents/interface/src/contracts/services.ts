@@ -23,11 +23,18 @@ import type {
 } from './execution.js';
 import type {
   AgentCompactRequestV4,
+  AgentExecutionContextV4,
   AgentResumeRequestV4,
   AgentTranscriptAdmissionIdentity,
 } from './execution-events-v4.js';
 import type { AgentMigrationStore } from './host.js';
 import type { AgentChatReference, AgentNativeSessionRef } from './transcript.js';
+import type {
+  AgentChatReferenceV4,
+  AgentForkPoint,
+  AgentNativeForkRef,
+  AgentNativeForkResolution,
+} from './transcript-stream-v4.js';
 
 export interface AgentCatalog {
   snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<{
@@ -159,6 +166,28 @@ export interface AgentForking {
   readonly supportsWhileRunning: boolean;
   fork(request: AgentForkRequest): Promise<AgentForkOutcome>;
   discard(session: AgentStartedSession, signal: AbortSignal): Promise<void>;
+}
+
+export interface AgentForkingV4 {
+  readonly supportsAtMessage: boolean;
+  readonly supportsWhileRunning: boolean;
+  resolvePoint(request: AgentForkPointResolutionRequestV4): Promise<AgentNativeForkResolution>;
+  fork(request: AgentForkRequestV4): Promise<AgentForkOutcome>;
+  discard(session: AgentStartedSession, signal: AbortSignal): Promise<void>;
+}
+
+export interface AgentForkPointResolutionRequestV4 {
+  readonly source: AgentChatReferenceV4;
+  readonly point: AgentForkPoint;
+  readonly signal: AbortSignal;
+}
+
+export interface AgentForkRequestV4 extends AgentExecutionContextV4 {
+  readonly source: AgentChatReferenceV4;
+  readonly point: {
+    readonly projection: AgentForkPoint;
+    readonly native: AgentNativeForkRef;
+  } | null;
 }
 
 // Distinguishes a copied provider session from a successful fork with no resumable provider state.

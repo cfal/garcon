@@ -1,12 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { ChatMessage, UserMessage } from '@garcon/common/chat-types';
+import type { JsonObject } from '@garcon/common/json';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { orderedTranscriptDigest } from '@garcon/server-agent-interface';
 import type {
   AgentChatReferenceV4,
   AgentControlEvent,
   AgentControlRow,
   AgentInputAdmissionState,
   AgentInputPreparation,
+  AgentForkPoint,
+  AgentNativeForkResolution,
   AgentNativeSessionRef,
   AgentOperationIdentityV4,
   AgentOutgoingHandoffLease,
@@ -119,10 +123,12 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       seeds = bootstrap.value;
     }
     const entries = seedEntries(request.chat, seeds);
+    const bootstrapAliases = aliasesFromSeeds(seeds);
     const journal = await AgentProjectionJournal.open({
       directory,
       ...segmentIdentity(request.chat),
       bootstrapEntries: entries,
+      bootstrapAliases,
     });
     request.signal.throwIfAborted();
     const segment = this.#createSegment(request.chat, journal);
@@ -313,6 +319,70 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     return this.resolveIndexSource(request);
   }
 
+  async resolveNativeForkPoint(request: AgentTranscriptRequestV4 & {
+    readonly point: AgentForkPoint;
+  }): Promise<AgentNativeForkResolution> {
+    request.signal.throwIfAborted();
+    const opened = await this.#requireOpen(request);
+    if (opened.kind === 'deferred') {
+      return { kind: 'unavailable', reason: 'not-settled' };
+    }
+    if (opened.kind === 'degraded') return opened;
+    const segment = opened.value;
+    const checkpoint = segment.stream.current.checkpoint;
+    if (request.point.agentOwnershipEpoch !== request.chat.agentOwnershipEpoch
+        || request.point.contentEpoch !== checkpoint.projection.contentEpoch
+        || request.point.durableRevision !== checkpoint.projection.durableRevision) {
+      return { kind: 'unavailable', reason: 'source-diverged' };
+    }
+    const ordinal = segment.stream.current.entries.findIndex(
+      (entry) => entry.id === request.point.entryId,
+    ) + 1;
+    if (ordinal === 0) return { kind: 'unavailable', reason: 'source-diverged' };
+    const entry = segment.stream.current.entries[ordinal - 1]!;
+    if (entry.lifetime !== 'durable') return { kind: 'unavailable', reason: 'not-settled' };
+    const journal = segment.journal.state;
+    if (ordinal <= journal.nativeRetentionFloor) {
+      return { kind: 'unavailable', reason: 'below-native-retention-floor' };
+    }
+    if (!entry.source) return { kind: 'unavailable', reason: 'no-native-source' };
+    const alias = journal.aliases[sourceIdentityKey(entry.source)];
+    const prefix = segment.stream.current.entries.slice(0, ordinal);
+    const lineCounts: Record<string, number> = {};
+    let firstLine: number | null = null;
+    for (const candidate of prefix) {
+      if (!candidate.source) return { kind: 'unavailable', reason: 'no-native-source' };
+      const candidateAlias = journal.aliases[sourceIdentityKey(candidate.source)];
+      const lineNumber = nativeAliasLineNumber(candidateAlias);
+      if (lineNumber === null) continue;
+      firstLine = firstLine === null ? lineNumber : Math.min(firstLine, lineNumber);
+      lineCounts[String(lineNumber)] = (lineCounts[String(lineNumber)] ?? 0) + 1;
+    }
+    return {
+      kind: 'ready',
+      reference: {
+        ownerId: this.options.ownerId,
+        schemaVersion: 1,
+        value: {
+          ordinal,
+          entryId: entry.id,
+          source: { ...entry.source },
+          ...(alias && typeof alias === 'object' && !Array.isArray(alias)
+            ? { alias }
+            : {}),
+          prefix: {
+            semanticDigest: orderedTranscriptDigest(prefix.map((candidate, index) => ({
+              seq: index + 1,
+              message: candidate.message,
+            }))),
+            firstLine,
+            lineCounts,
+          },
+        },
+      },
+    };
+  }
+
   async describeSource(request: AgentTranscriptRequestV4) {
     if (this.options.describeSource) return this.options.describeSource(request);
     request.signal.throwIfAborted();
@@ -411,7 +481,10 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
           message,
         }];
       });
-      if (appended.length) await segment.stream.commit([], appended);
+      if (appended.length) {
+        await segment.stream.commit([], appended);
+        await persistNativeAliases(segment, appended);
+      }
       return appended;
     });
   }
@@ -677,5 +750,51 @@ function previewText(message: ChatMessage): string {
 function messageTimestamp(message: ChatMessage): string | null {
   return 'timestamp' in message && typeof message.timestamp === 'string'
     ? message.timestamp
+    : null;
+}
+
+function aliasesFromSeeds(seeds: readonly AgentTranscriptSeedEntry[]): JsonObject {
+  return Object.fromEntries(seeds.flatMap((seed) => {
+    const alias = nativeAlias(seed.message);
+    return alias ? [[sourceIdentityKey(seed.source), alias] as const] : [];
+  }));
+}
+
+async function persistNativeAliases(
+  segment: OpenSegment,
+  entries: readonly AgentTranscriptEntry[],
+): Promise<void> {
+  const additions = entries.flatMap((entry) => {
+    const alias = entry.source ? nativeAlias(entry.message) : null;
+    return alias && entry.source
+      ? [[sourceIdentityKey(entry.source), alias] as const]
+      : [];
+  });
+  if (!additions.length) return;
+  const state = segment.journal.state;
+  await segment.journal.updateNativeMetadata({
+    nativeRetentionFloor: state.nativeRetentionFloor,
+    aliases: { ...state.aliases, ...Object.fromEntries(additions) },
+  });
+}
+
+function nativeAlias(message: ChatMessage): JsonObject | null {
+  const source = getNativeMessageRevisionSource(message);
+  if (!source) return null;
+  return {
+    ...(source.entryId ? { entryId: source.entryId } : {}),
+    ...(source.lineNumber !== undefined ? { lineNumber: source.lineNumber } : {}),
+    ...(source.byteOffset !== undefined ? { byteOffset: source.byteOffset } : {}),
+    ...(source.withinSourceOrdinal !== undefined
+      ? { withinSourceOrdinal: source.withinSourceOrdinal }
+      : {}),
+  };
+}
+
+function nativeAliasLineNumber(value: unknown): number | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const lineNumber = (value as Record<string, unknown>).lineNumber;
+  return typeof lineNumber === 'number' && Number.isSafeInteger(lineNumber) && lineNumber > 0
+    ? lineNumber
     : null;
 }

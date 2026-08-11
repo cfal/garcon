@@ -10,6 +10,7 @@ import type {
   AgentCompaction,
   AgentCompactionV4,
   AgentForking,
+  AgentForkingV4,
   AgentGoals,
   AgentGoalsV4,
   AgentLifecycle,
@@ -55,10 +56,14 @@ export interface AgentIntegrationClass {
 }
 
 export interface AgentIntegrationV4
-  extends Omit<AgentIntegration, 'execution' | 'transcript' | 'compaction' | 'steering' | 'goals'> {
+  extends Omit<
+    AgentIntegration,
+    'execution' | 'transcript' | 'compaction' | 'forking' | 'steering' | 'goals'
+  > {
   readonly execution: AgentExecutionV4;
   readonly transcript: AgentTranscriptStream;
   readonly compaction: AgentCompactionV4 | null;
+  readonly forking: AgentForkingV4 | null;
   readonly steering: AgentSteeringV4 | null;
   readonly goals: AgentGoalsV4 | null;
   readonly transientControls: AgentTransientControlCapabilityV4 | null;

@@ -87,7 +87,7 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly compaction = null;
-  readonly forking: NonNullable<AgentIntegration['forking']>;
+  readonly forking: NonNullable<AgentIntegrationV4['forking']>;
   readonly steering = null;
   readonly goals = null;
   readonly endpoints = null;
@@ -138,6 +138,9 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
     this.forking = {
       supportsAtMessage: false,
       supportsWhileRunning: false,
+      async resolvePoint() {
+        return { kind: 'unavailable', reason: 'no-native-source' } as const;
+      },
       async fork(request) {
         request.admission.signal.throwIfAborted();
         if (request.point) {

@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevisions,
+  type AgentForkPoint,
+  type AgentNativeForkResolution,
   type AgentGoalControlHandoff,
   type AgentExecutionContextV4,
   type AgentTurnOwnerOperationIdentityV4,
@@ -575,23 +576,54 @@ export class AgentRuntimeRouter {
           );
         }
       }
-      const nativePrefixRevision = args.messageSequence && sourceSnapshot?.kind === 'ready'
-        ? computeAgentTranscriptRevisions(
-            sourceSnapshot.value.entries.map((entry) => entry.message),
-            Math.max(0, args.messageSequence - carryOverMessageCount),
-          ).prefix
-        : null;
+      let point: {
+        readonly projection: AgentForkPoint;
+        readonly native: import('@garcon/server-agent-interface').AgentNativeForkRef;
+      } | null = null;
+      if (args.messageSequence && sourceSnapshot?.kind === 'ready') {
+        const currentOrdinal = args.messageSequence - carryOverMessageCount;
+        const entry = sourceSnapshot.value.entries[currentOrdinal - 1];
+        if (!entry || entry.lifetime !== 'durable') {
+          throw new AgentIntegrationError(
+            'TRANSCRIPT_UNAVAILABLE',
+            'The selected transcript entry is not durably settled',
+            true,
+          );
+        }
+        const projectionPoint: AgentForkPoint = {
+          kind: 'projection-entry',
+          agentOwnershipEpoch: sourceReference.agentOwnershipEpoch,
+          contentEpoch: sourceSnapshot.value.checkpoint.projection.contentEpoch,
+          entryId: entry.id,
+          durableRevision: sourceSnapshot.value.checkpoint.projection.durableRevision,
+        };
+        const resolution = await integration.forking.resolvePoint({
+          source: sourceReference,
+          point: projectionPoint,
+          signal: new AbortController().signal,
+        });
+        if (resolution.kind === 'degraded') {
+          throw new AgentIntegrationError(
+            'TRANSCRIPT_UNAVAILABLE',
+            'The provider-native fork point is unavailable',
+            resolution.retryable,
+            { projectionErrorCode: resolution.errorCode },
+          );
+        }
+        if (resolution.kind === 'unavailable') {
+          throw new AgentIntegrationError(
+            'TRANSCRIPT_UNAVAILABLE',
+            nativeForkUnavailableMessage(resolution.reason),
+            resolution.reason === 'projection-ahead-of-provider'
+              || resolution.reason === 'not-settled',
+          );
+        }
+        point = { projection: projectionPoint, native: resolution.reference };
+      }
       const result = await integration.forking.fork({
         ...this.#executionContext(args.targetChatId, source, selection, operation, {}),
         source: sourceReference,
-        point: args.messageSequence ? {
-          messageSequence: args.messageSequence,
-          archivedMessageCount: carryOverMessageCount,
-          sourceRevision: {
-            nativePrefix: nativePrefixRevision!,
-            carryOver: sourceReference.carryOverRevision,
-          },
-        } : null,
+        point,
       });
       if (result.kind === 'unmaterialized') return result;
       return {
@@ -818,6 +850,23 @@ function attachments(images: RunAgentTurnOptions['images'] = []) {
 
 function supportedValue<T extends string>(values: readonly string[], value: T, fallback: T): T {
   return values.includes(value) ? value : fallback;
+}
+
+function nativeForkUnavailableMessage(
+  reason: Extract<AgentNativeForkResolution, { readonly kind: 'unavailable' }>['reason'],
+): string {
+  switch (reason) {
+    case 'below-native-retention-floor':
+      return 'The selected message is visible but no longer retained by the provider for forking';
+    case 'no-native-source':
+      return 'The selected message has no provider-native fork position';
+    case 'projection-ahead-of-provider':
+      return 'The selected message has not reached provider-native storage yet';
+    case 'not-settled':
+      return 'The selected message is not settled for provider-native forking';
+    case 'source-diverged':
+      return 'The provider-native session diverged from the selected transcript entry';
+  }
 }
 
 function validateStartedReceipt(

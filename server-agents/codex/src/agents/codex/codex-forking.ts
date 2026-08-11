@@ -1,29 +1,30 @@
 import {
   AgentIntegrationError,
-  type AgentForkRequest,
-  type AgentForking,
+  type AgentForkRequestV4,
+  type AgentForkingV4,
   type AgentStartedSession,
 } from '@garcon/server-agent-interface';
 import { CodexAppServerRpcError } from './app-server/client.js';
 import type { CodexHistoryProfile } from './history-profile.js';
 
 export interface CodexForkingOptions {
-  readonly legacy: AgentForking;
-  readonly resolveProfile: (request: AgentForkRequest) => Promise<CodexHistoryProfile | null>;
+  readonly journal: AgentForkingV4;
+  readonly resolveProfile: (request: AgentForkRequestV4) => Promise<CodexHistoryProfile | null>;
   readonly forkPaginatedWhole: (
-    request: AgentForkRequest,
+    request: AgentForkRequestV4,
   ) => Promise<AgentStartedSession | null>;
 }
 
-export function createCodexForking(options: CodexForkingOptions): AgentForking {
+export function createCodexForking(options: CodexForkingOptions): AgentForkingV4 {
   return {
     supportsAtMessage: true,
-    supportsWhileRunning: options.legacy.supportsWhileRunning,
+    supportsWhileRunning: options.journal.supportsWhileRunning,
+    resolvePoint: (request) => options.journal.resolvePoint(request),
     async fork(request) {
       request.admission.signal.throwIfAborted();
       const profile = await options.resolveProfile(request);
-      if (!profile) return options.legacy.fork(request);
-      if (profile.mode === 'legacy') return options.legacy.fork(request);
+      if (!profile) return options.journal.fork(request);
+      if (profile.mode === 'legacy') return options.journal.fork(request);
       if (request.point) throw paginatedForkUnsupported('fork-at-message');
 
       try {
@@ -36,7 +37,7 @@ export function createCodexForking(options: CodexForkingOptions): AgentForking {
       }
     },
     discard(session, signal) {
-      return options.legacy.discard(session, signal);
+      return options.journal.discard(session, signal);
     },
   };
 }

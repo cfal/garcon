@@ -19,6 +19,7 @@ import type {
   AgentTurnReceiptOwner,
 } from '@garcon/server-agent-interface';
 import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
+import { attachNativeMessageSource } from '@garcon/server-agent-interface';
 import { AgentInputAdmissionCoordinator } from '../admission.js';
 import { applyProjectionEvent } from '../apply.js';
 import { AgentProjectionMutationGate } from '../handoff.js';
@@ -30,7 +31,10 @@ import {
   newAgentTranscriptContentEpoch,
   newAgentTranscriptEntryId,
 } from '../identity.js';
-import { JournalBackedAgentTranscriptStream } from '../journal-stream.js';
+import {
+  JournalBackedAgentTranscriptStream,
+  transcriptSeedEntries,
+} from '../journal-stream.js';
 import { AgentProjectionPager } from '../paging.js';
 import {
   AgentProjectionRevisionAccumulator,
@@ -327,6 +331,69 @@ describe('JournalBackedAgentTranscriptStream handoff cleanup', () => {
     })).rejects.toMatchObject({ code: 'PROJECTION_HANDOFF_POST_BOUNDARY_EVENT' });
     expect(releaseProvider).not.toHaveBeenCalled();
     expect(await AgentProjectionJournal.exists({ directory, ...identity })).toBe(true);
+  });
+});
+
+describe('JournalBackedAgentTranscriptStream native fork points', () => {
+  it('resolves exact ledger identity through serialized native aliases after restart', async () => {
+    const directory = await tempDirectory();
+    const identity = projection().identity;
+    const chat = chatReference(identity);
+    const messages = [
+      attachNativeMessageSource(new UserMessage(timestamp(), 'first'), { lineNumber: 3 }),
+      attachNativeMessageSource(new AssistantMessage(timestamp(), 'second'), { lineNumber: 4 }),
+    ];
+    const first = new JournalBackedAgentTranscriptStream({
+      ownerId: 'fake',
+      directory: async () => directory,
+      bootstrap: async () => ({
+        kind: 'ready',
+        value: transcriptSeedEntries('fake', messages),
+      }),
+    });
+    const opened = await first.openSegment({ chat, signal: AbortSignal.timeout(1_000) });
+    expect(opened.kind).toBe('ready');
+    if (opened.kind !== 'ready') return;
+    const page = await first.loadPage({
+      chat,
+      signal: AbortSignal.timeout(1_000),
+      limit: 10,
+      beforeOrdinal: null,
+      expectedProjection: opened.value.checkpoint.projection,
+    });
+    expect(page.kind).toBe('ready');
+    if (page.kind !== 'ready') return;
+    const selected = page.page.entries[1]!;
+    const point = {
+      kind: 'projection-entry' as const,
+      agentOwnershipEpoch: chat.agentOwnershipEpoch,
+      contentEpoch: opened.value.checkpoint.projection.contentEpoch,
+      entryId: selected.id,
+      durableRevision: opened.value.checkpoint.projection.durableRevision,
+    };
+
+    const restarted = journalStream(directory);
+    const reopened = await restarted.openSegment({ chat, signal: AbortSignal.timeout(1_000) });
+    expect(reopened.kind).toBe('ready');
+    const resolved = await restarted.resolveNativeForkPoint({
+      chat,
+      point,
+      signal: AbortSignal.timeout(1_000),
+    });
+    expect(resolved).toMatchObject({
+      kind: 'ready',
+      reference: {
+        ownerId: 'fake',
+        value: {
+          ordinal: 2,
+          alias: { lineNumber: 4 },
+          prefix: {
+            firstLine: 3,
+            lineCounts: { 3: 1, 4: 1 },
+          },
+        },
+      },
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -11,12 +11,21 @@ import {
   computeAgentTranscriptRevision,
   computeAgentTranscriptRevisions,
   getNativeMessageRevisionSource,
+  orderedTranscriptDigest,
+  agentOwnershipEpoch,
   type AgentForkOutcome,
   type AgentForkRequest,
+  type AgentForkRequestV4,
+  type AgentTranscriptContentEpoch,
+  type AgentTranscriptEntryId,
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { createPathNativeSessionCodec } from '../../native-session/path-native-session.js';
-import { createJsonlForking, type JsonlForkingOptions } from '../jsonl-forking.js';
+import {
+  createJsonlForking,
+  createProjectionJsonlForking,
+  type JsonlForkingOptions,
+} from '../jsonl-forking.js';
 
 const roots: string[] = [];
 const sourceAgentSessionId = '11111111-1111-1111-1111-111111111111';
@@ -396,5 +405,79 @@ describe('createJsonlForking empty native prefixes', () => {
       { type: 'provider_context', cwd: fixture.root },
     ]);
     await expect(fixture.loadMessages(forkedPath)).resolves.toEqual([]);
+  });
+});
+
+describe('createProjectionJsonlForking', () => {
+  it('forks from an exact projection entry and its serialized native alias', async () => {
+    const fixture = await createFixture();
+    const ownershipEpoch = agentOwnershipEpoch('ownership-1');
+    const owner = {
+      agentOwnershipEpoch: ownershipEpoch,
+      commandType: 'fork-run' as const,
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+    };
+    const projectionPoint = {
+      kind: 'projection-entry' as const,
+      agentOwnershipEpoch: ownershipEpoch,
+      contentEpoch: 'content-1' as AgentTranscriptContentEpoch,
+      entryId: 'entry-2' as AgentTranscriptEntryId,
+      durableRevision: computeAgentTranscriptRevision(fixture.sourceMessages),
+    };
+    const native = {
+      ownerId: 'test',
+      schemaVersion: 1,
+      value: {
+        ordinal: 2,
+        entryId: 'entry-2',
+        source: { namespace: 'test:native', itemId: 'line:4', subrowId: 'row:0' },
+        alias: { lineNumber: 4 },
+        prefix: {
+          semanticDigest: orderedTranscriptDigest(fixture.sourceMessages.map((message, index) => ({
+            seq: index + 1,
+            message,
+          }))),
+          firstLine: 3,
+          lineCounts: { 3: 1, 4: 1 },
+        },
+      },
+    } as const;
+    const resolveNativeForkPoint = mock(async () => ({ kind: 'ready' as const, reference: native }));
+    const forking = createProjectionJsonlForking({
+      ...fixture.options,
+      ownerId: 'test',
+      projection: { resolveNativeForkPoint },
+    });
+    const request = {
+      ...fixture.request,
+      operation: {
+        agentOwnershipEpoch: ownershipEpoch,
+        commandType: 'fork-run' as const,
+        clientRequestId: 'request-1',
+        clientMessageId: null,
+        turnId: 'turn-1',
+        turnOwner: owner,
+      },
+      source: {
+        ...fixture.request.source,
+        agentOwnershipEpoch: ownershipEpoch,
+      },
+      point: { projection: projectionPoint, native },
+    } satisfies AgentForkRequestV4;
+
+    await expect(forking.resolvePoint({
+      source: request.source,
+      point: projectionPoint,
+      signal: request.admission.signal,
+    })).resolves.toEqual({ kind: 'ready', reference: native });
+    const session = materializedSession(await forking.fork(request));
+    const messages = await fixture.loadMessages(
+      fixture.nativeSessions.decode(session.nativeSession).path!,
+    );
+    expect(messages.map((message) => (message as UserMessage).content)).toEqual([
+      'first',
+      'second',
+    ]);
   });
 });

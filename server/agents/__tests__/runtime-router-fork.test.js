@@ -3,7 +3,6 @@ import { UserMessage } from '../../../common/chat-types.js';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevision,
-  computeAgentTranscriptRevisions,
 } from '@garcon/server-agent-interface';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 
@@ -54,13 +53,30 @@ function makeRouter(fork) {
         revision: computeAgentTranscriptRevision(messages),
       })),
     },
-    forking: { fork, discard: mock(async () => undefined) },
+    forking: {
+      resolvePoint: mock(async () => ({
+        kind: 'ready',
+        reference: { ownerId: 'test', schemaVersion: 1, value: { native: 'point-1' } },
+      })),
+      fork,
+      discard: mock(async () => undefined),
+    },
   };
   const projection = {
     open: mock(async () => ({
       kind: 'ready',
       value: {
-        entries: messages.map((message, index) => ({ id: `entry-${index + 1}`, message })),
+        checkpoint: {
+          projection: {
+            contentEpoch: 'content-1',
+            durableRevision: 'revision-1',
+          },
+        },
+        entries: messages.map((message, index) => ({
+          id: `entry-${index + 1}`,
+          lifetime: 'durable',
+          message,
+        })),
       },
     })),
   };
@@ -109,7 +125,7 @@ describe('AgentRuntimeRouter forks', () => {
         nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'forked-session' } },
       },
     }));
-    const { router, entry, messages } = makeRouter(fork);
+    const { router, entry, integration } = makeRouter(fork);
 
     await router.forkAgentSession({
       sourceSession: entry,
@@ -120,14 +136,24 @@ describe('AgentRuntimeRouter forks', () => {
 
     expect(fork).toHaveBeenCalledWith(expect.objectContaining({
       point: {
-        messageSequence: 1,
-        archivedMessageCount: 0,
-        sourceRevision: {
-          nativePrefix: computeAgentTranscriptRevisions(messages, 1).prefix,
-          carryOver: 'carry-1',
+        projection: {
+          kind: 'projection-entry',
+          agentOwnershipEpoch: 'epoch-1',
+          contentEpoch: 'content-1',
+          entryId: 'entry-1',
+          durableRevision: 'revision-1',
         },
+        native: { ownerId: 'test', schemaVersion: 1, value: { native: 'point-1' } },
       },
     }));
+    expect(integration.forking.resolvePoint).toHaveBeenCalledWith({
+      source: expect.objectContaining({
+        chatId: 'source-chat',
+        agentOwnershipEpoch: 'epoch-1',
+      }),
+      point: expect.objectContaining({ entryId: 'entry-1' }),
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it('preserves a successful unmaterialized whole-session outcome', async () => {

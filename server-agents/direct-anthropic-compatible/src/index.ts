@@ -25,7 +25,7 @@ import {
 } from '@garcon/server-agent-common/direct/transcript';
 import { createDirectCompatibleTranscriptSource } from '@garcon/server-agent-common/direct/transcript-source';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
-import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
+import { createProjectionJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
@@ -138,7 +138,9 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
         return { authenticated: false, canReauth: false, label: '', source: 'none' };
       },
     };
-    this.forking = createJsonlForking({
+    this.forking = createProjectionJsonlForking({
+      ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      projection: projection.transcript,
       supportsWhileRunning: false,
       transcript: legacyTranscript,
       nativeSessions,

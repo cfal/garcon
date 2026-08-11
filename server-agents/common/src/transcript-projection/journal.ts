@@ -94,6 +94,7 @@ export interface ProjectionJournalState extends AgentSegmentIdentity {
 export interface ProjectionJournalOptions extends AgentSegmentIdentity {
   readonly directory: string;
   readonly bootstrapEntries?: readonly AgentTranscriptEntry[];
+  readonly bootstrapAliases?: JsonObject;
   readonly contentEpoch?: AgentTranscriptContentEpoch;
 }
 
@@ -148,7 +149,7 @@ export class AgentProjectionJournal {
         contentEpoch: options.contentEpoch ?? newAgentTranscriptContentEpoch(),
         entries,
         nativeRetentionFloor: 0,
-        aliases: {},
+        aliases: options.bootstrapAliases ?? {},
         handoffCleanupBlocked: false,
         discardedAdmissions: [],
       } as const;

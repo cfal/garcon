@@ -13,7 +13,7 @@ import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-c
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
-import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
+import { createProjectionJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
@@ -204,7 +204,9 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
         return commandDiscovery.discover(projectPath);
       },
     };
-    this.forking = createJsonlForking({
+    this.forking = createProjectionJsonlForking({
+      ownerId: 'claude',
+      projection: projection.transcript,
       supportsWhileRunning: true,
       transcript: legacyTranscript,
       nativeSessions,
