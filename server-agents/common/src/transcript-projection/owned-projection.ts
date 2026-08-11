@@ -130,10 +130,39 @@ export function createAgentOwnedProjection(
           // cannot prove settlement, so a finished provider outcome is
           // withheld as a retryable failure instead of publishing success the
           // audit never established.
-          let sourceSettlement: 'confirmed' | 'unresolved' = 'unresolved';
-          let boundaryFailure: unknown = null;
+          const terminalFor = (settlement: 'confirmed' | 'unresolved', failed: boolean) => {
+            const settled = settlement === 'confirmed' && !failed;
+            const outcome = projectionFault
+              ? {
+                  kind: 'failed' as const,
+                  error: new AgentIntegrationError(
+                    'TRANSCRIPT_UNAVAILABLE',
+                    'The authoritative transcript projection failed',
+                    true,
+                  ),
+                }
+              : event.type === 'failed'
+                ? { kind: 'failed' as const, error: event.error }
+                : settled
+                  ? { kind: 'finished' as const, exitCode: event.exitCode }
+                  : {
+                      kind: 'failed' as const,
+                      error: new AgentIntegrationError(
+                        'TRANSCRIPT_UNAVAILABLE',
+                        'The provider transcript was not proven settled for this turn',
+                        true,
+                      ),
+                    };
+            return {
+              operation: terminalOperation,
+              outcome,
+              sourceSettlement: projectionFault || failed
+                ? 'unresolved' as const
+                : settlement,
+            };
+          };
           try {
-            sourceSettlement = await transcript.settleNativeBoundary({
+            await transcript.settleNativeBoundary({
               chat,
               operation: causalOperation,
               signal: AbortSignal.timeout(10_000),
@@ -145,39 +174,14 @@ export function createAgentOwnedProjection(
                       : { verdict: 'unresolved' as const };
                   }
                 : undefined,
+              terminal: (settlement) => terminalFor(settlement, false),
             });
           } catch (error) {
-            boundaryFailure = error;
             options.onProjectionError?.(error, event.chatId);
+            // The boundary could not prove settlement or publish inside its
+            // gate; the terminal still publishes, as an unproven failure.
+            await transcript.emitTerminal({ chat, ...terminalFor('unresolved', true) });
           }
-          const settled = sourceSettlement === 'confirmed' && boundaryFailure === null;
-          const outcome = projectionFault
-            ? {
-                kind: 'failed' as const,
-                error: new AgentIntegrationError(
-                  'TRANSCRIPT_UNAVAILABLE',
-                  'The authoritative transcript projection failed',
-                  true,
-                ),
-              }
-            : event.type === 'failed'
-              ? { kind: 'failed' as const, error: event.error }
-              : settled
-                ? { kind: 'finished' as const, exitCode: event.exitCode }
-                : {
-                    kind: 'failed' as const,
-                    error: new AgentIntegrationError(
-                      'TRANSCRIPT_UNAVAILABLE',
-                      'The provider transcript was not proven settled for this turn',
-                      true,
-                    ),
-                  };
-          await transcript.emitTerminal({
-            chat,
-            operation: terminalOperation,
-            outcome,
-            sourceSettlement: projectionFault || boundaryFailure ? 'unresolved' : sourceSettlement,
-          });
           operations.delete(event.chatId);
           attributions.delete(event.chatId);
           faults.delete(event.chatId);

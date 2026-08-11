@@ -171,23 +171,17 @@ export function auditNativeEvidence(options: {
     firstMatchedJournalIndex !== -1 && index > lastMatchedJournalIndex
   ));
   if (missingPrefix.length + missingTail.length !== missing.length) return { kind: 'diverged' };
-  // Native rows the journal missed may only trail the last matched identity;
-  // importing anything earlier would reorder committed ordinals. Rows behind
-  // event-identified journal rows are unattributable, not divergent.
+  // Native rows no committed identity claims are provider-observed new
+  // output, wherever the provider recorded them: a retried tool attempt or
+  // superseded item the stream never notified appends to the ledger in
+  // native order. Divergence is reserved for already committed sources.
   const journalKeys = new Set(journal.flatMap((committed) => (
     committed.kind === 'exact' ? [committed.matchKey] : []
   )));
-  if (!importSuppressed) {
-    for (const [position, row] of native.entries()) {
-      if (position > lastMatchedNativePosition) break;
-      if (!claimed.has(position) && !journalKeys.has(row.key)) return { kind: 'diverged' };
-    }
-  }
   const suffix = importSuppressed
     ? []
     : native
-      .slice(lastMatchedNativePosition + 1)
-      .filter((row) => !journalKeys.has(row.key))
+      .filter((row, position) => !claimed.has(position) && !journalKeys.has(row.key))
       .map((row) => row.seed);
   // A provider that moved on to new rows without persisting the committed
   // tail is not merely behind.

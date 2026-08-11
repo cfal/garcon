@@ -230,6 +230,14 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   async settleNativeBoundary(request: AgentTranscriptRequestV4 & {
     readonly operation?: AgentTurnBoundOperationIdentityV4 | null;
     readonly sourceSettlement?: () => Promise<AgentProviderSettlement>;
+    // Publishes the turn terminal inside the same gated operation, so no
+    // successor admission can interleave between the settled boundary and
+    // the terminal it proves.
+    readonly terminal?: (settlement: 'confirmed' | 'unresolved') => {
+      readonly operation: AgentTurnOwnerOperationIdentityV4;
+      readonly outcome: AgentTerminalEvent['outcome'];
+      readonly sourceSettlement: AgentTerminalEvent['sourceSettlement'];
+    };
   }): Promise<'confirmed' | 'unresolved'> {
     const segment = this.#segments.get(segmentKey(request.chat));
     if (!segment) {
@@ -238,6 +246,10 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
         : 'unresolved';
     }
     return segment.gate.run(async () => {
+      const finish = async (verdict: 'confirmed' | 'unresolved') => {
+        if (request.terminal) await this.#publishTerminal(segment, request.terminal(verdict));
+        return verdict;
+      };
       const proof = request.sourceSettlement
         ? await request.sourceSettlement()
         : null;
@@ -249,7 +261,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       const deadline = Date.now() + (request.sourceSettlement ? 0 : SETTLEMENT_WAIT_MS);
       for (;;) {
         const evidence = await this.options.bootstrap({ chat: segment.chat, signal: request.signal });
-        if (evidence.kind !== 'ready') return settlement ?? 'unresolved';
+        if (evidence.kind !== 'ready') return finish(settlement ?? 'unresolved');
         const state = segment.journal.state;
         const outcome = auditNativeEvidence({
           ownerId: this.options.ownerId,
@@ -273,7 +285,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
             await sleep(SETTLEMENT_POLL_INTERVAL_MS);
             continue;
           }
-          return settlement ?? (providerOwedRows ? 'unresolved' : 'confirmed');
+          return finish(settlement ?? (providerOwedRows ? 'unresolved' : 'confirmed'));
         }
         if (outcome.kind === 'diverged') {
           if (state.nativeContinuity !== 'diverged') {
@@ -283,7 +295,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
               nativeContinuity: 'diverged',
             });
           }
-          return settlement ?? 'confirmed';
+          return finish(settlement ?? 'confirmed');
         }
         if (outcome.aheadFromOrdinal !== null && Date.now() < deadline) {
           await sleep(SETTLEMENT_POLL_INTERVAL_MS);
@@ -299,7 +311,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
         }
         await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
         segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
-        return settlement ?? 'confirmed';
+        return finish(settlement ?? 'confirmed');
       }
     });
   }
@@ -772,30 +784,36 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     readonly sourceSettlement: AgentTerminalEvent['sourceSettlement'];
   }): Promise<AgentTerminalEvent> {
     const segment = this.#open(options.chat);
-    return segment.gate.run(async () => {
-      const active = segment.stream.current.entries.at(-1);
-      if (active?.lifetime === 'active'
-          && options.sourceSettlement === 'confirmed'
-          && sameTurnOwner(active.provenance?.turnOwner, options.operation.turnOwner)) {
-        await segment.stream.commit([{
-          entryId: active.id,
-          source: admissionSource(active.provenance ?? options.operation),
-        }], []);
-      }
-      const attributable = segment.stream.current.entries.filter((entry) => (
-        entry.provenance?.turnOwner.clientRequestId === options.operation.turnOwner.clientRequestId
-        && entry.provenance.turnOwner.turnId === options.operation.turnOwner.turnId
-      ));
-      const accepted = attributable.filter((entry) => entry.message.type === 'user-message');
-      return segment.stream.terminal({
-        operation: options.operation,
-        outcome: options.outcome,
-        completeness: {
-          acceptedInputEntryIds: accepted.map((entry) => entry.id),
-          attributableEntryCount: attributable.length,
-        },
-        sourceSettlement: options.sourceSettlement,
-      });
+    return segment.gate.run(() => this.#publishTerminal(segment, options));
+  }
+
+  async #publishTerminal(segment: OpenSegment, options: {
+    readonly operation: AgentTurnOwnerOperationIdentityV4;
+    readonly outcome: AgentTerminalEvent['outcome'];
+    readonly sourceSettlement: AgentTerminalEvent['sourceSettlement'];
+  }): Promise<AgentTerminalEvent> {
+    const active = segment.stream.current.entries.at(-1);
+    if (active?.lifetime === 'active'
+        && options.sourceSettlement === 'confirmed'
+        && sameTurnOwner(active.provenance?.turnOwner, options.operation.turnOwner)) {
+      await segment.stream.commit([{
+        entryId: active.id,
+        source: admissionSource(active.provenance ?? options.operation),
+      }], []);
+    }
+    const attributable = segment.stream.current.entries.filter((entry) => (
+      entry.provenance?.turnOwner.clientRequestId === options.operation.turnOwner.clientRequestId
+      && entry.provenance.turnOwner.turnId === options.operation.turnOwner.turnId
+    ));
+    const accepted = attributable.filter((entry) => entry.message.type === 'user-message');
+    return segment.stream.terminal({
+      operation: options.operation,
+      outcome: options.outcome,
+      completeness: {
+        acceptedInputEntryIds: accepted.map((entry) => entry.id),
+        attributableEntryCount: attributable.length,
+      },
+      sourceSettlement: options.sourceSettlement,
     });
   }
 
