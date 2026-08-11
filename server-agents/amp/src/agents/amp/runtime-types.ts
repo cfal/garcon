@@ -3,7 +3,7 @@ import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
 
 export interface AmpExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface AmpExecutionRequest {
@@ -37,11 +37,11 @@ export function assertAmpExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markAmpExecutionStarted(
+export async function markAmpExecutionStarted(
   request: { readonly executionAdmission?: AmpExecutionAdmission },
-): void {
+): Promise<void> {
   assertAmpExecutionOpen(request);
-  request.executionAdmission?.markStarted();
+  await request.executionAdmission?.markStarted();
 }
 
 export function ampEventMetadata(

@@ -759,7 +759,9 @@ export class AgentRuntimeRouter {
       operation,
       admission: {
         signal: opts.executionAdmission?.signal ?? new AbortController().signal,
-        markStarted: () => opts.executionAdmission?.markStarted(),
+        markStarted: async () => {
+          await opts.executionAdmission?.markStarted();
+        },
         markAbortable: () => this.#events.markTurnAbortable(chatId, operationMetadata(operation)),
       },
     };

@@ -5,6 +5,7 @@ import {
 } from '@garcon/server-agent-interface';
 import {
   AgentProjectionProducerEventChannel,
+  projectionProducerMessages,
   type AgentProjectionRuntimeExecution,
 } from '@garcon/server-agent-common/execution/projection-events';
 import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
@@ -21,7 +22,12 @@ export class FactoryExecution implements AgentProjectionRuntimeExecution {
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
       const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({ type: 'messages', chatId, messages, operation });
+      if (operation) this.#events.emit({
+        type: 'messages',
+        chatId,
+        messages: projectionProducerMessages('factory', messages),
+        operation,
+      });
     });
     runtime.onProcessing((chatId, processing) => {
       const operation = this.#operations.current(chatId);

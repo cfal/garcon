@@ -31,7 +31,7 @@ export interface PersistedChatExecutionConfig {
 
 export interface AgentExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export function assertExecutionAdmissionOpen(

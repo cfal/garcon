@@ -224,7 +224,7 @@ export class ExecutionOwnership {
       reservationId: crypto.randomUUID(),
       executionAdmission: Object.freeze<AgentExecutionAdmission>({
         signal: admissionController.signal,
-        markStarted: () => undefined,
+        markStarted: async () => {},
       }),
     });
     const identity = executionTurnIdentity(turn) ?? { turnId: crypto.randomUUID() };

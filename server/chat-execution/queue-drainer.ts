@@ -141,7 +141,7 @@ export class QueueDrainer {
       options = optionsForQueuedTurn(this.#getDrainOptions(chatId), entry);
       options.executionAdmission = Object.freeze({
         signal: admissionController.signal,
-        markStarted: () => { executionStarted = true; },
+        markStarted: async () => { executionStarted = true; },
       });
       if (this.#callbacks.isShuttingDown()) {
         admissionController.abort(new Error('Turn interrupted because the server is shutting down'));

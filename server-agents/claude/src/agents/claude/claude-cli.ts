@@ -1110,8 +1110,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       assertClaudeExecutionOpen(requestAdmission);
       const prepared = await materializeClaudeVideoAttachments(command, images);
       cleanupVideoAttachments = prepared.cleanup;
+      if (executionAdmission) await executionAdmission.markStarted();
       await this.#sendUserMessage(session, activeTurn, prepared.command, images);
-      executionAdmission?.markStarted();
       this.emitProcessing(chatId, true);
       onAbortable?.();
       this.#completeSessionInitialization(session);
@@ -1281,8 +1281,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       ownedTurn = activeTurn;
       const prepared = await materializeClaudeVideoAttachments(command, images);
       cleanupVideoAttachments = prepared.cleanup;
+      if (executionAdmission) await executionAdmission.markStarted();
       await this.#sendUserMessage(session, activeTurn, prepared.command, images);
-      executionAdmission?.markStarted();
       this.emitProcessing(chatId, true);
       onAbortable?.();
       await this.#waitForTurnComplete(activeTurn);

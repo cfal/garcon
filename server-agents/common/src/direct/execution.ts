@@ -6,6 +6,7 @@ import {
 } from '@garcon/server-agent-interface';
 import {
   AgentProjectionProducerEventChannel,
+  projectionProducerMessages,
   type AgentProjectionRuntimeExecution,
 } from '../execution/projection-events.js';
 import { AgentOperationTracker } from '../execution/operation-tracker.js';
@@ -25,7 +26,12 @@ implements AgentProjectionRuntimeExecution {
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
       const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({ type: 'messages', chatId, messages, operation });
+      if (operation) this.#events.emit({
+        type: 'messages',
+        chatId,
+        messages: projectionProducerMessages(this.host.agentId, messages),
+        operation,
+      });
     });
     runtime.onProcessing((chatId, processing) => {
       const operation = this.#operations.current(chatId);

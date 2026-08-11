@@ -293,7 +293,7 @@ export abstract class DirectChatRuntimeBase<
     }
 
     try {
-      markDirectExecutionStarted(request);
+      if (request.executionAdmission) await markDirectExecutionStarted(request);
       const response = await this.streamSession(session);
       if (session.aborted) {
         this.#finishAbortedTurn(session, eventMetadata);

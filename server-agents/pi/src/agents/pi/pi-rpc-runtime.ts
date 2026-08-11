@@ -171,7 +171,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       this.#assertAcceptingOperations();
       this.#sessions.set(session.id, session);
       this.emitSessionCreated(session.chatId);
-      const dispatch = this.#dispatchPrompt(session, request, prompt);
+      const dispatch = await this.#dispatchPrompt(session, request, prompt);
       // Initial session identity must bind before an unbounded prompt preflight can wedge.
       void dispatch.accepted.catch(() => undefined);
       return { agentSessionId: session.id, nativePath: session.nativePath };
@@ -239,7 +239,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       session.chatId = request.chatId;
       session.eventMetadata = piEventMetadata(request);
       session.lastActivityAt = Date.now();
-      const dispatch = this.#dispatchPrompt(session, request, prompt);
+      const dispatch = await this.#dispatchPrompt(session, request, prompt);
       this.#launchingSessionIds.delete(request.agentSessionId);
       await dispatch.accepted;
       await dispatch.settle;
@@ -621,11 +621,11 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     session.state = 'idle';
   }
 
-  #dispatchPrompt(
+  async #dispatchPrompt(
     session: PiRpcSession,
     request: PiStartRequest | PiResumeRequest,
     prompt: PreparedPiRpcPrompt,
-  ): PiPromptDispatch {
+  ): Promise<PiPromptDispatch> {
     const client = session.client;
     if (!client) throw new Error('Pi session has no RPC client');
     let resolveSettle!: () => void;
@@ -643,7 +643,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       settle: resolveSettle,
     };
     assertPiExecutionOpen(request);
-    markPiExecutionStarted(request);
+    if (request.executionAdmission) await markPiExecutionStarted(request);
     session.turn = turn;
     session.state = 'prompting';
     session.startTime = Date.now();

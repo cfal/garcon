@@ -1,16 +1,26 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { JsonObject } from '@garcon/common/json';
+import { randomUUID } from 'node:crypto';
 import type {
   AgentExecutionV4,
   AgentIntegrationError,
   AgentStartedSession,
+  AgentTranscriptSourceIdentity,
   AgentTurnOwnerOperationIdentityV4,
 } from '@garcon/server-agent-interface';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-interface';
+
+export interface AgentProjectionProducerMessage {
+  readonly message: ChatMessage;
+  readonly source: AgentTranscriptSourceIdentity;
+  readonly nativeAlias: JsonObject | null;
+}
 
 export type AgentProjectionProducerEvent =
   | {
       readonly type: 'messages';
       readonly chatId: string;
-      readonly messages: readonly ChatMessage[];
+      readonly messages: readonly AgentProjectionProducerMessage[];
       readonly operation: AgentTurnOwnerOperationIdentityV4;
     }
   | {
@@ -55,4 +65,35 @@ export class AgentProjectionProducerEventChannel {
   emit(event: AgentProjectionProducerEvent): void {
     for (const listener of this.#listeners) listener(event);
   }
+}
+
+export function projectionProducerMessages(
+  ownerId: string,
+  messages: readonly ChatMessage[],
+  sourceNamespace = `${ownerId}:native`,
+): readonly AgentProjectionProducerMessage[] {
+  const batchId = randomUUID();
+  return messages.map((message, index) => {
+    const native = getNativeMessageRevisionSource(message);
+    const itemId = native?.entryId
+      ?? (native?.byteOffset !== undefined ? `byte:${native.byteOffset}` : null)
+      ?? (native?.lineNumber !== undefined ? `line:${native.lineNumber}` : null)
+      ?? `event:${batchId}`;
+    return {
+      message,
+      source: {
+        namespace: sourceNamespace,
+        itemId,
+        subrowId: `row:${native?.withinSourceOrdinal ?? index}`,
+      },
+      nativeAlias: native ? {
+        ...(native.entryId ? { entryId: native.entryId } : {}),
+        ...(native.lineNumber !== undefined ? { lineNumber: native.lineNumber } : {}),
+        ...(native.byteOffset !== undefined ? { byteOffset: native.byteOffset } : {}),
+        ...(native.withinSourceOrdinal !== undefined
+          ? { withinSourceOrdinal: native.withinSourceOrdinal }
+          : {}),
+      } : null,
+    };
+  });
 }

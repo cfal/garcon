@@ -593,7 +593,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     const args = buildContinueArgs(threadId, model);
 
     try {
-      markAmpExecutionStarted(request);
+      if (request.executionAdmission) await markAmpExecutionStarted(request);
       this.emitProcessing(chatId, true);
       this.#spawnAmp(session, projectPath, args, command);
       onAbortable?.();
@@ -644,7 +644,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     const args = buildContinueArgs(threadId, model);
 
     try {
-      markAmpExecutionStarted(request);
+      if (request.executionAdmission) await markAmpExecutionStarted(request);
       this.emitProcessing(chatId, true);
       this.#spawnAmp(session, projectPath, args, command);
       onAbortable?.();

@@ -5,7 +5,7 @@ import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/ev
 
 export interface AcpExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface AcpExecutionRequest {
@@ -56,11 +56,11 @@ export function assertAcpExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markAcpExecutionStarted(
+export async function markAcpExecutionStarted(
   request: { readonly executionAdmission?: AcpExecutionAdmission },
-): void {
+): Promise<void> {
   assertAcpExecutionOpen(request);
-  request.executionAdmission?.markStarted();
+  await request.executionAdmission?.markStarted();
 }
 
 export function acpEventMetadata(

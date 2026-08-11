@@ -654,7 +654,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
       this.emitSessionCreated(request.chatId);
-      markCodexExecutionStarted(request);
+      if (request.executionAdmission) await markCodexExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       await this.#startRequestedTurn(client, session, request);
 
@@ -712,7 +712,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
             throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
           }
-          markCodexExecutionStarted(request);
+          if (request.executionAdmission) await markCodexExecutionStarted(request);
           this.emitProcessing(request.chatId, true);
           if (!request.codexGoalCommand) {
             if (session.managesGoalLifecycle) {
@@ -795,7 +795,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       session.turnItems.markManualCompaction();
       session.onAbortable = request.onAbortable;
       this.#releaseBufferedClientEvents(client);
-      markCodexExecutionStarted(request);
+      if (request.executionAdmission) await markCodexExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       await client.compactThread(resumed.thread.id);
     } catch (error) {

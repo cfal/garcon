@@ -15,7 +15,6 @@ import {
   PermissionCancelledMessage,
   PermissionRequestMessage,
   PermissionResolvedMessage,
-  type ChatMessage,
 } from '@garcon/common/chat-types';
 import { randomUUID } from 'node:crypto';
 import {
@@ -23,6 +22,7 @@ import {
   transcriptSeedEntries,
 } from './journal-stream.js';
 import type {
+  AgentProjectionProducerMessage,
   AgentProjectionProducerEvent,
   AgentProjectionRuntimeExecution,
 } from '../execution/projection-events.js';
@@ -72,6 +72,7 @@ export function createAgentOwnedProjection(
     releaseProvider: (request) => options.transcript.release(request),
   });
   const operations = new Map<string, AgentTurnOwnerOperationIdentityV4>();
+  const attributions = new Map<string, AgentTurnBoundOperationIdentityV4>();
   const chains = new Map<string, Promise<void>>();
   const faults = new Map<string, unknown>();
   const controls = new Map<string, Map<string, string>>();
@@ -88,17 +89,18 @@ export function createAgentOwnedProjection(
   };
 
   options.execution.subscribeProjectionEvents((event) => {
-    const operation = operations.get(event.chatId);
-    if (!operation) return;
+    const terminalOperation = operations.get(event.chatId);
+    if (!terminalOperation || !sameOwner(terminalOperation, event.operation)) return;
+    const causalOperation = attributions.get(event.chatId) ?? terminalOperation;
     void enqueue(event.chatId, async () => {
-      const chat = transcript.referenceForOperation(event.chatId, operation);
+      const chat = transcript.referenceForOperation(event.chatId, terminalOperation);
       if (!chat) throw new TypeError(`Projection segment ${event.chatId} is not open`);
       switch (event.type) {
         case 'messages':
           await projectMessages({
             transcript,
             chat,
-            operation,
+            operation: causalOperation,
             messages: event.messages,
             controls,
             controlOrder,
@@ -107,7 +109,7 @@ export function createAgentOwnedProjection(
         case 'processing':
           return;
         case 'session-created':
-          await transcript.emitSession(chat, operation, event.session);
+          await transcript.emitSession(chat, terminalOperation, event.session);
           return;
         case 'finished':
         case 'failed': {
@@ -130,18 +132,19 @@ export function createAgentOwnedProjection(
               ? { kind: 'finished' as const, exitCode: event.exitCode }
               : { kind: 'failed' as const, error: event.error };
           if ((controls.get(event.chatId)?.size ?? 0) > 0) {
-            await transcript.emitControl(chat, operation, {
+            await transcript.emitControl(chat, causalOperation, {
               kind: 'clear',
             });
             controls.delete(event.chatId);
           }
           await transcript.emitTerminal({
             chat,
-            operation,
+            operation: terminalOperation,
             outcome,
             sourceSettlement: projectionFault ? 'unresolved' : sourceSettlement,
           });
           operations.delete(event.chatId);
+          attributions.delete(event.chatId);
           faults.delete(event.chatId);
           controlOrder.delete(event.chatId);
           return;
@@ -160,6 +163,7 @@ export function createAgentOwnedProjection(
       throw new TypeError(`Cannot replace active projection operation for ${chatId}`);
     }
     operations.set(chatId, operation);
+    attributions.set(chatId, operation);
     try {
       const result = await action();
       // Blocking provider runtimes emit their terminal callback before their
@@ -169,6 +173,7 @@ export function createAgentOwnedProjection(
       return result;
     } catch (error) {
       if (operations.get(chatId) === operation) operations.delete(chatId);
+      if (sameOperation(attributions.get(chatId), operation)) attributions.delete(chatId);
       throw error;
     }
   };
@@ -203,12 +208,26 @@ export function createAgentOwnedProjection(
     operation: AgentTurnBoundOperationIdentityV4,
     action: () => Promise<T>,
   ): Promise<T> => {
-    const result = await action();
-    if (result.kind !== 'accepted') return result;
-    const chat = transcript.referenceForOperation(chatId, operation);
-    if (!chat) throw new TypeError(`Projection segment ${chatId} is not open`);
-    await transcript.promoteActiveInput(chat, operation);
-    return result;
+    const owner = operations.get(chatId);
+    if (!owner || !sameTurnOwner(owner.turnOwner, operation.turnOwner)) {
+      throw new TypeError(`Cannot attribute a steer outside the active turn for ${chatId}`);
+    }
+    const previous = attributions.get(chatId) ?? owner;
+    attributions.set(chatId, operation);
+    try {
+      const result = await action();
+      if (result.kind !== 'accepted') {
+        if (sameOperation(attributions.get(chatId), operation)) attributions.set(chatId, previous);
+        return result;
+      }
+      const chat = transcript.referenceForOperation(chatId, operation);
+      if (!chat) throw new TypeError(`Projection segment ${chatId} is not open`);
+      await transcript.promoteActiveInput(chat, operation);
+      return result;
+    } catch (error) {
+      if (sameOperation(attributions.get(chatId), operation)) attributions.set(chatId, previous);
+      throw error;
+    }
   };
 
   const replaceTrackedOperation = (
@@ -220,6 +239,7 @@ export function createAgentOwnedProjection(
       throw new TypeError(`Cannot replace projection ownership for ${chatId}`);
     }
     operations.set(chatId, operation);
+    attributions.set(chatId, operation);
   };
 
   return {
@@ -235,11 +255,11 @@ async function projectMessages(options: {
   readonly transcript: JournalBackedAgentTranscriptStream;
   readonly chat: AgentTranscriptRequestV4['chat'];
   readonly operation: AgentTurnBoundOperationIdentityV4;
-  readonly messages: readonly ChatMessage[];
+  readonly messages: readonly AgentProjectionProducerMessage[];
   readonly controls: Map<string, Map<string, string>>;
   readonly controlOrder: Map<string, number>;
 }): Promise<void> {
-  let durable: ChatMessage[] = [];
+  let durable: AgentProjectionProducerMessage[] = [];
   const flush = async () => {
     if (!durable.length) return;
     const messages = durable;
@@ -247,10 +267,15 @@ async function projectMessages(options: {
     await options.transcript.appendMessages({
       chat: options.chat,
       operation: options.operation,
-      messages,
+      messages: messages.map((record) => record.message),
+      sources: messages.map((record) => ({
+        source: record.source,
+        nativeAlias: record.nativeAlias,
+      })),
     });
   };
-  for (const message of options.messages) {
+  for (const record of options.messages) {
+    const message = record.message;
     if (message instanceof PermissionRequestMessage) {
       await flush();
       const byId = options.controls.get(options.chat.chatId) ?? new Map<string, string>();
@@ -285,10 +310,10 @@ async function projectMessages(options: {
       });
       byId?.delete(message.permissionRequestId);
       if (byId?.size === 0) options.controls.delete(options.chat.chatId);
-      durable.push(message);
+      durable.push(record);
       continue;
     }
-    durable.push(message);
+    durable.push(record);
   }
   await flush();
 }
@@ -308,12 +333,12 @@ function withProjectionAdmission<
     ...request,
     admission: {
       signal: request.admission.signal,
-      markStarted: () => {
+      markStarted: async () => {
         const chat = transcript.referenceForOperation(request.chatId, request.operation);
         if (!chat) throw new TypeError(`Projection segment ${request.chatId} is not open`);
         promotion ??= transcript.promoteActiveInput(chat, request.operation);
-        void promotion.catch(() => {});
-        request.admission.markStarted();
+        await promotion;
+        await request.admission.markStarted();
       },
       markAbortable: () => request.admission.markAbortable(),
     },
@@ -338,4 +363,25 @@ function sameOwner(
   return left.agentOwnershipEpoch === right.agentOwnershipEpoch
     && left.turnOwner.clientRequestId === right.turnOwner.clientRequestId
     && left.turnOwner.turnId === right.turnOwner.turnId;
+}
+
+function sameTurnOwner(
+  left: AgentTurnBoundOperationIdentityV4['turnOwner'],
+  right: AgentTurnBoundOperationIdentityV4['turnOwner'],
+): boolean {
+  return left.agentOwnershipEpoch === right.agentOwnershipEpoch
+    && left.clientRequestId === right.clientRequestId
+    && left.turnId === right.turnId;
+}
+
+function sameOperation(
+  left: AgentTurnBoundOperationIdentityV4 | undefined,
+  right: AgentTurnBoundOperationIdentityV4,
+): boolean {
+  return left?.agentOwnershipEpoch === right.agentOwnershipEpoch
+    && left.commandType === right.commandType
+    && left.clientRequestId === right.clientRequestId
+    && left.clientMessageId === right.clientMessageId
+    && left.turnId === right.turnId
+    && sameTurnOwner(left.turnOwner, right.turnOwner);
 }

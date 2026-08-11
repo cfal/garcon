@@ -20,7 +20,7 @@ export interface CodexProviderConfig {
 
 export interface CodexExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface CodexExecutionRequest {
@@ -76,11 +76,11 @@ export function assertCodexExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markCodexExecutionStarted(
+export async function markCodexExecutionStarted(
   request: { readonly executionAdmission?: CodexExecutionAdmission },
-): void {
+): Promise<void> {
   assertCodexExecutionOpen(request);
-  request.executionAdmission?.markStarted();
+  await request.executionAdmission?.markStarted();
 }
 
 export function codexEventMetadata(

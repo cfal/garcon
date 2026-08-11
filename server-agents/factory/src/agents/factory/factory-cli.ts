@@ -678,7 +678,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     };
 
     try {
-      markFactoryExecutionStarted(request);
+      if (request.executionAdmission) await markFactoryExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: false }));
       request.onAbortable?.();
@@ -733,7 +733,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     this.#runningSessions.set(session.id, session);
 
     try {
-      markFactoryExecutionStarted(request);
+      if (request.executionAdmission) await markFactoryExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: true }));
       request.onAbortable?.();

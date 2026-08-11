@@ -60,7 +60,7 @@ function request(modelEndpointId: string): AgentExecutionContextV4 {
     attachments: [],
     admission: {
       signal: new AbortController().signal,
-      markStarted() {},
+      async markStarted() {},
       markAbortable() {},
     },
   };

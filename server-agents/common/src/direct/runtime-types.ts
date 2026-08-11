@@ -13,7 +13,7 @@ export interface DirectEndpointRuntime {
 
 export interface DirectExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface DirectExecutionRequest {
@@ -50,11 +50,11 @@ export function assertDirectExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markDirectExecutionStarted(
+export async function markDirectExecutionStarted(
   request: { readonly executionAdmission?: DirectExecutionAdmission },
-): void {
+): Promise<void> {
   assertDirectExecutionOpen(request);
-  request.executionAdmission?.markStarted();
+  await request.executionAdmission?.markStarted();
 }
 
 export function directEventMetadata(

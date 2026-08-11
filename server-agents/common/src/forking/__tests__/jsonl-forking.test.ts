@@ -123,7 +123,7 @@ async function createFixture() {
     },
     admission: {
       signal: new AbortController().signal,
-      markStarted() {},
+      async markStarted() {},
       markAbortable() {},
     },
     source: {

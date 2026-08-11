@@ -9,7 +9,7 @@ export interface FactoryCommandImage {
 
 export interface FactoryExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface FactoryExecutionRequest {
@@ -44,11 +44,11 @@ export function assertFactoryExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markFactoryExecutionStarted(
+export async function markFactoryExecutionStarted(
   request: { readonly executionAdmission?: FactoryExecutionAdmission },
-): void {
+): Promise<void> {
   assertFactoryExecutionOpen(request);
-  request.executionAdmission?.markStarted();
+  await request.executionAdmission?.markStarted();
 }
 
 export function factoryEventMetadata(

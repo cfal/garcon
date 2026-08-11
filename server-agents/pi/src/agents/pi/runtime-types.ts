@@ -5,7 +5,7 @@ import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/ev
 
 export interface PiExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface PiExecutionRequest {
@@ -41,11 +41,11 @@ export function assertPiExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markPiExecutionStarted(
+export async function markPiExecutionStarted(
   request: { readonly executionAdmission?: PiExecutionAdmission },
-): void {
+): Promise<void> {
   assertPiExecutionOpen(request);
-  request.executionAdmission?.markStarted();
+  await request.executionAdmission?.markStarted();
 }
 
 export function piEventMetadata(

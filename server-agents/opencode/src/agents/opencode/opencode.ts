@@ -1128,7 +1128,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
-      markOpenCodeExecutionStarted(request);
+      if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
       this.emitProcessing(chatId, true);
     } catch (error) {
       this.#sessions.delete(agentSessionId);
@@ -1252,7 +1252,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
-      markOpenCodeExecutionStarted(request);
+      if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
       this.emitProcessing(chatId, true);
       const promptRequest = this.#runScopedSessionRequest(
         'OpenCode prompt submit',

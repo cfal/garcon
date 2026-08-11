@@ -86,7 +86,7 @@ export interface AgentOperationIdentity {
 
 export interface AgentExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
   markAbortable(): void;
 }
 

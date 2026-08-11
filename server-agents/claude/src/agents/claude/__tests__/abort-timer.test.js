@@ -221,7 +221,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     runtime.shutdown();
   });
 
-  it('kills and rolls back a process whose prompt write fails synchronously', async () => {
+  it('records provider ownership before killing a process whose prompt write fails', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     const write = ctrl.proc.stdin.write.bind(ctrl.proc.stdin);
@@ -240,7 +240,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     }))).rejects.toThrow('stdin failed');
 
     expect(ctrl.proc.ended).toBe(true);
-    expect(markStarted).not.toHaveBeenCalled();
+    expect(markStarted).toHaveBeenCalledTimes(1);
     expect(runtime.isClaudeInternalSessionRunning('session-1')).toBe(false);
     runtime.shutdown();
   });

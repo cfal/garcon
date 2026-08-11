@@ -4,7 +4,7 @@ import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
 
 export interface OpenCodeExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface OpenCodeExecutionRequest {
@@ -42,11 +42,11 @@ export function assertOpenCodeExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markOpenCodeExecutionStarted(
+export async function markOpenCodeExecutionStarted(
   request: { readonly executionAdmission?: OpenCodeExecutionAdmission },
-): void {
+): Promise<void> {
   assertOpenCodeExecutionOpen(request);
-  request.executionAdmission?.markStarted();
+  await request.executionAdmission?.markStarted();
 }
 
 export function openCodeEventMetadata(

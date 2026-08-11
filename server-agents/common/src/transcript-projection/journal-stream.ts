@@ -56,6 +56,7 @@ import { AgentProjectionEventStream } from './stream.js';
 export interface AgentTranscriptSeedEntry {
   readonly message: ChatMessage;
   readonly source: AgentTranscriptSourceIdentity;
+  readonly nativeAlias?: JsonObject | null;
   readonly provenance?: AgentTranscriptProvenance | null;
   readonly entryId?: AgentTranscriptEntry['id'];
 }
@@ -443,8 +444,15 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     readonly messages: readonly ChatMessage[];
     readonly upstreamRequestId?: string | null;
     readonly sourceNamespace?: string;
+    readonly sources?: readonly {
+      readonly source: AgentTranscriptSourceIdentity;
+      readonly nativeAlias: JsonObject | null;
+    }[];
   }): Promise<readonly AgentTranscriptEntry[]> {
     if (!options.messages.length) return [];
+    if (options.sources && options.sources.length !== options.messages.length) {
+      throw new TypeError('Serialized projection sources must align with their messages');
+    }
     const segment = this.#open(options.chat);
     return segment.gate.run(async () => {
       const active = segment.stream.current.entries.at(-1);
@@ -460,7 +468,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
         segment.stream.current.entries.flatMap((entry) => entry.source ? [sourceIdentityKey(entry.source)] : []),
       );
       const appended = options.messages.flatMap((message, index) => {
-        const source = messageSource(
+        const source = options.sources?.[index]?.source ?? messageSource(
           this.options.ownerId,
           options.sourceNamespace,
           message,
@@ -483,7 +491,12 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       });
       if (appended.length) {
         await segment.stream.commit([], appended);
-        await persistNativeAliases(segment, appended);
+        const serializedAliases = new Map(options.sources?.flatMap((record) => (
+          record.nativeAlias
+            ? [[sourceIdentityKey(record.source), record.nativeAlias] as const]
+            : []
+        )) ?? []);
+        await persistNativeAliases(segment, appended, serializedAliases);
       }
       return appended;
     });
@@ -659,6 +672,7 @@ export function transcriptSeedEntries(
   return messages.map((message, index) => ({
     message,
     source: messageSource(ownerId, sourceNamespace, message, index, batchId),
+    nativeAlias: nativeAlias(message),
   }));
 }
 
@@ -755,7 +769,7 @@ function messageTimestamp(message: ChatMessage): string | null {
 
 function aliasesFromSeeds(seeds: readonly AgentTranscriptSeedEntry[]): JsonObject {
   return Object.fromEntries(seeds.flatMap((seed) => {
-    const alias = nativeAlias(seed.message);
+    const alias = seed.nativeAlias === undefined ? nativeAlias(seed.message) : seed.nativeAlias;
     return alias ? [[sourceIdentityKey(seed.source), alias] as const] : [];
   }));
 }
@@ -763,9 +777,12 @@ function aliasesFromSeeds(seeds: readonly AgentTranscriptSeedEntry[]): JsonObjec
 async function persistNativeAliases(
   segment: OpenSegment,
   entries: readonly AgentTranscriptEntry[],
+  serializedAliases: ReadonlyMap<string, JsonObject> = new Map(),
 ): Promise<void> {
   const additions = entries.flatMap((entry) => {
-    const alias = entry.source ? nativeAlias(entry.message) : null;
+    const alias = entry.source
+      ? serializedAliases.get(sourceIdentityKey(entry.source)) ?? nativeAlias(entry.message)
+      : null;
     return alias && entry.source
       ? [[sourceIdentityKey(entry.source), alias] as const]
       : [];

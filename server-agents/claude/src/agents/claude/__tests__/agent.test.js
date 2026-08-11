@@ -68,7 +68,7 @@ function startRequest(projectPath, signal = new AbortController().signal) {
     },
     admission: {
       signal,
-      markStarted: mock(() => undefined),
+      markStarted: mock(async () => undefined),
       markAbortable: mock(() => undefined),
     },
     prompt: 'hello',
@@ -85,7 +85,7 @@ describe('ClaudeExecution', () => {
       const claude = createClaudeStub(startError);
       const execution = createExecution(claude, projectPath);
       const failed = new Promise((resolve) => {
-        execution.subscribe((event) => {
+        execution.subscribeProjectionEvents((event) => {
           if (event.type === 'failed') resolve(event);
         });
       });
@@ -129,7 +129,7 @@ describe('ClaudeExecution', () => {
       const execution = createExecution(claude, projectPath);
       const controller = new AbortController();
       const failed = new Promise((resolve) => {
-        execution.subscribe((event) => {
+        execution.subscribeProjectionEvents((event) => {
           if (event.type === 'failed') resolve(event);
         });
       });

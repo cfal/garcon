@@ -9,7 +9,7 @@ import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/ev
 
 export interface ClaudeExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface ClaudeExecutionRequest {

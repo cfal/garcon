@@ -516,7 +516,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       await this.#configureSession(session, request);
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
-      markAcpExecutionStarted(request);
+      if (request.executionAdmission) await markAcpExecutionStarted(request);
       executionStarted = true;
       session.running = true;
       session.state = 'running';
