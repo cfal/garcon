@@ -24,6 +24,10 @@ export type NativeAuditOutcome =
       // recomputed on every audit rather than recorded, so it clears itself
       // once the provider catches up.
       readonly aheadFromOrdinal: number | null;
+      // Native aliases observed for already-committed identities, so rows
+      // journalled from live events gain their provider positions once the
+      // provider persists them.
+      readonly matchedAliases: ReadonlyMap<string, AgentTranscriptSeedEntry>;
     };
 
 export function auditNativeEvidence(options: {
@@ -58,6 +62,7 @@ export function auditNativeEvidence(options: {
 
   let lastMatchedNativePosition = -1;
   const missing: number[] = [];
+  const matchedAliases = new Map<string, AgentTranscriptSeedEntry>();
   let firstMatchedJournalIndex = -1;
   let lastMatchedJournalIndex = -1;
   for (const [index, committed] of journal.entries()) {
@@ -71,6 +76,7 @@ export function auditNativeEvidence(options: {
     if (firstMatchedJournalIndex === -1) firstMatchedJournalIndex = index;
     lastMatchedJournalIndex = index;
     lastMatchedNativePosition = position;
+    matchedAliases.set(committed.key, native[position]!.seed);
   }
   // Missing identities are explainable only at the edges: a missing prefix is
   // provider compaction and a missing tail is a provider that has not
@@ -107,6 +113,7 @@ export function auditNativeEvidence(options: {
     aheadFromOrdinal: missingTail.length === 0
       ? null
       : journal[missingTail[0]!]!.ordinal,
+    matchedAliases,
   };
 }
 

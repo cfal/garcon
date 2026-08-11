@@ -39,9 +39,10 @@ const chat: AgentChatReferenceV4 = {
 };
 
 function nativeMessage(itemId: string, content: string): ChatMessage {
+  const line = Number(itemId.split('-').at(-1));
   return attachNativeMessageSource(
     new UserMessage('2026-06-01T00:00:00.000Z', content),
-    { entryId: itemId, withinSourceOrdinal: 0 },
+    { entryId: itemId, lineNumber: line, withinSourceOrdinal: 0 },
   );
 }
 

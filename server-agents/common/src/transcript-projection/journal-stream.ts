@@ -193,13 +193,27 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       await journal.appendImported(seedEntries(request.chat, outcome.suffix));
     }
     const importedAliases = aliasesFromSeeds(outcome.suffix);
+    // Committed identities the provider has now persisted gain their native
+    // positions, which is what makes rows journalled from live events line
+    // addressable for fork continuity.
+    const boundAliases = Object.fromEntries(
+      [...outcome.matchedAliases]
+        .filter(([key]) => state.aliases[key] === undefined
+          || nativeAliasLineNumber(state.aliases[key]) === null)
+        .flatMap(([key, seed]) => {
+          const alias = seed.nativeAlias === undefined ? nativeAlias(seed.message) : seed.nativeAlias;
+          return alias ? [[key, alias] as const] : [];
+        }),
+    );
     const floor = outcome.nativeRetentionFloor;
-    if (Object.keys(importedAliases).length > 0 || (floor !== null && floor > state.nativeRetentionFloor)) {
+    if (Object.keys(importedAliases).length > 0
+        || Object.keys(boundAliases).length > 0
+        || (floor !== null && floor > state.nativeRetentionFloor)) {
       await journal.updateNativeMetadata({
         nativeRetentionFloor: floor !== null && floor > state.nativeRetentionFloor
           ? floor
           : state.nativeRetentionFloor,
-        aliases: { ...state.aliases, ...importedAliases },
+        aliases: { ...state.aliases, ...boundAliases, ...importedAliases },
       });
     }
     return outcome.aheadFromOrdinal;
@@ -422,6 +436,11 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     }
     if (!entry.source) return { kind: 'unavailable', reason: 'no-native-source' };
     const alias = journal.aliases[sourceIdentityKey(entry.source)];
+    // A durable row without a bound native line has not been persisted by the
+    // provider yet; a line-cut fork through it would silently drop it.
+    if (nativeAliasLineNumber(alias) === null) {
+      return { kind: 'unavailable', reason: 'projection-ahead-of-provider' };
+    }
     const prefix = segment.stream.current.entries.slice(0, ordinal);
     const lineCounts: Record<string, number> = {};
     let firstLine: number | null = null;
@@ -429,7 +448,9 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       if (!candidate.source) return { kind: 'unavailable', reason: 'no-native-source' };
       const candidateAlias = journal.aliases[sourceIdentityKey(candidate.source)];
       const lineNumber = nativeAliasLineNumber(candidateAlias);
-      if (lineNumber === null) continue;
+      if (lineNumber === null) {
+        return { kind: 'unavailable', reason: 'projection-ahead-of-provider' };
+      }
       firstLine = firstLine === null ? lineNumber : Math.min(firstLine, lineNumber);
       lineCounts[String(lineNumber)] = (lineCounts[String(lineNumber)] ?? 0) + 1;
     }

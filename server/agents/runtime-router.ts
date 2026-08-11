@@ -588,6 +588,7 @@ export class AgentRuntimeRouter {
             'TRANSCRIPT_UNAVAILABLE',
             'The selected transcript entry is not durably settled',
             true,
+            { nativeForkReason: 'not-settled' },
           );
         }
         const projectionPoint: AgentForkPoint = {
@@ -616,6 +617,7 @@ export class AgentRuntimeRouter {
             nativeForkUnavailableMessage(resolution.reason),
             resolution.reason === 'projection-ahead-of-provider'
               || resolution.reason === 'not-settled',
+            { nativeForkReason: resolution.reason },
           );
         }
         point = { projection: projectionPoint, native: resolution.reference };
@@ -642,6 +644,17 @@ export class AgentRuntimeRouter {
         throw new DomainError('SOURCE_REVISION_CHANGED', error.message, 409, error.retryable);
       }
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
+        // A point the provider has not settled or persisted yet keeps the
+        // established retry-later contract instead of a hard failure.
+        const reason = error.details?.nativeForkReason;
+        if (reason === 'not-settled' || reason === 'projection-ahead-of-provider') {
+          throw new DomainError(
+            'MESSAGE_NOT_IN_NATIVE_HISTORY',
+            "This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
+            409,
+            true,
+          );
+        }
         throw new DomainError(
           'TRANSCRIPT_UNAVAILABLE',
           transcriptUnavailableMessage(error.retryable),
