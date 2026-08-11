@@ -160,6 +160,7 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
   const response = `echo:${prompt}`;
   const userTimestamp = new Date().toISOString();
   const assistantTimestamp = new Date(Date.now() + 1).toISOString();
+  const assistantUuid = randomUUID();
   if (process.env.CLAUDE_TEST_STREAM_PROMPT === prompt) {
     streamActiveTurn({
       sessionId,
@@ -223,7 +224,7 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
     JSON.stringify({
       sessionId,
       type: 'assistant',
-      uuid: randomUUID(),
+      uuid: assistantUuid,
       timestamp: assistantTimestamp,
       cwd: process.cwd(),
       message: {
@@ -262,6 +263,7 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
   writeOutput({
     type: 'assistant',
     session_id: sessionId,
+    uuid: assistantUuid,
     message: {
       role: 'assistant',
       content: [{ type: 'text', text: response }],
@@ -302,6 +304,7 @@ function streamActiveTurn(turn: {
   response: string;
   userTimestamp: string;
 }): void {
+  const streamedAssistantUuid = randomUUID();
   appendFileSync(turn.nativePath, `${JSON.stringify({
     sessionId: turn.sessionId,
     type: 'user',
@@ -338,6 +341,7 @@ function streamActiveTurn(turn: {
   writeOutput({
     type: 'assistant',
     session_id: turn.sessionId,
+    uuid: streamedAssistantUuid,
     message: { role: 'assistant', content: [{ type: 'text', text: turn.response }] },
   });
 
@@ -346,7 +350,7 @@ function streamActiveTurn(turn: {
     appendFileSync(turn.nativePath, `${JSON.stringify({
       sessionId: turn.sessionId,
       type: 'assistant',
-      uuid: randomUUID(),
+      uuid: streamedAssistantUuid,
       timestamp: new Date().toISOString(),
       cwd: process.cwd(),
       message: { role: 'assistant', content: [{ type: 'text', text: turn.response }] },

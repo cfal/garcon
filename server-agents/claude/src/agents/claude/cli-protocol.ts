@@ -1,4 +1,5 @@
 import { AssistantMessage, ThinkingMessage, ToolResultMessage } from '@garcon/common/chat-types';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import { convertClaudeToolUse } from './tool-use-converter.js';
 import { claudeToolResultContent } from './tool-result-converter.js';
@@ -343,6 +344,9 @@ export function convertCLIMessageToChatMessages(message: ClaudeCLIMessage): Chat
   if (!isAssistant && !isUser) return [];
 
   const chatMessages: ChatMessage[] = [];
+  // One stream message mirrors one JSONL record; its uuid plus the rendered
+  // ordinal is the canonical identity both live rows and JSONL import share.
+  const recordUuid = typeof message.uuid === 'string' && message.uuid ? message.uuid : null;
   const now = new Date().toISOString();
   const rawContent =
     Array.isArray(message.content) ? message.content
@@ -373,5 +377,13 @@ export function convertCLIMessageToChatMessages(message: ClaudeCLIMessage): Chat
     }
   }
 
+  if (recordUuid) {
+    chatMessages.forEach((chatMessage, withinSourceOrdinal) => {
+      attachNativeMessageSource(chatMessage, {
+        entryId: recordUuid,
+        withinSourceOrdinal,
+      });
+    });
+  }
   return chatMessages;
 }

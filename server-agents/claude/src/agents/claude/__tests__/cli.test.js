@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages } from '../claude-cli.js';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   ClaudeTurnState,
   claudeBackgroundTaskCount,
@@ -344,6 +345,25 @@ describe('buildClaudeCLIArgs', () => {
 describe('convertCLIMessageToChatMessages', () => {
   it('returns empty array for non-assistant messages', () => {
     expect(convertCLIMessageToChatMessages({ type: 'system', content: [] })).toEqual([]);
+  });
+
+  it('attaches the record uuid and rendered ordinal as the native identity', () => {
+    const result = convertCLIMessageToChatMessages({
+      type: 'assistant',
+      uuid: 'uuid-live-1',
+      content: [
+        { type: 'thinking', thinking: 'reason' },
+        { type: 'text', text: 'answer' },
+      ],
+    });
+    expect(result).toHaveLength(2);
+    expect(getNativeMessageRevisionSource(result[0])).toEqual({ entryId: 'uuid-live-1', withinSourceOrdinal: 0 });
+    expect(getNativeMessageRevisionSource(result[1])).toEqual({ entryId: 'uuid-live-1', withinSourceOrdinal: 1 });
+    const withoutUuid = convertCLIMessageToChatMessages({
+      type: 'assistant',
+      content: [{ type: 'text', text: 'answer' }],
+    });
+    expect(getNativeMessageRevisionSource(withoutUuid[0])).toBeNull();
   });
 
   it('converts text to assistant-message', () => {
