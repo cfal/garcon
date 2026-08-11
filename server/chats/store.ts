@@ -253,7 +253,10 @@ function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegi
       ? rawEntry.modelProtocol
       : null,
     lastReadAt: normalizeNullableString(rawEntry.lastReadAt),
-    nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
+    ...(() => {
+      const nextForkOrdinal = normalizeNextForkOrdinal(rawEntry.nextForkOrdinal);
+      return nextForkOrdinal === undefined ? {} : { nextForkOrdinal };
+    })(),
     ...normalizeRegistryModes(rawEntry),
     carryOverSegments,
     nativeSeedReceipt,
