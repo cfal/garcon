@@ -36,15 +36,36 @@ export function auditNativeEvidence(options: {
   readonly seeds: readonly AgentTranscriptSeedEntry[];
 }): NativeAuditOutcome {
   const namespace = `${options.ownerId}:native`;
-  const journal = options.entries.flatMap((entry, index) => (
-    entry.lifetime === 'durable' && comparableSource(entry.source, namespace)
-      ? [{ ordinal: index + 1, key: sourceIdentityKey(entry.source!) }]
-      : []
-  ));
-  // A populated journal without any comparable identity offers no anchor to
-  // match against, and importing anything could duplicate rows imported at
-  // genesis under process-local fallback identities.
+  // Admission rows anchor by identity and order rather than native source key:
+  // providers that never notify user items still persist the admitted input as
+  // a native user row, which the admission row claims without content
+  // comparison so the audit can align around it and bind its alias.
+  const journal = options.entries.flatMap(
+    (entry, index): { ordinal: number; key: string; kind: 'exact' | 'admission' }[] => {
+      const source = entry.source;
+      if (entry.lifetime !== 'durable' || source === null) return [];
+      if (comparableSource(source, namespace)) {
+        return [{ ordinal: index + 1, key: sourceIdentityKey(source), kind: 'exact' }];
+      }
+      if (source.namespace === 'garcon:admission' && entry.message.type === 'user-message') {
+        return [{ ordinal: index + 1, key: sourceIdentityKey(source), kind: 'admission' }];
+      }
+      return [];
+    },
+  );
+  // A populated journal without any comparable identity or admission anchor
+  // offers nothing to match against, and importing anything could duplicate
+  // rows imported at genesis under process-local fallback identities.
   if (journal.length === 0 && options.entries.length > 0) return { kind: 'skipped' };
+  // Durable rows journalled under process-local event identities have no
+  // native counterpart to match, so any import decision around them could
+  // duplicate the very rows they represent.
+  const hasFallbackRows = options.entries.some((entry) => (
+    entry.lifetime === 'durable'
+    && entry.source?.namespace === namespace
+    && entry.source.itemId.startsWith('event:')
+  ));
+  if (hasFallbackRows) return { kind: 'skipped' };
 
   const native: { readonly key: string; readonly seed: AgentTranscriptSeedEntry }[] = [];
   const nativePositions = new Map<string, number>();
@@ -63,19 +84,33 @@ export function auditNativeEvidence(options: {
   let lastMatchedNativePosition = -1;
   const missing: number[] = [];
   const matchedAliases = new Map<string, AgentTranscriptSeedEntry>();
+  const claimed = new Set<number>();
   let firstMatchedJournalIndex = -1;
   let lastMatchedJournalIndex = -1;
   for (const [index, committed] of journal.entries()) {
-    const position = nativePositions.get(committed.key);
+    let position: number | undefined;
+    if (committed.kind === 'exact') {
+      position = nativePositions.get(committed.key);
+      // Native order must preserve committed order.
+      if (position !== undefined && position <= lastMatchedNativePosition) {
+        return { kind: 'diverged' };
+      }
+    } else {
+      for (let candidate = lastMatchedNativePosition + 1; candidate < native.length; candidate += 1) {
+        if (claimed.has(candidate)) continue;
+        if (native[candidate]!.seed.message.type !== 'user-message') continue;
+        position = candidate;
+        break;
+      }
+    }
     if (position === undefined) {
       missing.push(index);
       continue;
     }
-    // Native order must preserve committed order.
-    if (position <= lastMatchedNativePosition) return { kind: 'diverged' };
     if (firstMatchedJournalIndex === -1) firstMatchedJournalIndex = index;
     lastMatchedJournalIndex = index;
     lastMatchedNativePosition = position;
+    claimed.add(position);
     matchedAliases.set(committed.key, native[position]!.seed);
   }
   // Missing identities are explainable only at the edges: a missing prefix is
@@ -91,10 +126,12 @@ export function auditNativeEvidence(options: {
   if (missingPrefix.length + missingTail.length !== missing.length) return { kind: 'diverged' };
   // Native rows the journal missed may only trail the last matched identity;
   // importing anything earlier would reorder committed ordinals.
-  const journalKeys = new Set(journal.map((committed) => committed.key));
+  const journalKeys = new Set(journal.flatMap((committed) => (
+    committed.kind === 'exact' ? [committed.key] : []
+  )));
   for (const [position, row] of native.entries()) {
     if (position > lastMatchedNativePosition) break;
-    if (!journalKeys.has(row.key)) return { kind: 'diverged' };
+    if (!claimed.has(position) && !journalKeys.has(row.key)) return { kind: 'diverged' };
   }
   const suffix = native
     .slice(lastMatchedNativePosition + 1)
@@ -120,7 +157,7 @@ export function auditNativeEvidence(options: {
 function comparableSource(
   source: AgentTranscriptSourceIdentity | null,
   namespace: string,
-): source is AgentTranscriptSourceIdentity {
+): boolean {
   return source !== null
     && source.namespace === namespace
     && !source.itemId.startsWith('event:');

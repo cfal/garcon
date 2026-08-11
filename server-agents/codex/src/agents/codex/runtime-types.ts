@@ -43,6 +43,10 @@ export interface CodexExecutionRequest {
 
 export interface CodexStartRequest extends CodexExecutionRequest {
   readonly codexSeedContext?: string;
+  // Invoked as soon as the thread is activated, before the first turn runs.
+  // A blocking runtime can settle the whole turn inside startSession, so the
+  // caller needs the session identity ahead of that resolution.
+  readonly onSessionActivated?: (session: CodexStartedSession) => void;
 }
 
 export interface CodexResumeRequest extends CodexExecutionRequest {

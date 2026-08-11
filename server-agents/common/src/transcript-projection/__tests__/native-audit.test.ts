@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { UserMessage, type ChatMessage } from '@garcon/common/chat-types';
+import { AssistantMessage, UserMessage, type ChatMessage } from '@garcon/common/chat-types';
 import {
   AgentIntegrationError,
   agentOwnershipEpoch,
@@ -37,6 +37,23 @@ const chat: AgentChatReferenceV4 = {
   nativeSeedReceipt: null,
   settings: { ownerId: 'test', schemaVersion: 1, values: {} },
 };
+
+function admissionOperation() {
+  const turnOwner = {
+    agentOwnershipEpoch: chat.agentOwnershipEpoch,
+    commandType: 'agent-run' as const,
+    clientRequestId: 'held-request',
+    turnId: 'held-turn',
+  };
+  return {
+    agentOwnershipEpoch: chat.agentOwnershipEpoch,
+    commandType: 'agent-run' as const,
+    clientRequestId: 'held-request',
+    clientMessageId: 'held-message',
+    turnId: 'held-turn',
+    turnOwner,
+  };
+}
 
 function nativeMessage(itemId: string, content: string): ChatMessage {
   const line = Number(itemId.split('-').at(-1));
@@ -336,6 +353,53 @@ describe('existing-journal native audit', () => {
       point: forkPointFor(after.checkpoint, after.entries[0]!.id),
     });
     expect(resolved.kind).toBe('ready');
+  });
+
+  it('imports held provider output around the admission anchor at the settled boundary', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+
+    // Admission commits the user row; the provider never notifies any item.
+    const operation = admissionOperation();
+    const preparation = await stream.prepareInput({
+      chat,
+      signal: signal(),
+      message: new UserMessage('2026-06-01T00:00:00.000Z', 'held prompt'),
+      operation,
+    });
+    await preparation.commit();
+    await stream.promoteActiveInput(chat, operation);
+
+    // The rollout persisted both the user row and the held assistant answer.
+    persisted = [
+      nativeMessage('item-1', 'held prompt'),
+      attachNativeMessageSource(
+        new AssistantMessage('2026-06-01T00:00:01.000Z', 'held answer'),
+        { entryId: 'item-2', lineNumber: 2, withinSourceOrdinal: 0 },
+      ),
+    ];
+    await stream.refreshNativeContinuity({ chat, operation, signal: signal() });
+
+    const after = await openContents(stream);
+    // The admission row is claimed rather than duplicated, and the held
+    // answer imports once under the settling turn's provenance.
+    expect(after.contents).toEqual(['held prompt', 'held answer']);
+    expect(after.entries[1]!.provenance?.turnOwner.turnId).toBe(operation.turnOwner.turnId);
+    const anchor = await stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(after.checkpoint, after.entries[0]!.id),
+    });
+    expect(anchor.kind).toBe('ready');
+
+    // A repeated settled audit is a no-op.
+    await stream.refreshNativeContinuity({ chat, operation, signal: signal() });
+    const again = await openContents(stream);
+    expect(again.contents).toEqual(['held prompt', 'held answer']);
+    expect(again.checkpoint.projection.durableRevision)
+      .toBe(after.checkpoint.projection.durableRevision);
   });
 
   it('serves the committed journal unchanged when evidence is unavailable or empty', async () => {

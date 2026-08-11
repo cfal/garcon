@@ -2,6 +2,7 @@ import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   type AgentCompactRequestV4,
+  type AgentStartedSession,
   type AgentExecutionContextV4,
   type AgentGoalControlRequestV4,
   type AgentHost,
@@ -79,27 +80,50 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
     try {
       const configuration = await this.#runtimeConfiguration(request);
       const runtimeRequest = prepareStartRequest(request, configuration);
-      const started = await this.runtime.startSession(runtimeRequest);
-      const session = {
-        agentSessionId: started.agentSessionId,
-        nativeSession: this.nativeSessions.encode({
-          path: started.nativePath,
+      // The session event must precede any turn event: a blocking runtime can
+      // settle the first turn inside startSession, and the settled audit needs
+      // the session identity to read provider evidence.
+      const holder: { session: AgentStartedSession | null } = { session: null };
+      const emitStarted = (started: { agentSessionId: string; nativePath: string | null }) => {
+        if (holder.session) return holder.session;
+        holder.session = {
           agentSessionId: started.agentSessionId,
-          modelEndpointId: request.endpoint?.endpointId ?? null,
-        }),
-        nativeSeedReceipt: receiptForCarriedContext(
-          request.carriedContext,
-          started.agentSessionId,
-          runtimeRequest.codexGoalCommand ? 'provider-context' : 'user-prefix',
-        ),
+          nativeSession: this.nativeSessions.encode({
+            path: started.nativePath,
+            agentSessionId: started.agentSessionId,
+            modelEndpointId: request.endpoint?.endpointId ?? null,
+          }),
+          nativeSeedReceipt: receiptForCarriedContext(
+            request.carriedContext,
+            started.agentSessionId,
+            runtimeRequest.codexGoalCommand ? 'provider-context' : 'user-prefix',
+          ),
+        };
+        this.#events.emit({
+          type: 'session-created',
+          chatId: request.chatId,
+          session: holder.session,
+          operation: request.operation,
+        });
+        return holder.session;
       };
-      this.#events.emit({
-        type: 'session-created',
-        chatId: request.chatId,
-        session,
-        operation: request.operation,
+      const started = await this.runtime.startSession({
+        ...runtimeRequest,
+        onSessionActivated: (session) => void emitStarted(session),
       });
-      return session;
+      const early = holder.session;
+      return early && early.agentSessionId === started.agentSessionId
+        // The materialized path supersedes the activation-time path for core's
+        // durable record without re-emitting the session event.
+        ? {
+            ...early,
+            nativeSession: this.nativeSessions.encode({
+              path: started.nativePath,
+              agentSessionId: started.agentSessionId,
+              modelEndpointId: request.endpoint?.endpointId ?? null,
+            }),
+          }
+        : emitStarted(started);
     } catch (error) {
       this.#operations.finish(request.chatId, request.operation);
       throw error;

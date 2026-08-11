@@ -653,6 +653,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
       this.emitSessionCreated(request.chatId);
+      request.onSessionActivated?.({ agentSessionId: threadId, nativePath: started.thread.path });
       if (request.executionAdmission) await markCodexExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       await this.#startRequestedTurn(client, session, request);

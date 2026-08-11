@@ -81,7 +81,9 @@ export interface JournalBackedTranscriptStreamOptions {
 
 interface OpenSegment {
   readonly identity: AgentSegmentIdentity;
-  readonly chat: AgentChatReferenceV4;
+  // Refreshed from session events: a session created mid-turn feeds later
+  // evidence reads that the reference captured at open time would miss.
+  chat: AgentChatReferenceV4;
   readonly journal: AgentProjectionJournal;
   readonly stream: AgentProjectionEventStream;
   readonly admission: AgentInputAdmissionCoordinator;
@@ -198,13 +200,17 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
 
   // Rebinds native continuity for an open segment at a settled provider
   // boundary: a newly persisted live row gains its native alias without a
-  // process restart, the ahead fence clears once the provider catches up, and
-  // divergence records durably. Committed rows are never appended, reread into
-  // the materialization, or re-rendered here.
-  async refreshNativeContinuity(request: AgentTranscriptRequestV4): Promise<void> {
+  // process restart, held provider output the stream never notified imports
+  // exactly once as the missing native suffix under the settling turn's
+  // provenance, the ahead fence clears once the provider catches up, and
+  // divergence records durably. Committed rows are never reread into the
+  // materialization or re-rendered here.
+  async refreshNativeContinuity(request: AgentTranscriptRequestV4 & {
+    readonly operation?: AgentTurnBoundOperationIdentityV4 | null;
+  }): Promise<void> {
     const segment = this.#segments.get(segmentKey(request.chat));
     if (!segment) return;
-    const evidence = await this.options.bootstrap(request);
+    const evidence = await this.options.bootstrap({ chat: segment.chat, signal: request.signal });
     if (evidence.kind !== 'ready') return;
     await segment.gate.run(async () => {
       const state = segment.journal.state;
@@ -224,7 +230,15 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
         }
         return;
       }
-      await applyAuditMetadata(segment.journal, outcome, {});
+      if (outcome.suffix.length > 0) {
+        const provenance = request.operation
+          ? { ...request.operation, upstreamRequestId: null }
+          : null;
+        await segment.stream.commit([], seedEntries(segment.chat, outcome.suffix).map((entry) => (
+          entry.provenance || !provenance ? entry : { ...entry, provenance }
+        )));
+      }
+      await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
       segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
     });
   }
@@ -633,6 +647,12 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
     session: import('@garcon/server-agent-interface').AgentStartedSession,
   ) {
     const segment = this.#open(chat);
+    segment.chat = {
+      ...segment.chat,
+      agentSessionId: session.agentSessionId,
+      nativeSession: session.nativeSession ?? segment.chat.nativeSession,
+      nativeSeedReceipt: session.nativeSeedReceipt ?? segment.chat.nativeSeedReceipt,
+    };
     return segment.gate.run(() => segment.stream.session(operation, session));
   }
 
