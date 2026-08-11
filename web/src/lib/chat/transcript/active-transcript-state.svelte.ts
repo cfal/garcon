@@ -11,6 +11,7 @@ import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { TranscriptNoticeFeed } from './transcript-notice-feed.svelte.js';
+import { TranscriptPendingInputs } from './transcript-pending-inputs.svelte.js';
 import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
 import {
 	responseMessageType,
@@ -38,7 +39,6 @@ import {
 	applyPendingDeliveryStatuses,
 	mergeRowsWithPendingInputs,
 	normalizePendingInputs,
-	sortPendingInputs,
 	uniqueEntriesByClientRequestId,
 	type ChatTranscriptRow,
 } from './transcript-row-projection.js';
@@ -70,7 +70,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	windowRevision = $state(0);
 	lastSeq = $state(0);
 	oldestSeq = $state(0);
-	pendingUserInputs = $state<PendingUserInput[]>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
 	hasEarlierMessages = $state(false);
@@ -86,9 +85,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#snapshotBuffer: SnapshotBatch[] | null = null;
 	#loadEpoch = 0;
 	#notices = new TranscriptNoticeFeed();
+	#pendingInputs = new TranscriptPendingInputs(() => {
+		this.#growExpandedVisibleWindow();
+		this.#recordFeedMutation('presentation-structure');
+	});
 	#deferredRetryChatId: string | null = null;
-	#pendingUserInputsRevision = 0;
-	#pendingUserInputsRevisionAtLoadStart = 0;
 	#pageLoadPromise: Promise<TranscriptPageLoadResult> | null = null;
 	#loadingPageChatId: string | null = null;
 	#loadingPageDirection: TranscriptPageDirection | null = null;
@@ -103,6 +104,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	get localNotices(): (LocalNoticeRow & { revision: number })[] {
 		return this.#notices.rows;
+	}
+
+	get pendingUserInputs(): PendingUserInput[] {
+		return this.#pendingInputs.rows;
 	}
 
 	#renderEntries = $derived.by(() =>
@@ -412,7 +417,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.oldestSeq = retainedMessages[0]?.seq ?? 0;
 		this.hasEarlierMessages = options.hasMore || retainedMessages.length < messages.length;
 		this.totalMessages = retainedMessages.length;
-		this.#replacePendingUserInputs(options.pendingUserInputs ?? []);
+		this.#pendingInputs.replace(options.pendingUserInputs ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.#notices.reset();
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
@@ -461,8 +466,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.oldestSeq = retainedMessages[0]?.seq ?? 0;
 		this.hasEarlierMessages = page.hasMore || retainedMessages.length < page.messages.length;
 		this.totalMessages = retainedMessages.length;
-		if (this.#pendingUserInputsRevision === this.#pendingUserInputsRevisionAtLoadStart) {
-			this.#replacePendingUserInputs(normalizePendingInputs(page.pendingUserInputs));
+		if (this.#pendingInputs.unchangedSinceLoadStart) {
+			this.#pendingInputs.replace(normalizePendingInputs(page.pendingUserInputs));
 		}
 		this.clearLocalNotices(this.#notices.revisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
@@ -720,46 +725,23 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	setPendingUserInputs(inputs: PendingUserInput[]): void {
-		this.#replacePendingUserInputs(inputs);
+		this.#pendingInputs.replace(inputs);
 	}
 
 	upsertPendingUserInput(input: PendingUserInput): void {
 		this.clearLocalNotices();
-		const next = this.pendingUserInputs.slice();
-		const index = next.findIndex((entry) => entry.clientRequestId === input.clientRequestId);
-		if (index >= 0) next[index] = input;
-		else next.push(input);
-		this.#replacePendingUserInputs(next);
+		this.#pendingInputs.upsert(input);
 	}
 
 	clearPendingUserInput(clientRequestId: string): void {
-		const next = this.pendingUserInputs.filter(
-			(input) => input.clientRequestId !== clientRequestId,
-		);
-		if (next.length === this.pendingUserInputs.length) return;
-		this.#replacePendingUserInputs(next);
+		this.#pendingInputs.clear(clientRequestId);
 	}
 
 	updatePendingUserInputDeliveryStatus(
 		clientRequestId: string,
 		deliveryStatus: UserMessageDeliveryStatus,
 	): void {
-		const current = this.pendingUserInputs.find(
-			(input) => input.clientRequestId === clientRequestId,
-		);
-		if (!current || current.deliveryStatus === deliveryStatus) return;
-		this.#replacePendingUserInputs(
-			this.pendingUserInputs.map((input) =>
-				input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
-			),
-		);
-	}
-
-	#replacePendingUserInputs(inputs: PendingUserInput[]): void {
-		this.#pendingUserInputsRevision += 1;
-		this.pendingUserInputs = sortPendingInputs(inputs);
-		this.#growExpandedVisibleWindow();
-		this.#recordFeedMutation('presentation-structure');
+		this.#pendingInputs.setDeliveryStatus(clientRequestId, deliveryStatus);
 	}
 
 	clearMessages(): void {
@@ -778,7 +760,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.generationId = '';
 		this.lastSeq = 0;
 		this.oldestSeq = 0;
-		this.#replacePendingUserInputs([]);
+		this.#pendingInputs.replace([]);
 		this.#notices.reset();
 		this.hasEarlierMessages = false;
 		this.totalMessages = 0;
@@ -917,7 +899,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	#beginLoadEpoch(): number {
-		this.#pendingUserInputsRevisionAtLoadStart = this.#pendingUserInputsRevision;
+		this.#pendingInputs.markLoadStart();
 		this.#notices.markLoadStart();
 		return ++this.#loadEpoch;
 	}

@@ -10,7 +10,6 @@ const MAX_LINES = 1000;
 
 const GRANDFATHER: Record<string, number> = {
 	'src/lib/chat/tools/tool-display-registry.ts': 1075,
-	'src/lib/chat/transcript/active-transcript-state.svelte.ts': 1020,
 	'src/lib/components/sidebar/SidebarVirtualSortableChatList.svelte': 1050,
 };
 
