@@ -51,19 +51,22 @@ describe('Codex fork while a turn is running', () => {
         agentSettings: codex.defaultSettings,
         model: codex.defaultModel,
       });
-      // Both streamed answers land above the persisted history, so the view outruns the rollout.
-      const running = await waitForLastSeq(fixture, sourceChatId, 5);
+      // The streamed rows land above the persisted history, so the view
+      // outruns the rollout's assistant tail.
+      const running = await waitForLastSeq(fixture, sourceChatId, 6);
       expect(running.messages.map((entry) => [entry.seq, entry.message.type])).toEqual([
         [1, 'user-message'],
         [2, 'assistant-message'],
         [3, 'user-message'],
-        [4, 'assistant-message'],
+        [4, 'thinking'],
         [5, 'assistant-message'],
+        [6, 'assistant-message'],
       ]);
 
-      // Seq 4 and 5 exist only on the event stream. Seq 4 additionally sits inside the range the
-      // rollout has already grown into, which is what used to fork at the wrong message.
-      for (const upToSeq of [4, 5]) {
+      // The streamed points have no bound native positions until the settled
+      // boundary proves them, even where the rollout has already grown into
+      // their range.
+      for (const upToSeq of [4, 5, 6]) {
         await expectEventStreamForkRefusal(fixture.client.forkChat({
           sourceChatId,
           chatId: fixture.newChatId(),
@@ -95,6 +98,7 @@ describe('Codex fork while a turn is running', () => {
 
       // The same point is forkable once the rollout owns those messages.
       const settledSeq = 5;
+
       const reloaded = await fixture.client.getMessages(sourceChatId);
       expect(reloaded.messages.map((entry) => entry.message.type)).toEqual([
         'user-message',
@@ -112,8 +116,14 @@ describe('Codex fork while a turn is running', () => {
         upToSeq: settledSeq,
       });
       const recovered = await fixture.client.getMessages(recoveredChatId);
-      expect(recovered.messages.map((entry) => entry.message))
-        .toEqual(reloaded.messages.slice(0, settledSeq).map((entry) => entry.message));
+      // The fork renders from the native cut, so live-only delivery metadata
+      // and timestamps regenerate; row types and contents must match.
+      const semantic = (entry: (typeof recovered.messages)[number]) => [
+        entry.message.type,
+        'content' in entry.message ? entry.message.content : null,
+      ];
+      expect(recovered.messages.map(semantic))
+        .toEqual(reloaded.messages.slice(0, settledSeq).map(semantic));
     }, {
       serverEnvironment,
       async prepareWorkspace(directories) {

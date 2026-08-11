@@ -298,6 +298,9 @@ function startStreamingTurn(
   userContent: string,
 ): void {
   const timestamp = new Date().toISOString();
+  const turnId = randomUUID();
+  const metadata = { turn_id: turnId };
+  const reasoningItemId = `${turnId}-reasoning`;
   appendFileSync(
     nativePath,
     [
@@ -306,8 +309,10 @@ function startStreamingTurn(
         type: 'response_item',
         payload: {
           type: 'message',
+          id: `${turnId}-user`,
           role: 'user',
           content: [{ type: 'input_text', text: userContent }],
+          internal_chat_message_metadata_passthrough: metadata,
         },
       }),
       JSON.stringify({
@@ -320,16 +325,27 @@ function startStreamingTurn(
         type: 'response_item',
         payload: {
           type: 'reasoning',
+          id: reasoningItemId,
           summary: [{ type: 'summary_text', text: `codex-reasoning-${userContent}` }],
+          internal_chat_message_metadata_passthrough: metadata,
         },
       }),
       '',
     ].join('\n'),
   );
 
-  const turnId = randomUUID();
   write(id, { turn: codexTurn(turnId, 'inProgress', timestamp) });
   notify('turn/started', { threadId, turn: codexTurn(turnId, 'inProgress', timestamp) });
+  notify('item/completed', {
+    threadId,
+    turnId,
+    item: {
+      type: 'reasoning',
+      id: reasoningItemId,
+      summary: [`codex-reasoning-${userContent}`],
+      content: [],
+    },
+  });
   streamedLiveAnswers(userContent).forEach((text, index) => {
     notify('item/completed', {
       threadId,
@@ -348,13 +364,15 @@ function startStreamingTurn(
     const completedAt = new Date().toISOString();
     appendFileSync(
       nativePath,
-      `${streamedLiveAnswers(userContent).map((text) => JSON.stringify({
+      `${streamedLiveAnswers(userContent).map((text, index) => JSON.stringify({
         timestamp: completedAt,
         type: 'response_item',
         payload: {
           type: 'message',
+          id: `${turnId}-live-${index}`,
           role: 'assistant',
           content: [{ type: 'output_text', text }],
+          internal_chat_message_metadata_passthrough: metadata,
         },
       })).join('\n')}\n`,
     );

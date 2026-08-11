@@ -6,7 +6,6 @@ import {
   countUserContent,
   messagesOfType,
 } from '../../support/chat-assertions.js';
-import type { ChatGenerationResetMessage } from '../../../common/ws-events.js';
 import {
   codexAssistantMessage,
   codexExecCommandCall,
@@ -146,25 +145,11 @@ describe('scripted Codex escalation', () => {
           'item/commandExecution/requestApproval',
         ]);
 
-        const liveExecutions = expectExecutions(
-          await fixture.client.getMessages(chatId),
-          command,
-          marker,
-          1,
-        );
-        const reconciled = await fixture.client.waitForEvent(
-          (event): event is ChatGenerationResetMessage =>
-            event.type === 'chat-generation-reset'
-            && event.chatId === chatId
-            && event.reason === 'idle-reconcile',
-          'scripted Codex idle native reconcile',
-          { afterIndex: cursor, timeoutMs: 15_000 },
-        );
-        expect(reconciled.lastSeq).toBeGreaterThan(0);
-        const native = await fixture.client.getMessages(chatId);
+        // The settled boundary imports the rollout's sandboxed failure as
+        // provider-observed row evidence beside the streamed retry.
+        const native = await waitForExecutionCount(fixture, chatId, command, 2);
         const nativeExecutions = expectExecutions(native, command, marker, 2);
-        expect(nativeExecutions.filter((execution) => !execution.isError))
-          .toEqual(liveExecutions);
+        expect(nativeExecutions.filter((execution) => !execution.isError)).toHaveLength(1);
         expect(nativeExecutions.filter((execution) => execution.isError)).toHaveLength(1);
         expect(assistantContents(native.messages).some((content) => content.includes(reply)))
           .toBe(true);
@@ -195,6 +180,26 @@ function expectSuccessfulExecution(
 ): void {
   expect(expectExecutions(transcript, command, marker, executionCount)
     .filter((execution) => !execution.isError)).toHaveLength(1);
+}
+
+async function waitForExecutionCount(
+  fixture: Parameters<Parameters<typeof withIntegrationFixture>[1]>[0],
+  chatId: string,
+  command: string,
+  count: number,
+): Promise<Awaited<ReturnType<GarconTestClient['getMessages']>>> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const transcript = await fixture.client.getMessages(chatId);
+    const executions = transcript.messages.filter((entry) => (
+      entry.message.type === 'bash-tool-use' && entry.message.command === command
+    ));
+    if (executions.length >= count) return transcript;
+    if (Date.now() >= deadline) {
+      throw new Error(`Expected ${count} executions of the scripted command, saw ${executions.length}.`);
+    }
+    await Bun.sleep(100);
+  }
 }
 
 function expectExecutions(
