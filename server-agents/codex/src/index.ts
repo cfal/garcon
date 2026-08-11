@@ -219,7 +219,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
         if (!source.path) {
           reference = await nativeEvidence.resolveNativeSession({
             chat: request.source,
-            signal: request.admission.signal,
+            signal: request.signal,
           });
           source = nativeSessions.decode(reference);
         }
@@ -234,7 +234,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
         return inspectCodexHistoryProfile({
           nativePath: source.path,
           expectedThreadId: request.source.agentSessionId ?? source.agentSessionId,
-          signal: request.admission.signal,
+          signal: request.signal,
         });
       },
       forkPaginatedWhole: (request) => forkWholeCodexSession(

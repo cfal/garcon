@@ -9,7 +9,13 @@ import type { CodexHistoryProfile } from './history-profile.js';
 
 export interface CodexForkingOptions {
   readonly journal: AgentForkingV4;
-  readonly resolveProfile: (request: AgentForkRequestV4) => Promise<CodexHistoryProfile | null>;
+  readonly resolveProfile: (request: {
+    readonly source: AgentForkRequestV4['source'];
+    // Presence decides missing-source strictness; whole and point forks pass
+    // their own point shapes.
+    readonly point: object | null;
+    readonly signal: AbortSignal;
+  }) => Promise<CodexHistoryProfile | null>;
   readonly forkPaginatedWhole: (
     request: AgentForkRequestV4,
   ) => Promise<AgentStartedSession | null>;
@@ -19,10 +25,27 @@ export function createCodexForking(options: CodexForkingOptions): AgentForkingV4
   return {
     supportsAtMessage: true,
     supportsWhileRunning: options.journal.supportsWhileRunning,
-    resolvePoint: (request) => options.journal.resolvePoint(request),
+    // A paginated-history source can never be line-cut, so point resolution
+    // answers the permanent unsupported operation instead of a retryable
+    // projection-ahead refusal that would never clear.
+    async resolvePoint(request) {
+      const profile = await options.resolveProfile({
+        source: request.source,
+        point: request.point,
+        signal: request.signal,
+      });
+      if (profile && profile.mode !== 'legacy') {
+        throw paginatedForkUnsupported('fork-at-message');
+      }
+      return options.journal.resolvePoint(request);
+    },
     async fork(request) {
       request.admission.signal.throwIfAborted();
-      const profile = await options.resolveProfile(request);
+      const profile = await options.resolveProfile({
+        source: request.source,
+        point: request.point,
+        signal: request.admission.signal,
+      });
       if (!profile) return options.journal.fork(request);
       if (profile.mode === 'legacy') return options.journal.fork(request);
       if (request.point) throw paginatedForkUnsupported('fork-at-message');
