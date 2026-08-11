@@ -296,6 +296,35 @@ export class ChatViewStore {
     });
   }
 
+  // Rebuilds a chat's view from the authoritative projection under a fresh
+  // generation. Execution ownership refuses the reload because the running
+  // turn's exact commits already keep the view current; ownership is rechecked
+  // after each held read so a turn that starts mid-load wins.
+  async reloadFromProjection(chatId: string, loader: ChatViewLoader): Promise<ChatViewPage> {
+    return this.#withChat(chatId, async () => {
+      const assertIdle = () => {
+        if (this.#isChatActive(chatId)) throw new ChatRunningError(chatId);
+      };
+      assertIdle();
+      const guarded: ChatViewLoader = {
+        loadAll: async () => {
+          const snapshot = await loader.loadAll();
+          assertIdle();
+          return snapshot;
+        },
+        ...(loader.loadPage ? {
+          loadPage: async (limit: number, offset: number) => {
+            const page = await loader.loadPage!(limit, offset);
+            assertIdle();
+            return page;
+          },
+        } : {}),
+      };
+      const view = await this.#relistFromProjection(chatId, guarded);
+      return this.#readPageFromView(view, Number.MAX_SAFE_INTEGER);
+    });
+  }
+
   // Applies one integration commit event against the exact predecessor state the
   // view already holds. Identity is the projection state alone: content and
   // delivery identity never participate. A view on any other state relists from

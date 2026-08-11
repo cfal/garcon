@@ -5,7 +5,6 @@ import path from 'path';
 import { UserMessage } from '../../common/chat-types.js';
 import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution/chat-execution-control-repository.ts';
-import { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { ChatRunningError } from '../chats/errors.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
@@ -570,11 +569,9 @@ describe('queue and transcript stability', () => {
         controlRepository(),
       );
       executionCoordinator = queue;
-      const reloader = new ChatNativeReloader(
-        views,
-        { loadSnapshot: snapshotLoader(loadNativeMessages) },
-        ownsExecution,
-      );
+      const reload = () => views.reloadFromProjection(chatId, {
+        loadAll: snapshotLoader(loadNativeMessages),
+      });
 
       await Promise.all([
         queue.createChatQueueEntry(chatId, 'first'),
@@ -585,9 +582,7 @@ describe('queue and transcript stability', () => {
       await firstTurnStarted.promise;
 
       expect(ownsExecution(chatId)).toBe(true);
-      await expect(reloader.reloadFromNative(chatId, 'manual-reload')).rejects.toBeInstanceOf(
-        ChatRunningError,
-      );
+      await expect(reload()).rejects.toBeInstanceOf(ChatRunningError);
 
       releaseFirstTurn.resolve();
       await drain;
@@ -603,7 +598,7 @@ describe('queue and transcript stability', () => {
       ]);
 
       const beforeReloadCalls = loadNativeMessages.mock.calls.length;
-      await reloader.reloadFromNative(chatId, 'manual-reload');
+      await reload();
       expect(loadNativeMessages.mock.calls.length).toBe(beforeReloadCalls + 1);
       expect(views.readPage(chatId, 20).messages.map((entry) => entry.message.content)).toEqual([
         'first',

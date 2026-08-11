@@ -46,7 +46,6 @@ import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import { IdleNativeReconciler } from './chats/idle-native-reconciler.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
-import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
@@ -361,11 +360,6 @@ export async function startServer(): Promise<void> {
     const loadCurrentNativeMessages = (chatId: string) => (
       transcripts.loadCurrentNativeMessages(chatId)
     );
-    const chatNativeReloader = new ChatNativeReloader(
-      chatViews,
-      { loadSnapshot: loadChatSnapshot },
-      ownsExecution,
-    );
     const transcriptSearchService = new TranscriptSearchService({
       workspaceDirectory: workspaceDir,
       logger,
@@ -449,13 +443,6 @@ export async function startServer(): Promise<void> {
       chatSearch,
     );
 
-    const indexedNativeReloader: Pick<ChatNativeReloader, 'reloadFromNative'> = {
-      async reloadFromNative(chatId, mode, processErrorReason) {
-        const reload = await chatNativeReloader.reloadFromNative(chatId, mode, processErrorReason);
-        chatSearch.markDirty(chatId);
-        return reload;
-      },
-    };
     const chatMessageReader = {
       loadNativeMessages: loadCurrentNativeMessages,
       loadNativeWindow: (input: Parameters<OrderedChatTranscriptReader['loadNativeWindow']>[0]) => (
@@ -705,7 +692,10 @@ export async function startServer(): Promise<void> {
         readReplay: (chatId, generationId, afterSeq) =>
           chatViews.readReplay(chatId, generationId, afterSeq),
       },
-      nativeReloader: indexedNativeReloader,
+      projectionReload: (chatId) => chatViews.reloadFromProjection(chatId, {
+        loadAll: () => loadChatSnapshot(chatId),
+        loadPage: (limit, offset) => transcripts.loadPage(chatId, limit, offset),
+      }),
       queue,
       pendingInputs,
       transientFeeds,

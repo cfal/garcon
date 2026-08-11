@@ -26,7 +26,6 @@ import {
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
-import type { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { isDomainError } from '../lib/domain-error.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
@@ -42,12 +41,13 @@ const logger = createLogger('ws:chat');
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
 type WS = import('bun').ServerWebSocket<unknown>;
 
-type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 type QueueDep = Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
 type ChatViewsDep = {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
 };
+// Serves the manual reload as a fresh view over the authoritative projection.
+type ProjectionReload = (chatId: string) => Promise<import('../../common/chat-view.js').ChatViewPage>;
 
 type WsRequestHandler = (data: ClientWsMessage, writer: WebSocketWriter) => Promise<void> | void;
 type ChatIdRequest = { type: string; chatId?: string | null };
@@ -56,7 +56,7 @@ interface ChatHandlerDeps {
   serverInstanceId: string;
   processing: Pick<ChatProcessingActivity, 'snapshot'>;
   chatViews: ChatViewsDep;
-  nativeReloader: NativeReloaderDep;
+  projectionReload: ProjectionReload;
   queue: QueueDep;
   pendingInputs: PendingInputsDep;
   transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
@@ -115,7 +115,7 @@ export class ChatHandler {
   #serverInstanceId: string;
   #processing: Pick<ChatProcessingActivity, 'snapshot'>;
   #chatViews: ChatViewsDep;
-  #nativeReloader: NativeReloaderDep;
+  #projectionReload: ProjectionReload;
   #queue: QueueDep;
   #pendingInputs: PendingInputsDep;
   #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
@@ -126,7 +126,7 @@ export class ChatHandler {
     serverInstanceId,
     processing,
     chatViews,
-    nativeReloader,
+    projectionReload,
     queue,
     pendingInputs,
     transientFeeds,
@@ -135,7 +135,7 @@ export class ChatHandler {
     this.#serverInstanceId = serverInstanceId;
     this.#processing = processing;
     this.#chatViews = chatViews;
-    this.#nativeReloader = nativeReloader;
+    this.#projectionReload = projectionReload;
     this.#queue = queue;
     this.#pendingInputs = pendingInputs;
     this.#transientFeeds = transientFeeds;
@@ -303,7 +303,7 @@ export class ChatHandler {
         });
         return;
       }
-      const reload = await this.#nativeReloader.reloadFromNative(chatId, 'manual-reload');
+      const reload = await this.#projectionReload(chatId);
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,
