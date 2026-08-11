@@ -69,11 +69,9 @@ describe('scripted Pi interrupt lifecycle', () => {
         afterIndex: stopCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      // chat-session-stopped is terminal-driven; wait for it before asserting
-      // the stop event order.
       await fixture.client.waitForEvent(
         (event): event is ServerWsMessage => event.type === 'chat-session-stopped'
-          && (event as { chatId?: string }).chatId === chatId,
+          && event.chatId === chatId,
         `${chatId} chat-session-stopped`,
         { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
@@ -129,8 +127,7 @@ function withScriptedPi(): {
   };
 }
 
-// The stop drops processing to idle before the terminal-driven
-// chat-session-stopped publishes.
+// Pi drops processing to idle before the coordinator publishes chat-session-stopped.
 function expectPiStoppedTurnEventOrder(
   events: readonly ServerWsMessage[],
   chatId: string,

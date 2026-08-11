@@ -1,3 +1,4 @@
+import type { ServerWsMessage } from '../../../common/ws-events.js';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -65,7 +66,12 @@ describe('scripted Codex interrupt lifecycle', () => {
         afterIndex: stopCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      await fixture.client.waitForSessionStopped(chatId, { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS });
+      await fixture.client.waitForEvent(
+        (event): event is ServerWsMessage => event.type === 'chat-session-stopped'
+          && event.chatId === chatId,
+        `${chatId} chat-session-stopped`,
+        { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
       expectStoppedTurnEventOrder(
         fixture.client.eventsSince(stopCursor),
         chatId,
