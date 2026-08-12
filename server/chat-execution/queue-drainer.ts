@@ -26,7 +26,7 @@ const logger = createLogger('queue-dispatch');
 // its ownership, controls, turn runner, or pending-input collaborators.
 export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
-  registerPending(chatId: string, content: string, options: RunAgentTurnOptions): Promise<void>;
+  registerPending(chatId: string, content: string, options: RunAgentTurnOptions): Promise<boolean>;
   discardProjectedInput(chatId: string, clientRequestId: string): Promise<void>;
   publishDispatching(chatId: string, entry: StoredQueueEntry): void;
   publishIdle(chatId: string): void;
@@ -167,7 +167,17 @@ export class QueueDrainer {
       finalization = this.#ownership.beginFinalization(chatId, turn.turnId!);
       attempt = new QueueExecutionAttempt(turn, entry.id);
       this.#ownership.installAttempt(chatId, attempt);
-      await this.#callbacks.registerPending(chatId, entry.content, options);
+      const inserted = await this.#callbacks.registerPending(chatId, entry.content, options);
+      if (inserted === false) {
+        attempt.markRegistered();
+        attempt.markRunSettled();
+        attempt.markTerminalObserved();
+        this.#callbacks.settleAttempt(chatId, attempt);
+        stage = 'finalizing';
+        await this.#callbacks.removeSent(chatId, entry.id);
+        finalization.settle('committed');
+        return true;
+      }
       attempt.markRegistered();
       if (this.#shouldHalt(chatId)) {
         stage = 'running';

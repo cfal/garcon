@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 const storedNativeSession = {
   ownerId: 'claude',
@@ -14,6 +15,7 @@ const resolvedNativeSession = {
 };
 
 function makeRouter(overrides = {}) {
+  const transcript = createRuntimeTranscriptFixture();
   const preparation = {
     nativeSession: resolvedNativeSession,
     commit: mock(() => Promise.resolve()),
@@ -51,7 +53,12 @@ function makeRouter(overrides = {}) {
     },
     endpointResolver: {},
     events: {},
+    projection: {},
     getCarryOverRevision: () => 'carry-1',
+    loadCarriedContext: async () => null,
+    getCarryOverMessageCount: async () => 0,
+    ledger: transcript.ledger,
+    adoption: transcript.adoption,
   });
 
   return { entry, preparation, prepareProjectPathUpdate, router };

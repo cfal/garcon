@@ -1,7 +1,9 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function makeRouter(compaction) {
+  const transcript = createRuntimeTranscriptFixture();
   const execution = {
     start: mock(async () => ({ agentSessionId: 'session-a', nativeSession: null })),
     resume: mock(async () => undefined),
@@ -52,6 +54,8 @@ function makeRouter(compaction) {
     getCarryOverRevision: () => 'carry-1',
     loadCarriedContext: async () => null,
     getCarryOverMessageCount: async () => 0,
+    ledger: transcript.ledger,
+    adoption: transcript.adoption,
   });
   return { router, execution };
 }

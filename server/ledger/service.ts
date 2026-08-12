@@ -84,6 +84,7 @@ export class TranscriptLedgerService {
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
+  readonly #preparedInputs = new Map<string, InputComposition>();
 
   constructor(store: TranscriptLedgerStore, options: TranscriptLedgerServiceOptions = {}) {
     this.#store = store;
@@ -150,6 +151,10 @@ export class TranscriptLedgerService {
     return active !== undefined && (runId === undefined || active === runId);
   }
 
+  activeChatIds(): readonly string[] {
+    return [...this.#activeRuns.keys()];
+  }
+
   interruptRun(chatId: string): LedgerRunEndedRow | null {
     const runId = this.#activeRuns.get(chatId);
     if (!runId) return null;
@@ -195,7 +200,22 @@ export class TranscriptLedgerService {
         rows: [composition.input],
       });
     }
+    if (input.clientMessageId) {
+      this.#preparedInputs.set(inputKey(input.chatId, input.clientMessageId), composition);
+    }
     return composition;
+  }
+
+  takePreparedInput(chatId: string, clientMessageId: string | null | undefined): InputComposition | null {
+    if (!clientMessageId) return null;
+    const key = inputKey(chatId, clientMessageId);
+    const composition = this.#preparedInputs.get(key) ?? null;
+    this.#preparedInputs.delete(key);
+    return composition;
+  }
+
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void {
+    if (clientMessageId) this.#preparedInputs.delete(inputKey(chatId, clientMessageId));
   }
 
   appendPermissionResolution(input: {
@@ -290,12 +310,14 @@ export class TranscriptLedgerService {
   closeChat(chatId: string): void {
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
+    this.#deletePreparedInputs(chatId);
     this.#store.closeChat(chatId);
   }
 
   deleteChat(chatId: string): void {
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
+    this.#deletePreparedInputs(chatId);
     this.#store.deleteChat(chatId);
   }
 
@@ -303,7 +325,15 @@ export class TranscriptLedgerService {
     for (const lease of this.#leases.values()) lease.close();
     this.#leases.clear();
     this.#activeRuns.clear();
+    this.#preparedInputs.clear();
     this.#store.close();
+  }
+
+  #deletePreparedInputs(chatId: string): void {
+    const prefix = `${chatId}\u0000`;
+    for (const key of this.#preparedInputs.keys()) {
+      if (key.startsWith(prefix)) this.#preparedInputs.delete(key);
+    }
   }
 
   #publish(chatId: string, viewId: TranscriptViewId, event: AgentProducerEvent): void {
@@ -392,6 +422,10 @@ export class TranscriptLedgerService {
       }
     });
   }
+}
+
+function inputKey(chatId: string, clientMessageId: string): string {
+  return `${chatId}\u0000${clientMessageId}`;
 }
 
 class ProducerLease implements TranscriptProducerLease {

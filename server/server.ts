@@ -103,6 +103,11 @@ import {
   SnippetProjectPathService,
   SnippetService,
 } from './snippets/service.js';
+import {
+  TranscriptAdoptionService,
+  TranscriptLedgerService,
+  TranscriptLedgerStore,
+} from './ledger/index.js';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
@@ -278,7 +283,38 @@ export async function startServer(): Promise<void> {
     // which only runs once a session starts.
     let carryOverCompaction: CarryOverCompactionService | null = null;
     let carryOverWarnings: ((chatId: string, message: string) => void) | null = null;
-    const agentRegistry = new AgentRegistry({
+    const transcriptStore = new TranscriptLedgerStore(
+      path.join(workspaceDir, 'transcript-ledgers'),
+    );
+    transcriptStore.removeUnregisteredChatDirectories(
+      new Set(Object.keys(chatRegistry.listAllChats())),
+    );
+    const transcriptLedger = new TranscriptLedgerService(transcriptStore, {
+      onListenerError(error) {
+        logger.warn('Transcript commit listener failed:', errorMessage(error));
+      },
+    });
+    let agentRegistry!: AgentRegistry;
+    const transcriptAdoption = new TranscriptAdoptionService({
+      ledger: transcriptLedger,
+      registry: chatRegistry,
+      integrations: integrationRegistry,
+      getCarryOverRevision: (entry) => carryOver.revision(
+        entry.carryOverSegments ?? [],
+        entry.carryOverMigrationQuarantine ?? null,
+      ),
+      async loadFrozenPrefix(_chatId, entry, signal) {
+        if (entry.carryOverMigrationQuarantine) throw new CarryOverHistoryUnavailableError();
+        return carryOver.loadProjectionSource({
+          refs: entry.carryOverSegments ?? [],
+          signal,
+        });
+      },
+      loadLegacyCurrent: (chatId, entry, signal) => (
+        agentRegistry.loadLegacyProjectionMessages(entry, chatId, signal)
+      ),
+    });
+    agentRegistry = new AgentRegistry({
       registry: chatRegistry,
       integrations: integrationRegistry,
       endpointResolver,
@@ -312,6 +348,8 @@ export async function startServer(): Promise<void> {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },
       chatMutationLock,
+      ledger: transcriptLedger,
+      adoption: transcriptAdoption,
     });
 
     await chatRegistry.reconcileSessions((session, chatId) =>
@@ -858,6 +896,7 @@ export async function startServer(): Promise<void> {
         }
         await chatSearch.close();
         await integrationRegistry.stop();
+        transcriptLedger.close();
         terminalManager.shutdown();
         await metadata.flush();
         await chatRegistry.flush();

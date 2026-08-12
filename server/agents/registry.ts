@@ -5,12 +5,8 @@ import type {
   AgentSteerResult,
   AgentSteerTarget,
   AgentTranscriptSourceLocation,
-  AgentInputPreparation,
   AgentTranscriptAdmissionIdentity,
-  AgentChatReferenceV4,
-  AgentIntegrationV4,
   AgentProjectionState,
-  AgentStreamEvent,
   AgentTurnReceiptOwner,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -53,6 +49,10 @@ import { AgentProjectionIngress } from './projection-ingress.js';
 import type { UserMessage } from '@garcon/common/chat-types';
 import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import type { PendingUserInputRegistrationOptions } from '../chat-execution/types.js';
+import type { TranscriptAdoptionService } from '../ledger/adoption.js';
+import type { LedgerRow } from '../ledger/contracts.js';
+import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
+import { ledgerRowsToMessages } from '../ledger/presentation.js';
 
 const logger = createLogger('agents:registry');
 
@@ -143,7 +143,7 @@ interface MutableAgentTranscriptPage {
   offset: number;
   limit: number;
   revision: string;
-  projectionState: AgentProjectionState;
+  projectionState: AgentProjectionState | null;
 }
 
 interface StartSessionOptions {
@@ -176,6 +176,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #runtime: AgentRuntimeRouter;
   readonly #settings: AgentSessionSettingsService;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
+  readonly #ledger: TranscriptLedgerService;
+  readonly #adoption: TranscriptAdoptionService;
+  readonly #transcriptListeners = new Set<(
+    event: TranscriptCommitEvent,
+  ) => void | Promise<void>>();
 
   constructor(args: {
     registry: IChatRegistry;
@@ -190,9 +195,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;
+    ledger: TranscriptLedgerService;
+    adoption: TranscriptAdoptionService;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
+    this.#ledger = args.ledger;
+    this.#adoption = args.adoption;
     this.#directory = new AgentDirectory(args.integrations);
     this.#catalog = new AgentCatalogService({
       directory: this.#directory,
@@ -207,9 +216,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       events: this.#events,
       projection: this.#projection,
       getCarryOverRevision: args.getCarryOverRevision,
-        loadCarriedContext: args.loadCarriedContext,
         getCarryOverMessageCount: args.getCarryOverMessageCount,
-      onCarryOverChanged: args.onCarryOverChanged,
+      ledger: this.#ledger,
+      adoption: this.#adoption,
     });
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,
@@ -217,6 +226,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       endpointResolver: args.endpointResolver,
       chatMutationLock: args.chatMutationLock,
     });
+    this.#ledger.subscribe((event) => this.#onTranscriptCommit(event));
   }
 
   hasAgent(agentId: string): boolean { return this.#directory.has(agentId); }
@@ -323,19 +333,21 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     contentEpoch: string | null;
     durableRevision: string | null;
   } | null> {
-    if (!session?.agentId) return null;
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return null;
-    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
-    const signal = new AbortController().signal;
-    const opened = await this.#projection.open(integration, chat, signal);
-    const result = await integration.transcript.preview({ chat, signal });
-    if (result.kind !== 'ready') return null;
-    const projection = opened.kind === 'ready' ? opened.value.checkpoint.projection : null;
+    if (!session?.agentId || !chatId) return null;
+    await this.#adoption.ensure(chatId);
+    const messages = this.#ledger.conversationMessages(chatId);
+    const first = messages.find((message) => message.type === 'user-message') ?? messages[0];
+    const last = messages.at(-1);
+    if (!first || !last) return null;
     return {
-      preview: result.value,
-      contentEpoch: projection?.contentEpoch ?? null,
-      durableRevision: projection?.durableRevision ?? null,
+      preview: {
+        firstMessage: messageText(first),
+        lastMessage: messageText(last),
+        createdAt: first.timestamp || null,
+        lastActivity: last.timestamp || null,
+      },
+      contentEpoch: this.#ledger.currentView(chatId)?.viewId ?? null,
+      durableRevision: String(this.#ledger.highWatermark(chatId).ordinal),
     };
   }
 
@@ -343,44 +355,25 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return [...(await this.loadTranscriptSnapshot(session, chatId)).messages];
   }
 
-  // Client-request identities the projection has settled for routine
-  // pending-overlay clearing; the turn owner's own input settles on durable
-  // promotion.
+  // Client-request identities already committed to the serving ledger.
   async listSettledInputRequests(
     session: AgentChatEntry | null,
     chatId = '',
     signal: AbortSignal = new AbortController().signal,
   ): Promise<readonly string[]> {
-    return this.#listInputRequests(session, chatId, signal, false);
+    signal.throwIfAborted();
+    if (!session || !chatId) return [];
+    await this.#adoption.ensure(chatId, signal);
+    return ledgerInputRequestIds(this.#ledger.currentRows(chatId));
   }
 
-  // Client-request identities bound to proven provider-native persistence; the
-  // stop-cohort path settles against these so an unpersisted input stays
-  // unconfirmed.
+  // Retains the legacy caller shape until pending-input settlement is removed.
   async listNativelyBoundInputRequests(
     session: AgentChatEntry | null,
     chatId = '',
     signal: AbortSignal = new AbortController().signal,
   ): Promise<readonly string[]> {
-    return this.#listInputRequests(session, chatId, signal, true);
-  }
-
-  async #listInputRequests(
-    session: AgentChatEntry | null,
-    chatId: string,
-    signal: AbortSignal,
-    requireNativeBinding: boolean,
-  ): Promise<readonly string[]> {
-    if (!session?.agentId) return [];
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return [];
-    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
-    const request = { chat, signal };
-    const settled = requireNativeBinding
-      ? await integration.transcript.nativelyBoundInputRequests(request)
-      : await integration.transcript.settledInputRequests(request);
-    if (settled.kind !== 'ready') throw transcriptAccessFailure(settled);
-    return settled.value;
+    return this.listSettledInputRequests(session, chatId, signal);
   }
 
   async loadTranscriptSnapshot(
@@ -388,27 +381,32 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     chatId = '',
     signal: AbortSignal = new AbortController().signal,
   ) {
-    if (!session?.agentId) {
+    if (!session?.agentId || !chatId) {
       return { messages: [], revision: transcriptRevision([]), projectionState: null };
     }
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) {
-      return { messages: [], revision: transcriptRevision([]), projectionState: null };
-    }
-    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
-    const opened = await this.#projection.open(integration, chat, signal);
-    if (opened.kind !== 'ready') throw transcriptAccessFailure(opened);
-    const messages = opened.value.entries.map((entry) => entry.message);
+    await this.#adoption.ensure(chatId, signal);
+    const messages = ledgerRowsToMessages(this.#ledger.currentRows(chatId));
     return {
       messages,
       revision: transcriptRevision(messages),
-      projectionState: opened.value.checkpoint.projection,
+      projectionState: null,
     };
   }
 
-  // Loads only durable-lifetime ledger rows for share/export capture. The
-  // active streaming suffix is excluded so a published artifact never contains
-  // rows the provider could still retract before settlement.
+  async loadLegacyProjectionMessages(
+    session: AgentChatEntry,
+    chatId: string,
+    signal: AbortSignal,
+  ): Promise<readonly ChatMessage[]> {
+    const integration = this.#directory.get(session.agentId);
+    if (!integration) return [];
+    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
+    const opened = await this.#projection.open(integration, chat, signal);
+    if (opened.kind !== 'ready') throw transcriptAccessFailure(opened);
+    return opened.value.entries.map((entry) => entry.message);
+  }
+
+  // Loads the immutable rendering fold for share/export capture.
   async loadDurableTranscriptSnapshot(
     session: AgentChatEntry | null,
     chatId = '',
@@ -417,17 +415,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     readonly messages: readonly ChatMessage[];
     readonly projectionState: AgentProjectionState | null;
   }> {
-    if (!session?.agentId) return { messages: [], projectionState: null };
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return { messages: [], projectionState: null };
-    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
-    const opened = await this.#projection.open(integration, chat, signal);
-    if (opened.kind !== 'ready') throw transcriptAccessFailure(opened);
+    if (!session?.agentId || !chatId) return { messages: [], projectionState: null };
+    await this.#adoption.ensure(chatId, signal);
     return {
-      messages: opened.value.entries
-        .filter((entry) => entry.lifetime === 'durable')
-        .map((entry) => entry.message),
-      projectionState: opened.value.checkpoint.projection,
+      messages: ledgerRowsToMessages(this.#ledger.currentRows(chatId)),
+      projectionState: null,
     };
   }
 
@@ -441,22 +433,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     entryId: string,
   ): Promise<boolean> {
     if (!session?.agentId || !Number.isSafeInteger(ordinal) || ordinal < 1) return false;
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return false;
-    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
-    const opened = await this.#projection.open(integration, chat, new AbortController().signal);
-    if (opened.kind !== 'ready') return false;
-    const page = await this.#projection.page({
-      integration,
-      chat,
-      signal: new AbortController().signal,
-      limit: 1,
-      beforeOrdinal: ordinal + 1,
-      expectedProjection: opened.value.checkpoint.projection,
-    });
-    return page.kind === 'ready'
-      && page.page.firstOrdinal === ordinal
-      && page.page.entries[0]?.id === entryId;
+    await this.#adoption.ensure(chatId);
+    const view = this.#ledger.currentView(chatId);
+    return view?.viewId === entryId && this.#ledger.currentRows(chatId).some((row) => row.ordinal === ordinal);
   }
 
   async loadMessagePage(
@@ -466,34 +445,22 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     chatId = '',
     signal: AbortSignal = new AbortController().signal,
   ): Promise<MutableAgentTranscriptPage | null> {
-    if (!session?.agentId) return null;
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return null;
-    const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
-    const opened = await this.#projection.open(integration, chat, signal);
-    if (opened.kind !== 'ready') throw transcriptAccessFailure(opened);
-    const total = opened.value.checkpoint.projection.total;
-    const page = await this.#projection.page({
-      integration,
-      chat,
-      signal,
-      limit,
-      beforeOrdinal: Math.max(1, total - offset + 1),
-      expectedProjection: opened.value.checkpoint.projection,
-    });
-    // An expired page names a superseded projection state; the caller relists
-    // through the full snapshot instead of treating it as missing history.
-    if (page.kind === 'expired') return null;
-    if (page.kind !== 'ready') throw transcriptAccessFailure(page);
-    const messages = page.page.entries.map((entry) => entry.message);
+    if (!session?.agentId || !chatId) return null;
+    await this.#adoption.ensure(chatId, signal);
+    const view = this.#ledger.currentView(chatId);
+    if (!view) return null;
+    const all = ledgerRowsToMessages(this.#ledger.currentRows(chatId));
+    const total = all.length;
+    const end = Math.max(0, total - offset);
+    const messages = all.slice(Math.max(0, end - limit), end);
     return {
       messages,
       total,
-      hasMore: page.page.hasMore,
+      hasMore: end - messages.length > 0,
       offset,
       limit,
-      revision: transcriptRevision(opened.value.entries.map((entry) => entry.message)),
-      projectionState: opened.value.checkpoint.projection,
+      revision: transcriptRevision(all),
+      projectionState: null,
     };
   }
 
@@ -612,99 +579,61 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   discardTurn(chatId: string): void { this.#events.clearTurn(chatId); }
   getActiveTurn(chatId: string): TurnEventMetadata | undefined { return this.#events.getActiveTurn(chatId); }
   projectionIngress(): AgentProjectionIngress { return this.#projection; }
+  onTranscriptCommitted(listener: (event: TranscriptCommitEvent) => void | Promise<void>): void {
+    this.#transcriptListeners.add(listener);
+  }
 
   async repairProjection(
     chatId: string,
     signal: AbortSignal,
   ): Promise<boolean> {
-    const session = this.#registry.getChat(chatId);
-    if (!session?.agentId) return false;
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return false;
-    const chat = toAgentChatReference(
-      integration,
-      chatId,
-      session,
-      this.#getCarryOverRevision(session),
-    );
-    this.#projection.closeSegment(chat);
-    const result = await this.#projection.open(integration, chat, signal);
-    if (result.kind === 'ready') {
-      await this.#persistProjectionContentEpoch(
-        chatId,
-        chat.agentOwnershipEpoch,
-        result.value.checkpoint.projection.contentEpoch,
-      );
-    }
-    return result.kind === 'ready';
+    signal.throwIfAborted();
+    await this.#adoption.ensure(chatId, signal);
+    return true;
   }
 
   async admitInput(
     chatId: string,
     message: UserMessage,
     options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
-  ): Promise<{ discardKnownNotSent(): Promise<void> }> {
+  ): Promise<{ readonly inserted: boolean; discardKnownNotSent(): Promise<void> }> {
     const session = this.#registry.getChat(chatId);
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
-    const integration = this.#directory.require(session.agentId);
-    const chat = toAgentChatReference(
-      integration,
+    const view = await this.#adoption.ensure(chatId);
+    this.#admissionIdentity(chatId, session, options);
+    const composition = this.#ledger.appendInputAndCompose({
       chatId,
-      session,
-      this.#getCarryOverRevision(session),
-    );
-    const signal = new AbortController().signal;
-    const opened = await this.#projection.open(integration, chat, signal);
-    if (opened.kind !== 'ready') {
-      throw new Error(opened.kind === 'deferred'
-        ? 'TRANSCRIPT_PROJECTION_DEFERRED'
-        : opened.errorCode);
-    }
-    await this.#persistProjectionContentEpoch(
-      chatId,
-      chat.agentOwnershipEpoch,
-      opened.value.checkpoint.projection.contentEpoch,
-    );
-    const operation = this.#admissionIdentity(chatId, session, options);
-    if (options.commandType !== 'steer') {
-      this.#events.trackTurn(chatId, {
-        commandType: operation.turnOwner.commandType,
-        clientRequestId: operation.turnOwner.clientRequestId,
-        turnId: operation.turnOwner.turnId,
-        agentOwnershipEpoch: operation.agentOwnershipEpoch,
-        turnOwner: operation.turnOwner,
-      });
-    }
-    const preparation = await integration.transcript.prepareInput({
-      chat,
-      signal,
+      viewId: view.viewId,
       message,
-      operation,
+      attachments: (options.images ?? []).map((image) => ({
+        kind: 'image' as const,
+        data: image.data,
+        name: image.name ?? null,
+        mimeType: image.mimeType ?? 'application/octet-stream',
+      })),
+      clientMessageId: options.clientMessageId ?? null,
+      steer: options.commandType === 'steer',
     });
-    let admission: AdmissionCommitResult;
-    try {
-      admission = await commitAdmission(integration, chat, operation, preparation, signal);
-    } catch (error) {
-      if (error instanceof ProjectionAdmissionAmbiguousError) {
-        this.#projection.fence(chat, error);
-      }
-      throw error;
-    }
-    if (admission.kind === 'event') {
-      await this.#projection.applyReturnedEvent(integration, chat, admission.event);
-    } else {
-      verifySettledAdmission(
-        this.#projection.current(chat)?.entries ?? opened.value.entries,
-        operation,
-        admission,
-      );
-    }
     return {
+      inserted: composition.inserted,
       discardKnownNotSent: async () => {
-        const reset = await preparation.discardCommitted();
-        await this.#projection.applyReturnedEvent(integration, chat, reset);
+        this.#ledger.discardPreparedInput(chatId, options.clientMessageId);
       },
     };
+  }
+
+  async #onTranscriptCommit(event: TranscriptCommitEvent): Promise<void> {
+    if (event.type === 'session') {
+      this.#registry.updateChat(event.chatId, {
+        agentSessionId: event.row.detail.agentSessionId,
+        nativeSession: event.row.detail.nativeSession,
+        nativeSeedReceipt: event.row.detail.nativeSeedReceipt,
+      });
+      await this.#events.publishSession(event.chatId);
+    } else if (event.type === 'run-ended') {
+      await this.#events.publishRunEnded(event.chatId, event.runId, event.row);
+    }
+    for (const listener of this.#transcriptListeners) await listener(event);
   }
 
   #admissionIdentity(
@@ -743,83 +672,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     };
   }
 
-  async #persistProjectionContentEpoch(
-    chatId: string,
-    ownershipEpoch: string,
-    contentEpoch: string,
-  ): Promise<void> {
-    const current = this.#registry.getChat(chatId);
-    if (!current || current.agentOwnershipEpoch !== ownershipEpoch) {
-      throw new Error('Projection content epoch belongs to a stale owner');
-    }
-    if (current.transcriptContentEpoch === contentEpoch) return;
-    await this.#registry.updateChat(
-      chatId,
-      { transcriptContentEpoch: contentEpoch },
-      { flush: true },
-    );
-  }
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
   getAgentCatalogEntries() { return this.#catalog.getAgentCatalogEntries(); }
-}
-
-async function commitAdmission(
-  integration: AgentIntegrationV4,
-  chat: AgentChatReferenceV4,
-  operation: AgentTranscriptAdmissionIdentity,
-  preparation: AgentInputPreparation,
-  signal: AbortSignal,
-): Promise<AdmissionCommitResult> {
-  let commitError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      return { kind: 'event', event: await preparation.commit() };
-    } catch (error) {
-      commitError ??= error;
-    }
-    let resolved: Awaited<ReturnType<AgentIntegrationV4['transcript']['resolveInputAdmission']>>;
-    try {
-      resolved = await integration.transcript.resolveInputAdmission({ chat, signal, operation });
-    } catch (error) {
-      throw new ProjectionAdmissionAmbiguousError(commitError, error);
-    }
-    switch (resolved.kind) {
-      case 'committed':
-      case 'discarded':
-        return { kind: 'event', event: resolved.event };
-      case 'committed-settled':
-      case 'discarded-settled':
-        return resolved;
-      case 'prepared':
-        continue;
-      case 'rolled-back':
-      case 'absent':
-        throw commitError;
-      case 'degraded':
-        throw new ProjectionAdmissionAmbiguousError(
-          commitError,
-          new Error(resolved.errorCode),
-        );
-    }
-  }
-  throw new ProjectionAdmissionAmbiguousError(
-    commitError,
-    new Error('Projection admission could not prove its commit outcome'),
-  );
-}
-
-type AdmissionCommitResult =
-  | { readonly kind: 'event'; readonly event: AgentStreamEvent }
-  | { readonly kind: 'committed-settled'; readonly entryId: string }
-  | { readonly kind: 'discarded-settled'; readonly entryId: string };
-
-class ProjectionAdmissionAmbiguousError extends Error {
-  constructor(commitError: unknown, resolutionError: unknown) {
-    super('Projection admission outcome is ambiguous', {
-      cause: new AggregateError([commitError, resolutionError]),
-    });
-    this.name = 'ProjectionAdmissionAmbiguousError';
-  }
 }
 
 function transcriptAccessFailure(
@@ -832,20 +686,16 @@ function transcriptAccessFailure(
     : { kind: 'degraded', errorCode: result.errorCode, retryable: result.retryable });
 }
 
-function verifySettledAdmission(
-  entries: readonly import('@garcon/server-agent-interface').AgentTranscriptEntry[],
-  operation: AgentTranscriptAdmissionIdentity,
-  result: Exclude<AdmissionCommitResult, { readonly kind: 'event' }>,
-): void {
-  const entry = entries.find((candidate) => candidate.id === result.entryId);
-  if (result.kind === 'discarded-settled') {
-    if (entry) throw new TypeError('Discarded admission still exists in the opened projection');
-    return;
-  }
-  if (!entry || entry.lifetime !== 'durable'
-      || entry.provenance?.clientRequestId !== operation.clientRequestId
-      || entry.provenance.turnOwner.turnId !== operation.turnOwner.turnId
-      || entry.provenance.agentOwnershipEpoch !== operation.agentOwnershipEpoch) {
-    throw new TypeError('Settled admission does not match the opened durable projection');
-  }
+function ledgerInputRequestIds(rows: readonly LedgerRow[]): string[] {
+  return rows.flatMap((row) => (
+    row.kind === 'user-input' && row.detail.message.metadata?.clientRequestId
+      ? [row.detail.message.metadata.clientRequestId]
+      : []
+  ));
+}
+
+function messageText(message: ChatMessage): string {
+  return 'content' in message && typeof message.content === 'string'
+    ? message.content
+    : message.type;
 }

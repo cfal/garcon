@@ -3,17 +3,11 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createNativeSeedReceipt } from '@garcon/common/transcript-seed';
+import { UserMessage } from '../../../common/chat-types.js';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
-
-const CARRY_OVER_HEAD = '11111111-1111-4111-8111-111111111111';
+import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 let projectDir;
-
-const terminalHandoff = () => ({
-  validate: () => undefined,
-  commit: () => undefined,
-});
 
 function makeRouter(overrides = {}) {
   const settings = { ownerId: 'test', schemaVersion: 1, values: {} };
@@ -22,6 +16,7 @@ function makeRouter(overrides = {}) {
     agentId: 'test',
     agentSessionId: null,
     nativeSession: null,
+    nativeSeedReceipt: null,
     agentOwnershipEpoch: 'epoch-1',
     agentSettingsById: { test: settings },
     projectPath: projectDir,
@@ -34,23 +29,26 @@ function makeRouter(overrides = {}) {
     tags: [],
     ...overrides.entry,
   };
-  const carriedContext = overrides.carriedContext ?? {
-    headId: CARRY_OVER_HEAD,
-    prefix: '<carried-context version="1">prior context</carried-context>\n\n',
-  };
-  const start = overrides.start ?? mock(async (request) => ({
-    agentSessionId: 'native-1',
-    nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
-    nativeSeedReceipt: request.carriedContext
-      ? createNativeSeedReceipt({
-          headId: request.carriedContext.headId,
-          agentSessionId: 'native-1',
-          placement: 'user-prefix',
-          prefix: request.carriedContext.prefix,
-        })
-      : null,
-  }));
-  const resume = overrides.resume ?? mock(async () => undefined);
+  const priorContext = overrides.priorContext ?? [
+    new UserMessage('2026-08-12T00:00:00.000Z', 'prior context'),
+  ];
+  const transcript = createRuntimeTranscriptFixture({ priorContext });
+  const start = overrides.start ?? mock(async (request) => {
+    request.sink.publish({
+      type: 'session',
+      session: {
+        agentSessionId: 'native-1',
+        nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+        nativeSeedReceipt: null,
+      },
+    });
+    request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+    return { id: 'start-handle' };
+  });
+  const resume = overrides.resume ?? mock(async (request) => {
+    request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+    return { id: 'resume-handle' };
+  });
   const submitGoalControl = overrides.submitGoalControl ?? mock(async () => true);
   const steer = overrides.steer ?? mock(async () => ({ kind: 'accepted' }));
   const providerTarget = overrides.providerTarget ?? {};
@@ -61,12 +59,11 @@ function makeRouter(overrides = {}) {
       supportedPermissionModes: ['default'],
       supportedThinkingModes: ['none'],
     },
-    execution: {
+    execution: {},
+    producerExecution: {
       start,
       resume,
-      abort: mock(async () => true),
-      isRunning: () => false,
-      runningSessions: () => [],
+      abort: mock(async () => undefined),
     },
     steering: { captureTarget, steer },
     goals: { submitControl: submitGoalControl },
@@ -74,31 +71,22 @@ function makeRouter(overrides = {}) {
   };
   const registry = {
     getChat: mock(() => entry),
-    updateChat: mock(async (_chatId, patch) => Object.assign(entry, patch)),
+    updateChat: mock((_chatId, patch) => Object.assign(entry, patch)),
     getChatByAgentSessionId: mock(() => null),
   };
   let activeTurn = overrides.activeTurn;
   const events = {
-    trackTurn: mock((_chatId, turn) => {
-      if (activeTurn && activeTurn.turnId !== turn.turnId) throw new Error('active turn changed');
-      activeTurn = turn;
-    }),
-    handoffTurn: mock((_chatId, predecessor, successor, downstream) => {
-      const validate = () => {
+    trackTurn: mock((_chatId, turn) => { activeTurn = turn; }),
+    handoffTurn: mock((_chatId, predecessor, successor, downstream) => ({
+      validate: () => {
         if (activeTurn?.turnId !== predecessor?.turnId) throw new Error('active turn changed');
-      };
-      validate();
-      return {
-        validate: () => {
-          validate();
-          downstream.validate();
-        },
-        commit: () => {
-          activeTurn = successor;
-          downstream.commit();
-        },
-      };
-    }),
+        downstream.validate();
+      },
+      commit: () => {
+        activeTurn = successor;
+        downstream.commit();
+      },
+    })),
     clearTurn: mock(() => { activeTurn = undefined; }),
     getActiveTurn: mock(() => activeTurn),
     markTurnAbortable: mock(() => undefined),
@@ -113,7 +101,6 @@ function makeRouter(overrides = {}) {
     })),
     resolveEndpointReference: mock(() => null),
   };
-  const onCarryOverChanged = overrides.onCarryOverChanged ?? mock(() => undefined);
   const router = new AgentRuntimeRouter({
     registry,
     directory: {
@@ -123,11 +110,12 @@ function makeRouter(overrides = {}) {
     },
     endpointResolver,
     events,
-    projection: { open: mock(async () => ({ kind: 'ready', value: {} })) },
+    projection: {},
     getCarryOverRevision: () => 'carry-1',
-    loadCarriedContext: async () => carriedContext,
-    getCarryOverMessageCount: async () => 1,
-    onCarryOverChanged,
+    loadCarriedContext: async () => null,
+    getCarryOverMessageCount: async () => 0,
+    ledger: transcript.ledger,
+    adoption: transcript.adoption,
   });
   return {
     router,
@@ -136,16 +124,15 @@ function makeRouter(overrides = {}) {
     captureTarget,
     providerTarget,
     steer,
-    submitGoalControl,
     registry,
     events,
-    carriedContext,
+    priorContext,
     endpointResolver,
-    onCarryOverChanged,
+    transcript,
   };
 }
 
-describe('AgentRuntimeRouter fresh-session boundary', () => {
+describe('AgentRuntimeRouter producer boundary', () => {
   beforeEach(async () => {
     projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-runtime-router-'));
     await fs.writeFile(path.join(projectDir, 'notes.txt'), 'USER FILE BODY');
@@ -155,8 +142,8 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     await fs.rm(projectDir, { recursive: true, force: true });
   });
 
-  it('passes canonical carry-over separately from the resolved user prompt', async () => {
-    const { router, start, carriedContext } = makeRouter();
+  it('passes ledger context separately from the resolved prompt', async () => {
+    const { router, start, priorContext } = makeRouter();
 
     await router.runAgentTurn('chat-1', 'review @notes.txt', {
       clientRequestId: 'request-1',
@@ -166,25 +153,33 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
 
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining('USER FILE BODY'),
-      carriedContext,
-      operation: {
-        agentOwnershipEpoch: 'epoch-1',
-        commandType: 'agent-run',
-        clientRequestId: 'request-1',
-        clientMessageId: 'message-1',
-        turnId: 'turn-1',
-        turnOwner: {
-          agentOwnershipEpoch: 'epoch-1',
-          commandType: 'agent-run',
-          clientRequestId: 'request-1',
-          turnId: 'turn-1',
-        },
-      },
+      priorContext,
+      carriedContext: expect.objectContaining({
+        prefix: expect.stringContaining('prior context'),
+      }),
+      runId: 'turn-1',
+      sink: expect.objectContaining({ publish: expect.any(Function) }),
     }));
   });
 
-  it('materializes a lazy session with one coherent routing tuple', async () => {
-    const { router, endpointResolver, registry, resume, events } = makeRouter({
+  it('repairs the registry cache from a session row before resuming', async () => {
+    const { router, registry, resume } = makeRouter();
+
+    await router.runAgentTurn('chat-1', 'start', { turnId: 'turn-1' });
+    await router.runAgentTurn('chat-1', 'resume', { turnId: 'turn-2' });
+
+    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
+      agentSessionId: 'native-1',
+      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+    }));
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      agentSessionId: 'native-1',
+      runId: 'turn-2',
+    }));
+  });
+
+  it('persists one coherent endpoint selection after a lazy start', async () => {
+    const { router, registry } = makeRouter({
       entry: {
         model: 'model-a',
         apiProviderId: 'provider-a',
@@ -192,10 +187,11 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       },
     });
 
-    await router.runAgentTurn('chat-1', 'resume with override', {
+    await router.runAgentTurn('chat-1', 'start with override', {
       model: 'model-b',
       apiProviderId: 'provider-b',
       modelEndpointId: 'endpoint-b',
+      turnId: 'turn-1',
     });
 
     expect(registry.updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
@@ -203,50 +199,10 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       apiProviderId: 'provider-b',
       modelEndpointId: 'endpoint-b',
       modelProtocol: 'openai-compatible',
-    }), { flush: true });
-
-    events.clearTurn();
-    await router.runAgentTurn('chat-1', 'resume without override');
-
-    expect(endpointResolver.resolveSelection).toHaveBeenLastCalledWith({
-      agentId: 'test',
-      model: 'model-b',
-      apiProviderId: 'provider-b',
-      modelEndpointId: 'endpoint-b',
-    });
-    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'model-b',
-      agentSessionId: 'native-1',
     }));
   });
 
-  it('uses an explicit model to complete a legacy lazy session configuration', async () => {
-    const { router, start, registry } = makeRouter({
-      entry: { model: undefined },
-    });
-
-    await router.runAgentTurn('chat-1', 'resume with model', { model: 'model-b' });
-
-    expect(start).toHaveBeenCalledWith(expect.objectContaining({ model: 'model-b' }));
-    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
-      model: 'model-b',
-    }), { flush: true });
-  });
-
-  it('uses an explicit model to resume a legacy materialized session', async () => {
-    const { router, resume } = makeRouter({
-      entry: { agentSessionId: 'native-1', model: undefined },
-    });
-
-    await router.runAgentTurn('chat-1', 'resume with model', { model: 'model-b' });
-
-    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
-      agentSessionId: 'native-1',
-      model: 'model-b',
-    }));
-  });
-
-  it('rejects a local-to-cloud override before materializing a lazy session', async () => {
+  it('rejects a local-to-cloud override before provider dispatch', async () => {
     const { router, start, endpointResolver } = makeRouter({
       entry: {
         model: 'local-model',
@@ -262,7 +218,7 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       isLocal: request.apiProviderId === 'local-provider',
     }));
 
-    await expect(router.runAgentTurn('chat-1', 'do not disclose carry-over', {
+    await expect(router.runAgentTurn('chat-1', 'do not dispatch', {
       model: 'cloud-model',
       apiProviderId: 'cloud-provider',
       modelEndpointId: 'cloud-endpoint',
@@ -270,49 +226,7 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  it('binds only the opaque native session returned by the integration', async () => {
-    const { router, registry } = makeRouter();
-
-    await router.startSession('chat-1', 'start', { turnId: 'turn-1' });
-
-    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', {
-      agentSessionId: 'native-1',
-      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
-      model: 'model-a',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      nativeSeedReceipt: null,
-      carryOverSegments: [],
-    }, { flush: true });
-  });
-
-  it('invalidates cached history after reconciling an archived point-fork tail', async () => {
-    const archivedRef = {
-      id: '22222222-2222-4222-8222-222222222222',
-      agentId: 'other',
-      model: 'old-model',
-      capturedAt: '2026-01-01T00:00:00.000Z',
-      storedMessageCount: 1,
-      visibleMessageCount: 1,
-      trailingHandoff: null,
-    };
-    const { router, registry, onCarryOverChanged } = makeRouter({
-      entry: { carryOverSegments: [archivedRef] },
-    });
-
-    await router.startSession('chat-1', 'continue point fork', { turnId: 'turn-1' });
-
-    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
-      carryOverSegments: [{
-        ...archivedRef,
-        trailingHandoff: { agentId: 'test', model: 'model-a' },
-      }],
-    }), { flush: true });
-    expect(onCarryOverChanged).toHaveBeenCalledWith('chat-1');
-  });
-
-  it('does not invoke an integration after execution admission closes', async () => {
+  it('does not invoke a producer after execution admission closes', async () => {
     const admission = new AbortController();
     admission.abort(new Error('server is shutting down'));
     const { router, start } = makeRouter();
@@ -323,89 +237,7 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  it('keeps a pre-boundary decline from hiding the predecessor terminal or blocking a successor', async () => {
-    const predecessor = {
-      clientRequestId: 'request-predecessor',
-      commandType: 'chat-start',
-      turnId: 'turn-predecessor',
-    };
-    const { router, events, submitGoalControl, resume } = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      activeTurn: predecessor,
-    });
-    submitGoalControl.mockImplementation(async () => {
-      events.clearTurn('chat-1');
-      return false;
-    });
-
-    await expect(router.submitGoalControl('chat-1', 'steer', {
-      clientRequestId: 'request-steer',
-      turnId: 'turn-steer',
-    }, async () => undefined)).resolves.toBe(false);
-
-    expect(events.handoffTurn).not.toHaveBeenCalled();
-    await router.runAgentTurn('chat-1', 'successor', {
-      clientRequestId: 'request-successor',
-      turnId: 'turn-successor',
-    });
-    expect(resume).toHaveBeenCalledOnce();
-  });
-
-  it('keeps a pre-boundary failure from hiding the predecessor terminal or blocking a successor', async () => {
-    const predecessor = {
-      clientRequestId: 'request-predecessor',
-      commandType: 'chat-start',
-      turnId: 'turn-predecessor',
-    };
-    const { router, events, submitGoalControl, resume } = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      activeTurn: predecessor,
-    });
-    submitGoalControl.mockImplementation(async () => {
-      events.clearTurn('chat-1');
-      throw new Error('delivery failed');
-    });
-
-    await expect(router.submitGoalControl('chat-1', 'steer', {
-      clientRequestId: 'request-steer',
-      turnId: 'turn-steer',
-    }, async () => undefined)).rejects.toThrow('delivery failed');
-
-    expect(events.handoffTurn).not.toHaveBeenCalled();
-    await router.runAgentTurn('chat-1', 'successor', {
-      clientRequestId: 'request-successor',
-      turnId: 'turn-successor',
-    });
-    expect(resume).toHaveBeenCalledOnce();
-  });
-
-  it('retains successor metadata after a post-boundary delivery failure', async () => {
-    const predecessor = {
-      clientRequestId: 'request-predecessor',
-      commandType: 'chat-start',
-      turnId: 'turn-predecessor',
-    };
-    const { router, events, submitGoalControl } = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      activeTurn: predecessor,
-    });
-    submitGoalControl.mockImplementation(async (request) => {
-      await request.beforeDelivery(terminalHandoff());
-      throw new Error('delivery outcome unknown');
-    });
-
-    await expect(router.submitGoalControl('chat-1', 'steer', {
-      clientRequestId: 'request-steer',
-      turnId: 'turn-steer',
-    }, async (handoff) => {
-      handoff.validate();
-      handoff.commit();
-    })).rejects.toThrow('delivery outcome unknown');
-
-    expect(events.getActiveTurn()).toMatchObject({ turnId: 'turn-steer' });
-  });
-
-  it('routes steering through its facet without handing off the active operation', async () => {
+  it('routes steering through its facet without replacing the active run', async () => {
     const activeTurn = {
       agentOwnershipEpoch: 'epoch-1',
       clientRequestId: 'request-active',
@@ -425,7 +257,7 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     const prepareDelivery = mock(async () => undefined);
     const target = router.captureSteerTarget('chat-1');
 
-    await expect(router.steerInput('chat-1', 'review @notes.txt', {
+    await expect(router.steerInput('chat-1', 'guidance', {
       clientRequestId: 'request-steer',
       clientMessageId: 'message-steer',
     }, target, prepareDelivery)).resolves.toEqual({ kind: 'accepted' });
@@ -435,12 +267,9 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       agentSessionId: 'native-1',
     }));
     expect(steer).toHaveBeenCalledWith(expect.objectContaining({
-      chatId: 'chat-1',
-      agentSessionId: 'native-1',
       target: providerTarget,
-      input: 'review @notes.txt',
-      clientMessageId: 'message-steer',
-      prepareDelivery,
+      input: 'guidance',
+      prepareDelivery: expect.any(Function),
     }));
     expect(events.handoffTurn).not.toHaveBeenCalled();
     expect(events.getActiveTurn()).toEqual(activeTurn);

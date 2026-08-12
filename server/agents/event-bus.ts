@@ -12,6 +12,7 @@ import type {
 } from './projection-ingress.js';
 import { createLogger } from '../lib/log.js';
 import { matchesTurnIdentity } from '../lib/turn-identity.js';
+import type { LedgerRunEndedRow } from '../ledger/contracts.js';
 
 const logger = createLogger('agents:event-bus');
 
@@ -205,6 +206,28 @@ export class AgentEventBus {
     this.#projectionFailureListeners.add(cb);
   }
 
+  async publishSession(chatId: string): Promise<void> {
+    for (const listener of this.#sessionListeners) await listener(chatId);
+  }
+
+  async publishRunEnded(
+    chatId: string,
+    runId: string,
+    row: LedgerRunEndedRow,
+  ): Promise<void> {
+    const metadata = this.#terminalMetadata(chatId, runId);
+    if (!metadata) return;
+    this.#settledTurnByChatId.delete(chatId);
+    this.#turnMetadataByChatId.delete(chatId);
+    this.#clearAbortability(chatId);
+    if (row.outcome === 'failed') {
+      const message = row.error?.message ?? row.error?.code ?? 'Agent run failed';
+      for (const listener of this.#failedListeners) await listener(chatId, message, metadata);
+      return;
+    }
+    for (const listener of this.#finishedListeners) await listener(chatId, 0, metadata);
+  }
+
   async #dispatch(applied: AppliedProjectionEvent): Promise<void> {
     const event = applied.event;
     switch (event.kind) {
@@ -275,6 +298,15 @@ export class AgentEventBus {
 
   #isActive(event: AgentStreamEvent, metadata: TurnEventMetadata): boolean {
     return this.#isActiveEntry(event.chatId, metadata);
+  }
+
+  #terminalMetadata(chatId: string, runId: string): TurnEventMetadata | null {
+    const active = this.#turnMetadataByChatId.get(chatId);
+    if (active?.turnId === runId) return active;
+    const settled = this.#settledTurnByChatId.get(chatId);
+    if (settled?.turnId === runId) return settled;
+    logger.warn('agents: ignored ledger terminal for a non-active turn', chatId);
+    return null;
   }
 
   // The terminal is the authoritative close of its turn, so it dispatches

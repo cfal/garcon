@@ -157,7 +157,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         chatId: string,
         content: string,
         options: PendingUserInputRegistrationOptions,
-      ) => this.registerPendingUserInput(chatId, content, options),
+      ) => this.registerPendingUserInput(chatId, content, options).then(() => undefined),
       discardProjectedInput: (chatId: string, clientRequestId: string) => (
         this.#acceptedInputTranscript.discardKnownNotSent(chatId, clientRequestId)
       ),
@@ -526,8 +526,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     chatId: string,
     command: string,
     options: PendingUserInputRegistrationOptions,
-  ): Promise<void> {
-    await this.#acceptedInputTranscript.register(chatId, command, options);
+  ): Promise<boolean> {
+    return this.#acceptedInputTranscript.register(chatId, command, options);
   }
 
   onAcceptedInputSettled(chatId: string, clientRequestId: string): void {

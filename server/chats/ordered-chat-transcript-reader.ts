@@ -50,7 +50,7 @@ export class OrderedChatTranscriptReader {
         readonly offset: number;
         readonly limit: number;
         readonly revision: string;
-        readonly projectionState: AgentProjectionState;
+        readonly projectionState: AgentProjectionState | null;
       } | null>;
     };
     readonly carryOver: CarryOverTranscriptStore;

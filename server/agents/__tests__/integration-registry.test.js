@@ -28,6 +28,13 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       isRunning: () => false,
       runningSessions: () => [],
     },
+    producerExecution: {
+      start: async () => ({ id: 'execution' }),
+      resume: async () => ({ id: 'execution' }),
+      abort: async () => {},
+    },
+    nativeHistoryImport: null,
+    nativeActivity: null,
     transcript: {
       openSegment: async () => { throw new Error('not used'); },
       subscribe: () => () => {},

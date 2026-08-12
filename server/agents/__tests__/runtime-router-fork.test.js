@@ -5,8 +5,10 @@ import {
   computeAgentTranscriptRevision,
 } from '@garcon/server-agent-interface';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function makeRouter(fork) {
+  const transcript = createRuntimeTranscriptFixture();
   const settings = { ownerId: 'test', schemaVersion: 1, values: {} };
   const entry = {
     id: 'source-chat',
@@ -47,6 +49,17 @@ function makeRouter(fork) {
     },
     settings: { parse: (value) => value },
     execution,
+    producerExecution: {
+      start: async (request) => {
+        await execution.start(request);
+        return { id: 'started-session' };
+      },
+      resume: async (request) => {
+        await execution.resume(request);
+        return { id: request.agentSessionId };
+      },
+      abort: async () => undefined,
+    },
     transcript: {
       load: mock(async () => ({
         messages,
@@ -112,6 +125,8 @@ function makeRouter(fork) {
     getCarryOverRevision: () => 'carry-1',
     loadCarriedContext: async () => null,
     getCarryOverMessageCount: async () => 0,
+    ledger: transcript.ledger,
+    adoption: transcript.adoption,
   });
   return { router, entry, entries, execution, messages, integration, projection };
 }

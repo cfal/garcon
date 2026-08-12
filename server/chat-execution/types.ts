@@ -124,6 +124,7 @@ export interface CommandSettlementPort {
     deliveryOutcome?: SteerDeliveryOutcome,
   ): Promise<void>;
   settleOperationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void>;
+  settleDuplicateInput(command: AcceptedExecutionCommand): Promise<void>;
 }
 
 export interface DirectInputPreparation {
@@ -390,7 +391,7 @@ export interface ChatExecutionService
     chatId: string,
     command: string,
     options: PendingUserInputRegistrationOptions,
-  ): Promise<void>;
+  ): Promise<boolean>;
   onAcceptedInputSettled(chatId: string, clientRequestId: string): void;
   reserveDirectTurn(chatId: string, turn?: TurnIdentity): DirectTurnReservation;
   assertDirectTurnReservationActive(reservation: DirectTurnReservation): void;

@@ -50,7 +50,7 @@ export interface AcceptedInputCoordinator {
     chatId: string,
     content: string,
     options: PendingUserInputRegistrationOptions,
-  ): Promise<void>;
+  ): Promise<boolean>;
   discardProjectedInput(chatId: string, clientRequestId: string): Promise<void>;
   releaseDirect(reservation: DirectTurnReservation): Promise<void>;
   runDirect(
@@ -168,6 +168,7 @@ export class AcceptedInputHandler {
 
   async schedule(input: AcceptedDirectInput): Promise<void> {
     const reservation = await this.#prepareDirect(input);
+    if (!reservation) return;
     this.#coordinator.trackDispatch(
       this.#coordinator.runDirect(reservation, input.content, input.options, input.dispatch).catch((error) => {
         logger.error('commands: run failed:', error instanceof Error ? error.message : String(error));
@@ -177,6 +178,7 @@ export class AcceptedInputHandler {
 
   async runInitial(input: AcceptedDirectInput): Promise<void> {
     const reservation = await this.#prepareDirect(input);
+    if (!reservation) return;
     await this.#coordinator.runDirect(
       reservation,
       input.content,
@@ -565,7 +567,7 @@ export class AcceptedInputHandler {
     };
   }
 
-  async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation> {
+  async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation | null> {
     let reservation: DirectTurnReservation;
     let inputRegistered = false;
     try {
@@ -578,14 +580,19 @@ export class AcceptedInputHandler {
       this.#checkpoint(reservation);
       const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
-        await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare({
+      await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare({
           signal: reservation.executionAdmission.signal,
           assertAdmissionActive: () => this.#checkpoint(reservation),
         })));
-      await this.#checkpointAfter(
+      const inserted = await this.#checkpointAfter(
         reservation,
         this.#coordinator.registerPending(input.command.chatId, input.content, input.options),
       );
+      if (inserted === false) {
+        await input.settlement.settleDuplicateInput(input.command);
+        await this.#coordinator.releaseDirect(reservation);
+        return null;
+      }
       inputRegistered = true;
       await this.#checkpointAfter(
         reservation,

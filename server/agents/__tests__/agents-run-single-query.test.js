@@ -1,10 +1,12 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 
 function makeRouter(overrides = {}) {
+  const transcript = createRuntimeTranscriptFixture();
   const run = mock(async () => 'response');
   const integration = {
     descriptor: { id: 'test' },
@@ -40,7 +42,11 @@ function makeRouter(overrides = {}) {
     },
     endpointResolver,
     events: {},
+    projection: {},
     getCarryOverRevision: () => 'carry-1',
+    getCarryOverMessageCount: async () => 0,
+    ledger: transcript.ledger,
+    adoption: transcript.adoption,
   });
   return { router, integration, endpointResolver, run };
 }

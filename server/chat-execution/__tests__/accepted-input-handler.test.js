@@ -41,6 +41,7 @@ function settlement(overrides = {}) {
     settleSteerSuccess: mock(async () => undefined),
     settleSteerFailure: mock(async () => undefined),
     settleOperationFailure: mock(async () => undefined),
+    settleDuplicateInput: mock(async () => undefined),
     ...overrides,
   };
 }
@@ -114,7 +115,7 @@ function scaffold(overrides = {}) {
     requestDrain: mock(() => undefined),
     reserveDirect: mock(() => reservation),
     checkpoint: mock(() => undefined),
-    registerPending: mock(async () => undefined),
+    registerPending: mock(async () => true),
     releaseDirect: mock(async () => undefined),
     runDirect: mock(async () => undefined),
     trackDispatch: mock(() => undefined),
@@ -224,6 +225,25 @@ describe('AcceptedInputHandler', () => {
       error: busy,
       retryable: true,
     });
+  });
+
+  test('settles a committed duplicate without dispatching it again', async () => {
+    const settle = settlement();
+    const { handler, m } = scaffold({
+      registerPending: mock(async () => false),
+    });
+
+    await handler.schedule({
+      command: command(),
+      content: 'already committed',
+      options: { clientRequestId: 'request-1', turnId: 'turn-1' },
+      settlement: settle,
+    });
+
+    expect(settle.settleDuplicateInput).toHaveBeenCalledWith(command());
+    expect(m.releaseDirect).toHaveBeenCalledOnce();
+    expect(m.runDirect).not.toHaveBeenCalled();
+    expect(settle.markScheduled).not.toHaveBeenCalled();
   });
 
   test('rolls back preparation before releasing admission on pre-schedule failure', async () => {

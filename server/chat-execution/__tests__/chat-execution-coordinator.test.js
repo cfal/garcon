@@ -37,6 +37,7 @@ function createPendingInputs() {
 function createInputProjection() {
   return {
     admitInput: mock(async () => ({
+      inserted: true,
       discardKnownNotSent: mock(async () => {}),
     })),
   };
@@ -2931,6 +2932,19 @@ describe('orchestration', () => {
       await orchQueue.triggerDrain('c1');
       expect(events).toHaveLength(1);
       expect(events[0].content).toBe('msg1');
+    });
+
+    it('removes a queued duplicate without dispatching it again', async () => {
+      await orchQueue.createChatQueueEntry('c1', 'already committed');
+      mockChatMessages.admitInput.mockResolvedValueOnce({
+        inserted: false,
+        discardKnownNotSent: mock(async () => {}),
+      });
+
+      await orchQueue.triggerDrain('c1');
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
     });
 
     it('pauses on agent error with a queued-turn-failed reason', async () => {

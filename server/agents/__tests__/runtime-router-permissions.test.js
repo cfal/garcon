@@ -1,8 +1,19 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function makeRouter(execution) {
+  const transcript = createRuntimeTranscriptFixture({
+    rows: [{
+      kind: 'permission-requested',
+      lifecycle: {
+        kind: 'requested',
+        requestId: 'permission-1',
+        incarnation: 'incarnation-1',
+      },
+    }],
+  });
   const integration = {
     descriptor: { id: 'test' },
     execution,
@@ -16,7 +27,12 @@ function makeRouter(execution) {
     },
     endpointResolver: {},
     events: {},
+    projection: {},
     getCarryOverRevision: () => 'carry-1',
+    loadCarriedContext: async () => null,
+    getCarryOverMessageCount: async () => 0,
+    ledger: transcript.ledger,
+    adoption: transcript.adoption,
   });
 }
 
@@ -32,8 +48,7 @@ describe('AgentRuntimeRouter permission replies', () => {
     const router = makeRouter(execution);
     const decision = { allow: true };
 
-    router.resolvePermission('chat-1', 'permission-1', decision);
-    await Promise.resolve();
+    await router.resolvePermission('chat-1', 'permission-1', decision);
 
     expect(resolvePermission).toHaveBeenCalledWith('permission-1', decision);
   });

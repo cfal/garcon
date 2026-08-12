@@ -9,6 +9,7 @@ import type {
 } from './types.ts';
 
 export interface AcceptedInputProjectionHandle {
+  readonly inserted: boolean;
   discardKnownNotSent(): Promise<void>;
 }
 
@@ -32,8 +33,8 @@ export class AcceptedInputTranscript {
     chatId: string,
     content: string,
     options: PendingUserInputRegistrationOptions,
-  ): Promise<void> {
-    if (!content && !options.images?.length) return;
+  ): Promise<boolean> {
+    if (!content && !options.images?.length) return true;
     const deliveryStatus = options.deliveryStatus ?? 'accepted';
     const images = normalizeChatImages(options.images);
     let clientRequestId: string | undefined;
@@ -68,7 +69,13 @@ export class AcceptedInputTranscript {
         }),
         { ...options, clientRequestId },
       );
-      this.#handles.set(inputKey(chatId, clientRequestId), handle);
+      if (handle.inserted !== false) {
+        this.#handles.set(inputKey(chatId, clientRequestId), handle);
+      } else {
+        await handle.discardKnownNotSent();
+        this.pendingInputs.discard(chatId, clientRequestId);
+      }
+      return handle.inserted !== false;
     } catch (error) {
       if (clientRequestId) this.pendingInputs.discard(chatId, clientRequestId);
       throw error;
