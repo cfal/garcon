@@ -398,12 +398,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       pending.preTokens,
       pending.postTokens,
     );
-    const summaryUuid = typeof msg.uuid === 'string' && msg.uuid ? msg.uuid : null;
-    this.emitMessages(session.chatId, [
-      summaryUuid
-        ? attachNativeMessageSource(compactionMessage, { entryId: summaryUuid, withinSourceOrdinal: 0 })
-        : compactionMessage,
-    ], activeTurn.eventMetadata);
+    // Match the JSONL loader's compaction identity: the summary uuid at ordinal 0.
+    if (typeof msg.uuid === 'string' && msg.uuid) attachNativeMessageSource(compactionMessage, { entryId: msg.uuid, withinSourceOrdinal: 0 });
+    this.emitMessages(session.chatId, [compactionMessage], activeTurn.eventMetadata);
   }
 
   // Cancels the pending force-kill fallback armed by an abort. Safe to call
