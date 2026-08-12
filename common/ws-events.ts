@@ -492,7 +492,6 @@ function parseChatListInvalidationReason(
 function parseResetReason(value: unknown): ChatGenerationResetReason | null {
   return value === 'manual-reload'
     || value === 'process-error'
-    || value === 'idle-reconcile'
     || value === 'agent-handoff'
     ? value
     : null;

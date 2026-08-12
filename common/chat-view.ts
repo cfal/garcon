@@ -99,12 +99,9 @@ export type ChatReplayResult =
       lastSeq: number;
     };
 
-// 'idle-reconcile' is the server rebuilding a settled view from native history on its own, so
-// clients refetch rather than keeping sequence numbers that no longer address the same messages.
 export type ChatGenerationResetReason =
   | 'manual-reload'
   | 'process-error'
-  | 'idle-reconcile'
   | 'agent-handoff';
 export type ChatViewApplyStatus = 'applied' | 'gap-detected';
 

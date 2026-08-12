@@ -86,7 +86,6 @@ export function createRouteCommandService({
       getNativeHistoryLastSeq: () => null,
       getCursor: () => null,
     },
-    idleReconciler: { ensureReconciled: async () => undefined },
     settings,
     recentTitleIcons: {
       getRecentIcons: () => [],
