@@ -1,0 +1,300 @@
+import {
+  parseChatMessage,
+  type ChatMessage,
+  type ToolUseChatMessage,
+  UserMessage,
+} from '../../common/chat-types.js';
+import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
+import { isRecord, stableJsonStringify, type JsonObject } from '../../common/json.js';
+import { parseNativeSeedReceipt } from '../../common/transcript-seed.js';
+import type {
+  AgentEstablishedSession,
+  AgentPermissionLifecycle,
+  AgentPermissionOption,
+  AgentRunFailureDetail,
+} from '@garcon/server-agent-interface';
+import type {
+  LedgerPermissionRow,
+  LedgerRow,
+  LedgerRowDraft,
+  LedgerUserInputDetail,
+  TranscriptViewId,
+} from './contracts.js';
+
+export interface StoredLedgerRow {
+  readonly view_id: string;
+  readonly ordinal: number;
+  readonly kind: LedgerRow['kind'];
+  readonly at: string;
+  readonly client_message_id: string | null;
+  readonly payload_json: string;
+}
+
+interface StoredPayload {
+  readonly providerMeta: JsonObject | null;
+  readonly value: unknown;
+}
+
+export function encodeLedgerDraft(draft: LedgerRowDraft): {
+  readonly clientMessageId: string | null;
+  readonly payloadJson: string;
+} {
+  const clientMessageId = draft.kind === 'user-input'
+    ? draft.detail.clientMessageId
+    : null;
+  const value = draftValue(draft);
+  return {
+    clientMessageId,
+    payloadJson: stableJsonStringify({
+      providerMeta: draft.providerMeta ?? null,
+      value,
+    }),
+  };
+}
+
+export function decodeLedgerRow(row: StoredLedgerRow): LedgerRow {
+  const payload = parsePayload(row.payload_json);
+  const base = {
+    viewId: row.view_id as TranscriptViewId,
+    ordinal: positiveInteger(row.ordinal, 'ordinal'),
+    at: nonEmptyString(row.at, 'row timestamp'),
+    providerMeta: payload.providerMeta,
+  };
+
+  switch (row.kind) {
+    case 'user-input': {
+      const detail = parseUserInput(payload.value);
+      if (detail.clientMessageId !== row.client_message_id) {
+        throw new TypeError('Stored user-input identity does not match its payload');
+      }
+      return { ...base, kind: 'user-input', detail };
+    }
+    case 'provider-row':
+      return { ...base, kind: 'provider-row', message: parseMessage(payload.value) };
+    case 'notice': {
+      const value = record(payload.value, 'notice payload');
+      return {
+        ...base,
+        kind: 'notice',
+        message: nonEmptyString(value.message, 'notice message'),
+        detail: jsonObject(value.detail, 'notice detail'),
+      };
+    }
+    case 'session':
+      return { ...base, kind: 'session', detail: parseSession(payload.value) };
+    case 'run-ended': {
+      const value = record(payload.value, 'run-ended payload');
+      const outcome = value.outcome;
+      const origin = value.origin;
+      if (outcome !== 'finished' && outcome !== 'failed' && outcome !== 'interrupted') {
+        throw new TypeError('Stored run outcome is invalid');
+      }
+      if (origin !== 'provider' && origin !== 'core') {
+        throw new TypeError('Stored run origin is invalid');
+      }
+      const error = value.error === undefined ? undefined : parseRunFailure(value.error);
+      return { ...base, kind: 'run-ended', outcome, origin, ...(error ? { error } : {}) };
+    }
+    case 'permission-requested':
+    case 'permission-resolved':
+    case 'permission-cancelled':
+    case 'permission-expired': {
+      const lifecycle = parsePermissionLifecycle(payload.value);
+      const expectedKind = `permission-${lifecycle.kind}`;
+      if (row.kind !== expectedKind) {
+        throw new TypeError('Stored permission kind does not match its lifecycle payload');
+      }
+      return { ...base, kind: row.kind, lifecycle } as LedgerPermissionRow;
+    }
+    default:
+      throw new TypeError(`Unknown transcript row kind: ${String(row.kind)}`);
+  }
+}
+
+export function submissionFingerprint(detail: LedgerUserInputDetail): string {
+  return stableJsonStringify({
+    content: detail.message.content,
+    images: detail.message.images ?? null,
+    attachments: detail.attachments,
+    steer: detail.steer,
+  });
+}
+
+function draftValue(draft: LedgerRowDraft): unknown {
+  switch (draft.kind) {
+    case 'user-input':
+      return draft.detail;
+    case 'provider-row':
+      return draft.message;
+    case 'notice':
+      return { message: draft.message, detail: draft.detail };
+    case 'session':
+      return draft.detail;
+    case 'run-ended':
+      return {
+        outcome: draft.outcome,
+        origin: draft.origin,
+        ...(draft.error ? { error: draft.error } : {}),
+      };
+    case 'permission-requested':
+    case 'permission-resolved':
+    case 'permission-cancelled':
+    case 'permission-expired':
+      return draft.lifecycle;
+  }
+}
+
+function parsePayload(value: string): StoredPayload {
+  const parsed: unknown = JSON.parse(value);
+  const payload = record(parsed, 'ledger payload');
+  return {
+    providerMeta: payload.providerMeta === null
+      ? null
+      : jsonObject(payload.providerMeta, 'provider metadata'),
+    value: payload.value,
+  };
+}
+
+function parseUserInput(value: unknown): LedgerUserInputDetail {
+  const detail = record(value, 'user-input payload');
+  const message = parseMessage(detail.message);
+  if (!(message instanceof UserMessage)) {
+    throw new TypeError('Stored user-input message is not a user message');
+  }
+  const clientMessageId = detail.clientMessageId === null
+    ? null
+    : nonEmptyString(detail.clientMessageId, 'client message ID');
+  if (!Array.isArray(detail.attachments)) {
+    throw new TypeError('Stored input attachments are invalid');
+  }
+  const attachments = detail.attachments.map((attachment) => {
+    const item = record(attachment, 'input attachment');
+    if (item.kind !== 'image') throw new TypeError('Stored input attachment kind is invalid');
+    return {
+      kind: 'image' as const,
+      data: nonEmptyString(item.data, 'attachment data'),
+      name: item.name === null ? null : nonEmptyString(item.name, 'attachment name'),
+      mimeType: nonEmptyString(item.mimeType, 'attachment MIME type'),
+    };
+  });
+  if (typeof detail.steer !== 'boolean') throw new TypeError('Stored steer flag is invalid');
+  return { clientMessageId, message, attachments, steer: detail.steer };
+}
+
+function parseSession(value: unknown): AgentEstablishedSession {
+  const session = record(value, 'session payload');
+  const agentSessionId = nonEmptyString(session.agentSessionId, 'agent session ID');
+  const nativeSession = session.nativeSession === null
+    ? null
+    : parseNativeSession(session.nativeSession);
+  const nativeSeedReceipt = session.nativeSeedReceipt === null
+    ? null
+    : parseNativeSeedReceipt(session.nativeSeedReceipt);
+  if (session.nativeSeedReceipt !== null && !nativeSeedReceipt) {
+    throw new TypeError('Stored native seed receipt is invalid');
+  }
+  return { agentSessionId, nativeSession, nativeSeedReceipt };
+}
+
+function parseNativeSession(value: unknown): AgentEstablishedSession['nativeSession'] {
+  const session = record(value, 'native session');
+  return {
+    ownerId: nonEmptyString(session.ownerId, 'native session owner'),
+    schemaVersion: positiveInteger(session.schemaVersion, 'native session schema version'),
+    value: jsonObject(session.value, 'native session value'),
+  };
+}
+
+function parsePermissionLifecycle(value: unknown): AgentPermissionLifecycle {
+  const lifecycle = record(value, 'permission lifecycle');
+  const requestId = nonEmptyString(lifecycle.requestId, 'permission request ID');
+  const incarnation = nonEmptyString(lifecycle.incarnation, 'permission incarnation');
+  switch (lifecycle.kind) {
+    case 'requested': {
+      const requestedTool = parseMessage(lifecycle.requestedTool) as ToolUseChatMessage;
+      if (!('toolId' in requestedTool)) throw new TypeError('Permission request tool is invalid');
+      if (!Array.isArray(lifecycle.options)) throw new TypeError('Permission options are invalid');
+      const options = lifecycle.options.map((option) => {
+        const parsed = jsonObject(option, 'permission option') as AgentPermissionOption;
+        nonEmptyString(parsed.id, 'permission option ID');
+        nonEmptyString(parsed.label, 'permission option label');
+        return parsed;
+      });
+      return { kind: 'requested', requestId, incarnation, requestedTool, options };
+    }
+    case 'resolved': {
+      const decision = record(lifecycle.decision, 'permission decision');
+      if (typeof decision.allow !== 'boolean') throw new TypeError('Permission decision is invalid');
+      const parsedDecision: PermissionDecisionPayload = {
+        allow: decision.allow,
+        ...(typeof decision.alwaysAllow === 'boolean'
+          ? { alwaysAllow: decision.alwaysAllow }
+          : {}),
+        ...(isRecord(decision.response)
+          ? { response: decision.response }
+          : {}),
+      };
+      return {
+        kind: 'resolved',
+        requestId,
+        incarnation,
+        decision: parsedDecision,
+      };
+    }
+    case 'cancelled':
+      return {
+        kind: 'cancelled',
+        requestId,
+        incarnation,
+        reason: lifecycle.reason === null
+          ? null
+          : nonEmptyString(lifecycle.reason, 'permission cancellation reason'),
+      };
+    case 'expired':
+      return { kind: 'expired', requestId, incarnation };
+    default:
+      throw new TypeError('Stored permission lifecycle kind is invalid');
+  }
+}
+
+function parseRunFailure(value: unknown): AgentRunFailureDetail {
+  const error = record(value, 'run failure');
+  const message = error.message === undefined
+    ? undefined
+    : nonEmptyString(error.message, 'run failure message');
+  return {
+    code: nonEmptyString(error.code, 'run failure code'),
+    ...(message ? { message } : {}),
+  };
+}
+
+function parseMessage(value: unknown): ChatMessage {
+  const message = parseChatMessage(record(value, 'chat message'));
+  if (!message) throw new TypeError('Stored chat message is invalid');
+  return message;
+}
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  return value;
+}
+
+function jsonObject(value: unknown, label: string): JsonObject {
+  const parsed = record(value, label);
+  stableJsonStringify(parsed);
+  return parsed as JsonObject;
+}
+
+function nonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string`);
+  }
+  return value;
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw new TypeError(`${label} must be a positive integer`);
+  }
+  return Number(value);
+}
