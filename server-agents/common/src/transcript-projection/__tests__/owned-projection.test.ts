@@ -150,6 +150,14 @@ describe('AgentOwnedProjection', () => {
         evidenceDegraded: true,
         expectSuccess: false,
       },
+      // A confirmed hook proves only its own streamed occurrences persisted;
+      // it cannot override evidence the audit could not read.
+      {
+        label: 'confirmed hook with degraded evidence',
+        settlement: 'confirmed',
+        evidenceDegraded: true,
+        expectSuccess: false,
+      },
     ];
     for (const testCase of cases) {
       const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-owned-projection-'));

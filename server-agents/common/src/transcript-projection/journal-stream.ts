@@ -259,7 +259,14 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       const proof = request.sourceSettlement
         ? await request.sourceSettlement()
         : null;
-      const settlement = proof?.verdict ?? null;
+      // Success requires both the provider proof and the settled native audit.
+      // A provider hook proves only that its expected streamed occurrences
+      // persisted, never that the integration observed every provider output;
+      // an unresolved hook fails closed, and a confirmed hook still needs the
+      // audit to establish that no provider-owed output was missed. The two
+      // are combined at each conclusion, so a confirmed hook never overrides
+      // unavailable, ambiguous, or ahead evidence.
+      const hookProven = proof === null || proof.verdict === 'confirmed';
       // Providers persist native records asynchronously relative to their
       // stream terminals, so a boundary whose evidence has not caught up yet
       // rereads boundedly before concluding. A provider settlement hook owns
@@ -267,7 +274,9 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       const deadline = Date.now() + (request.sourceSettlement ? 0 : SETTLEMENT_WAIT_MS);
       for (;;) {
         const evidence = await this.options.bootstrap({ chat: segment.chat, signal: request.signal });
-        if (evidence.kind !== 'ready') return finish(settlement ?? 'unresolved');
+        // Unavailable evidence cannot exclude missed provider output and so
+        // never proves settlement, whatever the hook reported.
+        if (evidence.kind !== 'ready') return finish('unresolved');
         const state = segment.journal.state;
         const outcome = auditNativeEvidence({
           ownerId: this.options.ownerId,
@@ -277,10 +286,10 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
           itemAliases: proof?.itemAliases,
         });
         if (outcome.kind === 'skipped') {
-          // The proof obligation is vacuous when no durable row claims a
+          // The proof obligation is vacuous only when no durable row claims a
           // provider-native identity: a cancelled-before-start or output-free
           // turn left nothing the provider owes evidence for. Owner-native
-          // rows facing ambiguous evidence keep success withheld.
+          // rows facing ambiguous evidence cannot be proved complete.
           const namespace = `${this.options.ownerId}:native`;
           const providerOwedRows = state.entries.some((entry) => (
             entry.lifetime === 'durable'
@@ -291,7 +300,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
             await sleep(SETTLEMENT_POLL_INTERVAL_MS);
             continue;
           }
-          return finish(settlement ?? (providerOwedRows ? 'unresolved' : 'confirmed'));
+          return finish(hookProven && !providerOwedRows ? 'confirmed' : 'unresolved');
         }
         if (outcome.kind === 'diverged') {
           if (state.nativeContinuity !== 'diverged') {
@@ -301,7 +310,9 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
               nativeContinuity: 'diverged',
             });
           }
-          return finish(settlement ?? 'confirmed');
+          // Divergence at an already committed source degrades resume/fork
+          // continuity but does not fail the just-finished turn's completeness.
+          return finish(hookProven ? 'confirmed' : 'unresolved');
         }
         if (outcome.aheadFromOrdinal !== null && Date.now() < deadline) {
           await sleep(SETTLEMENT_POLL_INTERVAL_MS);
@@ -317,7 +328,10 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
         }
         await applyAuditMetadata(segment.journal, outcome, aliasesFromSeeds(outcome.suffix));
         segment.nativeAheadFromOrdinal = outcome.aheadFromOrdinal;
-        return finish(settlement ?? 'confirmed');
+        // A projection still ahead of the provider after its bounded wait has
+        // not proved the committed suffix durable, so success is withheld even
+        // though the audit aligned and any missed suffix was imported.
+        return finish(hookProven && outcome.aheadFromOrdinal === null ? 'confirmed' : 'unresolved');
       }
     });
   }

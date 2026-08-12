@@ -743,6 +743,72 @@ describe('existing-journal native audit', () => {
     expect(reresolved.kind).toBe('ready');
   });
 
+  it('withholds success when a confirmed hook faces ambiguous native evidence', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+    // A provider-owed assistant occurrence is committed from a live event.
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new AssistantMessage('2026-06-01T00:00:01.000Z', 'answer')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'turn:t1:end:0', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+
+    // The native evidence is ambiguous: two rows share one native identity, so
+    // the audit skips. A confirmed hook cannot override the owed row.
+    persisted = [
+      nativeMessage('dup-1', 'answer'),
+      attachNativeMessageSource(
+        new AssistantMessage('2026-06-01T00:00:02.000Z', 'answer'),
+        { entryId: 'dup-1', lineNumber: 2, withinSourceOrdinal: 0 },
+      ),
+    ];
+    await expect(stream.settleNativeBoundary({
+      chat,
+      signal: signal(),
+      sourceSettlement: async () => ({ verdict: 'confirmed' }),
+    })).resolves.toBe('unresolved');
+  });
+
+  it('withholds success when a confirmed hook faces a projection ahead of the provider', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new AssistantMessage('2026-06-01T00:00:01.000Z', 'answer')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'item-1', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+
+    // The provider has not persisted the committed occurrence yet, so the
+    // projection is ahead. Even a confirmed hook cannot prove the suffix
+    // durable, and the native file being empty skips the audit outright.
+    persisted = [];
+    await expect(stream.settleNativeBoundary({
+      chat,
+      signal: signal(),
+      sourceSettlement: async () => ({ verdict: 'confirmed' }),
+    })).resolves.toBe('unresolved');
+    // Once the provider persists the occurrence, the confirmed hook and the
+    // aligned audit agree.
+    persisted = [nativeMessage('item-1', 'answer')];
+    await expect(stream.settleNativeBoundary({
+      chat,
+      signal: signal(),
+      sourceSettlement: async () => ({ verdict: 'confirmed' }),
+    })).resolves.toBe('confirmed');
+  });
+
   it('serves the committed journal unchanged when evidence is unavailable or empty', async () => {
     const directory = await createDirectory();
     const first = await openContents(streamOver(directory, () => [
