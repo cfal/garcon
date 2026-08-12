@@ -343,23 +343,42 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return [...(await this.loadTranscriptSnapshot(session, chatId)).messages];
   }
 
-  // Client-request identities of user rows the projection has bound to proven
-  // provider-native evidence; the pending-input service settles against these.
+  // Client-request identities the projection has settled for routine
+  // pending-overlay clearing; the turn owner's own input settles on durable
+  // promotion.
   async listSettledInputRequests(
     session: AgentChatEntry | null,
     chatId = '',
-    requireNativeBinding = false,
     signal: AbortSignal = new AbortController().signal,
+  ): Promise<readonly string[]> {
+    return this.#listInputRequests(session, chatId, signal, false);
+  }
+
+  // Client-request identities bound to proven provider-native persistence; the
+  // stop-cohort path settles against these so an unpersisted input stays
+  // unconfirmed.
+  async listNativelyBoundInputRequests(
+    session: AgentChatEntry | null,
+    chatId = '',
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<readonly string[]> {
+    return this.#listInputRequests(session, chatId, signal, true);
+  }
+
+  async #listInputRequests(
+    session: AgentChatEntry | null,
+    chatId: string,
+    signal: AbortSignal,
+    requireNativeBinding: boolean,
   ): Promise<readonly string[]> {
     if (!session?.agentId) return [];
     const integration = this.#directory.get(session.agentId);
     if (!integration) return [];
     const chat = toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session));
-    const settled = await integration.transcript.settledInputRequests({
-      chat,
-      signal,
-      ...(requireNativeBinding ? { requireNativeBinding: true } : {}),
-    });
+    const request = { chat, signal };
+    const settled = requireNativeBinding
+      ? await integration.transcript.nativelyBoundInputRequests(request)
+      : await integration.transcript.settledInputRequests(request);
     if (settled.kind !== 'ready') throw transcriptAccessFailure(settled);
     return settled.value;
   }

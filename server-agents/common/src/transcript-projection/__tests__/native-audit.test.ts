@@ -670,11 +670,7 @@ describe('existing-journal native audit', () => {
     const routine = await stream.settledInputRequests({ chat, signal: signal() });
     expect(routine).toEqual({ kind: 'ready', value: ['held-request'] });
     // The stop cohort holds even the owner to the persistence proof.
-    const cohort = await stream.settledInputRequests({
-      chat,
-      signal: signal(),
-      requireNativeBinding: true,
-    });
+    const cohort = await stream.nativelyBoundInputRequests({ chat, signal: signal() });
     expect(cohort).toEqual({ kind: 'ready', value: [] });
   });
 

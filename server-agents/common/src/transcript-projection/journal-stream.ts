@@ -371,15 +371,29 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
   }
 
   // A user input's pending overlay clears once its admission is settled. The
-  // turn owner's own input is settled by promotion to a durable ledger row:
-  // it defines the turn and is part of the conversation. An auxiliary input
-  // such as a mid-turn steer is settled only when bound to proven
-  // provider-native evidence, since a promoted but unpersisted steer whose
-  // turn stopped never reached the provider. The stop-cohort path passes
-  // requireNativeBinding to hold every input, owner included, to that same
-  // persistence proof.
-  async settledInputRequests(
-    request: AgentTranscriptRequestV4 & { readonly requireNativeBinding?: boolean },
+  // turn owner's own input is settled by promotion to a durable ledger row: it
+  // defines the turn and is part of the conversation. An auxiliary input such
+  // as a mid-turn steer is settled only when bound to proven provider-native
+  // evidence, since a promoted but unpersisted steer whose turn stopped never
+  // reached the provider.
+  settledInputRequests(
+    request: AgentTranscriptRequestV4,
+  ): Promise<AgentTranscriptAccessResult<readonly string[]>> {
+    return this.#collectSettledInputs(request, false);
+  }
+
+  // The stop-cohort path holds every input, owner included, to the same
+  // provider-native persistence proof, so a promoted but unpersisted input on
+  // a stopped turn surfaces as unconfirmed rather than clearing.
+  nativelyBoundInputRequests(
+    request: AgentTranscriptRequestV4,
+  ): Promise<AgentTranscriptAccessResult<readonly string[]>> {
+    return this.#collectSettledInputs(request, true);
+  }
+
+  async #collectSettledInputs(
+    request: AgentTranscriptRequestV4,
+    requireNativeBinding: boolean,
   ): Promise<AgentTranscriptAccessResult<readonly string[]>> {
     request.signal.throwIfAborted();
     const opened = await this.#requireOpen(request);
@@ -393,7 +407,7 @@ export class JournalBackedAgentTranscriptStream implements AgentTranscriptStream
       const clientRequestId = provenance?.clientRequestId;
       if (!clientRequestId) return [];
       const isTurnOwnerInput = clientRequestId === provenance!.turnOwner.clientRequestId;
-      if (!request.requireNativeBinding && isTurnOwnerInput) return [clientRequestId];
+      if (!requireNativeBinding && isTurnOwnerInput) return [clientRequestId];
       if (!entry.source) return [];
       const claimedNative = entry.source.namespace === namespace
         && !entry.source.itemId.startsWith('event:');

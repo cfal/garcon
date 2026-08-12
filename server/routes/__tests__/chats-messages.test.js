@@ -314,7 +314,10 @@ describe('GET /api/v1/chats/messages', () => {
     const views = new ChatViewStore(() => false, { messageLimit: 2 });
     // A foreign identity in the settled set never clears the live record.
     const settledInputRequests = mock(async () => new Set(['req-native']));
-    const pendingInputs = new PendingUserInputService({ settledInputRequests });
+    const pendingInputs = new PendingUserInputService({
+      settledInputRequests,
+      nativelyBoundInputRequests: settledInputRequests,
+    });
     await pendingInputs.register('123', 'pending', {
       clientRequestId: 'req-live',
       turnId: 'turn-live',

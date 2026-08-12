@@ -45,10 +45,8 @@ interface NativeReconcileRun {
 // stop-cohort path requires proven provider-native binding, so a promoted
 // but unpersisted input on a stopped turn surfaces as unconfirmed.
 export interface SettledInputRequestReader {
-  settledInputRequests(
-    chatId: string,
-    options?: { readonly requireNativeBinding?: boolean },
-  ): Promise<ReadonlySet<string>>;
+  settledInputRequests(chatId: string): Promise<ReadonlySet<string>>;
+  nativelyBoundInputRequests(chatId: string): Promise<ReadonlySet<string>>;
 }
 
 export interface PendingUserInputServiceContract {
@@ -227,10 +225,9 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     requireNativeBinding = false,
   ): Promise<void> {
     if (records.length === 0) return;
-    const settled = await this.#settled.settledInputRequests(
-      chatId,
-      requireNativeBinding ? { requireNativeBinding: true } : undefined,
-    );
+    const settled = requireNativeBinding
+      ? await this.#settled.nativelyBoundInputRequests(chatId)
+      : await this.#settled.settledInputRequests(chatId);
     for (const record of records) {
       if (!settled.has(record.clientRequestId)) continue;
       this.store.clear(chatId, record.clientRequestId, 'persisted');

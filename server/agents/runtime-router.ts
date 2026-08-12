@@ -454,7 +454,7 @@ export class AgentRuntimeRouter {
     if (!entry?.agentId) return;
     const integration = this.#directory.get(entry.agentId);
     if (!integration) return;
-    integration.transcript.updateNativeReference?.(
+    integration.transcript.updateNativeReference(
       toAgentChatReference(integration, chatId, entry, this.#getCarryOverRevision(entry)),
     );
   }

@@ -11,11 +11,17 @@ function createService(initialSettled = [], initialNativeBound = null) {
   const reads = [];
   let gate = null;
   const service = new PendingUserInputService({
-    async settledInputRequests(chatId, options) {
+    async settledInputRequests(chatId) {
       reads.push(chatId);
       if (gate) await gate.promise;
       if (settledError) throw settledError;
-      return new Set(options?.requireNativeBinding ? nativeBound : settled);
+      return new Set(settled);
+    },
+    async nativelyBoundInputRequests(chatId) {
+      reads.push(chatId);
+      if (gate) await gate.promise;
+      if (settledError) throw settledError;
+      return new Set(nativeBound);
     },
   });
   let settledError = null;

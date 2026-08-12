@@ -60,6 +60,7 @@ describe('queue and transcript stability', () => {
       const views = new ChatViewStore(() => true);
       const pendingInputs = new PendingUserInputService({
         settledInputRequests: async () => new Set(),
+        nativelyBoundInputRequests: async () => new Set(),
       });
       const queue = new ChatExecutionCoordinator(
         workspaceDir,
@@ -137,6 +138,7 @@ describe('queue and transcript stability', () => {
       const views = new ChatViewStore(() => true);
       const pendingInputs = new PendingUserInputService({
         settledInputRequests: async () => new Set(),
+        nativelyBoundInputRequests: async () => new Set(),
       });
       pendingInputs.store.onStatusUpdated(() => { throw null; });
       const steerInput = mock(async (_chatId, _content, _options, _target, prepareDelivery) => {
@@ -331,7 +333,8 @@ describe('queue and transcript stability', () => {
       const interruptedSettled = deferred();
       const views = new ChatViewStore(() => false);
       const pendingInputs = new PendingUserInputService({
-        settledInputRequests: async () => {
+        settledInputRequests: async () => new Set(),
+        nativelyBoundInputRequests: async () => {
           nativeLoadStarted.resolve();
           await nativeLoadResult.promise;
           return new Set();
@@ -427,6 +430,7 @@ describe('queue and transcript stability', () => {
       const views = new ChatViewStore(() => false);
       const pendingInputs = new PendingUserInputService({
         settledInputRequests: async () => new Set(),
+        nativelyBoundInputRequests: async () => new Set(),
       });
       const pendingPort = {
         register: mock(async (...args) => {
@@ -514,6 +518,9 @@ describe('queue and transcript stability', () => {
       const loadNativeMessages = mock(async () => [...nativeMessages]);
       const pendingInputs = new PendingUserInputService({
         settledInputRequests: async () => new Set(
+          nativeMessages.map((message) => message.metadata?.clientRequestId),
+        ),
+        nativelyBoundInputRequests: async () => new Set(
           nativeMessages.map((message) => message.metadata?.clientRequestId),
         ),
       });

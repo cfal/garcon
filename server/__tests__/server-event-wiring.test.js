@@ -107,6 +107,7 @@ function createWiringFixture(overrides = {}) {
   const noOpSubscription = mock(() => undefined);
   const pendingInputs = overrides.pendingInputs ?? new PendingUserInputService({
     settledInputRequests: mock(async () => new Set()),
+    nativelyBoundInputRequests: mock(async () => new Set()),
   });
   const agentRegistry = {
     onProcessing: mock((callback) => { agentListeners.processing = callback; }),
@@ -1231,12 +1232,15 @@ describe('server event wiring', () => {
     const timestamp = '2026-06-01T00:00:00.000Z';
     const nativeLoadStarted = deferred();
     const releaseNativeLoad = deferred();
-    const settledInputRequests = mock(async () => {
+    const nativelyBoundInputRequests = mock(async () => {
       nativeLoadStarted.resolve();
       await releaseNativeLoad.promise;
       return new Set();
     });
-    const pendingInputs = new PendingUserInputService({ settledInputRequests });
+    const pendingInputs = new PendingUserInputService({
+      settledInputRequests: mock(async () => new Set()),
+      nativelyBoundInputRequests,
+    });
     await pendingInputs.register(chatId, 'interrupted', {
       ...turn,
       createdAt: timestamp,
@@ -1331,7 +1335,7 @@ describe('server event wiring', () => {
     releaseNativeLoad.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(settledInputRequests).toHaveBeenCalledTimes(1);
+    expect(nativelyBoundInputRequests).toHaveBeenCalledTimes(1);
     expect(pendingInputs.listForChat(chatId)).toMatchObject([
       { clientRequestId: 'req-a', deliveryStatus: 'unconfirmed' },
       { clientRequestId: 'req-b', deliveryStatus: 'accepted' },
@@ -1344,6 +1348,7 @@ describe('server event wiring', () => {
     const turn = { clientRequestId: 'req-a', turnId: 'turn-a' };
     const pendingInputs = new PendingUserInputService({
       settledInputRequests: mock(async () => new Set()),
+      nativelyBoundInputRequests: mock(async () => new Set()),
     });
     await pendingInputs.register(chatId, 'still running', {
       ...turn,
