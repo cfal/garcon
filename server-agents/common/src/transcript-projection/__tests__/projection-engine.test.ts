@@ -230,6 +230,32 @@ describe('AgentProjectionMutationGate', () => {
     expect(ran).toBe(false);
     expect(violations).toBe(2);
   });
+
+  it('classifies a seal-racing microtask by whether its run precedes the seal', async () => {
+    let violations = 0;
+    const gate = new AgentProjectionMutationGate(async () => { violations += 1; });
+
+    // A mutation buffered before the seal keeps the lease dirty across a
+    // microtask turn, so the seal is refused rather than racing ahead of it.
+    const dirtyLease = await gate.acquire();
+    const buffered = gate.run(async () => 'buffered');
+    await Promise.resolve();
+    expect(() => dirtyLease.seal()).toThrow('buffered mutation');
+    await dirtyLease.rollback();
+    expect(await buffered).toBe('buffered');
+    expect(violations).toBe(0);
+
+    // A mutation whose run() is invoked from a microtask that fires after the
+    // seal is post-boundary and excluded, never applied.
+    const sealedLease = await gate.acquire();
+    const seal = sealedLease.seal();
+    let applied = false;
+    const raced = Promise.resolve().then(() => gate.run(async () => { applied = true; }));
+    await expect(raced).rejects.toThrow('sealed handoff boundary');
+    sealedLease.commit(seal);
+    expect(applied).toBe(false);
+    expect(violations).toBe(1);
+  });
 });
 
 describe('handoff conformance', () => {

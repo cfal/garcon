@@ -252,6 +252,42 @@ describe('AgentOwnershipJournal', () => {
     });
   });
 
+  it('retries an fsync-failed decision record without releasing the source', async () => {
+    // The in-memory registry keeps only the journal's own atomic write on disk,
+    // so a read-only workspace injects a real persistence-boundary failure on
+    // the decision record alone, not on registry state.
+    const registry = createRegistry({ chat: chat() });
+    const release = mock(async () => {});
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+    });
+    await journal.initialize();
+    const intent = await begin(journal, registry);
+    await stageAndDecide(journal, intent);
+
+    await fs.chmod(workspaceDir, 0o500);
+    try {
+      // Registry ownership advances in memory, then the decision-record write
+      // to the read-only directory fails: the decision is not durable yet.
+      await expect(journal.applyHandoffDecision(intent.operationId)).rejects.toThrow();
+      expect(release).not.toHaveBeenCalled();
+    } finally {
+      await fs.chmod(workspaceDir, 0o700);
+    }
+
+    // Retrying the identical decision after repair resolves idempotently
+    // through the already-applied registry target rather than rolling back or
+    // re-releasing, and completion releases the source exactly once.
+    const applied = await journal.applyHandoffDecision(intent.operationId);
+    expect(applied).toMatchObject({ agentId: 'target-agent', agentSessionId: null });
+    await journal.completeHandoff(intent.operationId);
+    await journal.drainTransferCleanup();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(await readJournal(workspaceDir)).toMatchObject({ ownershipIntents: [] });
+  });
+
   it('serializes deletion behind an in-flight transfer release', async () => {
     const registry = createRegistry({ chat: chat() });
     let releaseTransfer;
@@ -480,6 +516,53 @@ describe('AgentOwnershipJournal', () => {
     });
 
     await expect(journal.initialize()).rejects.toThrow('Invalid agent ownership journal');
+  });
+
+  it('presumes abort and restores the source for an undecided staged handoff', async () => {
+    const registry = createRegistry({ chat: chat() });
+    const release = mock(async () => {});
+    await writeJournal(workspaceDir, {
+      version: 4,
+      ownershipIntents: [persistedHandoff()],
+      transferCleanup: [],
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+    });
+
+    // No decision was recorded, so recovery rolls the staged incoming back and
+    // leaves the source owning the chat rather than completing the transfer.
+    await expect(journal.initialize()).resolves.toBeUndefined();
+    expect(registry.getChat('chat')).toMatchObject({
+      agentId: 'source-agent',
+      agentOwnershipEpoch: 'source-agent-epoch',
+    });
+    expect(release).not.toHaveBeenCalled();
+    expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
+  });
+
+  it('retains a decided handoff whose incoming preparation is deferred', async () => {
+    const registry = createRegistry({ chat: chat() });
+    const release = mock(async () => {});
+    const integrations = createIntegrations(release);
+    integrations.get('target-agent').transcript.prepareOwnershipSegment =
+      mock(async () => ({ kind: 'deferred' }));
+    await writeJournal(workspaceDir, {
+      version: 4,
+      ownershipIntents: [persistedHandoff({ phase: 'commit-decided' })],
+      transferCleanup: [],
+    });
+    const journal = new AgentOwnershipJournal({ workspaceDir, registry, integrations });
+
+    // A deferred incoming projection cannot roll the decision forward, so
+    // recovery retains the intent rather than applying or discarding it, and
+    // the source keeps ownership until the incoming becomes ready.
+    await expect(journal.initialize()).resolves.toBeUndefined();
+    expect(registry.getChat('chat').agentId).toBe('source-agent');
+    expect(release).not.toHaveBeenCalled();
+    expect((await readJournal(workspaceDir)).ownershipIntents).toHaveLength(1);
   });
 });
 
