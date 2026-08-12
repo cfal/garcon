@@ -16,6 +16,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createNativeHistoryImport } from '@garcon/server-agent-common/transcript-projection/native-history-import';
 import { createFactoryConfig } from './config.js';
 import { getFactoryAuthStatus } from './agents/factory/factory-auth.js';
 import { FactoryCliRuntime, runSingleQuery } from './agents/factory/factory-cli.js';
@@ -55,7 +57,10 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
   readonly descriptor = FACTORY_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly producerExecution;
   readonly transcript;
+  readonly nativeHistoryImport;
+  readonly nativeActivity = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -86,6 +91,8 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
     });
     const providerExecution = new FactoryExecution(runtime, nativeSessions);
     const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions);
+    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     const projection = createAgentOwnedProjection({
       ownerId: 'factory',
       host,

@@ -28,6 +28,17 @@ export function validateAgentIntegration(
   if (!integration.execution || !integration.transcript) {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing a required facet`);
   }
+  if (!integration.producerExecution
+      || typeof integration.producerExecution.start !== 'function'
+      || typeof integration.producerExecution.resume !== 'function'
+      || typeof integration.producerExecution.abort !== 'function') {
+    throw new Error(`Agent integration ${integration.descriptor.id} is missing its V5 producer execution`);
+  }
+  for (const facet of ['nativeHistoryImport', 'nativeActivity'] as const) {
+    if (!(facet in integration) || integration[facet] === undefined) {
+      throw new Error(`Agent integration ${integration.descriptor.id} is missing required ${facet} capability state`);
+    }
+  }
   if ('transcriptSearch' in integration) {
     throw new Error(`Agent integration ${integration.descriptor.id} exposes removed transcriptSearch state`);
   }

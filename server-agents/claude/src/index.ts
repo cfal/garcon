@@ -20,6 +20,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createNativeHistoryImport } from '@garcon/server-agent-common/transcript-projection/native-history-import';
 import { createClaudeConfig } from './config.js';
 import { getClaudeAuthStatus } from './agents/claude/claude-auth.js';
 import {
@@ -79,7 +81,10 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly producerExecution;
   readonly transcript;
+  readonly nativeHistoryImport;
+  readonly nativeActivity = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -162,6 +167,8 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
       configHomeDir: config.configHomeDir,
       logger,
     });
+    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     const projection = createAgentOwnedProjection({
       ownerId: 'claude',
       host,

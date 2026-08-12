@@ -26,6 +26,7 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 
 const SESSIONS_LABEL = 'openai-compatible-responses-sessions';
 
@@ -59,7 +60,10 @@ export default class DirectOpenAiResponsesCompatibleIntegration implements Agent
     fileMimeTypes: TEXT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly producerExecution;
   readonly transcript;
+  readonly nativeHistoryImport = null;
+  readonly nativeActivity = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -102,6 +106,7 @@ export default class DirectOpenAiResponsesCompatibleIntegration implements Agent
       descriptors: [],
     });
     const providerExecution = new DirectExecution(host, runtime, nativeSessions);
+    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     const nativeEvidence = createDirectNativeEvidence({
       reader,
       nativeSessions,

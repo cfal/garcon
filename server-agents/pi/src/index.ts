@@ -22,6 +22,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createNativeHistoryImport } from '@garcon/server-agent-common/transcript-projection/native-history-import';
 import { createPiConfig } from './config.js';
 import { PiExecution } from './agents/pi/execution.js';
 import { LazyPiRuntime } from './agents/pi/lazy-runtime.js';
@@ -65,7 +67,10 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
   readonly descriptor = PI_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly producerExecution;
   readonly transcript;
+  readonly nativeHistoryImport;
+  readonly nativeActivity = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -98,6 +103,8 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
     });
     const providerExecution = new PiExecution(runtime, nativeSessions);
     const nativeEvidence = createPiNativeEvidence(config, nativeSessions);
+    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     const projection = createAgentOwnedProjection({
       ownerId: 'pi',
       host,

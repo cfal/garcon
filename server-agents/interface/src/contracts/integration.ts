@@ -18,6 +18,11 @@ import type {
 import type { AgentTranscriptIndexModuleReference } from './transcript-index.js';
 import type { AgentTranscriptIndexerModuleV4 } from './transcript-index-v4.js';
 import type { AgentExecutionV4 } from './execution-events-v4.js';
+import type { AgentExecutionV5 } from './execution-v5.js';
+import type {
+  AgentNativeActivityProbe,
+  AgentNativeHistoryImport,
+} from './native-history.js';
 import type {
   AgentTranscriptStream,
   AgentTransientControlCapabilityV4,
@@ -41,6 +46,10 @@ export interface AgentIntegrationV4 {
   readonly endpoints: AgentEndpoints | null;
   readonly singleQuery: AgentSingleQuery | null;
   readonly transientControls: AgentTransientControlCapabilityV4 | null;
+  // Transitional V5 facets remain inactive until core switches serving authority.
+  readonly producerExecution: AgentExecutionV5;
+  readonly nativeHistoryImport: AgentNativeHistoryImport | null;
+  readonly nativeActivity: AgentNativeActivityProbe | null;
 }
 
 export interface AgentIntegrationClassV4 {

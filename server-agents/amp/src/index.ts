@@ -17,6 +17,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createNativeHistoryImport } from '@garcon/server-agent-common/transcript-projection/native-history-import';
 import { createAmpConfig } from './config.js';
 import { getAmpAuthStatus } from './agents/amp/amp-auth.js';
 import { AmpCliRuntime, runSingleQuery } from './agents/amp/amp-cli.js';
@@ -51,7 +53,10 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
   readonly descriptor = AMP_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly producerExecution;
   readonly transcript;
+  readonly nativeHistoryImport;
+  readonly nativeActivity = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -89,6 +94,8 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
     });
     const providerExecution = new AmpExecution(runtime, nativeSessions);
     const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
+    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     const projection = createAgentOwnedProjection({
       ownerId: 'amp',
       host,

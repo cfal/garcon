@@ -16,6 +16,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createNativeHistoryImport } from '@garcon/server-agent-common/transcript-projection/native-history-import';
 import { createCursorConfig } from './config.js';
 import { AcpAgentRuntime } from './agents/shared/acp-agent-runtime.js';
 import { createCursorAcpPolicy } from './agents/cursor/cursor-acp-policy.js';
@@ -77,7 +79,10 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
   readonly descriptor = CURSOR_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly producerExecution;
   readonly transcript;
+  readonly nativeHistoryImport;
+  readonly nativeActivity = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -110,6 +115,8 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
     });
     const providerExecution = new CursorExecution(runtime, nativeSessions);
     const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions);
+    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     const projection = createAgentOwnedProjection({
       ownerId: 'cursor',
       host,
