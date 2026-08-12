@@ -3,6 +3,7 @@ import { AssistantMessage, PermissionRequestMessage, PermissionResolvedMessage, 
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { ClaudeCliVersionProbe } from "./cli-version.js";
 import {
@@ -387,14 +388,21 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     activeTurn.pendingCompaction = undefined;
 
     activeTurn.protocol.addOutputMessages(1);
+    // The compaction occurrence's canonical identity is the summary record's
+    // uuid, the same identity the JSONL loader binds to its CompactionMessage,
+    // so the live and imported rows are one occurrence across restart/audit.
+    const compactionMessage = new CompactionMessage(
+      new Date().toISOString(),
+      pending.trigger,
+      extractCompactionSummary(text),
+      pending.preTokens,
+      pending.postTokens,
+    );
+    const summaryUuid = typeof msg.uuid === 'string' && msg.uuid ? msg.uuid : null;
     this.emitMessages(session.chatId, [
-      new CompactionMessage(
-        new Date().toISOString(),
-        pending.trigger,
-        extractCompactionSummary(text),
-        pending.preTokens,
-        pending.postTokens,
-      ),
+      summaryUuid
+        ? attachNativeMessageSource(compactionMessage, { entryId: summaryUuid, withinSourceOrdinal: 0 })
+        : compactionMessage,
     ], activeTurn.eventMetadata);
   }
 

@@ -689,9 +689,17 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       }
       // Every finalized non-user message persists one session entry, whether
       // or not it renders: tool-only assistant and toolResult occurrences
-      // count by role, never by content. The occurrence index doubles as the
-      // durable integration identity for the rendered rows, so a repeated
-      // notification cannot mint a second identity for the same occurrence.
+      // count by role, never by content. The pre-append ordinal is the rows'
+      // durable integration identity and equals the settlement walk's
+      // expected-role index, so verifyPiTurnSettlement binds it to the proven
+      // native entry id and live rows reconcile to their restart identities.
+      // Pi 0.83.0 delivers each occurrence's message_end exactly once: the SDK
+      // emits it once per finalized message (agent-session.js _handleAgentEvent)
+      // and rpc-mode streams each subscribed event to stdout once as it occurs
+      // with no replay (modes/rpc/rpc-mode.js session.subscribe), so the ordinal
+      // never advances twice for one occurrence. A distinct equal-content
+      // occurrence is a separate message_end and correctly takes the next
+      // ordinal; content never participates in identity.
       const occurrenceOrdinal = session.turn?.expectedNative.length ?? null;
       if (session.turn && typeof role === 'string') {
         addExpectedNativeMessage(session.turn.expectedNative, role);
