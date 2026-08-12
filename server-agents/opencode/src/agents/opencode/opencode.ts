@@ -15,6 +15,7 @@ import {
 } from './turn-events.js';
 import { ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
@@ -600,7 +601,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     session.lastActivityAt = Date.now();
     this.#cancelPendingPermissionsForSession(agentSessionId, 'cancelled');
     this.#rejectTurnWaiter(agentSessionId, new Error(message));
-    this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), message)], metadata);
+    // OpenCode stores a failed turn's provider error on its in-flight assistant
+    // message, whose id the native loader uses as the error occurrence's
+    // identity. Carrying that same id on the live error keeps one canonical
+    // occurrence across live and restart rather than a duplicate.
+    const failedMessageId = lastValue(session.turn.assistantMessageIds);
+    const errorRow = new ErrorMessage(new Date().toISOString(), message);
+    this.emitMessages(
+      session.chatId,
+      [failedMessageId ? attachNativeMessageSource(errorRow, { entryId: failedMessageId }) : errorRow],
+      metadata,
+    );
     this.emitProcessing(session.chatId, false);
     this.emitFailed(session.chatId, message, metadata);
   }
@@ -1481,4 +1492,12 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   startPurgeTimer(): void {
     this.#idlePurger.start();
   }
+}
+
+// The failing assistant message is the last one the turn observed; the native
+// error occurrence is stored on it, so its id is the canonical error identity.
+function lastValue(values: Iterable<string>): string | null {
+  let last: string | null = null;
+  for (const value of values) last = value;
+  return last;
 }

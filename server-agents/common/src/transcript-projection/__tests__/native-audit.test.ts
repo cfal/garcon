@@ -255,6 +255,46 @@ describe('existing-journal native audit', () => {
     })).resolves.toEqual({ kind: 'unavailable', reason: 'source-diverged' });
   });
 
+  it('records divergence when an exact and an admission row claim one native position', async () => {
+    const directory = await createDirectory();
+    let persisted: ChatMessage[] = [];
+    const stream = streamOver(directory, () => persisted);
+    await openContents(stream);
+
+    // The admission row will claim the single native user occurrence, and an
+    // exact row resolves to that same native position: one native position
+    // claimed by two journal families is ambiguous evidence, not a match.
+    const operation = admissionOperation();
+    const preparation = await stream.prepareInput({
+      chat,
+      signal: signal(),
+      message: new UserMessage('2026-06-01T00:00:00.000Z', 'prompt'),
+      operation,
+    });
+    await preparation.commit();
+    await stream.promoteActiveInput(chat, operation);
+    await stream.appendMessages({
+      chat,
+      operation,
+      messages: [new UserMessage('2026-06-01T00:00:00.000Z', 'prompt')],
+      sources: [{
+        source: { namespace: 'test:native', itemId: 'entry-1', subrowId: 'row:0' },
+        nativeAlias: null,
+      }],
+    });
+
+    persisted = [nativeMessage('entry-1', 'prompt')];
+    await stream.settleNativeBoundary({ chat, operation, signal: signal() });
+    const after = await openContents(stream);
+    // The committed rendering is preserved; only fork continuity is fenced.
+    expect(after.contents).toEqual(['prompt', 'prompt']);
+    await expect(stream.resolveNativeForkPoint({
+      chat,
+      signal: signal(),
+      point: forkPointFor(after.checkpoint, after.entries[0]!.id),
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'source-diverged' });
+  });
+
   it('degrades resume continuity while ahead and restores it on catch-up', async () => {
     const directory = await createDirectory();
     await openContents(streamOver(directory, () => [
@@ -472,7 +512,7 @@ describe('existing-journal native audit', () => {
     })).resolves.toMatchObject({ kind: 'ready' });
   });
 
-  it('suppresses imports and hole divergence around event-identified legacy rows', async () => {
+  it('holds back a legacy event-row counterpart while importing a genuine crash-missed suffix', async () => {
     const directory = await createDirectory();
     let persisted: ChatMessage[] = [];
     const stream = streamOver(directory, () => persisted);
@@ -497,8 +537,10 @@ describe('existing-journal native audit', () => {
         nativeAlias: null,
       }],
     });
-    // Native holds an unmatchable assistant row plus trailing output; neither
-    // may be imported or read as divergence while a legacy row exists.
+    // Native holds the legacy row's counterpart, its identified match, and a
+    // genuinely crash-missed trailing occurrence. The single event-identified
+    // row accounts for one unmatched native row, so the trailing occurrence
+    // still imports exactly once and the counterpart never duplicates.
     persisted = [
       nativeMessage('item-1', 'legacy assistant'),
       nativeMessage('item-2', 'identified'),
@@ -506,40 +548,46 @@ describe('existing-journal native audit', () => {
     ];
     await expect(stream.settleNativeBoundary({ chat, signal: signal() }))
       .resolves.toBe('confirmed');
-    expect((await openContents(stream)).contents).toEqual(['legacy assistant', 'identified']);
+    expect((await openContents(stream)).contents)
+      .toEqual(['legacy assistant', 'identified', 'trailing']);
   });
 
-  it('suppresses imports while an identity-less surface row could shadow native output', async () => {
+  it('imports a crash-missed canonical suffix after an event-only earlier row', async () => {
     const directory = await createDirectory();
     let persisted: ChatMessage[] = [];
     const stream = streamOver(directory, () => persisted);
     await openContents(stream);
+    // A live-emitted provider banner without canonical identity lands in the
+    // event namespace.
     await stream.appendMessages({
       chat,
       operation: null,
-      messages: [new UserMessage('2026-06-01T00:00:00.000Z', 'identified')],
+      messages: [new AssistantMessage('2026-06-01T00:00:00.000Z', 'surface banner')],
+    });
+    await stream.appendMessages({
+      chat,
+      operation: null,
+      messages: [new UserMessage('2026-06-01T00:00:01.000Z', 'identified')],
       sources: [{
         source: { namespace: 'test:native', itemId: 'item-1', subrowId: 'row:0' },
         nativeAlias: null,
       }],
     });
-    // A live-emitted provider banner without canonical identity lands in the
-    // event namespace. Its native counterpart cannot be matched by identity,
-    // so while it exists suffix imports are suppressed rather than risk
-    // re-importing the same occurrence.
-    await stream.appendMessages({
-      chat,
-      operation: null,
-      messages: [new AssistantMessage('2026-06-01T00:00:01.000Z', 'surface banner')],
-    });
+    // The banner accounts for the one low unmatched native row; the held
+    // output beyond it is a genuine crash-missed suffix and imports once.
     persisted = [
+      nativeMessage('item-0', 'surface banner'),
       nativeMessage('item-1', 'identified'),
       nativeMessage('item-2', 'held output'),
     ];
     await expect(stream.settleNativeBoundary({ chat, signal: signal() }))
       .resolves.toBe('confirmed');
-    expect((await openContents(stream)).contents)
-      .toEqual(['identified', 'surface banner']);
+    const contents = (await openContents(stream)).contents;
+    expect(contents).toEqual(['surface banner', 'identified', 'held output']);
+    // Re-auditing does not import the suffix a second time.
+    await expect(stream.settleNativeBoundary({ chat, signal: signal() }))
+      .resolves.toBe('confirmed');
+    expect((await openContents(stream)).contents).toEqual(contents);
   });
 
   it('reads evidence from the relocated reference after updateNativeReference', async () => {

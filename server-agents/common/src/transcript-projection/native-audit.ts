@@ -29,11 +29,6 @@ export type NativeAuditOutcome =
       // journalled from live events gain their provider positions once the
       // provider persists them.
       readonly matchedAliases: ReadonlyMap<string, AgentTranscriptSeedEntry>;
-      // Rows journalled under process-local event identities cannot be told
-      // apart from genuinely missed provider output, so imports and
-      // hole-divergence conclusions are suppressed while any exist. Adapters
-      // owe canonical identities; this only degrades legacy rows gracefully.
-      readonly importSuppressed: boolean;
     };
 
 export function auditNativeEvidence(options: {
@@ -100,18 +95,19 @@ export function auditNativeEvidence(options: {
   // and importing anything could duplicate rows imported at genesis under
   // process-local fallback identities.
   if (journal.length === 0 && options.entries.length > 0) return { kind: 'skipped' };
-  // A live-emitted row without canonical identity may have a native
-  // counterpart the audit cannot match by identity, such as a provider error
-  // rendered live and also persisted natively. Any such row suppresses
-  // suffix imports and hole-divergence conclusions so the counterpart is not
-  // re-imported. Both the legacy owner-native event: fallback and the current
-  // owner event namespace mark these rows.
+  // Legacy rows journalled under a process-local event identity may have a
+  // native counterpart the audit cannot match. Rather than suppress every
+  // future import for the whole segment, each such row accounts for at most
+  // one unmatched native occurrence, so that many low unmatched native rows
+  // are held back from import while a genuinely crash-missed canonical suffix
+  // beyond them still repairs. Post-V4 adapters owe canonical identities and
+  // produce no such rows; this only degrades grandfathered journals.
   const eventNamespace = `${options.ownerId}:event`;
-  const importSuppressed = options.entries.some((entry) => (
+  const unidentifiedCommittedCount = options.entries.filter((entry) => (
     entry.lifetime === 'durable'
     && ((entry.source?.namespace === namespace && entry.source.itemId.startsWith('event:'))
       || entry.source?.namespace === eventNamespace)
-  ));
+  )).length;
 
   const native: { readonly key: string; readonly seed: AgentTranscriptSeedEntry }[] = [];
   const nativePositions = new Map<string, number>();
@@ -145,7 +141,10 @@ export function auditNativeEvidence(options: {
     if (committed.kind === 'exact') {
       position = nativePositions.get(committed.matchKey);
       if (position !== undefined) {
-        if (position <= exactCursor) return { kind: 'diverged' };
+        // Two journal claims of one native position, whether an exact row
+        // repeating a position or an exact row colliding with an admission
+        // claim, is ambiguous evidence, not a match.
+        if (position <= exactCursor || claimed.has(position)) return { kind: 'diverged' };
         exactCursor = position;
       }
     } else {
@@ -185,11 +184,13 @@ export function auditNativeEvidence(options: {
   const journalKeys = new Set(journal.flatMap((committed) => (
     committed.kind === 'exact' ? [committed.matchKey] : []
   )));
-  const suffix = importSuppressed
-    ? []
-    : native
-      .filter((row, position) => !claimed.has(position) && !journalKeys.has(row.key))
-      .map((row) => row.seed);
+  // The lowest unidentified-count unmatched native rows are held back as the
+  // presumed counterparts of the journal's event-identified rows; the rest
+  // are provider-observed new output and import in native order.
+  const suffix = native
+    .filter((row, position) => !claimed.has(position) && !journalKeys.has(row.key))
+    .slice(unidentifiedCommittedCount)
+    .map((row) => row.seed);
   // A provider that moved on to new rows without persisting the committed
   // tail is not merely behind.
   if (missingTail.length > 0 && suffix.length > 0) return { kind: 'diverged' };
@@ -204,7 +205,6 @@ export function auditNativeEvidence(options: {
       ? null
       : journal[missingTail[0]!]!.ordinal,
     matchedAliases,
-    importSuppressed,
   };
 }
 
