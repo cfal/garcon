@@ -1,0 +1,443 @@
+import crypto from 'node:crypto';
+import type {
+  AgentPermissionLifecycle,
+  AgentProducerEvent,
+  AgentProducerSink,
+  AgentRunFailureDetail,
+} from '@garcon/server-agent-interface';
+import type { AgentAttachment } from '../../common/agent-execution.js';
+import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
+import type {
+  InputComposition,
+  LedgerNoticeRow,
+  LedgerPermissionRow,
+  LedgerRow,
+  LedgerRowDraft,
+  LedgerRunEndedRow,
+  LedgerSessionRow,
+  LedgerUserInputRow,
+  TranscriptPage,
+  TranscriptView,
+  TranscriptViewId,
+  TranscriptWatermark,
+} from './contracts.js';
+import { TranscriptLedgerStore } from './store.js';
+
+export class TranscriptSinkClosedError extends Error {
+  constructor() {
+    super('Transcript producer sink is closed');
+    this.name = 'TranscriptSinkClosedError';
+  }
+}
+
+export interface TranscriptProducerLease {
+  readonly sink: AgentProducerSink;
+  close(): void;
+  readonly closed: boolean;
+}
+
+export type TranscriptCommitEvent =
+  | {
+      readonly type: 'rows';
+      readonly chatId: string;
+      readonly viewId: TranscriptViewId;
+      readonly rows: readonly LedgerRow[];
+    }
+  | {
+      readonly type: 'session';
+      readonly chatId: string;
+      readonly viewId: TranscriptViewId;
+      readonly row: LedgerSessionRow;
+    }
+  | {
+      readonly type: 'permission';
+      readonly chatId: string;
+      readonly viewId: TranscriptViewId;
+      readonly runId: string | null;
+      readonly row: LedgerPermissionRow;
+    }
+  | {
+      readonly type: 'run-ended';
+      readonly chatId: string;
+      readonly viewId: TranscriptViewId;
+      readonly runId: string;
+      readonly row: LedgerRunEndedRow;
+    }
+  | {
+      readonly type: 'view-replaced';
+      readonly chatId: string;
+      readonly previousViewId: TranscriptViewId;
+      readonly view: TranscriptView;
+    };
+
+export interface TranscriptLedgerServiceOptions {
+  readonly now?: () => string;
+  readonly createRunId?: () => string;
+  readonly onListenerError?: (error: unknown) => void;
+}
+
+export class TranscriptLedgerService {
+  readonly #store: TranscriptLedgerStore;
+  readonly #now: () => string;
+  readonly #createRunId: () => string;
+  readonly #onListenerError: (error: unknown) => void;
+  readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
+  readonly #leases = new Map<string, ProducerLease>();
+  readonly #activeRuns = new Map<string, string>();
+
+  constructor(store: TranscriptLedgerStore, options: TranscriptLedgerServiceOptions = {}) {
+    this.#store = store;
+    this.#now = options.now ?? (() => new Date().toISOString());
+    this.#createRunId = options.createRunId ?? (() => crypto.randomUUID());
+    this.#onListenerError = options.onListenerError ?? (() => undefined);
+  }
+
+  subscribe(listener: (event: TranscriptCommitEvent) => void | Promise<void>): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  initializeChat(
+    chatId: string,
+    rows: readonly LedgerRowDraft[] = [],
+    contentStartOrdinal = 1,
+  ): TranscriptView {
+    return this.#store.initializeCurrentView(chatId, { rows, contentStartOrdinal });
+  }
+
+  currentView(chatId: string): TranscriptView | null {
+    return this.#store.currentView(chatId);
+  }
+
+  openProducer(chatId: string): TranscriptProducerLease {
+    const view = this.#store.currentView(chatId);
+    if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
+    const current = this.#leases.get(chatId);
+    if (current && !current.closed) {
+      throw new TypeError(`Transcript producer sink is already open for ${chatId}`);
+    }
+    const lease = new ProducerLease(chatId, view.viewId, (event) => {
+      if (this.#leases.get(chatId) !== lease) throw new TranscriptSinkClosedError();
+      this.#publish(chatId, view.viewId, event);
+    }, () => {
+      if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
+      this.#activeRuns.delete(chatId);
+    });
+    this.#leases.set(chatId, lease);
+    return lease;
+  }
+
+  closeProducer(chatId: string): void {
+    this.#leases.get(chatId)?.close();
+  }
+
+  beginRun(chatId: string, runId = this.#createRunId()): string {
+    if (!runId) throw new TypeError('Run ID is required');
+    if (!this.#leases.has(chatId)) throw new TranscriptSinkClosedError();
+    if (this.#activeRuns.has(chatId)) {
+      throw new TypeError(`Transcript run is already active for ${chatId}`);
+    }
+    this.#activeRuns.set(chatId, runId);
+    return runId;
+  }
+
+  activeRunId(chatId: string): string | null {
+    return this.#activeRuns.get(chatId) ?? null;
+  }
+
+  isRunActive(chatId: string, runId?: string): boolean {
+    const active = this.#activeRuns.get(chatId);
+    return active !== undefined && (runId === undefined || active === runId);
+  }
+
+  interruptRun(chatId: string): LedgerRunEndedRow | null {
+    const runId = this.#activeRuns.get(chatId);
+    if (!runId) return null;
+    this.#activeRuns.delete(chatId);
+    return this.#appendRunEnd(chatId, runId, 'interrupted', 'core');
+  }
+
+  failRun(
+    chatId: string,
+    runId: string,
+    error?: AgentRunFailureDetail,
+  ): LedgerRunEndedRow | null {
+    if (this.#activeRuns.get(chatId) !== runId) return null;
+    this.#activeRuns.delete(chatId);
+    return this.#appendRunEnd(chatId, runId, 'failed', 'core', error);
+  }
+
+  appendInputAndCompose(input: {
+    readonly chatId: string;
+    readonly viewId: TranscriptViewId;
+    readonly message: UserMessage;
+    readonly attachments: readonly AgentAttachment[];
+    readonly clientMessageId: string | null;
+    readonly steer: boolean;
+    readonly excludedOrdinals?: ReadonlySet<number>;
+  }): InputComposition {
+    const composition = this.#store.appendInputAndCompose(input.chatId, {
+      viewId: input.viewId,
+      at: input.message.timestamp,
+      detail: {
+        clientMessageId: input.clientMessageId,
+        message: input.message,
+        attachments: input.attachments,
+        steer: input.steer,
+      },
+      excludedOrdinals: input.excludedOrdinals,
+    });
+    if (composition.inserted) {
+      this.#notify({
+        type: 'rows',
+        chatId: input.chatId,
+        viewId: input.viewId,
+        rows: [composition.input],
+      });
+    }
+    return composition;
+  }
+
+  appendPermissionResolution(input: {
+    readonly chatId: string;
+    readonly viewId: TranscriptViewId;
+    readonly lifecycle: Extract<AgentPermissionLifecycle, { readonly kind: 'resolved' }>;
+  }): LedgerPermissionRow {
+    const [row] = this.#store.append(input.chatId, input.viewId, [{
+      kind: 'permission-resolved',
+      at: this.#now(),
+      lifecycle: input.lifecycle,
+      providerMeta: null,
+    }]);
+    const permission = row as LedgerPermissionRow;
+    this.#notify({
+      type: 'permission',
+      chatId: input.chatId,
+      viewId: input.viewId,
+      runId: null,
+      row: permission,
+    });
+    return permission;
+  }
+
+  appendNotice(input: {
+    readonly chatId: string;
+    readonly viewId: TranscriptViewId;
+    readonly message: string;
+    readonly detail: LedgerNoticeRow['detail'];
+  }): LedgerNoticeRow {
+    const [row] = this.#store.append(input.chatId, input.viewId, [{
+      kind: 'notice',
+      at: this.#now(),
+      message: input.message,
+      detail: input.detail,
+      providerMeta: null,
+    }]);
+    this.#notify({
+      type: 'rows',
+      chatId: input.chatId,
+      viewId: input.viewId,
+      rows: [row!],
+    });
+    return row as LedgerNoticeRow;
+  }
+
+  page(chatId: string, viewId: TranscriptViewId, limit: number, before?: number): TranscriptPage {
+    return this.#store.page(chatId, viewId, limit, before);
+  }
+
+  currentRows(chatId: string): readonly LedgerRow[] {
+    return this.#store.currentRows(chatId);
+  }
+
+  rowsThrough(chatId: string, watermark: TranscriptWatermark): readonly LedgerRow[] {
+    return this.#store.rowsThrough(chatId, watermark);
+  }
+
+  conversationRows(chatId: string): readonly (LedgerUserInputRow | Extract<LedgerRow, { kind: 'provider-row' }>)[] {
+    return this.#store.currentRows(chatId).filter(isConversationRow);
+  }
+
+  conversationMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): readonly ChatMessage[] {
+    return this.conversationRows(chatId)
+      .filter((row) => !excludedOrdinals.has(row.ordinal))
+      .map(messageForConversationRow);
+  }
+
+  currentSession(chatId: string): LedgerSessionRow | null {
+    return this.#store.currentSession(chatId);
+  }
+
+  highWatermark(chatId: string): TranscriptWatermark {
+    return this.#store.highWatermark(chatId);
+  }
+
+  replaceCurrentView(
+    chatId: string,
+    expectedViewId: TranscriptViewId,
+    stagingViewId: TranscriptViewId,
+  ): TranscriptView {
+    const view = this.#store.replaceCurrentView(chatId, expectedViewId, stagingViewId);
+    this.#notify({
+      type: 'view-replaced',
+      chatId,
+      previousViewId: expectedViewId,
+      view,
+    });
+    return view;
+  }
+
+  closeChat(chatId: string): void {
+    this.closeProducer(chatId);
+    this.#activeRuns.delete(chatId);
+    this.#store.closeChat(chatId);
+  }
+
+  deleteChat(chatId: string): void {
+    this.closeProducer(chatId);
+    this.#activeRuns.delete(chatId);
+    this.#store.deleteChat(chatId);
+  }
+
+  close(): void {
+    for (const lease of this.#leases.values()) lease.close();
+    this.#leases.clear();
+    this.#activeRuns.clear();
+    this.#store.close();
+  }
+
+  #publish(chatId: string, viewId: TranscriptViewId, event: AgentProducerEvent): void {
+    switch (event.type) {
+      case 'rows': {
+        if (event.rows.length === 0) return;
+        const rows = this.#store.append(chatId, viewId, event.rows.map((row) => ({
+          kind: 'provider-row' as const,
+          at: row.message.timestamp,
+          message: row.message,
+          providerMeta: row.providerMeta ?? null,
+        })));
+        this.#notify({ type: 'rows', chatId, viewId, rows });
+        return;
+      }
+      case 'session': {
+        const [row] = this.#store.append(chatId, viewId, [{
+          kind: 'session',
+          at: this.#now(),
+          detail: event.session,
+          providerMeta: null,
+        }]);
+        this.#notify({ type: 'session', chatId, viewId, row: row as LedgerSessionRow });
+        return;
+      }
+      case 'permission': {
+        const [row] = this.#store.append(chatId, viewId, [{
+          kind: permissionRowKind(event.lifecycle),
+          at: this.#now(),
+          lifecycle: event.lifecycle,
+          providerMeta: null,
+        }]);
+        this.#notify({
+          type: 'permission',
+          chatId,
+          viewId,
+          runId: event.runId,
+          row: row as LedgerPermissionRow,
+        });
+        return;
+      }
+      case 'run-ended': {
+        if (this.#activeRuns.get(chatId) !== event.runId) return;
+        this.#activeRuns.delete(chatId);
+        this.#appendRunEnd(
+          chatId,
+          event.runId,
+          event.outcome,
+          'provider',
+          event.error,
+        );
+      }
+    }
+  }
+
+  #appendRunEnd(
+    chatId: string,
+    runId: string,
+    outcome: LedgerRunEndedRow['outcome'],
+    origin: LedgerRunEndedRow['origin'],
+    error?: AgentRunFailureDetail,
+  ): LedgerRunEndedRow {
+    const view = this.#store.currentView(chatId);
+    if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
+    const [row] = this.#store.append(chatId, view.viewId, [{
+      kind: 'run-ended',
+      at: this.#now(),
+      outcome,
+      origin,
+      ...(error ? { error } : {}),
+      providerMeta: null,
+    }]);
+    const ended = row as LedgerRunEndedRow;
+    this.#notify({ type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended });
+    return ended;
+  }
+
+  #notify(event: TranscriptCommitEvent): void {
+    queueMicrotask(() => {
+      for (const listener of this.#listeners) {
+        try {
+          void Promise.resolve(listener(event)).catch(this.#onListenerError);
+        } catch (error) {
+          this.#onListenerError(error);
+        }
+      }
+    });
+  }
+}
+
+class ProducerLease implements TranscriptProducerLease {
+  #closed = false;
+
+  readonly sink: AgentProducerSink;
+
+  constructor(
+    readonly chatId: string,
+    readonly viewId: TranscriptViewId,
+    publish: (event: AgentProducerEvent) => void,
+    private readonly onClose: () => void,
+  ) {
+    this.sink = Object.freeze({
+      publish: (event: AgentProducerEvent) => {
+        if (this.#closed) throw new TranscriptSinkClosedError();
+        publish(event);
+      },
+    });
+  }
+
+  get closed(): boolean {
+    return this.#closed;
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.onClose();
+  }
+}
+
+function permissionRowKind(
+  lifecycle: Exclude<AgentPermissionLifecycle, { readonly kind: 'resolved' }>,
+): LedgerPermissionRow['kind'] {
+  return `permission-${lifecycle.kind}`;
+}
+
+function isConversationRow(
+  row: LedgerRow,
+): row is LedgerUserInputRow | Extract<LedgerRow, { kind: 'provider-row' }> {
+  return row.kind === 'user-input' || row.kind === 'provider-row';
+}
+
+function messageForConversationRow(
+  row: LedgerUserInputRow | Extract<LedgerRow, { kind: 'provider-row' }>,
+): ChatMessage {
+  return row.kind === 'user-input' ? row.detail.message : row.message;
+}
