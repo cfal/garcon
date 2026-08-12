@@ -8,7 +8,6 @@ import {
   type DirectRuntimeSession,
   type DirectUserTurn,
 } from "./direct-chat-runtime-base.js";
-import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
 import {
@@ -18,6 +17,7 @@ import {
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
 import { stripThinkBlocks } from './strip-think-blocks.js';
+import type { ChatMessage } from '@garcon/common/chat-types';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -89,13 +89,6 @@ export function extractOpenAiResponsesTextContent(content: ResponsesInputContent
     .filter((part): part is ResponsesInputText => part.type === 'input_text')
     .map((part) => part.text)
     .join('\n');
-}
-
-function persistedToResponsesMessage(message: DirectConversationMessage): ResponsesInputMessage {
-  return {
-    role: message.role,
-    content: message.content,
-  };
 }
 
 interface ResponsesOutputTextPart {
@@ -306,8 +299,18 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
     return { role: 'assistant', content };
   }
 
-  protected persistedToMessage(message: DirectConversationMessage): ResponsesInputMessage {
-    return persistedToResponsesMessage(message);
+  protected contextMessage(message: ChatMessage): ResponsesInputMessage | null {
+    if (message.type === 'user-message') {
+      return {
+        role: 'user',
+        content: buildOpenAiResponsesUserContent(message.content, message.images?.map((image) => ({
+          kind: 'image', data: image.data, name: image.name || null,
+          mimeType: image.mimeType ?? 'application/octet-stream',
+        }))),
+      };
+    }
+    if (message.type === 'assistant-message') return { role: 'assistant', content: message.content };
+    return { role: 'assistant', content: JSON.stringify(message) };
   }
 
   protected async streamSession(session: DirectRuntimeSession<ResponsesInputMessage>): Promise<string> {

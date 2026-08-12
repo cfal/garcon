@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import { DirectChatRuntimeBase } from '../direct-chat-runtime-base.ts';
 
 const createdDirs = [];
@@ -45,8 +46,10 @@ class CapturingDirectRuntime extends DirectChatRuntimeBase {
     return { role: 'assistant', content };
   }
 
-  persistedToMessage(message) {
-    return message;
+  contextMessage(message) {
+    if (message.type === 'user-message') return { role: 'user', content: message.content };
+    if (message.type === 'assistant-message') return { role: 'assistant', content: message.content };
+    return null;
   }
 
   async streamSession(session) {
@@ -115,10 +118,20 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     await runtime.runTurn(resumeRequest(started.agentSessionId, {
       command: 'second message',
       thinkingMode: 'low',
+      priorContext: [
+        new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
+        new AssistantMessage('2026-01-01T00:00:01.000Z', 'OK'),
+      ],
     }));
     await runtime.runTurn(resumeRequest(started.agentSessionId, {
       command: 'third message',
       thinkingMode: 'none',
+      priorContext: [
+        new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
+        new AssistantMessage('2026-01-01T00:00:01.000Z', 'OK'),
+        new UserMessage('2026-01-01T00:00:02.000Z', 'second message'),
+        new AssistantMessage('2026-01-01T00:00:03.000Z', 'OK'),
+      ],
     }));
 
     expect(runtime.captured.map((entry) => entry.thinkingMode)).toEqual([
@@ -135,19 +148,18 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     ]);
   });
 
-  it('uses the current resume effort when hydrating persisted messages', async () => {
+  it('uses the current resume effort with supplied ledger context', async () => {
     const dir = await tempDir();
     const sessionId = 'persisted-session';
-    await fs.writeFile(path.join(dir, `${sessionId}.jsonl`), [
-      JSON.stringify({ role: 'user', content: 'first message' }),
-      JSON.stringify({ role: 'assistant', content: 'first response' }),
-      '',
-    ].join('\n'));
 
     const runtime = new CapturingDirectRuntime(dir);
     await runtime.runTurn(resumeRequest(sessionId, {
       command: 'resumed message',
       thinkingMode: 'max',
+      priorContext: [
+        new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
+        new AssistantMessage('2026-01-01T00:00:01.000Z', 'first response'),
+      ],
     }));
 
     expect(runtime.captured).toEqual([{

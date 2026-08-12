@@ -4,7 +4,7 @@ import {
   type AgentExecutionContextV4,
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import { createPathNativeSessionCodec } from '../../native-session/path-native-session.js';
+import { UserMessage } from '@garcon/common/chat-types';
 import { DirectExecution } from '../execution.js';
 
 function endpoint(endpointId: string) {
@@ -67,7 +67,7 @@ function request(modelEndpointId: string): AgentExecutionContextV4 {
 }
 
 describe('DirectExecution', () => {
-  test('fails closed when a materialized session requests another endpoint', async () => {
+  test('forwards core-owned context when rebuilding a stateless request', async () => {
     const runTurn = mock(async () => {});
     const subscribe = () => {};
     const runtime = {
@@ -77,19 +77,16 @@ describe('DirectExecution', () => {
       onFinished: subscribe,
       onFailed: subscribe,
     };
-    const nativeSessions = createPathNativeSessionCodec('direct-test');
-    const execution = new DirectExecution(host(), runtime as never, nativeSessions);
+    const execution = new DirectExecution(host(), runtime as never);
     const resume = request('endpoint-b');
-    resume.nativeSession = nativeSessions.encode({
-      path: '/tmp/endpoint-a/session.jsonl',
-      agentSessionId: 'session-1',
-      modelEndpointId: 'endpoint-a',
-    });
+    resume.nativeSession = null;
     resume.agentSessionId = 'session-1';
+    resume.priorContext = [new UserMessage('2026-01-01T00:00:00.000Z', 'earlier')];
 
-    await expect(execution.resume(resume)).rejects.toThrow(
-      'Direct sessions cannot change API provider endpoints after they start',
-    );
-    expect(runTurn).not.toHaveBeenCalled();
+    await expect(execution.resume(resume)).resolves.toBeUndefined();
+    expect(runTurn).toHaveBeenCalledWith(expect.objectContaining({
+      priorContext: resume.priorContext,
+      command: 'continue',
+    }));
   });
 });

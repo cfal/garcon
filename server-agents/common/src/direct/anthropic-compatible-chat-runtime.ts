@@ -7,7 +7,6 @@ import {
   type DirectRuntimeSession,
   type DirectUserTurn,
 } from "./direct-chat-runtime-base.js";
-import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '@garcon/server-agent-common/shared/attachments';
 import {
@@ -17,6 +16,7 @@ import {
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
 import { stripThinkBlocks } from './strip-think-blocks.js';
+import type { ChatMessage } from '@garcon/common/chat-types';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -111,13 +111,6 @@ export function extractAnthropicTextContent(content: AnthropicContent): string {
     .filter((part): part is AnthropicTextContentBlock => part.type === 'text')
     .map((part) => part.text)
     .join('\n');
-}
-
-function persistedToAnthropicMessage(message: DirectConversationMessage): AnthropicConversationMessage {
-  return {
-    role: message.role,
-    content: message.content,
-  };
 }
 
 interface AnthropicStreamState {
@@ -255,8 +248,18 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
     return { role: 'assistant', content };
   }
 
-  protected persistedToMessage(message: DirectConversationMessage): AnthropicConversationMessage {
-    return persistedToAnthropicMessage(message);
+  protected contextMessage(message: ChatMessage): AnthropicConversationMessage | null {
+    if (message.type === 'user-message') {
+      return {
+        role: 'user',
+        content: buildAnthropicCompatibleUserContent(message.content, message.images?.map((image) => ({
+          kind: 'image', data: image.data, name: image.name || null,
+          mimeType: image.mimeType ?? 'application/octet-stream',
+        }))),
+      };
+    }
+    if (message.type === 'assistant-message') return { role: 'assistant', content: message.content };
+    return { role: 'assistant', content: JSON.stringify(message) };
   }
 
   protected async streamSession(session: DirectRuntimeSession<AnthropicConversationMessage>): Promise<string> {

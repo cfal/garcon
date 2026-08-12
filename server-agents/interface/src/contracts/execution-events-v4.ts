@@ -3,6 +3,7 @@ import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
+import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentOwnershipEpoch } from '../ownership-epoch.js';
 import type {
   AgentExecutionAdmission,
@@ -63,6 +64,7 @@ export interface AgentExecutionContextV4 {
   readonly endpoint: AgentEndpointSelection | null;
   readonly operation: AgentTurnOwnerOperationIdentityV4;
   readonly admission: AgentExecutionAdmission;
+  readonly priorContext?: readonly ChatMessage[];
 }
 
 export interface AgentStartRequestV4 extends AgentExecutionContextV4 {

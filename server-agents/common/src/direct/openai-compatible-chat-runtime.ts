@@ -9,7 +9,6 @@ import {
   type DirectRuntimeSession,
   type DirectUserTurn,
 } from "./direct-chat-runtime-base.js";
-import type { DirectConversationMessage } from "./session-store.js";
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
 import {
   DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
@@ -19,6 +18,7 @@ import {
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
 import { stripThinkBlocks } from './strip-think-blocks.js';
+import type { ChatMessage } from '@garcon/common/chat-types';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -108,13 +108,6 @@ export function extractOpenAiCompatibleTextContent(content: ConversationMessage[
     .filter((part) => part.type === 'text' && typeof part.text === 'string')
     .map((part) => part.text!)
     .join('\n');
-}
-
-function persistedToOpenAiMessage(message: DirectConversationMessage): ConversationMessage {
-  return {
-    role: message.role,
-    content: message.content,
-  };
 }
 
 async function readOpenAiCompatibleTextStream(
@@ -246,8 +239,18 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
     return { role: 'assistant', content };
   }
 
-  protected persistedToMessage(message: DirectConversationMessage): ConversationMessage {
-    return persistedToOpenAiMessage(message);
+  protected contextMessage(message: ChatMessage): ConversationMessage | null {
+    if (message.type === 'user-message') {
+      return {
+        role: 'user',
+        content: buildOpenAiCompatibleUserContent(message.content, message.images?.map((image) => ({
+          kind: 'image', data: image.data, name: image.name || null,
+          mimeType: image.mimeType ?? 'application/octet-stream',
+        }))),
+      };
+    }
+    if (message.type === 'assistant-message') return { role: 'assistant', content: message.content };
+    return { role: 'assistant', content: JSON.stringify(message) };
   }
 
   protected async streamSession(session: DirectRuntimeSession<ConversationMessage>): Promise<string> {

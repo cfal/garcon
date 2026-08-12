@@ -3,8 +3,7 @@ import {
   normalizeThinkingMode,
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
-import { AssistantMessage } from '@garcon/common/chat-types';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { AssistantMessage, type ChatMessage } from '@garcon/common/chat-types';
 import type { SharedModelOption } from '@garcon/common/models';
 import {
   assertDirectExecutionOpen,
@@ -18,11 +17,6 @@ import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/eve
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
-import {
-  DirectSessionStore,
-  type DirectConversationMessage,
-  type DirectMessageIdentity,
-} from './session-store.js';
 
 const DEFAULT_MAX_MESSAGES_PER_SESSION = 200;
 
@@ -61,7 +55,6 @@ export abstract class DirectChatRuntimeBase<
   TConfig extends DirectChatRuntimeBaseConfig,
 > extends AgentEventEmitterRuntime {
   protected readonly config: TConfig;
-  readonly #sessionStore: DirectSessionStore;
   readonly #maxMessagesPerSession: number;
   #sessions = new Map<string, DirectRuntimeSession<TMessage>>();
   #idlePurger = new IdleSessionPurger<DirectRuntimeSession<TMessage>>({
@@ -76,10 +69,6 @@ export abstract class DirectChatRuntimeBase<
   protected constructor(config: TConfig) {
     super();
     this.config = config;
-    this.#sessionStore = new DirectSessionStore({
-      getSessionDir: config.getSessionDir,
-      getSessionFilePath: config.getSessionFilePath,
-    });
     this.#maxMessagesPerSession = config.maxMessagesPerSession ?? DEFAULT_MAX_MESSAGES_PER_SESSION;
   }
 
@@ -87,7 +76,7 @@ export abstract class DirectChatRuntimeBase<
 
   protected abstract buildAssistantMessage(content: string): TMessage;
 
-  protected abstract persistedToMessage(message: DirectConversationMessage): TMessage;
+  protected abstract contextMessage(message: ChatMessage): TMessage | null;
 
   protected abstract streamSession(session: DirectRuntimeSession<TMessage>): Promise<string>;
 
@@ -103,7 +92,7 @@ export abstract class DirectChatRuntimeBase<
       id: sessionId,
       isFinalizing: false,
       isRunning: false,
-      messages: [userTurn.message],
+      messages: [...this.#contextMessages(request.priorContext), userTurn.message],
       model: request.model || this.config.defaultModel,
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
@@ -111,16 +100,10 @@ export abstract class DirectChatRuntimeBase<
       eventMetadata: directEventMetadata(request, 'chat-start'),
     };
 
-    await this.#sessionStore.append(
-      sessionId,
-      'user',
-      userTurn.persistedContent,
-      this.#turnIdentity(request),
-    );
     assertDirectExecutionOpen(request);
     this.#sessions.set(sessionId, session);
     this.emitSessionCreated(request.chatId);
-    void this.#runTurnInternal(session, this.#turnIdentity(request), request).catch(() => undefined);
+    void this.#runTurnInternal(session, request).catch(() => undefined);
     request.onAbortable?.();
 
     return {
@@ -132,7 +115,7 @@ export abstract class DirectChatRuntimeBase<
   async runTurn(request: DirectResumeRequest): Promise<void> {
     assertDirectExecutionOpen(request);
     const session = this.#sessions.get(request.agentSessionId)
-      ?? await this.#hydrateSession(request.agentSessionId, request);
+      ?? this.#hydrateSession(request.agentSessionId, request);
     assertDirectExecutionOpen(request);
 
     if (session.isRunning) {
@@ -145,33 +128,18 @@ export abstract class DirectChatRuntimeBase<
     session.eventMetadata = directEventMetadata(request);
 
     const userTurn = this.buildUserTurn(request.command, request.images);
-    const turnIdentity = this.#turnIdentity(request);
     this.#markSessionRunning(session);
     request.onAbortable?.();
     try {
-      const prepared = await this.#sessionStore.prepareUserTurn(
-        session.id,
-        userTurn.persistedContent,
-        turnIdentity,
-      );
       assertDirectExecutionOpen(request);
-      if (prepared === 'appended') {
-        if (session.messages.length >= this.#maxMessagesPerSession) {
-          const first = session.messages[0];
-          session.messages = [first, ...session.messages.slice(-(this.#maxMessagesPerSession - 2))];
-        }
-        session.messages.push(userTurn.message);
-      } else {
-        await this.#refreshSessionMessages(session);
+      session.messages = this.#contextMessages(request.priorContext);
+      if (session.messages.length >= this.#maxMessagesPerSession) {
+        session.messages = session.messages.slice(-(this.#maxMessagesPerSession - 1));
       }
+      session.messages.push(userTurn.message);
 
       session.chatId = request.chatId;
-      if (prepared === 'turn-complete') {
-        this.#markSessionIdle(session);
-        this.emitFinished(session.chatId, 0, session.eventMetadata);
-        return;
-      }
-      await this.#runTurnInternal(session, turnIdentity, request);
+      await this.#runTurnInternal(session, request);
     } catch (error: unknown) {
       this.#markSessionIdle(session);
       throw error;
@@ -219,15 +187,10 @@ export abstract class DirectChatRuntimeBase<
     this.#sessions.clear();
   }
 
-  async #hydrateSession(
+  #hydrateSession(
     sessionId: string,
     request: DirectResumeRequest,
-  ): Promise<DirectRuntimeSession<TMessage>> {
-    const messages = await this.#sessionStore.read(sessionId);
-    if (!messages) {
-      throw new Error(`Cannot hydrate ${this.config.runtimeLabel} session without persisted messages: ${sessionId}`);
-    }
-
+  ): DirectRuntimeSession<TMessage> {
     const now = Date.now();
     const session: DirectRuntimeSession<TMessage> = {
       abortController: null,
@@ -236,7 +199,7 @@ export abstract class DirectChatRuntimeBase<
       id: sessionId,
       isFinalizing: false,
       isRunning: false,
-      messages: messages.map((message) => this.persistedToMessage(message)),
+      messages: this.#contextMessages(request.priorContext),
       model: request.model || this.config.defaultModel,
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
@@ -247,22 +210,11 @@ export abstract class DirectChatRuntimeBase<
     return session;
   }
 
-  async #refreshSessionMessages(session: DirectRuntimeSession<TMessage>): Promise<void> {
-    const messages = await this.#sessionStore.read(session.id);
-    if (!messages) {
-      throw new Error(`Cannot refresh ${this.config.runtimeLabel} session without persisted messages: ${session.id}`);
-    }
-    session.messages = messages.map((message) => this.persistedToMessage(message));
-  }
-
-  #turnIdentity(
-    request: Pick<DirectStartRequest, 'clientRequestId' | 'clientMessageId' | 'turnId'>,
-  ): DirectMessageIdentity {
-    return {
-      ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
-      ...(request.clientMessageId ? { clientMessageId: request.clientMessageId } : {}),
-      ...(request.turnId ? { turnId: request.turnId } : {}),
-    };
+  #contextMessages(messages: readonly ChatMessage[] | undefined): TMessage[] {
+    return (messages ?? []).flatMap((message) => {
+      const translated = this.contextMessage(message);
+      return translated ? [translated] : [];
+    });
   }
 
   #markSessionIdle(session: DirectRuntimeSession<TMessage>): void {
@@ -283,7 +235,6 @@ export abstract class DirectChatRuntimeBase<
 
   async #runTurnInternal(
     session: DirectRuntimeSession<TMessage>,
-    turnIdentity: DirectMessageIdentity,
     request: Pick<DirectStartRequest, 'executionAdmission'>,
   ): Promise<void> {
     const eventMetadata = session.eventMetadata;
@@ -312,21 +263,8 @@ export abstract class DirectChatRuntimeBase<
       }
 
       session.isFinalizing = true;
-      const appended = await this.#sessionStore.append(
-        session.id,
-        'assistant',
-        response,
-        turnIdentity,
-      );
       session.messages.push(this.buildAssistantMessage(response));
-      // The row is emitted only after its fsynced append, so the persisted
-      // line is its canonical native identity.
-      this.emitMessages(session.chatId, [
-        attachNativeMessageSource(
-          new AssistantMessage(new Date().toISOString(), response),
-          { lineNumber: appended.lineNumber },
-        ),
-      ], eventMetadata);
+      this.emitMessages(session.chatId, [new AssistantMessage(new Date().toISOString(), response)], eventMetadata);
       this.#markSessionIdle(session);
       this.emitFinished(session.chatId, 0, eventMetadata);
     } catch (error: unknown) {

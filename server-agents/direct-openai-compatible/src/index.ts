@@ -105,7 +105,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       defaults: {},
       descriptors: [],
     });
-    const providerExecution = new DirectExecution(host, runtime, nativeSessions);
+    const providerExecution = new DirectExecution(host, runtime);
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     const nativeEvidence = createDirectNativeEvidence({
       reader,

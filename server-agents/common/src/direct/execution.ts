@@ -1,4 +1,3 @@
-import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   type AgentExecutionContextV4,
@@ -11,7 +10,6 @@ import {
 } from '../execution/projection-events.js';
 import { AgentOperationTracker } from '../execution/operation-tracker.js';
 import { resolveAgentEndpoint } from '../execution/resolve-endpoint.js';
-import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
 import type { DirectEndpointRouterRuntime, DirectCompatibleRuntime } from './router.js';
 
 export class DirectExecution<TRuntime extends DirectCompatibleRuntime>
@@ -22,7 +20,6 @@ implements AgentProjectionRuntimeExecution {
   constructor(
     private readonly host: AgentHost,
     private readonly runtime: DirectEndpointRouterRuntime<TRuntime>,
-    private readonly nativeSessions: PathNativeSessionCodec,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
       const operation = this.#operations.current(chatId, metadata);
@@ -59,22 +56,17 @@ implements AgentProjectionRuntimeExecution {
   async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
     const endpoint = await this.#endpoint(request);
     this.#operations.register(request.chatId, request.operation);
-    const seed = request.carriedContext?.prefix ?? '';
     try {
       const result = await this.runtime.startSession({
         ...executionFields(request),
-        command: `${seed}${request.prompt}`,
+        command: request.prompt,
         images: request.attachments,
         endpoint,
       });
       const session = {
         agentSessionId: result.agentSessionId,
-        nativeSession: this.nativeSessions.encode({
-          path: result.nativePath,
-          agentSessionId: result.agentSessionId,
-          modelEndpointId: endpoint.selection.endpointId,
-        }),
-        nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, result.agentSessionId),
+        nativeSession: null,
+        nativeSeedReceipt: null,
       };
       this.#events.emit({
         type: 'session-created',
@@ -91,17 +83,6 @@ implements AgentProjectionRuntimeExecution {
 
   async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
     const endpoint = await this.#endpoint(request);
-    const nativeSession = this.nativeSessions.decode(request.nativeSession);
-    if (
-      nativeSession.modelEndpointId
-      && nativeSession.modelEndpointId !== endpoint.selection.endpointId
-    ) {
-      throw new AgentIntegrationError(
-        'INVALID_ENDPOINT',
-        'Direct sessions cannot change API provider endpoints after they start',
-        false,
-      );
-    }
     this.#operations.register(request.chatId, request.operation);
     try {
       await this.runtime.runTurn({
@@ -109,7 +90,6 @@ implements AgentProjectionRuntimeExecution {
         agentSessionId: request.agentSessionId,
         command: request.prompt,
         images: request.attachments,
-        nativePath: nativeSession.path,
         endpoint,
       });
     } catch (error) {
@@ -178,5 +158,6 @@ function executionFields(request: AgentExecutionContextV4) {
       markStarted: () => request.admission.markStarted(),
     },
     onAbortable: () => request.admission.markAbortable(),
+    priorContext: request.priorContext,
   };
 }

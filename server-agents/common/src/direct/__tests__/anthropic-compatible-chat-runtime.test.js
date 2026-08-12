@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
   AnthropicCompatibleChatRuntime,
   anthropicMessagesUrl,
@@ -155,7 +156,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
     const runtime = makeRuntime(dir);
     const messagesPromise = waitForMessages(runtime);
 
-    const started = await runtime.startSession({
+    await runtime.startSession({
       chatId: 'chat-1',
       command: 'hello?',
       projectPath: '/tmp/project',
@@ -175,9 +176,6 @@ describe('AnthropicCompatibleChatRuntime', () => {
     expect(requestBody).not.toHaveProperty('output_config');
     expect(requestBody).not.toHaveProperty('thinking');
     expect(messages[0].content).toBe('hello world');
-    const persisted = await fs.readFile(started.nativePath, 'utf8');
-    expect(persisted).toContain('"content":"hello world"');
-    expect(persisted).not.toContain('private');
   });
 
   it('accepts buffered JSON for an interactive Anthropic session', async () => {
@@ -259,14 +257,9 @@ describe('AnthropicCompatibleChatRuntime', () => {
     expect(requestBodies.every((body) => !Object.hasOwn(body, 'thinking'))).toBe(true);
   });
 
-  it('hydrates an unknown session from persisted JSONL before resuming', async () => {
+  it('hydrates an unknown session from the supplied ledger context', async () => {
     const dir = await tempDir();
     const sessionId = 'persisted-session';
-    await fs.writeFile(path.join(dir, `${sessionId}.jsonl`), [
-      JSON.stringify({ role: 'user', content: 'first message' }),
-      JSON.stringify({ role: 'assistant', content: 'first response' }),
-      '',
-    ].join('\n'));
 
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
@@ -290,6 +283,10 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'max',
       claudeThinkingMode: 'auto',
+      priorContext: [
+        new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
+        new AssistantMessage('2026-01-01T00:00:01.000Z', 'first response'),
+      ],
     });
 
     expect(requestBody.messages).toEqual([

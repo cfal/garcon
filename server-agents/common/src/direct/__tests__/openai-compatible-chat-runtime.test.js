@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
   OpenAiCompatibleChatRuntime,
   runOpenAiCompatibleSingleQuery,
@@ -59,14 +60,9 @@ describe('OpenAiCompatibleChatRuntime', () => {
     }
   });
 
-  it('hydrates an unknown session from persisted JSONL before resuming', async () => {
+  it('hydrates an unknown session from the supplied ledger context', async () => {
     const dir = await tempDir();
     const sessionId = 'persisted-session';
-    await fs.writeFile(path.join(dir, `${sessionId}.jsonl`), [
-      JSON.stringify({ role: 'user', content: 'first message' }),
-      JSON.stringify({ role: 'assistant', content: 'first response' }),
-      '',
-    ].join('\n'));
 
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
@@ -85,6 +81,10 @@ describe('OpenAiCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'max',
       claudeThinkingMode: 'auto',
+      priorContext: [
+        new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
+        new AssistantMessage('2026-01-01T00:00:01.000Z', 'first response'),
+      ],
     });
 
     expect(requestBody.model).toBe('selected-model');
@@ -235,7 +235,7 @@ describe('OpenAiCompatibleChatRuntime', () => {
     expect(result).toBe('generated message');
   });
 
-  it('strips think blocks before emitting and persisting interactive text', async () => {
+  it('strips think blocks before emitting interactive text', async () => {
     const dir = await tempDir();
     globalThis.fetch = mock(async () => streamResponse(
       '<think>private',
@@ -245,7 +245,7 @@ describe('OpenAiCompatibleChatRuntime', () => {
     const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig(dir));
     const messages = waitForMessages(runtime);
 
-    const started = await runtime.startSession({
+    await runtime.startSession({
       chatId: 'chat-think',
       command: 'hello',
       projectPath: '/tmp/project',
@@ -256,9 +256,6 @@ describe('OpenAiCompatibleChatRuntime', () => {
     });
 
     await expect(messages).resolves.toMatchObject([{ content: 'visible response' }]);
-    const persisted = await fs.readFile(started.nativePath, 'utf8');
-    expect(persisted).toContain('"content":"visible response"');
-    expect(persisted).not.toContain('private reasoning');
   });
 
   it('accepts a buffered JSON response for an interactive session', async () => {
