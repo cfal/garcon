@@ -194,13 +194,17 @@ export class TranscriptLedgerStore {
   resendCandidates(chatId: string): readonly LedgerUserInputRow[] {
     return this.#read(chatId, (entry) => {
       const view = this.#requireCurrent(entry);
-      const stored = entry.db.query<StoredLedgerRow, [string]>(`
+      const statement = entry.db.query<StoredLedgerRow, [string]>(`
         SELECT view_id, ordinal, kind, at, client_message_id, payload_json
         FROM transcript_rows
         WHERE view_id = ?
         ORDER BY ordinal DESC
-      `).all(view.viewId);
-      return collectResendCandidates(stored);
+      `);
+      try {
+        return collectResendCandidates(statement.iterate(view.viewId));
+      } finally {
+        statement.finalize();
+      }
     });
   }
 
@@ -518,13 +522,21 @@ export class TranscriptLedgerStore {
     current: LedgerUserInputRow,
     excludedOrdinals: ReadonlySet<number> | undefined,
   ): readonly LedgerUserInputRow[] {
-    const preceding = entry.db.query<StoredLedgerRow, [string, number]>(`
+    const statement = entry.db.query<StoredLedgerRow, [string, number]>(`
       SELECT view_id, ordinal, kind, at, client_message_id, payload_json
       FROM transcript_rows
       WHERE view_id = ? AND ordinal < ?
       ORDER BY ordinal DESC
-    `).all(viewId, current.ordinal);
-    return [...collectResendCandidates(preceding, excludedOrdinals), current];
+    `);
+    try {
+      const preceding = collectResendCandidates(
+        statement.iterate(viewId, current.ordinal),
+        excludedOrdinals,
+      );
+      return [...preceding, current];
+    } finally {
+      statement.finalize();
+    }
   }
 
   #currentSession(entry: ConnectionEntry, current: TranscriptView): LedgerSessionRow | null {
@@ -655,7 +667,7 @@ function decodeStoredRow(row: StoredLedgerRow): LedgerRow {
 }
 
 function collectResendCandidates(
-  storedRows: readonly StoredLedgerRow[],
+  storedRows: Iterable<StoredLedgerRow>,
   excludedOrdinals?: ReadonlySet<number>,
 ): readonly LedgerUserInputRow[] {
   const candidates: LedgerUserInputRow[] = [];

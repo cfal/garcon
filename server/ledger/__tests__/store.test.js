@@ -175,6 +175,47 @@ describe('TranscriptLedgerStore', () => {
     expect(steer.prompt.map((row) => row.detail.message.content)).toEqual(['steer']);
   });
 
+  it('does not materialize unbounded resend scans', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const originalQuery = Database.prototype.query;
+    Database.prototype.query = function query(sql) {
+      const statement = originalQuery.call(this, sql);
+      const isUnboundedResendScan = sql.includes('FROM transcript_rows')
+        && sql.includes('ORDER BY ordinal DESC')
+        && !sql.includes('LIMIT');
+      if (isUnboundedResendScan) {
+        statement.all = function rejectEagerScan() {
+          throw new Error('Unbounded resend scans must stream rows');
+        };
+      }
+      return statement;
+    };
+
+    try {
+      store.appendInputAndCompose('chat-one', {
+        viewId: view.viewId,
+        at,
+        detail: inputDetail('a', 'A'),
+      });
+      store.append('chat-one', view.viewId, [runEnded('interrupted')]);
+      const second = store.appendInputAndCompose('chat-one', {
+        viewId: view.viewId,
+        at,
+        detail: inputDetail('b', 'B'),
+      });
+
+      expect(second.prompt.map((row) => row.detail.message.content)).toEqual(['A', 'B']);
+      expect(store.resendCandidates('chat-one').map(
+        (row) => row.detail.message.content,
+      )).toEqual(['A', 'B']);
+    } finally {
+      Database.prototype.query = originalQuery;
+    }
+  });
+
   it('treats every permission request as a resend boundary', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
