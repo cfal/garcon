@@ -23,7 +23,10 @@ import type {
 	ChatRestoreResult,
 } from './active-transcript-port.js';
 import { validateRequestedTranscriptPage } from './transcript-page-progress.js';
-import { stageLatestTranscriptWindow } from './transcript-window-loader.js';
+import {
+	retainLoadedTranscriptPrefix,
+	stageLatestTranscriptWindow,
+} from './transcript-window-loader.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import {
 	applyPendingDeliveryStatuses,
@@ -105,10 +108,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	#renderEntries = $derived.by(() =>
-		applyPendingDeliveryStatuses(
-			this.entries,
-			this.pendingUserInputs,
-		),
+		applyPendingDeliveryStatuses(this.entries, this.pendingUserInputs),
 	);
 
 	#echoedClientRequestIds = $derived.by(() => {
@@ -424,18 +424,19 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		epoch: number,
 	): PageApplyResult {
 		if (epoch !== this.#loadEpoch) return 'stale';
+		const stagedPage = retainLoadedTranscriptPrefix(this.generationId, this.entries, page);
 
 		const buffered = this.#snapshotBuffer ?? [];
 		const hasBufferedGenerationChange = buffered.some(
-			(batch) => batch.generationId !== page.generationId,
+			(batch) => batch.generationId !== stagedPage.generationId,
 		);
 		if (hasBufferedGenerationChange) {
 			this.#invalidatePageLoad();
 			this.isLoadingMessages = false;
 			return 'generation-changed';
 		}
-		let validatedMessages = page.messages;
-		let validatedLastSeq = page.lastSeq;
+		let validatedMessages = stagedPage.messages;
+		let validatedLastSeq = stagedPage.lastSeq;
 		for (const batch of buffered) {
 			const validation = applyChatViewMessages(validatedMessages, batch.messages, validatedLastSeq);
 			if (validation.status !== 'applied') return 'gap-detected';
@@ -443,28 +444,29 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			validatedLastSeq = validation.lastSeq;
 		}
 		this.#snapshotBuffer = null;
-		if (page.generationId !== this.generationId) {
+		if (stagedPage.generationId !== this.generationId) {
 			const preservesExpandedWindow =
-				this.#preserveExpandedVisibleWindow && page.messages.length >= this.visibleMessageCount;
+				this.#preserveExpandedVisibleWindow &&
+				stagedPage.messages.length >= this.visibleMessageCount;
 			this.#preserveExpandedVisibleWindow = preservesExpandedWindow;
 			if (!preservesExpandedWindow) this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		}
 
 		this.#invalidatePageLoad();
 		this.historyState = { kind: 'complete' };
-		this.transcriptCache.replaceFromPage(chatId, page);
+		this.transcriptCache.replaceFromPage(chatId, stagedPage);
 		this.windowRevision += 1;
-		this.generationId = page.generationId;
-		this.entries = page.messages;
-		this.lastSeq = page.lastSeq;
-		this.oldestSeq = page.messages[0]?.seq ?? 0;
-		this.hasEarlierMessages = page.hasMore;
-		this.totalMessages = page.messages.length;
+		this.generationId = stagedPage.generationId;
+		this.entries = stagedPage.messages;
+		this.lastSeq = stagedPage.lastSeq;
+		this.oldestSeq = stagedPage.messages[0]?.seq ?? 0;
+		this.hasEarlierMessages = stagedPage.hasMore;
+		this.totalMessages = stagedPage.messages.length;
 		if (this.#pendingUserInputsRevision === this.#pendingUserInputsRevisionAtLoadStart) {
-			this.#replacePendingUserInputs(normalizePendingInputs(page.pendingUserInputs));
+			this.#replacePendingUserInputs(normalizePendingInputs(stagedPage.pendingUserInputs));
 		}
 		this.clearLocalNotices(this.#localNoticeRevisionAtLoadStart);
-		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
+		this.loadStatus = stagedPage.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.#recordFeedMutation('replacement');
@@ -498,7 +500,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 					this.abortSnapshotLoad(epoch);
 					return this.chatMessages;
 				}
-				if (page === 'snapshot-changed') continue;
 				if (isDegradedChatHistoryResponse(page)) {
 					if (epoch !== this.#loadEpoch) return this.chatMessages;
 					this.#setDegradedHistory(chatId, page.historyState);

@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage } from '$shared/chat-types';
 import type { CompleteChatHistoryResponse } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
-import { stageLatestTranscriptWindow } from '../transcript-window-loader.js';
+import {
+	retainLoadedTranscriptPrefix,
+	stageLatestTranscriptWindow,
+} from '../transcript-window-loader.js';
 
 vi.mock('$lib/api/chats.js', () => ({ getChatMessages: vi.fn() }));
 
@@ -34,31 +37,32 @@ function page(
 describe('stageLatestTranscriptWindow', () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it('stages a wide suffix while same-generation live messages extend the tail', async () => {
-		vi.mocked(getChatMessages)
-			.mockResolvedValueOnce(page('generation-1', 51, 200, 250, 200))
-			.mockResolvedValueOnce(page('generation-1', 1, 50, 251, 50));
+	it('bounds latest-window validation to one maximum-size request', async () => {
+		vi.mocked(getChatMessages).mockResolvedValueOnce(page('generation-1', 51, 200, 250, 200));
 
-		const staged = await stageLatestTranscriptWindow('chat-1', 250);
+		const staged = await stageLatestTranscriptWindow('chat-1', 7_274);
 
-		expect(staged).not.toBe('snapshot-changed');
-		if (staged === 'snapshot-changed') return;
 		expect(staged.messages.map((entry) => entry.seq)).toEqual(
-			Array.from({ length: 250 }, (_, index) => index + 1),
+			Array.from({ length: 200 }, (_, index) => index + 51),
 		);
 		expect(staged.lastSeq).toBe(250);
-		expect(getChatMessages).toHaveBeenNthCalledWith(2, {
-			chatId: 'chat-1',
-			limit: 50,
-			beforeSeq: 51,
-		});
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(getChatMessages).toHaveBeenCalledWith({ chatId: 'chat-1', limit: 200 });
 	});
 
-	it('rejects pages from a replacement generation', async () => {
-		vi.mocked(getChatMessages)
-			.mockResolvedValueOnce(page('generation-1', 51, 200, 250, 200))
-			.mockResolvedValueOnce(page('generation-2', 1, 50, 250, 50));
+	it('retains only an exact contiguous same-generation prefix', () => {
+		const latest = page('generation-1', 101, 200, 300, 200);
+		const loaded = page('generation-1', 1, 300, 300, 300).messages;
+		const retained = retainLoadedTranscriptPrefix('generation-1', loaded, latest);
 
-		await expect(stageLatestTranscriptWindow('chat-1', 250)).resolves.toBe('snapshot-changed');
+		expect(retained.messages.map((entry) => entry.seq)).toEqual(
+			Array.from({ length: 300 }, (_, index) => index + 1),
+		);
+		expect(retained.messages[99]).toBe(loaded[99]);
+		expect(retained.messages[100]).toBe(latest.messages[0]);
+		expect(retained.pageOldestSeq).toBe(1);
+		expect(retained.hasMore).toBe(false);
+		expect(retainLoadedTranscriptPrefix('generation-2', loaded, latest)).toBe(latest);
+		expect(retainLoadedTranscriptPrefix('generation-1', loaded.slice(0, 99), latest)).toBe(latest);
 	});
 });

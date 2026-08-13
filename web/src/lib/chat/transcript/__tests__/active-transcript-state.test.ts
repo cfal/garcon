@@ -440,9 +440,7 @@ describe('ActiveTranscriptState', () => {
 		);
 		expect(
 			chat.visibleRows.flatMap((row) => (row.kind === 'message' && row.seq ? [row.seq] : [])),
-		).toEqual(
-			Array.from({ length: total }, (_, index) => index + 1),
-		);
+		).toEqual(Array.from({ length: total }, (_, index) => index + 1));
 		expect(chat.visibleMessageCount).toBe(total);
 	});
 
@@ -706,7 +704,45 @@ describe('ActiveTranscriptState', () => {
 		]);
 	});
 
-	it('stages an oversized replacement window without dropping the visible reading range', async () => {
+	it('validates a bounded suffix without dropping a loaded same-generation prefix', async () => {
+		const chat = new ActiveTranscriptState();
+		const loadedEntries = Array.from({ length: 300 }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', loadedEntries, {
+			lastSeq: 300,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.visibleMessageCount = 300;
+		chat.revealAllLoadedMessages();
+		const publishedEntries = chat.entries;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 200,
+			...page({
+				messages: loadedEntries.slice(100),
+				lastSeq: 300,
+				pageOldestSeq: 101,
+				hasMore: true,
+			}),
+		});
+
+		await expect(chat.loadMessages('chat-1')).resolves.toHaveLength(300);
+
+		expect(getChatMessages).toHaveBeenNthCalledWith(1, { chatId: 'chat-1', limit: 200 });
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(chat.generationId).toBe('generation-1');
+		expect(chat.entries.slice(0, 100)).toEqual(publishedEntries.slice(0, 100));
+		expect(chat.entries.map((item) => item.seq)).toEqual(
+			Array.from({ length: 300 }, (_, index) => index + 1),
+		);
+		expect(chat.hasEarlierMessages).toBe(false);
+		expect(chat.visibleMessageCount).toBe(300);
+		expect(chat.visibleRows.find((row) => row.kind === 'message' && row.seq === 91)).toBeTruthy();
+	});
+
+	it('keeps the current transcript visible until a bounded replacement generation is ready', async () => {
 		const chat = new ActiveTranscriptState();
 		const oldEntries = Array.from({ length: 300 }, (_, index) =>
 			entry(index + 1, assistant(`old-${index + 1}`)),
@@ -719,137 +755,68 @@ describe('ActiveTranscriptState', () => {
 		chat.visibleMessageCount = 300;
 		chat.revealAllLoadedMessages();
 		const publishedEntries = chat.entries;
-		const initialWindowRevision = chat.windowRevision;
-		let resolveEarlier!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
-		vi.mocked(getChatMessages)
-			.mockResolvedValueOnce({
-				chatId: 'chat-1',
-				limit: 200,
-				...page({
-					generationId: 'generation-2',
-					messages: Array.from({ length: 200 }, (_, index) =>
-						entry(index + 101, assistant(`new-${index + 101}`)),
-					),
-					lastSeq: 300,
-					pageOldestSeq: 101,
-					hasMore: true,
-				}),
-			})
-			.mockReturnValueOnce(
-				new Promise((resolve) => {
-					resolveEarlier = resolve;
-				}),
-			);
+		let resolveLatest!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveLatest = resolve;
+			}),
+		);
 
 		const replacement = chat.loadMessages('chat-1');
-		await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
-
-		expect(getChatMessages).toHaveBeenNthCalledWith(1, { chatId: 'chat-1', limit: 200 });
-		expect(getChatMessages).toHaveBeenNthCalledWith(2, {
-			chatId: 'chat-1',
-			limit: 100,
-			beforeSeq: 101,
-		});
-		expect(chat.generationId).toBe('generation-1');
 		expect(chat.entries).toBe(publishedEntries);
-		expect(chat.windowRevision).toBe(initialWindowRevision);
 		expect(chat.visibleRows.find((row) => row.kind === 'message' && row.seq === 91)).toBeTruthy();
 
-		resolveEarlier({
+		resolveLatest({
 			chatId: 'chat-1',
-			limit: 100,
+			limit: 200,
 			...page({
 				generationId: 'generation-2',
-				messages: Array.from({ length: 100 }, (_, index) =>
-					entry(index + 1, assistant(`new-${index + 1}`)),
+				messages: Array.from({ length: 200 }, (_, index) =>
+					entry(index + 101, assistant(`new-${index + 101}`)),
 				),
 				lastSeq: 300,
-				pageOldestSeq: 1,
-				hasMore: false,
+				pageOldestSeq: 101,
+				hasMore: true,
 			}),
 		});
 
-		await expect(replacement).resolves.toHaveLength(300);
+		await expect(replacement).resolves.toHaveLength(200);
+		expect(getChatMessages).toHaveBeenCalledOnce();
 		expect(chat.generationId).toBe('generation-2');
 		expect(chat.entries.map((item) => item.seq)).toEqual(
-			Array.from({ length: 300 }, (_, index) => index + 1),
+			Array.from({ length: 200 }, (_, index) => index + 101),
 		);
-		expect(chat.entries[90]).toMatchObject({ seq: 91, message: { content: 'new-91' } });
-		expect(chat.visibleMessageCount).toBe(300);
-		expect(chat.visibleRows.find((row) => row.kind === 'message' && row.seq === 91)).toBeTruthy();
-		expect(chat.windowRevision).toBe(initialWindowRevision + 1);
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
 	});
 
-	it('retries a moving paged snapshot atomically while preserving buffered live messages', async () => {
+	it('replays buffered live messages after one bounded latest-window validation', async () => {
 		const chat = new ActiveTranscriptState();
-		const firstLatest = Array.from({ length: 200 }, (_, index) =>
-			entry(index + 101, assistant(`first-${index + 101}`)),
-		);
-		const stableLatest = Array.from({ length: 200 }, (_, index) =>
+		const latest = Array.from({ length: 200 }, (_, index) =>
 			entry(index + 102, assistant(`stable-${index + 102}`)),
 		);
-		vi.mocked(getChatMessages)
-			.mockResolvedValueOnce({
-				chatId: 'chat-1',
-				limit: 200,
-				...page({
-					messages: firstLatest,
-					lastSeq: 300,
-					pageOldestSeq: 101,
-					hasMore: true,
-					pendingUserInputs: [pendingInput({ clientRequestId: 'first-latest' })],
-				}),
-			})
-			.mockResolvedValueOnce({
-				chatId: 'chat-1',
-				limit: 100,
-				...page({
-					messages: Array.from({ length: 100 }, (_, index) =>
-						entry(index + 1, assistant(`moving-${index + 1}`)),
-					),
-					lastSeq: 301,
-					pageOldestSeq: 1,
-					hasMore: false,
-				}),
-			})
-			.mockResolvedValueOnce({
-				chatId: 'chat-1',
-				limit: 200,
-				...page({
-					messages: stableLatest,
-					lastSeq: 301,
-					pageOldestSeq: 102,
-					hasMore: true,
-					pendingUserInputs: [
-						pendingInput({ clientRequestId: 'stable-latest', content: 'stable pending' }),
-					],
-				}),
-			})
-			.mockResolvedValueOnce({
-				chatId: 'chat-1',
-				limit: 100,
-				...page({
-					messages: Array.from({ length: 100 }, (_, index) =>
-						entry(index + 2, assistant(`stable-${index + 2}`)),
-					),
-					lastSeq: 301,
-					pageOldestSeq: 2,
-					hasMore: true,
-					pendingUserInputs: [
-						pendingInput({ clientRequestId: 'stale-earlier', content: 'stale pending' }),
-					],
-				}),
-			});
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 200,
+			...page({
+				messages: latest,
+				lastSeq: 301,
+				pageOldestSeq: 102,
+				hasMore: true,
+				pendingUserInputs: [
+					pendingInput({ clientRequestId: 'stable-latest', content: 'stable pending' }),
+				],
+			}),
+		});
 
 		const snapshot = chat.loadMessages('chat-1', { minimumLimit: 300 });
 		expect(chat.applyMessages('chat-1', 'generation-1', [entry(302, assistant('live-302'))])).toBe(
 			'applied',
 		);
 
-		await expect(snapshot).resolves.toHaveLength(301);
-		expect(getChatMessages).toHaveBeenCalledTimes(4);
+		await expect(snapshot).resolves.toHaveLength(201);
+		expect(getChatMessages).toHaveBeenCalledOnce();
 		expect(chat.entries.map((message) => message.seq)).toEqual(
-			Array.from({ length: 301 }, (_, index) => index + 2),
+			Array.from({ length: 201 }, (_, index) => index + 102),
 		);
 		expect(contentOf(chat.chatMessages.at(-1)!)).toBe('live-302');
 		expect(chat.pendingUserInputs).toMatchObject([
