@@ -162,22 +162,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
     }));
   });
 
-  it('repairs the registry cache from a session row before resuming', async () => {
-    const { router, registry, resume } = makeRouter();
-
-    await router.runAgentTurn('chat-1', 'start', { turnId: 'turn-1' });
-    await router.runAgentTurn('chat-1', 'resume', { turnId: 'turn-2' });
-
-    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
-      agentSessionId: 'native-1',
-      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
-    }));
-    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
-      agentSessionId: 'native-1',
-      runId: 'turn-2',
-    }));
-  });
-
   it('persists one coherent endpoint selection after a lazy start', async () => {
     const { router, registry } = makeRouter({
       entry: {

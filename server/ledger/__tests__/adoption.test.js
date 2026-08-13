@@ -65,6 +65,40 @@ describe('TranscriptAdoptionService', () => {
       expect(loadCounts).toEqual({ prefix: 1, current: 1 });
     });
   });
+
+  it('repairs stale registry session fields from an existing ledger on open', async () => {
+    await withFixture(async ({ adoption, ledger, entry, updates }) => {
+      await adoption.ensure('chat-1');
+      ledger.openProducer('chat-1').sink.publish({
+        type: 'session',
+        session: {
+          agentSessionId: 'session-2',
+          nativeSession: {
+            ownerId: 'test',
+            schemaVersion: 1,
+            value: { path: '/private/session-2.jsonl' },
+          },
+          nativeSeedReceipt: null,
+        },
+      });
+      entry.agentSessionId = 'session-1';
+      entry.nativeSession = null;
+      updates.length = 0;
+
+      await adoption.ensure('chat-1');
+
+      expect(updates).toEqual([{
+        agentSessionId: 'session-2',
+        nativeSession: {
+          ownerId: 'test',
+          schemaVersion: 1,
+          value: { path: '/private/session-2.jsonl' },
+        },
+        nativeSeedReceipt: null,
+      }]);
+      expect(entry.agentSessionId).toBe('session-2');
+    });
+  });
 });
 
 async function withFixture(run) {
@@ -89,6 +123,7 @@ async function withFixture(run) {
   };
   let current = [new UserMessage(TS, 'current'), new AssistantMessage(TS, 'answer')];
   const loadCounts = { prefix: 0, current: 0 };
+  const updates = [];
   const integration = {
     descriptor: { id: 'test' },
     settings: {
@@ -99,7 +134,14 @@ async function withFixture(run) {
   };
   const adoption = new TranscriptAdoptionService({
     ledger,
-    registry: { getChat: () => entry },
+    registry: {
+      getChat: () => entry,
+      updateChat(_chatId, patch) {
+        updates.push(patch);
+        Object.assign(entry, patch);
+        return { id: 'chat-1', ...entry };
+      },
+    },
     integrations: { require: () => integration },
     getCarryOverRevision: () => 'carryover-1',
     async loadFrozenPrefix() {
@@ -116,7 +158,9 @@ async function withFixture(run) {
     await run({
       ledger,
       adoption,
+      entry,
       loadCounts,
+      updates,
       setCurrent(value) { current = value; },
     });
   } finally {

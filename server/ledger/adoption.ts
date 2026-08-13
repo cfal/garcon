@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
   PermissionCancelledMessage,
   PermissionRequestMessage,
@@ -42,12 +43,21 @@ export class TranscriptAdoptionService {
     this.#now = options.now ?? (() => new Date().toISOString());
   }
 
-  ensure(chatId: string, signal: AbortSignal = new AbortController().signal): Promise<TranscriptView> {
+  async ensure(
+    chatId: string,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<TranscriptView> {
     const current = this.options.ledger.currentView(chatId);
-    if (current) return Promise.resolve(current);
+    if (current) {
+      this.#repairSessionCache(chatId);
+      return current;
+    }
     return this.#locks.runExclusive(chatId, async () => {
       const reopened = this.options.ledger.currentView(chatId);
-      if (reopened) return reopened;
+      if (reopened) {
+        this.#repairSessionCache(chatId);
+        return reopened;
+      }
       signal.throwIfAborted();
       const entry = this.options.registry.getChat(chatId);
       if (!entry) throw new TypeError(`Cannot adopt transcript for unknown chat ${chatId}`);
@@ -64,12 +74,31 @@ export class TranscriptAdoptionService {
       const prefixRows = frozenRows(prefix, this.#now);
       const contentStartOrdinal = prefixRows.length + 1;
       const session = sessionDraft(entry, this.#now());
-      return this.options.ledger.initializeChat(
+      const view = this.options.ledger.initializeChat(
         chatId,
         [...prefixRows, ...(session ? [session] : []), ...adoptedRows(current, this.#now)],
         contentStartOrdinal,
       );
+      this.#repairSessionCache(chatId);
+      return view;
     });
+  }
+
+  #repairSessionCache(chatId: string): void {
+    const entry = this.options.registry.getChat(chatId);
+    if (!entry) return;
+    const session = this.options.ledger.currentSession(chatId)?.detail ?? null;
+    const patch = {
+      agentSessionId: session?.agentSessionId ?? null,
+      nativeSession: session?.nativeSession ?? null,
+      nativeSeedReceipt: session?.nativeSeedReceipt ?? null,
+    };
+    if (
+      entry.agentSessionId === patch.agentSessionId
+      && isDeepStrictEqual(entry.nativeSession ?? null, patch.nativeSession)
+      && isDeepStrictEqual(entry.nativeSeedReceipt ?? null, patch.nativeSeedReceipt)
+    ) return;
+    this.options.registry.updateChat(chatId, patch);
   }
 
   async #loadCurrent(

@@ -144,7 +144,6 @@ export class AgentRuntimeRouter {
       );
     }
     await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
-    await this.#repairSessionCache(chatId);
     const persistedEntry = this.#registry.getChat(chatId);
     const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
     const integration = this.#directory.require(entry.agentId);
@@ -202,7 +201,6 @@ export class AgentRuntimeRouter {
   ): Promise<void> {
     assertExecutionAdmissionOpen(opts);
     await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
-    await this.#repairSessionCache(chatId);
     const persistedEntry = this.#registry.getChat(chatId);
     const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
     if (!entry.agentSessionId) {
@@ -755,22 +753,6 @@ export class AgentRuntimeRouter {
       attachments: [...preparedAttachments],
       priorContext: this.#ledger.conversationMessages(chatId, excluded),
     };
-  }
-
-  async #repairSessionCache(chatId: string): Promise<void> {
-    const entry = this.#registry.getChat(chatId);
-    if (!entry) return;
-    const session = this.#ledger.currentSession(chatId)?.detail ?? null;
-    if (
-      entry.agentSessionId === (session?.agentSessionId ?? null)
-      && JSON.stringify(entry.nativeSession ?? null) === JSON.stringify(session?.nativeSession ?? null)
-      && JSON.stringify(entry.nativeSeedReceipt ?? null) === JSON.stringify(session?.nativeSeedReceipt ?? null)
-    ) return;
-    this.#registry.updateChat(chatId, {
-      agentSessionId: session?.agentSessionId ?? null,
-      nativeSession: session?.nativeSession ?? null,
-      nativeSeedReceipt: session?.nativeSeedReceipt ?? null,
-    });
   }
 
   async #retainOrAbortHandle(
