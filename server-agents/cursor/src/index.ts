@@ -73,6 +73,7 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
   readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
+  readonly nativeSessions;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -105,6 +106,7 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
     });
     const providerExecution = new CursorExecution(runtime, nativeSessions);
     const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions);
+    this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     const projection = createAgentOwnedProjection({

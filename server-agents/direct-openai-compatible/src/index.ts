@@ -53,6 +53,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
   readonly transcript;
   readonly nativeHistoryImport = null;
   readonly nativeActivity = null;
+  readonly nativeSessions = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;

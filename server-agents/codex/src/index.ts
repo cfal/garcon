@@ -74,6 +74,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
   readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity;
+  readonly nativeSessions;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -125,6 +126,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
     });
     const execution = new CodexExecution(host, runtime, nativeSessions, config);
     const nativeEvidence = createCodexNativeEvidence(runtime, nativeSessions, logger);
+    this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(execution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createCodexNativeActivityProbe(nativeSessions);

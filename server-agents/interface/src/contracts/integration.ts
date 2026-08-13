@@ -20,6 +20,7 @@ import type { AgentExecutionV5 } from './execution-v5.js';
 import type {
   AgentNativeActivityProbe,
   AgentNativeHistoryImport,
+  AgentNativeSessionAccess,
 } from './native-history.js';
 import type {
   AgentTranscriptStream,
@@ -48,6 +49,7 @@ export interface AgentIntegrationV4 {
   readonly producerExecution: AgentExecutionV5;
   readonly nativeHistoryImport: AgentNativeHistoryImport | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;
+  readonly nativeSessions: AgentNativeSessionAccess | null;
 }
 
 export interface AgentIntegrationClassV4 {

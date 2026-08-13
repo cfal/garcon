@@ -62,6 +62,7 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
   readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity;
+  readonly nativeSessions;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -94,6 +95,7 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
     });
     const providerExecution = new PiExecution(runtime, nativeSessions);
     const nativeEvidence = createPiNativeEvidence(config, nativeSessions);
+    this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createPiNativeActivityProbe(nativeSessions);

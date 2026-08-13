@@ -76,6 +76,7 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
   readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity;
+  readonly nativeSessions;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -158,6 +159,7 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
       configHomeDir: config.configHomeDir,
       logger,
     });
+    this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createClaudeNativeActivityProbe(nativeSessions);

@@ -71,7 +71,7 @@ function createIntegrations(release = mock(async () => {})) {
       defaults: () => envelope(agentId),
       parse: (input) => input,
     },
-    transcript: { release },
+    nativeSessions: { release },
   });
   const byId = new Map([
     ['source-agent', integration('source-agent')],

@@ -52,6 +52,7 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
   readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity;
+  readonly nativeSessions;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -82,6 +83,7 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
     });
     const providerExecution = new FactoryExecution(runtime, nativeSessions);
     const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions);
+    this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createFactoryNativeActivityProbe(nativeSessions);

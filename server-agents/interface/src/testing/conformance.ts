@@ -32,18 +32,13 @@ export function validateAgentIntegration(
       || typeof integration.producerExecution.abort !== 'function') {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing its V5 producer execution`);
   }
-  for (const facet of ['nativeHistoryImport', 'nativeActivity'] as const) {
+  for (const facet of ['nativeHistoryImport', 'nativeActivity', 'nativeSessions'] as const) {
     if (!(facet in integration) || integration[facet] === undefined) {
       throw new Error(`Agent integration ${integration.descriptor.id} is missing required ${facet} capability state`);
     }
   }
   if ('transcriptSearch' in integration) {
     throw new Error(`Agent integration ${integration.descriptor.id} exposes removed transcriptSearch state`);
-  }
-  for (const method of ['resolveIndexSource', 'refreshIndexSource', 'describeSource'] as const) {
-    if (typeof integration.transcript[method] !== 'function') {
-      throw new Error(`Agent integration ${integration.descriptor.id} is missing transcript.${method}`);
-    }
   }
   if (!integration.catalog || !integration.settings || !integration.lifecycle || !integration.migration) {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing a required service facet`);

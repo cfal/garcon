@@ -483,12 +483,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!session.agentSessionId) return null;
     const integration = this.#directory.get(session.agentId);
     if (!integration) return null;
-    const result = await integration.transcript.resolveNativeSession({
+    const nativeSessions = integration.nativeSessions;
+    if (!nativeSessions) return null;
+    const reference = await nativeSessions.resolveNativeSession({
       chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
       signal: new AbortController().signal,
     });
-    if (result.kind !== 'ready') return null;
-    const reference = result.value;
     if (reference?.ownerId !== session.agentId && reference !== null) {
       throw new Error(`Native session owner mismatch for ${chatId || session.agentSessionId}`);
     }
@@ -502,12 +502,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const integration = this.#directory.get(session.agentId);
     if (!integration) return null;
     try {
-      const result = await integration.transcript.describeSource({
+      const nativeSessions = integration.nativeSessions;
+      if (!nativeSessions) return null;
+      const source = await nativeSessions.describeSource({
         chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
         signal: new AbortController().signal,
       });
-      if (result.kind !== 'ready') return null;
-      const source = result.value;
       if (source === null) return null;
       if ((source.kind !== 'filesystem-path' && source.kind !== 'provider-reference')
           || typeof source.value !== 'string' || source.value.length === 0) {

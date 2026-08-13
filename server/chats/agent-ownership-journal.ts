@@ -381,7 +381,7 @@ export class AgentOwnershipJournal {
     });
     try {
       await Promise.race([
-        integration.transcript.release({
+        integration.nativeSessions?.release({
           ...request,
           chat: releaseReference(request.chat),
           signal: controller.signal,

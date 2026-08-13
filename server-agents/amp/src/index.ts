@@ -47,6 +47,7 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
   readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
+  readonly nativeSessions;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -84,6 +85,7 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
     });
     const providerExecution = new AmpExecution(runtime, nativeSessions);
     const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
+    this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     const projection = createAgentOwnedProjection({
