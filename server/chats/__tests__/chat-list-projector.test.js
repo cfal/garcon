@@ -58,6 +58,7 @@ function makeDeps() {
         })),
       },
       processing: { phase: mock(() => 'running') },
+      canReloadFromNativeHistory: mock(() => true),
       pathCache: {
         resolveProjectPath: mock(() =>
           Promise.resolve({
@@ -97,6 +98,7 @@ describe('ChatListProjector', () => {
       isActive: true,
       isProcessing: true,
       processingPhase: 'running',
+      canReloadFromNativeHistory: true,
       title: 'First line',
     });
   });
@@ -125,6 +127,7 @@ describe('ChatListProjector', () => {
         title: 'First line',
         projectPath: '/alias',
         tags: ['cli', 'review-needed'],
+        canReloadFromNativeHistory: true,
         activity: {
           createdAt: '2026-01-01T00:00:00.000Z',
           lastActivityAt: '2026-01-02T00:00:00.000Z',

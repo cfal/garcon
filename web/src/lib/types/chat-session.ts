@@ -45,6 +45,7 @@ export interface ChatSessionRecord {
 	isArchived: boolean;
 	isProcessing: boolean;
 	processingPhase: ChatProcessingPhase | null;
+	canReloadFromNativeHistory: boolean;
 	isUnread: boolean;
 	status: ChatStatus;
 	agentOwnershipEpoch: string | null;

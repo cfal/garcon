@@ -9,6 +9,7 @@
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
+	import ReloadChatDialog from './ReloadChatDialog.svelte';
 	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import QueueControls from './QueueControls.svelte';
@@ -16,7 +17,7 @@
 		ActiveTranscriptState,
 		INITIAL_VISIBLE_MESSAGES,
 	} from '$lib/chat/transcript/active-transcript-state.svelte.js';
-	import type { TranscriptMessage } from '$shared/chat-view';
+	import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 	import type { ChatProcessingPhase } from '$shared/chat-types';
 	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
@@ -179,6 +180,14 @@
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
 	let composerEditorOpenRequestId = $state(0);
+	type ReloadRequest = {
+		chatId: string;
+		candidates: readonly ResendCandidate[];
+		resolve: () => void;
+		reject: (error: unknown) => void;
+	};
+	let reloadRequest = $state<ReloadRequest | null>(null);
+	let reloadBusy = $state(false);
 	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
 	const dialogQueue = $derived(dialogControl?.queue ?? null);
 	const queuedInputEditor = new QueuedInputEditorState({
@@ -325,6 +334,8 @@
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
+		reloadRequest?.resolve();
+		reloadRequest = null;
 		removeProcessingPresentation();
 		drainHandle.cleanup();
 		transcriptCache.flush();
@@ -398,9 +409,8 @@
 					defaults.thinkingMode,
 					modelCatalog.getThinkingModes(agentId),
 				),
-				agentSettings:
-					defaults.agentSettingsById[agentId]
-					?? modelCatalog.getDefaultAgentSettings(agentId),
+					agentSettings: defaults.agentSettingsById[agentId]
+						?? modelCatalog.getDefaultAgentSettings(agentId),
 			};
 		},
 		appShell,
@@ -473,6 +483,7 @@
 		if (queuedInputsDialogOpen && queuedInputsDialogChatId !== chatId) {
 			closeQueuedInputsDialog();
 		}
+		if (reloadRequest && reloadRequest.chatId !== chatId) cancelReload();
 		controller.handleChatSwitchIfChanged(chatId);
 	});
 
@@ -644,9 +655,40 @@
 		if (!chatId || chatId !== sessions.selectedChatId) {
 			throw new Error(m.sidebar_chats_reload_failed());
 		}
-		await reloadChatFromNative(ws, chatState, chatId);
-		if (chatId === sessions.selectedChatId && scroll.isPinnedToBottom) {
-			scroll.prepareInitialBottomRestore(chatId);
+		if (reloadRequest) throw new Error(m.sidebar_chats_reload_failed());
+		return new Promise<void>((resolve, reject) => {
+			reloadRequest = {
+				chatId,
+				candidates: [...chatState.resendCandidates],
+				resolve,
+				reject,
+			};
+		});
+	}
+
+	function cancelReload(): void {
+		if (reloadBusy || !reloadRequest) return;
+		const request = reloadRequest;
+		reloadRequest = null;
+		request.resolve();
+	}
+
+	async function confirmReload(): Promise<void> {
+		const request = reloadRequest;
+		if (!request || reloadBusy) return;
+		reloadBusy = true;
+		try {
+			await reloadChatFromNative(ws, chatState, request.chatId);
+			if (request.chatId === sessions.selectedChatId && scroll.isPinnedToBottom) {
+				scroll.prepareInitialBottomRestore(request.chatId);
+			}
+			reloadRequest = null;
+			request.resolve();
+		} catch (error) {
+			reloadRequest = null;
+			request.reject(error);
+		} finally {
+			reloadBusy = false;
 		}
 	}
 
@@ -828,4 +870,12 @@
 			}}
 		/>
 	{/if}
+
+	<ReloadChatDialog
+		open={reloadRequest !== null}
+		candidates={reloadRequest?.candidates ?? []}
+		busy={reloadBusy}
+		onCancel={cancelReload}
+		onConfirm={() => void confirmReload()}
+	/>
 </div>

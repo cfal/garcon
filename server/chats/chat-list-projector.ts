@@ -37,6 +37,7 @@ export interface ChatListProjectorDeps {
   metadata: ChatListProjectorMetadata;
   processing: { phase(chatId: string): ChatProcessingPhase | null };
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
+  canReloadFromNativeHistory(chatId: string, session: ChatRegistryEntry): boolean;
 }
 
 export interface ChatSummaryProjection {
@@ -137,6 +138,7 @@ export class ChatListProjector {
         title,
         projectPath: session.projectPath,
         tags: normalizeTags(session.tags ?? []),
+        canReloadFromNativeHistory: this.deps.canReloadFromNativeHistory(chatId, session),
         activity: {
           createdAt: metadata?.createdAt || inferredCreatedAt,
           lastActivityAt: metadata?.lastActivity ?? null,
@@ -194,6 +196,7 @@ export class ChatListProjector {
       isActive: processingPhase !== null,
       isProcessing: processingPhase !== null,
       processingPhase,
+      canReloadFromNativeHistory: chat.canReloadFromNativeHistory,
       isPinned: orderGroup === 'pinned',
       isArchived: orderGroup === 'archived',
       isUnread: Boolean(

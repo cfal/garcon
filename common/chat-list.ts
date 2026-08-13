@@ -33,6 +33,7 @@ export interface ChatListEntry {
   isActive: boolean;
   isProcessing: boolean;
   processingPhase: ChatProcessingPhase | null;
+  canReloadFromNativeHistory: boolean;
   isUnread: boolean;
 }
 

@@ -123,6 +123,7 @@
 				})
 			: false,
 	);
+	const canReloadSelectedChat = $derived(selectedChat?.canReloadFromNativeHistory ?? false);
 	const sidebarFullscreen = $derived(!isMobile && snapshot.fullscreenHost === 'sidebar');
 	const sidebarPresented = $derived(
 		!isMobile && snapshot.sidebarOpen && snapshot.fullscreenHost !== 'main',
@@ -290,7 +291,7 @@
 	{#if activeMain === CHAT_SURFACE_ID && selectedChat && workspaceContext.currentProject}
 		<CurrentChatMenuItems
 			{selectedChat}
-			canReload
+			canReload={canReloadSelectedChat}
 			canUpdateProjectPath={workspaceContext.canUpdateProjectPath}
 			canFork={canForkSelectedChat}
 			canForkNow={canForkSelectedChatNow}

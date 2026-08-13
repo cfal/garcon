@@ -563,6 +563,13 @@ export async function startServer(): Promise<void> {
       metadata,
       processing: chatProcessingActivity,
       pathCache,
+      canReloadFromNativeHistory(_chatId, session) {
+        return Boolean(
+          session.agentSessionId
+          && session.nativeSession
+          && integrationRegistry.get(session.agentId)?.nativeHistoryImport,
+        );
+      },
     });
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,

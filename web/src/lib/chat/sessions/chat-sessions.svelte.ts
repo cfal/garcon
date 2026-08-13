@@ -122,6 +122,7 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		isArchived: session.isArchived ?? false,
 		isProcessing: session.processingPhase !== null,
 		processingPhase: session.processingPhase,
+		canReloadFromNativeHistory: session.canReloadFromNativeHistory === true,
 		isUnread: session.isUnread ?? false,
 		status: 'running',
 		agentOwnershipEpoch: session.agentOwnershipEpoch,
@@ -162,6 +163,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.isArchived === b.isArchived &&
 		a.isProcessing === b.isProcessing &&
 		a.processingPhase === b.processingPhase &&
+		a.canReloadFromNativeHistory === b.canReloadFromNativeHistory &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
 		a.agentOwnershipEpoch === b.agentOwnershipEpoch &&
@@ -571,6 +573,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			isArchived: false,
 			isProcessing: false,
 			processingPhase: null,
+			canReloadFromNativeHistory: false,
 			isUnread: false,
 			status: 'draft',
 			agentOwnershipEpoch: null,

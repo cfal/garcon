@@ -39,6 +39,7 @@ export interface ChatSnapshotChat {
   thinkingMode: ThinkingMode;
   projectPath: string;
   tags: string[];
+  canReloadFromNativeHistory: boolean;
   activity: {
     createdAt: string | null;
     lastActivityAt: string | null;
@@ -178,6 +179,10 @@ function parseChat(value: unknown): ChatSnapshotChat {
     thinkingMode: raw.thinkingMode,
     projectPath: requiredString(raw.projectPath, 'chat.projectPath'),
     tags: [...tags],
+    canReloadFromNativeHistory: requiredBoolean(
+      raw.canReloadFromNativeHistory,
+      'chat.canReloadFromNativeHistory',
+    ),
     activity: {
       createdAt: nullableTimestamp(activity.createdAt, 'chat.activity.createdAt'),
       lastActivityAt: nullableTimestamp(
@@ -267,6 +272,11 @@ function nullableApiProtocol(value: unknown, field: string): ApiProtocol | null 
 
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.length === 0) fail(`${field} is invalid`);
+  return value;
+}
+
+function requiredBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') fail(`${field} is invalid`);
   return value;
 }
 

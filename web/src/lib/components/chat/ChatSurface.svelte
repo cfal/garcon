@@ -128,6 +128,7 @@
 				})
 			: false,
 	);
+	const canReloadSelectedChat = $derived(selectedChat?.canReloadFromNativeHistory ?? false);
 	const splitDropZones = SPLIT_DROP_ZONES;
 	const visibleSplitChatIds = $derived(
 		splitLayout.isEnabled ? splitLayout.panes.map((pane) => pane.chatId) : [],
@@ -326,7 +327,7 @@
 		<CurrentChatMenu
 			{selectedChat}
 			{isMobileLayout}
-			canReload
+			canReload={canReloadSelectedChat}
 			canUpdateProjectPath={canUpdateSelectedProjectPath}
 			canFork={canForkSelectedChat}
 			canForkNow={canForkSelectedChatNow}

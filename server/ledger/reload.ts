@@ -55,13 +55,6 @@ export class TranscriptReloadService {
     }
   }
 
-  canReload(chatId: string): boolean {
-    const entry = this.options.registry.getChat(chatId);
-    const session = this.options.ledger.currentSession(chatId);
-    if (!entry || !session) return false;
-    return Boolean(this.options.integrations.get(entry.agentId)?.nativeHistoryImport);
-  }
-
   #reserve(chatId: string): TranscriptSnapshotReservation {
     try {
       return this.options.execution.reserveTranscriptSnapshot(chatId);

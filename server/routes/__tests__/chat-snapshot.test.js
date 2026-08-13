@@ -38,6 +38,7 @@ function fixture(overrides = {}) {
           thinkingMode: 'high',
           projectPath: '/missing/project',
           tags: ['cli'],
+          canReloadFromNativeHistory: true,
           activity: { createdAt: TIMESTAMP, lastActivityAt: TIMESTAMP },
         },
         processingPhase: 'running',
@@ -56,10 +57,10 @@ function fixture(overrides = {}) {
           updatedAt: TIMESTAMP,
           revision: 1,
           status: 'queued',
-          delivery: {
+          submission: {
             clientRequestId: 'private-request',
             clientMessageId: 'private-message',
-            turnId: 'private-turn',
+            transcriptViewId: 'generation-1',
           },
         }],
         recentlyDispatched: [],
@@ -77,18 +78,18 @@ function fixture(overrides = {}) {
     }),
   };
   const chatViews = overrides.chatViews ?? {
-    getOrCreatePage: mock(async (_chatId, limit) => {
+    page: mock(async (_chatId, limit) => {
       calls.push('messages');
       return {
-        generationId: 'generation-1',
+        transcriptViewId: 'generation-1',
         messages: [{
-          seq: 1,
+          ordinal: 1,
           message: { type: 'assistant-message', timestamp: TIMESTAMP, content: 'Working' },
         }],
-        lastSeq: 1,
-        pageOldestSeq: 1,
+        lastOrdinal: 1,
+        pageOldestOrdinal: 1,
+        pageNewestOrdinal: 1,
         hasMore: false,
-        limit,
       };
     }),
   };
@@ -158,12 +159,12 @@ describe('GET /api/v1/chats/snapshot', () => {
         rows: [],
       },
       pendingUserInputs: [{ attachments: [{ name: 'image.png' }] }],
-      transcript: { availability: 'available', generationId: 'generation-1' },
+      transcript: { availability: 'available', transcriptViewId: 'generation-1' },
     });
     expect(JSON.stringify(body)).not.toContain('private-request');
     expect(JSON.stringify(body)).not.toContain('private-command');
     expect(parseChatSnapshotResponse(body)).toMatchObject({ chat: { id: CHAT_ID } });
-    expect(testFixture.chatViews.getOrCreatePage).toHaveBeenCalledWith(CHAT_ID, 10);
+    expect(testFixture.chatViews.page).toHaveBeenCalledWith(CHAT_ID, 10);
     expect(testFixture.calls).toEqual(['summary', 'control', 'messages', 'reconcile']);
   });
 
@@ -175,7 +176,7 @@ describe('GET /api/v1/chats/snapshot', () => {
       messageLimit: 0,
       transcript: { availability: 'not-requested' },
     });
-    expect(testFixture.chatViews.getOrCreatePage).not.toHaveBeenCalled();
+    expect(testFixture.chatViews.page).not.toHaveBeenCalled();
     expect(testFixture.pendingInputs.reconcileRetainedHistory).toHaveBeenCalledWith(CHAT_ID);
   });
 
@@ -184,7 +185,7 @@ describe('GET /api/v1/chats/snapshot', () => {
     const { response } = await getSnapshot(testFixture, `chatId=${CHAT_ID}&limit=200`);
 
     expect(response.status).toBe(200);
-    expect(testFixture.chatViews.getOrCreatePage).toHaveBeenCalledWith(CHAT_ID, 200);
+    expect(testFixture.chatViews.page).toHaveBeenCalledWith(CHAT_ID, 200);
   });
 
   test.each(['-1', '201', '1.5', '1e2', '', 'abc'])('rejects invalid limit %s', async (limit) => {
@@ -219,7 +220,7 @@ describe('GET /api/v1/chats/snapshot', () => {
   test('returns partial status when the transcript is unavailable', async () => {
     const testFixture = fixture({
       chatViews: {
-        getOrCreatePage: mock(async () => {
+        page: mock(async () => {
           throw new AgentIntegrationError(
             'TRANSCRIPT_UNAVAILABLE',
             'private provider path',
@@ -241,31 +242,13 @@ describe('GET /api/v1/chats/snapshot', () => {
     expect(testFixture.pendingInputs.reconcileRetainedHistory).toHaveBeenCalled();
   });
 
-  test('names the typed deferred and degraded history states in the transcript section', async () => {
-    const deferredFixture = fixture({
-      chatViews: {
-        getOrCreatePage: mock(async () => {
-          throw new TranscriptHistoryUnavailableError({
-            kind: 'deferred',
-            retry: 'execution-settled',
-          });
-        }),
-      },
-    });
-    const deferred = await getSnapshot(deferredFixture, `chatId=${CHAT_ID}`);
-    expect(deferred.response.status).toBe(200);
-    expect(deferred.body.transcript).toMatchObject({
-      availability: 'unavailable',
-      errorCode: 'TRANSCRIPT_DEFERRED',
-      retryable: true,
-    });
-
+  test('names a typed ledger failure in the transcript section', async () => {
     const degradedFixture = fixture({
       chatViews: {
-        getOrCreatePage: mock(async () => {
+        page: mock(async () => {
           throw new TranscriptHistoryUnavailableError({
             kind: 'degraded',
-            errorCode: 'PROJECTION_REPAIR_REQUIRED',
+            errorCode: 'LEDGER_FENCED',
             retryable: true,
           });
         }),
@@ -275,7 +258,7 @@ describe('GET /api/v1/chats/snapshot', () => {
     expect(degraded.response.status).toBe(200);
     expect(degraded.body.transcript).toMatchObject({
       availability: 'unavailable',
-      errorCode: 'PROJECTION_REPAIR_REQUIRED',
+      errorCode: 'LEDGER_FENCED',
       retryable: true,
     });
     expect(() => parseChatSnapshotResponse(degraded.body)).not.toThrow();
@@ -284,7 +267,7 @@ describe('GET /api/v1/chats/snapshot', () => {
   test('uses the standard error envelope for unexpected transcript failures', async () => {
     routeLogger.error.mockClear();
     const testFixture = fixture({
-      chatViews: { getOrCreatePage: mock(async () => { throw new Error('private path'); }) },
+      chatViews: { page: mock(async () => { throw new Error('private path'); }) },
     });
     const { response, body } = await getSnapshot(testFixture, `chatId=${CHAT_ID}`);
 

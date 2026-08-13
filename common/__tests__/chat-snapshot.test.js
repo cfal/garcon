@@ -25,6 +25,7 @@ function snapshot(overrides = {}) {
       carryOverRevision: 'carry-v1:0',
       projectPath: '/work/project',
       tags: ['cli', 'review'],
+      canReloadFromNativeHistory: true,
       activity: { createdAt: TIMESTAMP, lastActivityAt: TIMESTAMP },
     },
     processingPhase: 'running',
@@ -171,6 +172,10 @@ describe('chat snapshot contract', () => {
     ['carryover revision', (value) => ({
       ...value,
       chat: { ...value.chat, carryOverRevision: null },
+    })],
+    ['reload capability', (value) => ({
+      ...value,
+      chat: { ...value.chat, canReloadFromNativeHistory: 'yes' },
     })],
     ['timestamp', (value) => ({ ...value, observedAt: 'not-a-time' })],
   ])('rejects invalid %s data', (_label, mutate) => {
