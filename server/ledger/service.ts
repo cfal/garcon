@@ -23,6 +23,7 @@ import type {
   TranscriptViewId,
   TranscriptWatermark,
 } from './contracts.js';
+import { transcriptViewId } from './contracts.js';
 import { TranscriptLedgerStore } from './store.js';
 import { PermissionNotActionableError } from './errors.js';
 
@@ -395,7 +396,11 @@ export class TranscriptLedgerService {
     expectedViewId: TranscriptViewId,
     stagingViewId: TranscriptViewId,
   ): TranscriptView {
+    this.closeProducer(chatId);
     const view = this.#store.replaceCurrentView(chatId, expectedViewId, stagingViewId);
+    this.#activePermissions.delete(chatId);
+    this.#deletePermissionClaims(chatId);
+    this.#deletePreparedInputs(chatId);
     this.#notify({
       type: 'view-replaced',
       chatId,
@@ -403,6 +408,19 @@ export class TranscriptLedgerService {
       view,
     });
     return view;
+  }
+
+  stageView(
+    chatId: string,
+    rows: readonly LedgerRowDraft[],
+    contentStartOrdinal: number,
+    viewId = transcriptViewId(crypto.randomUUID()),
+  ): TranscriptView {
+    return this.#store.stageView(chatId, { viewId, rows, contentStartOrdinal });
+  }
+
+  discardStagingView(chatId: string, viewId: TranscriptViewId): void {
+    this.#store.discardStagingView(chatId, viewId);
   }
 
   closeChat(chatId: string): void {

@@ -108,6 +108,7 @@ import {
   TranscriptAdoptionService,
   TranscriptLedgerService,
   TranscriptLedgerStore,
+  TranscriptReloadService,
   TranscriptViewReader,
 } from './ledger/index.js';
 
@@ -542,6 +543,17 @@ export async function startServer(): Promise<void> {
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
     executionCoordinator = queue;
+    const transcriptReload = new TranscriptReloadService({
+      ledger: transcriptLedger,
+      adoption: transcriptAdoption,
+      registry: chatRegistry,
+      integrations: integrationRegistry,
+      execution: queue,
+      getCarryOverRevision: (entry) => carryOver.revision(
+        entry.carryOverSegments ?? [],
+        entry.carryOverMigrationQuarantine,
+      ),
+    });
     const chatProcessingActivity = new ChatProcessingActivity(agentRegistry, queue);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
@@ -697,7 +709,10 @@ export async function startServer(): Promise<void> {
           transcriptReader.replay(chatId, viewId, afterOrdinal),
         resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
       },
-      projectionReload: (chatId) => transcriptReader.page(chatId, 100),
+      projectionReload: async (chatId) => {
+        await transcriptReload.reload(chatId);
+        return transcriptReader.page(chatId, 100);
+      },
       queue,
       pendingInputs,
       transientFeeds,
