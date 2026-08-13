@@ -11,7 +11,7 @@ import {
   messagesOfType,
   userContents,
 } from '../../support/chat-assertions.js';
-import { GarconWsRequestError } from '../../support/garcon-client.js';
+import { GarconApiError, GarconWsRequestError } from '../../support/garcon-client.js';
 import {
   type IntegrationDirectories,
   type IntegrationFixture,
@@ -165,6 +165,35 @@ describe('native transcript reload', () => {
           chatId,
         },
       });
+
+      let staleSubmission: unknown;
+      try {
+        await fixture.client.runChat({
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          chatId,
+          transcriptViewId: beforeDrift.transcriptViewId,
+          command: 'stale-after-native-reload',
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          agentSettings: claude.defaultSettings,
+          model: claude.defaultModel,
+        });
+      } catch (error) {
+        staleSubmission = error;
+      }
+      expect(staleSubmission).toBeInstanceOf(GarconApiError);
+      expect(staleSubmission).toMatchObject({
+        status: 409,
+        body: {
+          errorCode: 'STALE_TRANSCRIPT_VIEW',
+          retryable: false,
+        },
+      });
+      const afterStaleSubmission = await fixture.client.getMessages(chatId);
+      expect(afterStaleSubmission.transcriptViewId).toBe(reloaded.transcriptViewId);
+      expect(afterStaleSubmission.lastOrdinal).toBe(reloaded.lastOrdinal);
+      expect(afterStaleSubmission.messages).toEqual(reloaded.messages);
 
       const resumed = await fixture.client.runChat({
         clientRequestId: crypto.randomUUID(),
