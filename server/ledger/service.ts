@@ -19,6 +19,7 @@ import type {
   LedgerSessionRow,
   LedgerUserInputRow,
   TranscriptPage,
+  TranscriptNativeActivityState,
   TranscriptView,
   TranscriptViewId,
   TranscriptWatermark,
@@ -385,6 +386,10 @@ export class TranscriptLedgerService {
 
   currentSession(chatId: string): LedgerSessionRow | null {
     return this.#store.currentSession(chatId);
+  }
+
+  nativeActivityState(chatId: string): TranscriptNativeActivityState {
+    return this.#store.nativeActivityState(chatId);
   }
 
   highWatermark(chatId: string): TranscriptWatermark {

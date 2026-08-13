@@ -126,3 +126,10 @@ export interface LedgerCheckpoint extends TranscriptWatermark {
   readonly logFrames: number;
   readonly checkpointedFrames: number;
 }
+
+export interface TranscriptNativeActivityState {
+  readonly viewId: TranscriptViewId;
+  readonly session: LedgerSessionRow | null;
+  readonly providerWatermarkAt: string | null;
+  readonly lastNoticeWatermarkAt: string | null;
+}

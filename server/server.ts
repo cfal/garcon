@@ -105,6 +105,7 @@ import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
   TranscriptLedgerService,
+  NativeTranscriptActivityService,
   TranscriptLedgerStore,
   TranscriptReloadService,
   TranscriptViewReader,
@@ -316,7 +317,16 @@ export async function startServer(): Promise<void> {
         agentRegistry.loadLegacyProjectionMessages(entry, chatId, signal)
       ),
     });
-    const transcriptReader = new TranscriptViewReader(transcriptLedger, transcriptAdoption);
+    const nativeTranscriptActivity = new NativeTranscriptActivityService({
+      ledger: transcriptLedger,
+      registry: chatRegistry,
+      integrations: integrationRegistry,
+    });
+    const transcriptReader = new TranscriptViewReader(
+      transcriptLedger,
+      transcriptAdoption,
+      nativeTranscriptActivity,
+    );
     agentRegistry = new AgentRegistry({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -353,6 +363,7 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
+      nativeActivity: nativeTranscriptActivity,
     });
 
     await chatRegistry.reconcileSessions((session, chatId) =>

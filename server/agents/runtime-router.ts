@@ -48,6 +48,7 @@ import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-pla
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { AgentProjectionIngress } from './projection-ingress.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
+import type { NativeTranscriptActivityService } from '../ledger/native-activity.js';
 import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
@@ -68,6 +69,7 @@ export interface AgentRuntimeRouterOptions {
   getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
+  nativeActivity?: NativeTranscriptActivityService;
 }
 
 export interface RunSingleQueryOptions {
@@ -96,6 +98,7 @@ export class AgentRuntimeRouter {
   ) => Promise<number>;
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
+  readonly #nativeActivity: NativeTranscriptActivityService | null;
   readonly #producerLeases = new Map<string, TranscriptProducerLease>();
   readonly #executionHandles = new Map<string, {
     readonly agentId: string;
@@ -114,6 +117,7 @@ export class AgentRuntimeRouter {
     this.#getCarryOverMessageCount = options.getCarryOverMessageCount;
     this.#ledger = options.ledger;
     this.#adoption = options.adoption;
+    this.#nativeActivity = options.nativeActivity ?? null;
     this.#ledger.subscribe((event) => {
       if (event.type !== 'run-ended') return;
       if (this.#executionHandles.get(event.chatId)?.runId === event.runId) {
@@ -229,6 +233,11 @@ export class AgentRuntimeRouter {
     await this.#validateEndpoint(integration, selection);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
+    assertExecutionAdmissionOpen(opts);
+    await this.#nativeActivity?.check(
+      chatId,
+      opts.executionAdmission?.signal ?? new AbortController().signal,
+    );
     assertExecutionAdmissionOpen(opts);
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
     this.#events.trackTurn(chatId, operationMetadata(operation));

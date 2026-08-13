@@ -51,6 +51,7 @@ import type { UserMessage } from '@garcon/common/chat-types';
 import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import type { PendingUserInputRegistrationOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
+import type { NativeTranscriptActivityService } from '../ledger/native-activity.js';
 import { transcriptViewId, type LedgerRow } from '../ledger/contracts.js';
 import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
 import { ledgerRowsToMessages } from '../ledger/presentation.js';
@@ -203,6 +204,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     chatMutationLock?: KeyedPromiseLock;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
+    nativeActivity?: NativeTranscriptActivityService;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
@@ -225,6 +227,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         getCarryOverMessageCount: args.getCarryOverMessageCount,
       ledger: this.#ledger,
       adoption: this.#adoption,
+      nativeActivity: args.nativeActivity,
     });
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,

@@ -116,6 +116,7 @@ function makeRouter(overrides = {}) {
     getCarryOverMessageCount: async () => 0,
     ledger: transcript.ledger,
     adoption: transcript.adoption,
+    nativeActivity: overrides.nativeActivity,
   });
   return {
     router,
@@ -184,6 +185,30 @@ describe('AgentRuntimeRouter producer boundary', () => {
       modelEndpointId: 'endpoint-b',
       modelProtocol: 'openai-compatible',
     }));
+  });
+
+  it('checks native activity immediately before resuming', async () => {
+    const order = [];
+    const nativeActivity = {
+      check: mock(async () => { order.push('probe'); }),
+    };
+    const resume = mock(async (request) => {
+      order.push('resume');
+      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      return { id: 'resume-handle' };
+    });
+    const { router } = makeRouter({
+      entry: {
+        agentSessionId: 'native-1',
+        nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+      },
+      nativeActivity,
+      resume,
+    });
+
+    await router.runAgentTurn('chat-1', 'resume', { turnId: 'turn-1' });
+
+    expect(order).toEqual(['probe', 'resume']);
   });
 
   it('rejects a local-to-cloud override before provider dispatch', async () => {

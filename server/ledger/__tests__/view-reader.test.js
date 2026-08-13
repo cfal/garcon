@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,6 +93,19 @@ describe('TranscriptViewReader', () => {
       expect(snapshot.messages.map((message) => message.content)).toEqual(['prompt', 'answer']);
     });
   });
+
+  it('checks native activity for a newest-page open but not older paging', async () => {
+    await withReader(async ({ reader, nativeActivity }) => {
+      await reader.page('chat-1', 20);
+      await reader.page('chat-1', 20, 1);
+
+      expect(nativeActivity.check).toHaveBeenCalledTimes(1);
+      expect(nativeActivity.check).toHaveBeenCalledWith(
+        'chat-1',
+        expect.any(AbortSignal),
+      );
+    });
+  });
 });
 
 async function withReader(run) {
@@ -101,11 +114,12 @@ async function withReader(run) {
   const store = new TranscriptLedgerStore(root, { createViewId: () => viewId, now: () => TS });
   const ledger = new TranscriptLedgerService(store, { now: () => TS });
   ledger.initializeChat('chat-1');
+  const nativeActivity = { check: mock(async () => false) };
   const reader = new TranscriptViewReader(ledger, {
     ensure: async () => ledger.currentView('chat-1'),
-  });
+  }, nativeActivity);
   try {
-    await run({ ledger, reader, viewId });
+    await run({ ledger, nativeActivity, reader, viewId });
   } finally {
     ledger.close();
     await rm(root, { recursive: true, force: true });

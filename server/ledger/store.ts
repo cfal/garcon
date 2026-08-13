@@ -22,6 +22,7 @@ import type {
   LedgerRow,
   LedgerRowDraft,
   LedgerSessionRow,
+  TranscriptNativeActivityState,
   LedgerUserInputDetail,
   LedgerUserInputRow,
   TranscriptPage,
@@ -323,6 +324,60 @@ export class TranscriptLedgerStore {
         ORDER BY ordinal DESC LIMIT 1
       `).get(current.viewId, current.contentStartOrdinal);
       return stored ? decodeLedgerRow(stored) as LedgerSessionRow : null;
+    });
+  }
+
+  nativeActivityState(chatId: string): TranscriptNativeActivityState {
+    return this.#read(chatId, (entry) => {
+      const current = this.#requireCurrent(entry);
+      const session = entry.db.query<StoredLedgerRow, [string, number]>(`
+        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
+        FROM transcript_rows
+        WHERE view_id = ? AND ordinal >= ? AND kind = 'session'
+        ORDER BY ordinal DESC LIMIT 1
+      `).get(current.viewId, current.contentStartOrdinal);
+      const watermark = entry.db.query<{ at: string }, [string, number]>(`
+        SELECT at
+        FROM transcript_rows
+        WHERE view_id = ? AND ordinal >= ? AND (
+          kind IN (
+            'provider-row',
+            'session',
+            'permission-requested',
+            'permission-cancelled',
+            'permission-expired'
+          )
+          OR (
+            kind = 'run-ended'
+            AND json_extract(payload_json, '$.value.origin') = 'provider'
+          )
+          OR (
+            kind = 'user-input'
+            AND json_type(payload_json, '$.providerMeta') <> 'null'
+          )
+        )
+        ORDER BY ordinal DESC LIMIT 1
+      `).get(current.viewId, current.contentStartOrdinal);
+      const notice = entry.db.query<StoredLedgerRow, [string, number, string]>(`
+        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
+        FROM transcript_rows
+        WHERE view_id = ?
+          AND ordinal >= ?
+          AND kind = 'notice'
+          AND json_extract(payload_json, '$.value.detail.type') = ?
+        ORDER BY ordinal DESC LIMIT 1
+      `).get(current.viewId, current.contentStartOrdinal, 'native-transcript-drift');
+      const noticeRow = notice ? decodeLedgerRow(notice) : null;
+      const noticeWatermark = noticeRow?.kind === 'notice'
+        && typeof noticeRow.detail.observedNativeWatermark === 'string'
+        ? noticeRow.detail.observedNativeWatermark
+        : null;
+      return {
+        viewId: current.viewId,
+        session: session ? decodeLedgerRow(session) as LedgerSessionRow : null,
+        providerWatermarkAt: watermark?.at ?? null,
+        lastNoticeWatermarkAt: noticeWatermark,
+      };
     });
   }
 
