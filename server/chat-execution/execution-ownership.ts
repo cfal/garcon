@@ -57,6 +57,20 @@ function emptyChatExecutionState(): ChatExecutionState {
   };
 }
 
+function createExecutionAdmission(): {
+  readonly controller: AbortController;
+  readonly admission: AgentExecutionAdmission;
+} {
+  const controller = new AbortController();
+  return {
+    controller,
+    admission: Object.freeze({
+      signal: controller.signal,
+      markStarted: async () => {},
+    }),
+  };
+}
+
 function isIdle(state: ChatExecutionState): boolean {
   return !ownsExecution(state)
     && !state.pending.drainRequested
@@ -207,18 +221,15 @@ export class ExecutionOwnership {
     if (ownsExecution(state)) {
       throw new Error('Cannot reserve a direct turn while another operation owns execution');
     }
-    const admissionController = new AbortController();
+    const { controller, admission } = createExecutionAdmission();
     const reservation = Object.freeze({
       chatId,
       reservationId: crypto.randomUUID(),
-      executionAdmission: Object.freeze<AgentExecutionAdmission>({
-        signal: admissionController.signal,
-        markStarted: async () => {},
-      }),
+      executionAdmission: admission,
     });
     const identity = executionTurnIdentity(turn) ?? { turnId: crypto.randomUUID() };
     state.owner = { kind: 'direct', reservationId: reservation.reservationId };
-    state.turn = { attempt: new QueueExecutionAttempt(identity), admission: admissionController };
+    state.turn = { attempt: new QueueExecutionAttempt(identity), admission: controller };
     return reservation;
   }
 
@@ -278,12 +289,14 @@ export class ExecutionOwnership {
     return this.#chats.get(chatId)?.turn != null;
   }
 
-  installAttempt(chatId: string, attempt: QueueExecutionAttempt): void {
+  installAttempt(chatId: string, attempt: QueueExecutionAttempt): AgentExecutionAdmission {
     const state = this.#state(chatId);
     if (state.turn !== null) {
       throw new Error('Another chat turn already owns execution');
     }
-    state.turn = { attempt, admission: null };
+    const { controller, admission } = createExecutionAdmission();
+    state.turn = { attempt, admission: controller };
+    return admission;
   }
 
   isCurrentAttempt(chatId: string, attempt: QueueExecutionAttempt): boolean {

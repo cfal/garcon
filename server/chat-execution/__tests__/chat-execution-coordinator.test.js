@@ -275,6 +275,60 @@ describe('ChatExecutionCoordinator', () => {
     await run;
   });
 
+  it('stops a reserved turn before the provider run starts', async () => {
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock((_chatId, _content, options) => new Promise((_resolve, reject) => {
+          options.executionAdmission.signal.addEventListener(
+            'abort',
+            () => reject(options.executionAdmission.signal.reason),
+            { once: true },
+          );
+        })),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const run = coordinator.runReservedTurn(reservation, 'work', { turnId: 'turn-1' });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    const stopped = await coordinator.stopActiveTurn('chat-1');
+
+    expect(stopped.outcome).toBe('interrupt-requested');
+    expect(reservation.executionAdmission.signal.aborted).toBe(true);
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    await expect(run).rejects.toThrow('Turn interrupted by the user');
+  });
+
+  it('stops a dequeued turn before the provider run starts', async () => {
+    const failures = [];
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock((_chatId, _content, options) => new Promise((_resolve, reject) => {
+          options.executionAdmission.signal.addEventListener(
+            'abort',
+            () => reject(options.executionAdmission.signal.reason),
+            { once: true },
+          );
+        })),
+      },
+    });
+    coordinator = fixture.coordinator;
+    coordinator.onTurnFailed((_chatId, message) => failures.push(message));
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+    const drain = coordinator.triggerDrain('chat-1');
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+
+    const stopped = await coordinator.stopActiveTurn('chat-1');
+    await drain;
+
+    expect(stopped.outcome).toBe('interrupt-requested');
+    expect(options.executionAdmission.signal.aborted).toBe(true);
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    expect(failures).toEqual([]);
+  });
+
   it('treats interruption while idle as a no-op', async () => {
     const fixture = createFixture();
     coordinator = fixture.coordinator;

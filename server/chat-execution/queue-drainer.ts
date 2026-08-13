@@ -85,7 +85,10 @@ export class QueueDrainer {
 
       const turn = executionTurnIdentity(options)!;
       const attempt = new QueueExecutionAttempt(turn, result.entry.id);
-      ownership.installAttempt(chatId, attempt);
+      const dispatchOptions = {
+        ...options,
+        executionAdmission: ownership.installAttempt(chatId, attempt),
+      };
       ownership.beginFinalization(chatId, turn.turnId!).settle('committed');
       ownership.setActiveDrainEntry(chatId, result.entry.id);
 
@@ -95,7 +98,7 @@ export class QueueDrainer {
       }
 
       attempt.markLaunching();
-      const shouldContinue = await this.#runEntry(chatId, result.entry, options, attempt);
+      const shouldContinue = await this.#runEntry(chatId, result.entry, dispatchOptions, attempt);
       if (!shouldContinue) return;
     }
   }
@@ -107,7 +110,7 @@ export class QueueDrainer {
     attempt: QueueExecutionAttempt,
   ): Promise<boolean> {
     const result = await this.#runProvider(chatId, entry, options, attempt);
-    if (result.kind !== 'failed') return true;
+    if (result.kind !== 'failed' || attempt.isSettled) return true;
 
     const message = result.error instanceof Error ? result.error.message : String(result.error);
     logger.error('queue: queued turn failed:', { chatId, entryId: entry.id, message });

@@ -81,6 +81,38 @@ describe('agent switch compaction', () => {
     });
   }, 90_000);
 
+  test('stops a handoff while compaction delays provider launch', async () => {
+    await withIntegrationFixture('compaction-stop-before-launch', async (fixture) => {
+      const source = fixture.directAgents.openAi;
+      const target = fixture.directAgents.anthropic;
+      const chatId = await seedHistory(fixture, source);
+      await enableCompaction(fixture, source);
+      const targetRequestCount = fixture.fakeProviders.anthropic.requests().length;
+      const compactionCall = fixture.fakeProviders.openAi.holdNext({
+        model: source.provider.model,
+      });
+      const handoff = fixture.client.handoffDirectChat({
+        chatId,
+        content: 'stop-before-provider-start',
+        agent: target,
+      });
+      await compactionCall.received;
+      await handoff;
+      const compactionAborted = compactionCall.expectAbort();
+      const eventCursor = fixture.client.markEvents();
+
+      const stopped = await fixture.client.stopChat({
+        chatId,
+        clientRequestId: crypto.randomUUID(),
+      });
+
+      expect(stopped.outcome).toBe('interrupt-requested');
+      await compactionAborted;
+      await fixture.client.waitForProcessing(chatId, false, { afterIndex: eventCursor });
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(targetRequestCount);
+    });
+  }, 90_000);
+
   test('does not query any model while the setting is off', async () => {
     await withIntegrationFixture('compaction-disabled', async (fixture) => {
       const source = fixture.directAgents.openAi;
