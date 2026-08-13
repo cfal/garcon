@@ -37,7 +37,7 @@ import type {
 
 export type PendingUserInputRegistrationOptions = Pick<
   RunAgentTurnOptions,
-  'clientRequestId' | 'clientMessageId' | 'turnId' | 'images'
+  'clientRequestId' | 'clientMessageId' | 'transcriptViewId' | 'turnId' | 'images'
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
   deliveryStatus?: UserMessageDeliveryStatus;
@@ -156,11 +156,16 @@ export interface AcceptedDirectOperation {
 export interface AcceptedQueueCreate {
   command: AcceptedExecutionCommand & { entryId: string };
   content: string;
+  clientMessageId: string;
+  transcriptViewId: string;
   settlement: CommandSettlementPort;
 }
 
-export interface AcceptedQueueReplace extends AcceptedQueueCreate {
+export interface AcceptedQueueReplace {
+  command: AcceptedExecutionCommand & { entryId: string };
+  content: string;
   expectedRevision: number;
+  settlement: CommandSettlementPort;
 }
 
 export interface AcceptedQueueDelete {
@@ -181,6 +186,8 @@ export interface AcceptedQueueMove {
 export interface AcceptedGoalControl {
   command: AcceptedExecutionCommand & { entryId: string };
   content: string;
+  clientMessageId: string;
+  transcriptViewId: string;
   settlement: CommandSettlementPort;
 }
 
@@ -201,6 +208,7 @@ export interface AcceptedSteerInput {
   content: string;
   providerContent: string;
   clientMessageId: string;
+  transcriptViewId: string;
   target: CapturedSteerTarget;
   settlement: CommandSettlementPort;
 }
@@ -217,6 +225,7 @@ export interface AcceptedQueueEntrySteerOutcome extends AcceptedSteerOutcome {
 
 export interface AcceptedSteerOutcome {
   turnId: string;
+  duplicate: boolean;
 }
 
 export interface DirectTurnReservation {
@@ -268,6 +277,7 @@ export interface PendingInputsPort {
     },
   ): Promise<unknown>;
   discard(chatId: string, clientRequestId: string): boolean;
+  settleCommitted(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
   markUnconfirmed(chatId: string, clientRequestId: string): boolean;
 }
@@ -447,7 +457,6 @@ export interface ChatExecutionService
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
-    notSentDisposition?: 'mark-failed' | 'queue-handler-settles',
   ): Promise<AcceptedSteerOutcome>;
   requeueAndPauseChat(
     chatId: string,
@@ -479,6 +488,12 @@ export function transitionError(
   control: StoredChatExecutionControlState,
 ): DomainError {
   switch (rejection.code) {
+    case 'IDEMPOTENCY_CONFLICT':
+      return new DomainError(
+        'IDEMPOTENCY_CONFLICT',
+        `Client message ${rejection.clientMessageId} was already queued with different content`,
+        409,
+      );
     case 'QUEUE_ENTRY_NOT_FOUND':
       return new QueueEntryMutationError(
         rejection.code,

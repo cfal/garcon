@@ -122,7 +122,7 @@ export function scriptedPiRunRequest(input: {
   command: string;
   model?: string;
   thinkingMode?: AgentRunCommandRequest['thinkingMode'];
-}): AgentRunCommandRequest {
+}): Omit<AgentRunCommandRequest, 'transcriptViewId'> {
   return {
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),

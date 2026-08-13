@@ -158,9 +158,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         content: string,
         options: PendingUserInputRegistrationOptions,
       ) => this.registerPendingUserInput(chatId, content, options).then(() => undefined),
-      discardProjectedInput: (chatId: string, clientRequestId: string) => (
-        this.#acceptedInputTranscript.discardKnownNotSent(chatId, clientRequestId)
-      ),
     };
     this.#goalControlDelivery = new GoalControlDelivery({
       ...inputDeliveryOptions,
@@ -168,7 +165,11 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       readControl: (chatId) => this.readChatExecutionControl(chatId),
     });
     this.#steerInputDelivery = new SteerInputDelivery({
-      ...inputDeliveryOptions,
+      turnRunner: this.#turnRunner,
+      ownership: this.#ownership,
+      registerPending: (chatId, content, options) => (
+        this.registerPendingUserInput(chatId, content, options)
+      ),
       isShuttingDown: () => this.#shuttingDown,
     });
     this.#acceptedInputHandler = new AcceptedInputHandler({
@@ -183,9 +184,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         },
         registerPending: (chatId, content, options) => (
           this.registerPendingUserInput(chatId, content, options)
-        ),
-        discardProjectedInput: (chatId, clientRequestId) => (
-          this.#acceptedInputTranscript.discardKnownNotSent(chatId, clientRequestId)
         ),
         releaseDirect: (reservation) => this.#finishDirect(reservation, 'released'),
         runDirect: (reservation, content, options, dispatch, beforeFailureRelease) => (
@@ -211,9 +209,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         isShuttingDown: () => this.#shuttingDown,
         registerPending: (chatId, content, options) => (
           this.registerPendingUserInput(chatId, content, options)
-        ),
-        discardProjectedInput: (chatId, clientRequestId) => (
-          this.#acceptedInputTranscript.discardKnownNotSent(chatId, clientRequestId)
         ),
         publishDispatching: (chatId, entry) => {
           this.#invalidateProcessing(chatId);
@@ -424,7 +419,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
-    notSentDisposition: 'mark-failed' | 'queue-handler-settles' = 'mark-failed',
   ): Promise<AcceptedSteerOutcome> {
     return this.#steerInputDelivery.deliver(
       chatId,
@@ -433,7 +427,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       options,
       target,
       afterPendingRegistered,
-      notSentDisposition,
     );
   }
 
@@ -531,7 +524,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
 
   onAcceptedInputSettled(chatId: string, clientRequestId: string): void {
-    this.#acceptedInputTranscript.settle(chatId, clientRequestId);
+    void chatId;
+    void clientRequestId;
   }
 
   reserveDirectTurn(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {

@@ -7,6 +7,7 @@ import type { RunAgentTurnOptions } from './session-types.js';
 
 export interface NormalizedAgentRunCommandInput {
   readonly chatId: string;
+  readonly transcriptViewId?: string;
   readonly command: string;
   readonly images?: RunAgentTurnOptions['images'];
   readonly options: RunAgentTurnOptions;
@@ -37,6 +38,7 @@ export function agentRunCommandPayload(
   const options = input.handoff ? undefined : input.options;
   return {
     chatId: input.chatId,
+    transcriptViewId: input.transcriptViewId,
     clientMessageId,
     command: input.command,
     images: input.images,

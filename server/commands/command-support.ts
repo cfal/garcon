@@ -108,6 +108,7 @@ export type AgentRegistryDep = Pick<
   | 'supportsUpdateProjectPath'
   | 'requiresNativePathForProjectPathUpdate'
   | 'isAgentSessionRunning'
+  | 'currentTranscriptViewId'
   | 'forkAgentSession'
   | 'discardForkedAgentSession'
   | 'compactSession'
@@ -178,6 +179,7 @@ export type SubmitForkRunInput = ForkRunCommandRequest;
 
 export interface NormalizedSubmitRunInput {
   chatId: string;
+  transcriptViewId?: string;
   command: string;
   images?: RunAgentTurnOptions['images'];
   clientRequestId: string;
@@ -232,6 +234,7 @@ export interface NormalizedChatStart {
 
 export interface ScheduledExistingChatInput {
   chatId: string;
+  transcriptViewId?: string;
   command: string;
   busyBehavior: 'queue' | 'skip';
   clientRequestId: string;
@@ -396,6 +399,17 @@ export class CommandSupport {
     );
   }
 
+  async assertCurrentTranscriptView(chatId: string, transcriptViewId: string): Promise<void> {
+    const currentTranscriptViewId = await this.deps.agents.currentTranscriptViewId(chatId);
+    if (currentTranscriptViewId === transcriptViewId) return;
+    throw new CommandValidationError(
+      'STALE_TRANSCRIPT_VIEW',
+      `Transcript view ${transcriptViewId} was replaced by ${currentTranscriptViewId}`,
+      409,
+      false,
+    );
+  }
+
   async projectCommandChat(chatId: string): Promise<import('../../common/chat-list.js').ChatListEntry> {
     const chat = await this.projectCommandChatIfPresent(chatId);
     if (chat) return chat;
@@ -511,6 +525,7 @@ export class CommandSupport {
       ...this.optionsWithoutAttachments(input.options),
       clientRequestId: ids.clientRequestId,
       clientMessageId: ids.clientMessageId,
+      ...(input.transcriptViewId ? { transcriptViewId: input.transcriptViewId } : {}),
       turnId: ledger.record.turnId ?? ids.turnId,
     };
     options.commandType = commandType;

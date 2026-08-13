@@ -29,6 +29,7 @@ function createPendingInputs() {
   return {
     register: mock(() => Promise.resolve()),
     discard: mock(() => true),
+    settleCommitted: mock(() => true),
     markFailed: mock(() => true),
     markUnconfirmed: mock(() => true),
   };
@@ -663,6 +664,7 @@ describe('orchestration', () => {
     mockPendingInputs = {
       register: mock(() => Promise.resolve()),
       discard: mock(() => true),
+      settleCommitted: mock(() => true),
       markFailed: mock(() => true),
       markUnconfirmed: mock(() => true),
     };
@@ -1168,7 +1170,7 @@ describe('orchestration', () => {
       );
     });
 
-    it('admits the accepted user message through the projection owner', async () => {
+    it('admits a metadata-free user message through the transcript owner', async () => {
       await orchQueue.registerPendingUserInput('c1', 'hello', {
         clientRequestId: 'req-1',
         clientMessageId: 'msg-1',
@@ -1179,12 +1181,7 @@ describe('orchestration', () => {
         'c1',
         expect.objectContaining({
           content: 'hello',
-          metadata: expect.objectContaining({
-            clientRequestId: 'req-1',
-            upstreamRequestId: 'msg-1',
-            turnId: 'turn-1',
-            deliveryStatus: 'accepted',
-          }),
+          metadata: undefined,
         }),
         expect.objectContaining({
           clientRequestId: 'req-1',
@@ -1311,7 +1308,7 @@ describe('orchestration', () => {
         { clientRequestId: 'request-steer', clientMessageId: 'message-steer' },
         target,
         async (turnId) => { events.push(`scheduled:${turnId}`); },
-      )).resolves.toEqual({ turnId: 'turn-active' });
+      )).resolves.toEqual({ turnId: 'turn-active', duplicate: false });
 
       expect(events).toEqual(['scheduled:turn-active', 'delivered']);
       expect(mockAgents.steerInput).toHaveBeenCalledWith(
@@ -1476,7 +1473,7 @@ describe('orchestration', () => {
       await orchQueue.releaseDirectTurn(replacement);
     });
 
-    it('marks an acknowledged transport ambiguity unconfirmed', async () => {
+    it('keeps a committed steer durable when transport delivery is ambiguous', async () => {
       const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-active' });
       const target = orchQueue.captureSteerTarget('c1');
       mockAgents.steerInput = mock(async (
@@ -1498,7 +1495,7 @@ describe('orchestration', () => {
         target,
         async () => undefined,
       )).rejects.toMatchObject({ code: 'STEER_OUTCOME_UNKNOWN', outcome: 'unknown' });
-      expect(mockPendingInputs.markUnconfirmed).toHaveBeenCalledWith('c1', 'request-steer');
+      expect(mockPendingInputs.markUnconfirmed).not.toHaveBeenCalled();
       await orchQueue.releaseDirectTurn(reservation);
     });
   });

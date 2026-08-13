@@ -4,6 +4,7 @@ import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
   type StoredQueueDeliveryIdentity,
+  type StoredQueueSubmissionIdentity,
   type StoredQueueEntry,
 } from './control-state.ts';
 import { DomainError } from '../lib/domain-error.ts';
@@ -59,13 +60,14 @@ export class ChatExecutionControlOperations {
     chatId: string,
     content: string,
     command?: QueueCommandIdentity,
+    submission?: StoredQueueSubmissionIdentity,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
       const committed = await this.#commitTransition(
         chatId,
         current,
-        createQueueEntry(current, { content, command }, this.#transitionContext(chatId)),
+        createQueueEntry(current, { content, command, submission }, this.#transitionContext(chatId)),
       );
       const result = committed.value;
       if (!result.duplicate) {

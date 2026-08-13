@@ -18,6 +18,7 @@ import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
 import { createLogger, type Logger } from '../lib/log.ts';
 import { PromiseTimeoutError, withPromiseTimeout } from '../lib/promise-timeout.ts';
 import {
+  commandLedgerKey,
   SteerIdentityCapacityError,
   type LedgerAcceptResult,
   type CommandLedgerRecord,
@@ -61,6 +62,7 @@ export class SteerCommands {
       clientRequestId,
       payload: {
         chatId: input.chatId,
+        transcriptViewId: input.transcriptViewId,
         content: input.content,
         clientMessageId,
       },
@@ -81,6 +83,8 @@ export class SteerCommands {
           }
           throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
         }
+
+        await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
 
         let ledger: LedgerAcceptResult;
         try {
@@ -132,6 +136,7 @@ export class SteerCommands {
           content: input.content,
           providerContent,
           clientMessageId,
+          transcriptViewId: input.transcriptViewId,
           target,
           settlement: this.support.settlement,
         });
@@ -175,10 +180,6 @@ export class SteerCommands {
     input: QueueEntrySteerCommandRequest,
   ): Promise<QueueEntrySteerCommandResponse> {
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
-    const clientMessageId = this.support.requireClientRequestId(
-      input.clientMessageId,
-      'clientMessageId',
-    );
     const entryId = this.support.requireQueueEntryId(input.entryId);
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
       throw new CommandValidationError(
@@ -201,6 +202,16 @@ export class SteerCommands {
     const observedEntry = observedControl?.entries.find((entry) => (
       entry.id === entryId && entry.status === 'queued'
     ));
+    const priorRecord = await this.deps.ledger.getRecord(
+      commandLedgerKey('steer', input.chatId, clientRequestId),
+    );
+    const priorClientMessageId = typeof priorRecord?.payload.clientMessageId === 'string'
+      ? priorRecord.payload.clientMessageId
+      : null;
+    const clientMessageId = priorClientMessageId
+      ?? observedEntry?.submission?.clientMessageId
+      ?? observedEntry?.delivery?.clientMessageId
+      ?? entryId;
     const target = initialChat ? this.deps.queue.captureSteerTarget(input.chatId) : null;
     const ledgerInput = {
       commandType: 'steer',
@@ -208,6 +219,7 @@ export class SteerCommands {
       clientRequestId,
       payload: {
         chatId: input.chatId,
+        transcriptViewId: input.transcriptViewId,
         clientMessageId,
         source: {
           kind: 'queue-entry',
@@ -239,6 +251,8 @@ export class SteerCommands {
             'not-sent',
           );
         }
+
+        await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
 
         let ledger: LedgerAcceptResult;
         try {
@@ -309,6 +323,7 @@ export class SteerCommands {
           content: observedEntry.content,
           providerContent,
           clientMessageId,
+          transcriptViewId: input.transcriptViewId,
           target,
           expectedRevision: input.expectedRevision,
           expectedReorderRevision: input.expectedReorderRevision,

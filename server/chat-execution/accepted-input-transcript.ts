@@ -10,7 +10,6 @@ import type {
 
 export interface AcceptedInputProjectionHandle {
   readonly inserted: boolean;
-  discardKnownNotSent(): Promise<void>;
 }
 
 export interface AcceptedInputProjectionPort {
@@ -22,8 +21,6 @@ export interface AcceptedInputProjectionPort {
 }
 
 export class AcceptedInputTranscript {
-  readonly #handles = new Map<string, AcceptedInputProjectionHandle>();
-
   constructor(
     private readonly pendingInputs: PendingInputsPort,
     private readonly projection: AcceptedInputProjectionPort,
@@ -61,20 +58,10 @@ export class AcceptedInputTranscript {
         ?? (typeof record?.createdAt === 'string' ? record.createdAt : new Date().toISOString());
       const handle = await this.projection.admitInput(
         chatId,
-        new UserMessage(createdAt, content, images, {
-          clientRequestId,
-          upstreamRequestId: options.clientMessageId,
-          turnId: options.turnId,
-          deliveryStatus,
-        }),
+        new UserMessage(createdAt, content, images),
         { ...options, clientRequestId },
       );
-      if (handle.inserted !== false) {
-        this.#handles.set(inputKey(chatId, clientRequestId), handle);
-      } else {
-        await handle.discardKnownNotSent();
-        this.pendingInputs.discard(chatId, clientRequestId);
-      }
+      this.pendingInputs.settleCommitted(chatId, clientRequestId);
       return handle.inserted !== false;
     } catch (error) {
       if (clientRequestId) this.pendingInputs.discard(chatId, clientRequestId);
@@ -82,21 +69,6 @@ export class AcceptedInputTranscript {
     }
   }
 
-  async discardKnownNotSent(chatId: string, clientRequestId: string): Promise<void> {
-    const key = inputKey(chatId, clientRequestId);
-    const handle = this.#handles.get(key);
-    if (!handle) return;
-    await handle.discardKnownNotSent();
-    this.#handles.delete(key);
-  }
-
-  settle(chatId: string, clientRequestId: string): void {
-    this.#handles.delete(inputKey(chatId, clientRequestId));
-  }
-}
-
-function inputKey(chatId: string, clientRequestId: string): string {
-  return JSON.stringify([chatId, clientRequestId]);
 }
 
 function normalizeChatImages(images: RunAgentTurnOptions['images']): ChatImage[] | undefined {

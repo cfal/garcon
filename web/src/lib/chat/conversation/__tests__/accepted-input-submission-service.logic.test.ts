@@ -76,6 +76,7 @@ describe('AcceptedInputSubmissionService', () => {
 
 		const submission = service.run({
 			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			command: 'hello',
 			permissionMode: 'default',
 			thinkingMode: 'none',
@@ -95,31 +96,39 @@ describe('AcceptedInputSubmissionService', () => {
 		expect(createId).toHaveBeenCalledTimes(2);
 	});
 
-	it('uses one identity for queued and goal-control submissions', async () => {
+	it('uses stable request and message identities for queued and goal-control submissions', async () => {
 		const enqueue = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
 		const goalControl = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
-		const createId = vi.fn().mockReturnValueOnce('queue-1').mockReturnValueOnce('goal-1');
+		const createId = vi.fn()
+			.mockReturnValueOnce('queue-request')
+			.mockReturnValueOnce('queue-message')
+			.mockReturnValueOnce('goal-request')
+			.mockReturnValueOnce('goal-message');
 		const service = new AcceptedInputSubmissionService(
 			transport({ enqueue, goalControl }),
 			createId,
 		);
 
-		const queued = service.enqueue({ chatId: 'chat-1', content: 'later' });
-		const goal = service.goalControl({ chatId: 'chat-1', content: '/goal pause' });
+		const queued = service.enqueue({ chatId: 'chat-1', transcriptViewId: 'view-1', content: 'later' });
+		const goal = service.goalControl({ chatId: 'chat-1', transcriptViewId: 'view-1', content: '/goal pause' });
 		await queued.submit();
 		await goal.submit();
 
-		expect(queued).toMatchObject({ clientRequestId: 'queue-1' });
-		expect(goal).toMatchObject({ clientRequestId: 'goal-1' });
+		expect(queued).toMatchObject({ clientRequestId: 'queue-request', clientMessageId: 'queue-message' });
+		expect(goal).toMatchObject({ clientRequestId: 'goal-request', clientMessageId: 'goal-message' });
 		expect(enqueue).toHaveBeenCalledWith({
 			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			content: 'later',
-			clientRequestId: 'queue-1',
+			clientRequestId: 'queue-request',
+			clientMessageId: 'queue-message',
 		});
 		expect(goalControl).toHaveBeenCalledWith({
 			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			content: '/goal pause',
-			clientRequestId: 'goal-1',
+			clientRequestId: 'goal-request',
+			clientMessageId: 'goal-message',
 		});
 	});
 
@@ -128,7 +137,7 @@ describe('AcceptedInputSubmissionService', () => {
 		const createId = vi.fn().mockReturnValueOnce('request-1').mockReturnValueOnce('message-1');
 		const service = new AcceptedInputSubmissionService(transport({ steer }), createId);
 
-		const submission = service.steer({ chatId: 'chat-1', content: 'focus here' });
+		const submission = service.steer({ chatId: 'chat-1', transcriptViewId: 'view-1', content: 'focus here' });
 
 		expect(submission).toMatchObject({
 			clientRequestId: 'request-1',
@@ -137,13 +146,14 @@ describe('AcceptedInputSubmissionService', () => {
 		await submission.submit();
 		expect(steer).toHaveBeenCalledWith({
 			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			content: 'focus here',
 			clientRequestId: 'request-1',
 			clientMessageId: 'message-1',
 		});
 	});
 
-	it('retries queued steering with the same two identities and queue observation', async () => {
+	it('retries queued steering with the same request identity and queue observation', async () => {
 		const requests: unknown[] = [];
 		const steerQueuedEntry = vi
 			.fn()
@@ -155,11 +165,12 @@ describe('AcceptedInputSubmissionService', () => {
 				requests.push(request);
 				return { success: true, status: 'duplicate' };
 			});
-		const createId = vi.fn().mockReturnValueOnce('request-1').mockReturnValueOnce('message-1');
+		const createId = vi.fn().mockReturnValueOnce('request-1');
 		const service = new AcceptedInputSubmissionService(transport({ steerQueuedEntry }), createId);
 
 		const submission = service.steerQueuedEntry({
 			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			entryId: 'entry-1',
 			expectedRevision: 3,
 			expectedReorderRevision: 7,
@@ -167,7 +178,6 @@ describe('AcceptedInputSubmissionService', () => {
 
 		expect(submission).toMatchObject({
 			clientRequestId: 'request-1',
-			clientMessageId: 'message-1',
 		});
 		await expect(submission.submit()).resolves.toMatchObject({ status: 'duplicate' });
 		expect(requests).toHaveLength(2);
@@ -178,7 +188,7 @@ describe('AcceptedInputSubmissionService', () => {
 			expectedRevision: 3,
 			expectedReorderRevision: 7,
 			clientRequestId: 'request-1',
-			clientMessageId: 'message-1',
+			transcriptViewId: 'view-1',
 		});
 	});
 });

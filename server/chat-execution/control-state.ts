@@ -14,9 +14,15 @@ export interface StoredQueueDeliveryIdentity {
   turnId: string;
 }
 
+export interface StoredQueueSubmissionIdentity {
+  clientMessageId: string;
+  transcriptViewId: string;
+}
+
 export interface StoredQueueEntry extends QueueEntry {
   status: 'queued' | 'sending' | 'steering';
   delivery?: StoredQueueDeliveryIdentity;
+  submission?: StoredQueueSubmissionIdentity;
 }
 
 export type StoredQueueCommandOperation = 'create' | 'replace' | 'delete' | 'move';
@@ -65,6 +71,7 @@ export function cloneStoredChatExecutionControl(
     entries: control.entries.map((entry) => ({
       ...entry,
       ...(entry.delivery ? { delivery: { ...entry.delivery } } : {}),
+      ...(entry.submission ? { submission: { ...entry.submission } } : {}),
     })),
     recentlyDispatched: control.recentlyDispatched.map((entry) => ({ ...entry })),
     appliedCommands: control.appliedCommands.map((command) => ({ ...command })),
@@ -86,7 +93,7 @@ export function toClientChatExecutionControlState(
     queue: {
       entries: control.entries
         .filter((entry) => entry.status === 'queued' || entry.status === 'steering')
-        .map(({ status: _status, delivery: _delivery, ...entry }) => ({ ...entry })),
+        .map(({ status: _status, delivery: _delivery, submission: _submission, ...entry }) => ({ ...entry })),
       dispatchingEntryId: control.entries.find((entry) => entry.status === 'sending')?.id ?? null,
       steeringEntryId: control.entries.find((entry) => entry.status === 'steering')?.id ?? null,
       recentlyDispatched: control.recentlyDispatched

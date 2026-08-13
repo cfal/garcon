@@ -261,8 +261,10 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'todo-read-tool-use':
     case 'enter-plan-mode-tool-use':
     case 'amp-mermaid-tool-use':
+    case 'transcript-notice':
     case 'permission-resolved':
     case 'permission-cancelled':
+    case 'permission-expired':
       return '';
   }
   return assertNever(message);

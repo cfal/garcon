@@ -100,8 +100,8 @@ describe('ConversationFeedProjectionState', () => {
 					: new AssistantMessage(TS, `response ${index + 1}`),
 		}));
 		transcript.replaceGeneration('chat-1', 'generation-1', deepEntries, {
-			lastSeq: initialCount,
-			pageOldestSeq: 1,
+			lastOrdinal: initialCount,
+			pageOldestOrdinal: 1,
 			hasMore: false,
 		});
 		transcript.revealAllLoadedMessages();
@@ -116,7 +116,7 @@ describe('ConversationFeedProjectionState', () => {
 				ordinal: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 				message: new AssistantMessage(TS, 'new response'),
 			},
-		]);
+		], ACTIVE_TRANSCRIPT_RETENTION_LIMIT, ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		const appendedRows = transcript.visibleRows;
 		const appendedTail = appendedRows.at(-1);
 		if (appendedTail?.kind !== 'message') throw new Error('Expected an appended transcript row');

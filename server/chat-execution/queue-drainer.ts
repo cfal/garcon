@@ -27,7 +27,6 @@ const logger = createLogger('queue-dispatch');
 export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
   registerPending(chatId: string, content: string, options: RunAgentTurnOptions): Promise<boolean>;
-  discardProjectedInput(chatId: string, clientRequestId: string): Promise<void>;
   publishDispatching(chatId: string, entry: StoredQueueEntry): void;
   publishIdle(chatId: string): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
@@ -51,12 +50,17 @@ function optionsForQueuedTurn(
 ): RunAgentTurnOptions & { createdAt: string } {
   const delivery = entry.delivery ?? {
     clientRequestId: crypto.randomUUID(),
-    clientMessageId: crypto.randomUUID(),
+    clientMessageId: entry.submission?.clientMessageId ?? crypto.randomUUID(),
     turnId: crypto.randomUUID(),
   };
   // The entry's creation time anchors the admitted message so a retry of the
   // same delivery identity is idempotent rather than a payload conflict.
-  return { ...options, ...delivery, createdAt: entry.createdAt };
+  return {
+    ...options,
+    ...delivery,
+    ...(entry.submission ? { transcriptViewId: entry.submission.transcriptViewId } : {}),
+    createdAt: entry.createdAt,
+  };
 }
 
 export class QueueDrainer {
@@ -199,17 +203,7 @@ export class QueueDrainer {
       finalization.settle('committed');
       return true;
     } catch (caught: unknown) {
-      let error = caught;
-      if (!executionStarted && options.clientRequestId) {
-        try {
-          await this.#callbacks.discardProjectedInput(chatId, options.clientRequestId);
-        } catch (discardError) {
-          error = new AggregateError(
-            [caught, discardError],
-            `Failed to discard an unstarted queued input for ${chatId}`,
-          );
-        }
-      }
+      const error = caught;
       if (this.#ownership.shutdownTargetsEntry(chatId, entry.id)) {
         attempt?.clearExpectedAbort();
         await this.#tryShutdownCompensation(chatId, entry, options, executionStarted);

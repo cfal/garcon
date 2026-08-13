@@ -39,7 +39,7 @@ export interface ConversationQueueControllerOptions {
 	get sessions(): Pick<SessionControllerDeps['sessions'], 'selectedChatId'>;
 	get chatState(): Pick<
 		SessionControllerDeps['chatState'],
-		'clearLocalNotices' | 'appendLocalNotice' | 'loadMessages'
+		'clearLocalNotices' | 'appendLocalNotice' | 'loadMessages' | 'getCursor'
 	>;
 	get composerState(): Pick<
 		SessionControllerDeps['composerState'],
@@ -165,7 +165,11 @@ export class ConversationQueueController {
 	}
 
 	async createForChat(chatId: string, content: string): Promise<void> {
-		const submission = this.options.acceptedInputs.enqueue({ chatId, content });
+		const submission = this.options.acceptedInputs.enqueue({
+			chatId,
+			transcriptViewId: this.#transcriptViewId(chatId),
+			content,
+		});
 		try {
 			const result = await submission.submit();
 			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
@@ -247,6 +251,7 @@ export class ConversationQueueController {
 		this.options.chatState.clearLocalNotices();
 		const submission = this.options.acceptedInputs.steerQueuedEntry({
 			chatId,
+			transcriptViewId: this.#transcriptViewId(chatId),
 			entryId: entry.id,
 			expectedRevision: entry.revision,
 			expectedReorderRevision,
@@ -285,6 +290,12 @@ export class ConversationQueueController {
 			}
 			throw error;
 		}
+	}
+
+	#transcriptViewId(chatId: string): string {
+		const transcriptViewId = this.options.chatState.getCursor().transcriptViewId;
+		if (!transcriptViewId) throw new Error(`Transcript view is not loaded for ${chatId}`);
+		return transcriptViewId;
 	}
 
 	async handleDelete(entryId: string): Promise<void> {

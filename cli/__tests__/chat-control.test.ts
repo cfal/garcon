@@ -65,6 +65,33 @@ function client(overrides: Partial<ChatControlClient> = {}): ChatControlClient &
   const steers: SteerCommandRequest[] = [];
   const stops: AgentStopCommandRequest[] = [];
   const base: ChatControlClient = {
+    async getChatSnapshot() {
+      return {
+        observedAt: new Date().toISOString(),
+        messageLimit: 1,
+        chat: {
+          id: CHAT_ID,
+          title: 'Chat',
+          agentId: 'claude',
+          agentOwnershipEpoch: 'epoch-1',
+          carryOverRevision: 'carry-v1:0',
+          model: 'model',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+          permissionMode: 'default',
+          thinkingMode: 'default',
+          projectPath: '/tmp',
+          tags: [],
+          activity: { createdAt: null, lastActivityAt: null },
+        },
+        processingPhase: null,
+        control: { serverInstanceId: 'id', queue: { entries: [], dispatchingEntryId: null, steeringEntryId: null, recentlyDispatched: [], pause: null, reorderRevision: 0 }, version: 0, updatedAt: null },
+        transientFeed: { serverInstanceId: 'id', chatId: CHAT_ID, agentOwnershipEpoch: 'epoch-1', generationId: 'view-1', resetTransactionId: null, transientRevision: 0, stateDigest: '', rows: [] },
+        pendingUserInputs: [],
+        transcript: { availability: 'available', transcriptViewId: 'view-1', messages: [], lastOrdinal: 0, pageOldestOrdinal: 0, pageNewestOrdinal: 0, hasMore: false },
+      };
+    },
     async runChat() { return acceptedTurn(); },
     async steerChat() {
       return { ...acceptedTurn(), commandType: 'steer', turnId: 'turn-active' };
@@ -78,6 +105,11 @@ function client(overrides: Partial<ChatControlClient> = {}): ChatControlClient &
   };
   return {
     runs, steers, stops,
+    async getChatSnapshot(chatId, messageLimit, signal) {
+      return overrides.getChatSnapshot
+        ? overrides.getChatSnapshot.call(this, chatId, messageLimit, signal)
+        : base.getChatSnapshot(chatId, messageLimit, signal);
+    },
     async runChat(request, signal) {
       runs.push(request);
       return overrides.runChat ? overrides.runChat.call(this, request, signal) : base.runChat(request, signal);
@@ -198,6 +230,7 @@ describe('sendChatAsync', () => {
       clientRequestId: 'fixed-id',
       clientMessageId: 'fixed-id',
       chatId: CHAT_ID,
+      transcriptViewId: 'view-1',
       command: 'Message',
     });
   });
@@ -308,6 +341,7 @@ describe('sendChatAsync', () => {
       clientRequestId: 'id',
       clientMessageId: 'id',
       chatId: CHAT_ID,
+      transcriptViewId: 'view-1',
       command: 'Message',
     });
   });

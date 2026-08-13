@@ -72,7 +72,7 @@ export function liveClaudeRunRequest(input: {
   chatId: string;
   command: string;
   permissionMode?: AgentRunCommandRequest['permissionMode'];
-}): AgentRunCommandRequest {
+}): Omit<AgentRunCommandRequest, 'transcriptViewId'> {
   return {
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),

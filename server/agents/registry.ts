@@ -50,9 +50,11 @@ import type { UserMessage } from '@garcon/common/chat-types';
 import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import type { PendingUserInputRegistrationOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
-import type { LedgerRow } from '../ledger/contracts.js';
+import { transcriptViewId, type LedgerRow } from '../ledger/contracts.js';
 import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
 import { ledgerRowsToMessages } from '../ledger/presentation.js';
+import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
+import { DomainError } from '../lib/domain-error.js';
 
 const logger = createLogger('agents:registry');
 
@@ -70,6 +72,7 @@ export interface AgentRegistryServiceContract {
   supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean;
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
+  currentTranscriptViewId(chatId: string): Promise<string>;
   captureSteerTarget(chatId: string): AgentSteerTarget | null;
   steerInput(
     chatId: string,
@@ -592,34 +595,44 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return true;
   }
 
+  async currentTranscriptViewId(chatId: string): Promise<string> {
+    return (await this.#adoption.ensure(chatId)).viewId;
+  }
+
   async admitInput(
     chatId: string,
     message: UserMessage,
     options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
-  ): Promise<{ readonly inserted: boolean; discardKnownNotSent(): Promise<void> }> {
+  ): Promise<{ readonly inserted: boolean }> {
     const session = this.#registry.getChat(chatId);
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
     const view = await this.#adoption.ensure(chatId);
     this.#admissionIdentity(chatId, session, options);
-    const composition = this.#ledger.appendInputAndCompose({
-      chatId,
-      viewId: view.viewId,
-      message,
-      attachments: (options.images ?? []).map((image) => ({
-        kind: 'image' as const,
-        data: image.data,
-        name: image.name ?? null,
-        mimeType: image.mimeType ?? 'application/octet-stream',
-      })),
-      clientMessageId: options.clientMessageId ?? null,
-      steer: options.commandType === 'steer',
-    });
-    return {
-      inserted: composition.inserted,
-      discardKnownNotSent: async () => {
-        this.#ledger.discardPreparedInput(chatId, options.clientMessageId);
-      },
-    };
+    let composition;
+    try {
+      composition = this.#ledger.appendInputAndCompose({
+        chatId,
+        viewId: options.transcriptViewId ? transcriptViewId(options.transcriptViewId) : view.viewId,
+        message,
+        attachments: (options.images ?? []).map((image) => ({
+          kind: 'image' as const,
+          data: image.data,
+          name: image.name ?? null,
+          mimeType: image.mimeType ?? 'application/octet-stream',
+        })),
+        clientMessageId: options.clientMessageId ?? null,
+        steer: options.commandType === 'steer',
+      });
+    } catch (error) {
+      if (error instanceof StaleTranscriptViewError) {
+        throw new DomainError('STALE_TRANSCRIPT_VIEW', error.message, 409, false, { cause: error });
+      }
+      if (error instanceof SubmissionConflictError) {
+        throw new DomainError('IDEMPOTENCY_CONFLICT', error.message, 409, false, { cause: error });
+      }
+      throw error;
+    }
+    return { inserted: composition.inserted };
   }
 
   async #onTranscriptCommit(event: TranscriptCommitEvent): Promise<void> {

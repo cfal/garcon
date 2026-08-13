@@ -51,7 +51,6 @@ export interface AcceptedInputCoordinator {
     content: string,
     options: PendingUserInputRegistrationOptions,
   ): Promise<boolean>;
-  discardProjectedInput(chatId: string, clientRequestId: string): Promise<void>;
   releaseDirect(reservation: DirectTurnReservation): Promise<void>;
   runDirect(
     reservation: DirectTurnReservation,
@@ -74,7 +73,6 @@ export interface AcceptedInputCoordinator {
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
-    notSentDisposition?: 'mark-failed' | 'queue-handler-settles',
   ): Promise<AcceptedSteerOutcome>;
   hasAppliedCreate(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
 }
@@ -102,6 +100,10 @@ export class AcceptedInputHandler {
         input.command.chatId,
         input.content,
         { key: input.command.key, entryId: input.command.entryId },
+        {
+          clientMessageId: input.clientMessageId,
+          transcriptViewId: input.transcriptViewId,
+        },
       );
       await input.settlement.settleQueueMutation(input.command, result.entryId);
       this.#coordinator.requestDrain(input.command.chatId, 'accepted enqueue');
@@ -249,7 +251,8 @@ export class AcceptedInputHandler {
     }
     const delivery = {
       clientRequestId: input.command.clientRequestId,
-      clientMessageId: input.command.entryId,
+      clientMessageId: input.clientMessageId,
+      transcriptViewId: input.transcriptViewId,
       turnId,
     };
     let deliveryAccepted = false;
@@ -287,6 +290,8 @@ export class AcceptedInputHandler {
     const queued = await this.enqueue({
       command: input.command,
       content: input.content,
+      clientMessageId: input.clientMessageId,
+      transcriptViewId: input.transcriptViewId,
       settlement: input.settlement,
     });
     return { delivery: 'queued', entryId: queued.entryId, control: queued.control };
@@ -301,11 +306,16 @@ export class AcceptedInputHandler {
         {
           clientRequestId: input.command.clientRequestId,
           clientMessageId: input.clientMessageId,
+          transcriptViewId: input.transcriptViewId,
         },
         input.target,
         (turnId) => input.settlement.markScheduled(input.command, turnId),
       );
-      await input.settlement.settleSteerSuccess(input.command, outcome.turnId);
+      if (outcome.duplicate) {
+        await input.settlement.settleDuplicateInput(input.command);
+      } else {
+        await input.settlement.settleSteerSuccess(input.command, outcome.turnId);
+      }
       return outcome;
     } catch (error) {
       await input.settlement.settleSteerFailure(input.command, error);
@@ -336,10 +346,10 @@ export class AcceptedInputHandler {
         {
           clientRequestId: input.command.clientRequestId,
           clientMessageId: input.clientMessageId,
+          transcriptViewId: input.transcriptViewId,
         },
         input.target,
         (turnId) => input.settlement.markScheduled(input.command, turnId),
-        'queue-handler-settles',
       );
     } catch (error) {
       const deliveryOutcome = error instanceof SteerDeliveryError ? error.outcome : 'not-sent';
@@ -357,7 +367,11 @@ export class AcceptedInputHandler {
     }
     this.#coordinator.requestDrain(input.command.chatId, 'queued steer consumed');
     try {
-      await input.settlement.settleSteerSuccess(input.command, outcome.turnId);
+      if (outcome.duplicate) {
+        await input.settlement.settleDuplicateInput(input.command);
+      } else {
+        await input.settlement.settleSteerSuccess(input.command, outcome.turnId);
+      }
     } catch (error) {
       logger.error('queued steer ledger settlement failed', {
         chatId: input.command.chatId,
@@ -569,7 +583,6 @@ export class AcceptedInputHandler {
 
   async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation | null> {
     let reservation: DirectTurnReservation;
-    let inputRegistered = false;
     try {
       reservation = this.#coordinator.reserveDirect(input.command.chatId, input.options);
     } catch (error) {
@@ -593,7 +606,6 @@ export class AcceptedInputHandler {
         await this.#coordinator.releaseDirect(reservation);
         return null;
       }
-      inputRegistered = true;
       await this.#checkpointAfter(
         reservation,
         input.settlement.markScheduled(input.command, input.options.turnId!),
@@ -607,21 +619,6 @@ export class AcceptedInputHandler {
       let failure: unknown = error;
       let retryable = true;
       let preserveForkPreparation = false;
-      if (inputRegistered) {
-        try {
-          await this.#coordinator.discardProjectedInput(
-            input.command.chatId,
-            input.options.clientRequestId!,
-          );
-        } catch (discardError) {
-          retryable = false;
-          failure = aggregateFailure(
-            failure,
-            discardError,
-            `Failed to discard an unstarted input for ${input.command.chatId}`,
-          );
-        }
-      }
       if (input.preparation) {
         try {
           await input.preparation.compensate();

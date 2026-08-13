@@ -1,5 +1,5 @@
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
-import type { ChatViewMessage } from '@garcon/common/chat-view';
+import type { TranscriptMessage } from '@garcon/common/chat-view';
 import type { StatusCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
@@ -87,8 +87,8 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
     );
   } else if (snapshot.transcript.availability === 'available') {
     lines.push(
-      `transcript: generation ${snapshot.transcript.generationId}, `
-        + `last seq ${snapshot.transcript.lastSeq}, `
+      `transcript: view ${snapshot.transcript.transcriptViewId}, `
+        + `last ordinal ${snapshot.transcript.lastOrdinal}, `
         + `showing ${snapshot.transcript.messages.length}`
         + (snapshot.transcript.hasMore ? ', older messages available' : ''),
     );
@@ -99,7 +99,7 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
   return lines.join('\n');
 }
 
-function formatMessage(entry: ChatViewMessage): string {
+function formatMessage(entry: TranscriptMessage): string {
   const { type, timestamp, ...payload } = entry.message;
   const images = 'images' in payload && Array.isArray(payload.images)
     ? payload.images
@@ -112,7 +112,7 @@ function formatMessage(entry: ChatViewMessage): string {
   if (images && images.length > 0) {
     content += `\n[${images.length} image attachments omitted from text output]`;
   }
-  return `[${entry.seq}] ${timestamp} ${type}\n${truncateStatusText(content)}`;
+  return `[${entry.ordinal}] ${timestamp} ${type}\n${truncateStatusText(content)}`;
 }
 
 function redactDataUrls(_key: string, value: unknown): unknown {

@@ -57,8 +57,8 @@
 				},
 			],
 			{
-				lastSeq: 1,
-				pageOldestSeq: 1,
+				lastOrdinal: 1,
+				pageOldestOrdinal: 1,
 				hasMore: false,
 			},
 		);
@@ -82,8 +82,8 @@
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
-			lastSeq: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
-			pageOldestSeq: 1,
+			lastOrdinal: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
+			pageOldestOrdinal: 1,
 			hasMore: false,
 		});
 		if (initialTranscriptScenario === 'loading-later') {
@@ -110,8 +110,8 @@
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
-			lastSeq: messages.length,
-			pageOldestSeq: 1,
+			lastOrdinal: messages.length,
+			pageOldestOrdinal: 1,
 			hasMore: false,
 		});
 		chatState.revealAllLoadedMessages();
@@ -123,8 +123,8 @@
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 101}`),
 		}));
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
-			lastSeq: 120,
-			pageOldestSeq: 101,
+			lastOrdinal: 120,
+			pageOldestOrdinal: 101,
 			hasMore: false,
 		});
 		chatState.revealAllLoadedMessages();

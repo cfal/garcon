@@ -7,6 +7,7 @@ import type {
 import { createClientChatId } from '@garcon/common/client-chat-id';
 import type { ChatListEntry } from '@garcon/common/chat-list';
 import type { ChatListResponse } from '@garcon/common/chat-list';
+import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import type { UpdateChatTitleRequest } from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
@@ -29,6 +30,11 @@ import {
 import { writeTerminalResult } from './terminal-receipt.js';
 
 export interface ConsultationClient extends ReceiptClient {
+  getChatSnapshot(
+    chatId: string,
+    messageLimit: number,
+    signal?: AbortSignal,
+  ): Promise<ChatSnapshotResponse>;
   getModelCatalog(agentId: string, signal?: AbortSignal): Promise<ModelCatalogResponse>;
   getSettings(signal?: AbortSignal): Promise<RemoteSettingsSnapshot>;
   listChats(signal?: AbortSignal): Promise<ChatListResponse>;
@@ -124,10 +130,19 @@ async function submitResume(
   createId: () => string,
 ): Promise<AgentTurnCommandResponse> {
   const tagsToAdd = resumeTags(invocation.additionalTags);
+  const snapshot = await client.getChatSnapshot(invocation.chatId, 1, signal);
+  if (snapshot.transcript.availability !== 'available') {
+    throw new CliError(
+      'resume admission',
+      `chat ${invocation.chatId} transcript is unavailable`,
+      3,
+    );
+  }
   const request: AgentRunCommandRequest = {
     clientRequestId: createId(),
     clientMessageId: createId(),
     chatId: invocation.chatId,
+    transcriptViewId: snapshot.transcript.transcriptViewId,
     command: prompt,
     ...(tagsToAdd === undefined ? {} : { tagsToAdd }),
     permissionFallbackPolicy: 'require-explicit-bypass',

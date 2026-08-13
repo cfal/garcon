@@ -152,6 +152,7 @@ export interface RunAgentTurnRequest {
 export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'> & {
   clientRequestId?: string;
   clientMessageId?: string;
+  transcriptViewId?: string;
   turnId?: string;
   commandType?: AgentExecutionCommandType;
   executionAdmission?: AgentExecutionAdmission;
@@ -161,4 +162,5 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
 export interface AgentSteerOptions {
   readonly clientRequestId: string;
   readonly clientMessageId: string;
+  readonly transcriptViewId: string;
 }

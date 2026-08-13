@@ -47,8 +47,10 @@ export class SessionCommands {
   }
 
   private async submitRunLocked(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+    await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
     const normalizedInput = {
       chatId: input.chatId,
+      transcriptViewId: input.transcriptViewId,
       command: input.command,
       images: input.images,
       clientRequestId: input.clientRequestId,

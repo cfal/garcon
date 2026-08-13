@@ -164,6 +164,7 @@ export interface AgentRunCommandRequest {
   clientRequestId: string;
   clientMessageId: string;
   chatId: string;
+  transcriptViewId: string;
   command: string;
   images?: AgentCommandImage[];
   permissionMode?: PermissionMode;
@@ -213,7 +214,9 @@ export interface ForkRunCommandRequest {
 
 export interface QueueEntryCreateCommandRequest {
   clientRequestId: string;
+  clientMessageId: string;
   chatId: string;
+  transcriptViewId: string;
   content: string;
 }
 
@@ -258,6 +261,7 @@ export interface SteerCommandRequest {
   clientRequestId: string;
   clientMessageId: string;
   chatId: string;
+  transcriptViewId: string;
   content: string;
 }
 
@@ -269,8 +273,8 @@ export interface SteerCommandResponse extends CommandAcceptedResponse {
 
 export interface QueueEntrySteerCommandRequest {
   clientRequestId: string;
-  clientMessageId: string;
   chatId: string;
+  transcriptViewId: string;
   entryId: string;
   expectedRevision: number;
   expectedReorderRevision: number;
@@ -292,7 +296,9 @@ export interface QueueEntrySteerErrorResponse extends HttpErrorResponse {
 
 export interface GoalControlCommandRequest {
   clientRequestId: string;
+  clientMessageId: string;
   chatId: string;
+  transcriptViewId: string;
   content: string;
 }
 
@@ -520,6 +526,7 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
+    transcriptViewId: requiredString(body, 'transcriptViewId'),
     command: contentOrImages(body, 'command', images),
     ...(images === undefined ? {} : { images }),
     ...(permissionMode === undefined ? {} : { permissionMode }),
@@ -648,7 +655,9 @@ export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryC
   const body = requestRecord(value);
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
+    clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
+    transcriptViewId: requiredString(body, 'transcriptViewId'),
     content: requiredContent(body, 'content'),
   };
 }
@@ -722,6 +731,7 @@ export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
+    transcriptViewId: requiredString(body, 'transcriptViewId'),
     content: requiredContent(body, 'content'),
   };
 }
@@ -741,8 +751,8 @@ export function parseQueueEntrySteerCommandRequest(value: unknown): QueueEntrySt
   }
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
-    clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
+    transcriptViewId: requiredString(body, 'transcriptViewId'),
     entryId: requiredQueueEntryId(body, 'entryId'),
     expectedRevision: Number(body.expectedRevision),
     expectedReorderRevision: Number(body.expectedReorderRevision),
@@ -753,7 +763,9 @@ export function parseGoalControlCommandRequest(value: unknown): GoalControlComma
   const body = requestRecord(value);
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
+    clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
+    transcriptViewId: requiredString(body, 'transcriptViewId'),
     content: requiredContent(body, 'content'),
   };
 }

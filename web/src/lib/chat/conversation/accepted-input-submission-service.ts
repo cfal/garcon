@@ -81,9 +81,8 @@ export class AcceptedInputSubmissionService {
 		return this.#messageSubmission(input, (request) => this.transport.selfHandoff(request));
 	}
 
-	enqueue(input: Omit<QueueEntryCreateCommandRequest, 'clientRequestId'>) {
-		const request = { ...input, clientRequestId: this.createId() };
-		return this.#prepared(request, () => this.transport.enqueue(request));
+	enqueue(input: Omit<QueueEntryCreateCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
+		return this.#messageSubmission(input, (request) => this.transport.enqueue(request));
 	}
 
 	steer(input: Omit<SteerCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
@@ -91,14 +90,14 @@ export class AcceptedInputSubmissionService {
 	}
 
 	steerQueuedEntry(
-		input: Omit<QueueEntrySteerCommandRequest, 'clientRequestId' | 'clientMessageId'>,
+		input: Omit<QueueEntrySteerCommandRequest, 'clientRequestId'>,
 	) {
-		return this.#messageSubmission(input, (request) => this.transport.steerQueuedEntry(request));
+		const request = { ...input, clientRequestId: this.createId() };
+		return this.#prepared(request, () => this.transport.steerQueuedEntry(request));
 	}
 
-	goalControl(input: Omit<GoalControlCommandRequest, 'clientRequestId'>) {
-		const request = { ...input, clientRequestId: this.createId() };
-		return this.#prepared(request, () => this.transport.goalControl(request));
+	goalControl(input: Omit<GoalControlCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
+		return this.#messageSubmission(input, (request) => this.transport.goalControl(request));
 	}
 
 	#messageSubmission<T extends object, R>(

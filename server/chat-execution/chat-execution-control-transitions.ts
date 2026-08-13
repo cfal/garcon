@@ -7,6 +7,7 @@ import {
   type StoredAppliedQueueCommand,
   type StoredChatExecutionControlState,
   type StoredQueueDeliveryIdentity,
+  type StoredQueueSubmissionIdentity,
   type StoredQueueEntry,
 } from './control-state.ts';
 
@@ -22,6 +23,7 @@ export interface QueueCommandIdentity {
 }
 
 export type TransitionRejection =
+  | { code: 'IDEMPOTENCY_CONFLICT'; clientMessageId: string }
   | { code: 'QUEUE_ENTRY_NOT_FOUND'; entryId: string }
   | { code: 'QUEUE_ENTRY_ALREADY_SENT'; entryId: string }
   | { code: 'QUEUE_ENTRY_IN_FLIGHT'; entryId: string }
@@ -86,7 +88,7 @@ function bump(control: StoredChatExecutionControlState, now: string): void {
 }
 
 function toQueueEntry(entry: StoredQueueEntry): QueueEntry {
-  const { status: _status, delivery: _delivery, ...clientEntry } = entry;
+  const { status: _status, delivery: _delivery, submission: _submission, ...clientEntry } = entry;
   return { ...clientEntry };
 }
 
@@ -141,10 +143,33 @@ function missingEntryRejection(
 
 export function createQueueEntry(
   current: StoredChatExecutionControlState,
-  input: { content: string; command?: QueueCommandIdentity },
+  input: {
+    content: string;
+    command?: QueueCommandIdentity;
+    submission?: StoredQueueSubmissionIdentity;
+  },
   context: TransitionContext,
 ): ControlTransition<QueueMutationValue> {
   const next = cloneStoredChatExecutionControl(current);
+  if (input.submission) {
+    const submitted = next.entries.find((entry) => (
+      entry.submission?.clientMessageId === input.submission!.clientMessageId
+      && entry.submission.transcriptViewId === input.submission!.transcriptViewId
+    ));
+    if (submitted) {
+      if (submitted.content !== input.content) {
+        return rejected(current, {
+          code: 'IDEMPOTENCY_CONFLICT',
+          clientMessageId: input.submission.clientMessageId,
+        });
+      }
+      return accepted(next, {
+        entryId: submitted.id,
+        entry: toQueueEntry(submitted),
+        duplicate: true,
+      }, false);
+    }
+  }
   if (input.command) {
     const applied = findAppliedCommand(next, input.command);
     if (applied) {
@@ -164,6 +189,7 @@ export function createQueueEntry(
     status: 'queued',
     createdAt: context.now,
     updatedAt: context.now,
+    ...(input.submission ? { submission: { ...input.submission } } : {}),
   };
   next.entries.push(entry);
   if (input.command) recordAppliedCommand(next, input.command, 'create', context);

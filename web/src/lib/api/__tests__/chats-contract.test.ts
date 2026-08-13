@@ -388,6 +388,7 @@ describe('chats API contract', () => {
 			clientRequestId: 'req-1',
 			clientMessageId: 'msg-1',
 			chatId: 'c-1',
+			transcriptViewId: 'view-1',
 			command: 'hello',
 			permissionMode: 'default',
 			thinkingMode: 'none',
@@ -426,12 +427,14 @@ describe('chats API contract', () => {
 			clientRequestId: 'req-normal',
 			clientMessageId: 'msg-normal',
 			chatId: 'c-1',
+			transcriptViewId: 'view-1',
 			command: 'normal',
 		});
 		await runChat({
 			clientRequestId: 'req-handoff',
 			clientMessageId: 'msg-handoff',
 			chatId: 'c-1',
+			transcriptViewId: 'view-1',
 			command: 'handoff',
 			handoff: {
 				expectedAgentOwnershipEpoch: 'epoch-1',
@@ -470,6 +473,7 @@ describe('chats API contract', () => {
 				clientRequestId: 'req-handoff',
 				clientMessageId: 'msg-handoff',
 				chatId: 'c-1',
+				transcriptViewId: 'view-1',
 				command: 'handoff',
 				handoff: {
 					expectedAgentOwnershipEpoch: 'epoch-1',
@@ -677,14 +681,18 @@ describe('chats API contract', () => {
 
 		await createQueuedInput({
 			clientRequestId: 'req-queue',
+			clientMessageId: 'message-queue',
 			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			content: 'queue this',
 		});
 		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/queue/entries');
 		expect(fetchMock.mock.calls[1][1].method).toBe('POST');
-		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+			expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
 			clientRequestId: 'req-queue',
+			clientMessageId: 'message-queue',
 			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			content: 'queue this',
 		});
 
@@ -743,7 +751,9 @@ describe('chats API contract', () => {
 
 		await submitGoalControl({
 			clientRequestId: 'req-goal',
+			clientMessageId: 'message-goal',
 			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			content: '/goal pause',
 		});
 		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/goal-control');
@@ -753,6 +763,7 @@ describe('chats API contract', () => {
 			clientRequestId: 'req-steer',
 			clientMessageId: 'message-steer',
 			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			content: 'steer now',
 		});
 		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/steer');
@@ -761,6 +772,7 @@ describe('chats API contract', () => {
 			clientRequestId: 'req-steer',
 			clientMessageId: 'message-steer',
 			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			content: 'steer now',
 		});
 
@@ -799,8 +811,8 @@ describe('chats API contract', () => {
 		await expect(
 			steerQueuedEntry({
 				clientRequestId: 'request-queue-steer',
-				clientMessageId: 'message-queue-steer',
 				chatId: 'c/1',
+				transcriptViewId: 'view-1',
 				entryId: 'entry/1',
 				expectedRevision: 3,
 				expectedReorderRevision: 7,
@@ -811,8 +823,8 @@ describe('chats API contract', () => {
 		expect(fetchMock.mock.calls[0][1].method).toBe('POST');
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
 			clientRequestId: 'request-queue-steer',
-			clientMessageId: 'message-queue-steer',
 			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			entryId: 'entry/1',
 			expectedRevision: 3,
 			expectedReorderRevision: 7,
@@ -840,8 +852,8 @@ describe('chats API contract', () => {
 		await expect(
 			steerQueuedEntry({
 				clientRequestId: 'request-queue-steer',
-				clientMessageId: 'message-queue-steer',
 				chatId: 'c-1',
+				transcriptViewId: 'view-1',
 				entryId: 'entry-1',
 				expectedRevision: 3,
 				expectedReorderRevision: 7,
@@ -862,8 +874,8 @@ describe('chats API contract', () => {
 		};
 		const request = {
 			clientRequestId: 'request-queue-steer',
-			clientMessageId: 'message-queue-steer',
 			chatId: 'c-1',
+			transcriptViewId: 'view-1',
 			entryId: 'entry-1',
 			expectedRevision: 3,
 			expectedReorderRevision: 7,

@@ -143,6 +143,41 @@ function projectedChat(chatId, projectPath = '/repo', source = {}) {
   };
 }
 
+class TestChatCommandService extends ChatCommandService {
+  submitRun(input) {
+    return super.submitRun(this.#qualify(input));
+  }
+
+  submitQueueEntryCreate(input) {
+    return super.submitQueueEntryCreate(this.#qualify({
+      ...input,
+      clientMessageId: input.clientMessageId ?? input.clientRequestId,
+    }));
+  }
+
+  submitSteer(input) {
+    return super.submitSteer(this.#qualify(input));
+  }
+
+  submitQueueEntrySteer(input) {
+    return super.submitQueueEntrySteer(this.#qualify(input));
+  }
+
+  submitGoalControl(input) {
+    return super.submitGoalControl(this.#qualify({
+      ...input,
+      clientMessageId: input.clientMessageId ?? input.clientRequestId,
+    }));
+  }
+
+  #qualify(input) {
+    return {
+      ...input,
+      transcriptViewId: input.transcriptViewId ?? 'view-1',
+    };
+  }
+}
+
 function makeService(overrides = {}) {
   const activeFallbacks = new Map();
   const session = {
@@ -288,6 +323,10 @@ function makeService(overrides = {}) {
         input.command.chatId,
         input.content,
         { key: input.command.key, entryId: input.command.entryId },
+        {
+          clientMessageId: input.clientMessageId,
+          transcriptViewId: input.transcriptViewId,
+        },
       );
       await input.settlement.settleQueueMutation(input.command, result.entryId);
       await queue.triggerDrain(input.command.chatId);
@@ -518,6 +557,7 @@ function makeService(overrides = {}) {
     getChatMetadata: mock(() => null),
   };
   const agents = {
+    currentTranscriptViewId: mock(() => Promise.resolve('view-1')),
     hasAgent: mock(() => true),
     supportsImages: mock(() => true),
     supportsFileAttachmentMimeType: mock(
@@ -555,6 +595,7 @@ function makeService(overrides = {}) {
     reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
     markFailed: mock(() => false),
     markUnconfirmed: mock(() => false),
+    settleCommitted: mock(() => false),
     clear: mock(() => false),
     hasInFlightForChat: mock(() => false),
     ...overrides.pendingInputs,
@@ -669,7 +710,7 @@ function makeService(overrides = {}) {
   const fileMentions = overrides.fileMentions ?? {
     resolve: mock(async (command) => command),
   };
-  const service = new ChatCommandService({
+  const service = new TestChatCommandService({
     chats,
     queue,
     chatViews,
@@ -2831,7 +2872,7 @@ describe('ChatCommandService', () => {
       upToSeq: 2,
       generationId: 'generation-1',
     })).rejects.toMatchObject({
-      code: 'STALE_VIEW_GENERATION',
+      code: 'STALE_TRANSCRIPT_VIEW',
       status: 409,
       retryable: true,
     });
@@ -3102,7 +3143,12 @@ describe('ChatCommandService', () => {
       commandType: 'queue-entry-create',
       chatId: SOURCE_CHAT_ID,
       clientRequestId,
-      payload: { chatId: SOURCE_CHAT_ID, content: 'survives retry' },
+      payload: {
+        chatId: SOURCE_CHAT_ID,
+        transcriptViewId: 'view-1',
+        clientMessageId: clientRequestId,
+        content: 'survives retry',
+      },
       entryId,
     });
     queue.createChatQueueEntry.mockResolvedValueOnce({
@@ -3128,10 +3174,15 @@ describe('ChatCommandService', () => {
     });
 
     expect(result).toMatchObject({ status: 'duplicate', entryId });
-    expect(queue.createChatQueueEntry).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'survives retry', {
-      key: `queue-entry-create:${SOURCE_CHAT_ID}:${clientRequestId}`,
-      entryId,
-    });
+    expect(queue.createChatQueueEntry).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      'survives retry',
+      {
+        key: `queue-entry-create:${SOURCE_CHAT_ID}:${clientRequestId}`,
+        entryId,
+      },
+      { clientMessageId: clientRequestId, transcriptViewId: 'view-1' },
+    );
     expect(await readLedgerRecord(ledger, 'queue-entry-create', clientRequestId)).toMatchObject({
       status: 'finished',
       entryId,
@@ -3414,7 +3465,10 @@ describe('ChatCommandService', () => {
       identity: { clientRequestId: 'request-active', turnId: 'turn-active' },
     };
     const queued = storedQueue([
-      queueEntry('entry-head', 'authoritative @notes.txt', 'queued', 3),
+      {
+        ...queueEntry('entry-head', 'authoritative @notes.txt', 'queued', 3),
+        submission: { clientMessageId: 'message-queue-steer', transcriptViewId: 'view-1' },
+      },
       queueEntry('entry-next', 'later turn', 'queued', 1),
     ], { reorderRevision: 7, version: 4 });
     const consumed = storedQueue([
@@ -3459,7 +3513,6 @@ describe('ChatCommandService', () => {
     const input = {
       chatId: SOURCE_CHAT_ID,
       clientRequestId: 'request-queue-steer',
-      clientMessageId: 'message-queue-steer',
       entryId: 'entry-head',
       expectedRevision: 3,
       expectedReorderRevision: 7,
@@ -3690,6 +3743,7 @@ describe('ChatCommandService', () => {
       entryId: input.entryId,
       payload: {
         chatId: input.chatId,
+        transcriptViewId: 'view-1',
         clientMessageId: input.clientMessageId,
         source: {
           kind: 'queue-entry',
@@ -3700,7 +3754,13 @@ describe('ChatCommandService', () => {
       },
     });
     const current = storedQueue([
-      queueEntry('entry-head', 'authoritative content', 'queued', 3),
+      {
+        ...queueEntry('entry-head', 'authoritative content', 'queued', 3),
+        submission: {
+          clientMessageId: input.clientMessageId,
+          transcriptViewId: 'view-1',
+        },
+      },
     ], { reorderRevision: 7, version: 5 });
     const recoverQueueEntrySteer = mock(async () => {
       throw new Error('control commit unavailable');
@@ -4148,6 +4208,7 @@ describe('ChatCommandService', () => {
       clientRequestId: input.clientRequestId,
       payload: {
         chatId: input.chatId,
+        transcriptViewId: 'view-1',
         content: input.content,
         clientMessageId: input.clientMessageId,
       },
@@ -4408,6 +4469,10 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         key: `queue-entry-create:${SOURCE_CHAT_ID}:scheduled-prompt-2`,
       }),
+      {
+        clientMessageId: 'scheduled-message-2',
+        transcriptViewId: 'view-1',
+      },
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
@@ -4454,6 +4519,10 @@ describe('ChatCommandService', () => {
       SOURCE_CHAT_ID,
       'scheduled second',
       expect.any(Object),
+      {
+        clientMessageId: 'scheduled-message-after-sending',
+        transcriptViewId: 'view-1',
+      },
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
@@ -4560,7 +4629,7 @@ describe('ChatCommandService', () => {
       status: 'sending',
       delivery: {
         clientRequestId: input.clientRequestId,
-        clientMessageId: uncertain.entries[0].id,
+        clientMessageId: input.clientRequestId,
       },
     });
     expect(uncertain.appliedCommands).toContainEqual(expect.objectContaining({
@@ -4605,7 +4674,12 @@ describe('ChatCommandService', () => {
       commandType: 'goal-control',
       chatId: SOURCE_CHAT_ID,
       clientRequestId: 'request-active-incomplete',
-      payload: { chatId: SOURCE_CHAT_ID, content: 'uncertain delivery' },
+      payload: {
+        chatId: SOURCE_CHAT_ID,
+        transcriptViewId: 'view-1',
+        clientMessageId: 'request-active-incomplete',
+        content: 'uncertain delivery',
+      },
       entryId: 'prepared-fallback-id',
     });
 

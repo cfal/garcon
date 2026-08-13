@@ -851,6 +851,7 @@ export class ConversationSessionController {
 
 			const submission = this.#acceptedInputs.run({
 				chatId,
+				transcriptViewId: deps.chatState.getCursor().transcriptViewId,
 				command: buildApprovalMessage(),
 				permissionMode: mode,
 				thinkingMode: deps.agentState.thinkingMode,

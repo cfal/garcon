@@ -58,7 +58,11 @@ export async function submitQueueRoute(
 	const sequence = queue.beginSubmission(context.chatId);
 	// Clears before awaiting the network so typing during the request survives.
 	clearOwnedComposer(deps, context);
-	const submission = acceptedInputs.enqueue({ chatId: context.chatId, content: context.content });
+	const submission = acceptedInputs.enqueue({
+		chatId: context.chatId,
+		transcriptViewId: requireTranscriptView(deps, context.chatId),
+		content: context.content,
+	});
 	try {
 		const result = await submission.submit();
 		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
@@ -92,6 +96,7 @@ export async function submitGoalControlRoute(
 	clearOwnedComposer(deps, context);
 	const submission = acceptedInputs.goalControl({
 		chatId: context.chatId,
+		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		content: context.content,
 	});
 	try {
@@ -124,6 +129,7 @@ export async function submitSteerRoute(
 ): Promise<ConversationSubmissionOutcome> {
 	const submission = acceptedInputs.steer({
 		chatId: context.chatId,
+		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		content: context.content,
 	});
 	deps.chatState.upsertPendingUserInput(
@@ -260,6 +266,7 @@ export async function submitRunRoute(
 ): Promise<ConversationSubmissionOutcome> {
 	const submission = acceptedInputs.run({
 		chatId: context.chatId,
+		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		command: context.text,
 		images: context.images.length > 0 ? context.images : undefined,
 		...(handoff
@@ -299,6 +306,12 @@ export async function submitRunRoute(
 	} finally {
 		deps.composerState.isSubmitting = false;
 	}
+}
+
+function requireTranscriptView(deps: RouteDeps, chatId: string): string {
+	const transcriptViewId = deps.chatState.getCursor().transcriptViewId;
+	if (!transcriptViewId) throw new Error(`Transcript view is not loaded for ${chatId}`);
+	return transcriptViewId;
 }
 
 function beginOptimisticInput(

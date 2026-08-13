@@ -22,6 +22,7 @@ import {
 
 const CHAT_ID = '1783725900000000';
 const SOURCE_CHAT_ID = '1783725900000001';
+const TRANSCRIPT_VIEW_ID = 'view-1';
 
 function agentSettings(ownerId = 'claude') {
   return { ownerId, schemaVersion: 1, values: {} };
@@ -72,6 +73,7 @@ describe('chat command request parsers', () => {
       clientRequestId: 'request-2',
       clientMessageId: 'message-2',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       command: 'continue',
       agentSettings: agentSettings(),
       model: 'opus',
@@ -93,6 +95,7 @@ describe('chat command request parsers', () => {
       clientRequestId: 'request-handoff',
       clientMessageId: 'message-handoff',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       command: 'continue elsewhere',
       permissionFallbackPolicy: 'require-explicit-bypass',
       handoff: {
@@ -134,6 +137,7 @@ describe('chat command request parsers', () => {
       clientRequestId: 'request-handoff-invalid',
       clientMessageId: 'message-handoff-invalid',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       command: 'continue elsewhere',
       handoff: {
         expectedAgentOwnershipEpoch: 'epoch-1',
@@ -167,6 +171,7 @@ describe('chat command request parsers', () => {
       clientRequestId: 'request-routing',
       clientMessageId: 'message-routing',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       command: 'continue',
     };
     expect(() => parseAgentRunCommandRequest({ ...base, apiProviderId: 'provider' }))
@@ -184,11 +189,13 @@ describe('chat command request parsers', () => {
       clientRequestId: ' request-steer ',
       clientMessageId: ' message-steer ',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       content: ' focus here ',
     })).toEqual({
       clientRequestId: 'request-steer',
       clientMessageId: 'message-steer',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       content: ' focus here ',
     });
     expect(() => parseSteerCommandRequest({
@@ -201,31 +208,31 @@ describe('chat command request parsers', () => {
   it('parses queue steering with explicit entry concurrency preconditions', () => {
     expect(parseQueueEntrySteerCommandRequest({
       clientRequestId: ' request-steer-queue ',
-      clientMessageId: ' message-steer-queue ',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       entryId: ' entry-1 ',
       expectedRevision: 2,
       expectedReorderRevision: 4,
     })).toEqual({
       clientRequestId: 'request-steer-queue',
-      clientMessageId: 'message-steer-queue',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       entryId: 'entry-1',
       expectedRevision: 2,
       expectedReorderRevision: 4,
     });
     expect(() => parseQueueEntrySteerCommandRequest({
       clientRequestId: 'request-steer-queue',
-      clientMessageId: 'message-steer-queue',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       entryId: 'entry-1',
       expectedRevision: 0,
       expectedReorderRevision: 0,
     })).toThrow('expectedRevision must be a positive integer');
     expect(() => parseQueueEntrySteerCommandRequest({
       clientRequestId: 'request-steer-queue',
-      clientMessageId: 'message-steer-queue',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       entryId: 'entry-1',
       expectedRevision: 1,
       expectedReorderRevision: -1,
@@ -237,6 +244,7 @@ describe('chat command request parsers', () => {
       clientRequestId: 'request-steer',
       clientMessageId: 'message-steer',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       content: 'focus here',
     };
 
@@ -257,8 +265,8 @@ describe('chat command request parsers', () => {
   it('bounds queue entry identities by UTF-8 byte length', () => {
     const base = {
       clientRequestId: 'request-steer-queue',
-      clientMessageId: 'message-steer-queue',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       expectedRevision: 1,
       expectedReorderRevision: 0,
     };
@@ -277,14 +285,18 @@ describe('chat command request parsers', () => {
     })).toThrow(`entryId must be at most ${QUEUE_ENTRY_ID_MAX_BYTES} bytes`);
   });
 
-  it('keeps goal control on its request-only command identity', () => {
+  it('qualifies goal control with logical message and transcript identities', () => {
     expect(parseGoalControlCommandRequest({
       clientRequestId: 'request-goal',
+      clientMessageId: 'message-goal',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       content: '/goal pause',
     })).toEqual({
       clientRequestId: 'request-goal',
+      clientMessageId: 'message-goal',
       chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
       content: '/goal pause',
     });
   });

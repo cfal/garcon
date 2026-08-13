@@ -7,6 +7,7 @@ import type {
   SteerCommandRequest,
   SteerCommandResponse,
 } from '@garcon/common/chat-command-contracts';
+import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
@@ -16,6 +17,11 @@ const MAX_CONTROL_DISPATCH_ATTEMPTS = 3;
 const CONTROL_STATE_RETRY_DELAY_MS = 50;
 
 export interface ChatControlClient {
+  getChatSnapshot(
+    chatId: string,
+    messageLimit: number,
+    signal?: AbortSignal,
+  ): Promise<ChatSnapshotResponse>;
   runChat(
     request: AgentRunCommandRequest,
     signal?: AbortSignal,
@@ -65,10 +71,12 @@ export async function sendChatAsync(
 ): Promise<void> {
   const createId = dependencies.createId ?? crypto.randomUUID;
   const delay = dependencies.delay ?? abortableDelay;
+  const transcriptViewId = await currentTranscriptViewId(client, input.chatId, signal);
   const runRequest: AgentRunCommandRequest = {
     clientRequestId: createId(),
     clientMessageId: createId(),
     chatId: input.chatId,
+    transcriptViewId,
     command: input.content,
   };
   let operation: 'run' | 'steer' = 'run';
@@ -88,6 +96,7 @@ export async function sendChatAsync(
         clientRequestId: createId(),
         clientMessageId: createId(),
         chatId: input.chatId,
+        transcriptViewId,
         content: input.content,
       };
       const response = await client.steerChat(request, signal);
@@ -127,6 +136,22 @@ export async function sendChatAsync(
     3,
     { cause: lastStateFlip },
   );
+}
+
+async function currentTranscriptViewId(
+  client: ChatControlClient,
+  chatId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const snapshot = await client.getChatSnapshot(chatId, 1, signal);
+  if (snapshot.transcript.availability !== 'available') {
+    throw new CliError(
+      'submission',
+      `chat ${chatId} transcript is unavailable; retry after transcript access is restored`,
+      3,
+    );
+  }
+  return snapshot.transcript.transcriptViewId;
 }
 
 export async function stopChat(

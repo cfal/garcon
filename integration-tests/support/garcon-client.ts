@@ -148,9 +148,10 @@ export interface DirectHandoffInput extends DirectRunInput {
 export interface ChatMessagesPage {
   chatId: string;
   messages: TranscriptMessage[];
-  generationId: string;
-  lastSeq: number;
-  pageOldestSeq: number;
+  transcriptViewId: string;
+  lastOrdinal: number;
+  pageOldestOrdinal: number;
+  pageNewestOrdinal: number;
   pendingUserInputs: PendingUserInput[];
   hasMore: boolean;
   limit: number;
@@ -551,8 +552,14 @@ export class GarconTestClient {
     };
   }
 
-  runChat(request: AgentRunCommandRequest): Promise<AgentTurnCommandResponse> {
-    return this.post<AgentTurnCommandResponse>('/api/v1/chats/run', request);
+  async runChat(
+    request: Omit<AgentRunCommandRequest, 'transcriptViewId'>
+      & { transcriptViewId?: string },
+  ): Promise<AgentTurnCommandResponse> {
+    return this.post<AgentTurnCommandResponse>('/api/v1/chats/run', {
+      ...request,
+      transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
+    });
   }
 
   runDirectChat(input: DirectRunInput): Promise<CommandAcceptedResponse> {
@@ -586,7 +593,7 @@ export class GarconTestClient {
     });
   }
 
-  directRunRequest(input: DirectRunInput): AgentRunCommandRequest {
+  directRunRequest(input: DirectRunInput): Omit<AgentRunCommandRequest, 'transcriptViewId'> {
     return {
       clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
       clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
@@ -686,24 +693,47 @@ export class GarconTestClient {
     return this.post<MarkChatsReadResponse>('/api/v1/chats/read', request);
   }
 
-  enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
-    return this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', request);
+  async enqueue(
+    request: Omit<QueueEntryCreateCommandRequest, 'transcriptViewId' | 'clientMessageId'>
+      & { transcriptViewId?: string; clientMessageId?: string },
+  ): Promise<QueueEntryCommandResponse> {
+    return this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', {
+      ...request,
+      clientMessageId: request.clientMessageId ?? crypto.randomUUID(),
+      transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
+    });
   }
 
   submitGoalControl(request: GoalControlCommandRequest): Promise<GoalControlCommandResponse> {
     return this.post<GoalControlCommandResponse>('/api/v1/chats/goal-control', request);
   }
 
-  steer(request: SteerCommandRequest): Promise<SteerCommandResponse> {
-    return this.post<SteerCommandResponse>('/api/v1/chats/steer', request);
+  async steer(
+    request: Omit<SteerCommandRequest, 'transcriptViewId'> & { transcriptViewId?: string },
+  ): Promise<SteerCommandResponse> {
+    return this.post<SteerCommandResponse>('/api/v1/chats/steer', {
+      ...request,
+      transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
+    });
   }
 
-  steerQueued(request: QueueEntrySteerCommandRequest): Promise<QueueEntrySteerCommandResponse> {
-    return this.post<QueueEntrySteerCommandResponse>('/api/v1/chats/queue/entries/steer', request);
+  async steerQueued(
+    request: Omit<QueueEntrySteerCommandRequest, 'transcriptViewId'>
+      & { transcriptViewId?: string; clientMessageId?: string },
+  ): Promise<QueueEntrySteerCommandResponse> {
+    const { clientMessageId: _legacyClientMessageId, ...command } = request;
+    return this.post<QueueEntrySteerCommandResponse>('/api/v1/chats/queue/entries/steer', {
+      ...command,
+      transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
+    });
   }
 
   enqueueNew(chatId: string, content: string): Promise<QueueEntryCommandResponse> {
     return this.enqueue({ chatId, content, clientRequestId: crypto.randomUUID() });
+  }
+
+  async #currentTranscriptViewId(chatId: string): Promise<string> {
+    return (await this.getMessages(chatId, { limit: 1 })).transcriptViewId;
   }
 
   replaceQueued(request: QueueEntryReplaceCommandRequest): Promise<QueueEntryCommandResponse> {
@@ -747,12 +777,16 @@ export class GarconTestClient {
     return control;
   }
 
-  async getMessages(chatId: string, options: { limit?: number; beforeSeq?: number } = {}): Promise<ChatMessagesPage> {
+  async getMessages(
+    chatId: string,
+    options: { limit?: number; beforeOrdinal?: number; beforeSeq?: number } = {},
+  ): Promise<ChatMessagesPage> {
     const query = new URLSearchParams({
       chatId,
       limit: String(options.limit ?? 100),
     });
-    if (options.beforeSeq !== undefined) query.set('beforeSeq', String(options.beforeSeq));
+    const beforeOrdinal = options.beforeOrdinal ?? options.beforeSeq;
+    if (beforeOrdinal !== undefined) query.set('beforeOrdinal', String(beforeOrdinal));
     const response = await this.get<Record<string, unknown>>(`/api/v1/chats/messages?${query}`);
     const historyState = response.historyState as { kind?: unknown } | undefined;
     if (historyState && historyState.kind !== 'complete') {
@@ -774,9 +808,10 @@ export class GarconTestClient {
     return {
       chatId: requiredString(response.chatId, 'chatId'),
       messages,
-      generationId: requiredString(response.generationId, 'generationId'),
-      lastSeq: nonNegativeInteger(response.lastSeq, 'lastSeq'),
-      pageOldestSeq: nonNegativeInteger(response.pageOldestSeq, 'pageOldestSeq'),
+      transcriptViewId: requiredString(response.transcriptViewId, 'transcriptViewId'),
+      lastOrdinal: nonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
+      pageOldestOrdinal: nonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
+      pageNewestOrdinal: nonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
       pendingUserInputs: pendingUserInputs as PendingUserInput[],
       hasMore: response.hasMore,
       limit: positiveInteger(response.limit, 'limit'),

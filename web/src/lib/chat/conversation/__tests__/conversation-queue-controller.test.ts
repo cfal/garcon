@@ -36,6 +36,7 @@ function createHarness() {
 		clearLocalNotices: vi.fn(),
 		appendLocalNotice: vi.fn(),
 		loadMessages: vi.fn(async () => []),
+		getCursor: vi.fn(() => ({ transcriptViewId: 'view-1', lastOrdinal: 0 })),
 		upsertPendingUserInput: vi.fn(),
 	};
 	const composerState = {
@@ -52,7 +53,7 @@ function createHarness() {
 	const acceptedInputs = {
 		enqueue: vi.fn(() => ({
 			clientRequestId: 'request-1',
-			clientMessageId: undefined,
+			clientMessageId: 'message-1',
 			submit: vi.fn(async () => ({
 				success: true as const,
 				commandType: 'queue-entry-create',
@@ -320,6 +321,7 @@ describe('ConversationQueueController', () => {
 
 		expect(acceptedInputs.steerQueuedEntry).toHaveBeenCalledWith({
 			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			entryId: 'entry-head',
 			expectedRevision: 3,
 			expectedReorderRevision: 7,

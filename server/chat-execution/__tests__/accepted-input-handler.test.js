@@ -52,6 +52,7 @@ function queueSteerInput(overrides = {}) {
     content: 'observed queue content',
     providerContent: 'observed queue content\n\nresolved context',
     clientMessageId: 'message-steer',
+    transcriptViewId: 'view-1',
     target: { attempt: {}, identity: { turnId: 'turn-current' }, providerTarget: null },
     expectedRevision: 2,
     expectedReorderRevision: 4,
@@ -323,6 +324,8 @@ describe('AcceptedInputHandler', () => {
     await expect(handler.deliverGoalControl({
       command: command(),
       content: 'interrupt',
+      clientMessageId: 'message-goal',
+      transcriptViewId: 'view-1',
       settlement: settle,
     })).rejects.toBeInstanceOf(GoalControlDeliveryError);
 
@@ -337,7 +340,8 @@ describe('AcceptedInputHandler', () => {
       { key: 'command-1', entryId: 'entry-1' },
       {
         clientRequestId: 'request-1',
-        clientMessageId: 'entry-1',
+        clientMessageId: 'message-goal',
+        transcriptViewId: 'view-1',
         turnId: 'turn-1',
       },
     );
@@ -371,6 +375,8 @@ describe('AcceptedInputHandler', () => {
     await expect(handler.deliverGoalControl({
       command: command(),
       content: 'steer',
+      clientMessageId: 'message-goal',
+      transcriptViewId: 'view-1',
       settlement: settle,
     })).resolves.toMatchObject({ delivery: 'active' });
 
@@ -395,7 +401,7 @@ describe('AcceptedInputHandler', () => {
       ) => {
         await beforeDelivery('turn-current');
         events.push('delivered');
-        return { turnId: 'turn-current' };
+        return { turnId: 'turn-current', duplicate: false };
       }),
     });
 
@@ -404,9 +410,10 @@ describe('AcceptedInputHandler', () => {
       content: 'focus here',
       providerContent: 'focus here\n\nresolved context',
       clientMessageId: 'message-steer',
+      transcriptViewId: 'view-1',
       target: { attempt: {}, identity: { turnId: 'turn-current' } },
       settlement: settle,
-    })).resolves.toEqual({ turnId: 'turn-current' });
+    })).resolves.toEqual({ turnId: 'turn-current', duplicate: false });
 
     expect(events).toEqual(['scheduled', 'delivered', 'settled']);
     expect(m.steer).toHaveBeenCalledWith(
@@ -448,13 +455,11 @@ describe('AcceptedInputHandler', () => {
         _options,
         _target,
         beforeDelivery,
-        notSentDisposition,
       ) => {
         expect(content).toBe('authoritative queue content');
-        expect(notSentDisposition).toBe('queue-handler-settles');
         await beforeDelivery('turn-current');
         events.push('delivered');
-        return { turnId: 'turn-current' };
+        return { turnId: 'turn-current', duplicate: false };
       }),
       consumeSteer: mock(async () => {
         events.push('consumed');
@@ -464,7 +469,7 @@ describe('AcceptedInputHandler', () => {
     });
 
     await expect(handler.steerQueueEntry(queueSteerInput({ settlement: settle }))).resolves
-      .toEqual({ turnId: 'turn-current', control: control() });
+      .toEqual({ turnId: 'turn-current', duplicate: false, control: control() });
 
     expect(events).toEqual(['reserved', 'scheduled', 'delivered', 'consumed', 'drain', 'settled']);
     expect(m.releaseSteer).not.toHaveBeenCalled();
