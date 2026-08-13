@@ -33,5 +33,11 @@ export interface AppendedChatViewMessages {
   generationId: string;
   messages: ChatViewMessage[];
   lastSeq: number;
+  pendingNativeUserPosition?: PendingNativeUserPosition;
   skipped?: boolean;
+}
+
+export interface PendingNativeUserPosition {
+  previousNativeUserSourceKey: string | null;
+  userOffset: number;
 }

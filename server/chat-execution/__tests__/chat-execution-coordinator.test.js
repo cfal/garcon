@@ -31,6 +31,7 @@ function createPendingInputs() {
     discard: mock(() => true),
     markFailed: mock(() => true),
     markUnconfirmed: mock(() => true),
+    bindNativeUserPosition: mock(() => true),
   };
 }
 
@@ -658,6 +659,7 @@ describe('orchestration', () => {
       discard: mock(() => true),
       markFailed: mock(() => true),
       markUnconfirmed: mock(() => true),
+      bindNativeUserPosition: mock(() => true),
     };
     mockChatMessages = createChatMessages();
     mockDrainOptions = mock(() => ({
@@ -1173,6 +1175,28 @@ describe('orchestration', () => {
         metadata: { clientRequestId: 'req-1', turnId: 'turn-1' },
       });
       expect(batches[0].messages[0].message.content).toBe('hello');
+    });
+
+    it('binds the accepted input to its structural native position', async () => {
+      const pendingNativeUserPosition = {
+        previousNativeUserSourceKey: 'native-user-1',
+        userOffset: 2,
+      };
+      mockChatMessages.appendMessages.mockResolvedValueOnce({
+        generationId: 'generation-1',
+        messages: [],
+        pendingNativeUserPosition,
+      });
+
+      await orchQueue.registerPendingUserInput('c1', 'same prompt', {
+        clientRequestId: 'request-2',
+      });
+
+      expect(mockPendingInputs.bindNativeUserPosition).toHaveBeenCalledWith(
+        'c1',
+        'request-2',
+        pendingNativeUserPosition,
+      );
     });
 
     it('does not emit an empty chat message batch for an idempotent append', async () => {

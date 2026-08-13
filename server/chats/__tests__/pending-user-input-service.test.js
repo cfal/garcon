@@ -3,6 +3,11 @@ import { PendingUserInputService } from '../pending-user-input-service.js';
 import { ChatViewStore } from '../chat-view-store.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from '../../agents/shared/native-message-source.js';
+import { NativeUserIdentityRegistry } from '../native-user-identity-registry.js';
+import {
   historyPage,
   snapshotLoader,
   transcriptLoader,
@@ -26,6 +31,83 @@ function deferred() {
 }
 
 describe('PendingUserInputService', () => {
+  it('settles repeated identical prompts by structural native position', async () => {
+    const sourcedUser = (entryId, content) => attachNativeMessageSource(
+      new UserMessage('2026-06-01T00:00:00.000Z', content),
+      { entryId, withinSourceOrdinal: 0 },
+    );
+    const nativeMessages = [
+      sourcedUser('native-user-1', 'previous'),
+      sourcedUser('native-user-2', 'repeat'),
+      sourcedUser('native-user-3', 'repeat'),
+    ];
+    const identities = new NativeUserIdentityRegistry();
+    const service = new PendingUserInputService({
+      loadNativeMessages: async () => nativeMessages,
+      getRetainedHistoryMessages: () => [],
+    }, identities);
+    const previousNativeUserSourceKey = JSON.stringify([
+      'native-entry',
+      'native-user-1',
+      0,
+    ]);
+    await service.register('chat-1', 'repeat', {
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    });
+    service.bindNativeUserPosition('chat-1', 'request-1', {
+      previousNativeUserSourceKey,
+      userOffset: 1,
+    });
+    await service.register('chat-1', 'repeat', {
+      clientRequestId: 'request-2',
+      clientMessageId: 'message-2',
+      turnId: 'turn-2',
+    });
+    service.bindNativeUserPosition('chat-1', 'request-2', {
+      previousNativeUserSourceKey,
+      userOffset: 2,
+    });
+
+    await service.reconcileNativeHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+    const identified = identities.apply('chat-1', nativeMessages);
+    expect(identified.map((message) => ({
+      source: getNativeMessageRevisionSource(message)?.entryId,
+      clientRequestId: message.metadata?.clientRequestId,
+      upstreamRequestId: message.metadata?.upstreamRequestId,
+    }))).toEqual([
+      { source: 'native-user-1', clientRequestId: undefined, upstreamRequestId: undefined },
+      { source: 'native-user-2', clientRequestId: 'request-1', upstreamRequestId: 'message-1' },
+      { source: 'native-user-3', clientRequestId: 'request-2', upstreamRequestId: 'message-2' },
+    ]);
+  });
+
+  it('does not resolve a first-user position from an incomplete native tail', async () => {
+    const nativeUser = attachNativeMessageSource(
+      new UserMessage('2026-06-01T00:00:00.000Z', 'repeat'),
+      { entryId: 'native-user-tail', withinSourceOrdinal: 0 },
+    );
+    const identities = new NativeUserIdentityRegistry();
+    const service = new PendingUserInputService({
+      loadNativeMessages: async () => [nativeUser],
+      getRetainedHistoryMessages: () => [nativeUser],
+      hasCompleteHistory: () => false,
+    }, identities);
+    await service.register('chat-1', 'repeat', { clientRequestId: 'request-1' });
+    service.bindNativeUserPosition('chat-1', 'request-1', {
+      previousNativeUserSourceKey: null,
+      userOffset: 1,
+    });
+
+    await service.reconcileRetainedHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toHaveLength(1);
+    expect(identities.apply('chat-1', [nativeUser])[0].metadata).toBeUndefined();
+  });
+
   it('classifies pending delivery lifecycle for chat idleness', async () => {
     const service = new PendingUserInputService(createReader());
 

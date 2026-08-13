@@ -49,6 +49,7 @@ import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
+import { NativeUserIdentityRegistry } from './chats/native-user-identity-registry.js';
 import { AgentRegistry } from './agents/index.js';
 import { renderCarriedContext } from '@garcon/common/transcript-seed';
 import { CarryOverCompactionService } from './chats/carryover-compaction.js';
@@ -352,10 +353,12 @@ export async function startServer(): Promise<void> {
     });
     const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
     chatViewPruneTimer.unref();
+    const nativeUserIdentities = new NativeUserIdentityRegistry();
     const transcripts = new OrderedChatTranscriptReader({
       registry: chatRegistry,
       agents: agentRegistry,
       carryOver,
+      nativeUserIdentities,
     });
     const loadChatSnapshot = (chatId: string) => transcripts.loadAll(chatId);
     const loadChatMessages = async (chatId: string) => (await loadChatSnapshot(chatId)).messages;
@@ -496,7 +499,10 @@ export async function startServer(): Promise<void> {
         );
       },
     };
-    const pendingInputs = new PendingUserInputService(chatMessageReader);
+    const pendingInputs = new PendingUserInputService(
+      chatMessageReader,
+      nativeUserIdentities,
+    );
     const handoffs = new AgentHandoffService({
       registry: chatRegistry,
       integrations: integrationRegistry,

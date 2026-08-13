@@ -38,7 +38,7 @@ export class AcceptedInputTranscript {
     const deliveryStatus = options.deliveryStatus ?? 'accepted';
     const images = normalizeChatImages(options.images);
     let clientRequestId: string | undefined;
-    let appended: { generationId: string; messages: ChatViewMessage[] };
+    let appended: Awaited<ReturnType<ChatMessagesPort['appendMessages']>>;
     try {
       const registered = await this.pendingInputs.register(chatId, content, {
         clientRequestId: options.clientRequestId,
@@ -61,6 +61,13 @@ export class AcceptedInputTranscript {
           deliveryStatus,
         }),
       ]);
+      if (clientRequestId && appended.pendingNativeUserPosition) {
+        this.pendingInputs.bindNativeUserPosition(
+          chatId,
+          clientRequestId,
+          appended.pendingNativeUserPosition,
+        );
+      }
     } catch (error) {
       if (clientRequestId) this.pendingInputs.discard(chatId, clientRequestId);
       throw error;

@@ -13,11 +13,14 @@ export async function scanCurrentNativeUserEvidence(input: {
   readonly chatId: string;
   readonly reader: PendingInputHistoryReader;
   readonly shouldContinue: () => boolean;
-  readonly acceptEvidence: (messages: UserMessage[]) => void;
+  readonly acceptEvidence: (
+    messages: UserMessage[],
+    includesNativeStart: boolean,
+  ) => void;
 }): Promise<UserMessage[]> {
   if (!input.reader.loadNativeWindow) {
     const messages = nativeUserMessages(await input.reader.loadNativeMessages(input.chatId));
-    input.acceptEvidence(messages);
+    input.acceptEvidence(messages, true);
     return messages;
   }
   const signal = new AbortController().signal;
@@ -34,7 +37,7 @@ export async function scanCurrentNativeUserEvidence(input: {
     });
     if (window.kind === 'snapshot') {
       messages = nativeUserMessages(window.messages);
-      input.acceptEvidence(messages);
+      input.acceptEvidence(messages, true);
       return messages;
     }
     if ((nativeRevision !== null && nativeRevision !== window.nativeRevision)
@@ -45,8 +48,9 @@ export async function scanCurrentNativeUserEvidence(input: {
     nativeRevision = window.nativeRevision;
     totalNativeMessages = window.totalNativeMessages;
     messages = [...nativeUserMessages(window.messages), ...messages];
-    input.acceptEvidence(messages);
     offsetFromNewest += window.messages.length;
+    const includesNativeStart = offsetFromNewest >= window.totalNativeMessages;
+    input.acceptEvidence(messages, includesNativeStart);
     if (offsetFromNewest >= window.totalNativeMessages) return messages;
     if (window.messages.length === 0) {
       throw new Error('Native transcript paging stopped before reaching its beginning');

@@ -6,10 +6,13 @@ import type {
 } from '../../common/pending-user-input.js';
 import { errorMessage } from '../lib/errors.ts';
 import { createLogger } from '../lib/log.ts';
+import type { PendingNativeUserPosition } from './chat-view-contracts.ts';
 
 const logger = createLogger('pending-user-input-store');
 
-export type PendingUserInputRecord = PendingUserInput;
+export interface PendingUserInputRecord extends PendingUserInput {
+  nativeUserPosition?: PendingNativeUserPosition;
+}
 export type PendingUserInputStoreClearReason = PendingUserInputClearReason;
 
 type UpdatedCallback = (input: PendingUserInput) => void;
@@ -100,6 +103,19 @@ export class PendingUserInputStore extends EventEmitter<PendingUserInputEvents> 
         errorMessage(error, 'Unknown delivery-status listener failure'),
       );
     }
+    return true;
+  }
+
+  bindNativeUserPosition(
+    chatId: string,
+    clientRequestId: string,
+    position: PendingNativeUserPosition,
+  ): boolean {
+    const record = this.#recordsByChatId
+      .get(chatId)
+      ?.find((candidate) => candidate.clientRequestId === clientRequestId);
+    if (!record) return false;
+    record.nativeUserPosition = position;
     return true;
   }
 

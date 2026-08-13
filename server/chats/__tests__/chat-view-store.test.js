@@ -100,6 +100,35 @@ describe('ChatViewStore', () => {
     expect(loadNative).toHaveBeenCalledTimes(1);
   });
 
+  it('assigns consecutive native user positions without comparing message content', async () => {
+    const store = new ChatViewStore(() => false);
+    const nativeUser = attachNativeMessageSource(user('same prompt'), {
+      entryId: 'native-user-1',
+      withinSourceOrdinal: 0,
+    });
+    const first = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => [nativeUser]),
+      [user('same prompt', { clientRequestId: 'request-1', deliveryStatus: 'accepted' })],
+    );
+    const second = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => {
+        throw new Error('The existing generation should be reused');
+      }),
+      [user('same prompt', { clientRequestId: 'request-2', deliveryStatus: 'accepted' })],
+    );
+
+    expect(first.pendingNativeUserPosition).toEqual({
+      previousNativeUserSourceKey: JSON.stringify(['native-entry', 'native-user-1', 0]),
+      userOffset: 1,
+    });
+    expect(second.pendingNativeUserPosition).toEqual({
+      previousNativeUserSourceKey: JSON.stringify(['native-entry', 'native-user-1', 0]),
+      userOffset: 2,
+    });
+  });
+
   it('does not append an optimistic retry over the same durable user identity', async () => {
     const store = new ChatViewStore(() => false);
     const identity = { clientRequestId: 'request-1', turnId: 'turn-1' };

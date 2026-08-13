@@ -11,6 +11,7 @@ import type {
   ChatStopOutcome,
   UserMessageDeliveryStatus,
 } from '../../common/chat-types.ts';
+import type { PendingNativeUserPosition } from '../chats/chat-view-contracts.ts';
 import type { ChatViewMessage } from '../../common/chat-view.ts';
 import type {
   AgentGoalControlHandoff,
@@ -263,6 +264,11 @@ export interface PendingInputsPort {
       deliveryStatus?: UserMessageDeliveryStatus;
     },
   ): Promise<unknown>;
+  bindNativeUserPosition(
+    chatId: string,
+    clientRequestId: string,
+    position: PendingNativeUserPosition,
+  ): boolean;
   discard(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
   markUnconfirmed(chatId: string, clientRequestId: string): boolean;
@@ -272,7 +278,11 @@ export interface ChatMessagesPort {
   appendMessages(
     chatId: string,
     messages: ChatMessage[],
-  ): Promise<{ generationId: string; messages: ChatViewMessage[] }>;
+  ): Promise<{
+    generationId: string;
+    messages: ChatViewMessage[];
+    pendingNativeUserPosition?: PendingNativeUserPosition;
+  }>;
 }
 
 export type ExecutionControlUpdatedCallback = (
