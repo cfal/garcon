@@ -227,7 +227,9 @@ export function waitForGitDiffSyntaxWorkSlot(signal: AbortSignal): Promise<void>
 		const finish = (): void => {
 			if (settled) return;
 			settled = true;
-			if (idleId !== null) cancelIdleCallback(idleId);
+			if (idleId !== null && typeof cancelIdleCallback === 'function') {
+				cancelIdleCallback(idleId);
+			}
 			if (timerId !== null) clearTimeout(timerId);
 			signal.removeEventListener('abort', finish);
 			resolve();

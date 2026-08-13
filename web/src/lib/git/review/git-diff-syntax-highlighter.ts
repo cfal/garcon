@@ -1,5 +1,5 @@
 import { ensureSyntaxTree } from '@codemirror/language';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Text } from '@codemirror/state';
 import { highlightCode } from '@lezer/highlight';
 
 import { codeTagHighlighter } from '$lib/highlighting/codemirror-code-highlighter.js';
@@ -51,9 +51,12 @@ export function highlightGitDiffSyntheticSide(
 	loaded: LoadedCodeMirrorLanguage,
 ): GitDiffSyntaxSideAttempt {
 	const editorState = EditorState.create({
-		doc: side.text,
+		doc: Text.of(side.lines.map((line) => line.text)),
 		extensions: loaded.language.extension,
 	});
+	if (editorState.doc.length !== side.text.length) {
+		return { status: 'plain', reason: 'invalid-segment-text' };
+	}
 	const parseSpan = startGitReviewPerformanceSpan('syntax-parse');
 	let tree;
 	try {

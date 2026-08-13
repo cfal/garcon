@@ -252,6 +252,31 @@ describe('Git diff syntax highlighting', () => {
 		).toBe(true);
 	});
 
+	it('keeps syntax offsets aligned with CRLF source lines', async () => {
+		const patch =
+			'@@ -1,3 +1,3 @@\n function example() {\r\n-\tconst oldValue = 1;\r\n+\tconst newValue = 2;\r\n }\r\n';
+		const side = buildGitDiffSyntheticSides(body('example.ts', patch)).sides.after;
+		const loaded = await loadCodeMirrorLanguageForFile('example.ts');
+		expect(side).not.toBeNull();
+		expect(loaded).not.toBeNull();
+		if (!side || !loaded) return;
+		loaded.language.parser.parse(side.text);
+
+		const result = highlightGitDiffSyntheticSide(side, 'example.ts', loaded);
+
+		expect(result.status).toBe('highlighted');
+		if (result.status !== 'highlighted') return;
+		expect(
+			result.result.lines.get(2)?.find((segment) => segment.className === 'cm-code-keyword')?.text,
+		).toBe('const');
+		expect(
+			result.result.lines
+				.get(2)
+				?.map((segment) => segment.text)
+				.join(''),
+		).toBe('\tconst newValue = 2;\r');
+	});
+
 	it('loads distinct before and after languages for a rename', async () => {
 		const fileValue = file('src/after.py', { originalPath: 'src/before.js' });
 		const bodyValue = body(fileValue.path, PATCH, { bodyFingerprint: fileValue.bodyFingerprint });
@@ -451,5 +476,19 @@ describe('Git diff syntax work slots', () => {
 
 		await expect(pending).resolves.toBeUndefined();
 		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('does not require cancelIdleCallback when idle scheduling is available', async () => {
+		let idleCallback!: IdleRequestCallback;
+		vi.stubGlobal('requestIdleCallback', (callback: IdleRequestCallback) => {
+			idleCallback = callback;
+			return 1;
+		});
+		vi.stubGlobal('cancelIdleCallback', undefined);
+		const pending = waitForGitDiffSyntaxWorkSlot(new AbortController().signal);
+
+		expect(() => idleCallback({ didTimeout: false, timeRemaining: () => 50 })).not.toThrow();
+
+		await expect(pending).resolves.toBeUndefined();
 	});
 });
