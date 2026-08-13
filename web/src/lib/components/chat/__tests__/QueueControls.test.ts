@@ -35,7 +35,6 @@ function manualPause(id = 'pause-1'): QueuePause {
 function makeQueue(count: number, pause: QueuePause | null = null): ChatQueueState {
 	return {
 		entries: Array.from({ length: count }, (_, index) => makeEntry(index)),
-		dispatchingEntryId: null,
 		steeringEntryId: null,
 		recentlyDispatched: [],
 		pause: count > 0 ? pause : null,

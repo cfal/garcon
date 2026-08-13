@@ -581,6 +581,7 @@ export default function createChatRoutes({
         pageOldestOrdinal: page.pageOldestOrdinal,
         pageNewestOrdinal: page.pageNewestOrdinal,
         hasMore: page.hasMore,
+        resendCandidates: [...agents.resendCandidates(chatId)],
         limit,
         pendingUserInputs: pendingInputs.listForTransport(chatId),
       } satisfies CompleteChatHistoryResponse);

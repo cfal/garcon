@@ -74,7 +74,6 @@ export interface AcceptedInputCoordinator {
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
   ): Promise<AcceptedSteerOutcome>;
-  hasAppliedCreate(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
 }
 
 export interface AcceptedInputDeps {
@@ -103,6 +102,9 @@ export class AcceptedInputHandler {
         {
           clientMessageId: input.clientMessageId,
           transcriptViewId: input.transcriptViewId,
+          ...(input.excludedResendOrdinals?.length
+            ? { excludedResendOrdinals: [...input.excludedResendOrdinals] }
+            : {}),
         },
       );
       await input.settlement.settleQueueMutation(input.command, result.entryId);
@@ -261,24 +263,10 @@ export class AcceptedInputHandler {
         input.command.chatId,
         input.content,
         delivery,
-        async () => {
-          await this.#controls.stageGoalControlFallback(
-            input.command.chatId,
-            input.content,
-            { key: input.command.key, entryId: input.command.entryId },
-            delivery,
-          );
-          try {
-            await input.settlement.markScheduled(input.command, turnId);
-          } catch (error) {
-            await this.#controls.removeSent(input.command.chatId, input.command.entryId);
-            throw error;
-          }
-        },
+        () => input.settlement.markScheduled(input.command, turnId),
       );
       if (delivered) {
         deliveryAccepted = true;
-        await this.#controls.removeSent(input.command.chatId, input.command.entryId);
         await input.settlement.settleGoalControl(input.command);
         return { delivery: 'active', control: await this.#controls.read(input.command.chatId) };
       }
@@ -553,32 +541,6 @@ export class AcceptedInputHandler {
 
   #isMissingSession(error: unknown): boolean {
     return error instanceof DomainError && error.code === 'SESSION_NOT_FOUND';
-  }
-
-  async recoverGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome> {
-    const applied = await this.#coordinator.hasAppliedCreate(
-      input.command.chatId,
-      input.command.key,
-      input.command.entryId,
-    );
-    if (!applied) {
-      throw new DomainError(
-        'INTERNAL_ERROR',
-        'The previous goal-control delivery did not reach a recorded outcome',
-        409,
-      );
-    }
-    const control = await this.#controls.returnUnsent(
-      input.command.chatId,
-      input.command.entryId,
-    );
-    await input.settlement.settleQueueMutation(input.command, input.command.entryId);
-    this.#coordinator.requestDrain(input.command.chatId, 'recovered goal-control fallback');
-    return {
-      delivery: 'queued',
-      entryId: input.command.entryId,
-      control,
-    };
   }
 
   async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation | null> {

@@ -2,6 +2,7 @@ import {
 	applyTranscriptAppend,
 	isUnavailableChatHistoryResponse,
 	type ChatHistoryState,
+	type ResendCandidate,
 	type TranscriptAppend,
 	type TranscriptMessage,
 	type TranscriptPage,
@@ -58,6 +59,7 @@ type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>
 type SnapshotBatch = Pick<TranscriptAppend, 'firstOrdinal' | 'lastOrdinal' | 'messages'> & {
 	transcriptViewId: string;
 	noticeRevision: number;
+	resendCandidates: ResendCandidate[];
 };
 export type MessageApplyResult = 'applied' | 'view-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
@@ -70,6 +72,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
 	activeChatId = $state<string | null>(null);
 	entries = $state<TranscriptMessage[]>([]);
+	#resendCandidates = $state<ResendCandidate[]>([]);
+	#excludedResendOrdinals = $state<number[]>([]);
 	transcriptViewId = $state('');
 	windowRevision = $state(0);
 	lastOrdinal = $state(0);
@@ -113,6 +117,38 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	get pendingUserInputs(): PendingUserInput[] {
 		return this.#pendingInputs.rows;
+	}
+
+	get resendCandidates(): readonly ResendCandidate[] {
+		const excluded = new Set(this.#excludedResendOrdinals);
+		return this.#resendCandidates.filter((candidate) => !excluded.has(candidate.ordinal));
+	}
+
+	get excludedResendOrdinals(): readonly number[] {
+		return this.#excludedResendOrdinals;
+	}
+
+	setResendCandidates(candidates: readonly ResendCandidate[]): void {
+		this.#resendCandidates = candidates.map((candidate) => ({
+			...candidate,
+			attachmentNames: [...candidate.attachmentNames],
+		}));
+		const available = new Set(candidates.map((candidate) => candidate.ordinal));
+		this.#excludedResendOrdinals = this.#excludedResendOrdinals.filter((ordinal) =>
+			available.has(ordinal),
+		);
+	}
+
+	excludeResendCandidate(ordinal: number): void {
+		if (!this.#resendCandidates.some((candidate) => candidate.ordinal === ordinal)) return;
+		if (this.#excludedResendOrdinals.includes(ordinal)) return;
+		this.#excludedResendOrdinals = [...this.#excludedResendOrdinals, ordinal].sort(
+			(left, right) => left - right,
+		);
+	}
+
+	clearResendExclusions(): void {
+		this.#excludedResendOrdinals = [];
 	}
 
 	#renderEntries = $derived.by(() =>
@@ -261,6 +297,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		messages: TranscriptMessage[],
 		firstOrdinal: number,
 		lastOrdinal: number,
+		resendCandidates: ResendCandidate[] = [...this.#resendCandidates],
 		noticeRevision = this.#notices.revision,
 	): MessageApplyResult {
 		if (this.historyState.kind !== 'complete') {
@@ -271,7 +308,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const append = { firstOrdinal, lastOrdinal, messages };
 		if (this.#snapshotBuffer) {
 			this.transcriptCache.applyMessages(chatId, transcriptViewId, append);
-			this.#snapshotBuffer.push({ transcriptViewId, ...append, noticeRevision });
+			this.#snapshotBuffer.push({
+				transcriptViewId,
+				...append,
+				noticeRevision,
+				resendCandidates,
+			});
 			return 'applied';
 		}
 		if (this.transcriptViewId && transcriptViewId !== this.transcriptViewId) {
@@ -313,6 +355,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (result.changed || cursorAdvanced) {
 				this.#recordFeedMutation('live-append', responseMessageTypes);
 			}
+			this.setResendCandidates(resendCandidates);
 			return 'applied';
 		}
 		const applied = applyTranscriptAppend(this.entries, append, this.lastOrdinal);
@@ -362,6 +405,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (entriesChanged) {
 			this.#recordFeedMutation('live-append', responseMessageTypes);
 		}
+		this.setResendCandidates(resendCandidates);
 		return 'applied';
 	}
 
@@ -397,6 +441,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				batch.messages,
 				batch.firstOrdinal,
 				batch.lastOrdinal,
+				batch.resendCandidates,
 				batch.noticeRevision,
 			) !== 'applied') break;
 		}
@@ -410,6 +455,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		options: Pick<TranscriptPage, 'lastOrdinal' | 'pageOldestOrdinal' | 'hasMore'> & {
 			pageNewestOrdinal?: number;
 			pendingUserInputs?: PendingUserInput[];
+			resendCandidates?: ResendCandidate[];
 		},
 	): void {
 		const retainedMessages = retainTranscriptEntries(messages, 'later');
@@ -438,6 +484,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasLaterMessages = false;
 		this.totalMessages = retainedMessages.length;
 		this.#pendingInputs.replace(options.pendingUserInputs ?? []);
+		this.setResendCandidates(options.resendCandidates ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.#notices.reset();
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
@@ -456,6 +503,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			pageNewestOrdinal: number;
 			hasMore: boolean;
 			pendingUserInputs: PendingUserInput[];
+			resendCandidates?: ResendCandidate[];
 		},
 		epoch: number,
 	): PageApplyResult {
@@ -492,6 +540,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (this.#pendingInputs.unchangedSinceLoadStart) {
 			this.#pendingInputs.replace(normalizePendingInputs(page.pendingUserInputs));
 		}
+		this.setResendCandidates(page.resendCandidates ?? []);
 		this.clearLocalNotices(this.#notices.revisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
@@ -504,6 +553,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				batch.messages,
 				batch.firstOrdinal,
 				batch.lastOrdinal,
+				batch.resendCandidates,
 				batch.noticeRevision,
 			);
 			if (result !== 'applied') return result;
@@ -804,6 +854,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.oldestOrdinal = 0;
 		this.loadedThroughOrdinal = 0;
 		this.#pendingInputs.replace([]);
+		this.#resendCandidates = [];
+		this.#excludedResendOrdinals = [];
 		this.#notices.reset();
 		this.hasEarlierMessages = false;
 		this.hasLaterMessages = false;

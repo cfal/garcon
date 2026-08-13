@@ -68,9 +68,6 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
     `tags: ${snapshot.chat.tags.length > 0 ? snapshot.chat.tags.join(', ') : 'none'}`,
     `queue: ${snapshot.control.queue.entries.length}`,
   );
-  if (snapshot.control.queue.dispatchingEntryId !== null) {
-    lines.push(`queue dispatching: ${snapshot.control.queue.dispatchingEntryId}`);
-  }
   if (snapshot.control.queue.steeringEntryId !== null) {
     lines.push(`queue steering: ${snapshot.control.queue.steeringEntryId}`);
   }

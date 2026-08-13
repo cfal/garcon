@@ -297,7 +297,9 @@ describe('queue lifecycle', () => {
         expectedTargetRevision: entryB.revision,
       };
       const moved = await fixture.client.moveQueued(moveRequest);
-      expect(moved.control.queue.dispatchingEntryId).toBe(entryB.id);
+      expect(moved.control.queue.recentlyDispatched).toContainEqual(
+        expect.objectContaining({ entryId: entryB.id }),
+      );
       expect(moved.control.queue.entries.map((entry) => entry.content)).toEqual([
         'rebase-d',
         'rebase-c',

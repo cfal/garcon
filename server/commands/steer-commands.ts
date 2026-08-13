@@ -210,7 +210,6 @@ export class SteerCommands {
       : null;
     const clientMessageId = priorClientMessageId
       ?? observedEntry?.submission?.clientMessageId
-      ?? observedEntry?.delivery?.clientMessageId
       ?? entryId;
     const target = initialChat ? this.deps.queue.captureSteerTarget(input.chatId) : null;
     const ledgerInput = {
@@ -624,7 +623,7 @@ function queueObservationErrorCode(
   entryId: string,
 ): 'QUEUE_ENTRY_NOT_FOUND' | 'QUEUE_ENTRY_ALREADY_SENT' | 'QUEUE_ENTRY_IN_FLIGHT' {
   const entry = control.entries.find((candidate) => candidate.id === entryId);
-  if (entry?.status === 'sending' || control.recentlyDispatched.some((item) => item.entryId === entryId)) {
+  if (control.recentlyDispatched.some((item) => item.entryId === entryId)) {
     return 'QUEUE_ENTRY_ALREADY_SENT';
   }
   if (entry?.status === 'steering') return 'QUEUE_ENTRY_IN_FLIGHT';

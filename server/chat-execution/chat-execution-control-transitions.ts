@@ -6,7 +6,6 @@ import {
   cloneStoredChatExecutionControl,
   type StoredAppliedQueueCommand,
   type StoredChatExecutionControlState,
-  type StoredQueueDeliveryIdentity,
   type StoredQueueSubmissionIdentity,
   type StoredQueueEntry,
 } from './control-state.ts';
@@ -51,7 +50,7 @@ export interface QueueMoveMutationValue extends QueueMutationValue {
   rebased: boolean | null;
 }
 
-export interface PoppedQueueEntry {
+export interface DequeuedQueueEntry {
   entry: StoredQueueEntry;
 }
 
@@ -88,7 +87,7 @@ function bump(control: StoredChatExecutionControlState, now: string): void {
 }
 
 function toQueueEntry(entry: StoredQueueEntry): QueueEntry {
-  const { status: _status, delivery: _delivery, submission: _submission, ...clientEntry } = entry;
+  const { status: _status, submission: _submission, ...clientEntry } = entry;
   return { ...clientEntry };
 }
 
@@ -239,7 +238,6 @@ export function replaceQueueEntry(
   entry.content = input.content;
   entry.revision += 1;
   entry.updatedAt = context.now;
-  delete entry.delivery;
   if (input.command) recordAppliedCommand(next, input.command, 'replace', context);
   bump(next, context.now);
   return accepted(next, { entryId: entry.id, entry: toQueueEntry(entry), duplicate: false }, true);
@@ -333,8 +331,7 @@ export function moveQueueEntry(
   const recentlyDispatchedTarget = next.recentlyDispatched.find(
     (entry) => entry.entryId === input.targetEntryId,
   );
-  const targetWasDispatched = target?.status === 'sending'
-    || (!target && recentlyDispatchedTarget !== undefined);
+  const targetWasDispatched = !target && recentlyDispatchedTarget !== undefined;
   if (target && target.revision !== input.expectedTargetRevision) {
     return rejected(current, {
       code: 'QUEUE_ENTRY_REVISION_CONFLICT',
@@ -395,7 +392,7 @@ export function clearQueue(
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
-  next.entries = next.entries.filter((entry) => entry.status === 'sending');
+  next.entries = [];
   next.pause = null;
   delete next.resumePauses;
   bump(next, context.now);
@@ -431,47 +428,30 @@ export function resumeQueue(
   return accepted(next, undefined, true);
 }
 
-export function popNextQueueEntry(
+export function dequeueNextQueueEntry(
   current: StoredChatExecutionControlState,
   context: TransitionContext,
-  input: {
-    entryId?: string;
-    delivery?: StoredQueueDeliveryIdentity;
-  } = {},
-): ControlTransition<PoppedQueueEntry | null> {
+): ControlTransition<DequeuedQueueEntry | null> {
   const next = cloneStoredChatExecutionControl(current);
   if (next.pause) return accepted(next, null, false);
-  if (next.entries.some((entry) => entry.status === 'sending' || entry.status === 'steering')) {
+  if (next.entries.some((entry) => entry.status === 'steering')) {
     return accepted(next, null, false);
   }
   const entry = next.entries.find((candidate) => candidate.status === 'queued');
-  if (!entry || (input.entryId !== undefined && entry.id !== input.entryId)) {
-    return accepted(next, null, false);
-  }
+  if (!entry) return accepted(next, null, false);
 
-  entry.status = 'sending';
-  entry.delivery ??= input.delivery ?? {
-    clientRequestId: context.newId(),
-    clientMessageId: context.newId(),
-    turnId: context.newId(),
-  };
+  next.entries.splice(next.entries.indexOf(entry), 1);
   next.recentlyDispatched = [
     ...next.recentlyDispatched.filter((candidate) => candidate.entryId !== entry.id),
     { entryId: entry.id, revision: entry.revision, dispatchedAt: context.now },
   ].slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
   bump(next, context.now);
-  return accepted(next, { entry: { ...entry, delivery: { ...entry.delivery } } }, true);
-}
-
-export function removeSentQueueEntry(
-  current: StoredChatExecutionControlState,
-  entryId: string,
-  context: TransitionContext,
-): ControlTransition<void> {
-  const next = cloneStoredChatExecutionControl(current);
-  next.entries = next.entries.filter((entry) => entry.id !== entryId);
-  bump(next, context.now);
-  return accepted(next, undefined, true);
+  return accepted(next, {
+    entry: {
+      ...entry,
+      ...(entry.submission ? { submission: { ...entry.submission } } : {}),
+    },
+  }, true);
 }
 
 export function reserveQueueSteer(
@@ -486,9 +466,6 @@ export function reserveQueueSteer(
   const next = cloneStoredChatExecutionControl(current);
   const entry = next.entries.find((candidate) => candidate.id === input.entryId);
   if (!entry) return rejected(current, missingEntryRejection(current, input.entryId));
-  if (entry.status === 'sending') {
-    return rejected(current, { code: 'QUEUE_ENTRY_ALREADY_SENT', entryId: input.entryId });
-  }
   if (entry.status === 'steering' || next.entries.some((candidate) => candidate.status === 'steering')) {
     return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId: input.entryId });
   }
@@ -512,7 +489,7 @@ export function reserveQueueSteer(
   return accepted(next, {
     entry: {
       ...entry,
-      ...(entry.delivery ? { delivery: { ...entry.delivery } } : {}),
+      ...(entry.submission ? { submission: { ...entry.submission } } : {}),
     },
   }, true);
 }
@@ -558,20 +535,6 @@ export function consumeQueueSteer(
   return accepted(next, undefined, true);
 }
 
-export function returnUnsentQueueEntry(
-  current: StoredChatExecutionControlState,
-  entryId: string,
-  context: TransitionContext,
-): ControlTransition<void> {
-  const next = cloneStoredChatExecutionControl(current);
-  const entry = next.entries.find((candidate) => candidate.id === entryId);
-  if (!entry || entry.status !== 'sending') return accepted(next, undefined, false);
-  entry.status = 'queued';
-  next.recentlyDispatched = next.recentlyDispatched.filter((candidate) => candidate.entryId !== entryId);
-  bump(next, context.now);
-  return accepted(next, undefined, true);
-}
-
 export function requeueAndPause(
   current: StoredChatExecutionControlState,
   input: { entryId: string; kind: AutomaticQueuePauseKind },
@@ -599,17 +562,19 @@ export function requeueAndPause(
   return accepted(next, undefined, true);
 }
 
-export function restoreStoppedQueueEntry(
+export function pauseAfterDispatchFailure(
   current: StoredChatExecutionControlState,
   entryId: string,
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
-  const entry = next.entries.find((candidate) => candidate.id === entryId);
-  if (!entry || entry.status !== 'sending') return accepted(next, undefined, false);
-  entry.status = 'queued';
-  next.recentlyDispatched = next.recentlyDispatched.filter((candidate) => candidate.entryId !== entryId);
-  next.pause ??= { id: context.newId(), kind: 'manual', pausedAt: context.now };
+  if (!next.entries.some(isPendingQueueEntry)) return accepted(next, undefined, false);
+  next.pause = {
+    id: context.newId(),
+    kind: 'queued-turn-failed',
+    entryId,
+    pausedAt: context.now,
+  };
   bump(next, context.now);
   return accepted(next, undefined, true);
 }

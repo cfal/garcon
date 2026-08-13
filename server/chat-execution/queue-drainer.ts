@@ -1,45 +1,32 @@
 import crypto from 'crypto';
-import {
-  isAbortAcknowledged,
-  isStopSatisfied,
-  type ChatStopOutcome,
-} from '../../common/chat-types.ts';
-import type { AutomaticQueuePauseKind } from '../../common/queue-state.ts';
+import { isAbortAcknowledged, type ChatStopOutcome } from '../../common/chat-types.ts';
 import type { RunAgentTurnOptions } from '../agents/session-types.ts';
 import type { StoredQueueEntry } from './control-state.ts';
 import { createLogger } from '../lib/log.ts';
-import type { TurnIdentity } from '../lib/turn-identity.ts';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
-import type { QueuedTurnFinalizationHandle } from './turn-finalization-tracker.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type { ExecutionOwnership } from './execution-ownership.ts';
 import {
   executionTurnIdentity,
   type AgentTurnRunnerPort,
-  type PendingInputsPort,
   type QueueDrainOptionsResolver,
 } from './types.ts';
 
 const logger = createLogger('queue-dispatch');
 
-// Exposes coordinator-owned effects that the drain loop cannot perform through
-// its ownership, controls, turn runner, or pending-input collaborators.
 export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
-  registerPending(chatId: string, content: string, options: RunAgentTurnOptions): Promise<boolean>;
-  publishDispatching(chatId: string, entry: StoredQueueEntry): void;
+  registerQueued(chatId: string, content: string, options: RunAgentTurnOptions): boolean;
   publishIdle(chatId: string): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
   settleAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
   stopBarrier(chatId: string): Promise<ChatStopOutcome> | null;
-  removeSent(chatId: string, entryId: string): Promise<unknown>;
 }
 
 export interface QueueDispatchDeps {
   ownership: ExecutionOwnership;
   controls: ChatExecutionControlOperations;
   turnRunner: AgentTurnRunnerPort;
-  pendingInputs: PendingInputsPort;
   getDrainOptions: QueueDrainOptionsResolver;
   callbacks: QueueDispatchCallbacks;
 }
@@ -48,180 +35,104 @@ function optionsForQueuedTurn(
   options: RunAgentTurnOptions,
   entry: StoredQueueEntry,
 ): RunAgentTurnOptions & { createdAt: string } {
-  const delivery = entry.delivery ?? {
+  return {
+    ...options,
     clientRequestId: crypto.randomUUID(),
     clientMessageId: entry.submission?.clientMessageId ?? crypto.randomUUID(),
     turnId: crypto.randomUUID(),
-  };
-  // The entry's creation time anchors the admitted message so a retry of the
-  // same delivery identity is idempotent rather than a payload conflict.
-  return {
-    ...options,
-    ...delivery,
     ...(entry.submission ? { transcriptViewId: entry.submission.transcriptViewId } : {}),
+    ...(entry.submission?.excludedResendOrdinals?.length
+      ? { excludedResendOrdinals: [...entry.submission.excludedResendOrdinals] }
+      : {}),
     createdAt: entry.createdAt,
   };
 }
 
 export class QueueDrainer {
-  readonly #ownership: ExecutionOwnership;
-  readonly #controls: ChatExecutionControlOperations;
-  readonly #turnRunner: AgentTurnRunnerPort;
-  readonly #pendingInputs: PendingInputsPort;
-  readonly #getDrainOptions: QueueDrainOptionsResolver;
-  readonly #callbacks: QueueDispatchCallbacks;
-
-  constructor(deps: QueueDispatchDeps) {
-    this.#ownership = deps.ownership;
-    this.#controls = deps.controls;
-    this.#turnRunner = deps.turnRunner;
-    this.#pendingInputs = deps.pendingInputs;
-    this.#getDrainOptions = deps.getDrainOptions;
-    this.#callbacks = deps.callbacks;
-  }
+  constructor(private readonly deps: QueueDispatchDeps) {}
 
   #shouldHalt(chatId: string): boolean {
-    return this.#callbacks.isShuttingDown()
-      || this.#ownership.hasSuppression(chatId, 'abort')
-      || this.#ownership.hasSuppression(chatId, 'deletion')
-      || this.#ownership.hasSuppression(chatId, 'manual-stop')
-      || this.#ownership.hasDirect(chatId)
-      || this.#ownership.stop(chatId) !== undefined
-      || this.#turnRunner.isChatRunning(chatId);
-  }
-
-  #hasManualStop(chatId: string): boolean {
-    return this.#ownership.hasSuppression(chatId, 'manual-stop');
+    const { ownership, turnRunner, callbacks } = this.deps;
+    return callbacks.isShuttingDown()
+      || ownership.hasSuppression(chatId, 'abort')
+      || ownership.hasSuppression(chatId, 'deletion')
+      || ownership.hasSuppression(chatId, 'manual-stop')
+      || ownership.hasDirect(chatId)
+      || ownership.stop(chatId) !== undefined
+      || turnRunner.isChatRunning(chatId);
   }
 
   async run(chatId: string): Promise<void> {
+    const { ownership, controls, callbacks } = this.deps;
     while (!this.#shouldHalt(chatId)) {
-      const lingering = this.#ownership.attempt(chatId);
+      const lingering = ownership.attempt(chatId);
       if (lingering) {
-        // A completed provider call retires only at its ordered terminal
-        // frontier, so queued admission stays fenced until that turn settles.
-        // With nothing left to dispatch the drain exits instead; the terminal
-        // path re-triggers it through checkChatIdle.
-        const control = await this.#controls.read(chatId);
-        if (!control.entries.some((entry) => (
-          entry.status === 'queued' || entry.status === 'sending' || entry.status === 'steering'
-        ))) {
-          return;
-        }
+        const control = await controls.read(chatId);
+        if (control.entries.length === 0) return;
         await lingering.waitUntilSettled();
         continue;
       }
-      const result = await this.#controls.pop(chatId);
+
+      let options: RunAgentTurnOptions | undefined;
+      const result = await controls.dequeue(chatId, (entry) => {
+        options = optionsForQueuedTurn(this.deps.getDrainOptions(chatId), entry);
+        return callbacks.registerQueued(chatId, entry.content, options);
+      });
       if (!result) {
-        const control = await this.#controls.read(chatId);
-        if (!control.entries.some((entry) => (
-          entry.status === 'queued' || entry.status === 'sending' || entry.status === 'steering'
-        ))) {
-          this.#callbacks.publishIdle(chatId);
-        }
+        const control = await controls.read(chatId);
+        if (control.entries.length === 0) callbacks.publishIdle(chatId);
+        return;
+      }
+      if (!options) throw new Error('Queued input admission did not produce dispatch options');
+      if (!result.inserted) continue;
+
+      const turn = executionTurnIdentity(options)!;
+      const attempt = new QueueExecutionAttempt(turn, result.entry.id);
+      attempt.markRegistered();
+      ownership.installAttempt(chatId, attempt);
+      ownership.beginFinalization(chatId, turn.turnId!).settle('committed');
+      ownership.setActiveDrainEntry(chatId, result.entry.id);
+
+      if (callbacks.isShuttingDown()) {
+        attempt.markRunSettled();
+        attempt.markTerminalObserved();
+        callbacks.settleAttempt(chatId, attempt);
         return;
       }
 
-      const { entry } = result;
-      this.#ownership.setActiveDrainEntry(chatId, entry.id);
-      if (this.#callbacks.isShuttingDown()) {
-        await this.#controls.returnUnsent(chatId, entry.id);
-        return;
-      }
-      if (this.#hasManualStop(chatId)) {
-        await this.#controls.restoreStopped(chatId, entry.id);
-        return;
-      }
-      const stop = this.#callbacks.stopBarrier(chatId);
-      if (stop) {
-        const outcome = await stop.catch((): ChatStopOutcome => 'failed');
-        if (this.#hasManualStop(chatId)) {
-          await this.#controls.restoreStopped(chatId, entry.id);
-          return;
-        }
-        if (!isStopSatisfied(outcome)) {
-          await this.#controls.returnUnsent(chatId, entry.id);
-          return;
-        }
-      }
-      const shouldContinue = await this.#dispatchEntry(chatId, entry);
+      attempt.markLaunching();
+      const shouldContinue = await this.#runEntry(chatId, result.entry, options, attempt);
       if (!shouldContinue) return;
     }
   }
 
-  async #dispatchEntry(chatId: string, entry: StoredQueueEntry): Promise<boolean> {
-    let options: RunAgentTurnOptions = {};
-    let stage: 'preparing' | 'running' | 'finalizing' = 'preparing';
-    let attempt: QueueExecutionAttempt | undefined;
-    let finalization: QueuedTurnFinalizationHandle | undefined;
-    let executionStarted = false;
-    const admissionController = new AbortController();
-    this.#ownership.setDrainAdmission(chatId, admissionController);
-
+  async #runEntry(
+    chatId: string,
+    entry: StoredQueueEntry,
+    options: RunAgentTurnOptions,
+    attempt: QueueExecutionAttempt,
+  ): Promise<boolean> {
     try {
-      options = optionsForQueuedTurn(this.#getDrainOptions(chatId), entry);
-      options.executionAdmission = Object.freeze({
-        signal: admissionController.signal,
-        markStarted: async () => { executionStarted = true; },
-      });
-      if (this.#callbacks.isShuttingDown()) {
-        admissionController.abort(new Error('Turn interrupted because the server is shutting down'));
-      }
-      const turn = executionTurnIdentity(options)!;
-      finalization = this.#ownership.beginFinalization(chatId, turn.turnId!);
-      attempt = new QueueExecutionAttempt(turn, entry.id);
-      this.#ownership.installAttempt(chatId, attempt);
-      const inserted = await this.#callbacks.registerPending(chatId, entry.content, options);
-      if (inserted === false) {
-        attempt.markRegistered();
-        attempt.markRunSettled();
-        attempt.markTerminalObserved();
-        this.#callbacks.settleAttempt(chatId, attempt);
-        stage = 'finalizing';
-        await this.#callbacks.removeSent(chatId, entry.id);
-        finalization.settle('committed');
-        return true;
-      }
-      attempt.markRegistered();
-      if (this.#shouldHalt(chatId)) {
-        stage = 'running';
-        const shouldStart = await attempt.waitForLaunchDecision(admissionController.signal);
-        if (!shouldStart) throw new Error('Queued turn stopped before runtime start');
-      }
-      this.#callbacks.publishDispatching(chatId, entry);
-      stage = 'running';
-      attempt.markLaunching();
       await this.#runProvider(chatId, entry, options, attempt);
-
-      if (this.#ownership.shutdownTargetsEntry(chatId, entry.id)) {
-        await this.#compensateShutdown(chatId, entry, options, executionStarted);
-        finalization.settle('not-committed');
-        return false;
-      }
-      stage = 'finalizing';
-      await this.#callbacks.removeSent(chatId, entry.id);
-      finalization.settle('committed');
       return true;
-    } catch (caught: unknown) {
-      const error = caught;
-      if (this.#ownership.shutdownTargetsEntry(chatId, entry.id)) {
-        attempt?.clearExpectedAbort();
-        await this.#tryShutdownCompensation(chatId, entry, options, executionStarted);
-        finalization?.settle('not-committed');
-        return false;
-      }
-      if (stage === 'running' && attempt?.isExpectedAbort === true) {
+    } catch (error) {
+      if (attempt.isExpectedAbort) {
         attempt.clearExpectedAbort();
-        return this.#settleExpectedAbort(chatId, entry, options, error, finalization);
+        const stop = this.deps.callbacks.stopBarrier(chatId);
+        const outcome = stop ? await stop.catch((): ChatStopOutcome => 'failed') : 'failed';
+        if (isAbortAcknowledged(outcome)) return true;
       }
-      await this.#settleFailure(chatId, entry, options, stage, error, finalization);
+
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('queue: queued turn failed:', { chatId, entryId: entry.id, message });
+      await this.deps.controls.pauseAfterDispatchFailure(chatId, entry.id);
+      this.deps.callbacks.publishTurnFailed(chatId, message, options);
       return false;
     } finally {
-      finalization?.settle('not-committed');
-      if (attempt && !attempt.isRunSettled) {
+      if (!attempt.isRunSettled) {
         attempt.markRunSettled();
-        if (!this.#turnRunner.isChatRunning(chatId)) attempt.markTerminalObserved();
-        this.#callbacks.settleAttempt(chatId, attempt);
+        if (!this.deps.turnRunner.isChatRunning(chatId)) attempt.markTerminalObserved();
+        this.deps.callbacks.settleAttempt(chatId, attempt);
       }
     }
   }
@@ -234,7 +145,7 @@ export class QueueDrainer {
   ): Promise<void> {
     const abortableWaitController = new AbortController();
     let completed = false;
-    const abortable = this.#turnRunner.waitUntilTurnAbortable(
+    const abortable = this.deps.turnRunner.waitUntilTurnAbortable(
       chatId,
       attempt.identity(),
       abortableWaitController.signal,
@@ -246,7 +157,7 @@ export class QueueDrainer {
       () => false,
     );
     try {
-      const run = this.#turnRunner.runAgentTurn(chatId, entry.content, options);
+      const run = this.deps.turnRunner.runAgentTurn(chatId, entry.content, options);
       void Promise.race([abortable, run.then(() => false, () => false)])
         .finally(() => abortableWaitController.abort());
       await run;
@@ -254,120 +165,8 @@ export class QueueDrainer {
     } finally {
       abortableWaitController.abort();
       attempt.markRunSettled();
-      // Provider idle is not the transcript terminal frontier. A successful
-      // run remains owned until core applies the exact ordered terminal event.
       if (!completed) attempt.markTerminalObserved();
-      this.#callbacks.settleAttempt(chatId, attempt);
-    }
-  }
-
-  async #compensateShutdown(
-    chatId: string,
-    entry: StoredQueueEntry,
-    options: RunAgentTurnOptions,
-    executionStarted: boolean,
-  ): Promise<void> {
-    if (executionStarted) {
-      await this.#controls.requeueAndPause(chatId, entry.id, 'completion-uncertain');
-      return;
-    }
-    if (options.clientRequestId) this.#pendingInputs.discard(chatId, options.clientRequestId);
-    await this.#controls.returnUnsent(chatId, entry.id);
-  }
-
-  async #tryShutdownCompensation(
-    chatId: string,
-    entry: StoredQueueEntry,
-    options: RunAgentTurnOptions,
-    executionStarted: boolean,
-  ): Promise<void> {
-    try {
-      await this.#compensateShutdown(chatId, entry, options, executionStarted);
-    } catch (error: unknown) {
-      logger.error('queue: failed to preserve shutdown-aborted entry:', {
-        chatId,
-        entryId: entry.id,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  async #settleExpectedAbort(
-    chatId: string,
-    entry: StoredQueueEntry,
-    options: RunAgentTurnOptions,
-    runError: unknown,
-    finalization: QueuedTurnFinalizationHandle | undefined,
-  ): Promise<boolean> {
-    let outcome: ChatStopOutcome = 'failed';
-    try {
-      const stop = this.#callbacks.stopBarrier(chatId);
-      outcome = stop ? await stop : 'failed';
-    } catch {
-      // The provider failure remains authoritative when the stop acknowledgement fails.
-    }
-    if (!isAbortAcknowledged(outcome)) {
-      await this.#settleFailure(chatId, entry, options, 'running', runError, finalization);
-      return false;
-    }
-
-    try {
-      await this.#callbacks.removeSent(chatId, entry.id);
-      finalization?.settle('committed');
-      return true;
-    } catch (error: unknown) {
-      logger.error('queue: aborted entry finalization failed:', {
-        chatId,
-        entryId: entry.id,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      try {
-        await this.#controls.requeueAndPause(chatId, entry.id, 'completion-uncertain');
-      } catch (compensationError: unknown) {
-        logger.error('queue: failed to record aborted-entry pause:', {
-          chatId,
-          entryId: entry.id,
-          message: compensationError instanceof Error
-            ? compensationError.message
-            : String(compensationError),
-        });
-      }
-      return false;
-    }
-  }
-
-  async #settleFailure(
-    chatId: string,
-    entry: StoredQueueEntry,
-    options: RunAgentTurnOptions,
-    stage: 'preparing' | 'running' | 'finalizing',
-    error: unknown,
-    finalization: QueuedTurnFinalizationHandle | undefined,
-  ): Promise<void> {
-    const message = error instanceof Error ? error.message : String(error);
-    const kind: AutomaticQueuePauseKind = stage === 'finalizing'
-      ? 'completion-uncertain'
-      : 'queued-turn-failed';
-    if (kind === 'queued-turn-failed') {
-      logger.error('queue: queued turn failed:', { chatId, entryId: entry.id, stage, message });
-    } else {
-      logger.error('queue: sent-entry finalization failed:', { chatId, entryId: entry.id, stage });
-    }
-    let compensated = false;
-    try {
-      await this.#controls.requeueAndPause(chatId, entry.id, kind);
-      compensated = true;
-    } catch (compensationError: unknown) {
-      logger.error('queue: failed to record automatic pause:', {
-        chatId,
-        entryId: entry.id,
-        stage,
-        message: compensationError instanceof Error ? compensationError.message : String(compensationError),
-      });
-    }
-    finalization?.settle('not-committed');
-    if (kind === 'queued-turn-failed' && compensated) {
-      this.#callbacks.publishTurnFailed(chatId, message, options);
+      this.deps.callbacks.settleAttempt(chatId, attempt);
     }
   }
 }

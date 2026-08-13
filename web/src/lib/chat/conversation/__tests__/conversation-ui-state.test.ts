@@ -10,7 +10,6 @@ import { BashToolUseMessage } from '$shared/chat-types';
 function makeQueue(overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 	return {
 		entries: [],
-		dispatchingEntryId: null,
 		steeringEntryId: null,
 		recentlyDispatched: [],
 		pause: null,

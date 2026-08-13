@@ -165,6 +165,7 @@ export interface AgentRunCommandRequest {
   clientMessageId: string;
   chatId: string;
   transcriptViewId: string;
+  excludedResendOrdinals?: number[];
   command: string;
   images?: AgentCommandImage[];
   permissionMode?: PermissionMode;
@@ -217,6 +218,7 @@ export interface QueueEntryCreateCommandRequest {
   clientMessageId: string;
   chatId: string;
   transcriptViewId: string;
+  excludedResendOrdinals?: number[];
   content: string;
 }
 
@@ -527,6 +529,7 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
+    ...(optionalResendOrdinals(body.excludedResendOrdinals) ?? {}),
     command: contentOrImages(body, 'command', images),
     ...(images === undefined ? {} : { images }),
     ...(permissionMode === undefined ? {} : { permissionMode }),
@@ -658,8 +661,25 @@ export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryC
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
+    ...(optionalResendOrdinals(body.excludedResendOrdinals) ?? {}),
     content: requiredContent(body, 'content'),
   };
+}
+
+function optionalResendOrdinals(value: unknown): { excludedResendOrdinals: number[] } | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    throw new CommandRequestValidationError('excludedResendOrdinals must be an array');
+  }
+  const ordinals = [...new Set(value.map((ordinal) => {
+    if (!Number.isSafeInteger(ordinal) || Number(ordinal) < 1) {
+      throw new CommandRequestValidationError(
+        'excludedResendOrdinals must contain positive integers',
+      );
+    }
+    return Number(ordinal);
+  }))].sort((left, right) => left - right);
+  return ordinals.length > 0 ? { excludedResendOrdinals: ordinals } : undefined;
 }
 
 export function parseQueueEntryReplaceCommandRequest(value: unknown): QueueEntryReplaceCommandRequest {

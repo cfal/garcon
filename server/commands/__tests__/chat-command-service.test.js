@@ -768,7 +768,10 @@ function makeRealQueue(pendingInputsService, turnRunnerOverrides = {}) {
       ...turnRunnerOverrides,
     },
     pendingInputsService,
-    { admitInput: mock(async () => ({ discardKnownNotSent: async () => {} })) },
+    {
+      admitInput: mock(async () => ({ inserted: true })),
+      admitQueuedInput: mock(() => ({ inserted: true })),
+    },
     () => ({}),
     () => true,
     new InMemoryChatExecutionControlRepository('server-instance-test'),
@@ -1584,7 +1587,6 @@ describe('ChatCommandService', () => {
     expect(pause.success).toBe(true);
     expect(pause.control.queue).toMatchObject({
       entries: [],
-      dispatchingEntryId: null,
       pause: null,
     });
     expect(fork.success).toBe(true);
@@ -3089,8 +3091,8 @@ describe('ChatCommandService', () => {
     expect(agents.compactSession).not.toHaveBeenCalled();
   });
 
-  it('projects dispatch state separately from a created queue entry', async () => {
-    const postCreate = storedQueue([queueEntry('s1', 'in flight', 'sending'), queueEntry('q1', 'still waiting')], {
+  it('projects a created queue entry without server-private fields', async () => {
+    const postCreate = storedQueue([queueEntry('q1', 'still waiting')], {
       version: 7,
     });
     const { service } = makeService({
@@ -3115,7 +3117,6 @@ describe('ChatCommandService', () => {
 
     expect(result.control.queue.entries.map((e) => e.id)).toEqual(['q1']);
     expect(result.control.queue.entries[0]).not.toHaveProperty('status');
-    expect(result.control.queue.dispatchingEntryId).toBe('s1');
   });
 
   it('deduplicates identical queue create retries', async () => {
@@ -4585,7 +4586,6 @@ describe('ChatCommandService', () => {
       control: {
         queue: {
           entries: [expect.objectContaining({ id: record.entryId, content: 'deliver once' })],
-          dispatchingEntryId: null,
         },
       },
     });
@@ -4648,7 +4648,6 @@ describe('ChatCommandService', () => {
             id: uncertain.entries[0].id,
             content: input.content,
           })],
-          dispatchingEntryId: null,
         },
       },
     });
@@ -4699,8 +4698,8 @@ describe('ChatCommandService', () => {
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
   });
 
-  it('projects an in-flight entry from clear responses without deleting it', async () => {
-    const afterClear = storedQueue([queueEntry('s1', 'in flight', 'sending')], {
+  it('projects an empty queue after clear', async () => {
+    const afterClear = storedQueue([], {
       version: 9,
     });
     const { service } = makeService({
@@ -4715,7 +4714,6 @@ describe('ChatCommandService', () => {
     });
 
     expect(result.control.queue.entries).toEqual([]);
-    expect(result.control.queue.dispatchingEntryId).toBe('s1');
   });
 
   it('resumes only the named pause and schedules drain after the mutation succeeds', async () => {

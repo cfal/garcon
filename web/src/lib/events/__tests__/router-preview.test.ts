@@ -53,12 +53,12 @@ describe('createChatMessagesAccumulator', () => {
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-a', 'generation-1', [
 				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first')),
-			], 1, 1),
+				], 1, 1, []),
 		);
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-a', 'generation-1', [
 				entry(2, new AssistantMessage('2024-01-01T00:00:01Z', 'second')),
-			], 2, 2),
+				], 2, 2, []),
 		);
 		accumulator.flush();
 
@@ -86,12 +86,12 @@ describe('createChatMessagesAccumulator', () => {
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-a', 'generation-1', [
 				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first')),
-			], 1, 1),
+				], 1, 1, []),
 		);
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-b', 'generation-1', [
 				entry(1, new AssistantMessage('2024-01-01T00:00:01Z', 'second')),
-			], 1, 1),
+				], 1, 1, []),
 		);
 		accumulator.flush();
 
@@ -111,7 +111,7 @@ describe('createChatMessagesAccumulator', () => {
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-a', 'generation-2', [
 				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'fresh')),
-			], 1, 1),
+				], 1, 1, []),
 		);
 		accumulator.flush();
 

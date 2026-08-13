@@ -25,7 +25,6 @@ function executionControl(serverInstanceId: string, version: number, content: st
 					updatedAt: TS,
 				},
 			],
-			dispatchingEntryId: null,
 			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: null,

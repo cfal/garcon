@@ -398,7 +398,6 @@ describe('server event wiring', () => {
         serverInstanceId: 'server-instance-a',
         queue: {
           entries: [],
-          dispatchingEntryId: null,
           steeringEntryId: null,
           recentlyDispatched: [],
           pause: null,

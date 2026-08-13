@@ -32,7 +32,6 @@ function controlState(
 						},
 					]
 				: [],
-			dispatchingEntryId: null,
 			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: paused ? { id: 'pause-1', kind: 'manual', pausedAt: TS } : null,
@@ -101,6 +100,7 @@ function deltaResponse(
 		messages,
 		firstOrdinal: typeof first?.ordinal === 'number' ? first.ordinal : 1,
 		lastOrdinal: typeof last?.ordinal === 'number' ? last.ordinal : 0,
+		resendCandidates: [],
 		pendingUserInputs,
 		transientFeed: transientFeed(chatId, transcriptViewId),
 	};
@@ -118,6 +118,7 @@ function snapshotRequiredResponse(
 		messages: [],
 		firstOrdinal: 1,
 		lastOrdinal: 0,
+		resendCandidates: [],
 		pendingUserInputs: [],
 		transientFeed: transientFeed(chatId, transcriptViewId ?? `pending:${chatId}`),
 	};
@@ -188,6 +189,7 @@ function createReconnectDeps(
 			},
 		),
 		setPendingUserInputs: vi.fn(),
+		setResendCandidates: vi.fn(),
 		loadMessages: vi.fn(async () => []),
 		transcriptCache: {
 			markStale: vi.fn(),

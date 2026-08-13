@@ -78,6 +78,8 @@
 	"chat_composer_permission_mode": "Permission mode",
 	"chat_composer_reply_placeholder": "Reply...",
 	"chat_composer_remove_image": "Remove attachment {name}",
+	"chat_composer_resend_candidates": "Will send with your next message",
+	"chat_composer_skip_resend": "Don't resend {content}",
 	"chat_composer_queue_message": "Queue message",
 	"chat_composer_resize": "Resize message composer",
 	"chat_composer_send_message": "Send message",

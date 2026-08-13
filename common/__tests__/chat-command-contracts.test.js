@@ -90,6 +90,23 @@ describe('chat command request parsers', () => {
     expect(parsed.permissionFallbackPolicy).toBe('require-explicit-bypass');
   });
 
+  it('normalizes one-shot resend exclusions at the request boundary', () => {
+    const parsed = parseAgentRunCommandRequest({
+      clientRequestId: 'request-resend',
+      clientMessageId: 'message-resend',
+      chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
+      command: 'continue',
+      excludedResendOrdinals: [3, 1, 3],
+    });
+
+    expect(parsed.excludedResendOrdinals).toEqual([1, 3]);
+    expect(() => parseAgentRunCommandRequest({
+      ...parsed,
+      excludedResendOrdinals: [0],
+    })).toThrow('excludedResendOrdinals must contain positive integers');
+  });
+
   it('parses one fenced handoff without flattening target execution settings', () => {
     const parsed = parseAgentRunCommandRequest({
       clientRequestId: 'request-handoff',

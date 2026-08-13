@@ -6,7 +6,6 @@ import {
 
 const BASE_QUEUE = {
   entries: [],
-  dispatchingEntryId: null,
   steeringEntryId: null,
   recentlyDispatched: [],
   pause: null,

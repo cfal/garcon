@@ -1,4 +1,4 @@
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import type { ChatMessage, UserMessageDeliveryStatus } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeType } from './local-notice.js';
@@ -23,6 +23,8 @@ export interface ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
 	activeChatId: string | null;
 	readonly entries: readonly TranscriptMessage[];
+	readonly resendCandidates: readonly ResendCandidate[];
+	readonly excludedResendOrdinals: readonly number[];
 	readonly chatMessages: ChatMessage[];
 	readonly feedMutationClock: ConversationFeedMutationClock;
 	isUserScrolledUp: boolean;
@@ -33,7 +35,11 @@ export interface ActiveTranscriptPort {
 		messages: TranscriptMessage[],
 		firstOrdinal: number,
 		lastOrdinal: number,
+		resendCandidates?: ResendCandidate[],
 	): 'applied' | 'view-changed' | 'gap-detected';
+	setResendCandidates(candidates: readonly ResendCandidate[]): void;
+	excludeResendCandidate(ordinal: number): void;
+	clearResendExclusions(): void;
 	loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]>;
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
 	appendServerNotice(chatId: string, noticeType: LocalNoticeType, content: string): void;

@@ -8,7 +8,6 @@ function control(overrides: Record<string, unknown> = {}) {
 		serverInstanceId: 'server-instance-test',
 		queue: {
 			entries: [],
-			dispatchingEntryId: null,
 			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
@@ -55,7 +54,6 @@ describe('chat execution-control WS contract', () => {
 							updatedAt: installedAt,
 						},
 					],
-					dispatchingEntryId: null,
 					steeringEntryId: null,
 					recentlyDispatched: [],
 					pause,
@@ -85,7 +83,6 @@ describe('chat execution-control WS contract', () => {
 								updatedAt: installedAt,
 							},
 						],
-						dispatchingEntryId: null,
 						steeringEntryId: null,
 						recentlyDispatched: [],
 						pause: null,
@@ -96,14 +93,13 @@ describe('chat execution-control WS contract', () => {
 		).toBeNull();
 	});
 
-	it('preserves dispatch identity and recent dispatch markers', () => {
+	it('preserves recent dispatch markers', () => {
 		const parsed = parseServerWsMessage({
 			type: 'chat-execution-control-updated',
 			chatId: '123',
 			control: control({
 				queue: {
 					entries: [],
-					dispatchingEntryId: 'entry-1',
 					steeringEntryId: null,
 					recentlyDispatched: [{ entryId: 'entry-1', revision: 2, dispatchedAt: installedAt }],
 					pause: null,
@@ -114,7 +110,6 @@ describe('chat execution-control WS contract', () => {
 
 		expect(parsed).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
 		if (!(parsed instanceof ChatExecutionControlUpdatedMessage)) return;
-		expect(parsed.control.queue.dispatchingEntryId).toBe('entry-1');
 		expect(parsed.control.queue.recentlyDispatched).toEqual([
 			{ entryId: 'entry-1', revision: 2, dispatchedAt: installedAt },
 		]);

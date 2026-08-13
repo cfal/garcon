@@ -13,7 +13,7 @@ import type { ConversationLifecycleState } from '$lib/chat/conversation/conversa
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import type {
 	ChatTranscriptApplyResult,
 	ChatTranscriptCache,
@@ -115,7 +115,14 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		},
 		chatState: {
 			getCursor: () => deps.chatState.getCursor(),
-			applyChatMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
+			applyChatMessages: (
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+				resendCandidates: ResendCandidate[],
+			) => {
 				if (deps.sessions.selectedChatId !== chatId) {
 					return routerApplyStatus(applyBackgroundTranscript(
 						chatId,
@@ -131,6 +138,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					messages,
 					firstOrdinal,
 					lastOrdinal,
+					resendCandidates,
 				);
 			},
 			reloadChatTranscript: (chatId) => {

@@ -246,25 +246,13 @@ export class QueueCommands {
           this.support.throwRecordedExecutionFailure(ledger.record);
         }
         if (ledger.record.status === 'accepted') {
-          const outcome = await this.deps.queue.recoverAcceptedGoalControl({
-            command: {
-              key: ledger.record.key,
-              chatId: input.chatId,
-              clientRequestId: ledger.record.clientRequestId,
-              turnId: ledger.record.turnId ?? turnId,
-              entryId: ledger.record.entryId ?? preparedEntryId,
-            },
-            content,
-            clientMessageId: input.clientMessageId,
-            transcriptViewId: input.transcriptViewId,
-            settlement: this.support.settlement,
-          });
           return {
             ...commandResultFromRecord(ledger.record, 'duplicate'),
             commandType: 'goal-control',
-            delivery: outcome.delivery,
-            ...(outcome.entryId ? { entryId: outcome.entryId } : {}),
-            control: toClientChatExecutionControlState(outcome.control),
+            delivery: 'active',
+            control: toClientChatExecutionControlState(
+              await this.deps.queue.readChatExecutionControl(input.chatId),
+            ),
           };
         }
         return {
@@ -360,6 +348,7 @@ export class QueueCommands {
         chatId: input.chatId,
         transcriptViewId: input.transcriptViewId,
         clientMessageId: input.clientMessageId,
+        excludedResendOrdinals: input.excludedResendOrdinals,
         content,
       },
       entryId: preparedEntryId,
@@ -386,6 +375,7 @@ export class QueueCommands {
       content,
       clientMessageId: input.clientMessageId,
       transcriptViewId: input.transcriptViewId,
+      excludedResendOrdinals: input.excludedResendOrdinals,
       settlement: this.support.settlement,
     });
     return {

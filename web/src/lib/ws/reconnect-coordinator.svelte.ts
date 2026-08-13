@@ -25,7 +25,11 @@ export interface ReconnectWsPort {
 
 export type ReconnectTranscriptState = Pick<
 	ActiveTranscriptPort,
-	'getCursor' | 'applyMessages' | 'setPendingUserInputs' | 'loadMessages'
+	| 'getCursor'
+	| 'applyMessages'
+	| 'setPendingUserInputs'
+	| 'setResendCandidates'
+	| 'loadMessages'
 > & {
 	transcriptCache: {
 		markStale(chatId: string): void;
@@ -265,6 +269,7 @@ export class ChatReconnectCoordinator {
 				return;
 			}
 			this.options.chatState.setPendingUserInputs(message.pendingUserInputs);
+			this.options.chatState.setResendCandidates(message.resendCandidates);
 			this.options.chatState.transcriptCache.markValidated(chatId);
 		} catch {
 			if (epoch !== this.#reconnectEpoch || this.options.sessions.selectedChatId !== chatId) return;

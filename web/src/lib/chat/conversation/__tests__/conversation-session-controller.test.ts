@@ -152,7 +152,6 @@ function emptyControl(): ChatExecutionControlState {
 		serverInstanceId: 'server-instance-test',
 		queue: {
 			entries: [],
-			dispatchingEntryId: null,
 			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
@@ -208,6 +207,10 @@ function createDeps(chat = createRunningChat()) {
 		chatMessages: [] as ChatMessage[],
 		localNotices: [] as LocalNoticeRow[],
 		pendingUserInputs: [] as PendingUserInput[],
+		excludedResendOrdinals: [] as number[],
+		clearResendExclusions: vi.fn(() => {
+			chatState.excludedResendOrdinals = [];
+		}),
 		isUserScrolledUp: false,
 		getCursor: vi.fn(() => ({
 			transcriptViewId: 'generation-1',
@@ -842,7 +845,6 @@ describe('ConversationSessionController', () => {
 						updatedAt: '2026-07-17T00:00:00.000Z',
 					},
 				],
-				dispatchingEntryId: null,
 				steeringEntryId: null,
 				recentlyDispatched: [],
 				reorderRevision: 0,
@@ -1844,7 +1846,6 @@ describe('ConversationSessionController', () => {
 							updatedAt: '2026-05-14T00:00:00.000Z',
 						},
 					],
-					dispatchingEntryId: null,
 					recentlyDispatched: [],
 				},
 				{
@@ -2060,7 +2061,6 @@ describe('ConversationSessionController', () => {
 							updatedAt: '2026-05-14T00:00:00.000Z',
 						},
 					],
-					dispatchingEntryId: null,
 					recentlyDispatched: [],
 					pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
 				},
@@ -2096,7 +2096,6 @@ describe('ConversationSessionController', () => {
 							updatedAt: '2026-05-14T00:00:01.000Z',
 						},
 					],
-					dispatchingEntryId: null,
 					recentlyDispatched: [],
 					pause: null,
 				},
@@ -2134,7 +2133,6 @@ describe('ConversationSessionController', () => {
 							updatedAt: '2026-05-14T00:00:00.000Z',
 						},
 					],
-					dispatchingEntryId: null,
 					recentlyDispatched: [],
 					pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
 				},
@@ -2155,14 +2153,13 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 	});
 
-	it('queues behind a dispatching entry even when the visible queue is empty', async () => {
+	it('starts directly once a dequeued entry has left the visible queue', async () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = 'wait behind the in-flight entry';
 		const dispatchingControl: ChatExecutionControlState = controlWithQueue(
 			{
 				entries: [],
-				dispatchingEntryId: 'entry-sending',
 				recentlyDispatched: [
 					{
 						entryId: 'entry-sending',
@@ -2178,23 +2175,12 @@ describe('ConversationSessionController', () => {
 			},
 		);
 		deps.conversationUi.getExecutionControl.mockReturnValue(dispatchingControl);
-		mockCreateQueuedInput.mockResolvedValueOnce({
-			success: true,
-			commandType: 'queue-entry-create',
-			clientRequestId: 'req-after-dispatching',
-			chatId: 'chat-1',
-			status: 'accepted',
-			acceptedAt: '2026-05-14T00:00:01.000Z',
-			entryId: 'entry-next',
-			control: dispatchingControl,
-		});
-
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
-		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
-			expect.objectContaining({ content: 'wait behind the in-flight entry' }),
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({ command: 'wait behind the in-flight entry' }),
 		);
-		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 	});
 
 	it('waits for chat-switch queue reconciliation before choosing run or queue', async () => {
@@ -2221,7 +2207,6 @@ describe('ConversationSessionController', () => {
 						updatedAt: '2026-05-14T00:00:00.000Z',
 					},
 				],
-				dispatchingEntryId: null,
 				recentlyDispatched: [],
 				pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
 			},
@@ -2425,7 +2410,6 @@ describe('ConversationSessionController', () => {
 						updatedAt: '2026-05-14T00:00:01.000Z',
 					},
 				],
-				dispatchingEntryId: null,
 				recentlyDispatched: [],
 				pause: null,
 			},
@@ -2465,7 +2449,6 @@ describe('ConversationSessionController', () => {
 		const latestControl: ChatExecutionControlState = controlWithQueue(
 			{
 				entries: [],
-				dispatchingEntryId: null,
 				recentlyDispatched: [
 					{
 						entryId: 'entry-1',

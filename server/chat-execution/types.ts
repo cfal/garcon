@@ -37,7 +37,12 @@ import type {
 
 export type PendingUserInputRegistrationOptions = Pick<
   RunAgentTurnOptions,
-  'clientRequestId' | 'clientMessageId' | 'transcriptViewId' | 'turnId' | 'images'
+  | 'clientRequestId'
+  | 'clientMessageId'
+  | 'transcriptViewId'
+  | 'turnId'
+  | 'images'
+  | 'excludedResendOrdinals'
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
   deliveryStatus?: UserMessageDeliveryStatus;
@@ -158,6 +163,7 @@ export interface AcceptedQueueCreate {
   content: string;
   clientMessageId: string;
   transcriptViewId: string;
+  excludedResendOrdinals?: readonly number[];
   settlement: CommandSettlementPort;
 }
 
@@ -275,7 +281,7 @@ export interface PendingInputsPort {
       images?: ChatImage[];
       deliveryStatus?: UserMessageDeliveryStatus;
     },
-  ): Promise<unknown>;
+  ): unknown;
   discard(chatId: string, clientRequestId: string): boolean;
   settleCommitted(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
@@ -286,7 +292,6 @@ export type ExecutionControlUpdatedCallback = (
   chatId: string,
   control: StoredChatExecutionControlState,
 ) => void;
-export type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
 export type SessionStopRequestedCallback = (
   chatId: string,
   stopId: string,
@@ -313,7 +318,6 @@ export type ChatExistsResolver = (chatId: string) => boolean;
 
 export interface ChatExecutionCoordinatorEvents {
   'execution-control-updated': Parameters<ExecutionControlUpdatedCallback>;
-  dispatching: Parameters<DispatchingCallback>;
   'session-stop-requested': Parameters<SessionStopRequestedCallback>;
   'session-stopped': Parameters<SessionStoppedCallback>;
   'chat-idle': Parameters<ChatIdleCallback>;
@@ -352,7 +356,6 @@ export interface ChatExecutionCommands {
   ): Promise<AcceptedQueueEntrySteerOutcome>;
   recoverQueueEntrySteer(chatId: string, entryId: string): Promise<StoredChatExecutionControlState>;
   deliverAcceptedGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome>;
-  recoverAcceptedGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome>;
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
   interruptActiveTurn(chatId: string): Promise<ChatStopOutcome>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
@@ -414,7 +417,6 @@ export interface ChatExecutionService
     options: RunAgentTurnOptions,
   ): Promise<void>;
   triggerDrain(chatId: string): Promise<void>;
-  hasAppliedQueueCreateCommand(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
   createChatQueueEntry(
     chatId: string,
     content: string,

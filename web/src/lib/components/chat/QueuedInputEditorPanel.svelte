@@ -121,12 +121,9 @@
 		<div class="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm" role="status">
 			<p class="font-medium">{m.chat_queue_other_message_steering()}</p>
 		</div>
-	{:else if editor.phase === 'dispatching' || editor.phase === 'sent'}
+	{:else if editor.phase === 'sent'}
 		<div class="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm" role="status">
 			<p class="font-medium">{m.chat_queue_already_sent()}</p>
-			{#if editor.phase === 'dispatching'}
-				<p class="mt-0.5 text-xs text-muted-foreground">{m.chat_queue_agent_processing()}</p>
-			{/if}
 		</div>
 	{:else if editor.phase === 'removed'}
 		<div class="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm" role="status">

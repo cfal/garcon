@@ -59,7 +59,7 @@ export interface PendingUserInputServiceContract {
   settleCommitted(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
   markUnconfirmed(chatId: string, clientRequestId: string): boolean;
-  register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
+  register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): PendingUserInput;
   captureCohort(chatId: string): PendingUserInputCohort;
   reconcileRetainedHistory(chatId: string): Promise<void>;
   reconcileNativeHistory(chatId: string): Promise<void>;
@@ -133,7 +133,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
 
   // Registration never blocks on a settlement read; commit-driven reconciles
   // and snapshot reads clear records the projection has already proven.
-  async register(chatId: string, content: string, options: RegisterPendingUserInputOptions = {}): Promise<PendingUserInput> {
+  register(chatId: string, content: string, options: RegisterPendingUserInputOptions = {}): PendingUserInput {
     const input: PendingUserInput = {
       chatId,
       clientRequestId: options.clientRequestId ?? crypto.randomUUID(),

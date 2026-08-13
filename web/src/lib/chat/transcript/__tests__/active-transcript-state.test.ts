@@ -12,7 +12,7 @@ import {
 	UserMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
@@ -63,6 +63,7 @@ function page(
 		pageNewestOrdinal: number;
 		hasMore: boolean;
 		pendingUserInputs: PendingUserInput[];
+		resendCandidates: ResendCandidate[];
 	}> = {},
 ) {
 	const messages = overrides.messages ?? [entry(1, assistant('hello'))];
@@ -77,6 +78,7 @@ function page(
 			?? 0,
 		hasMore: overrides.hasMore ?? false,
 		pendingUserInputs: overrides.pendingUserInputs ?? [],
+		resendCandidates: overrides.resendCandidates ?? [],
 	};
 }
 
@@ -106,6 +108,23 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: '', lastOrdinal: 0 });
 		expect(chat.chatMessages).toEqual([]);
 		expect(chat.feedMutationClock.dataRevision).toBe(0);
+	});
+
+	it('keeps resend opt-outs ephemeral and prunes them with the candidate set', () => {
+		const chat = new ActiveTranscriptState();
+		chat.setResendCandidates([
+			{ ordinal: 1, content: 'first', attachmentNames: [] },
+			{ ordinal: 2, content: 'second', attachmentNames: ['image.png'] },
+		]);
+
+		chat.excludeResendCandidate(1);
+		expect(chat.resendCandidates.map((candidate) => candidate.ordinal)).toEqual([2]);
+		expect(chat.excludedResendOrdinals).toEqual([1]);
+
+		chat.setResendCandidates([{ ordinal: 2, content: 'second', attachmentNames: [] }]);
+		expect(chat.excludedResendOrdinals).toEqual([]);
+		chat.clearResendExclusions();
+		expect(chat.resendCandidates.map((candidate) => candidate.ordinal)).toEqual([2]);
 	});
 
 	it('renders degraded history without retaining sequence or cache state', async () => {

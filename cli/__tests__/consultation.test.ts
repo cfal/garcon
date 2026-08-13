@@ -62,7 +62,6 @@ function snapshot(): ChatSnapshotResponse {
       serverInstanceId: 'id',
       queue: {
         entries: [],
-        dispatchingEntryId: null,
         steeringEntryId: null,
         recentlyDispatched: [],
         pause: null,

@@ -8,7 +8,7 @@ import {
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import type { AgentProjectionState } from '@garcon/server-agent-interface';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
-import { createProjectionEventFanout } from './projection-event-fanout.js';
+import { createTranscriptEventFanout } from './ledger/event-fanout.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
@@ -48,7 +48,6 @@ import {
   ChatListRefreshRequestedMessage,
   ChatSessionStoppedMessage,
   ChatExecutionControlUpdatedMessage,
-  QueueDispatchingMessage,
   PendingUserInputUpdatedMessage,
   PendingUserInputStatusUpdatedMessage,
   PendingUserInputClearedMessage,
@@ -411,7 +410,6 @@ export function wireServerEvents({
     queueErrorMessage: string,
     options: TurnEventMetadata,
   ): Promise<void> {
-    // Clears queue-dispatching's optimistic state when launch fails before the provider starts.
     broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
     if (consumeProcessFailure(chatId, options)) return;
     await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
@@ -437,23 +435,17 @@ export function wireServerEvents({
 
   const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
 
-  agentRegistry.onProjectionApplied(createProjectionEventFanout({
+  agentRegistry.onTranscriptCommitted(createTranscriptEventFanout({
     chatExists,
-    scheduleChatTask: (chatId, label, task) => scheduleChatTask(chatId, label, task),
+    schedule: (chatId, task) => {
+      void scheduleChatTask(chatId, 'server-events: transcript commit fanout failed', task);
+    },
     broadcast,
-    chatRegistry,
-    chatViews,
-    transientFeeds,
-    metadata,
-    commandLedger,
-    pendingInputs,
-    markSearchChatDirty,
-    markSearchCatalogDirty,
-    getCarryOverMessageCount,
-    getCarryOverRevision,
-    composeProjectionSnapshot,
-    loadChatSnapshot,
-    loadChatPage,
+    updateMetadata: (chatId, messages) => {
+      metadata.updateFromAppendedMessages(chatId, [...messages]);
+    },
+    markSearchDirty: markSearchChatDirty,
+    resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
   }));
   agentRegistry.onInputSettled((chatId, clientRequestId) => {
     queue.onAcceptedInputSettled(chatId, clientRequestId);
@@ -740,9 +732,6 @@ export function wireServerEvents({
   });
   queue.onSessionStopRequested((chatId, stopId, preparingTurn, intent) => {
     userAbortLifecycle.onStopRequested(chatId, stopId, preparingTurn);
-  });
-  queue.onDispatching((chatId, entryId, content) => {
-    broadcast(new QueueDispatchingMessage(chatId, entryId, content));
   });
   pendingInputs.store.onUpdated((input) => {
     broadcast(new PendingUserInputUpdatedMessage(input));

@@ -1,5 +1,5 @@
-import type { TranscriptMessage } from './chat-view';
-import { parseTranscriptMessages } from './chat-view';
+import type { ResendCandidate, TranscriptMessage } from './chat-view';
+import { parseResendCandidates, parseTranscriptMessages } from './chat-view';
 import {
   parseChatProjectionGenerationTransition,
   parseChatTransientFeedMutation,
@@ -48,6 +48,7 @@ export class ChatMessagesMessage {
     public messages: TranscriptMessage[],
     public firstOrdinal: number,
     public lastOrdinal: number,
+    public resendCandidates: ResendCandidate[],
     public turnId?: string,
     public clientRequestId?: string,
     public upstreamRequestId?: string,
@@ -63,6 +64,7 @@ export class ChatSubscribedMessage {
     public messages: TranscriptMessage[],
     public firstOrdinal: number,
     public lastOrdinal: number,
+    public resendCandidates: ResendCandidate[],
     public pendingUserInputs: PendingUserInput[],
     public transientFeed: ChatTransientFeedSnapshot,
   ) {}
@@ -189,15 +191,6 @@ export class ChatExecutionControlUpdatedMessage {
   constructor(
     public chatId: string,
     public control: ChatExecutionControlState,
-  ) {}
-}
-
-export class QueueDispatchingMessage {
-  readonly type = 'queue-dispatching' as const;
-  constructor(
-    public chatId: string,
-    public entryId: string,
-    public content: string,
   ) {}
 }
 
@@ -394,7 +387,6 @@ export type ServerWsMessage =
   | ChatSessionStoppedMessage
   | ChatProcessingUpdatedMessage
   | ChatExecutionControlUpdatedMessage
-  | QueueDispatchingMessage
   | ChatOperationalNoticeMessage
   | ReconnectStateMessage
   | PendingUserInputUpdatedMessage
@@ -511,7 +503,9 @@ export function parseServerWsMessage(
       const lastOrdinal = nonNegativeInt(data.lastOrdinal);
       if (!chatId || !transcriptViewId || firstOrdinal === null || lastOrdinal === null) return null;
       const messages = parseTranscriptMessages(data.messages);
-      if (messages === null || !isValidTranscriptSpan(firstOrdinal, lastOrdinal, messages)) {
+      const resendCandidates = parseResendCandidates(data.resendCandidates);
+      if (messages === null || resendCandidates === null
+          || !isValidTranscriptSpan(firstOrdinal, lastOrdinal, messages)) {
         return null;
       }
       return new ChatMessagesMessage(
@@ -520,6 +514,7 @@ export function parseServerWsMessage(
         messages,
         firstOrdinal,
         lastOrdinal,
+        resendCandidates,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string'
           ? data.clientRequestId
@@ -544,9 +539,11 @@ export function parseServerWsMessage(
       )
         return null;
       const messages = parseTranscriptMessages(data.messages);
+      const resendCandidates = parseResendCandidates(data.resendCandidates);
       const pendingUserInputs = parsePendingUserInputs(data.pendingUserInputs);
       const transientFeed = parseChatTransientFeedSnapshot(data.transientFeed);
-      if (messages === null || pendingUserInputs === null || !transientFeed) return null;
+      if (messages === null || resendCandidates === null
+          || pendingUserInputs === null || !transientFeed) return null;
       if (!isValidTranscriptSpan(firstOrdinal, lastOrdinal, messages)) return null;
       if (transientFeed.chatId !== chatId
           || transientFeed.generationId !== transcriptViewId) return null;
@@ -557,6 +554,7 @@ export function parseServerWsMessage(
         messages,
         firstOrdinal,
         lastOrdinal,
+        resendCandidates,
         pendingUserInputs,
         transientFeed,
       );
@@ -719,17 +717,6 @@ export function parseServerWsMessage(
       const control = parseChatExecutionControlState(data.control);
       return chatId && control
         ? new ChatExecutionControlUpdatedMessage(chatId, control)
-        : null;
-    }
-    case 'queue-dispatching': {
-      const chatId = requiredStr(data.chatId);
-      const entryId = requiredStr(data.entryId);
-      return chatId && entryId
-        ? new QueueDispatchingMessage(
-            chatId,
-            entryId,
-            String(data.content ?? ''),
-          )
         : null;
     }
     case 'chat-operational-notice': {

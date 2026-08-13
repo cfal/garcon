@@ -208,6 +208,7 @@ function broadcastCommitRows(
       messages,
       groupRows[0]?.seq ?? event.previous.projection.total + 1,
       groupRows.at(-1)?.seq ?? event.checkpoint.projection.total,
+      [],
       provenance?.turnOwner.turnId ?? provenance?.turnId,
       provenance?.turnOwner.clientRequestId ?? provenance?.clientRequestId ?? undefined,
       provenance?.upstreamRequestId ?? undefined,

@@ -76,7 +76,6 @@ describe('main', () => {
             serverInstanceId: 'instance',
             queue: {
               entries: [],
-              dispatchingEntryId: null,
               steeringEntryId: null,
               recentlyDispatched: [],
               pause: null,
@@ -320,7 +319,6 @@ describe('main', () => {
             serverInstanceId: 'instance',
             queue: {
               entries: [],
-              dispatchingEntryId: null,
               steeringEntryId: null,
               recentlyDispatched: [],
               pause: null,
@@ -355,7 +353,6 @@ describe('main', () => {
             serverInstanceId: 'instance',
             queue: {
               entries: [],
-              dispatchingEntryId: null,
               steeringEntryId: null,
               recentlyDispatched: [],
               pause: null,

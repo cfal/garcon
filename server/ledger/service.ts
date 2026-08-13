@@ -7,6 +7,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
 import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
+import type { ResendCandidate } from '../../common/chat-view.js';
 import type {
   InputComposition,
   LedgerNoticeRow,
@@ -290,6 +291,14 @@ export class TranscriptLedgerService {
     return this.conversationRows(chatId)
       .filter((row) => !excludedOrdinals.has(row.ordinal))
       .map(messageForConversationRow);
+  }
+
+  resendCandidates(chatId: string): readonly ResendCandidate[] {
+    return this.#store.resendCandidates(chatId).map((row) => ({
+      ordinal: row.ordinal,
+      content: row.detail.message.content,
+      attachmentNames: row.detail.attachments.map((attachment) => attachment.name ?? 'attachment'),
+    }));
   }
 
   currentSession(chatId: string): LedgerSessionRow | null {

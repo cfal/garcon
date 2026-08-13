@@ -81,6 +81,8 @@ type SessionTranscriptState = Pick<
 	| 'loadMessages'
 	| 'updatePendingUserInputDeliveryStatus'
 	| 'upsertPendingUserInput'
+	| 'excludedResendOrdinals'
+	| 'clearResendExclusions'
 > & {
 	transcriptCache: Pick<ChatTranscriptCache, 'markValidated'>;
 };

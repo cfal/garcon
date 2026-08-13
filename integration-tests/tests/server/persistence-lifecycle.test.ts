@@ -132,7 +132,6 @@ describe('persistence lifecycle', () => {
           serverInstanceId: restartedInstanceId,
           queue: {
             entries: [],
-            dispatchingEntryId: null,
             steeringEntryId: null,
             recentlyDispatched: [],
             pause: null,
@@ -146,7 +145,6 @@ describe('persistence lifecycle', () => {
         serverInstanceId: restartedInstanceId,
         queue: {
           entries: [],
-          dispatchingEntryId: null,
           steeringEntryId: null,
           recentlyDispatched: [],
           pause: null,

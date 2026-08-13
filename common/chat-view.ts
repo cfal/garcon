@@ -7,6 +7,12 @@ export interface TranscriptMessage {
   readonly message: ChatMessage;
 }
 
+export interface ResendCandidate {
+  readonly ordinal: number;
+  readonly content: string;
+  readonly attachmentNames: readonly string[];
+}
+
 export interface TranscriptPage {
   readonly transcriptViewId: string;
   readonly messages: TranscriptMessage[];
@@ -28,6 +34,7 @@ export interface CompleteChatHistoryResponse extends TranscriptPage {
   readonly historyState: Extract<ChatHistoryState, { readonly kind: 'complete' }>;
   readonly chatId: string;
   readonly pendingUserInputs: PendingUserInput[];
+  readonly resendCandidates: ResendCandidate[];
   readonly limit: number;
 }
 
@@ -132,6 +139,26 @@ export function parseTranscriptMessages(data: unknown): TranscriptMessage[] | nu
     previousOrdinal = parsed.ordinal;
   }
   return messages;
+}
+
+export function parseResendCandidates(data: unknown): ResendCandidate[] | null {
+  if (!Array.isArray(data)) return null;
+  const candidates: ResendCandidate[] = [];
+  let previousOrdinal = 0;
+  for (const value of data) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const raw = value as Record<string, unknown>;
+    if (!isPositiveInt(raw.ordinal) || raw.ordinal <= previousOrdinal) return null;
+    if (typeof raw.content !== 'string' || !Array.isArray(raw.attachmentNames)) return null;
+    if (!raw.attachmentNames.every((name) => typeof name === 'string')) return null;
+    candidates.push({
+      ordinal: raw.ordinal,
+      content: raw.content,
+      attachmentNames: raw.attachmentNames as string[],
+    });
+    previousOrdinal = raw.ordinal;
+  }
+  return candidates;
 }
 
 export function applyTranscriptAppend(

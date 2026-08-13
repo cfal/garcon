@@ -53,6 +53,7 @@ describe('reloadChatFromNative', () => {
 			hasMore: false,
 			limit: 50,
 			pendingUserInputs: [],
+			resendCandidates: [],
 			messages: [
 				{ ordinal: 1, message: new AssistantMessage(TS, 'one') },
 				{ ordinal: 2, message: new AssistantMessage(TS, 'two') },

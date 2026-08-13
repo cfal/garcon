@@ -55,7 +55,12 @@ export class SessionCommands {
       images: input.images,
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
-      options: input.handoff ? {} : runOptionsForCommand(input),
+      options: {
+        ...(input.handoff ? {} : runOptionsForCommand(input)),
+        ...(input.excludedResendOrdinals?.length
+          ? { excludedResendOrdinals: input.excludedResendOrdinals }
+          : {}),
+      },
       expectedAgentId: input.expectedAgentId,
       tagsToAdd: input.tagsToAdd,
       permissionFallbackPolicy: input.permissionFallbackPolicy,
@@ -91,7 +96,12 @@ export class SessionCommands {
       await this.support.assertAttachmentsSupported({
         ...handoffCommand.target, attachments: input.images ?? [],
       });
-      normalizedInput.options = handoffCommand.options;
+      normalizedInput.options = {
+        ...handoffCommand.options,
+        ...(input.excludedResendOrdinals?.length
+          ? { excludedResendOrdinals: input.excludedResendOrdinals }
+          : {}),
+      };
       const result = await this.support.submitHttpRun(
         normalizedInput,
         handoffCommand.preparation,
@@ -575,15 +585,6 @@ export class SessionCommands {
     }
 
     const queue = await this.deps.queue.readChatExecutionControl(chatId);
-    const sendingEntry = queue.entries.find((entry) => entry.status === 'sending');
-    if (sendingEntry) {
-      throw new CommandValidationError(
-        'CHAT_NOT_IDLE',
-        'Cannot update project path while a queued turn is dispatching',
-        409,
-        true,
-      );
-    }
     const steeringEntry = queue.entries.find((entry) => entry.status === 'steering');
     if (steeringEntry) {
       throw new CommandValidationError(

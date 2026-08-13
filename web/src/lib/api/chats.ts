@@ -16,6 +16,7 @@ import {
 import type { ApiProtocol } from '$shared/api-providers';
 import {
 	parseChatHistoryState,
+	parseResendCandidates,
 	parseTranscriptMessages,
 	type ChatHistoryResponse,
 } from '$shared/chat-view';
@@ -417,6 +418,7 @@ export async function getChatMessages(params: {
 		pageOldestOrdinal?: unknown;
 		pageNewestOrdinal?: unknown;
 		pendingUserInputs?: unknown;
+		resendCandidates?: unknown;
 		hasMore?: unknown;
 		limit?: unknown;
 	}>(`/api/v1/chats/messages?${query.toString()}`);
@@ -444,6 +446,10 @@ export async function getChatMessages(params: {
 	}
 	const messages = parseTranscriptMessages(response.messages);
 	if (messages === null) throw new Error('Invalid chat messages page: messages');
+	const resendCandidates = parseResendCandidates(response.resendCandidates);
+	if (resendCandidates === null) {
+		throw new Error('Invalid chat messages page: resendCandidates');
+	}
 	if (typeof response.hasMore !== 'boolean') {
 		throw new Error('Invalid chat messages page: hasMore');
 	}
@@ -451,6 +457,7 @@ export async function getChatMessages(params: {
 		historyState,
 		chatId,
 		messages,
+		resendCandidates,
 		transcriptViewId: requireNonEmptyString(response.transcriptViewId, 'transcriptViewId'),
 		lastOrdinal: requireNonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
 		pageOldestOrdinal: requireNonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),

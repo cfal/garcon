@@ -46,7 +46,6 @@ function snapshot(overrides: Partial<ChatSnapshotResponse> = {}): ChatSnapshotRe
       serverInstanceId: 'instance-1',
       queue: {
         entries: [],
-        dispatchingEntryId: null,
         steeringEntryId: null,
         recentlyDispatched: [],
         pause: null,
@@ -119,7 +118,6 @@ describe('chat status', () => {
             createdAt: TIMESTAMP,
             updatedAt: TIMESTAMP,
           }],
-          dispatchingEntryId: 'dispatching-1',
           steeringEntryId: 'steering-1',
           pause: { id: 'pause-1', kind: 'manual', pausedAt: TIMESTAMP },
         },
@@ -134,7 +132,6 @@ describe('chat status', () => {
 
     expect(value).toContain('status: idle');
     expect(value).toContain('queue: 1');
-    expect(value).toContain('queue dispatching: dispatching-1');
     expect(value).toContain('queue steering: steering-1');
     expect(value).toContain('queue paused: manual');
     expect(value).toContain('transcript: unavailable (TRANSCRIPT_UNAVAILABLE, retryable: yes)');

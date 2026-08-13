@@ -32,7 +32,6 @@ function snapshot(overrides = {}) {
       serverInstanceId: 'instance-1',
       queue: {
         entries: [],
-        dispatchingEntryId: null,
         steeringEntryId: null,
         recentlyDispatched: [],
         pause: null,

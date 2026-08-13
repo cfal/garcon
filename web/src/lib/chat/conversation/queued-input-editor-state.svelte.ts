@@ -5,7 +5,6 @@ export type QueuedInputEditPhase =
 	| 'editable'
 	| 'conflict'
 	| 'steering'
-	| 'dispatching'
 	| 'sent'
 	| 'removed';
 
@@ -35,7 +34,6 @@ export class QueuedInputEditorState {
 		if (this.liveEntry) {
 			return this.liveEntry.revision === this.baseRevision ? 'editable' : 'conflict';
 		}
-		if (this.options.queue?.dispatchingEntryId === this.entryId) return 'dispatching';
 		if (this.options.queue?.recentlyDispatched.some((entry) => entry.entryId === this.entryId)) {
 			return 'sent';
 		}

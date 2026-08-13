@@ -36,11 +36,10 @@ function createPendingInputs() {
 }
 
 function createInputProjection() {
+  const admit = () => ({ inserted: true });
   return {
-    admitInput: mock(async () => ({
-      inserted: true,
-      discardKnownNotSent: mock(async () => {}),
-    })),
+    admitInput: mock(async () => admit()),
+    admitQueuedInput: mock(admit),
   };
 }
 

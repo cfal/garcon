@@ -5,9 +5,9 @@ import {
 } from './control-state.ts';
 
 export interface ChatExecutionControlRepository {
-  load(chatId: string): Promise<StoredChatExecutionControlState>;
-  save(chatId: string, control: StoredChatExecutionControlState): Promise<StoredChatExecutionControlState>;
-  delete(chatId: string): Promise<void>;
+  load(chatId: string): StoredChatExecutionControlState;
+  save(chatId: string, control: StoredChatExecutionControlState): StoredChatExecutionControlState;
+  delete(chatId: string): void;
 }
 
 export class InMemoryChatExecutionControlRepository implements ChatExecutionControlRepository {
@@ -15,16 +15,16 @@ export class InMemoryChatExecutionControlRepository implements ChatExecutionCont
 
   constructor(readonly serverInstanceId: string) {}
 
-  async load(chatId: string): Promise<StoredChatExecutionControlState> {
+  load(chatId: string): StoredChatExecutionControlState {
     return cloneStoredChatExecutionControl(
       this.#controlsByChatId.get(chatId) ?? emptyStoredChatExecutionControl(this.serverInstanceId),
     );
   }
 
-  async save(
+  save(
     chatId: string,
     control: StoredChatExecutionControlState,
-  ): Promise<StoredChatExecutionControlState> {
+  ): StoredChatExecutionControlState {
     if (control.serverInstanceId !== this.serverInstanceId) {
       throw new Error('Cannot save execution controls from another server instance');
     }
@@ -33,7 +33,7 @@ export class InMemoryChatExecutionControlRepository implements ChatExecutionCont
     return cloneStoredChatExecutionControl(saved);
   }
 
-  async delete(chatId: string): Promise<void> {
+  delete(chatId: string): void {
     this.#controlsByChatId.delete(chatId);
   }
 }

@@ -16,7 +16,6 @@ import {
 	ChatSessionCreatedMessage,
 	ChatSessionStoppedMessage,
 	ChatExecutionControlUpdatedMessage,
-	QueueDispatchingMessage,
 	PendingUserInputUpdatedMessage,
 	PendingUserInputStatusUpdatedMessage,
 	PendingUserInputClearedMessage,
@@ -27,7 +26,7 @@ import {
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -110,6 +109,7 @@ export type EventRouterChatStateStore = Pick<
 		messages: TranscriptMessage[],
 		firstOrdinal: number,
 		lastOrdinal: number,
+		resendCandidates: ResendCandidate[],
 	) => 'applied' | 'view-changed' | 'gap-detected';
 	reloadChatTranscript: (chatId: string) => void;
 	warmBackgroundTranscript: (
@@ -208,6 +208,7 @@ export function createChatMessagesAccumulator(
 	let pendingChatId = '';
 	let pendingFirstOrdinal = 0;
 	let pendingLastOrdinal = 0;
+	let pendingResendCandidates: ResendCandidate[] = [];
 	let hasPending = false;
 
 	return {
@@ -225,6 +226,7 @@ export function createChatMessagesAccumulator(
 			pendingTranscriptViewId = msg.transcriptViewId;
 			pendingChatId = msg.chatId;
 			pendingLastOrdinal = Math.max(pendingLastOrdinal, msg.lastOrdinal);
+			pendingResendCandidates = msg.resendCandidates;
 			pendingMessages.push(...msg.messages);
 		},
 		flush() {
@@ -234,11 +236,13 @@ export function createChatMessagesAccumulator(
 			const chatId = pendingChatId;
 			const firstOrdinal = pendingFirstOrdinal;
 			const lastOrdinal = pendingLastOrdinal;
+			const resendCandidates = pendingResendCandidates;
 			pendingMessages = [];
 			pendingTranscriptViewId = '';
 			pendingChatId = '';
 			pendingFirstOrdinal = 0;
 			pendingLastOrdinal = 0;
+			pendingResendCandidates = [];
 			hasPending = false;
 			const result = chatState.applyChatMessages(
 				chatId,
@@ -246,6 +250,7 @@ export function createChatMessagesAccumulator(
 				messages,
 				firstOrdinal,
 				lastOrdinal,
+				resendCandidates,
 			);
 			if (result !== 'applied') {
 				chatState.reloadChatTranscript(chatId);
@@ -423,16 +428,6 @@ function buildDispatch(
 		'chat-operational-notice': (msg) => {
 			if (!(msg instanceof ChatOperationalNoticeMessage)) return;
 			stores.chatState.appendServerNotice(msg.chatId, msg.noticeType, msg.content);
-		},
-		'queue-dispatching': (msg) => {
-			if (!(msg instanceof QueueDispatchingMessage)) return;
-			const sendChatId = msg.chatId || stores.lifecycle.currentChatId();
-			if (sendChatId && msg.content) {
-				stores.sessions.patchPreview(
-					sendChatId,
-					String(msg.content).slice(0, 200),
-				);
-			}
 		},
 		'pending-user-input-updated': (msg) => {
 			if (!(msg instanceof PendingUserInputUpdatedMessage)) return;

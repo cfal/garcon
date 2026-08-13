@@ -3,7 +3,6 @@ import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
-  type StoredQueueDeliveryIdentity,
   type StoredQueueSubmissionIdentity,
   type StoredQueueEntry,
 } from './control-state.ts';
@@ -16,16 +15,14 @@ import {
   deleteQueueEntry,
   moveQueueEntry,
   pauseQueue,
-  popNextQueueEntry,
+  dequeueNextQueueEntry,
   consumeQueueSteer,
   releaseQueueSteer,
-  removeSentQueueEntry,
   replaceQueueEntry,
   reserveQueueSteer,
   requeueAndPause,
-  restoreStoppedQueueEntry,
+  pauseAfterDispatchFailure,
   resumeQueue,
-  returnUnsentQueueEntry,
   type ControlTransition,
   type QueueCommandIdentity,
 } from './chat-execution-control-transitions.ts';
@@ -74,50 +71,6 @@ export class ChatExecutionControlOperations {
         this.#logMutation('create', chatId, result.entryId, committed.control, result.entry?.revision);
       }
       return { ...result, control: committed.control };
-    });
-  }
-
-  async stageGoalControlFallback(
-    chatId: string,
-    content: string,
-    command: QueueCommandIdentity,
-    delivery: StoredQueueDeliveryIdentity,
-  ): Promise<QueueCommandMutationResult> {
-    return this.host.runExclusive(chatId, async () => {
-      const current = await this.#load(chatId);
-      const context = this.#transitionContext(chatId);
-      const created = createQueueEntry(current, { content, command }, context);
-      if (created.outcome.status === 'rejected') {
-        throw transitionError(created.outcome.rejection, current);
-      }
-      const popped = popNextQueueEntry(created.next, context, {
-        entryId: created.outcome.value.entryId,
-        delivery,
-      });
-      if (popped.outcome.status === 'rejected') {
-        throw transitionError(popped.outcome.rejection, current);
-      }
-      if (!popped.outcome.value) {
-        throw new DomainError(
-          'SESSION_BUSY',
-          'Chat queue changed before goal control delivery',
-          409,
-          true,
-        );
-      }
-      const control = await this.#commit(chatId, popped.next);
-      this.#logMutation(
-        'pop',
-        chatId,
-        created.outcome.value.entryId,
-        control,
-        created.outcome.value.entry?.revision,
-      );
-      return {
-        entryId: created.outcome.value.entryId,
-        control,
-        duplicate: created.outcome.value.duplicate,
-      };
     });
   }
 
@@ -268,33 +221,27 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async hasAppliedCreate(chatId: string, commandKey: string, entryId: string): Promise<boolean> {
-    return this.host.runExclusive(chatId, async () => {
-      const control = await this.#load(chatId);
-      return control.appliedCommands.some((command) => (
-        command.key === commandKey
-        && command.operation === 'create'
-        && command.entryId === entryId
-      ));
-    });
-  }
-
-  async pop(
+  async dequeue(
     chatId: string,
-  ): Promise<{ entry: StoredQueueEntry; control: StoredChatExecutionControlState } | null> {
-    return this.host.runExclusive(chatId, async () => {
-      const current = await this.#load(chatId);
-      const committed = await this.#commitTransition(
-        chatId,
-        current,
-        popNextQueueEntry(current, transitionContext()),
-      );
-      if (!committed.value) return null;
-      const entry = committed.control.entries.find(
-        (candidate) => candidate.id === committed.value!.entry.id,
-      )!;
+    admit: (entry: StoredQueueEntry) => boolean,
+  ): Promise<{
+    entry: StoredQueueEntry;
+    control: StoredChatExecutionControlState;
+    inserted: boolean;
+  } | null> {
+    return this.host.runExclusive(chatId, () => {
+      const current = this.#load(chatId);
+      const transition = dequeueNextQueueEntry(current, transitionContext());
+      if (transition.outcome.status === 'rejected') {
+        throw transitionError(transition.outcome.rejection, current);
+      }
+      if (!transition.outcome.value) return Promise.resolve(null);
+      const inserted = admit(transition.outcome.value.entry);
+      const control = this.#commitNow(chatId, transition.next);
+      const committed = { value: transition.outcome.value, control };
+      const entry = committed.value.entry;
       this.#logMutation('pop', chatId, entry.id, committed.control, entry.revision);
-      return { entry, control: committed.control };
+      return Promise.resolve({ entry, control: committed.control, inserted });
     });
   }
 
@@ -354,19 +301,6 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async removeSent(chatId: string, entryId: string): Promise<StoredChatExecutionControlState> {
-    return this.host.runExclusive(chatId, async () => {
-      const current = await this.#load(chatId);
-      const committed = await this.#commitTransition(
-        chatId,
-        current,
-        removeSentQueueEntry(current, entryId, transitionContext()),
-      );
-      this.#logMutation('sent', chatId, entryId, committed.control);
-      return committed.control;
-    });
-  }
-
   async requeueAndPause(
     chatId: string,
     entryId: string,
@@ -388,46 +322,24 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async returnUnsent(
-    chatId: string,
-    entryId: string,
-  ): Promise<StoredChatExecutionControlState> {
-    return this.host.runExclusive(chatId, async () => {
-      const current = await this.#load(chatId);
-      const entry = current.entries.find((candidate) => candidate.id === entryId);
-      const committed = await this.#commitTransition(
-        chatId,
-        current,
-        returnUnsentQueueEntry(current, entryId, transitionContext()),
-      );
-      if (committed.changed) {
-        this.#logMutation('requeue', chatId, entryId, committed.control, entry?.revision);
-      }
-      return committed.control;
-    });
-  }
-
-  async restoreStopped(chatId: string, entryId: string): Promise<void> {
+  async pauseAfterDispatchFailure(chatId: string, entryId: string): Promise<void> {
     await this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
-      const entry = current.entries.find((candidate) => candidate.id === entryId);
       const committed = await this.#commitTransition(
         chatId,
         current,
-        restoreStoppedQueueEntry(current, entryId, transitionContext()),
+        pauseAfterDispatchFailure(current, entryId, transitionContext()),
       );
-      if (committed.changed) {
-        this.#logMutation('requeue', chatId, entryId, committed.control, entry?.revision);
-        this.#logPauseMutation('pause', chatId, committed.control, entryId);
-      }
+      if (committed.changed) this.#logPauseMutation('pause', chatId, committed.control, entryId);
     });
   }
 
   deleteStored(chatId: string): Promise<void> {
-    return this.repository.delete(chatId);
+    this.repository.delete(chatId);
+    return Promise.resolve();
   }
 
-  async #load(chatId: string): Promise<StoredChatExecutionControlState> {
+  #load(chatId: string): StoredChatExecutionControlState {
     return this.repository.load(chatId);
   }
 
@@ -442,7 +354,17 @@ export class ChatExecutionControlOperations {
     if (!this.host.chatExists(chatId)) {
       throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
     }
-    const result = await this.repository.save(chatId, control);
+    return this.#commitNow(chatId, control);
+  }
+
+  #commitNow(
+    chatId: string,
+    control: StoredChatExecutionControlState,
+  ): StoredChatExecutionControlState {
+    if (!this.host.chatExists(chatId)) {
+      throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
+    }
+    const result = this.repository.save(chatId, control);
     try {
       this.host.publish(chatId, result);
     } catch (error) {
@@ -486,7 +408,6 @@ export class ChatExecutionControlOperations {
       | 'delete'
       | 'pop'
       | 'requeue'
-      | 'sent'
       | 'steer-reserve'
       | 'steer-release'
       | 'steer-consume',

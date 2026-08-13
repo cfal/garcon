@@ -19,7 +19,6 @@ describe('queue routing integration', () => {
 			serverInstanceId: 'server-instance-test',
 			queue: {
 				entries: [],
-				dispatchingEntryId: null,
 				steeringEntryId: null,
 				recentlyDispatched: [],
 				pause: null,

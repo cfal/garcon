@@ -23,7 +23,6 @@ function entry(index: number, revision = 1, content = `Queued message ${index}`)
 function queue(entries: QueueEntry[], overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 	return {
 		entries,
-		dispatchingEntryId: null,
 		steeringEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
@@ -481,14 +480,9 @@ describe('QueuedInputsDialog', () => {
 		});
 	});
 
-	it('waits for dispatch completion before offering queue draft as new', async () => {
+	it('offers a dequeued queue draft as a new message', async () => {
 		const { component } = renderDialog(queue([entry(0)]));
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
-		component.setQueue(queue([], { dispatchingEntryId: 'entry-0' }));
-
-		await waitFor(() => expect(screen.getByText(m.chat_queue_agent_processing())).toBeTruthy());
-		expect(screen.queryByRole('button', { name: m.chat_queue_queue_draft_as_new() })).toBeNull();
-
 		component.setQueue(
 			queue([], {
 				recentlyDispatched: [{

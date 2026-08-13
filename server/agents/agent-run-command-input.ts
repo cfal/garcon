@@ -39,6 +39,7 @@ export function agentRunCommandPayload(
   return {
     chatId: input.chatId,
     transcriptViewId: input.transcriptViewId,
+    excludedResendOrdinals: input.options.excludedResendOrdinals,
     clientMessageId,
     command: input.command,
     images: input.images,

@@ -69,7 +69,6 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
       serverInstanceId: connection.instanceId,
       queue: {
         entries: [],
-        dispatchingEntryId: null,
         steeringEntryId: null,
         recentlyDispatched: [],
         pause: null,
@@ -655,7 +654,6 @@ describe('GarconClient', () => {
     serverInstanceId: 'instance',
     queue: {
       entries: [],
-      dispatchingEntryId: null,
       steeringEntryId: null,
       recentlyDispatched: [],
       pause: null,

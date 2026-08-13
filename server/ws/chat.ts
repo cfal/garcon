@@ -53,6 +53,7 @@ type ChatViewsDep = {
     viewId: TranscriptViewId,
     afterOrdinal: number,
   ): Promise<TranscriptReplayResult>;
+  resendCandidates(chatId: string): readonly import('../../common/chat-view.js').ResendCandidate[];
 };
 // Serves the manual reload as a fresh view over the authoritative projection.
 type ProjectionReload = (chatId: string) => Promise<import('../../common/chat-view.js').TranscriptPage>;
@@ -264,6 +265,7 @@ export class ChatHandler {
         replay.messages,
         replay.firstOrdinal,
         replay.lastOrdinal,
+        [...this.#chatViews.resendCandidates(chatId)],
         this.#pendingInputs.listForTransport(chatId),
         this.#transientFeeds.snapshot({
           chatId,

@@ -86,7 +86,6 @@ function client(overrides: Partial<ChatControlClient> = {}): ChatControlClient &
           activity: { createdAt: null, lastActivityAt: null },
         },
         processingPhase: null,
-        control: { serverInstanceId: 'id', queue: { entries: [], dispatchingEntryId: null, steeringEntryId: null, recentlyDispatched: [], pause: null, reorderRevision: 0 }, version: 0, updatedAt: null },
         transientFeed: { serverInstanceId: 'id', chatId: CHAT_ID, agentOwnershipEpoch: 'epoch-1', generationId: 'view-1', resetTransactionId: null, transientRevision: 0, stateDigest: '', rows: [] },
         pendingUserInputs: [],
         transcript: { availability: 'available', transcriptViewId: 'view-1', messages: [], lastOrdinal: 0, pageOldestOrdinal: 0, pageNewestOrdinal: 0, hasMore: false },
@@ -99,7 +98,6 @@ function client(overrides: Partial<ChatControlClient> = {}): ChatControlClient &
     async stopChat() {
       return {
         ...acceptedTurn(), commandType: 'agent-stop', outcome: 'interrupt-requested',
-        control: { serverInstanceId: 'id', queue: { entries: [], dispatchingEntryId: null, steeringEntryId: null, recentlyDispatched: [], pause: null, reorderRevision: 0 }, version: 0, updatedAt: null },
       };
     },
   };
@@ -359,7 +357,6 @@ describe('stopChat', () => {
           captured = request;
           return {
             ...acceptedTurn(), commandType: 'agent-stop', outcome: outcome as 'interrupt-requested' | 'already-idle',
-            control: { serverInstanceId: 'id', queue: { entries: [], dispatchingEntryId: null, steeringEntryId: null, recentlyDispatched: [], pause: null, reorderRevision: 0 }, version: 0, updatedAt: null },
           };
         },
       };
@@ -377,7 +374,6 @@ describe('stopChat', () => {
       async stopChat() {
         return {
           ...acceptedTurn(), commandType: 'agent-stop', outcome: 'failed',
-          control: { serverInstanceId: 'id', queue: { entries: [], dispatchingEntryId: null, steeringEntryId: null, recentlyDispatched: [], pause: null, reorderRevision: 0 }, version: 0, updatedAt: null },
         };
       },
     };

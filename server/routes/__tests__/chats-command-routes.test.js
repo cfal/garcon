@@ -426,6 +426,7 @@ function createRouteAgent(sessionOverrides = {}) {
     supportsUpdateProjectPath: mock(() => true),
     supportsImages: mock(() => true),
     isAgentSessionRunning: mock(() => false),
+    currentTranscriptViewId: mock(() => Promise.resolve('view-current')),
     getRunningSessions: mock(() => ({ claude: [{ id: CHAT_ID }] })),
     startSession: mock(() => Promise.resolve(undefined)),
     modelSupportsImages: mock(() => Promise.resolve(true)),
@@ -512,7 +513,17 @@ function createRouteAgent(sessionOverrides = {}) {
 }
 
 async function callJson(handler, body, method = 'POST') {
-  parseJsonBody.mockResolvedValueOnce(body);
+  const inputBody = body && typeof body === 'object' && 'chatId' in body
+    ? {
+        ...body,
+        ...(!('transcriptViewId' in body) ? { transcriptViewId: 'view-current' } : {}),
+        ...('content' in body && 'clientRequestId' in body && !('clientMessageId' in body)
+          ? { clientMessageId: `message-${body.clientRequestId}` }
+          : {}),
+      }
+    : body;
+  const requestBody = inputBody;
+  parseJsonBody.mockResolvedValueOnce(requestBody);
   const response = await handler(new Request('http://localhost/test', { method }));
   return { response, body: await response.json() };
 }
@@ -926,9 +937,15 @@ describe('REST chat command routes', () => {
   it('PUT /queue/entries/move rejects a source that started processing', async () => {
     const agent = createRouteAgent();
     const currentQueue = storedQueue([
-      queueEntry('entry-3', 'processing', 'sending'),
       queueEntry('entry-1'),
-    ], { version: 5 });
+    ], {
+      version: 5,
+      recentlyDispatched: [{
+        entryId: 'entry-3',
+        revision: 1,
+        dispatchedAt: '2026-08-02T00:00:01.000Z',
+      }],
+    });
     agent.queue.moveChatQueueEntry.mockRejectedValueOnce(
       new QueueEntryMutationError(
         'QUEUE_ENTRY_ALREADY_SENT',
@@ -954,7 +971,9 @@ describe('REST chat command routes', () => {
 
     expect(result.response.status).toBe(409);
     expect(result.body.errorCode).toBe('QUEUE_ENTRY_ALREADY_SENT');
-    expect(result.body.control.queue.dispatchingEntryId).toBe('entry-3');
+    expect(result.body.control.queue.recentlyDispatched).toContainEqual(
+      expect.objectContaining({ entryId: 'entry-3' }),
+    );
   });
 
   it('POST /goal-control preserves immediate goal delivery', async () => {
@@ -999,7 +1018,13 @@ describe('REST chat command routes', () => {
   it('POST /queue/entries/steer consumes the authoritative queue head idempotently', async () => {
     const agent = createRouteAgent();
     const queued = storedQueue([
-      queueEntry('entry-head', 'authoritative guidance', 'queued', 3),
+      {
+        ...queueEntry('entry-head', 'authoritative guidance', 'queued', 3),
+        submission: {
+          clientMessageId: 'message-queue-steer',
+          transcriptViewId: 'view-current',
+        },
+      },
     ], { reorderRevision: 7, version: 4 });
     const consumed = storedQueue([], {
       reorderRevision: 7,

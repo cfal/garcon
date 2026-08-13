@@ -31,39 +31,27 @@ function control(entries, overrides = {}) {
 
 describe('chat execution-control projection', () => {
   it('projects editable entries in one versioned snapshot', () => {
-    const queued = {
-      ...entry('q1', 'queued', 3),
-      delivery: {
-        clientRequestId: 'request-1',
-        clientMessageId: 'message-1',
-        turnId: 'turn-1',
-      },
-    };
-    const result = toClientChatExecutionControlState(control([entry('s1', 'sending'), queued]));
+    const result = toClientChatExecutionControlState(control([entry('q1', 'queued', 3)]));
 
     expect(result.queue.entries).toEqual([expect.objectContaining({ id: 'q1', revision: 3 })]);
     expect(result.queue.entries[0]).not.toHaveProperty('status');
-    expect(result.queue.entries[0]).not.toHaveProperty('delivery');
-    expect(result.queue.dispatchingEntryId).toBe('s1');
     expect(result.queue.reorderRevision).toBe(2);
     expect(result.serverInstanceId).toBe('server-instance-test');
     expect(result.version).toBe(4);
   });
 
-  it('projects a steering row separately from a dispatching queued turn', () => {
+  it('projects a steering row separately from queued turns', () => {
     const result = toClientChatExecutionControlState(control([
-      entry('sending', 'sending'),
       entry('steering', 'steering'),
       entry('queued', 'queued'),
     ]));
 
     expect(result.queue.entries.map((item) => item.id)).toEqual(['steering', 'queued']);
-    expect(result.queue.dispatchingEntryId).toBe('sending');
     expect(result.queue.steeringEntryId).toBe('steering');
     expect(result.queue.entries[0]).not.toHaveProperty('status');
   });
 
-  it('retains bounded recently-dispatched markers after the sending entry leaves', () => {
+  it('retains bounded recently-dispatched markers after dequeue', () => {
     const markers = Array.from({ length: MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES + 3 }, (_, index) => ({
       entryId: `q${index}`,
       revision: index + 1,
@@ -73,7 +61,6 @@ describe('chat execution-control projection', () => {
 
     expect(result.queue.recentlyDispatched).toHaveLength(MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
     expect(result.queue.recentlyDispatched[0].entryId).toBe('q3');
-    expect(result.queue.dispatchingEntryId).toBeNull();
   });
 
   it('keeps command receipts and pause history server-only', () => {

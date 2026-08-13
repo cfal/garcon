@@ -10,6 +10,7 @@
 	import LoadingStatus from './LoadingStatus.svelte';
 	import GitQuickStatusTray from './GitQuickStatusTray.svelte';
 	import {
+		getActiveTranscriptState,
 		getComposerState,
 		getConversationLifecycle,
 		getLocalSettings,
@@ -96,6 +97,7 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
+	import ResendCandidateChips from './ResendCandidateChips.svelte';
 	interface Props {
 		onsubmit: () => void;
 		onSteerPreferredSubmit: () => void;
@@ -141,6 +143,7 @@
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 
 	const composerState = getComposerState();
+	const transcriptState = getActiveTranscriptState();
 	const lifecycle = getConversationLifecycle();
 	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
@@ -771,6 +774,12 @@
 			}}
 			class="relative"
 		>
+			{#if !selectedIsProcessing}
+				<ResendCandidateChips
+					candidates={transcriptState.resendCandidates}
+					onExclude={(ordinal) => transcriptState.excludeResendCandidate(ordinal)}
+				/>
+			{/if}
 			{#if composerState.isDragActive}
 				<div
 					class="absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg"

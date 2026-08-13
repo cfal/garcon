@@ -28,6 +28,7 @@ function page(
 		pageNewestOrdinal: lastOrdinal,
 		hasMore: false,
 		pendingUserInputs: [],
+		resendCandidates: [],
 		limit: 50,
 	};
 }

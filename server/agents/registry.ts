@@ -73,6 +73,7 @@ export interface AgentRegistryServiceContract {
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
   currentTranscriptViewId(chatId: string): Promise<string>;
+  resendCandidates(chatId: string): readonly import('../../common/chat-view.js').ResendCandidate[];
   captureSteerTarget(chatId: string): AgentSteerTarget | null;
   steerInput(
     chatId: string,
@@ -599,6 +600,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return (await this.#adoption.ensure(chatId)).viewId;
   }
 
+  resendCandidates(chatId: string) {
+    return this.#ledger.resendCandidates(chatId);
+  }
+
   async admitInput(
     chatId: string,
     message: UserMessage,
@@ -608,11 +613,33 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
     const view = await this.#adoption.ensure(chatId);
     this.#admissionIdentity(chatId, session, options);
+    return this.#commitInput(chatId, message, options, view.viewId);
+  }
+
+  admitQueuedInput(
+    chatId: string,
+    message: UserMessage,
+    options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
+  ): { readonly inserted: boolean } {
+    const session = this.#registry.getChat(chatId);
+    if (!session) throw new Error(`Session not initialized: ${chatId}`);
+    this.#admissionIdentity(chatId, session, options);
+    const view = this.#ledger.currentView(chatId);
+    if (!view) throw new Error(`Transcript view is not initialized for ${chatId}`);
+    return this.#commitInput(chatId, message, options, view.viewId);
+  }
+
+  #commitInput(
+    chatId: string,
+    message: UserMessage,
+    options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
+    currentViewId: ReturnType<typeof transcriptViewId>,
+  ): { readonly inserted: boolean } {
     let composition;
     try {
       composition = this.#ledger.appendInputAndCompose({
         chatId,
-        viewId: options.transcriptViewId ? transcriptViewId(options.transcriptViewId) : view.viewId,
+        viewId: options.transcriptViewId ? transcriptViewId(options.transcriptViewId) : currentViewId,
         message,
         attachments: (options.images ?? []).map((image) => ({
           kind: 'image' as const,
@@ -622,6 +649,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         })),
         clientMessageId: options.clientMessageId ?? null,
         steer: options.commandType === 'steer',
+        ...(options.excludedResendOrdinals?.length
+          ? { excludedOrdinals: new Set(options.excludedResendOrdinals) }
+          : {}),
       });
     } catch (error) {
       if (error instanceof StaleTranscriptViewError) {
@@ -636,6 +666,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   async #onTranscriptCommit(event: TranscriptCommitEvent): Promise<void> {
+    for (const listener of this.#transcriptListeners) await listener(event);
     if (event.type === 'session') {
       this.#registry.updateChat(event.chatId, {
         agentSessionId: event.row.detail.agentSessionId,
@@ -646,7 +677,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     } else if (event.type === 'run-ended') {
       await this.#events.publishRunEnded(event.chatId, event.runId, event.row);
     }
-    for (const listener of this.#transcriptListeners) await listener(event);
   }
 
   #admissionIdentity(

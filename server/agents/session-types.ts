@@ -153,6 +153,7 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
   clientRequestId?: string;
   clientMessageId?: string;
   transcriptViewId?: string;
+  excludedResendOrdinals?: readonly number[];
   turnId?: string;
   commandType?: AgentExecutionCommandType;
   executionAdmission?: AgentExecutionAdmission;

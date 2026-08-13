@@ -200,6 +200,31 @@ export class TranscriptLedgerStore {
     });
   }
 
+  resendCandidates(chatId: string): readonly LedgerUserInputRow[] {
+    return this.#read(chatId, (entry) => {
+      const view = this.#requireCurrent(entry);
+      const stored = entry.db.query<StoredLedgerRow, [string]>(`
+        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
+        FROM transcript_rows
+        WHERE view_id = ?
+        ORDER BY ordinal DESC
+      `).all(view.viewId);
+      const candidates: LedgerUserInputRow[] = [];
+      for (const item of stored) {
+        const row = decodeLedgerRow(item);
+        if (row.kind === 'user-input') {
+          candidates.unshift(row);
+          continue;
+        }
+        if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
+        if (row.kind === 'provider-row'
+            || row.kind === 'permission-requested'
+            || row.kind === 'run-ended') break;
+      }
+      return candidates;
+    });
+  }
+
   page(
     chatId: string,
     viewId: TranscriptViewId,

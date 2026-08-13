@@ -117,6 +117,39 @@ describe('TranscriptLedgerService', () => {
 
       expect(first.prompt.map((row) => row.detail.message.content)).toEqual(['first']);
       expect(second.prompt.map((row) => row.detail.message.content)).toEqual(['first', 'second']);
+      expect(ledger.resendCandidates('chat-1')).toEqual([
+        { ordinal: 1, content: 'first', attachmentNames: [] },
+        { ordinal: 3, content: 'second', attachmentNames: [] },
+      ]);
+    });
+  });
+
+  it('applies one-composition resend exclusions without changing durable history', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: view.viewId,
+        message: new UserMessage(TS, 'first'),
+        attachments: [],
+        clientMessageId: 'message-1',
+        steer: false,
+      });
+      const second = ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: view.viewId,
+        message: new UserMessage(TS, 'second'),
+        attachments: [],
+        clientMessageId: 'message-2',
+        steer: false,
+        excludedOrdinals: new Set([1]),
+      });
+
+      expect(second.prompt.map((row) => row.detail.message.content)).toEqual(['second']);
+      expect(ledger.resendCandidates('chat-1').map((row) => row.content)).toEqual([
+        'first',
+        'second',
+      ]);
     });
   });
 

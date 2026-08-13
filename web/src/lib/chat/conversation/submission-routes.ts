@@ -62,10 +62,12 @@ export async function submitQueueRoute(
 		chatId: context.chatId,
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		content: context.content,
+		excludedResendOrdinals: [...deps.chatState.excludedResendOrdinals],
 	});
 	try {
 		const result = await submission.submit();
 		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
+		deps.chatState.clearResendExclusions();
 		return 'accepted';
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {
@@ -269,6 +271,7 @@ export async function submitRunRoute(
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		command: context.text,
 		images: context.images.length > 0 ? context.images : undefined,
+		excludedResendOrdinals: [...deps.chatState.excludedResendOrdinals],
 		...(handoff
 			? { handoff }
 			: {
@@ -292,6 +295,7 @@ export async function submitRunRoute(
 			onHandoffAccepted(response.chat);
 		}
 		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
+		deps.chatState.clearResendExclusions();
 		deps.lifecycle.beginTurn(context.chatId);
 		return 'accepted';
 	} catch (error) {

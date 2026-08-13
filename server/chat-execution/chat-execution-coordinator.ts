@@ -22,7 +22,6 @@ import {
 } from './turn-finalization-tracker.js';
 import {
   type StoredChatExecutionControlState,
-  type StoredQueueEntry,
 } from './control-state.ts';
 import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';
 import {
@@ -49,7 +48,6 @@ import {
   type CapturedSteerTarget,
   type ChatIdleCallback,
   type DirectTurnReservation,
-  type DispatchingCallback,
   type DrainSuppressionReason,
   type ExecutionControlUpdatedCallback,
   type PendingInputsPort,
@@ -194,42 +192,30 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
           this.deliverGoalControlInput(chatId, content, options, beforeDelivery)
         ),
         steer: (...args) => this.steerInput(...args),
-        hasAppliedCreate: (chatId, commandKey, entryId) => (
-          this.hasAppliedQueueCreateCommand(chatId, commandKey, entryId)
-        ),
       },
     });
     this.#queueDrainer = new QueueDrainer({
       ownership: this.#ownership,
       controls: this.#controlOperations,
       turnRunner: this.#turnRunner,
-      pendingInputs: this.#pendingInputs,
       getDrainOptions: this.#getDrainOptions,
       callbacks: {
         isShuttingDown: () => this.#shuttingDown,
-        registerPending: (chatId, content, options) => (
-          this.registerPendingUserInput(chatId, content, options)
+        registerQueued: (chatId, content, options) => (
+          this.#acceptedInputTranscript.registerQueued(chatId, content, options)
         ),
-        publishDispatching: (chatId, entry) => {
-          this.#invalidateProcessing(chatId);
-          this.emit('dispatching', chatId, entry.id, entry.content);
-        },
         publishIdle: (chatId) => { this.emit('chat-idle', chatId); },
         publishTurnFailed: (chatId, message, options) => {
           this.emit('turn-failed', chatId, message, options);
         },
         settleAttempt: (chatId, attempt) => { this.#settleDirectAttempt(chatId, attempt); },
         stopBarrier: (chatId) => this.#drainStopBarrier(chatId),
-        removeSent: (chatId, entryId) => this.removeSentChat(chatId, entryId),
       },
     });
   }
 
   onExecutionControlUpdated(cb: ExecutionControlUpdatedCallback): void {
     this.on('execution-control-updated', cb);
-  }
-  onDispatching(cb: DispatchingCallback): void {
-    this.on('dispatching', cb);
   }
   onSessionStopRequested(cb: SessionStopRequestedCallback): void {
     this.on('session-stop-requested', cb);
@@ -461,12 +447,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   async recoverQueueEntrySteer(chatId: string, entryId: string): Promise<StoredChatExecutionControlState> {
     return this.#acceptedInputHandler.recoverQueueEntrySteer(chatId, entryId);
   }
-  async recoverAcceptedGoalControl(
-    input: AcceptedGoalControl,
-  ): Promise<AcceptedGoalControlOutcome> {
-    return this.#acceptedInputHandler.recoverGoalControl(input);
-  }
-
   async clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState> {
     this.#ownership.clearAbortSuppression(chatId);
     this.#ownership.consumeDrainRequest(chatId);
@@ -487,24 +467,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const control = await this.resumeChatQueue(chatId, pauseId);
     this.#requestDrain(chatId, 'queue resume');
     return control;
-  }
-
-  async hasAppliedQueueCreateCommand(
-    chatId: string,
-    commandKey: string,
-    entryId: string,
-  ): Promise<boolean> {
-    return this.#controlOperations.hasAppliedCreate(chatId, commandKey, entryId);
-  }
-
-  async popNextChat(
-    chatId: string,
-  ): Promise<{ entry: StoredQueueEntry; control: StoredChatExecutionControlState } | null> {
-    return this.#controlOperations.pop(chatId);
-  }
-
-  async removeSentChat(chatId: string, entryId: string): Promise<StoredChatExecutionControlState> {
-    return this.#controlOperations.removeSent(chatId, entryId);
   }
 
   async requeueAndPauseChat(

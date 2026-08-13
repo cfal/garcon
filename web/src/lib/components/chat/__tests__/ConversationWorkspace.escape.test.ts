@@ -75,6 +75,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			hasMore: false,
 			limit: 50,
 			pendingUserInputs: [],
+			resendCandidates: [],
 		});
 		mockGetChatExecutionControl.mockResolvedValue({
 			success: true,
@@ -83,7 +84,6 @@ describe('ConversationWorkspace Escape abort handling', () => {
 				serverInstanceId: 'server-instance-test',
 				queue: {
 					entries: [],
-					dispatchingEntryId: null,
 					steeringEntryId: null,
 					recentlyDispatched: [],
 					pause: null,
@@ -104,7 +104,6 @@ describe('ConversationWorkspace Escape abort handling', () => {
 				serverInstanceId: 'server-instance-test',
 				queue: {
 					entries: [],
-					dispatchingEntryId: null,
 					steeringEntryId: null,
 					recentlyDispatched: [],
 					pause: null,

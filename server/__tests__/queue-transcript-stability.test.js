@@ -48,6 +48,7 @@ function projectionPort(views, loadMessages = async () => []) {
       }
       return { discardKnownNotSent: async () => {} };
     },
+    admitQueuedInput: () => ({ inserted: true }),
   };
 }
 
@@ -115,13 +116,7 @@ describe('queue and transcript stability', () => {
       expect((await queue.readChatExecutionControl(chatId)).entries).toEqual([
         expect.objectContaining({ id: source.entryId, content: 'rejected guidance', status: 'queued' }),
       ]);
-      expect(pendingInputs.listForChat(chatId)).toEqual([
-        expect.objectContaining({
-          clientRequestId: 'request-steer',
-          content: 'rejected guidance',
-          deliveryStatus: 'failed',
-        }),
-      ]);
+      expect(pendingInputs.listForChat(chatId)).toEqual([]);
       expect(views.readPage(chatId, 20).messages).toEqual([
         expect.objectContaining({ message: expect.objectContaining({ content: 'rejected guidance' }) }),
       ]);
@@ -194,13 +189,7 @@ describe('queue and transcript stability', () => {
 
       expect(steerInput).toHaveBeenCalledOnce();
       expect((await queue.readChatExecutionControl(chatId)).entries).toEqual([]);
-      expect(pendingInputs.listForChat(chatId)).toEqual([
-        expect.objectContaining({
-          clientRequestId: 'request-steer',
-          content: 'possibly delivered guidance',
-          deliveryStatus: 'unconfirmed',
-        }),
-      ]);
+      expect(pendingInputs.listForChat(chatId)).toEqual([]);
       await queue.releaseDirectTurn(reservation);
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
@@ -263,6 +252,7 @@ describe('queue and transcript stability', () => {
         },
         {
           register: mock(async () => undefined),
+          settleCommitted: mock(() => true),
           discard: mock(() => true),
           markFailed: mock(() => true),
           markUnconfirmed: mock(() => true),
@@ -632,7 +622,6 @@ describe('queue and transcript stability', () => {
         controlRepository('server-instance-a'),
       );
       await queue.createChatQueueEntry(chatId, 'discard on restart');
-      await queue.popNextChat(chatId);
 
       const ledgerInput = {
         commandType: 'agent-run',

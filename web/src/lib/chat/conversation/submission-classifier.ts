@@ -19,7 +19,7 @@ export function classifySubmission(input: SubmissionClassificationInput): Accept
 	if (input.isDraft) return 'draft';
 
 	const queue = input.control?.queue ?? null;
-	const queueIsEmpty = (queue?.entries.length ?? 0) === 0 && queue?.dispatchingEntryId == null;
+	const queueIsEmpty = (queue?.entries.length ?? 0) === 0;
 	const queueIsUnpaused = queue?.pause == null;
 	const requiresQueue =
 		input.isProcessing || !queueIsEmpty || !queueIsUnpaused;

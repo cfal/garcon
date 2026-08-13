@@ -18,6 +18,11 @@ export interface AcceptedInputProjectionPort {
     message: UserMessage,
     options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
   ): Promise<AcceptedInputProjectionHandle>;
+  admitQueuedInput(
+    chatId: string,
+    message: UserMessage,
+    options: PendingUserInputRegistrationOptions & { readonly clientRequestId: string },
+  ): AcceptedInputProjectionHandle;
 }
 
 export class AcceptedInputTranscript {
@@ -57,6 +62,45 @@ export class AcceptedInputTranscript {
       const createdAt = options.createdAt
         ?? (typeof record?.createdAt === 'string' ? record.createdAt : new Date().toISOString());
       const handle = await this.projection.admitInput(
+        chatId,
+        new UserMessage(createdAt, content, images),
+        { ...options, clientRequestId },
+      );
+      this.pendingInputs.settleCommitted(chatId, clientRequestId);
+      return handle.inserted !== false;
+    } catch (error) {
+      if (clientRequestId) this.pendingInputs.discard(chatId, clientRequestId);
+      throw error;
+    }
+  }
+
+  registerQueued(
+    chatId: string,
+    content: string,
+    options: PendingUserInputRegistrationOptions,
+  ): boolean {
+    if (!content && !options.images?.length) return true;
+    const images = normalizeChatImages(options.images);
+    let clientRequestId: string | undefined;
+    try {
+      const registered = this.pendingInputs.register(chatId, content, {
+        clientRequestId: options.clientRequestId,
+        clientMessageId: options.clientMessageId,
+        turnId: options.turnId,
+        images,
+        deliveryStatus: options.deliveryStatus ?? 'accepted',
+        ...(options.createdAt ? { createdAt: options.createdAt } : {}),
+      });
+      const record = registered && typeof registered === 'object'
+        ? registered as { clientRequestId?: unknown; createdAt?: unknown }
+        : null;
+      clientRequestId = typeof record?.clientRequestId === 'string'
+        ? record.clientRequestId
+        : options.clientRequestId;
+      if (!clientRequestId) throw new TypeError('Accepted input is missing a client request ID');
+      const createdAt = options.createdAt
+        ?? (typeof record?.createdAt === 'string' ? record.createdAt : new Date().toISOString());
+      const handle = this.projection.admitQueuedInput(
         chatId,
         new UserMessage(createdAt, content, images),
         { ...options, clientRequestId },

@@ -65,7 +65,6 @@ describe('chats API contract', () => {
 			serverInstanceId: 'server-instance-test',
 			queue: {
 				entries: [],
-				dispatchingEntryId: null,
 				steeringEntryId: null,
 				recentlyDispatched: [],
 				pause: null,
