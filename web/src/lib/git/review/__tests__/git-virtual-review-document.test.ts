@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
 	GitReviewDocumentSummary,
 	GitReviewFileBody,
@@ -6,10 +6,18 @@ import type {
 } from '$lib/api/git.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import {
+	GitVirtualReviewDocumentController,
+	type GitVirtualReviewDocumentDeps,
+} from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { GitDiffSyntaxController } from '$lib/git/review/git-diff-syntax-controller.svelte.js';
+import {
+	gitDiffSyntaxCacheKey,
+	type GitDiffSyntaxAttempt,
+	type GitDiffSyntaxFileInput,
+} from '$lib/git/review/git-diff-syntax.js';
 
-function buildVirtualRows(
-	options: Parameters<typeof buildGitVirtualReviewRowSource>[0],
-) {
+function buildVirtualRows(options: Parameters<typeof buildGitVirtualReviewRowSource>[0]) {
 	const source = buildGitVirtualReviewRowSource(options);
 	return source.rowsInRange(0, source.rowCount);
 }
@@ -93,6 +101,57 @@ function baseOptions(summary: GitReviewDocumentSummary) {
 			selectedLineKeys: new Set<string>(),
 		},
 	};
+}
+
+function highlightedAttempt(input: GitDiffSyntaxFileInput): GitDiffSyntaxAttempt {
+	return {
+		status: 'highlighted',
+		result: {
+			cacheKey: gitDiffSyntaxCacheKey(input.documentId, input.file, input.body),
+			filePath: input.file.path,
+			bodyFingerprint: input.body.bodyFingerprint,
+			before: null,
+			after: {
+				path: input.file.path,
+				languageKey: 'typescript',
+				lines: new Map([[0, [{ text: 'new line', className: 'cm-code-keyword' }]]]),
+				characterCount: 8,
+				segmentCount: 1,
+			},
+			characterCount: 8,
+			segmentCount: 1,
+		},
+	};
+}
+
+function documentDeps(visibleFilePaths: () => string[]): GitVirtualReviewDocumentDeps {
+	return {
+		targetKey: () => 'target',
+		targetProjectPath: () => null,
+		activeTab: () => 'unstaged',
+		visibleFilePaths,
+		selectedFile: () => null,
+		selectedLineKeys: () => new Set(),
+		composerState: () => ({
+			open: false,
+			focusPending: false,
+			filePath: '',
+			side: 'after',
+			line: 0,
+			body: '',
+			severity: 'note',
+		}),
+		surfaceError: vi.fn(),
+		markExternallyStale: vi.fn(),
+	};
+}
+
+function addedSyntaxSegments(controller: GitVirtualReviewDocumentController) {
+	return controller.rowSource
+		.rowsInRange(0, controller.rowSource.rowCount)
+		.flatMap((row) =>
+			row.kind === 'unified-row' && row.view.row.kind === 'add' ? [row.view.segments] : [],
+		)[0];
 }
 
 describe('buildVirtualRows', () => {
@@ -218,5 +277,62 @@ describe('buildVirtualRows', () => {
 			title: 'Diff limit reached',
 			message: 'Showing 1 of 2 changed files.',
 		});
+	});
+});
+
+describe('GitVirtualReviewDocumentController syntax', () => {
+	it('activates demanded retained bodies and follows workbench cache policy', async () => {
+		let visiblePaths = ['a.ts'];
+		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
+		const syntax = new GitDiffSyntaxController({
+			waitForWorkSlot: async () => {},
+			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
+		});
+		const controller = new GitVirtualReviewDocumentController(
+			documentDeps(() => visiblePaths),
+			syntax,
+		);
+		const summary = makeSummary([makeFile('a.ts')]);
+		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
+		controller.applySummary(summary);
+
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: summary.documentId,
+			filePaths: ['a.ts'],
+		});
+
+		await vi.waitFor(() => expect(highlighter).toHaveBeenCalledOnce());
+		await vi.waitFor(() =>
+			expect(addedSyntaxSegments(controller)).toEqual([
+				{ text: 'new line', className: 'cm-code-keyword' },
+			]),
+		);
+
+		controller.clearForDisplayChange();
+		expect(controller.rowSource.rowCount).toBe(0);
+		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
+		controller.applySummary(summary);
+		await vi.waitFor(() => expect(addedSyntaxSegments(controller)).toBeDefined());
+		expect(highlighter).toHaveBeenCalledOnce();
+
+		controller.refreshAllData();
+		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
+		controller.applySummary(summary);
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: summary.documentId,
+			filePaths: ['a.ts'],
+		});
+		await vi.waitFor(() => expect(highlighter).toHaveBeenCalledTimes(2));
+
+		visiblePaths = [];
+		controller.pruneToFilePaths(new Set());
+		expect(controller.fileBodies).toEqual({});
+		expect(
+			controller.rowSource
+				.rowsInRange(0, controller.rowSource.rowCount)
+				.some((row) => row.kind === 'unified-row' || row.kind === 'split-row'),
+		).toBe(false);
 	});
 });

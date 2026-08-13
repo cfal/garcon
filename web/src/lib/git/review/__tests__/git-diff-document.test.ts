@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GitReviewFileBody } from '$lib/api/git.js';
 import { createGitPatchIndex } from '../git-patch-index.js';
 import { commitFileToReviewFile, GitDiffDocumentController } from '../git-diff-document.svelte.js';
+import { GitDiffSyntaxController } from '../git-diff-syntax-controller.svelte.js';
+import {
+	gitDiffSyntaxCacheKey,
+	type GitDiffSyntaxAttempt,
+	type GitDiffSyntaxFileInput,
+} from '../git-diff-syntax.js';
 
 const limits = {
 	maxSummaryFiles: 100,
@@ -82,7 +88,99 @@ function testCommentSource() {
 	};
 }
 
+function highlightedAttempt(input: GitDiffSyntaxFileInput): GitDiffSyntaxAttempt {
+	return {
+		status: 'highlighted',
+		result: {
+			cacheKey: gitDiffSyntaxCacheKey(input.documentId, input.file, input.body),
+			filePath: input.file.path,
+			bodyFingerprint: input.body.bodyFingerprint,
+			before: null,
+			after: {
+				path: input.file.path,
+				languageKey: 'typescript',
+				lines: new Map([[0, [{ text: 'one', className: 'cm-code-keyword' }]]]),
+				characterCount: 3,
+				segmentCount: 1,
+			},
+			characterCount: 3,
+			segmentCount: 1,
+		},
+	};
+}
+
+function addedSyntaxSegments(controller: GitDiffDocumentController) {
+	return controller.rowSource
+		.rowsInRange(0, controller.rowSource.rowCount)
+		.flatMap((row) =>
+			row.kind === 'unified-row' && row.view.row.kind === 'add' ? [row.view.segments] : [],
+		)[0];
+}
+
 describe('GitDiffDocumentController', () => {
+	it('replays early demand into syntax and honors document cache clearing', async () => {
+		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
+		const syntax = new GitDiffSyntaxController({
+			waitForWorkSlot: async () => {},
+			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
+		});
+		const controller = new GitDiffDocumentController(syntax);
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
+			bodyResponse(
+				'doc',
+				requested.map(({ path }) => path),
+			),
+		);
+		const snapshot = {
+			project: '/project',
+			documentId: 'doc',
+			files: [file('a.ts')],
+			limits,
+			firstBodyCandidates: [],
+		};
+		const options = {
+			contextLines: 5,
+			diffMode: 'unified' as const,
+			loadBodies,
+			onError: vi.fn(),
+			commentSource: testCommentSource(),
+		};
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: snapshot.documentId,
+			filePaths: ['a.ts'],
+		});
+
+		controller.open(snapshot, options);
+
+		await vi.waitFor(() => expect(highlighter).toHaveBeenCalledOnce());
+		await vi.waitFor(() =>
+			expect(addedSyntaxSegments(controller)).toEqual([
+				{ text: 'one', className: 'cm-code-keyword' },
+			]),
+		);
+
+		controller.clear({ preserveCache: true });
+		expect(controller.rowSource.rowCount).toBe(0);
+		controller.open(snapshot, options);
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: snapshot.documentId,
+			filePaths: ['a.ts'],
+		});
+		await vi.waitFor(() => expect(addedSyntaxSegments(controller)).toBeDefined());
+		expect(highlighter).toHaveBeenCalledOnce();
+
+		controller.clear();
+		controller.open(snapshot, options);
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: snapshot.documentId,
+			filePaths: ['a.ts'],
+		});
+		await vi.waitFor(() => expect(highlighter).toHaveBeenCalledTimes(2));
+	});
+
 	it('reconciles retained viewport demand when the matching document becomes ready', async () => {
 		const controller = new GitDiffDocumentController();
 		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>

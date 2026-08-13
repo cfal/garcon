@@ -32,6 +32,7 @@ import {
 	type GitReviewDemandOutcome,
 } from './git-review-body-demand.js';
 import { GitReviewDemandReconciler } from './git-review-demand-reconciler.js';
+import { GitDiffSyntaxController } from './git-diff-syntax-controller.svelte.js';
 import {
 	assertGitReviewLoadingOwnership,
 	traceGitReviewDemand,
@@ -184,6 +185,7 @@ export class GitVirtualReviewDocumentController {
 			summary,
 			visibleFilePaths: this.deps.visibleFilePaths(),
 			fileBodies: this.fileBodies,
+			syntaxResults: this.syntax.results,
 			loadingBodies: this.loadingBodies,
 			focusedFilePath: this.deps.selectedFile(),
 			diffMode: this.diffMode,
@@ -198,7 +200,10 @@ export class GitVirtualReviewDocumentController {
 		});
 	});
 
-	constructor(private readonly deps: GitVirtualReviewDocumentDeps) {
+	constructor(
+		private readonly deps: GitVirtualReviewDocumentDeps,
+		private readonly syntax = new GitDiffSyntaxController(),
+	) {
 		this.demandReconciler = new GitReviewDemandReconciler({
 			currentDocumentId: () => this.summary?.documentId ?? null,
 			requestViewportPaths: (filePaths) => this.requestDemandPaths(filePaths),
@@ -224,6 +229,7 @@ export class GitVirtualReviewDocumentController {
 	}
 
 	applySummary(summary: GitReviewDocumentSummary | null): void {
+		const nextBodies = summary ? this.retainedBodiesForSummary(summary) : {};
 		this.clearBodyInFlightLoads();
 		this.loadingBodies = new Set();
 		this.loadGeneration++;
@@ -231,14 +237,18 @@ export class GitVirtualReviewDocumentController {
 		this.aggregateLimit = null;
 		this.prefetchStopped = false;
 		if (summary) {
-			this.pruneBodiesToSummary(summary);
+			this.fileBodies = nextBodies;
+			this.syntax.open({ documentId: summary.documentId, files: summary.files }, nextBodies);
+			this.replayViewportSyntaxDemand(summary.documentId);
 		} else {
 			this.fileBodies = {};
+			this.syntax.close({ preserveCache: true });
 		}
 		this.demandReconciler.markReadinessChanged();
 	}
 
 	handleBodyDemand(demand: GitReviewBodyDemand): void {
+		this.syntax.handleDemand(demand);
 		this.demandReconciler.handle(demand);
 	}
 
@@ -310,12 +320,14 @@ export class GitVirtualReviewDocumentController {
 	refreshAllData(): void {
 		this.bodyCache.clear();
 		this.bodyCacheBytes = 0;
+		this.syntax.reset();
 		this.applySummary(null);
 	}
 
 	clearForDisplayChange(): void {
 		this.summary = null;
 		this.fileBodies = {};
+		this.syntax.close({ preserveCache: true });
 		this.aggregateLimit = null;
 		this.prefetchStopped = false;
 		this.loadingBodies = new Set();
@@ -330,15 +342,21 @@ export class GitVirtualReviewDocumentController {
 				this.bodyCache.delete(key);
 			}
 		}
-		this.fileBodies = Object.fromEntries(
-			Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+		this.replaceFileBodies(
+			Object.fromEntries(
+				Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+			),
 		);
+		this.syntax.invalidateFile(filePath);
 	}
 
 	pruneToFilePaths(paths: Set<string>): void {
-		this.fileBodies = Object.fromEntries(
-			Object.entries(this.fileBodies).filter(([filePath]) => paths.has(filePath)),
+		this.replaceFileBodies(
+			Object.fromEntries(
+				Object.entries(this.fileBodies).filter(([filePath]) => paths.has(filePath)),
+			),
 		);
+		this.syntax.pruneToFilePaths(paths);
 		for (const key of Array.from(this.bodyCache.keys())) {
 			const filePath = key.split('|').slice(3).join('|');
 			if (!paths.has(filePath)) {
@@ -351,6 +369,7 @@ export class GitVirtualReviewDocumentController {
 	reset(): void {
 		this.summary = null;
 		this.fileBodies = {};
+		this.syntax.reset();
 		this.loadingBodies = new Set();
 		this.scrollRequest = null;
 		this.aggregateLimit = null;
@@ -360,6 +379,21 @@ export class GitVirtualReviewDocumentController {
 		this.loadGeneration++;
 		this.clearBodyInFlightLoads();
 		this.demandReconciler.clear();
+	}
+
+	private replaceFileBodies(next: Record<string, GitReviewFileBody>): void {
+		this.fileBodies = next;
+		this.syntax.replaceBodies(next);
+	}
+
+	private replayViewportSyntaxDemand(documentId: string): void {
+		const demand = this.demandReconciler.snapshot();
+		if (demand.documentId !== documentId) return;
+		this.syntax.handleDemand({
+			kind: 'viewport',
+			documentId,
+			filePaths: demand.filePaths,
+		});
 	}
 
 	private requestDemandPaths(filePaths: readonly string[]): GitReviewDemandOutcome {
@@ -387,9 +421,11 @@ export class GitVirtualReviewDocumentController {
 		return !targetProjectPath || targetProjectPath === guard.projectPath;
 	}
 
-	private pruneBodiesToSummary(summary: GitReviewDocumentSummary): void {
+	private retainedBodiesForSummary(
+		summary: GitReviewDocumentSummary,
+	): Record<string, GitReviewFileBody> {
 		const files = new Map(summary.files.map((file) => [file.path, file]));
-		this.fileBodies = Object.fromEntries(
+		return Object.fromEntries(
 			Object.entries(this.fileBodies).filter(([filePath, body]) => {
 				const file = files.get(filePath);
 				return Boolean(
@@ -401,8 +437,10 @@ export class GitVirtualReviewDocumentController {
 
 	private discardErrorBody(filePath: string): void {
 		if (this.fileBodies[filePath]?.bodyState !== 'error') return;
-		this.fileBodies = Object.fromEntries(
-			Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+		this.replaceFileBodies(
+			Object.fromEntries(
+				Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+			),
 		);
 	}
 
@@ -450,7 +488,7 @@ export class GitVirtualReviewDocumentController {
 			next[filePath] = cached;
 			changed = true;
 		}
-		if (changed) this.fileBodies = next;
+		if (changed) this.replaceFileBodies(next);
 	}
 
 	private ensureBodyScheduler(projectPath: string, guard: GitWorkbenchLoadGuard): void {
@@ -541,7 +579,7 @@ export class GitVirtualReviewDocumentController {
 			if (body.bodyState !== 'error') this.cacheSet(file, guard, body);
 			next[filePath] = body;
 		}
-		this.fileBodies = next;
+		this.replaceFileBodies(next);
 	}
 
 	private collectionLimitBody(

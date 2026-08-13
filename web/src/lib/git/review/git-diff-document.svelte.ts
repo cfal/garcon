@@ -41,6 +41,7 @@ import {
 	type GitReviewDemandOutcome,
 } from './git-review-body-demand.js';
 import { GitReviewDemandReconciler } from './git-review-demand-reconciler.js';
+import { GitDiffSyntaxController } from './git-diff-syntax-controller.svelte.js';
 import {
 	assertGitReviewLoadingOwnership,
 	traceGitReviewDemand,
@@ -110,7 +111,7 @@ export class GitDiffDocumentController {
 	private onExpired: ((message: string) => void) | null = null;
 	private commentSource: GitReviewCommentSource | null = null;
 
-	constructor() {
+	constructor(private readonly syntax = new GitDiffSyntaxController()) {
 		this.demandReconciler = new GitReviewDemandReconciler({
 			currentDocumentId: () => this.snapshot?.documentId ?? null,
 			requestViewportPaths: (filePaths) => this.requestBodies(filePaths, 'visible'),
@@ -189,6 +190,7 @@ export class GitDiffDocumentController {
 			summary,
 			visibleFilePaths: summary.files.map((file) => file.path),
 			fileBodies: this.fileBodies,
+			syntaxResults: this.syntax.results,
 			loadingBodies: this.loadingBodies,
 			focusedFilePath: this.focusedFilePath,
 			diffMode: this.diffMode,
@@ -211,6 +213,8 @@ export class GitDiffDocumentController {
 		this.diffMode = options.diffMode;
 		this.contextLines = options.contextLines;
 		this.fileBodies = {};
+		this.syntax.open({ documentId: snapshot.documentId, files: snapshot.files }, {});
+		this.replayViewportSyntaxDemand(snapshot.documentId);
 		this.prefetchStopped = false;
 		this.loadingBodies = new Set();
 		this.scrollRequest = null;
@@ -265,6 +269,7 @@ export class GitDiffDocumentController {
 	}
 
 	handleBodyDemand(demand: GitReviewBodyDemand): void {
+		this.syntax.handleDemand(demand);
 		this.demandReconciler.handle(demand);
 	}
 
@@ -352,6 +357,7 @@ export class GitDiffDocumentController {
 		this.snapshot = null;
 		this.summariesByPath.clear();
 		this.fileBodies = {};
+		this.syntax.close(options);
 		this.prefetchStopped = false;
 		this.loadingBodies = new Set();
 		this.scrollRequest = null;
@@ -369,6 +375,21 @@ export class GitDiffDocumentController {
 		this.commentSource = null;
 		if (!options.preserveCache) this.clearBodyCache();
 		this.demandReconciler.clear();
+	}
+
+	private replaceFileBodies(next: Record<string, GitReviewFileBody>): void {
+		this.fileBodies = next;
+		this.syntax.replaceBodies(next);
+	}
+
+	private replayViewportSyntaxDemand(documentId: string): void {
+		const demand = this.demandReconciler.snapshot();
+		if (demand.documentId !== documentId) return;
+		this.syntax.handleDemand({
+			kind: 'viewport',
+			documentId,
+			filePaths: demand.filePaths,
+		});
 	}
 
 	private requestBodies(
@@ -468,7 +489,7 @@ export class GitDiffDocumentController {
 				this.cacheBody(file, body, snapshot.limits.maxLoadedPatchBytes);
 			}
 		}
-		this.fileBodies = next;
+		this.replaceFileBodies(next);
 	}
 
 	private collectionLimitBody(
@@ -538,8 +559,10 @@ export class GitDiffDocumentController {
 
 	private discardErrorBody(filePath: string): void {
 		if (this.fileBodies[filePath]?.bodyState !== 'error') return;
-		this.fileBodies = Object.fromEntries(
-			Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+		this.replaceFileBodies(
+			Object.fromEntries(
+				Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+			),
 		);
 	}
 
@@ -586,7 +609,7 @@ export class GitDiffDocumentController {
 				changed = true;
 			}
 		}
-		if (changed) this.fileBodies = next;
+		if (changed) this.replaceFileBodies(next);
 	}
 
 	private pinnedBodyPaths(documentId: string | null): Set<string> {
