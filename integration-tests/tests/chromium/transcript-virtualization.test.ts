@@ -1054,6 +1054,7 @@ function expectedRenderedTranscriptRows(transcript: {
   messages: ReadonlyArray<{ seq: number; message: unknown }>;
 }): ExpectedRenderedTranscriptRow[] {
   const rows: ExpectedRenderedTranscriptRow[] = [];
+  const pendingBashResultCounts = new Map<string, number>();
   for (const entry of transcript.messages) {
     if (typeof entry.message !== 'object' || entry.message === null) {
       throw new Error(`Transcript seq ${entry.seq} has no renderable message object.`);
@@ -1066,6 +1067,7 @@ function expectedRenderedTranscriptRows(transcript: {
       postTokens?: unknown;
       preTokens?: unknown;
       summary?: unknown;
+      toolId?: unknown;
       trigger?: unknown;
     };
     let text: string;
@@ -1079,6 +1081,13 @@ function expectedRenderedTranscriptRows(transcript: {
     ) {
       text = message.content;
     } else if (message.type === 'bash-tool-use' && typeof message.command === 'string') {
+      if (typeof message.toolId !== 'string') {
+        throw new Error(`Transcript seq ${entry.seq} has no Bash tool identity.`);
+      }
+      pendingBashResultCounts.set(
+        message.toolId,
+        (pendingBashResultCounts.get(message.toolId) ?? 0) + 1,
+      );
       text = `$ ${message.command}`;
     } else if (message.type === 'compaction') {
       const tokenLabel =
@@ -1090,9 +1099,18 @@ function expectedRenderedTranscriptRows(transcript: {
       text = `Context compacted (${message.trigger === 'auto' ? 'auto' : 'manual'})${tokenLabel}${summaryLabel}`;
       normalizeWhitespace = true;
     } else if (message.type === 'tool-result') {
-      text = '';
+      if (typeof message.toolId !== 'string') {
+        throw new Error(`Transcript seq ${entry.seq} has no tool-result identity.`);
+      }
+      const pendingCount = pendingBashResultCounts.get(message.toolId) ?? 0;
+      if (pendingCount === 0) {
+        throw new Error(`Missing rendered transcript expectation for tool result ${message.toolId}.`);
+      }
+      if (pendingCount === 1) pendingBashResultCounts.delete(message.toolId);
+      else pendingBashResultCounts.set(message.toolId, pendingCount - 1);
+      continue;
     } else if (message.type === 'permission-resolved' || message.type === 'permission-cancelled') {
-      text = '';
+      continue;
     } else {
       throw new Error(`Missing rendered transcript expectation for ${String(message.type)}.`);
     }
@@ -3017,33 +3035,43 @@ async function verifyStreamedRowOrderAndFollowingBuffer(
     'tool-result',
     'assistant-message',
   ]);
-  const expectedRowIds = appended.map((entry) => `${transcript.generationId}:${entry.seq}`);
-  const expectedTexts = [prompt, beforeTool, `$ ${command}`, '', afterTool];
-  const expectedIndexById = new Map(expectedRowIds.map((id, index) => [id, index] as const));
+  const expectedRows = expectedRenderedTranscriptRows({
+    generationId: transcript.generationId,
+    messages: appended,
+  });
+  expect(expectedRows.map((row) => row.type)).toEqual([
+    'user-message',
+    'assistant-message',
+    'bash-tool-use',
+    'assistant-message',
+  ]);
+  const hiddenToolResult = appended.find((entry) => entry.message.type === 'tool-result');
+  if (!hiddenToolResult) throw new Error('The streamed transcript has no Bash result.');
+  const hiddenToolResultId = `${transcript.generationId}:${hiddenToolResult.seq}`;
+  const expectedRowIds = expectedRows.map((row) => row.id);
+  const expectedById = new Map(expectedRows.map((row) => [row.id, row] as const));
   const firstFrameById = new Map<string, number>();
   const frameViolations = renderedFrames.flatMap((frame) => {
     const ids = frame.rows.map((row) => row.id);
     const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
-    const expectedRows = frame.rows.filter((row) => expectedIndexById.has(row.id));
-    for (const row of expectedRows) {
+    const renderedExpectedRows = frame.rows.filter((row) => expectedById.has(row.id));
+    for (const row of renderedExpectedRows) {
       if (!firstFrameById.has(row.id)) firstFrameById.set(row.id, frame.frame);
     }
-    const wrongText = expectedRows.filter(
-      (row) => row.text !== expectedTexts[expectedIndexById.get(row.id)!],
+    const wrongText = renderedExpectedRows.filter(
+      (row) => row.text !== expectedById.get(row.id)?.text,
     );
-    const wrongOrder = expectedRows.some((row, index) => {
-      const next = expectedRows[index + 1];
-      return (
-        Boolean(next) &&
-		(expectedIndexById.get(row.id)! >= expectedIndexById.get(next!.id)! || row.top > next!.top)
-      );
+    const wrongOrder = renderedExpectedRows.some((row, index) => {
+      const next = renderedExpectedRows[index + 1];
+      if (!next) return false;
+      return expectedById.get(row.id)!.index >= expectedById.get(next.id)!.index || row.top > next.top;
     });
     return duplicateIds.length > 0 || wrongText.length > 0 || wrongOrder
       ? [
           {
             frame: frame.frame,
             duplicateIds,
-            expectedRows,
+            expectedRows: renderedExpectedRows,
             wrongText,
             wrongOrder,
           },
@@ -3056,13 +3084,12 @@ async function verifyStreamedRowOrderAndFollowingBuffer(
   expect(observedExpectedIds).toContain(expectedRowIds[1]);
   expect(observedExpectedIds).toContain(expectedRowIds[2]);
   expect(observedExpectedIds).toContain(expectedRowIds[3]);
-  expect(observedExpectedIds).toContain(expectedRowIds[4]);
   expect(firstFrameById.get(expectedRowIds[2])!).toBeLessThanOrEqual(
     firstFrameById.get(expectedRowIds[3])!,
   );
-  expect(firstFrameById.get(expectedRowIds[3])!).toBeLessThanOrEqual(
-    firstFrameById.get(expectedRowIds[4])!,
-  );
+  expect(
+    renderedFrames.some((frame) => frame.rows.some((row) => row.id === hiddenToolResultId)),
+  ).toBe(false);
 
   await scrollToPosition(fixture.page, 'end');
   const rendered = await fixture.page
@@ -3099,20 +3126,18 @@ async function verifyStreamedRowOrderAndFollowingBuffer(
         },
       };
     }, expectedRowIds);
-  expect(rendered.rows.map((entry) => entry.count)).toEqual([1, 1, 1, 1, 1]);
-  expect(rendered.rows.map((entry) => entry.row?.text)).toEqual(expectedTexts);
-  expect(rendered.rows.map((entry) => entry.row?.type)).toEqual([
-    'user-message',
-    'assistant-message',
-    'bash-tool-use',
-    'tool-result',
-    'assistant-message',
-  ]);
+  expect(rendered.rows.map((entry) => entry.count)).toEqual([1, 1, 1, 1]);
+  expect(rendered.rows.map((entry) => entry.row?.text)).toEqual(
+    expectedRows.map((row) => row.text),
+  );
+  expect(rendered.rows.map((entry) => entry.row?.type)).toEqual(
+    expectedRows.map((row) => row.type),
+  );
   expect(
-		rendered.rows.every((entry, index) => {
-			const next = rendered.rows[index + 1];
-			return !next || (entry.row?.top ?? Number.POSITIVE_INFINITY) <= (next.row?.top ?? 0);
-		}),
+    rendered.rows.every((entry, index) => {
+      const next = rendered.rows[index + 1];
+      return !next || (entry.row?.top ?? Number.POSITIVE_INFINITY) <= (next.row?.top ?? 0);
+    }),
     JSON.stringify(rendered.rows, null, 2),
   ).toBe(true);
   expect(
@@ -3122,7 +3147,8 @@ async function verifyStreamedRowOrderAndFollowingBuffer(
     }),
   ).toEqual(expectedRowIds.map((id) => `transcript:${id}`));
   expect(new Set(rendered.allRowIds).size).toBe(rendered.allRowIds.length);
-  expect(rendered.allRowIds.filter((id) => expectedRowIds.includes(id))).toHaveLength(5);
+  expect(rendered.allRowIds.filter((id) => expectedRowIds.includes(id))).toHaveLength(4);
+  expect(rendered.allRowIds).not.toContain(hiddenToolResultId);
   expect(rendered.bash).toEqual({
     text: `$ ${command}`,
     childDivCount: 0,
