@@ -3,7 +3,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
-function makeRouter(execution) {
+function makeRouter(permissionDecisions) {
   const transcript = createRuntimeTranscriptFixture({
     rows: [{
       kind: 'permission-requested',
@@ -16,7 +16,7 @@ function makeRouter(execution) {
   });
   const integration = {
     descriptor: { id: 'test' },
-    execution,
+    permissionDecisions,
   };
   return new AgentRuntimeRouter({
     registry: {
@@ -39,13 +39,13 @@ function makeRouter(execution) {
 describe('AgentRuntimeRouter permission replies', () => {
   it('invokes the integration permission handler with its execution receiver', async () => {
     const resolvePermission = mock(async () => undefined);
-    const execution = {
+    const permissionDecisions = {
       runtime: { resolvePermission },
-      async respondToPermission(permissionRequestId, decision) {
+      async respond(permissionRequestId, decision) {
         await this.runtime.resolvePermission(permissionRequestId, decision);
       },
     };
-    const router = makeRouter(execution);
+    const router = makeRouter(permissionDecisions);
     const decision = { allow: true };
 
     await router.resolvePermission('chat-1', 'permission-1', decision, permissionControl());
@@ -61,7 +61,12 @@ describe('AgentRuntimeRouter permission replies', () => {
     const transcript = createRuntimeTranscriptFixture({ onPermissionAbandoned: abandoned });
     const router = new AgentRuntimeRouter({
       registry: { getChat: mock(() => ({ agentId: 'test' })) },
-      directory: { get: mock(() => ({ descriptor: { id: 'test' }, execution: { respondToPermission } })) },
+      directory: {
+        get: mock(() => ({
+          descriptor: { id: 'test' },
+          permissionDecisions: { respond: respondToPermission },
+        })),
+      },
       endpointResolver: {},
       events: {},
       projection: {},

@@ -31,6 +31,9 @@ const integration = {
   nativeHistoryImport: null,
   nativeActivity: null,
   nativeSessions: null,
+  sessionConfiguration: null,
+  permissionDecisions: null,
+  projectPathUpdates: null,
   transcript: {
     openSegment: async () => { throw new Error('not used'); },
     subscribe: () => () => {},

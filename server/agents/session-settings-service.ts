@@ -59,8 +59,8 @@ export class AgentSessionSettingsService {
         ? integration.settings.applyPatch(currentSettings, patch.agentSettingsPatch)
         : currentSettings;
 
-      if (entry.agentSessionId && integration.execution.applySessionConfiguration) {
-        await integration.execution.applySessionConfiguration(entry.agentSessionId, {
+      if (entry.agentSessionId && integration.sessionConfiguration) {
+        await integration.sessionConfiguration.apply(entry.agentSessionId, {
           model: next.model,
           permissionMode,
           thinkingMode,

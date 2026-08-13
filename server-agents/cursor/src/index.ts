@@ -74,6 +74,9 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
   readonly nativeSessions;
+  readonly sessionConfiguration: NonNullable<AgentIntegrationV4['sessionConfiguration']>;
+  readonly permissionDecisions: NonNullable<AgentIntegrationV4['permissionDecisions']>;
+  readonly projectPathUpdates: NonNullable<AgentIntegrationV4['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -105,6 +108,19 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const providerExecution = new CursorExecution(runtime, nativeSessions);
+    this.sessionConfiguration = {
+      apply: (agentSessionId, configuration) => (
+        providerExecution.applySessionConfiguration(agentSessionId, configuration)
+      ),
+    };
+    this.permissionDecisions = {
+      respond: (permissionRequestId, decision) => (
+        providerExecution.respondToPermission(permissionRequestId, decision)
+      ),
+    };
+    this.projectPathUpdates = {
+      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
+    };
     const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions);
     this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;

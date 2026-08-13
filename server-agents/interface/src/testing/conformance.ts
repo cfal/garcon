@@ -32,7 +32,14 @@ export function validateAgentIntegration(
       || typeof integration.producerExecution.abort !== 'function') {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing its V5 producer execution`);
   }
-  for (const facet of ['nativeHistoryImport', 'nativeActivity', 'nativeSessions'] as const) {
+  for (const facet of [
+    'nativeHistoryImport',
+    'nativeActivity',
+    'nativeSessions',
+    'sessionConfiguration',
+    'permissionDecisions',
+    'projectPathUpdates',
+  ] as const) {
     if (!(facet in integration) || integration[facet] === undefined) {
       throw new Error(`Agent integration ${integration.descriptor.id} is missing required ${facet} capability state`);
     }

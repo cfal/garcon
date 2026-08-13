@@ -15,6 +15,11 @@ import type {
   AgentSteeringV4,
 } from './services.js';
 import type { AgentNativeFork } from './native-fork.js';
+import type {
+  AgentPermissionDecisions,
+  AgentProjectPathUpdates,
+  AgentSessionConfigurationUpdates,
+} from './execution.js';
 import type { AgentExecutionV4 } from './execution-events-v4.js';
 import type { AgentExecutionV5 } from './execution-v5.js';
 import type {
@@ -50,6 +55,9 @@ export interface AgentIntegrationV4 {
   readonly nativeHistoryImport: AgentNativeHistoryImport | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;
   readonly nativeSessions: AgentNativeSessionAccess | null;
+  readonly sessionConfiguration: AgentSessionConfigurationUpdates | null;
+  readonly permissionDecisions: AgentPermissionDecisions | null;
+  readonly projectPathUpdates: AgentProjectPathUpdates | null;
 }
 
 export interface AgentIntegrationClassV4 {

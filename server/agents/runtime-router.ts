@@ -408,7 +408,7 @@ export class AgentRuntimeRouter {
     request: PrepareProjectPathUpdateRequest,
   ): Promise<AgentProjectPathUpdatePreparation | void> {
     const integration = this.#directory.require(agentId);
-    if (!integration.execution.prepareProjectPathUpdate) return;
+    if (!integration.projectPathUpdates) return;
     const entry = this.#registry.getChat(request.chatId);
     if (!entry) throw new Error(`Session not found: ${request.chatId}`);
     if (
@@ -418,7 +418,7 @@ export class AgentRuntimeRouter {
     ) {
       throw new Error(`Session changed while preparing project path: ${request.chatId}`);
     }
-    return integration.execution.prepareProjectPathUpdate({
+    return integration.projectPathUpdates.prepare({
       chat: toAgentChatReference(
         integration,
         request.chatId,
@@ -493,8 +493,10 @@ export class AgentRuntimeRouter {
     control: ChatTransientControlAction,
   ): Promise<void> {
     const entry = this.#registry.getChat(chatId);
-    const execution = entry ? this.#directory.get(entry.agentId)?.execution : null;
-    if (!execution?.respondToPermission || !permissionRequestId) {
+    const permissionDecisions = entry
+      ? this.#directory.get(entry.agentId)?.permissionDecisions
+      : null;
+    if (!permissionDecisions || !permissionRequestId) {
       throw new Error('The active integration cannot resolve this permission request');
     }
     if (control.chatId !== chatId || control.id !== permissionRequestId) {
@@ -502,7 +504,7 @@ export class AgentRuntimeRouter {
     }
     const claim = this.#ledger.claimPermissionResolution(control);
     try {
-      await execution.respondToPermission(permissionRequestId, decision);
+      await permissionDecisions.respond(permissionRequestId, decision);
     } catch (error) {
       this.#ledger.abandonPermissionResolution(claim);
       throw error;

@@ -42,7 +42,7 @@ function makeRouter(overrides = {}) {
       })),
       parse: mock((settings) => settings),
     },
-    execution: { prepareProjectPathUpdate },
+    projectPathUpdates: { prepare: prepareProjectPathUpdate },
   };
   const router = new AgentRuntimeRouter({
     registry: {

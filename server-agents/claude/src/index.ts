@@ -77,6 +77,9 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
+  readonly sessionConfiguration: NonNullable<AgentIntegrationV4['sessionConfiguration']>;
+  readonly permissionDecisions: NonNullable<AgentIntegrationV4['permissionDecisions']>;
+  readonly projectPathUpdates: NonNullable<AgentIntegrationV4['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -154,6 +157,19 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
       logger,
       config,
     );
+    this.sessionConfiguration = {
+      apply: (agentSessionId, configuration) => (
+        providerExecution.applySessionConfiguration(agentSessionId, configuration)
+      ),
+    };
+    this.permissionDecisions = {
+      respond: (permissionRequestId, decision) => (
+        providerExecution.respondToPermission(permissionRequestId, decision)
+      ),
+    };
+    this.projectPathUpdates = {
+      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
+    };
     const nativeEvidence = createClaudeNativeEvidence({
       nativeSessions,
       configHomeDir: config.configHomeDir,

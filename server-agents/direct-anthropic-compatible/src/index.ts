@@ -60,6 +60,9 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
   readonly nativeHistoryImport = null;
   readonly nativeActivity = null;
   readonly nativeSessions = null;
+  readonly sessionConfiguration = null;
+  readonly permissionDecisions = null;
+  readonly projectPathUpdates: NonNullable<AgentIntegrationV4['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -102,6 +105,9 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       descriptors: [],
     });
     const providerExecution = new DirectExecution(host, runtime);
+    this.projectPathUpdates = {
+      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
+    };
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     const nativeEvidence = createDirectNativeEvidence({
       reader,

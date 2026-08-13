@@ -63,6 +63,9 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
+  readonly sessionConfiguration = null;
+  readonly permissionDecisions = null;
+  readonly projectPathUpdates: NonNullable<AgentIntegrationV4['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -94,6 +97,9 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const providerExecution = new PiExecution(runtime, nativeSessions);
+    this.projectPathUpdates = {
+      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
+    };
     const nativeEvidence = createPiNativeEvidence(config, nativeSessions);
     this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;

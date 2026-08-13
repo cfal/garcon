@@ -75,6 +75,9 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
+  readonly sessionConfiguration: NonNullable<AgentIntegrationV4['sessionConfiguration']>;
+  readonly permissionDecisions: NonNullable<AgentIntegrationV4['permissionDecisions']>;
+  readonly projectPathUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -125,6 +128,16 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
       descriptors: [],
     });
     const execution = new CodexExecution(host, runtime, nativeSessions, config);
+    this.sessionConfiguration = {
+      apply: (agentSessionId, configuration) => (
+        execution.applySessionConfiguration(agentSessionId, configuration)
+      ),
+    };
+    this.permissionDecisions = {
+      respond: (permissionRequestId, decision) => (
+        execution.respondToPermission(permissionRequestId, decision)
+      ),
+    };
     const nativeEvidence = createCodexNativeEvidence(runtime, nativeSessions, logger);
     this.nativeSessions = nativeEvidence;
     this.producerExecution = createAgentProducerAdapter(execution).execution;
