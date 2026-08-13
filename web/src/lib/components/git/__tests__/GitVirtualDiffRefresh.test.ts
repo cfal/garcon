@@ -22,6 +22,7 @@ type TestRefreshedVirtualizerOptions = Partial<VirtualizerOptions<HTMLElement, H
 let initialVirtualizerOptions: TestInitialVirtualizerOptions | null;
 let refreshedVirtualizerOptions: TestRefreshedVirtualizerOptions | null;
 let measureCalls: number;
+let setOptionsCalls: number;
 let scrollToIndexCalls: number[];
 let publishVisibleRange: (startIndex: number, endIndex?: number) => void;
 
@@ -42,6 +43,7 @@ vi.mock('@tanstack/svelte-virtual', async () => {
 				getVirtualItems: () => virtualItems,
 				getTotalSize: () => 126,
 				setOptions: (next: TestRefreshedVirtualizerOptions) => {
+					setOptionsCalls += 1;
 					refreshedVirtualizerOptions = next;
 				},
 				measureElement: () => undefined,
@@ -221,6 +223,7 @@ describe('Git virtual diff refresh', () => {
 		initialVirtualizerOptions = null;
 		refreshedVirtualizerOptions = null;
 		measureCalls = 0;
+		setOptionsCalls = 0;
 		scrollToIndexCalls = [];
 	});
 
@@ -565,6 +568,7 @@ describe('Git virtual diff refresh', () => {
 		await waitFor(() => expect(refreshedVirtualizerOptions?.estimateSize).toBeTruthy());
 		const estimateSize = refreshedVirtualizerOptions?.estimateSize;
 		const getItemKey = refreshedVirtualizerOptions?.getItemKey;
+		const initialSetOptionsCalls = setOptionsCalls;
 
 		await rerender({
 			...props,
@@ -575,7 +579,47 @@ describe('Git virtual diff refresh', () => {
 
 		expect(refreshedVirtualizerOptions?.estimateSize).toBe(estimateSize);
 		expect(refreshedVirtualizerOptions?.getItemKey).toBe(getItemKey);
+		expect(setOptionsCalls).toBe(initialSetOptionsCalls);
 		expect(measureCalls).toBe(1);
+	});
+
+	it('restores scroll after presentation-only rows update the rendered DOM', async () => {
+		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
+		const props = makeSurfaceProps(rows);
+		const { container, rerender } = render(GitVirtualDiffSurface, { props });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		viewport.scrollTop = 60;
+		let shifted = false;
+		const observer = new MutationObserver(() => {
+			if (shifted || !container.querySelector('.cm-code-keyword')) return;
+			shifted = true;
+			viewport.scrollTop = 34;
+		});
+		observer.observe(viewport, { childList: true, subtree: true });
+
+		const highlightedRows = rows.map((row) =>
+			row.kind === 'unified-row'
+				? {
+						...row,
+						view: {
+							...row.view,
+							segments: [
+								{ text: 'added ', className: null },
+								{ text: 'line', className: 'cm-code-keyword' },
+							],
+						},
+					}
+				: row,
+		);
+
+		await rerender({
+			...props,
+			source: arrayGitVirtualReviewRowSource(highlightedRows, fileIndexes(highlightedRows)),
+		});
+
+		await waitFor(() => expect(shifted).toBe(true));
+		await waitFor(() => expect(viewport.scrollTop).toBe(60));
+		observer.disconnect();
 	});
 
 	it('republishes a new review document without resetting the layout scroll', async () => {

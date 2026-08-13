@@ -60,6 +60,9 @@
 	let measuredLayoutIdentity: string | null = null;
 	let performanceFrame: number | null = null;
 	let configuredMeasurementKey = '';
+	let configuredScrollElement: HTMLDivElement | null = null;
+	let presentedSource: GitVirtualReviewRowSource | null = null;
+	let presentedMeasurementRevision = '';
 	let demandEffectRuns = 0;
 	let demandPublications = 0;
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
@@ -153,6 +156,30 @@
 		});
 	});
 
+	$effect.pre(() => {
+		const nextSource = source;
+		const nextMeasurementRevision = nextSource.measurementRevision;
+		const scrollElement = viewportRef;
+		const preserveScroll =
+			presentedSource !== null &&
+			presentedSource !== nextSource &&
+			presentedMeasurementRevision === nextMeasurementRevision;
+		presentedSource = nextSource;
+		presentedMeasurementRevision = nextMeasurementRevision;
+		if (!preserveScroll || !scrollElement) return;
+
+		const scrollTop = scrollElement.scrollTop;
+		void tick().then(() => {
+			if (
+				source === nextSource &&
+				viewportRef === scrollElement &&
+				nextSource.measurementRevision === nextMeasurementRevision
+			) {
+				if (scrollElement.scrollTop !== scrollTop) scrollElement.scrollTop = scrollTop;
+			}
+		});
+	});
+
 	$effect(() => {
 		const measurementRevision = source.measurementRevision;
 		const count = source.rowCount;
@@ -160,13 +187,18 @@
 		const rowOverscan = overscan;
 		const lineHeight = rowLineHeight;
 		untrack(() => {
-			const measurementKey = `${measurementRevision}\0${lineHeight}`;
-			if (measurementKey !== configuredMeasurementKey) {
-				configuredMeasurementKey = measurementKey;
-				const measurementSource = source;
-				estimateSizeForOptions = (index) => measurementSource.estimateRowHeight(index, lineHeight);
-				itemKeyForOptions = (index) => measurementSource.rowKey(index);
+			const measurementKey = `${measurementRevision}\0${count}\0${rowOverscan}\0${lineHeight}`;
+			if (
+				measurementKey === configuredMeasurementKey &&
+				scrollElement === configuredScrollElement
+			) {
+				return;
 			}
+			configuredMeasurementKey = measurementKey;
+			configuredScrollElement = scrollElement;
+			const measurementSource = source;
+			estimateSizeForOptions = (index) => measurementSource.estimateRowHeight(index, lineHeight);
+			itemKeyForOptions = (index) => measurementSource.rowKey(index);
 			$virtualizer.setOptions({
 				count,
 				getScrollElement: () => scrollElement,
