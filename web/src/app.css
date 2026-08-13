@@ -377,12 +377,12 @@
 	--git-untracked: 214 82% 45%;
 	--git-renamed: 271 76% 53%;
 
-	--diff-add-bg: 138 76% 95%;
-	--diff-add-fg: 134 60% 28%;
-	--diff-add-line-num: 134 40% 50%;
-	--diff-del-bg: 353 100% 96%;
-	--diff-del-fg: 355 72% 36%;
-	--diff-del-line-num: 355 40% 50%;
+	--diff-add-bg: 133 80% 92%;
+	--diff-add-fg: 213 13% 14%;
+	--diff-add-line-num: 213 13% 14%;
+	--diff-del-bg: 5.5 100% 95.7%;
+	--diff-del-fg: 213 13% 14%;
+	--diff-del-line-num: 213 13% 14%;
 	--diff-hunk-header-bg: 214 60% 95%;
 
 	--safe-area-inset-top: env(safe-area-inset-top);
@@ -577,12 +577,12 @@
 	--git-untracked: 214 92% 68%;
 	--git-renamed: 271 81% 72%;
 
-	--diff-add-bg: 145 90% 12%;
-	--diff-add-fg: 132 68% 83%;
-	--diff-add-line-num: 132 40% 55%;
-	--diff-del-bg: 356 89% 14%;
-	--diff-del-fg: 9 100% 88%;
-	--diff-del-line-num: 9 50% 55%;
+	--diff-add-bg: 156 36% 11%;
+	--diff-add-fg: 210 66.7% 96.5%;
+	--diff-add-line-num: 210 66.7% 96.5%;
+	--diff-del-bg: 338.6 23.3% 11.8%;
+	--diff-del-fg: 210 66.7% 96.5%;
+	--diff-del-line-num: 210 66.7% 96.5%;
 	--diff-hunk-header-bg: 214 40% 18%;
 
 	--markdown-code-background: 0 0% 11%;
