@@ -157,7 +157,7 @@ describe('Git diff syntax reconstruction', () => {
 });
 
 describe('Git diff syntax eligibility', () => {
-	it.each([
+	it.each<[Partial<GitReviewFileSummary>, 'excluded']>([
 		[{ category: 'generated', isGenerated: true }, 'excluded'],
 		[{ category: 'lockfile' }, 'excluded'],
 		[{ category: 'binary', isBinary: true }, 'excluded'],
@@ -401,7 +401,7 @@ describe('Git diff syntax highlighting', () => {
 		const bodyValue = body();
 		const malformedBody: GitReviewFileBody = {
 			...bodyValue,
-			get patchIndex() {
+			get patchIndex(): never {
 				throw new Error('malformed patch');
 			},
 		};

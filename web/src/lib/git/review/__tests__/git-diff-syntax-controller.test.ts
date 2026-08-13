@@ -104,7 +104,11 @@ async function flushPromises(): Promise<void> {
 
 describe('GitDiffSyntaxController demand', () => {
 	it('waits for both eligible demand and a matching loaded body', async () => {
-		const loadHighlighter = vi.fn(async () => ({ highlightGitDiffFile: vi.fn() }));
+		const loadHighlighter = vi.fn(async () => ({
+			highlightGitDiffFile: vi.fn(
+				async () => ({ status: 'plain', reason: 'unsupported-language' }) as const,
+			),
+		}));
 		const controller = new GitDiffSyntaxController({
 			waitForWorkSlot: async () => {},
 			loadHighlighter,
@@ -183,7 +187,7 @@ describe('GitDiffSyntaxController demand', () => {
 
 	it('deduplicates duplicate viewport and navigation demand', async () => {
 		const pending = deferred<GitDiffSyntaxAttempt>();
-		const highlighter = vi.fn(() => pending.promise);
+		const highlighter = vi.fn((_value: GitDiffSyntaxFileInput) => pending.promise);
 		const controller = new GitDiffSyntaxController(dependencies(highlighter));
 		const fileValue = file('a.ts');
 		controller.open({ documentId: 'doc', files: [fileValue] }, { 'a.ts': body('a.ts') });
@@ -229,7 +233,7 @@ describe('GitDiffSyntaxController demand', () => {
 describe('GitDiffSyntaxController stale work', () => {
 	it('discards a result after document replacement', async () => {
 		const pending = deferred<GitDiffSyntaxAttempt>();
-		const highlighter = vi.fn(() => pending.promise);
+		const highlighter = vi.fn((_value: GitDiffSyntaxFileInput) => pending.promise);
 		const controller = new GitDiffSyntaxController(dependencies(highlighter));
 		const fileA = file('a.ts');
 		controller.open({ documentId: 'doc-a', files: [fileA] }, { 'a.ts': body('a.ts') });
@@ -246,7 +250,7 @@ describe('GitDiffSyntaxController stale work', () => {
 
 	it('discards a result after body fingerprint replacement and accepts the new key', async () => {
 		const attempts: Deferred<GitDiffSyntaxAttempt>[] = [];
-		const highlighter = vi.fn(() => {
+		const highlighter = vi.fn((_value: GitDiffSyntaxFileInput) => {
 			const pending = deferred<GitDiffSyntaxAttempt>();
 			attempts.push(pending);
 			return pending.promise;
