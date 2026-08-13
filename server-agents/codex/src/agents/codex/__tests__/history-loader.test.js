@@ -19,6 +19,66 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('loadCodexChatMessages', () => {
+  it('preserves the exact Codex turn and item identity for assistant rows', async () => {
+    const messages = await withTempJsonl([
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-08-13T05:04:03.796Z',
+        payload: {
+          type: 'message',
+          id: 'msg-final',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Standing by.' }],
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-final' },
+        },
+      }),
+    ], (filePath) => loadCodexChatMessages(filePath));
+
+    expect(messages).toHaveLength(1);
+    expect(getNativeMessageRevisionSource(messages[0])).toEqual({
+      entryId: 'turn:turn-final:item:msg-final',
+      byteOffset: 0,
+      lineNumber: 1,
+      withinSourceOrdinal: 0,
+    });
+  });
+
+  it('keeps physical rollout order when message timestamps move backward', async () => {
+    const rows = [
+      ['msg-compaction-adjacent', '2026-08-13T05:04:20.000Z', 'before tools'],
+      ['msg-tool-adjacent', '2026-08-13T05:04:10.000Z', 'after tools'],
+      ['msg-final', '2026-08-13T05:04:03.796Z', 'final assistant'],
+    ];
+    const lines = rows.map(([id, timestamp, content]) => JSON.stringify({
+      type: 'response_item',
+      timestamp,
+      payload: {
+        type: 'message',
+        id,
+        role: 'assistant',
+        content: [{ type: 'output_text', text: content }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-final' },
+      },
+    }));
+
+    await withTempJsonl(lines, async (filePath) => {
+      const full = await loadCodexChatMessages(filePath);
+      const latest = await loadCodexChatMessagePage(filePath, 2, 0);
+      const earlier = await loadCodexChatMessagePage(filePath, 2, 2);
+
+      expect(full.map((message) => message.content)).toEqual([
+        'before tools',
+        'after tools',
+        'final assistant',
+      ]);
+      expect(latest.messages.map((message) => message.content)).toEqual([
+        'after tools',
+        'final assistant',
+      ]);
+      expect(earlier.messages.map((message) => message.content)).toEqual(['before tools']);
+    });
+  });
+
   it('preserves literal entities in a captured Codex CLI user-message envelope', async () => {
     const fixturePath = fileURLToPath(new URL('./fixtures/codex-user-message-entities.jsonl', import.meta.url));
     const content = 'Fixture capture only. Preserve this marker as literal user input in the session transcript: &amp; &lt; &gt; &quot; &#39; <literal>. Reply only: acknowledged';
@@ -34,11 +94,55 @@ describe('loadCodexChatMessages', () => {
       JSON.stringify({
         type: 'response_item',
         timestamp: '2026-07-10T21:34:09.149Z',
+			payload: {
+				type: 'custom_tool_call',
+				id: 'item-exec',
+				name: 'exec',
+				call_id: 'call_exec',
+				input: code,
+				internal_chat_message_metadata_passthrough: { turn_id: 'turn-exec' },
+			},
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-07-10T21:34:09.150Z',
+			payload: {
+				type: 'custom_tool_call_output',
+				id: 'item-exec-output',
+				call_id: 'call_exec',
+				output: 'Script completed',
+				internal_chat_message_metadata_passthrough: { turn_id: 'turn-exec' },
+			},
+      }),
+    ];
+
+    const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
+
+		expect(messages).toMatchObject([
+			{ type: 'exec-tool-use', toolId: 'call_exec', code, language: 'javascript' },
+			{ type: 'tool-result', toolId: 'call_exec' },
+		]);
+		expect(getNativeMessageRevisionSource(messages[0])?.entryId).toBe(
+			'turn:turn-exec:item:item-exec',
+		);
+		expect(getNativeMessageRevisionSource(messages[0])?.withinSourceOrdinal).toBe(0);
+		expect(getNativeMessageRevisionSource(messages[1])?.entryId).toBe(
+			'turn:turn-exec:item:item-exec-output',
+		);
+		expect(getNativeMessageRevisionSource(messages[1])?.withinSourceOrdinal).toBe(0);
+	});
+
+  it('uses exact call identities when raw Code Mode response item IDs are absent', async () => {
+    const lines = [
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-07-10T21:34:09.149Z',
         payload: {
           type: 'custom_tool_call',
           name: 'exec',
-          call_id: 'call_exec',
-          input: code,
+          call_id: 'call_without_item_ids',
+          input: 'text("ok")',
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-exec' },
         },
       }),
       JSON.stringify({
@@ -46,17 +150,19 @@ describe('loadCodexChatMessages', () => {
         timestamp: '2026-07-10T21:34:09.150Z',
         payload: {
           type: 'custom_tool_call_output',
-          call_id: 'call_exec',
+          call_id: 'call_without_item_ids',
           output: 'Script completed',
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-exec' },
         },
       }),
     ];
 
     const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
 
-    expect(messages).toMatchObject([
-      { type: 'exec-tool-use', toolId: 'call_exec', code, language: 'javascript' },
-      { type: 'tool-result', toolId: 'call_exec' },
+    expect(messages).toHaveLength(2);
+    expect(messages.map((message) => getNativeMessageRevisionSource(message)?.entryId)).toEqual([
+      'turn:turn-exec:item:raw:custom_tool_call:call_without_item_ids',
+      'turn:turn-exec:item:raw:custom_tool_call_output:call_without_item_ids',
     ]);
   });
 
@@ -67,6 +173,7 @@ describe('loadCodexChatMessages', () => {
         timestamp: '2026-07-10T21:34:09.149Z',
         payload: {
           type: 'custom_tool_call',
+			id: 'item-outer',
           name: 'exec',
           call_id: 'outer',
           input: `
@@ -76,6 +183,7 @@ describe('loadCodexChatMessages', () => {
             ]);
             results.forEach(result => text(result.output));
           `,
+		  internal_chat_message_metadata_passthrough: { turn_id: 'turn-outer' },
         },
       }),
       JSON.stringify({
@@ -83,8 +191,10 @@ describe('loadCodexChatMessages', () => {
         timestamp: '2026-07-10T21:34:09.150Z',
         payload: {
           type: 'custom_tool_call_output',
+			id: 'item-outer-output',
           call_id: 'outer',
           output: 'aggregate output',
+		  internal_chat_message_metadata_passthrough: { turn_id: 'turn-outer' },
         },
       }),
     ];
@@ -99,13 +209,20 @@ describe('loadCodexChatMessages', () => {
         ['tool-result', 'codex-code-mode:outer:1'],
       ]);
       expect(getNativeMessageRevisionSource(full[0])).toMatchObject({
+		entryId: 'turn:turn-outer:item:item-outer',
         lineNumber: 1,
         withinSourceOrdinal: 0,
       });
       expect(getNativeMessageRevisionSource(full[1])).toMatchObject({
+		entryId: 'turn:turn-outer:item:item-outer',
         lineNumber: 1,
         withinSourceOrdinal: 1,
       });
+		expect(getNativeMessageRevisionSource(full[2])).toMatchObject({
+			entryId: 'turn:turn-outer:item:item-outer-output',
+			lineNumber: 2,
+			withinSourceOrdinal: 0,
+		});
       expect(page.messages).toEqual(full.slice(1));
       expect(page.total).toBe(3);
       expect(page.hasMore).toBe(true);
@@ -391,7 +508,7 @@ describe('loadCodexChatMessages', () => {
     ]);
   });
 
-  it('per-content-class dedup: canonical assistant suppresses fallback assistant but keeps fallback thinking', async () => {
+  it('uses message-class source precedence without comparing assistant content', async () => {
     const ts1 = '2026-02-21T12:00:00.000Z';
     const ts2 = '2026-02-21T12:00:01.000Z';
     const lines = [

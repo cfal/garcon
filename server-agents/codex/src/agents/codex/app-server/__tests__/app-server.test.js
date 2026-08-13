@@ -136,32 +136,41 @@ async function writeJsonl(filePath, entries) {
   await fs.writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
 }
 
-function commandHistoryEntries(callId, command, output) {
+function commandHistoryEntries(callId, command, output, timestampOffsetSeconds = 0) {
+  const timestamp = (seconds) => new Date(Date.UTC(2026, 6, 28, 0, 0, seconds + timestampOffsetSeconds)).toISOString();
   return [
     {
       type: 'session_meta',
-      timestamp: '2026-07-28T00:00:00.000Z',
+      timestamp: timestamp(0),
       payload: { id: 'thread-1', history_mode: 'legacy' },
     },
     {
       type: 'event_msg',
-      timestamp: '2026-07-28T00:00:01.000Z',
+      timestamp: timestamp(1),
       payload: { type: 'user_message', message: 'Run the command' },
     },
     {
       type: 'response_item',
-      timestamp: '2026-07-28T00:00:02.000Z',
+      timestamp: timestamp(2),
       payload: {
         type: 'function_call',
+		id: `function-${callId}-${timestampOffsetSeconds}`,
         name: 'exec_command',
         arguments: JSON.stringify({ cmd: command, workdir: '/repo' }),
         call_id: callId,
+		internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
       },
     },
     {
       type: 'response_item',
-      timestamp: '2026-07-28T00:00:03.000Z',
-      payload: { type: 'function_call_output', call_id: callId, output },
+      timestamp: timestamp(3),
+      payload: {
+		type: 'function_call_output',
+		id: `output-${callId}-${timestampOffsetSeconds}`,
+		call_id: callId,
+		output,
+		internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+	  },
     },
   ];
 }
@@ -2028,7 +2037,7 @@ describe('CodexAppServerRuntime', () => {
     await expect(provider.abort('thread-1')).resolves.toBe(true);
     await writeJsonl(nativePath, [
       ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
-      ...commandHistoryEntries('persisted-command', 'printf recovered', 'recovered').slice(2),
+      ...commandHistoryEntries('persisted-command', 'printf recovered', 'recovered', 4).slice(2),
     ]);
     const terminal = new Promise((resolve) => provider.onFinished(resolve));
     fake.emit('notification', {
@@ -2047,6 +2056,165 @@ describe('CodexAppServerRuntime', () => {
     });
   });
 
+  it('recovers only the missing result when its exact tool use was already emitted', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-result-recovery.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
+    const fake = new FakeClient();
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath }));
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'persisted-command',
+          command: 'printf recovered',
+          cwd: '/repo',
+          processId: '123',
+          source: 'agent',
+          status: 'inProgress',
+          commandActions: [],
+          aggregatedOutput: null,
+          exitCode: null,
+          durationMs: null,
+        },
+      },
+    });
+    expect(emitted).toEqual([
+      expect.objectContaining({ type: 'bash-tool-use', toolId: 'persisted-command' }),
+    ]);
+    emitted.length = 0;
+
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    await writeJsonl(nativePath, [
+      ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
+      ...commandHistoryEntries('persisted-command', 'printf recovered', 'recovered', 4).slice(2),
+    ]);
+    const terminal = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ status: 'interrupted' }) },
+    });
+    await terminal;
+
+    expect(emitted).toEqual([
+      expect.objectContaining({
+        type: 'tool-result',
+        toolId: 'persisted-command',
+        content: { raw: 'recovered' },
+        isError: false,
+      }),
+    ]);
+  });
+
+  it('does not publish an incomplete recovered tool pair', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-incomplete-recovery.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
+    const fake = new FakeClient();
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath }));
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    await writeJsonl(nativePath, [
+      ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
+      ...commandHistoryEntries('incomplete-command', 'printf incomplete', '', 4).slice(2, 3),
+    ]);
+    const terminal = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ status: 'interrupted' }) },
+    });
+    await terminal;
+
+    expect(emitted).toEqual([]);
+  });
+
+  it('does not recover an earlier complete pair across an incomplete native suffix', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-partial-suffix-recovery.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
+    const fake = new FakeClient();
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath }));
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    await writeJsonl(nativePath, [
+      ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
+      ...commandHistoryEntries('complete-command', 'printf complete', 'complete', 4).slice(2),
+      ...commandHistoryEntries('incomplete-command', 'printf incomplete', '', 8).slice(2, 3),
+    ]);
+    const terminal = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ status: 'interrupted' }) },
+    });
+    await terminal;
+
+    expect(emitted).toEqual([]);
+  });
+
+  it('does not append recovered interrupted tools after a later assistant row', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-ordered-recovery.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
+    const fake = new FakeClient();
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath }));
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'agentMessage',
+          id: 'assistant-after-command',
+          text: 'Interrupted after the command.',
+          phase: null,
+          memoryCitation: null,
+        },
+      },
+    });
+    await writeJsonl(nativePath, [
+      ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
+      ...commandHistoryEntries('persisted-command', 'printf recovered', 'recovered', 4).slice(2),
+      {
+        type: 'response_item',
+        timestamp: '2026-07-28T00:00:08.000Z',
+        payload: {
+          type: 'message',
+          id: 'assistant-after-command',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Interrupted after the command.' }],
+          internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+        },
+      },
+    ]);
+    const terminal = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ status: 'interrupted' }) },
+    });
+    await terminal;
+
+    expect(emitted).toEqual([
+      expect.objectContaining({
+        type: 'assistant-message',
+        content: 'Interrupted after the command.',
+      }),
+    ]);
+  });
+
   it('reconciles once when a completed terminal notification wins the interrupt response race', async () => {
     const nativePath = path.join(tmpDir, 'interrupt-response-race.jsonl');
     await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
@@ -2055,7 +2223,7 @@ describe('CodexAppServerRuntime', () => {
       interruptTurn: async () => {
         await writeJsonl(nativePath, [
           ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
-          ...commandHistoryEntries('race-command', 'printf raced', 'raced').slice(2),
+          ...commandHistoryEntries('race-command', 'printf raced', 'raced', 4).slice(2),
         ]);
         fake.emit('notification', {
           method: 'turn/completed',
@@ -3158,9 +3326,10 @@ describe('CodexAppServerRuntime', () => {
         turnId: 'turn-1',
         item: {
           type: 'custom_tool_call',
+		  id: 'ctc-live-exec-1',
           name: 'exec',
           call_id: 'call-exec-1',
-          input: 'const result = await tools.exec_command({cmd: "pwd"}); text(result.output);',
+		  input: 'const results = await Promise.all([tools.exec_command({cmd: "pwd"}), tools.exec_command({cmd: "git status"})]); for (const result of results) text(result.output);',
         },
       },
     });
@@ -3171,6 +3340,7 @@ describe('CodexAppServerRuntime', () => {
         turnId: 'turn-1',
         item: {
           type: 'custom_tool_call_output',
+		  id: 'ctco-live-unrelated',
           call_id: 'call-unrelated',
           output: 'ignored',
         },
@@ -3183,6 +3353,7 @@ describe('CodexAppServerRuntime', () => {
         turnId: 'turn-1',
         item: {
           type: 'custom_tool_call_output',
+		  id: 'ctco-live-exec-1',
           call_id: 'call-exec-1',
           output: [{ type: 'input_text', text: '1' }],
         },
@@ -3196,6 +3367,7 @@ describe('CodexAppServerRuntime', () => {
         turnId: 'turn-1',
         item: {
           type: 'function_call',
+		  id: 'fc-live-wait-1',
           name: 'wait',
           call_id: 'call-wait-1',
           arguments: '{"cell_id":"46","yield_time_ms":30000,"max_tokens":12000}',
@@ -3209,6 +3381,7 @@ describe('CodexAppServerRuntime', () => {
         turnId: 'turn-1',
         item: {
           type: 'function_call_output',
+		  id: 'fco-live-wait-1',
           call_id: 'call-wait-1',
           output: 'Script completed',
         },
@@ -3217,6 +3390,7 @@ describe('CodexAppServerRuntime', () => {
 
     expect(emitted.map((message) => message.type)).toEqual([
       'bash-tool-use',
+	  'bash-tool-use',
       'tool-result',
       'wait-tool-use',
       'tool-result',
@@ -3226,21 +3400,32 @@ describe('CodexAppServerRuntime', () => {
       command: 'pwd',
     });
     expect(emitted[1]).toMatchObject({
-      toolId: 'codex-code-mode:call-exec-1:0',
+	  toolId: 'codex-code-mode:call-exec-1:1',
+	  command: 'git status',
+	});
+	expect(emitted[2]).toMatchObject({
+	  toolId: 'codex-code-mode:call-exec-1:1',
       content: { items: [{ type: 'input_text', text: '1' }] },
       isError: false,
     });
-    expect(emitted[2]).toMatchObject({
+	expect(emitted[3]).toMatchObject({
       toolId: 'call-wait-1',
       executionId: '46',
       yieldTimeMs: 30000,
       maxTokens: 12000,
     });
-    expect(emitted[3]).toMatchObject({
+	expect(emitted[4]).toMatchObject({
       toolId: 'call-wait-1',
       content: { raw: 'Script completed' },
       isError: false,
     });
+	expect(emitted.map(getNativeMessageRevisionSource)).toEqual([
+	  { entryId: 'turn:turn-1:item:ctc-live-exec-1', withinSourceOrdinal: 0 },
+	  { entryId: 'turn:turn-1:item:ctc-live-exec-1', withinSourceOrdinal: 1 },
+	  { entryId: 'turn:turn-1:item:ctco-live-exec-1', withinSourceOrdinal: 0 },
+	  { entryId: 'turn:turn-1:item:call-wait-1', withinSourceOrdinal: 0 },
+	  { entryId: 'turn:turn-1:item:call-wait-1', withinSourceOrdinal: 1 },
+	]);
   });
 
   it('streams terminal subagent communications without another management call', async () => {
@@ -4618,7 +4803,11 @@ describe('CodexAppServerRuntime', () => {
         await fs.writeFile(nativePath, `${JSON.stringify({
           type: 'event_msg',
           timestamp: '2026-06-01T00:00:00.100Z',
-          payload: { type: 'user_message', message: deliveredText },
+          payload: {
+            type: 'user_message',
+            message: deliveredText,
+            client_id: 'message-steer',
+          },
         })}\n`);
         return { turnId: expectedTurnId };
       },
@@ -6407,8 +6596,10 @@ describe('CodexAppServerRuntime', () => {
             timestamp: new Date(Date.now() + 1_000).toISOString(),
             payload: {
               type: 'message',
+              id: 'a1',
               role: 'assistant',
               content: [{ type: 'output_text', text: 'JSONL should not append' }],
+              internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
             },
           },
         ]);
@@ -6437,6 +6628,13 @@ describe('CodexAppServerRuntime', () => {
     expect(emitted.map((message) => message.content)).toEqual(['Already emitted']);
     expect(getNativeMessageRevisionSource(emitted[0])).toEqual({
       entryId: 'turn:turn-1:item:a1',
+      withinSourceOrdinal: 0,
+    });
+    const persisted = await loadCodexChatMessages(nativePath);
+    expect(getNativeMessageRevisionSource(persisted[0])).toEqual({
+      entryId: 'turn:turn-1:item:a1',
+      lineNumber: 1,
+      byteOffset: 0,
       withinSourceOrdinal: 0,
     });
   });

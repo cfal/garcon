@@ -164,7 +164,7 @@ export function parseApplyPatch(input: string): ParsedApplyPatch {
 
 // Normalizes a single parsed JSONL entry into zero or more ChatMessage
 // objects. Returns an object describing the messages produced and whether
-// they represent canonical or fallback content for dedup purposes.
+// they represent canonical or fallback content for message-class source precedence.
 //
 // Return shape:
 //   { canonical: ChatMessage[], fallbackUser: ChatMessage[],

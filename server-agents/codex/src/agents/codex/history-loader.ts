@@ -7,7 +7,10 @@ import {
   extractTextContent,
   type CodexJsonlNormalizationContext,
 } from './history-normalizer.js';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from '@garcon/server-agent-common/shared/native-message-source';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type {
   AgentLogger,
@@ -19,7 +22,6 @@ import {
   TranscriptRevisionAccumulator,
   transcriptRevision,
 } from '@garcon/server-agent-common/lib/transcript-revision';
-import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
 import { LegacyCodexProjection } from './legacy-history-projection.js';
 
 const NOOP_LOGGER: AgentLogger = {
@@ -52,70 +54,51 @@ interface CodexMessageSummary {
 
 interface OrderedMessage {
   message: ChatMessage;
-  timestamp: number;
   order: number;
 }
 
 class BoundedLatestMessages {
   #items: OrderedMessage[] = [];
+  #nextReplacementIndex = 0;
 
   constructor(private readonly limit: number) {}
 
   add(message: ChatMessage, order: number): void {
     if (this.limit === 0) return;
-    const candidate = { message, timestamp: timestampMs(message.timestamp), order };
+    const candidate = { message, order };
     if (this.#items.length < this.limit) {
       this.#items.push(candidate);
-      this.#siftUp(this.#items.length - 1);
-    } else if (compareOrderedMessages(candidate, this.#items[0]) > 0) {
-      this.#items[0] = candidate;
-      this.#siftDown(0);
+      return;
     }
+    this.#items[this.#nextReplacementIndex] = candidate;
+    this.#nextReplacementIndex = (this.#nextReplacementIndex + 1) % this.limit;
   }
 
   values(): OrderedMessage[] {
     return this.#items;
   }
-
-  #siftUp(index: number): void {
-    while (index > 0) {
-      const parent = (index - 1) >> 1;
-      if (compareOrderedMessages(this.#items[parent], this.#items[index]) <= 0) break;
-      [this.#items[parent], this.#items[index]] = [this.#items[index], this.#items[parent]];
-      index = parent;
-    }
-  }
-
-  #siftDown(index: number): void {
-    while (true) {
-      const left = index * 2 + 1;
-      const right = left + 1;
-      let smallest = index;
-      if (left < this.#items.length && compareOrderedMessages(this.#items[left], this.#items[smallest]) < 0) smallest = left;
-      if (right < this.#items.length && compareOrderedMessages(this.#items[right], this.#items[smallest]) < 0) smallest = right;
-      if (smallest === index) break;
-      [this.#items[index], this.#items[smallest]] = [this.#items[smallest], this.#items[index]];
-      index = smallest;
-    }
-  }
-}
-
-function timestampMs(value: unknown): number {
-  const time = new Date((value as string | number | Date | undefined) ?? 0).getTime();
-  return Number.isNaN(time) ? 0 : time;
 }
 
 function compareOrderedMessages(left: OrderedMessage, right: OrderedMessage): number {
-  return compareTranscriptTimestamps(left.timestamp, right.timestamp) || left.order - right.order;
+  return left.order - right.order;
 }
 
-export function sortChatMessagesByTimestamp(messages: ChatMessage[]): ChatMessage[] {
+function sortCodexMessagesBySource(messages: ChatMessage[]): ChatMessage[] {
   return messages
     .map((message, index) => ({ message, index }))
     .sort((a, b) => {
-      const left = new Date(a.message.timestamp || 0).getTime();
-      const right = new Date(b.message.timestamp || 0).getTime();
-      return compareTranscriptTimestamps(left, right) || a.index - b.index;
+      const left = getNativeMessageRevisionSource(a.message);
+      const right = getNativeMessageRevisionSource(b.message);
+      if (left?.byteOffset !== undefined && right?.byteOffset !== undefined) {
+        const byteOrder = left.byteOffset - right.byteOffset;
+        if (byteOrder !== 0) return byteOrder;
+      } else if (left?.lineNumber !== undefined && right?.lineNumber !== undefined) {
+        const lineOrder = left.lineNumber - right.lineNumber;
+        if (lineOrder !== 0) return lineOrder;
+      }
+      const ordinalOrder =
+        (left?.withinSourceOrdinal ?? 0) - (right?.withinSourceOrdinal ?? 0);
+      return ordinalOrder || a.index - b.index;
     })
     .map(({ message }) => message);
 }
@@ -137,17 +120,19 @@ export function addCodexJsonlLine(
   line: string,
   context: CodexJsonlNormalizationContext = {},
   projection = new LegacyCodexProjection(),
-): boolean {
+): void {
   const entry = parseCodexJsonlEntry(line);
-  if (!entry) return false;
+  if (!entry) return;
   try {
     const result = projection.project(entry, context);
-    if (!result) return false;
+    if (!result) return;
+    const responseSource = codexResponseItemSource(entry);
 
-    let withinSourceOrdinal = 0;
+    let withinSourceOrdinal = responseSource?.firstOrdinal ?? 0;
     const appendMessages = (target: ChatMessage[], messages: ChatMessage[]): void => {
       for (const message of messages) {
         target.push(attachNativeMessageSource(message, {
+          entryId: responseSource?.entryId,
           byteOffset: context.sourceByteOffset,
           lineNumber: context.sourceLineNumber,
           withinSourceOrdinal,
@@ -162,16 +147,8 @@ export function addCodexJsonlLine(
     if (result.isCanonicalUser) buckets.hasCanonicalUser = true;
     if (result.isCanonicalAssistant) buckets.hasCanonicalAssistant = true;
     if (result.isCanonicalThinking) buckets.hasCanonicalThinking = true;
-    const emitted = result.canonical.length
-      + result.fallbackUser.length
-      + result.fallbackAssistant.length
-      + result.fallbackThinking.length > 0;
-    return emitted && (
-      typeof entry.timestamp !== 'string'
-      || timestampMs(entry.timestamp) <= 0
-    );
   } catch {
-    return false;
+    return;
   }
 }
 
@@ -180,12 +157,53 @@ function parseCodexJsonlEntry(line: string): Record<string, unknown> | null {
   return parsed.kind === 'value' ? asRecord(parsed.value) : null;
 }
 
+function codexResponseItemSource(
+  entry: Record<string, unknown>,
+): { entryId: string; firstOrdinal: number } | undefined {
+  if (entry.type !== 'response_item') return undefined;
+  const payload = asRecord(entry.payload);
+  const metadata = asRecord(payload.internal_chat_message_metadata_passthrough);
+  const turnId = nonEmptyString(metadata.turn_id) ?? nonEmptyString(metadata.turnId);
+  if (!turnId) return undefined;
+  if (
+    payload.type === 'custom_tool_call'
+    || payload.type === 'custom_tool_call_output'
+  ) {
+    const itemId = nonEmptyString(payload.id) ?? customToolFallbackItemId(payload);
+    if (!itemId) return undefined;
+    return { entryId: `turn:${turnId}:item:${itemId}`, firstOrdinal: 0 };
+  }
+  if (
+    payload.type === 'function_call'
+    || payload.type === 'function_call_output'
+  ) {
+    const callId = nonEmptyString(payload.call_id);
+    if (!callId) return undefined;
+    // Codex command thread items use call_id for both the start and completed item:
+    // https://github.com/openai/codex/blob/4c5fc230a9f35c24f863891e718e48377804ac9e/codex-rs/app-server-protocol/src/protocol/item_builders.rs#L96-L126
+    return {
+      entryId: `turn:${turnId}:item:${callId}`,
+      firstOrdinal: payload.type.endsWith('_output') ? 1 : 0,
+    };
+  }
+  const itemId = nonEmptyString(payload.id);
+  if (!itemId) return undefined;
+  // Codex carries response item IDs unchanged into non-command thread items:
+  // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/core/src/event_mapping.rs#L176-L192
+  return { entryId: `turn:${turnId}:item:${itemId}`, firstOrdinal: 0 };
+}
+
+function customToolFallbackItemId(payload: Record<string, unknown>): string | null {
+  const callId = nonEmptyString(payload.call_id);
+  return callId ? `raw:${String(payload.type)}:${callId}` : null;
+}
+
 function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: boolean): ChatMessage[] {
   const messages = [...buckets.canonical];
   if (includeFallback && !buckets.hasCanonicalUser) messages.push(...buckets.fallbackUser);
   if (includeFallback && !buckets.hasCanonicalAssistant) messages.push(...buckets.fallbackAssistant);
   if (includeFallback && !buckets.hasCanonicalThinking) messages.push(...buckets.fallbackThinking);
-  return sortChatMessagesByTimestamp(messages);
+  return sortCodexMessagesBySource(messages);
 }
 
 async function scanCodexMessagePage(
@@ -196,7 +214,6 @@ async function scanCodexMessagePage(
   summary: CodexMessageSummary;
   messages: ChatMessage[];
   revision: AgentTranscriptRevision;
-  requiresFullLoad: boolean;
 }> {
   const summary: CodexMessageSummary = {
     canonical: 0,
@@ -220,19 +237,19 @@ async function scanCodexMessagePage(
   const revisions = Object.fromEntries(
     bucketNames.map((name) => [name, new TranscriptRevisionAccumulator()]),
   ) as Record<(typeof bucketNames)[number], TranscriptRevisionAccumulator>;
-  let requiresFullLoad = false;
+  let sourceOrder = 0;
   const projection = new LegacyCodexProjection();
 
   for await (const entry of readJsonlLineEntries(nativePath, { signal })) {
     const buckets = createCodexMessageBuckets();
-    const hasMalformedTimestamp = addCodexJsonlLine(buckets, entry.line, {
+    addCodexJsonlLine(buckets, entry.line, {
       sourceByteOffset: entry.byteOffset,
       sourceLineNumber: entry.lineNumber,
     }, projection);
-    requiresFullLoad ||= hasMalformedTimestamp;
     for (const name of bucketNames) {
       for (const message of buckets[name]) {
-        windows[name].add(message, summary[name]);
+        windows[name].add(message, sourceOrder);
+        sourceOrder += 1;
         revisions[name].add(message);
         summary[name] += 1;
       }
@@ -252,15 +269,7 @@ async function scanCodexMessagePage(
     ...(!summary.hasCanonicalAssistant ? ['fallbackAssistant'] as const : []),
     ...(!summary.hasCanonicalThinking ? ['fallbackThinking'] as const : []),
   ] as const;
-  const combined = includedNames.flatMap((name, bucketRank) => {
-    const bucketStart = includedNames
-      .slice(0, bucketRank)
-      .reduce((count, previousName) => count + summary[previousName], 0);
-    return windows[name].values().map((entry) => ({
-      ...entry,
-      order: bucketStart + entry.order,
-    }));
-  });
+  const combined = includedNames.flatMap((name) => windows[name].values());
   combined.sort(compareOrderedMessages);
   const revision = new TranscriptRevisionAccumulator();
   for (const name of includedNames) revision.merge(revisions[name]);
@@ -268,14 +277,12 @@ async function scanCodexMessagePage(
     summary,
     messages: combined.slice(-Math.min(summary.total, windowSize)).map((entry) => entry.message),
     revision: revision.finish(),
-    requiresFullLoad,
   };
 }
 
 // Reads a Codex JSONL file and returns ChatMessage[].
-// Uses per-content-class dedup. event_msg user messages are treated as
-// canonical transcript content, while response_item user messages are
-// only included as fallback when event_msg user entries are missing.
+// Uses message-class source precedence. event_msg user messages are canonical,
+// while response_item user messages are included only when that class is absent.
 export async function loadCodexChatMessages(
   nativePath: string | null | undefined,
   logger: AgentLogger = NOOP_LOGGER,
@@ -323,18 +330,10 @@ export async function loadCodexChatMessagePage(
   ) return null;
 
   try {
-    // Retains the newest offset + limit messages because exact arbitrary-offset
-    // selection under global timestamp ordering requires the skipped suffix too.
+    // Retains the newest offset + limit messages in physical rollout order.
     const windowSize = offset + limit;
     signal?.throwIfAborted();
     const scan = await scanCodexMessagePage(nativePath, windowSize, signal);
-    if (scan.requiresFullLoad) {
-      return pageFromMessages(
-        await loadCodexChatMessages(nativePath, logger, { signal }),
-        limit,
-        offset,
-      );
-    }
     const { summary, messages, revision } = scan;
     if (offset >= summary.total) {
       return { messages: [], total: summary.total, hasMore: false, offset, limit, revision };
@@ -385,6 +384,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
 }
 
 function extractLastTextBlock(content: unknown): string | null {

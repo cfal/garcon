@@ -8,8 +8,9 @@ import {
 } from '../lib/transcript-revision.js';
 import {
   exactMessageIdentityKeys,
+  messageSharesNoExactIdentity,
+  nativeMessageMatchesRetainedSequence,
   preserveRetainedUserIdentities,
-  retainedMessageMatchesNative,
 } from './chat-message-reconciliation.js';
 
 export interface NativeSnapshotReconciliation {
@@ -132,7 +133,7 @@ export function reconcileNativeSnapshotView(
   const retainedNativeOverlapMatches = previous
     ? retainedLiveEntries
       .filter((entry) => entry.seq <= persistedTotal)
-      .every((entry) => retainedMessageMatchesNative(
+      .every((entry) => nativeMessageMatchesRetainedSequence(
         entry.message,
         nativeMessages[entry.seq - snapshot.archivedLogicalCount - 1],
       ))
@@ -165,11 +166,8 @@ export function reconcileNativeSnapshotView(
   const nativeIdentities = new Set(nativeMessages.flatMap(exactMessageIdentityKeys));
   const unpersistedLiveMessages = previous
     ? retainedLiveEntries
-      .filter((entry) => {
-        const identities = exactMessageIdentityKeys(entry.message);
-        return entry.seq > persistedTotal
-          && !identities.some((identity) => nativeIdentities.has(identity));
-      })
+      .filter((entry) => entry.seq > persistedTotal
+        && messageSharesNoExactIdentity(entry.message, nativeIdentities))
       .map((entry) => entry.message)
     : [];
   return { view, transition, unpersistedLiveMessages };
@@ -203,7 +201,7 @@ export function nativePrefixMatchesView(
       entry.seq > snapshot.archivedLogicalCount
       && entry.seq <= view.historyLastSeq
     ))
-    .every((entry) => retainedMessageMatchesNative(
+    .every((entry) => nativeMessageMatchesRetainedSequence(
       entry.message,
       nativeMessages[entry.seq - snapshot.archivedLogicalCount - 1],
     ));

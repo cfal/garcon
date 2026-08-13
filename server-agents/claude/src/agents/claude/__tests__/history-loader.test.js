@@ -35,11 +35,16 @@ describe('Claude pending-input evidence', () => {
     });
     await service.register('chat-1', content, {
       clientRequestId: 'request-1',
+      clientMessageId: 'a4912601-44aa-469d-b00e-3eee75dd027e',
       createdAt: '2026-07-17T15:20:02.700Z',
     });
 
     const nativeMessages = await loadClaudeChatMessages(fixturePath);
-    expect(nativeMessages).toMatchObject([{ type: 'user-message', content }]);
+    expect(nativeMessages).toMatchObject([{
+      type: 'user-message',
+      content,
+      metadata: { upstreamRequestId: 'a4912601-44aa-469d-b00e-3eee75dd027e' },
+    }]);
     await service.reconcileNativeHistory('chat-1');
     expect(service.listForChat('chat-1')).toEqual([]);
   });
@@ -66,6 +71,7 @@ describe('Claude pending-input evidence', () => {
       });
       await service.register('chat-1', content, {
         clientRequestId: 'request-1',
+        clientMessageId: 'queued-1',
         createdAt: '2026-07-21T14:00:00.500Z',
       });
 
@@ -196,11 +202,13 @@ describe('Claude steering history projection', () => {
       });
       await service.register('chat-1', spaced, {
         clientRequestId: 'request-spaced',
+        clientMessageId: 'following-batch',
         createdAt: '2026-07-21T14:00:00.500Z',
         deliveryStatus: 'accepted',
       });
       await service.register('chat-1', filtered, {
         clientRequestId: 'request-filtered',
+        clientMessageId: 'following-batch',
         createdAt: '2026-07-21T14:00:00.500Z',
         deliveryStatus: 'accepted',
       });

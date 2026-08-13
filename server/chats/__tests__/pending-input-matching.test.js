@@ -25,119 +25,74 @@ function message(overrides = {}) {
 }
 
 describe('matchingRequestIds', () => {
-  const cases = [
-    {
-      name: 'matches an identity-carrying echo independent of content',
-      records: [record('request-1')],
-      messages: [message({ content: 'provider-normalized', metadata: { clientRequestId: 'request-1' } })],
-      expected: ['request-1'],
-      identityless: [],
-    },
-    {
-      name: 'matches a provider echo by the forwarded client message identity',
-      records: [record('request-1', { clientMessageId: 'message-1' })],
-      messages: [message({
+  it('matches an exact client request identity independent of content', () => {
+    const matches = matchingRequestIds(
+      [record('request-1')],
+      [message({ content: 'provider-normalized', metadata: { clientRequestId: 'request-1' } })],
+    );
+
+    expect([...matches]).toEqual(['request-1']);
+  });
+
+  it('matches the exact forwarded provider request identity', () => {
+    const matches = matchingRequestIds(
+      [record('request-1', { clientMessageId: 'message-1' })],
+      [message({
         content: 'provider-normalized',
         metadata: { upstreamRequestId: 'message-1' },
       })],
-      expected: ['request-1'],
-      identityless: [],
-    },
-    {
-      name: 'does not content-match a conflicting forwarded message identity',
-      records: [record('request-1', { clientMessageId: 'message-1' })],
-      messages: [message({ metadata: { upstreamRequestId: 'message-2' } })],
-      expected: [],
-      identityless: [],
-    },
-    {
-      name: 'reconciles identical prompts by their forwarded message identities',
-      records: [
+    );
+
+    expect([...matches]).toEqual(['request-1']);
+  });
+
+  it('does not equate identical content without a shared identity', () => {
+    const matches = matchingRequestIds(
+      [record('request-1')],
+      [message()],
+    );
+
+    expect([...matches]).toEqual([]);
+  });
+
+  it('does not content-match a conflicting forwarded identity', () => {
+    const matches = matchingRequestIds(
+      [record('request-1', { clientMessageId: 'message-1' })],
+      [message({ metadata: { upstreamRequestId: 'message-2' } })],
+    );
+
+    expect([...matches]).toEqual([]);
+  });
+
+  it('reconciles repeated prompts only by their forwarded identities', () => {
+    const matches = matchingRequestIds(
+      [
         record('request-1', { clientMessageId: 'message-1' }),
         record('request-2', { clientMessageId: 'message-2' }),
       ],
-      messages: [
+      [
         message({ metadata: { upstreamRequestId: 'message-2' } }),
         message({ metadata: { upstreamRequestId: 'message-1' } }),
       ],
-      expected: ['request-1', 'request-2'],
-      identityless: [],
-    },
-    {
-      name: 'matches a nearby identityless echo',
-      records: [record('request-1')],
-      messages: [message()],
-      expected: ['request-1'],
-      identityless: ['request-1'],
-    },
-    {
-      name: 'conserves duplicated identityless content by occurrence',
-      records: [record('request-1'), record('request-2')],
-      messages: [message(), message()],
-      expected: ['request-1', 'request-2'],
-      identityless: ['request-1', 'request-2'],
-    },
-    {
-      name: 'matches image-bearing echoes by content digest and metadata',
-      records: [record('request-image', {
-        images: [{ name: 'capture.png', mimeType: 'image/png', data: 'data:image/png;base64,YQ==' }],
-      })],
-      messages: [message({
-        images: [{ name: 'capture.png', mimeType: 'image/png', data: 'data:image/png;base64,YQ==' }],
-      })],
-      expected: ['request-image'],
-      identityless: ['request-image'],
-    },
-    {
-      name: 'rejects an identityless echo outside the time window',
-      records: [record('request-1')],
-      messages: [message({ timestamp: '2026-06-01T00:05:00.001Z' })],
-      expected: [],
-      identityless: [],
-    },
-    {
-      name: 'rejects a conflicting turn identity',
-      records: [record('request-1', { turnId: 'turn-1' })],
-      messages: [message({ metadata: { turnId: 'turn-2' } })],
-      expected: [],
-      identityless: [],
-    },
-  ];
-
-  for (const fixture of cases) {
-    it(fixture.name, () => {
-      const result = matchingRequestIds(fixture.records, fixture.messages, new Map());
-      expect([...result.requestIds]).toEqual(fixture.expected);
-      expect([...result.identitylessRequestIds]).toEqual(fixture.identityless);
-    });
-  }
-
-  it('does not claim identityless evidence twice across batches', () => {
-    const records = [record('request-1')];
-    const messages = [message()];
-    const first = matchingRequestIds(records, messages, new Map());
-    const second = matchingRequestIds(
-      [record('request-2')],
-      messages,
-      first.identitylessEvidence,
     );
 
-    expect([...first.requestIds]).toEqual(['request-1']);
-    expect([...second.requestIds]).toEqual([]);
+    expect([...matches]).toEqual(['request-1', 'request-2']);
   });
 
-  it('can restrict settlement to explicit request identities', () => {
-    const result = matchingRequestIds(
-      [record('explicit'), record('identityless')],
+  it('allows one provider row to settle only one pending request', () => {
+    const matches = matchingRequestIds(
       [
-        message({ metadata: { clientRequestId: 'explicit' } }),
-        message(),
+        record('request-1'),
+        record('request-2', { clientMessageId: 'message-2' }),
       ],
-      new Map(),
-      false,
+      [message({
+        metadata: {
+          clientRequestId: 'request-1',
+          upstreamRequestId: 'message-2',
+        },
+      })],
     );
 
-    expect([...result.requestIds]).toEqual(['explicit']);
-    expect([...result.identitylessRequestIds]).toEqual([]);
+    expect([...matches]).toEqual(['request-1']);
   });
 });

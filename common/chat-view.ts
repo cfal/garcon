@@ -15,6 +15,18 @@ export interface ChatViewPage {
   hasMore: boolean;
 }
 
+export interface ChatViewPageRequest {
+  readonly limit: number;
+  readonly beforeSeq?: number;
+}
+
+export interface ChatViewWindow {
+  readonly messages: readonly ChatViewMessage[];
+  readonly lastSeq: number;
+  readonly pageOldestSeq: number;
+  readonly hasMore: boolean;
+}
+
 export type ChatHistoryState =
   | { readonly kind: 'complete' }
   | {
@@ -139,6 +151,53 @@ export function parseChatViewMessages(data: unknown): ChatViewMessage[] | null {
     previousSeq = parsed.seq;
   }
   return messages;
+}
+
+export function isContiguousChatViewWindow(page: ChatViewWindow): boolean {
+  if (!isNonNegativeSafeInteger(page.lastSeq)) return false;
+  if (!isNonNegativeSafeInteger(page.pageOldestSeq)) return false;
+  if (page.messages.length === 0) return page.pageOldestSeq === 0 && !page.hasMore;
+  if (
+    page.pageOldestSeq < 1
+    || page.messages[0]?.seq !== page.pageOldestSeq
+    || page.messages.at(-1)!.seq > page.lastSeq
+    || page.hasMore !== (page.pageOldestSeq > 1)
+  ) return false;
+  return page.messages.every(
+    (message, index) => index === 0 || message.seq === page.messages[index - 1].seq + 1,
+  );
+}
+
+export function isRequestedChatViewPage(
+  request: ChatViewPageRequest,
+  page: ChatViewWindow & { readonly limit: number },
+): boolean {
+  if (
+    !isContiguousChatViewWindow(page)
+    || !isPositiveSafeInteger(request.limit)
+    || page.limit !== request.limit
+  ) return false;
+  if (
+    request.beforeSeq !== undefined
+    && !isPositiveSafeInteger(request.beforeSeq)
+  ) return false;
+
+  const requestedEndSeq = request.beforeSeq === undefined
+    ? page.lastSeq
+    : Math.min(page.lastSeq, request.beforeSeq - 1);
+  if (requestedEndSeq === 0) return page.messages.length === 0;
+  const requestedStartSeq = Math.max(1, requestedEndSeq - request.limit + 1);
+  return page.pageOldestSeq === requestedStartSeq
+    && page.messages.length === requestedEndSeq - requestedStartSeq + 1
+    && page.messages.at(-1)?.seq === requestedEndSeq;
+}
+
+function isNonNegativeSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPositiveSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 export function applyChatViewMessages(

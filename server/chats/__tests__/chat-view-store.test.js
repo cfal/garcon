@@ -3,8 +3,10 @@ import { ChatViewStore } from '../chat-view-store.js';
 import {
   AgentSwitchMessage,
   AssistantMessage,
+  BashToolUseMessage,
   CompactionMessage,
   ErrorMessage,
+  ToolResultMessage,
   UserMessage,
 } from '../../../common/chat-types.js';
 import { attachNativeMessageSource } from '../../agents/shared/native-message-source.js';
@@ -1019,6 +1021,155 @@ describe('ChatViewStore', () => {
     ]));
 
     expect(store.getCursor('chat-1')?.generationId).not.toBe(appended.generationId);
+  });
+
+  it('preserves generation when exact native identity bridges persisted timestamp drift', async () => {
+    const history = [assistant('h1'), assistant('h2')];
+    const source = { entryId: 'direct-turn:turn-3', withinSourceOrdinal: 1 };
+    const live = attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:03.000Z', 'l3'),
+      source,
+    );
+    const store = new ChatViewStore(() => false, { messageLimit: 2 });
+    const appended = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => history),
+      [live],
+    );
+
+    await store.getOrCreateMessages('chat-1', snapshotLoader(async () => [
+      ...history,
+      attachNativeMessageSource(
+        new AssistantMessage('2026-06-01T00:00:04.000Z', 'l3'),
+        source,
+      ),
+    ]));
+
+    expect(store.getCursor('chat-1')?.generationId).toBe(appended.generationId);
+    expect(contents(store.readPage('chat-1', 10))).toEqual(['h2', 'l3']);
+  });
+
+  it('reconciles a native tool tail before one exact live final response without duplicating it', async () => {
+    const store = new ChatViewStore(() => false, { messageLimit: 20 });
+    const baseline = [user('run the command')];
+    const toolSource = { entryId: 'turn:turn-1:item:tool-1' };
+    const finalSource = {
+      entryId: 'turn:turn-1:item:assistant-1',
+      withinSourceOrdinal: 0,
+    };
+    const liveTool = attachNativeMessageSource(
+      new BashToolUseMessage('2026-06-01T00:00:01.000Z', 'tool-1', 'printf ready'),
+      { ...toolSource, withinSourceOrdinal: 0 },
+    );
+    const liveResult = attachNativeMessageSource(
+      new ToolResultMessage(
+        '2026-06-01T00:00:02.000Z',
+        'tool-1',
+        { raw: 'ready' },
+        false,
+      ),
+      { ...toolSource, withinSourceOrdinal: 1 },
+    );
+    const liveFinal = attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:03.000Z', 'final response'),
+      finalSource,
+    );
+    const appended = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => baseline),
+      [liveTool, liveResult, liveFinal],
+    );
+
+    await store.reconcileNativeSnapshot('chat-1', nativeReconciliation([
+      ...baseline,
+      attachNativeMessageSource(
+        new BashToolUseMessage('2026-06-01T00:00:01.100Z', 'tool-1', 'printf ready'),
+        { ...toolSource, withinSourceOrdinal: 0 },
+      ),
+      attachNativeMessageSource(
+        new ToolResultMessage(
+          '2026-06-01T00:00:02.100Z',
+          'tool-1',
+          { raw: 'ready' },
+          false,
+        ),
+        { ...toolSource, withinSourceOrdinal: 1 },
+      ),
+    ]));
+    expect(store.getCursor('chat-1')?.generationId).toBe(appended.generationId);
+
+    await store.reconcileNativeSnapshot('chat-1', nativeReconciliation([
+      ...baseline,
+      attachNativeMessageSource(
+        new BashToolUseMessage('2026-06-01T00:00:01.100Z', 'tool-1', 'printf ready'),
+        { ...toolSource, withinSourceOrdinal: 0 },
+      ),
+      attachNativeMessageSource(
+        new ToolResultMessage(
+          '2026-06-01T00:00:02.100Z',
+          'tool-1',
+          { raw: 'ready' },
+          false,
+        ),
+        { ...toolSource, withinSourceOrdinal: 1 },
+      ),
+      attachNativeMessageSource(
+        new AssistantMessage('2026-06-01T00:00:04.000Z', 'final response'),
+        finalSource,
+      ),
+    ]));
+
+    const finalPage = store.readPage('chat-1', 20);
+    expect(finalPage.messages.map((entry) => entry.seq)).toEqual([1, 2, 3, 4]);
+    expect(finalPage.messages.map((entry) => entry.message.type)).toEqual([
+      'user-message',
+      'bash-tool-use',
+      'tool-result',
+      'assistant-message',
+    ]);
+    expect(
+      finalPage.messages.filter(
+        (entry) => entry.message.type === 'assistant-message' && entry.message.content === 'final response',
+      ),
+    ).toHaveLength(1);
+    expect(store.getCursor('chat-1')?.generationId).toBe(appended.generationId);
+  });
+
+  it('does not discard a distinct live tool when an older native tool reused its id', async () => {
+    const store = new ChatViewStore(() => false, { messageLimit: 20 });
+    const history = [
+      user('first turn'),
+      new BashToolUseMessage('2026-06-01T00:00:01.000Z', 'reused-tool', 'printf first'),
+      new ToolResultMessage(
+        '2026-06-01T00:00:02.000Z',
+        'reused-tool',
+        { raw: 'first' },
+        false,
+      ),
+    ];
+    await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      transcriptLoader(async () => history),
+      [
+        new BashToolUseMessage('2026-06-01T00:00:03.000Z', 'reused-tool', 'printf second'),
+        new ToolResultMessage(
+          '2026-06-01T00:00:04.000Z',
+          'reused-tool',
+          { raw: 'second' },
+          false,
+        ),
+      ],
+    );
+
+    await store.reconcileNativeSnapshot('chat-1', nativeReconciliation(history));
+
+    expect(store.readPage('chat-1', 20).messages.map((entry) => entry.message)).toMatchObject([
+      { type: 'user-message', content: 'first turn' },
+      { type: 'bash-tool-use', command: 'printf first' },
+      { type: 'tool-result', content: { raw: 'first' } },
+      { type: 'bash-tool-use', command: 'printf second' },
+      { type: 'tool-result', content: { raw: 'second' } },
+    ]);
   });
 
   it('changes generation when persisted live metadata differs', async () => {

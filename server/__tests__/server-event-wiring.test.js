@@ -5,6 +5,10 @@ import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projecto
 import { CommandLedger } from '../commands/command-ledger.ts';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { wireServerEvents } from '../server-event-wiring.js';
+import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from '../agents/shared/native-message-source.ts';
 
 function deferred() {
   let resolve;
@@ -862,6 +866,33 @@ describe('server event wiring', () => {
 
     expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
     expect(fixture.searchIndex.sourceMayHaveChanged).not.toHaveBeenCalled();
+  });
+
+  it('preserves native message identity through event normalization', async () => {
+    const appendedMessages = [];
+    const fixture = createWiringFixture({
+      chatViews: {
+        appendAfterEnsuringGeneration: mock(async (_chatId, _loader, messages) => {
+          appendedMessages.push(...messages);
+          return { generationId: 'generation-1', messages: [], lastSeq: 0 };
+        }),
+      },
+    });
+    const source = {
+      entryId: 'direct-turn:turn-1',
+      withinSourceOrdinal: 1,
+    };
+    const liveAssistant = attachNativeMessageSource(
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'final reply'),
+      source,
+    );
+
+    fixture.agentListeners.messages('chat-1', [liveAssistant], { turnId: 'turn-1' });
+    await fixture.wiring.waitForIdle();
+
+    expect(appendedMessages).toHaveLength(1);
+    expect(appendedMessages[0]).not.toBe(liveAssistant);
+    expect(getNativeMessageRevisionSource(appendedMessages[0])).toEqual(source);
   });
 
   it('reports terminal settlement failures to the shutdown drain', async () => {

@@ -1363,12 +1363,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #handleRawResponseItemCompleted(client: CodexAppServerClient, params: RawResponseItemCompletedNotification): void {
     const session = this.#sessionForClientTurn(client, params.threadId, params.turnId);
     if (!session) return;
-    const messages = convertCodexRawCodeModeItem(
+    const converted = convertCodexRawCodeModeItem(
       params.item,
       new Date().toISOString(),
       session.liveCodeModeResultToolIds,
     );
-    session.turnItems.recordMessages(messages);
+    const messages = session.turnItems.recordRawMessages(params.turnId, params.item, converted);
     if (messages.length) this.emitMessages(session.chatId, messages);
   }
 

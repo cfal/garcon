@@ -45,13 +45,21 @@ export function preserveRetainedUserIdentities(
   return reconciled;
 }
 
-export function retainedMessageMatchesNative(
+export function nativeMessageMatchesRetainedSequence(
   retainedMessage: ChatMessage,
   nativeMessage: ChatMessage | undefined,
 ): boolean {
-  return wireMessagesEqual(retainedMessage, nativeMessage)
-    || nativeMessage !== undefined
-      && messagesShareExactIdentity(retainedMessage, nativeMessage);
+  if (wireMessagesEqual(retainedMessage, nativeMessage)) return true;
+  return nativeMessage !== undefined
+    && messagesShareExactIdentity(retainedMessage, nativeMessage);
+}
+
+export function messageSharesNoExactIdentity(
+  message: ChatMessage,
+  nativeIdentities: ReadonlySet<string>,
+): boolean {
+  return exactMessageIdentityKeys(message)
+    .every((identity) => !nativeIdentities.has(identity));
 }
 
 export function userDeliveryPayloadsAreCompatible(

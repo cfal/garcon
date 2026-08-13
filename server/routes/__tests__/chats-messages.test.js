@@ -99,7 +99,7 @@ function createRoutesFixture(overrides = {}) {
       messages: [],
       generationId: 'generation-1',
       lastSeq: 0,
-      pageOldestSeq: beforeSeq ?? 0,
+      pageOldestSeq: 0,
       hasMore: false,
       limit,
     })),
@@ -180,13 +180,42 @@ describe('GET /api/v1/chats/messages', () => {
       generationId: 'generation-1',
       messages: [],
       lastSeq: 0,
-      pageOldestSeq: 10,
+      pageOldestSeq: 0,
       hasMore: false,
       limit: 200,
       pendingUserInputs: [],
     });
     expect(pendingInputs.reconcileRetainedHistory).toHaveBeenCalledWith('123');
     expect(chatViews.getOrCreatePage).toHaveBeenCalledWith('123', 200, 10);
+  });
+
+  it('rejects a reader page that does not exactly match the requested sequence window', async () => {
+    const pendingInputs = {
+      reconcileRetainedHistory: mock(async () => undefined),
+      listForTransport: mock(() => []),
+    };
+    const { routes } = createRoutesFixture({
+      chatViews: {
+        getOrCreatePage: mock(async () => ({
+          generationId: 'generation-1',
+          messages: [
+            { seq: 2, message: new AssistantMessage('2026-08-13T00:00:02.000Z', 'two') },
+            { seq: 1, message: new AssistantMessage('2026-08-13T00:00:01.000Z', 'one') },
+          ],
+          lastSeq: 2,
+          pageOldestSeq: 2,
+          hasMore: true,
+        })),
+        reconcileNativeSnapshot: mock(async () => undefined),
+      },
+      pendingInputs,
+    });
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=2');
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(500);
+    expect(pendingInputs.reconcileRetainedHistory).not.toHaveBeenCalled();
   });
 
   it('returns degraded carryover history without claiming sequence metadata', async () => {

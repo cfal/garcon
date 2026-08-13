@@ -191,8 +191,18 @@ export const transformClaudeForkTranscript = createClaudeForkTranscriptTransform
 export function claudeForkSemanticDigest(messages: readonly ChatMessage[]): string {
   return orderedTranscriptDigest(messages.map((message, index) => ({
     seq: index + 1,
-    message: { ...message, timestamp: '' } as ChatMessage,
+    message: claudeForkSemanticMessage(message),
   })));
+}
+
+function claudeForkSemanticMessage(message: ChatMessage): ChatMessage {
+  if (message.type !== 'user-message') return { ...message, timestamp: '' } as ChatMessage;
+  const { upstreamRequestId: _nativeInputUuid, ...metadata } = message.metadata ?? {};
+  return {
+    ...message,
+    timestamp: '',
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+  };
 }
 
 function projectClaudeForkMessages(entries: readonly Record<string, unknown>[]): ChatMessage[] {

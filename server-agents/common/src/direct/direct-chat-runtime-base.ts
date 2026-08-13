@@ -17,11 +17,13 @@ import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/eve
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   DirectSessionStore,
   type DirectConversationMessage,
   type DirectMessageIdentity,
 } from './session-store.js';
+import { directMessageNativeSource } from './direct-message-native-source.js';
 
 const DEFAULT_MAX_MESSAGES_PER_SESSION = 200;
 
@@ -318,9 +320,11 @@ export abstract class DirectChatRuntimeBase<
         turnIdentity,
       );
       session.messages.push(this.buildAssistantMessage(response));
-      this.emitMessages(session.chatId, [
+      const liveMessage = attachNativeMessageSource(
         new AssistantMessage(new Date().toISOString(), response),
-      ], eventMetadata);
+        directMessageNativeSource({ role: 'assistant', turnId: turnIdentity.turnId }),
+      );
+      this.emitMessages(session.chatId, [liveMessage], eventMetadata);
       this.#markSessionIdle(session);
       this.emitFinished(session.chatId, 0, eventMetadata);
     } catch (error: unknown) {

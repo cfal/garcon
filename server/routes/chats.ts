@@ -62,9 +62,10 @@ import type { PendingUserInputServiceContract } from '../chats/pending-user-inpu
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
-import type {
-  CompleteChatHistoryResponse,
-  DegradedChatHistoryResponse,
+import {
+  isRequestedChatViewPage,
+  type CompleteChatHistoryResponse,
+  type DegradedChatHistoryResponse,
 } from '../../common/chat-view.js';
 import {
   archivedLogicalCount,
@@ -645,6 +646,9 @@ export default function createChatRoutes({
       if (beforeSeq instanceof Response) return beforeSeq;
 
       const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
+      if (!isRequestedChatViewPage({ limit, beforeSeq }, { ...page, limit })) {
+        throw new Error('Chat message reader returned an invalid requested page');
+      }
       await pendingInputs.reconcileRetainedHistory(chatId);
       return Response.json({
         historyState: { kind: 'complete' },

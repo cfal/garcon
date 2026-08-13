@@ -9,8 +9,9 @@ import {
 } from '../lib/transcript-revision.js';
 import {
   exactMessageIdentityKeys,
+  messageSharesNoExactIdentity,
+  nativeMessageMatchesRetainedSequence,
   preserveRetainedUserIdentities,
-  retainedMessageMatchesNative,
   userDeliveryPayloadsAreCompatible,
 } from './chat-message-reconciliation.js';
 import {
@@ -524,10 +525,7 @@ export class ChatViewStore {
     );
     const unpersistedLive = previous.messages
       .filter((entry) => entry.seq > previous.historyLastSeq && entry.seq > page.total)
-      .filter((entry) => {
-        const identities = exactMessageIdentityKeys(entry.message);
-        return !identities.some((identity) => persistedIdentities.has(identity));
-      })
+      .filter((entry) => messageSharesNoExactIdentity(entry.message, persistedIdentities))
       .map((entry) => entry.message);
     if (unpersistedLive.length > 0) {
       this.#appendLiveToView(view, unpersistedLive, 'native-wins');
@@ -589,7 +587,7 @@ export class ChatViewStore {
     const retainedNativeOverlapMatches = previous
       ? retainedLiveEntries
         .filter((entry) => entry.seq <= reconciledMessages.length)
-        .every((entry) => retainedMessageMatchesNative(
+        .every((entry) => nativeMessageMatchesRetainedSequence(
           entry.message,
           reconciledMessages[entry.seq - 1],
         ))
@@ -619,11 +617,8 @@ export class ChatViewStore {
     );
     const unpersistedLiveMessages = previous
         ? retainedLiveEntries
-        .filter((entry) => {
-          const identities = exactMessageIdentityKeys(entry.message);
-          return entry.seq > reconciledMessages.length
-            && !identities.some((identity) => nativeIdentities.has(identity));
-        })
+        .filter((entry) => entry.seq > reconciledMessages.length
+          && messageSharesNoExactIdentity(entry.message, nativeIdentities))
         .map((entry) => entry.message)
       : [];
     let fullMessages = [...reconciledMessages, ...this.#operationalNotices.retained(chatId)];

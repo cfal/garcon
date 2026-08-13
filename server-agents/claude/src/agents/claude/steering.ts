@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type {
   AgentLogger,
   AgentSteerRequest,
@@ -10,6 +9,7 @@ import type { ClaudeCLIMessage, ClaudeTurnState } from './cli-protocol.js';
 import {
   buildClaudeSteeringUserContent,
   buildClaudeUserInputFrame,
+  claudeNativeInputUuid,
 } from './user-input.js';
 
 export const CLAUDE_STEER_WRITE_TIMEOUT_MS = 15_000;
@@ -280,7 +280,7 @@ export class ClaudeSteeringController {
 
     const release = captured.activeTurn.steering.reserveDelivery();
     try {
-      const nativeInputId = crypto.randomUUID();
+      const nativeInputId = claudeNativeInputUuid(request.clientMessageId);
       const frame = buildClaudeUserInputFrame({
         content: buildClaudeSteeringUserContent(request.input),
         sessionId: captured.session.id,

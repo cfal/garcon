@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import {
+  getNativeMessageRevisionSource,
+  getNativeMessageSource,
+} from '@garcon/server-agent-common/shared/native-message-source';
 import { createDirectSessionPaths } from '../session-paths.ts';
 import { createDirectCompatibleTranscriptSource } from '../transcript-source.ts';
 
@@ -104,6 +107,26 @@ describe('Direct compatible transcript source', () => {
     expect(messages.map(getNativeMessageSource)).toEqual([
       { lineNumber: 1 },
       { lineNumber: 3 },
+    ]);
+  });
+
+  it('attaches stable turn identities to both persisted roles', async () => {
+    const root = await tempDir();
+    await writeTranscript(root, 'chat_endpoint', 'session-1', [
+      { role: 'user', content: 'one', turnId: 'turn-1' },
+      { role: 'assistant', content: 'two', turnId: 'turn-1' },
+    ]);
+
+    const messages = await source(root).loadMessages({
+      agentId: 'direct-openai-compatible',
+      projectPath: '/tmp/project',
+      agentSessionId: 'session-1',
+      modelEndpointId: 'chat_endpoint',
+    });
+
+    expect(messages.map(getNativeMessageRevisionSource)).toEqual([
+      { entryId: 'direct-turn:turn-1', lineNumber: 1, withinSourceOrdinal: 0 },
+      { entryId: 'direct-turn:turn-1', lineNumber: 2, withinSourceOrdinal: 1 },
     ]);
   });
 

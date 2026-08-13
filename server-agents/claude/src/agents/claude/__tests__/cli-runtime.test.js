@@ -1854,12 +1854,18 @@ describe('ClaudeCliRuntime steering', () => {
     let runtime;
 
     try {
+      const initialMessageId = '019ff704-7b0c-70a1-b062-875461e5b578';
+      const steeringMessageId = '019ff704-7b0c-70a1-b062-875461e5b579';
       runtime = createRuntime(logger);
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const run = runtime.startClaudeCliSession(startOptions({
+        turnId: 'turn-active',
+        clientMessageId: initialMessageId,
+      }));
       await waitForWrittenUserMessage(fake);
       expect(runtime.captureSteerTarget('expected-session')).toBeNull();
 
       const original = await enqueueInputStarted(fake);
+      expect(original.uuid).toBe(initialMessageId);
       const target = runtime.captureSteerTarget('expected-session');
       expect(target).not.toBeNull();
       expect(Object.isFrozen(target)).toBe(true);
@@ -1869,6 +1875,7 @@ describe('ClaudeCliRuntime steering', () => {
       let prepareCalls = 0;
       const steering = runtime.steer(steerRequest(target, {
         input: '/review\nCheck cafe',
+        clientMessageId: steeringMessageId,
         prepareDelivery: async () => {
           prepareCalls += 1;
           await preparation.promise;
@@ -1891,8 +1898,7 @@ describe('ClaudeCliRuntime steering', () => {
           }],
         },
       });
-      expect(frame.uuid).toMatch(/^[0-9a-f-]{36}$/);
-      expect(frame.uuid).not.toBe('message-steer');
+      expect(frame.uuid).toBe(steeringMessageId);
       expect(frame.uuid).not.toBe(original.uuid);
       expect(JSON.stringify(Object.values(logger).flatMap((entry) => entry.mock.calls)))
         .not.toContain('/review\nCheck cafe');

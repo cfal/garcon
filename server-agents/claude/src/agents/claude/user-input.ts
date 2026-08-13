@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import {
   appendTextAttachmentContext,
@@ -16,6 +17,14 @@ export interface ClaudeUserInputFrameOptions {
 
 export const CLAUDE_STEERING_PROMPT_PREFIX =
   'The user sent steering guidance for the active task:\n\n';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function claudeNativeInputUuid(clientMessageId?: string): string {
+  return clientMessageId && UUID_PATTERN.test(clientMessageId)
+    ? clientMessageId
+    : crypto.randomUUID();
+}
 
 export function buildClaudeUserInputFrame(options: ClaudeUserInputFrameOptions): string {
   return JSON.stringify({
