@@ -184,7 +184,7 @@ function importedDraft(
       kind: 'user-input',
       at,
       detail: {
-        clientMessageId: message.metadata?.upstreamRequestId ?? null,
+        clientMessageId: null,
         message,
         attachments: (message.images ?? []).map((image) => ({
           kind: 'image',

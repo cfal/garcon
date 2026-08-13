@@ -144,6 +144,7 @@ export function frozenRows(
   return adoptedRows(
     messages.map((message) => ({ message, providerMeta: null })),
     now,
+    true,
   );
 }
 
@@ -155,6 +156,7 @@ interface AdoptionRow {
 function adoptedRows(
   rows: readonly AdoptionRow[],
   now: () => string,
+  preserveClientMessageId = false,
 ): readonly LedgerRowDraft[] {
   return rows.flatMap(({ message, providerMeta }): LedgerRowDraft[] => {
     if (message instanceof PermissionRequestMessage
@@ -168,7 +170,9 @@ function adoptedRows(
         kind: 'user-input',
         at,
         detail: {
-          clientMessageId: message.metadata?.upstreamRequestId ?? null,
+          clientMessageId: preserveClientMessageId
+            ? message.metadata?.upstreamRequestId ?? null
+            : null,
           message,
           attachments: (message.images ?? []).map((image) => ({
             kind: 'image',

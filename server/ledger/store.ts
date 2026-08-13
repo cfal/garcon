@@ -353,7 +353,7 @@ export class TranscriptLedgerStore {
           )
           OR (
             kind = 'user-input'
-            AND json_type(payload_json, '$.providerMeta') <> 'null'
+            AND client_message_id IS NULL
           )
         )
         ORDER BY ordinal DESC LIMIT 1

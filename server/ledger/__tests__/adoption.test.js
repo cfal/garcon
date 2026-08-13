@@ -29,6 +29,9 @@ describe('TranscriptAdoptionService', () => {
         'user-input',
         'provider-row',
       ]);
+      expect(
+        rows.filter((row) => row.kind === 'user-input').map((row) => row.detail.clientMessageId),
+      ).toEqual(['prefix-message', null]);
       expect(ledger.currentSession('chat-1')?.detail.agentSessionId).toBe('session-1');
     });
   });
@@ -121,7 +124,10 @@ async function withFixture(run) {
     thinkingMode: 'medium',
     carryOverSegments: [],
   };
-  let current = [new UserMessage(TS, 'current'), new AssistantMessage(TS, 'answer')];
+  let current = [
+    new UserMessage(TS, 'current', undefined, { upstreamRequestId: 'native-message' }),
+    new AssistantMessage(TS, 'answer'),
+  ];
   const loadCounts = { prefix: 0, current: 0 };
   const updates = [];
   const integration = {
@@ -146,7 +152,10 @@ async function withFixture(run) {
     getCarryOverRevision: () => 'carryover-1',
     async loadFrozenPrefix() {
       loadCounts.prefix += 1;
-      return [new UserMessage(TS, 'prefix'), new AssistantMessage(TS, 'prefix answer')];
+      return [
+        new UserMessage(TS, 'prefix', undefined, { upstreamRequestId: 'prefix-message' }),
+        new AssistantMessage(TS, 'prefix answer'),
+      ];
     },
     async loadLegacyCurrent() {
       loadCounts.current += 1;

@@ -73,6 +73,7 @@ export class NativeTranscriptActivityService {
       message: NATIVE_TRANSCRIPT_DRIFT_NOTICE,
       detail: {
         type: 'native-transcript-drift',
+        action: 'reload-native-history',
         observedNativeWatermark: result.value.lastEntryAt,
       },
     });

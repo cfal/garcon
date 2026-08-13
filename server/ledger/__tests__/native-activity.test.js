@@ -7,6 +7,7 @@ import {
   NATIVE_TRANSCRIPT_DRIFT_NOTICE,
   NativeTranscriptActivityService,
 } from '../native-activity.ts';
+import { ledgerRowsToMessages } from '../presentation.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 
@@ -32,6 +33,10 @@ describe('NativeTranscriptActivityService', () => {
       expect(notices.map((row) => row.detail.observedNativeWatermark)).toEqual([
         EXTERNAL_AT,
         '2026-08-12T00:00:04.000Z',
+      ]);
+      expect(ledgerRowsToMessages(notices).map((message) => message.action)).toEqual([
+        'reload-native-history',
+        'reload-native-history',
       ]);
     });
   });
@@ -89,7 +94,7 @@ describe('NativeTranscriptActivityService', () => {
             attachments: [],
             steer: false,
           },
-          providerMeta: { nativeEntryId: 'native-user-1' },
+          providerMeta: null,
         },
       ]);
 

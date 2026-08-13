@@ -31,6 +31,9 @@ describe('TranscriptReloadService', () => {
         'native prompt',
         'native answer',
       ]);
+      expect(
+        rows.filter((row) => row.kind === 'user-input').map((row) => row.detail.clientMessageId),
+      ).toEqual(['frozen-1', null]);
       expect(() => ledger.rowsAfter('chat-1', oldViewId, 0)).toThrow();
       expect(ledger.currentSession('chat-1')?.detail.agentSessionId).toBe('session-1');
     });
@@ -102,7 +105,14 @@ async function withReload(run) {
     nativeHistoryImport: {
       async *load() {
         yield [
-          { message: new UserMessage(TS, 'native prompt') },
+          {
+            message: new UserMessage(
+              TS,
+              'native prompt',
+              undefined,
+              { upstreamRequestId: 'native-message' },
+            ),
+          },
           { message: new AssistantMessage(TS, 'native answer') },
         ];
       },
