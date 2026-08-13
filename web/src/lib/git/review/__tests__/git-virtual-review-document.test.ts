@@ -281,6 +281,28 @@ describe('buildVirtualRows', () => {
 });
 
 describe('GitVirtualReviewDocumentController syntax', () => {
+	it('highlights the initial visible body without highlighting prefetched bodies', async () => {
+		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
+		const syntax = new GitDiffSyntaxController({
+			waitForWorkSlot: async () => {},
+			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
+		});
+		const controller = new GitVirtualReviewDocumentController(
+			documentDeps(() => ['a.ts', 'b.ts']),
+			syntax,
+		);
+		const summary = makeSummary([makeFile('a.ts'), makeFile('b.ts')]);
+		controller.fileBodies = { 'a.ts': makeBody('a.ts'), 'b.ts': makeBody('b.ts') };
+		controller.applySummary(summary);
+
+		controller.requestInitialBodies('/project', ['a.ts', 'b.ts']);
+
+		await vi.waitFor(() => expect(highlighter).toHaveBeenCalledOnce());
+		expect(highlighter.mock.calls[0]?.[0].file.path).toBe('a.ts');
+		expect(syntax.results['a.ts']).toBeDefined();
+		expect(syntax.results['b.ts']).toBeUndefined();
+	});
+
 	it('activates demanded retained bodies and follows workbench cache policy', async () => {
 		let visiblePaths = ['a.ts'];
 		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));

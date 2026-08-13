@@ -301,6 +301,13 @@ export class GitVirtualReviewDocumentController {
 		this.ensureBodyScheduler(projectPath, guard);
 		if (!this.bodyScheduler) return 'not-ready';
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
+		if (purpose === 'visible' && uniquePaths.length > 0) {
+			this.syntax.handleDemand({
+				kind: 'navigation',
+				documentId: this.summary.documentId,
+				filePaths: uniquePaths,
+			});
+		}
 		this.seedCachedBodies(uniquePaths, purpose, guard);
 		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath, guard));

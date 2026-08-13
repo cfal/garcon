@@ -401,6 +401,13 @@ export class GitDiffDocumentController {
 		if (this.aggregateLimit) return 'limited';
 		if (purpose === 'prefetch' && this.prefetchStopped) return 'already-satisfied';
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
+		if (purpose === 'visible' && uniquePaths.length > 0) {
+			this.syntax.handleDemand({
+				kind: 'navigation',
+				documentId: snapshot.documentId,
+				filePaths: uniquePaths,
+			});
+		}
 		this.seedCachedBodies(uniquePaths, purpose);
 		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));

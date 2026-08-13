@@ -118,6 +118,41 @@ function addedSyntaxSegments(controller: GitDiffDocumentController) {
 }
 
 describe('GitDiffDocumentController', () => {
+	it('highlights the initial visible body without waiting for viewport demand', async () => {
+		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
+		const syntax = new GitDiffSyntaxController({
+			waitForWorkSlot: async () => {},
+			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
+		});
+		const controller = new GitDiffDocumentController(syntax);
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
+			bodyResponse(
+				'doc',
+				requested.map(({ path }) => path),
+			),
+		);
+
+		controller.open(
+			{
+				project: '/project',
+				documentId: 'doc',
+				files: [file('a.ts')],
+				limits,
+				firstBodyCandidates: ['a.ts'],
+			},
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
+		);
+
+		await vi.waitFor(() => expect(highlighter).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(addedSyntaxSegments(controller)).toBeDefined());
+	});
+
 	it('replays early demand into syntax and honors document cache clearing', async () => {
 		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
 		const syntax = new GitDiffSyntaxController({
