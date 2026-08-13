@@ -79,7 +79,7 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
   readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
-  readonly forking: NonNullable<AgentIntegrationV4['forking']>;
+  readonly forking = null;
   readonly steering: NonNullable<AgentIntegrationV4['steering']>;
   readonly goals = null;
   readonly endpoints = null;
@@ -142,47 +142,6 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
           ...status,
           source: status.authenticated ? 'cli' : 'none',
         };
-      },
-    };
-    this.forking = {
-      supportsAtMessage: false,
-      supportsWhileRunning: false,
-      async resolvePoint() {
-        return { kind: 'unavailable', reason: 'no-native-source' } as const;
-      },
-      async fork(request) {
-        request.admission.signal.throwIfAborted();
-        if (request.point) {
-          throw new AgentIntegrationError(
-            'OPERATION_UNSUPPORTED',
-            'Pi does not support message-point forks',
-            false,
-          );
-        }
-        const { forkPiSession } = await import('./agents/pi/pi-fork.js');
-        const forked = await forkPiSession(
-          piReference(request.source, nativeSessions),
-          config,
-        );
-        return {
-          kind: 'materialized',
-          session: {
-            agentSessionId: forked.agentSessionId,
-            nativeSession: nativeSessions.encode({
-              path: forked.nativePath,
-              agentSessionId: forked.agentSessionId,
-              modelEndpointId: null,
-            }),
-            nativeSeedReceipt: retargetNativeSeedReceipt(
-              request.source.nativeSeedReceipt,
-              forked.agentSessionId,
-            ),
-          },
-        };
-      },
-      // Pi exposes no safe API for deleting an uncommitted fork.
-      async discard(_session, signal) {
-        signal.throwIfAborted();
       },
     };
     this.singleQuery = {

@@ -53,7 +53,10 @@ function createIntegration() {
       }),
     },
     auth: { launchLogin: async () => ({}) },
-    forking: { supportsAtMessage: true, supportsWhileRunning: false },
+    forking: {
+      async fork() { return { kind: 'unmaterialized' }; },
+      async discard() {},
+    },
     steering: {
       captureTarget: () => ({}),
       steer: async () => ({ kind: "accepted" }),
@@ -89,7 +92,7 @@ describe("AgentCatalogService", () => {
       label: "Sample Agent",
       supportsFork: true,
       supportsForkAtMessage: true,
-      supportsForkWhileRunning: false,
+      supportsForkWhileRunning: true,
       supportsSteering: true,
       supportsGoals: false,
       supportsUpdateProjectPath: true,

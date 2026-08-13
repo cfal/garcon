@@ -354,9 +354,6 @@ export async function startServer(): Promise<void> {
           signal,
         });
       },
-      getCarryOverMessageCount: async (entry) => (
-        carryOver.logicalMessageCount(entry.carryOverSegments ?? [])
-      ),
       onCarryOverChanged(chatId) {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },

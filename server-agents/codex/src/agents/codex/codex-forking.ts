@@ -1,54 +1,38 @@
 import {
   AgentIntegrationError,
-  type AgentForkRequestV4,
-  type AgentForkingV4,
+  type AgentNativeFork,
+  type AgentNativeForkRequest,
   type AgentStartedSession,
 } from '@garcon/server-agent-interface';
 import { CodexAppServerRpcError } from './app-server/client.js';
 import type { CodexHistoryProfile } from './history-profile.js';
 
 export interface CodexForkingOptions {
-  readonly journal: AgentForkingV4;
+  readonly journal: AgentNativeFork;
   readonly resolveProfile: (request: {
-    readonly source: AgentForkRequestV4['source'];
+    readonly source: AgentNativeForkRequest['source'];
     // Presence decides missing-source strictness; whole and point forks pass
     // their own point shapes.
     readonly point: object | null;
     readonly signal: AbortSignal;
   }) => Promise<CodexHistoryProfile | null>;
   readonly forkPaginatedWhole: (
-    request: AgentForkRequestV4,
+    request: AgentNativeForkRequest,
   ) => Promise<AgentStartedSession | null>;
 }
 
-export function createCodexForking(options: CodexForkingOptions): AgentForkingV4 {
+export function createCodexForking(options: CodexForkingOptions): AgentNativeFork {
   return {
-    supportsAtMessage: true,
-    supportsWhileRunning: options.journal.supportsWhileRunning,
-    // A paginated-history source can never be line-cut, so point resolution
-    // answers the permanent unsupported operation instead of a retryable
-    // projection-ahead refusal that would never clear.
-    async resolvePoint(request) {
-      const profile = await options.resolveProfile({
-        source: request.source,
-        point: request.point,
-        signal: request.signal,
-      });
-      if (profile && profile.mode !== 'legacy') {
-        throw paginatedForkUnsupported('fork-at-message');
-      }
-      return options.journal.resolvePoint(request);
-    },
     async fork(request) {
       request.admission.signal.throwIfAborted();
       const profile = await options.resolveProfile({
         source: request.source,
-        point: request.point,
+        point: request.providerMeta,
         signal: request.admission.signal,
       });
       if (!profile) return options.journal.fork(request);
       if (profile.mode === 'legacy') return options.journal.fork(request);
-      if (request.point) throw paginatedForkUnsupported('fork-at-message');
+      if (request.providerMeta) throw paginatedForkUnsupported('fork-at-message');
 
       try {
         const forked = await options.forkPaginatedWhole(request);

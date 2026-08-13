@@ -33,8 +33,8 @@ describe('ClaudeAgentIntegration', () => {
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
-      supportsAtMessage: true,
-      supportsWhileRunning: true,
+      fork: expect.any(Function),
+      discard: expect.any(Function),
     });
     expect(integration.steering).toEqual({
       captureTarget: expect.any(Function),

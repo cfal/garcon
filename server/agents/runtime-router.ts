@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
-  type AgentForkPoint,
   type AgentGoalControlHandoff,
   type AgentExecutionContextV4,
   type AgentTurnOwnerOperationIdentityV4,
@@ -13,6 +12,7 @@ import {
 import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { JsonObject } from '@garcon/common/json';
 import {
   renderCarriedContext,
   type CarriedContext,
@@ -55,7 +55,6 @@ import type {
 } from '../ledger/service.js';
 import {
   dispatchFailureDetail,
-  nativeForkUnavailableMessage,
 } from './runtime-router-errors.js';
 const logger = createLogger('agents:runtime-router');
 
@@ -66,7 +65,6 @@ export interface AgentRuntimeRouterOptions {
   events: AgentEventBus;
   projection: AgentProjectionIngress;
   getCarryOverRevision(entry: AgentChatEntry): string;
-  getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
   nativeActivity?: NativeTranscriptActivityService;
@@ -92,10 +90,6 @@ export class AgentRuntimeRouter {
   readonly #events: AgentEventBus;
   readonly #projection: AgentProjectionIngress;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
-  readonly #getCarryOverMessageCount: (
-    entry: AgentChatEntry,
-    signal?: AbortSignal,
-  ) => Promise<number>;
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
   readonly #nativeActivity: NativeTranscriptActivityService | null;
@@ -114,7 +108,6 @@ export class AgentRuntimeRouter {
     this.#events = options.events;
     this.#projection = options.projection;
     this.#getCarryOverRevision = options.getCarryOverRevision;
-    this.#getCarryOverMessageCount = options.getCarryOverMessageCount;
     this.#ledger = options.ledger;
     this.#adoption = options.adoption;
     this.#nativeActivity = options.nativeActivity ?? null;
@@ -522,6 +515,7 @@ export class AgentRuntimeRouter {
     sourceChatId: string;
     targetChatId: string;
     messageSequence?: number;
+    providerMeta?: JsonObject | null;
   }): Promise<ForkedAgentSessionOutcome | null> {
     if (
       args.messageSequence !== undefined
@@ -547,85 +541,26 @@ export class AgentRuntimeRouter {
         source,
         this.#getCarryOverRevision(source),
       );
-      const sourceSnapshot = args.messageSequence
-        ? await this.#projection.open(
-            integration,
-            sourceReference,
-            new AbortController().signal,
-          )
-        : null;
-      const carryOverMessageCount = args.messageSequence
-        ? await this.#getCarryOverMessageCount(source)
-        : 0;
-      if (args.messageSequence) {
-        if (sourceSnapshot?.kind !== 'ready') {
-          throw new AgentIntegrationError(
-            'TRANSCRIPT_UNAVAILABLE',
-            'Source transcript is unavailable',
-            sourceSnapshot?.kind === 'deferred'
-              || (sourceSnapshot?.kind === 'degraded' && sourceSnapshot.retryable),
-          );
-        }
-        const messageCount = carryOverMessageCount
-          + sourceSnapshot.value.entries.length;
-        if (args.messageSequence > messageCount) {
-          throw new DomainError(
-            'TRANSCRIPT_UNAVAILABLE',
-            `Message not found for seq ${args.messageSequence}`,
-            422,
-          );
-        }
+      if (args.messageSequence !== undefined && !args.providerMeta) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'The selected ledger row has no provider-native fork position',
+          true,
+          { nativeForkReason: 'not-settled' },
+        );
       }
-      let point: {
-        readonly projection: AgentForkPoint;
-        readonly native: import('@garcon/server-agent-interface').AgentNativeForkRef;
-      } | null = null;
-      if (args.messageSequence && sourceSnapshot?.kind === 'ready') {
-        const currentOrdinal = args.messageSequence - carryOverMessageCount;
-        const entry = sourceSnapshot.value.entries[currentOrdinal - 1];
-        if (!entry || entry.lifetime !== 'durable') {
-          throw new AgentIntegrationError(
-            'TRANSCRIPT_UNAVAILABLE',
-            'The selected transcript entry is not durably settled',
-            true,
-            { nativeForkReason: 'not-settled' },
-          );
-        }
-        const projectionPoint: AgentForkPoint = {
-          kind: 'projection-entry',
-          agentOwnershipEpoch: sourceReference.agentOwnershipEpoch,
-          contentEpoch: sourceSnapshot.value.checkpoint.projection.contentEpoch,
-          entryId: entry.id,
-          durableRevision: sourceSnapshot.value.checkpoint.projection.durableRevision,
-        };
-        const resolution = await integration.forking.resolvePoint({
-          source: sourceReference,
-          point: projectionPoint,
-          signal: new AbortController().signal,
-        });
-        if (resolution.kind === 'degraded') {
-          throw new AgentIntegrationError(
-            'TRANSCRIPT_UNAVAILABLE',
-            'The provider-native fork point is unavailable',
-            resolution.retryable,
-            { projectionErrorCode: resolution.errorCode },
-          );
-        }
-        if (resolution.kind === 'unavailable') {
-          throw new AgentIntegrationError(
-            'TRANSCRIPT_UNAVAILABLE',
-            nativeForkUnavailableMessage(resolution.reason),
-            resolution.reason === 'projection-ahead-of-provider'
-              || resolution.reason === 'not-settled',
-            { nativeForkReason: resolution.reason },
-          );
-        }
-        point = { projection: projectionPoint, native: resolution.reference };
-      }
+      const context = this.#executionContext(args.targetChatId, source, selection, operation, {});
       const result = await integration.forking.fork({
-        ...this.#executionContext(args.targetChatId, source, selection, operation, {}),
+        chatId: context.chatId,
+        projectPath: context.projectPath,
+        model: context.model,
+        permissionMode: context.permissionMode,
+        thinkingMode: context.thinkingMode,
+        settings: context.settings,
+        endpoint: context.endpoint,
+        admission: context.admission,
         source: sourceReference,
-        point,
+        providerMeta: args.messageSequence === undefined ? null : args.providerMeta ?? null,
       });
       if (result.kind === 'unmaterialized') return result;
       return {

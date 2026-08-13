@@ -10,6 +10,7 @@ import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import { frozenConversationDrafts } from '../ledger/projection.js';
+import type { JsonObject } from '../../common/json.js';
 
 const logger = createLogger('chats:fork');
 
@@ -44,6 +45,7 @@ interface ForkChatInput {
     sourceChatId: string;
     targetChatId: string;
     messageSequence?: number;
+    providerMeta?: JsonObject | null;
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
 }
@@ -119,23 +121,27 @@ export async function forkChatFileCopy({
     );
   }
   const selectedWatermark = { viewId: sourceWatermark.viewId, ordinal: selectedOrdinal };
-  const frozenRows = frozenConversationDrafts(
-    ledger.rowsThrough(sourceChatId, selectedWatermark),
-  );
+  const sourceRows = ledger.rowsThrough(sourceChatId, selectedWatermark);
+  const frozenRows = frozenConversationDrafts(sourceRows);
+  const selectedProviderMeta = upToSequence === undefined
+    ? null
+    : sourceRows.at(-1)?.providerMeta ?? null;
   const needsNativeFork = Boolean(sourceAgentSessionId)
-    && selectedOrdinal >= sourceView.contentStartOrdinal;
+    && selectedOrdinal >= sourceView.contentStartOrdinal
+    && (upToSequence === undefined || selectedProviderMeta !== null);
   let forkOutcome: ForkedAgentSessionOutcome | null = null;
-  try {
-    if (needsNativeFork) {
-      forkOutcome = await forkAgentSession({
-        sourceSession,
-        sourceChatId,
-        targetChatId,
-        ...(upToSequence === undefined ? {} : { messageSequence: upToSequence }),
-      });
-    }
-  } catch (error) {
-    throw error;
+  if (needsNativeFork) {
+    forkOutcome = await forkAgentSession({
+      sourceSession,
+      sourceChatId,
+      targetChatId,
+      ...(upToSequence === undefined
+        ? {}
+        : {
+            messageSequence: upToSequence,
+            providerMeta: selectedProviderMeta,
+          }),
+    });
   }
   const nativeFork = forkOutcome?.kind === 'materialized' ? forkOutcome.session : null;
   try {

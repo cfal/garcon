@@ -5,10 +5,7 @@ import type {
   ForkRunCommandResponse,
 } from '../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
-import type { TranscriptSnapshotReservation } from '../chat-execution/types.js';
 import { rollbackForkTarget, type ForkChatFileCopyResult } from '../chats/fork-chat.js';
-import { isDomainError } from '../lib/domain-error.js';
-import { createLogger } from '../lib/log.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import {
   CommandSupport,
@@ -18,8 +15,6 @@ import {
   type SubmitForkRunInput,
 } from './command-support.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
-
-const logger = createLogger('commands:fork');
 
 interface ForkContext {
   sourceChatId: string;
@@ -44,14 +39,8 @@ export class ForkCommands {
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
       const context = await this.validateFork(normalized);
-      if (context.upToSeq !== undefined || this.forksSourceDuringExecution(context)) {
-        await this.forkChatFromContext(context);
-        return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
-      }
-      return this.withSettledSourceSnapshot(context, async () => {
-        await this.forkChatFromContext(context);
-        return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
-      });
+      await this.forkChatFromContext(context);
+      return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
     });
   }
 
@@ -120,7 +109,7 @@ export class ForkCommands {
       forkContext.sourceNextForkOrdinal = preparedFork.sourceNextForkOrdinal;
     }
 
-    const submit = async (releaseSourceSnapshot?: () => Promise<void>) => {
+    const submit = async () => {
       const ledger = await this.deps.ledger.accept(ledgerInput);
 
       if (ledger.kind === 'conflict') {
@@ -164,7 +153,6 @@ export class ForkCommands {
               sourceNextForkOrdinal: forkResult.sourceNextForkOrdinal,
             },
           });
-          await releaseSourceSnapshot?.();
         },
         compensate: async () => {
           if (forkResult) {
@@ -178,9 +166,7 @@ export class ForkCommands {
       return { ...result, chat: await this.support.projectCommandChat(input.chatId) };
     };
 
-    return forkAlreadyCreated || this.forksSourceDuringExecution(forkContext)
-      ? submit()
-      : this.withSettledSourceSnapshot(forkContext, submit);
+    return submit();
   }
 
   private async validateFork(
@@ -223,23 +209,7 @@ export class ForkCommands {
         422,
       );
     }
-    // A starting chat has no provider session to copy yet, so any fork would silently drop the
-    // turn that is materializing it.
-    if (this.deps.queue.ownsExecution(sourceChatId) && !sourceSession.agentSessionId) {
-      throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is materializing', 409, true);
-    }
     if (upToSeq !== undefined) {
-      // Asks about the provider session specifically, not execution ownership: a provider that
-      // cannot tolerate a live copy only objects while its own turn runs, and widening this to
-      // ownsExecution would refuse forks during windows the provider never observes.
-      if (
-        this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
-        && !this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)
-      ) {
-        throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
-      }
-      // Exact projection application keeps an idle view's seq numbering equal to
-      // carryover count plus entry ordinal, so no native rebuild is needed here.
       if (input.generationId !== undefined) {
         const cursor = this.deps.chatViews.getCursor(sourceChatId);
         if (cursor === null || cursor.generationId !== input.generationId) {
@@ -251,7 +221,6 @@ export class ForkCommands {
           );
         }
       }
-      this.assertSeqIsNativeBacked(sourceChatId, upToSeq);
     }
     if (!options.allowExistingTarget && this.deps.chats.getChat(targetChatId)) {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${targetChatId}`, 409);
@@ -264,86 +233,6 @@ export class ForkCommands {
       sourceNextForkOrdinal: normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1,
       ...(upToSeq ? { upToSeq } : {}),
     };
-  }
-
-  // Providers stream a turn's items before persisting them, so a running chat's view holds live
-  // messages that the native transcript cannot resolve yet. Translating those seqs into native
-  // positions silently forks at the wrong message, so they are refused until the turn settles.
-  // Only executing sources are checked: an idle transcript has stopped moving underneath the view.
-  private assertSeqIsNativeBacked(sourceChatId: string, upToSeq: number): void {
-    const nativeLastSeq = this.deps.chatViews.getNativeHistoryLastSeq(sourceChatId);
-    if (nativeLastSeq === null || upToSeq <= nativeLastSeq) return;
-    throw new CommandValidationError(
-      'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      "This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
-      409,
-      true,
-    );
-  }
-
-  // An executing source cannot reserve a transcript snapshot, so providers that tolerate a live
-  // fork copy the transcript as it stands instead of waiting for the turn to settle. Execution
-  // ownership rather than provider state is the signal, because the two disagree while a turn is
-  // being dispatched and again while it settles. Ownership is narrower than the reservation's
-  // refusal, which also covers a running session with no owner; attempt retirement only happens
-  // once the session has stopped running, so that combination is unreachable here.
-  private forksSourceDuringExecution(context: ForkContext): boolean {
-    return this.deps.queue.ownsExecution(context.sourceChatId)
-      && this.deps.agents.supportsForkWhileRunning(context.sourceSession.agentId);
-  }
-
-  private async withSettledSourceSnapshot<T>(
-    context: ForkContext,
-    operation: (release: () => Promise<void>) => Promise<T>,
-  ): Promise<T> {
-    let reservation: TranscriptSnapshotReservation | null = null;
-    let failure: unknown = null;
-    const release = async () => {
-      if (!reservation) return;
-      const current = reservation;
-      await this.deps.queue.releaseTranscriptSnapshot(current);
-      reservation = null;
-    };
-    try {
-      reservation = this.deps.queue.reserveTranscriptSnapshot(context.sourceChatId);
-      await this.deps.pendingInputs.reconcileNativeHistory(context.sourceChatId);
-      if (this.deps.pendingInputs.hasInFlightForChat(context.sourceChatId)) {
-        throw new CommandValidationError(
-          'SESSION_BUSY',
-          'Cannot fork until the accepted turn is persisted',
-          409,
-          true,
-        );
-      }
-      return await operation(release);
-    } catch (error) {
-      failure = error;
-      if (
-        (error instanceof CommandValidationError || isDomainError(error))
-        && error.code === 'SESSION_BUSY'
-      ) {
-        logger.info('fork deferred for source settlement', {
-          sourceChatId: context.sourceChatId,
-          agentId: context.sourceSession.agentId,
-          errorCode: error.code,
-        });
-      }
-      throw error;
-    } finally {
-      if (reservation) {
-        try {
-          await release();
-        } catch (releaseError) {
-          if (failure !== null) {
-            throw new AggregateError(
-              [failure, releaseError],
-              `Failed to release transcript snapshot for ${context.sourceChatId}`,
-            );
-          }
-          throw releaseError;
-        }
-      }
-    }
   }
 
   private async rollbackPreparedFork(context: ForkContext): Promise<void> {

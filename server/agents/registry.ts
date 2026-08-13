@@ -199,7 +199,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       entry: AgentChatEntry,
       signal?: AbortSignal,
     ): Promise<CarriedContext | null>;
-    getCarryOverMessageCount(entry: AgentChatEntry, signal?: AbortSignal): Promise<number>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;
     ledger: TranscriptLedgerService;
@@ -224,7 +223,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       events: this.#events,
       projection: this.#projection,
       getCarryOverRevision: args.getCarryOverRevision,
-        getCarryOverMessageCount: args.getCarryOverMessageCount,
       ledger: this.#ledger,
       adoption: this.#adoption,
       nativeActivity: args.nativeActivity,
@@ -241,12 +239,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   hasAgent(agentId: string): boolean { return this.#directory.has(agentId); }
   supportsAuthLogin(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.launchLogin); }
   supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
-  supportsFork(agentId: string): boolean { return this.#directory.get(agentId)?.forking !== null; }
+  supportsFork(agentId: string): boolean { return this.#directory.has(agentId); }
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean {
     return this.#directory.get(agentId)?.singleQuery?.runsToolsWithoutPermission ?? false;
   }
-  supportsForkAtMessage(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsAtMessage ?? false; }
-  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsWhileRunning ?? false; }
+  supportsForkAtMessage(agentId: string): boolean { return this.#directory.has(agentId); }
+  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.has(agentId); }
   supportsUpdateProjectPath(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string): boolean {
     return this.#directory.get(agentId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;

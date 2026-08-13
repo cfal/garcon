@@ -1,9 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.js';
-import {
-  AgentIntegrationError,
-  computeAgentTranscriptRevision,
-} from '@garcon/server-agent-interface';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
@@ -60,17 +57,8 @@ function makeRouter(fork) {
       },
       abort: async () => undefined,
     },
-    transcript: {
-      load: mock(async () => ({
-        messages,
-        revision: computeAgentTranscriptRevision(messages),
-      })),
-    },
+    transcript: { load: mock(async () => ({ messages, revision: 'unused' })) },
     forking: {
-      resolvePoint: mock(async () => ({
-        kind: 'ready',
-        reference: { ownerId: 'test', schemaVersion: 1, value: { native: 'point-1' } },
-      })),
       fork,
       discard: mock(async () => undefined),
     },
@@ -124,7 +112,6 @@ function makeRouter(fork) {
     projection,
     getCarryOverRevision: () => 'carry-1',
     loadCarriedContext: async () => null,
-    getCarryOverMessageCount: async () => 0,
     ledger: transcript.ledger,
     adoption: transcript.adoption,
   });
@@ -147,28 +134,14 @@ describe('AgentRuntimeRouter forks', () => {
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
       messageSequence: 1,
+      providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
     });
 
     expect(fork).toHaveBeenCalledWith(expect.objectContaining({
-      point: {
-        projection: {
-          kind: 'projection-entry',
-          agentOwnershipEpoch: 'epoch-1',
-          contentEpoch: 'content-1',
-          entryId: 'entry-1',
-          durableRevision: 'revision-1',
-        },
-        native: { ownerId: 'test', schemaVersion: 1, value: { native: 'point-1' } },
-      },
+      providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
+      source: expect.objectContaining({ chatId: 'source-chat' }),
     }));
-    expect(integration.forking.resolvePoint).toHaveBeenCalledWith({
-      source: expect.objectContaining({
-        chatId: 'source-chat',
-        agentOwnershipEpoch: 'epoch-1',
-      }),
-      point: expect.objectContaining({ entryId: 'entry-1' }),
-      signal: expect.any(AbortSignal),
-    });
+    expect(integration.forking).not.toHaveProperty('resolvePoint');
   });
 
   it('preserves a successful unmaterialized whole-session outcome', async () => {
@@ -182,7 +155,7 @@ describe('AgentRuntimeRouter forks', () => {
     });
     expect(outcome).toEqual({ kind: 'unmaterialized' });
 
-    expect(fork).toHaveBeenCalledWith(expect.objectContaining({ point: null }));
+    expect(fork).toHaveBeenCalledWith(expect.objectContaining({ providerMeta: null }));
 
     entries.set('target-chat', {
       ...entry,
@@ -214,6 +187,7 @@ describe('AgentRuntimeRouter forks', () => {
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
       messageSequence: 1,
+      providerMeta: { lineNumber: 1 },
     })).rejects.toMatchObject({
       code: 'SOURCE_REVISION_CHANGED',
       status: 409,
@@ -221,7 +195,7 @@ describe('AgentRuntimeRouter forks', () => {
     });
   });
 
-  it('maps an unavailable point to a structured validation error', async () => {
+  it('maps a missing ledger provider position to the established retry-later error', async () => {
     const fork = mock(async () => null);
     const { router, entry } = makeRouter(fork);
 
@@ -229,34 +203,27 @@ describe('AgentRuntimeRouter forks', () => {
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      messageSequence: 3,
+      messageSequence: 1,
     })).rejects.toMatchObject({
-      code: 'TRANSCRIPT_UNAVAILABLE',
-      status: 422,
-      retryable: false,
+      code: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
+      status: 409,
+      retryable: true,
     });
     expect(fork).not.toHaveBeenCalled();
   });
 
-  it('maps transcript-load failures before provider fork dispatch', async () => {
-    const fork = mock(async () => null);
+  it('does not read the V4 projection for a native point fork', async () => {
+    const fork = mock(async () => ({ kind: 'unmaterialized' }));
     const { router, entry, projection } = makeRouter(fork);
-    projection.open.mockRejectedValue(new AgentIntegrationError(
-      'TRANSCRIPT_UNAVAILABLE',
-      'Source transcript is missing',
-      false,
-    ));
 
-    await expect(router.forkAgentSession({
+    await router.forkAgentSession({
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
       messageSequence: 1,
-    })).rejects.toMatchObject({
-      code: 'TRANSCRIPT_UNAVAILABLE',
-      message: 'Chat transcript is unavailable.',
-      status: 422,
-      retryable: false,
+      providerMeta: { lineNumber: 1 },
     });
+
+    expect(projection.open).not.toHaveBeenCalled();
   });
 });

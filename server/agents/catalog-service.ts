@@ -77,10 +77,9 @@ export class AgentCatalogService {
       label: integration.descriptor.label,
       kind: "agent",
       supportsCompact: integration.compaction !== null,
-      supportsFork: integration.forking !== null,
-      supportsForkAtMessage: integration.forking?.supportsAtMessage ?? false,
-      supportsForkWhileRunning:
-        integration.forking?.supportsWhileRunning ?? false,
+      supportsFork: true,
+      supportsForkAtMessage: true,
+      supportsForkWhileRunning: true,
       supportsUpdateProjectPath:
         integration.descriptor.supportsProjectPathUpdate,
       supportsSteering: integration.steering !== null,

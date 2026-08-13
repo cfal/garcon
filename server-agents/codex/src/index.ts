@@ -6,7 +6,7 @@ import { CODEX_MODELS } from '@garcon/common/models';
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentForkRequestV4,
+  type AgentNativeForkRequest,
   type AgentHost,
   type AgentIntegrationV4,
 } from '@garcon/server-agent-interface';
@@ -14,7 +14,7 @@ import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-c
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
-import { createProjectionJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
+import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
@@ -203,10 +203,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
         return skillDiscovery.commands(projectPath);
       },
     };
-    const journalForking = createProjectionJsonlForking({
-      ownerId: 'codex',
-      projection: projection.transcript,
-      supportsWhileRunning: true,
+    const journalForking = createJsonlNativeForking({
       nativeEvidence,
       nativeSessions,
       createTargetPath: createCodexForkTargetPath,
@@ -311,7 +308,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
 }
 
 async function forkWholeCodexSession(
-  request: AgentForkRequestV4,
+  request: AgentNativeForkRequest,
   host: AgentHost,
   runtime: CodexAppServerRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,

@@ -13,20 +13,23 @@ const paginatedProfile = {
 const startedSession = { agentSessionId: 'target', nativeSession: null };
 const materialized = { kind: 'materialized', session: startedSession };
 
-function request(point = null) {
+function request(providerMeta = null) {
   return {
     chatId: 'target-chat',
     projectPath: '/repo',
     model: 'gpt',
+    permissionMode: 'default',
+    thinkingMode: 'none',
     settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
     endpoint: null,
     admission: { signal: new AbortController().signal, markStarted() {} },
     source: {
       chatId: 'source-chat', agentId: 'codex', agentSessionId: 'source',
       projectPath: '/repo', model: 'gpt', nativeSession: null,
-      carryOverRevision: '', settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      carryOverRevision: '', nativeSeedReceipt: null,
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
     },
-    point,
+    providerMeta,
   };
 }
 
@@ -37,10 +40,7 @@ function setup(profile, nativeImplementation = async () => startedSession) {
   return {
     forking: createCodexForking({
       journal: {
-        supportsAtMessage: true,
-        supportsWhileRunning: true,
         fork: legacyFork,
-        resolvePoint: mock(async () => ({ kind: 'unavailable', reason: 'no-native-source' })),
         discard: mock(async () => undefined),
       },
       resolveProfile,
@@ -60,22 +60,14 @@ describe('createCodexForking', () => {
     expect(full.forkPaginatedWhole).not.toHaveBeenCalled();
 
     const point = setup(legacyProfile);
-    await expect(point.forking.fork(request({
-      messageSequence: 2,
-      archivedMessageCount: 0,
-      sourceRevision: { nativePrefix: 'prefix', carryOver: 'carry-over' },
-    }))).resolves.toBe(materialized);
+    await expect(point.forking.fork(request({ entryId: 'item-2' }))).resolves.toBe(materialized);
     expect(point.legacyFork).toHaveBeenCalledTimes(1);
     expect(point.forkPaginatedWhole).not.toHaveBeenCalled();
   });
 
   it('rejects paginated point forks before either mutation strategy runs', async () => {
     const values = setup(paginatedProfile);
-    await expect(values.forking.fork(request({
-      messageSequence: 2,
-      archivedMessageCount: 0,
-      sourceRevision: { nativePrefix: 'prefix', carryOver: 'carry-over' },
-    }))).rejects.toMatchObject({
+    await expect(values.forking.fork(request({ entryId: 'item-2' }))).rejects.toMatchObject({
       code: 'OPERATION_UNSUPPORTED',
       retryable: false,
       details: { operation: 'fork-at-message', historyMode: 'paginated', provider: 'codex' },

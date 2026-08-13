@@ -72,7 +72,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
   readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
-  readonly forking: NonNullable<AgentIntegrationV4['forking']>;
+  readonly forking = null;
   readonly steering: NonNullable<AgentIntegrationV4['steering']>;
   readonly goals = null;
   readonly endpoints = null;
@@ -130,53 +130,6 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
       async status(signal) {
         signal.throwIfAborted();
         return getOpenCodeAuthStatus(runtime);
-      },
-    };
-    this.forking = {
-      supportsAtMessage: false,
-      supportsWhileRunning: false,
-      async resolvePoint() {
-        return { kind: 'unavailable', reason: 'no-native-source' } as const;
-      },
-      async fork(request) {
-        request.admission.signal.throwIfAborted();
-        if (request.point) {
-          throw new AgentIntegrationError(
-            'OPERATION_UNSUPPORTED',
-            'OpenCode does not support message-point forks',
-            false,
-          );
-        }
-        const sourceSessionId = sessionId(request.source)?.trim();
-        if (!sourceSessionId) {
-          throw new AgentIntegrationError(
-            'TRANSCRIPT_UNAVAILABLE',
-            'Cannot fork OpenCode session without a source session ID',
-            false,
-          );
-        }
-        const agentSessionId = await runtime.forkSession(sourceSessionId, {
-          projectPath: request.source.projectPath,
-        });
-        return {
-          kind: 'materialized',
-          session: {
-            agentSessionId,
-            nativeSession: nativeSessions.encode({
-              path: createArtificialNativePath('opencode', agentSessionId),
-              agentSessionId,
-              modelEndpointId: null,
-            }),
-            nativeSeedReceipt: retargetNativeSeedReceipt(
-              request.source.nativeSeedReceipt,
-              agentSessionId,
-            ),
-          },
-        };
-      },
-      // OpenCode exposes no safe API for deleting an uncommitted fork.
-      async discard(_session, signal) {
-        signal.throwIfAborted();
       },
     };
     this.singleQuery = {

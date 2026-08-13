@@ -180,6 +180,21 @@ describe('forkChatFileCopy', () => {
     expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
   });
 
+  it('uses carryover when a current-binding row has no native fork position', async () => {
+    const deps = makeDeps();
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToSequence: 3,
+      ...deps,
+    });
+
+    expect(deps.forkAgentSession).not.toHaveBeenCalled();
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(3);
+  });
+
   it('materializes a native session while retaining the ledger prefix', async () => {
     const deps = makeDeps();
 
@@ -194,6 +209,7 @@ describe('forkChatFileCopy', () => {
     expect(result.agentSessionId).toBe('target-native');
     expect(deps.forkAgentSession).toHaveBeenCalledWith(expect.objectContaining({
       messageSequence: 2,
+      providerMeta: { native: true },
     }));
     expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
       expect.objectContaining({ kind: 'user-input' }),

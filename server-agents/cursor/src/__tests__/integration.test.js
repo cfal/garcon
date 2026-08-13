@@ -32,10 +32,7 @@ describe('CursorAgentIntegration', () => {
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
     expect(integration.transcriptSearch).toBeUndefined();
-    expect(integration.forking).toMatchObject({
-      supportsAtMessage: false,
-      supportsWhileRunning: false,
-    });
+    expect(integration.forking).toBeNull();
     expect(integration.auth).toBeDefined();
     expect(integration.singleQuery).toBeDefined();
     expect(integration.commands).toBeNull();

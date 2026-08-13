@@ -2411,24 +2411,19 @@ describe('ChatCommandService', () => {
     });
   });
 
-  it('applies shared fork validation before copying', async () => {
+  it('copies from the serving ledger while the native source is running', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
 
-    await expect(
-      service.forkChat({
-        sourceChatId: SOURCE_CHAT_ID,
-        chatId: TARGET_CHAT_ID,
-      }),
-    ).rejects.toMatchObject({
-      code: 'SESSION_BUSY',
-      status: 409,
+    await service.forkChat({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
     });
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
-  it('keeps retryable fork-run settlement failures out of the command ledger', async () => {
+  it('does not reconcile V4 pending-input settlement before a fork run', async () => {
     const { service, pendingInputs, ledger, queue } = makeService();
     const input = {
       sourceChatId: SOURCE_CHAT_ID,
@@ -2437,26 +2432,20 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-unsettled-fork',
       clientMessageId: 'msg-unsettled-fork',
     };
-    pendingInputs.hasInFlightForChat.mockReturnValueOnce(true).mockReturnValue(false);
+    pendingInputs.hasInFlightForChat.mockReturnValue(true);
 
-    await expect(service.submitForkRun(input)).rejects.toMatchObject({
-      code: 'SESSION_BUSY',
-      status: 409,
-      retryable: true,
-    });
+    await expect(service.submitForkRun(input)).resolves.toMatchObject({ status: 'accepted' });
     expect(await readLedgerRecord(
       ledger,
       'fork-run',
       input.clientRequestId,
       TARGET_CHAT_ID,
-    )).toBeNull();
-    expect(queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
-
-    await expect(service.submitForkRun(input)).resolves.toMatchObject({ status: 'accepted' });
-    expect(queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(2);
+    )).toMatchObject({ status: 'scheduled' });
+    expect(pendingInputs.reconcileNativeHistory).not.toHaveBeenCalled();
+    expect(queue.releaseTranscriptSnapshot).not.toHaveBeenCalled();
   });
 
-  it('releases the source snapshot before admitting the fork target turn', async () => {
+  it('admits the fork target immediately after its ledger is built', async () => {
     const order = [];
     const forkChatFileCopy = mock(async () => {
       order.push('target-created');
@@ -2485,22 +2474,22 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-fork-release-order',
     });
 
-    expect(order).toEqual(['target-created', 'source-released', 'target-admitted']);
-    expect(queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['target-created', 'target-admitted']);
+    expect(queue.releaseTranscriptSnapshot).not.toHaveBeenCalled();
   });
 
-  it('rejects a point fork while a lazy source is materializing', async () => {
+  it('copies a point fork from committed rows while a lazy source materializes', async () => {
     const { service, queue, forkChatFileCopy } = makeService({
       session: { agentSessionId: null, nativeSession: null },
     });
     queue.ownsExecution.mockReturnValue(true);
 
-    await expect(service.forkChat({
+    await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
       upToSeq: 1,
-    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    });
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
   it('serializes source chat submissions behind an in-progress fork snapshot', async () => {
@@ -2794,17 +2783,17 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
-  it('rejects a whole-head fork while the source is running without running-fork support', async () => {
+  it('copies a whole-head fork from the ledger regardless of native fork support', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(false);
 
-    await expect(service.forkChat({
+    await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
+    });
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
   it('copies the transcript for a whole-head fork while the source is running', async () => {
@@ -2820,39 +2809,35 @@ describe('ChatCommandService', () => {
     );
   });
 
-  it('rejects a whole-head fork while the source session is materializing', async () => {
+  it('copies committed rows while a whole-head source session materializes', async () => {
     const { service, queue, forkChatFileCopy } = makeService({
       session: { agentSessionId: null, nativeSession: null },
     });
     queue.ownsExecution.mockReturnValue(true);
 
-    await expect(service.forkChat({
+    await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
+    });
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
-  it('rejects a fork point that only exists on the event stream', async () => {
+  it('forks a committed ledger point without consulting native coverage', async () => {
     const { service, agents, chatViews, queue, forkChatFileCopy } = makeService();
     queue.ownsExecution.mockReturnValue(true);
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
     chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
 
-    await expect(service.forkChat({
+    await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
       upToSeq: 3,
-    })).rejects.toMatchObject({
-      code: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      message: "This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
-      status: 409,
-      retryable: true,
     });
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(chatViews.getNativeHistoryLastSeq).not.toHaveBeenCalled();
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
   it('resolves a fork point against the projection-backed view boundary', async () => {
@@ -2904,22 +2889,18 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
-  it('refuses an idle fork point that native history still does not cover', async () => {
+  it('allows an idle ledger point without native coverage', async () => {
     const { service, chatViews, forkChatFileCopy } = makeService();
     chatViews.getNativeHistoryLastSeq.mockReturnValue(1);
 
-    await expect(service.forkChat({
+    await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
       upToSeq: 2,
-    })).rejects.toMatchObject({
-      code: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      message: "This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
-      status: 409,
-      retryable: true,
     });
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(chatViews.getNativeHistoryLastSeq).not.toHaveBeenCalled();
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
   it('allows a fork point that native history already covers', async () => {

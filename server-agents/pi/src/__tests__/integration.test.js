@@ -33,10 +33,7 @@ describe('PiAgentIntegration', () => {
     expect(integration.descriptor.requiresNativePathForProjectPathUpdate).toBe(true);
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
     expect(integration.transcriptSearch).toBeUndefined();
-    expect(integration.forking).toMatchObject({
-      supportsAtMessage: false,
-      supportsWhileRunning: false,
-    });
+    expect(integration.forking).toBeNull();
     expect(integration.auth).toBeDefined();
     expect(integration.singleQuery).toBeDefined();
     expect(integration.steering).toMatchObject({

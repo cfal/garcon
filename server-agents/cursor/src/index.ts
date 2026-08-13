@@ -90,7 +90,7 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
   readonly auth: NonNullable<AgentIntegrationV4['auth']>;
   readonly commands = null;
   readonly compaction = null;
-  readonly forking: NonNullable<AgentIntegrationV4['forking']>;
+  readonly forking = null;
   readonly steering = null;
   readonly goals = null;
   readonly endpoints = null;
@@ -138,45 +138,6 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
       async status(signal) {
         signal.throwIfAborted();
         return getCursorAuthStatus(config);
-      },
-    };
-    this.forking = {
-      supportsAtMessage: false,
-      supportsWhileRunning: false,
-      async resolvePoint() {
-        return { kind: 'unavailable', reason: 'no-native-source' } as const;
-      },
-      async fork(request) {
-        request.admission.signal.throwIfAborted();
-        if (request.point) {
-          throw new AgentIntegrationError(
-            'OPERATION_UNSUPPORTED',
-            'Cursor does not support message-point forks',
-            false,
-          );
-        }
-        const forked = await forkCursorAcpSession(
-          cursorReference(request.source, nativeSessions),
-        );
-        return {
-          kind: 'materialized',
-          session: {
-            agentSessionId: forked.agentSessionId,
-            nativeSession: nativeSessions.encode({
-              path: forked.nativePath,
-              agentSessionId: forked.agentSessionId,
-              modelEndpointId: null,
-            }),
-            nativeSeedReceipt: retargetNativeSeedReceipt(
-              request.source.nativeSeedReceipt,
-              forked.agentSessionId,
-            ),
-          },
-        };
-      },
-      // Cursor exposes no safe API for deleting an uncommitted fork.
-      async discard(_session, signal) {
-        signal.throwIfAborted();
       },
     };
     this.singleQuery = {

@@ -3,6 +3,7 @@ export * from './contracts/execution-events-v4.js';
 export * from './contracts/execution-v5.js';
 export * from './contracts/host.js';
 export * from './contracts/integration.js';
+export * from './contracts/native-fork.js';
 export * from './contracts/native-history.js';
 export * from './contracts/producer.js';
 export * from './contracts/services.js';
