@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { getAmpPreview, loadAmpChatMessages } from '../history-loader.js';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 const THREAD_EXPORT_FIXTURE = {
   id: 'T-123',
@@ -76,6 +77,14 @@ describe('amp history loader', () => {
     });
     expect(messages[5].type).toBe('assistant-message');
     expect(messages[5].content).toBe('final assistant message');
+    expect(messages.map((message) => getNativeMessageRevisionSource(message))).toEqual([
+      { entryId: 'amp-message:0', withinSourceOrdinal: 0 },
+      { entryId: 'amp-message:1', withinSourceOrdinal: 0 },
+      { entryId: 'amp-message:1', withinSourceOrdinal: 1 },
+      { entryId: 'amp-message:1', withinSourceOrdinal: 2 },
+      { entryId: 'amp-message:2', withinSourceOrdinal: 0 },
+      { entryId: 'amp-message:3', withinSourceOrdinal: 0 },
+    ]);
   });
 
   it('builds preview metadata from the export payload', () => {

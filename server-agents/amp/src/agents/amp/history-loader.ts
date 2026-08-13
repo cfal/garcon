@@ -9,6 +9,7 @@ import {
 import { convertAmpToolUse } from './tool-use-converter.js';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 export interface AmpContentPart {
   type: string;
@@ -120,6 +121,7 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
   const messages: ChatMessage[] = [];
 
   for (const message of getSortedMessages(threadExport)) {
+    const converted: ChatMessage[] = [];
     const timestamp = getMessageTimestamp(message, createdAt);
     const content: AmpContentPart[] = Array.isArray(message.content) ? message.content : [];
 
@@ -127,38 +129,54 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
       for (const part of content) {
         if (part.type !== 'tool_result') continue;
         const { content: resultContent, isError } = getToolResultPayload(part);
-        messages.push(new ToolResultMessage(timestamp, part.toolUseID || '', resultContent, isError));
+        converted.push(new ToolResultMessage(timestamp, part.toolUseID || '', resultContent, isError));
       }
 
       const text = getUserText(content);
       if (text) {
-        messages.push(new UserMessage(timestamp, stripResolvedFileMentionContext(text)));
+        converted.push(new UserMessage(timestamp, stripResolvedFileMentionContext(text)));
       }
+      appendAmpSource(messages, converted, message.messageId);
       continue;
     }
 
     if (message.role === 'assistant') {
       for (const part of content) {
         if (part.type === 'thinking' && part.thinking) {
-          messages.push(new ThinkingMessage(timestamp, part.thinking));
+          converted.push(new ThinkingMessage(timestamp, part.thinking));
         } else if (part.type === 'text' && part.text?.trim()) {
-          messages.push(new AssistantMessage(timestamp, part.text));
+          converted.push(new AssistantMessage(timestamp, part.text));
         } else if (part.type === 'tool_use') {
-          messages.push(convertAmpToolUse(timestamp, part));
+          converted.push(convertAmpToolUse(timestamp, part));
         }
       }
+      appendAmpSource(messages, converted, message.messageId);
       continue;
     }
 
     if (message.role === 'info') {
       const infoText = getUserText(content);
       if (infoText) {
-        messages.push(new ErrorMessage(timestamp, infoText));
+        converted.push(new ErrorMessage(timestamp, infoText));
       }
     }
+    appendAmpSource(messages, converted, message.messageId);
   }
 
   return messages;
+}
+
+function appendAmpSource(
+  messages: ChatMessage[],
+  converted: ChatMessage[],
+  messageId: number | undefined,
+): void {
+  converted.forEach((message, withinSourceOrdinal) => {
+    messages.push(attachNativeMessageSource(message, {
+      ...(Number.isSafeInteger(messageId) ? { entryId: `amp-message:${messageId}` } : {}),
+      withinSourceOrdinal,
+    }));
+  });
 }
 
 export function getAmpPreview(threadExport: AmpThreadExport): AmpPreview | null {

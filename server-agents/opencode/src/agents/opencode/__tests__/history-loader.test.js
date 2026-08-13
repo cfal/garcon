@@ -12,6 +12,7 @@ import {
   loadOpenCodeChatMessages,
 } from '../history-loader.js';
 import { FILE_CONTEXT_SEPARATOR } from '@garcon/server-agent-common/shared/file-mention-context';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 let originalError;
 let originalWarn;
@@ -35,14 +36,14 @@ describe('OpenCode history loader', () => {
         messages: mock(() => Promise.resolve({
           data: [
             {
-              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              info: { id: 'message-user-1', role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
               parts: [{
                 type: 'text',
                 text: `hello${FILE_CONTEXT_SEPARATOR}secret file context`,
               }],
             },
             {
-              info: { role: 'assistant', time: { created: '2026-07-04T00:00:01.000Z' } },
+              info: { id: 'message-assistant-1', role: 'assistant', time: { created: '2026-07-04T00:00:01.000Z' } },
               parts: [
                 { type: 'reasoning', reasoning: 'thinking' },
                 { type: 'text', text: 'world' },
@@ -91,6 +92,15 @@ describe('OpenCode history loader', () => {
     expect(messages[6]).toBeInstanceOf(ToolResultMessage);
     expect(messages[6].toolId).toBe('tool-2');
     expect(messages[6].isError).toBe(true);
+    expect(messages.map((message) => getNativeMessageRevisionSource(message))).toEqual([
+      { entryId: 'message-user-1', withinSourceOrdinal: 0 },
+      { entryId: 'message-assistant-1', withinSourceOrdinal: 0 },
+      { entryId: 'message-assistant-1', withinSourceOrdinal: 1 },
+      { entryId: 'message-assistant-1', withinSourceOrdinal: 2 },
+      { entryId: 'message-assistant-1', withinSourceOrdinal: 3 },
+      { entryId: 'message-assistant-1', withinSourceOrdinal: 4 },
+      { entryId: 'message-assistant-1', withinSourceOrdinal: 5 },
+    ]);
   });
 
   it('hides provider-owned compaction messages and an overflow replay', async () => {

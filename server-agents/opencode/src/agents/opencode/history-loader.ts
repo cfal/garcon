@@ -16,6 +16,7 @@ import {
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import {
@@ -336,6 +337,7 @@ export async function fetchOpenCodeStoredMessages(
 export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   for (const msg of visibleOpenCodeStoredMessages(rawMessages)) {
+    const converted: ChatMessage[] = [];
     const info = msg.info || {};
     const ts = dateToIso(info.time?.created)
       ?? new Date().toISOString();
@@ -343,8 +345,9 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
     if (info.role === 'user') {
       const text = extractUserTextFromParts(msg.parts || []);
       if (text?.trim()) {
-        messages.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
+        converted.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
       }
+      appendOpenCodeSource(messages, converted, info.id);
       continue;
     }
 
@@ -362,7 +365,7 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
               ? part.text
               : '';
           if (content.trim()) {
-            messages.push(new ThinkingMessage(ts, content));
+            converted.push(new ThinkingMessage(ts, content));
           }
         }
       }
@@ -371,22 +374,22 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
       for (const rawPart of parts) {
         const part = asRecord(rawPart);
         if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
-          messages.push(new AssistantMessage(ts, part.text));
+          converted.push(new AssistantMessage(ts, part.text));
         } else if (part.type === 'tool' && !aborted) {
           const state = asRecord(part.state);
           const toolUse = convertOpenCodeToolUse(ts, part);
-          messages.push(toolUse);
+          converted.push(toolUse);
 
           // Emit tool result if completed or errored
           if (state.status === 'completed') {
-            messages.push(new ToolResultMessage(
+            converted.push(new ToolResultMessage(
               ts,
               toolUse.toolId,
               normalizeToolResultContent(state.output),
               false,
             ));
           } else if (state.status === 'error') {
-            messages.push(new ToolResultMessage(
+            converted.push(new ToolResultMessage(
               ts,
               toolUse.toolId,
               normalizeToolResultContent(state.error || 'Error'),
@@ -395,10 +398,24 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
           }
         }
       }
-      if (providerError) messages.push(new ErrorMessage(ts, providerError));
+      if (providerError) converted.push(new ErrorMessage(ts, providerError));
     }
+    appendOpenCodeSource(messages, converted, info.id);
   }
   return messages;
+}
+
+function appendOpenCodeSource(
+  messages: ChatMessage[],
+  converted: ChatMessage[],
+  entryId: string | undefined,
+): void {
+  converted.forEach((message, withinSourceOrdinal) => {
+    messages.push(attachNativeMessageSource(message, {
+      ...(entryId ? { entryId } : {}),
+      withinSourceOrdinal,
+    }));
+  });
 }
 
 // Fetches messages for an OpenCode session and returns ChatMessage[].

@@ -1,7 +1,8 @@
 import { promises as fs } from 'fs';
 import {
-  buildSessionContext,
+  buildContextEntries,
   parseSessionEntries,
+  sessionEntryToContextMessages,
   type FileEntry,
   type SessionEntry,
   type SessionHeader,
@@ -11,6 +12,7 @@ import {
 } from '@garcon/common/chat-types';
 import { findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { convertPiMessage } from './message-converter.js';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { PiConfig } from '../../config.js';
 
 export interface PiPreview {
@@ -54,8 +56,14 @@ async function readPiSessionFile(sessionPath: string): Promise<{
   const header = findHeader(entries);
   const sessionEntries = entries.filter(isSessionEntry);
   assertAcyclicActivePath(sessionEntries);
-  const context = buildSessionContext(sessionEntries);
-  const messages = context.messages.flatMap((message) => convertPiMessage(message));
+  const messages = buildContextEntries(sessionEntries).flatMap((entry) => {
+    const converted = sessionEntryToContextMessages(entry)
+      .flatMap((message) => convertPiMessage(message));
+    return converted.map((message, withinSourceOrdinal) => attachNativeMessageSource(message, {
+      entryId: entry.id,
+      withinSourceOrdinal,
+    }));
+  });
   return { entries, header, messages };
 }
 
