@@ -118,6 +118,13 @@
 		isPresented?: boolean;
 	}
 
+	type ReloadRequest = {
+		readonly chatId: string;
+		readonly candidates: readonly ResendCandidate[];
+		readonly complete: () => void;
+		readonly fail: (error: unknown) => void;
+	};
+
 	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 
 	let {
@@ -180,14 +187,8 @@
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
 	let composerEditorOpenRequestId = $state(0);
-	type ReloadRequest = {
-		chatId: string;
-		candidates: readonly ResendCandidate[];
-		resolve: () => void;
-		reject: (error: unknown) => void;
-	};
-	let reloadRequest = $state<ReloadRequest | null>(null);
-	let reloadBusy = $state(false);
+	let reloadRequest = $state.raw<ReloadRequest | null>(null);
+	let reloadInProgress = $state(false);
 	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
 	const dialogQueue = $derived(dialogControl?.queue ?? null);
 	const queuedInputEditor = new QueuedInputEditorState({
@@ -334,7 +335,7 @@
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
-		reloadRequest?.resolve();
+		reloadRequest?.complete();
 		reloadRequest = null;
 		removeProcessingPresentation();
 		drainHandle.cleanup();
@@ -660,35 +661,35 @@
 			reloadRequest = {
 				chatId,
 				candidates: [...chatState.resendCandidates],
-				resolve,
-				reject,
+				complete: resolve,
+				fail: reject,
 			};
 		});
 	}
 
 	function cancelReload(): void {
-		if (reloadBusy || !reloadRequest) return;
+		if (reloadInProgress || !reloadRequest) return;
 		const request = reloadRequest;
 		reloadRequest = null;
-		request.resolve();
+		request.complete();
 	}
 
 	async function confirmReload(): Promise<void> {
 		const request = reloadRequest;
-		if (!request || reloadBusy) return;
-		reloadBusy = true;
+		if (!request || reloadInProgress) return;
+		reloadInProgress = true;
 		try {
 			await reloadChatFromNative(ws, chatState, request.chatId);
 			if (request.chatId === sessions.selectedChatId && scroll.isPinnedToBottom) {
 				scroll.prepareInitialBottomRestore(request.chatId);
 			}
 			reloadRequest = null;
-			request.resolve();
+			request.complete();
 		} catch (error) {
 			reloadRequest = null;
-			request.reject(error);
+			request.fail(error);
 		} finally {
-			reloadBusy = false;
+			reloadInProgress = false;
 		}
 	}
 
@@ -874,7 +875,7 @@
 	<ReloadChatDialog
 		open={reloadRequest !== null}
 		candidates={reloadRequest?.candidates ?? []}
-		busy={reloadBusy}
+		busy={reloadInProgress}
 		onCancel={cancelReload}
 		onConfirm={() => void confirmReload()}
 	/>
