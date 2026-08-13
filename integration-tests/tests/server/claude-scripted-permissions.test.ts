@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   claudeText,
   claudeToolUse,
@@ -97,6 +98,82 @@ describe('scripted Claude permissions', () => {
         entry.message.type === 'permission-resolved'
         && entry.message.permissionRequestId === permissionRequestId
         && entry.message.allowed)).toBe(true);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
+
+  test('keeps permission history inert after a server restart', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = marker('STALE_PERMISSION_PROMPT');
+    testEnvironment.model.scriptTurn([
+      claudeToolUse('toolu_stale_permission', 'AskUserQuestion', {
+        questions: [{
+          question: 'Keep this permission active?',
+          header: 'Permission',
+          multiSelect: false,
+          options: [
+            { label: 'Yes', description: '' },
+            { label: 'No', description: '' },
+          ],
+        }],
+      }),
+    ]);
+
+    await withIntegrationFixture('claude-stale-permission-restart', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        () => true,
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (permission.message.type !== 'permission-request') {
+        throw new Error('Scripted stale permission request was not found.');
+      }
+      const beforeRestart = await fixture.client.getChatSnapshot(chatId, 0);
+      const staleControl = {
+        serverInstanceId: beforeRestart.transientFeed.serverInstanceId,
+        chatId,
+        runId: permission.runId,
+        id: permission.id,
+        incarnation: permission.incarnation,
+      };
+
+      await fixture.restartGarcon();
+
+      const restarted = await fixture.client.getChatSnapshot(chatId, 0);
+      expect(restarted.transientFeed.serverInstanceId).not.toBe(staleControl.serverInstanceId);
+      expect(restarted.transientFeed.rows).toEqual([]);
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'permission-request')).toEqual([
+        expect.objectContaining({
+          permissionRequestId: permission.message.permissionRequestId,
+        }),
+      ]);
+
+      await expect(fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionRequestId: permission.message.permissionRequestId,
+        allow: false,
+        alwaysAllow: false,
+        control: staleControl,
+      })).rejects.toMatchObject({
+        status: 409,
+        body: {
+          errorCode: 'VALIDATION_FAILED',
+          retryable: false,
+        },
+      });
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

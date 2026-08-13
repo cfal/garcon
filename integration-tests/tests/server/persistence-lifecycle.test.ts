@@ -75,6 +75,54 @@ describe('persistence lifecycle', () => {
     });
   });
 
+  test('deduplicates committed submissions after a crash restart', async () => {
+    await withIntegrationFixture('committed-submission-restart', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const initial = await fixture.client.startDirectChat({
+        chatId,
+        content: 'idempotency-bootstrap',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, initial.turnId);
+
+      const request = fixture.client.directRunRequest({
+        chatId,
+        content: 'idempotency-committed',
+        agent: fixture.directAgents.openAi,
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+      });
+      const committed = await fixture.client.runChat(request);
+      await fixture.client.waitForTurnTerminal(chatId, committed.turnId);
+      const beforeRestart = await fixture.client.getMessages(chatId);
+      const requestCount = fixture.fakeProviders.openAi.requests().length;
+
+      await fixture.crashAndRestartGarcon();
+      await fixture.client.runChat(request);
+
+      const afterRetry = await fixture.client.getMessages(chatId);
+      expect(afterRetry.messages).toEqual(beforeRestart.messages);
+      expect(countUserContent(afterRetry.messages, 'idempotency-committed')).toBe(1);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
+      expect((await fixture.client.reconnectState([])).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+
+      await expect(fixture.client.runChat({
+        ...request,
+        clientRequestId: crypto.randomUUID(),
+        command: 'idempotency-conflict',
+      })).rejects.toMatchObject({
+        status: 409,
+        body: { errorCode: 'IDEMPOTENCY_CONFLICT' },
+      });
+      expect((await fixture.client.getMessages(chatId)).messages).toEqual(beforeRestart.messages);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
+    });
+  });
+
   test('drops queue control and pending input state on restart', async () => {
     await withIntegrationFixture('ephemeral-queue-restart', async (fixture) => {
       const chatId = fixture.newChatId();

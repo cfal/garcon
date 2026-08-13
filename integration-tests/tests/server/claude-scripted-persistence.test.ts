@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   assistantContents,
   countUserContent,
@@ -11,7 +13,11 @@ import {
 import type { GarconTestClient } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForVisibleResponse } from '../../support/live-agent.js';
-import { liveClaudeStartRequest } from '../../support/live-claude.js';
+import {
+  liveClaudeRunRequest,
+  liveClaudeStartRequest,
+} from '../../support/live-claude.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import {
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
@@ -78,6 +84,80 @@ describe('scripted Claude persistence', () => {
       serverEnvironment: testEnvironment.serverEnvironment,
     });
   });
+
+  test('repairs stale registry session metadata from the ledger before resume', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const firstReply = `SCRIPTED_CLAUDE_CACHE_FIRST_${crypto.randomUUID().replaceAll('-', '')}`;
+    const secondReply = `SCRIPTED_CLAUDE_CACHE_SECOND_${crypto.randomUUID().replaceAll('-', '')}`;
+    testEnvironment.model.scriptTurn([claudeText(firstReply)]);
+    testEnvironment.model.scriptTurn([claudeText(secondReply)]);
+
+    await withIntegrationFixture('claude-session-cache-repair', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const firstCursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'Establish the scripted native session.',
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: first.turnId,
+        marker: firstReply,
+        afterIndex: firstCursor,
+      });
+      const authoritative = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: 'claude',
+      });
+
+      await fixture.restartGarcon({
+        beforeStart: async () => {
+          const registryPath = join(fixture.dirs.workspace, 'chats.json');
+          const registry = JSON.parse(await readFile(registryPath, 'utf8')) as {
+            sessions: Record<string, Record<string, unknown>>;
+          };
+          const chat = registry.sessions[chatId];
+          if (!chat) throw new Error(`Claude chat ${chatId} was not persisted.`);
+          chat.agentSessionId = null;
+          chat.nativeSession = null;
+          chat.nativeSeedReceipt = null;
+          await writeFile(registryPath, JSON.stringify(registry), 'utf8');
+        },
+      });
+
+      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toContain(
+        firstReply,
+      );
+      const secondCursor = fixture.client.markEvents();
+      const second = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId,
+        command: 'Resume the repaired scripted native session.',
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: second.turnId,
+        marker: secondReply,
+        afterIndex: secondCursor,
+      });
+      const repaired = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: 'claude',
+      });
+      expect(repaired.agentSessionId).toBe(authoritative.agentSessionId);
+      expect(repaired.nativeSession).toEqual(authoritative.nativeSession);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
 });
 
 function expectToolTurn(
