@@ -3,7 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.ts';
+import { TranscriptHistoryUnavailableError } from '../../chats/errors.ts';
 import { transcriptViewId } from '../contracts.ts';
+import { LedgerFencedError } from '../errors.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { TranscriptViewReader } from '../view-reader.ts';
@@ -104,6 +106,33 @@ describe('TranscriptViewReader', () => {
         'chat-1',
         expect.any(AbortSignal),
       );
+    });
+  });
+
+  it('presents a fenced ledger as typed degraded history', async () => {
+    await withReader(async ({ ledger }) => {
+      const reader = new TranscriptViewReader(ledger, {
+        ensure: async () => {
+          throw new LedgerFencedError('chat-1');
+        },
+      });
+      let failure;
+      try {
+        await reader.page('chat-1', 20);
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(TranscriptHistoryUnavailableError);
+      expect(failure).toMatchObject({
+        name: 'DomainError',
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        historyState: {
+          kind: 'degraded',
+          errorCode: 'LEDGER_FENCED',
+          retryable: true,
+        },
+      });
     });
   });
 });

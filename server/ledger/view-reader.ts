@@ -4,8 +4,10 @@ import type {
   TranscriptReplayResult,
 } from '../../common/chat-view.js';
 import type { ChatMessage } from '../../common/chat-types.js';
+import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import type { TranscriptViewId } from './contracts.js';
+import { LedgerFencedError } from './errors.js';
 import { ledgerRowsToTranscriptMessages } from './presentation.js';
 import { ledgerRowsToMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
@@ -33,6 +35,26 @@ export class TranscriptViewReader {
     limit: number,
     beforeOrdinal?: number,
     signal: AbortSignal = new AbortController().signal,
+  ): Promise<PresentedTranscriptPage> {
+    try {
+      return await this.#page(chatId, limit, beforeOrdinal, signal);
+    } catch (error) {
+      if (error instanceof LedgerFencedError) {
+        throw new TranscriptHistoryUnavailableError({
+          kind: 'degraded',
+          errorCode: 'LEDGER_FENCED',
+          retryable: true,
+        });
+      }
+      throw error;
+    }
+  }
+
+  async #page(
+    chatId: string,
+    limit: number,
+    beforeOrdinal: number | undefined,
+    signal: AbortSignal,
   ): Promise<PresentedTranscriptPage> {
     validatePageRequest(limit, beforeOrdinal);
     const view = await this.#adoption.ensure(chatId, signal);
