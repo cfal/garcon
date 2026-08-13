@@ -58,7 +58,7 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 		showEarlierBoundary: false,
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
-		transcriptGenerationId: 'generation-1',
+		transcriptViewId: 'generation-1',
 		pendingPermissions: NO_PENDING_PERMISSIONS,
 		...overrides,
 	};
@@ -93,7 +93,7 @@ describe('ConversationFeedProjectionState', () => {
 		const projections = new ConversationFeedProjectionState();
 		const initialCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT - 1;
 		const deepEntries = Array.from({ length: initialCount }, (_, index) => ({
-			seq: index + 1,
+			ordinal: index + 1,
 			message:
 				index % 2 === 0
 					? new UserMessage(TS, `prompt ${index + 1}`)
@@ -113,7 +113,7 @@ describe('ConversationFeedProjectionState', () => {
 
 		transcript.applyMessages('chat-1', 'generation-1', [
 			{
-				seq: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+				ordinal: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 				message: new AssistantMessage(TS, 'new response'),
 			},
 		]);

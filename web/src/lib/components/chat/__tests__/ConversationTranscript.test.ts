@@ -18,7 +18,7 @@ describe('ConversationTranscript', () => {
 			{
 				kind: 'message',
 				id: 'generation-1:1',
-				seq: 1,
+				ordinal: 1,
 				message: new UserMessage('2026-07-22T00:00:00.000Z', 'Durable message'),
 			},
 			{

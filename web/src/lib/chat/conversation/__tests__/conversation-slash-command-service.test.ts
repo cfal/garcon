@@ -99,7 +99,7 @@ function createServerEntry(id: string) {
 }
 
 function createDeps(chat = createChat()) {
-	const cursor = { generationId: 'generation-1', lastSeq: 9 };
+	const cursor = { transcriptViewId: 'view-1', lastOrdinal: 9 };
 	let inputText = 'original command';
 	let images: File[] = [];
 	let contentRevision = 0;
@@ -153,7 +153,7 @@ function createDeps(chat = createChat()) {
 		chatState: {
 			activeChatId: chat.id,
 			entries: [{
-				seq: 9,
+				ordinal: 9,
 				message: new AssistantMessage('2026-07-29T00:00:00.000Z', 'selected reply'),
 			}],
 			isUserScrolledUp: true,
@@ -988,7 +988,7 @@ describe('ConversationSlashCommandService', () => {
 			sourceChatId: 'chat-1',
 			chatId: expect.stringMatching(/^\d+$/),
 			upToSeq: 9,
-			generationId: 'generation-1',
+			transcriptViewId: 'view-1',
 		});
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('chat-2');
@@ -1002,16 +1002,16 @@ describe('ConversationSlashCommandService', () => {
 			.mockRejectedValueOnce(new ApiError(
 				409,
 				'The view changed',
-				'STALE_VIEW_GENERATION',
+				'STALE_TRANSCRIPT_VIEW',
 				undefined,
 				true,
 			))
 			.mockResolvedValueOnce({ success: true, chat: forked });
 		deps.refetchTranscript.mockImplementationOnce(async () => {
-			cursor.generationId = 'generation-2';
-			cursor.lastSeq = 12;
+			cursor.transcriptViewId = 'view-2';
+			cursor.lastOrdinal = 12;
 			deps.chatState.entries = [{
-				seq: 12,
+				ordinal: 12,
 				message: new AssistantMessage('2026-07-29T01:00:00.000Z', 'selected reply'),
 			}];
 		});
@@ -1021,12 +1021,12 @@ describe('ConversationSlashCommandService', () => {
 		expect(mockForkChat).toHaveBeenCalledTimes(2);
 		expect(mockForkChat.mock.calls[0]?.[0]).toMatchObject({
 			upToSeq: 9,
-			generationId: 'generation-1',
+			transcriptViewId: 'view-1',
 		});
 		expect(mockForkChat.mock.calls[1]?.[0]).toMatchObject({
 			chatId: mockForkChat.mock.calls[0]?.[0].chatId,
 			upToSeq: 12,
-			generationId: 'generation-2',
+			transcriptViewId: 'view-2',
 		});
 		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
 		expect(appendLocalNotice).not.toHaveBeenCalled();

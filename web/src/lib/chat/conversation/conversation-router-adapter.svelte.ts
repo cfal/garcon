@@ -13,7 +13,7 @@ import type { ConversationLifecycleState } from '$lib/chat/conversation/conversa
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import type {
 	ChatTranscriptApplyResult,
 	ChatTranscriptCache,
@@ -49,8 +49,10 @@ export interface ConversationRouterStoreDeps {
 		isVisible: (chatId: string) => boolean;
 		applyMessages: (
 			chatId: string,
-			generationId: string,
-			messages: ChatViewMessage[],
+			transcriptViewId: string,
+			messages: TranscriptMessage[],
+			firstOrdinal: number,
+			lastOrdinal: number,
 		) => boolean | void;
 		loadSnapshot: (chatId: string) => Promise<void> | void;
 		markStale: (chatId: string) => void;
@@ -64,9 +66,9 @@ export interface ConversationRouterDeps extends ConversationRouterStoreDeps {
 
 function routerApplyStatus(
 	result: ChatTranscriptApplyResult,
-): 'applied' | 'generation-changed' | 'gap-detected' {
+): 'applied' | 'view-changed' | 'gap-detected' {
 	if (result.status === 'applied') return 'applied';
-	if (result.status === 'generation-changed') return 'generation-changed';
+	if (result.status === 'view-changed') return 'view-changed';
 	return 'gap-detected';
 }
 
@@ -75,19 +77,32 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 	const transcriptCache = deps.transcriptCache ?? deps.chatState.transcriptCache;
 	const queueBackgroundLoad = (
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
 	): void => {
-		deps.backgroundTranscriptLoader?.queueLoad(chatId, { generationId, messages });
+		deps.backgroundTranscriptLoader?.queueLoad(chatId, {
+			transcriptViewId,
+			messages,
+			firstOrdinal,
+			lastOrdinal,
+		});
 	};
 	const applyBackgroundTranscript = (
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
 	): ChatTranscriptApplyResult => {
-		const result = transcriptCache.applyMessages(chatId, generationId, messages);
+		const result = transcriptCache.applyMessages(chatId, transcriptViewId, {
+			messages,
+			firstOrdinal,
+			lastOrdinal,
+		});
 		if (result.status !== 'applied') {
-			queueBackgroundLoad(chatId, generationId, messages);
+			queueBackgroundLoad(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal);
 		}
 		return result;
 	};
@@ -100,11 +115,23 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		},
 		chatState: {
 			getCursor: () => deps.chatState.getCursor(),
-			applyChatMessages: (chatId, generationId, messages) => {
+			applyChatMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
 				if (deps.sessions.selectedChatId !== chatId) {
-					return routerApplyStatus(applyBackgroundTranscript(chatId, generationId, messages));
+					return routerApplyStatus(applyBackgroundTranscript(
+						chatId,
+						transcriptViewId,
+						messages,
+						firstOrdinal,
+						lastOrdinal,
+					));
 				}
-				return deps.chatState.applyMessages(chatId, generationId, messages);
+				return deps.chatState.applyMessages(
+					chatId,
+					transcriptViewId,
+					messages,
+					firstOrdinal,
+					lastOrdinal,
+				);
 			},
 			reloadChatTranscript: (chatId) => {
 				if (deps.sessions.selectedChatId !== chatId) return;
@@ -112,11 +139,33 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					// Leaves current visible state until a later retry succeeds.
 				});
 			},
-			warmBackgroundTranscript: (chatId, generationId, messages) =>
-				applyBackgroundTranscript(chatId, generationId, messages).status === 'applied',
+			warmBackgroundTranscript: (
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+			) => applyBackgroundTranscript(
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+			).status === 'applied',
 			isVisiblePreviewChat: (chatId) => deps.visiblePreviews?.isVisible(chatId) ?? false,
-			warmVisibleChatPreview: (chatId, generationId, messages) =>
-				deps.visiblePreviews?.applyMessages(chatId, generationId, messages) ?? undefined,
+			warmVisibleChatPreview: (
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+			) => deps.visiblePreviews?.applyMessages(
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+			) ?? undefined,
 			loadVisibleChatPreview: (chatId) => deps.visiblePreviews?.loadSnapshot(chatId),
 			markVisibleChatPreviewStale: (chatId) => {
 				deps.visiblePreviews?.markStale(chatId);

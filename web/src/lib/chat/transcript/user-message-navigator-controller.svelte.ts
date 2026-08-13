@@ -4,7 +4,7 @@ import type { TranscriptPageLoadResult } from './transcript-page-progress.js';
 
 export interface UserMessageNavigatorItem {
 	id: string;
-	seq?: number;
+	ordinal?: number;
 	content: string;
 	timestamp: string;
 	attachmentCount: number;
@@ -12,7 +12,7 @@ export interface UserMessageNavigatorItem {
 
 export interface UserMessageNavigatorTarget {
 	chatId: string;
-	generationId: string;
+	transcriptViewId: string;
 	rowId: string;
 }
 
@@ -25,7 +25,7 @@ export type UserMessageNavigatorRegistration = UserMessageNavigatorCommand | nul
 
 export interface UserMessageNavigatorTranscriptPort {
 	readonly activeChatId: string | null;
-	readonly generationId: string;
+	readonly transcriptViewId: string;
 	readonly displayRows: readonly ChatDisplayRow[];
 	readonly hasEarlierMessages: boolean;
 	readonly isLoadingMessages: boolean;
@@ -62,7 +62,7 @@ export interface UserMessageNavigatorDialogController {
 export class UserMessageNavigatorController implements UserMessageNavigatorDialogController {
 	open = $state(false);
 	openedChatId = $state<string | null>(null);
-	openedGenerationId = $state<string | null>(null);
+	openedTranscriptViewId = $state<string | null>(null);
 	isLoadingOlder = $state(false);
 	loadError = $state<UserMessageNavigatorLoadError | null>(null);
 	selectionError = $state<UserMessageNavigatorSelectionError | null>(null);
@@ -75,7 +75,7 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 				return [
 					{
 						id: row.id,
-						seq: row.seq,
+						ordinal: row.ordinal,
 						content: row.message.content,
 						timestamp: row.message.timestamp,
 						attachmentCount: row.message.images?.length ?? 0,
@@ -96,14 +96,14 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 	}
 
 	get isInitialLoading(): boolean {
-		return (
-			this.open && this.openedGenerationId === null && this.options.transcript.isLoadingMessages
-		);
+		return this.open
+			&& this.openedTranscriptViewId === null
+			&& this.options.transcript.isLoadingMessages;
 	}
 
 	get initialLoadError(): UserMessageNavigatorInitialLoadError | null {
 		return this.open &&
-			this.openedGenerationId === null &&
+			this.openedTranscriptViewId === null &&
 			!this.options.transcript.isLoadingMessages &&
 			this.options.transcript.loadStatus === 'error'
 			? 'initial-load-failed'
@@ -127,9 +127,9 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 			}
 		}
 
-		const generationId = this.options.transcript.generationId;
+		const transcriptViewId = this.options.transcript.transcriptViewId;
 		this.openedChatId = chatId;
-		this.openedGenerationId = generationId || null;
+		this.openedTranscriptViewId = transcriptViewId || null;
 		this.isLoadingOlder = false;
 		this.loadError = null;
 		this.selectionError = null;
@@ -142,17 +142,17 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 		this.#clearIdentity();
 	}
 
-	reconcileActiveTranscript(chatId: string | null, generationId: string): void {
+	reconcileActiveTranscript(chatId: string | null, transcriptViewId: string): void {
 		if (!this.open) return;
 		if (chatId !== this.openedChatId) {
 			this.close();
 			return;
 		}
-		if (this.openedGenerationId === null) {
-			if (generationId) this.openedGenerationId = generationId;
+		if (this.openedTranscriptViewId === null) {
+			if (transcriptViewId) this.openedTranscriptViewId = transcriptViewId;
 			return;
 		}
-		if (generationId !== this.openedGenerationId) this.close();
+		if (transcriptViewId !== this.openedTranscriptViewId) this.close();
 	}
 
 	async retryInitialLoad(): Promise<void> {
@@ -160,7 +160,7 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 		if (
 			!this.open ||
 			!chatId ||
-			this.openedGenerationId !== null ||
+			this.openedTranscriptViewId !== null ||
 			this.options.transcript.isLoadingMessages
 		) {
 			return;
@@ -171,12 +171,12 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 
 	async loadOlder(): Promise<void> {
 		const chatId = this.openedChatId;
-		const generationId = this.openedGenerationId;
+		const transcriptViewId = this.openedTranscriptViewId;
 		const lifecycleEpoch = this.#lifecycleEpoch;
 		if (
 			!this.open ||
 			!chatId ||
-			!generationId ||
+			!transcriptViewId ||
 			this.isLoadingOlder ||
 			!this.options.transcript.hasEarlierMessages
 		) {
@@ -187,12 +187,12 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 		this.loadError = null;
 		try {
 			const result = await this.options.loadOlderMessages(chatId);
-			if (!this.#matchesOpenTranscript(chatId, generationId, lifecycleEpoch)) return;
+			if (!this.#matchesOpenTranscript(chatId, transcriptViewId, lifecycleEpoch)) return;
 			if (result === 'failed') {
 				this.loadError = 'older-page-failed';
 			}
 		} finally {
-			if (this.#matchesOpenTranscript(chatId, generationId, lifecycleEpoch)) {
+			if (this.#matchesOpenTranscript(chatId, transcriptViewId, lifecycleEpoch)) {
 				this.isLoadingOlder = false;
 			}
 		}
@@ -217,7 +217,7 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 		if (lifecycleEpoch !== this.#lifecycleEpoch) return;
 		if (
 			result !== 'unavailable' ||
-			!this.#matchesActiveTranscript(target.chatId, target.generationId)
+			!this.#matchesActiveTranscript(target.chatId, target.transcriptViewId)
 		) {
 			this.#clearIdentity();
 			return;
@@ -229,33 +229,37 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 
 	#targetFor(rowId: string): UserMessageNavigatorTarget | null {
 		const chatId = this.openedChatId;
-		const generationId = this.openedGenerationId ?? this.options.transcript.generationId;
+		const transcriptViewId = this.openedTranscriptViewId ?? this.options.transcript.transcriptViewId;
 		if (!this.open || !chatId) return null;
-		if (!this.#matchesActiveTranscript(chatId, generationId)) return null;
-		return { chatId, generationId, rowId };
+		if (!this.#matchesActiveTranscript(chatId, transcriptViewId)) return null;
+		return { chatId, transcriptViewId, rowId };
 	}
 
-	#matchesOpenTranscript(chatId: string, generationId: string, lifecycleEpoch: number): boolean {
+	#matchesOpenTranscript(
+		chatId: string,
+		transcriptViewId: string,
+		lifecycleEpoch: number,
+	): boolean {
 		return (
 			this.#lifecycleEpoch === lifecycleEpoch &&
 			this.open &&
 			this.openedChatId === chatId &&
-			this.openedGenerationId === generationId &&
-			this.#matchesActiveTranscript(chatId, generationId)
+			this.openedTranscriptViewId === transcriptViewId &&
+			this.#matchesActiveTranscript(chatId, transcriptViewId)
 		);
 	}
 
-	#matchesActiveTranscript(chatId: string, generationId: string): boolean {
+	#matchesActiveTranscript(chatId: string, transcriptViewId: string): boolean {
 		return (
 			this.options.getSelectedChatId() === chatId &&
 			this.options.transcript.activeChatId === chatId &&
-			this.options.transcript.generationId === generationId
+			this.options.transcript.transcriptViewId === transcriptViewId
 		);
 	}
 
 	#clearIdentity(): void {
 		this.openedChatId = null;
-		this.openedGenerationId = null;
+		this.openedTranscriptViewId = null;
 		this.isLoadingOlder = false;
 		this.loadError = null;
 		this.selectionError = null;

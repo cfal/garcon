@@ -16,7 +16,7 @@ import {
 import type { ApiProtocol } from '$shared/api-providers';
 import {
 	parseChatHistoryState,
-	parseChatViewMessages,
+	parseTranscriptMessages,
 	type ChatHistoryResponse,
 } from '$shared/chat-view';
 import type {
@@ -401,20 +401,21 @@ function parsePendingUserInputs(value: unknown): PendingUserInput[] {
 export async function getChatMessages(params: {
 	chatId: string;
 	limit?: number;
-	beforeSeq?: number;
+	beforeOrdinal?: number;
 }): Promise<ChatHistoryResponse> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
 		limit: String(params.limit ?? 50),
 	});
-	if (params.beforeSeq !== undefined) query.set('beforeSeq', String(params.beforeSeq));
+	if (params.beforeOrdinal !== undefined) query.set('beforeOrdinal', String(params.beforeOrdinal));
 	const response = await apiGet<{
 		historyState?: unknown;
 		chatId?: unknown;
 		messages?: unknown;
-		generationId?: unknown;
-		lastSeq?: unknown;
-		pageOldestSeq?: unknown;
+		transcriptViewId?: unknown;
+		lastOrdinal?: unknown;
+		pageOldestOrdinal?: unknown;
+		pageNewestOrdinal?: unknown;
 		pendingUserInputs?: unknown;
 		hasMore?: unknown;
 		limit?: unknown;
@@ -427,9 +428,10 @@ export async function getChatMessages(params: {
 			throw new Error('Invalid unavailable chat history: messages');
 		}
 		for (const field of [
-			'generationId',
-			'lastSeq',
-			'pageOldestSeq',
+			'transcriptViewId',
+			'lastOrdinal',
+			'pageOldestOrdinal',
+			'pageNewestOrdinal',
 			'pendingUserInputs',
 			'hasMore',
 			'limit',
@@ -440,7 +442,7 @@ export async function getChatMessages(params: {
 		}
 		return { historyState, chatId, messages: [] };
 	}
-	const messages = parseChatViewMessages(response.messages);
+	const messages = parseTranscriptMessages(response.messages);
 	if (messages === null) throw new Error('Invalid chat messages page: messages');
 	if (typeof response.hasMore !== 'boolean') {
 		throw new Error('Invalid chat messages page: hasMore');
@@ -449,30 +451,31 @@ export async function getChatMessages(params: {
 		historyState,
 		chatId,
 		messages,
-		generationId: requireNonEmptyString(response.generationId, 'generationId'),
-		lastSeq: requireNonNegativeInteger(response.lastSeq, 'lastSeq'),
-		pageOldestSeq: requireNonNegativeInteger(response.pageOldestSeq, 'pageOldestSeq'),
+		transcriptViewId: requireNonEmptyString(response.transcriptViewId, 'transcriptViewId'),
+		lastOrdinal: requireNonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
+		pageOldestOrdinal: requireNonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
+		pageNewestOrdinal: requireNonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
 		pendingUserInputs: parsePendingUserInputs(response.pendingUserInputs),
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
 	};
 }
 
-// Resolves one search result to a browser seq under its composite content
+// Resolves one search result to a browser ordinal under its composite content
 // epoch. A stale result rejects with SEARCH_RESULT_STALE instead of scrolling
 // to a possibly reused ordinal.
 export async function navigateToSearchResult(
 	request: ChatSearchNavigateRequest,
 	options?: ApiFetchOptions,
 ): Promise<ChatSearchNavigateResponse> {
-	const response = await apiPost<{ chatId?: unknown; seq?: unknown }>(
+	const response = await apiPost<{ chatId?: unknown; ordinal?: unknown }>(
 		'/api/v1/chats/search/navigate',
 		request,
 		options,
 	);
 	return {
 		chatId: requireNonEmptyString(response.chatId, 'chatId'),
-		seq: requirePositiveInteger(response.seq, 'seq'),
+		ordinal: requirePositiveInteger(response.ordinal, 'ordinal'),
 	};
 }
 
@@ -552,7 +555,7 @@ export interface ForkChatParams {
 	sourceChatId: string;
 	chatId: string;
 	upToSeq?: number;
-	generationId?: string;
+	transcriptViewId?: string;
 }
 
 /** Forks (clones) an existing chat session into a new chat. */

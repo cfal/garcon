@@ -1,16 +1,17 @@
 import {
 	isUnavailableChatHistoryResponse,
 	type ChatHistoryResponse,
-	type ChatViewMessage,
+	type TranscriptMessage,
 } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import { INITIAL_VISIBLE_MESSAGES } from './active-transcript-state.svelte.js';
 import type { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 
 interface PendingBatch {
-	generationId: string;
-	messages: ChatViewMessage[];
-	lastSeq?: number;
+	transcriptViewId: string;
+	messages: TranscriptMessage[];
+	firstOrdinal: number;
+	lastOrdinal: number;
 }
 
 export interface BackgroundTranscriptLoaderOptions {
@@ -33,7 +34,7 @@ export class BackgroundTranscriptLoader {
 
 	queueLoad(chatId: string, failedBatch?: PendingBatch): void {
 		if (!chatId) return;
-		if (failedBatch && failedBatch.messages.length > 0) {
+		if (failedBatch) {
 			const pending = this.#pending.get(chatId) ?? [];
 			pending.push(failedBatch);
 			this.#pending.set(chatId, pending);
@@ -66,8 +67,8 @@ export class BackgroundTranscriptLoader {
 			while (pending && pending.length > 0) {
 				this.#pending.delete(chatId);
 				for (const batch of pending) {
-					if (batch.generationId !== page.generationId) continue;
-					this.#cache.applyMessages(chatId, batch.generationId, batch.messages, batch.lastSeq);
+					if (batch.transcriptViewId !== page.transcriptViewId) continue;
+					this.#cache.applyMessages(chatId, batch.transcriptViewId, batch);
 				}
 				pending = this.#pending.get(chatId);
 			}

@@ -9,7 +9,7 @@ import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
 
 vi.mock('$app/navigation', () => ({
@@ -71,9 +71,9 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 	};
 }
 
-function entry(seq: number, content: string): ChatViewMessage {
+function entry(ordinal: number, content: string): TranscriptMessage {
 	return {
-		seq,
+		ordinal,
 		message: new UserMessage('2026-01-01T00:00:00.000Z', content),
 	};
 }
@@ -97,10 +97,10 @@ describe('buildRouterStores', () => {
 
 		const applied = stores.chatState.warmBackgroundTranscript('chat-2', 'generation-2', [
 			entry(2, 'two'),
-		]);
+		], 2, 2);
 
 		expect(applied).toBe(true);
-		expect(deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.seq)).toEqual([
+		expect(deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.ordinal)).toEqual([
 			1, 2,
 		]);
 	});
@@ -113,13 +113,15 @@ describe('buildRouterStores', () => {
 
 		const applied = stores.chatState.warmBackgroundTranscript('chat-2', 'generation-2', [
 			entry(4, 'tail'),
-		]);
+		], 4, 4);
 
 		expect(applied).toBe(false);
 		expect(deps.chatState.transcriptCache.get('chat-2')).toBeNull();
 		expect(queueLoad).toHaveBeenCalledWith('chat-2', {
-			generationId: 'generation-2',
-			messages: [expect.objectContaining({ seq: 4 })],
+			transcriptViewId: 'generation-2',
+			messages: [expect.objectContaining({ ordinal: 4 })],
+			firstOrdinal: 4,
+			lastOrdinal: 4,
 		});
 	});
 
@@ -135,7 +137,13 @@ describe('buildRouterStores', () => {
 
 		expect(stores.chatState.isVisiblePreviewChat('chat-2')).toBe(true);
 		expect(
-			stores.chatState.warmVisibleChatPreview('chat-2', 'generation-2', [entry(2, 'two')]),
+			stores.chatState.warmVisibleChatPreview(
+				'chat-2',
+				'generation-2',
+				[entry(2, 'two')],
+				2,
+				2,
+			),
 		).toBe(true);
 		stores.chatState.markVisibleChatPreviewStale('chat-2');
 		void stores.chatState.loadVisibleChatPreview('chat-2');
@@ -143,7 +151,9 @@ describe('buildRouterStores', () => {
 		expect(deps.visiblePreviews.applyMessages).toHaveBeenCalledWith(
 			'chat-2',
 			'generation-2',
-			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 2 })]),
+			2,
+			2,
 		);
 		expect(deps.visiblePreviews.markStale).toHaveBeenCalledWith('chat-2');
 		expect(deps.visiblePreviews.loadSnapshot).toHaveBeenCalledWith('chat-2');

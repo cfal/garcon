@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { randomBytes } from 'node:crypto';
 import { parseServerRuntimeProbe } from '../../../common/server-runtime.js';
-import type { ChatViewMessage } from '../../../common/chat-view.js';
+import type { TranscriptMessage } from '../../../common/chat-view.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -265,7 +265,7 @@ describe('persistence lifecycle', () => {
   });
 });
 
-function conversationOf(messages: readonly ChatViewMessage[]) {
+function conversationOf(messages: readonly TranscriptMessage[]) {
   return messages.map((entry) => ({
     seq: entry.seq,
     type: entry.message.type,

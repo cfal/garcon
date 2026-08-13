@@ -16,7 +16,7 @@ function userItem(index: number): ReconciledConversationFeedRenderItem {
 		rowIds: [rowId],
 		message: new UserMessage('2026-08-03T00:00:00.000Z', `message ${index}`),
 		index,
-		seq: index,
+		ordinal: index,
 		prevMessage: null,
 		virtualKey: rowId,
 	};
@@ -30,7 +30,7 @@ function build(transcriptItems: ReconciledConversationFeedRenderItem[]) {
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
 		surfaceIdentity: 'chat-1:generation-1',
-		transcriptGenerationId: 'generation-1',
+		transcriptViewId: 'generation-1',
 		transcriptItems,
 		pendingPermissions: [],
 	});
@@ -61,7 +61,7 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			surfaceIdentity: 'chat-2:generation-1',
-			transcriptGenerationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			transcriptItems: [item],
 			pendingPermissions: [],
 		});
@@ -85,7 +85,7 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			surfaceIdentity: 'chat-1:generation-1',
-			transcriptGenerationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			transcriptItems: [],
 			pendingPermissions: [],
 		}).items[1];
@@ -107,7 +107,7 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: false,
 			reserveComposerTraySpace: true,
 			surfaceIdentity: 'chat-1:generation-1',
-			transcriptGenerationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			transcriptItems: [userItem(1)],
 			pendingPermissions: [permission, { ...permission, permissionRequestId: 'permission-2' }],
 		});
@@ -151,7 +151,7 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			surfaceIdentity: 'chat-1:generation-1',
-			transcriptGenerationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			transcriptItems: [userItem(1), userItem(2)],
 			pendingPermissions: [permission],
 		});
@@ -171,7 +171,7 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			surfaceIdentity: 'chat-1:generation-2',
-			transcriptGenerationId: 'generation-2',
+			transcriptViewId: 'generation-2',
 			transcriptItems: [userItem(1), userItem(2)],
 			pendingPermissions: [permission],
 		});
@@ -197,7 +197,7 @@ describe('conversation virtual feed model', () => {
 			showLaterBoundary: true,
 			reserveComposerTraySpace: false,
 			surfaceIdentity: 'chat-1:generation-1',
-			transcriptGenerationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			transcriptItems: [userItem(1)],
 			pendingPermissions: [permission],
 		});

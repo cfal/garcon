@@ -912,9 +912,10 @@ describe('chats API contract', () => {
 								historyState: { kind: 'complete' },
 								chatId: 'c/1',
 								messages: [],
-								generationId: 'generation-1',
-								lastSeq: 0,
-								pageOldestSeq: 0,
+								transcriptViewId: 'view-1',
+								lastOrdinal: 0,
+								pageOldestOrdinal: 0,
+								pageNewestOrdinal: 0,
 								pendingUserInputs: [],
 								hasMore: false,
 								limit: 50,
@@ -950,14 +951,14 @@ describe('chats API contract', () => {
 			projectPath: '/workspace/repo-worktree',
 		});
 
-		const messages = await getChatMessages({ chatId: 'c/1', limit: 50, beforeSeq: 20 });
+		const messages = await getChatMessages({ chatId: 'c/1', limit: 50, beforeOrdinal: 20 });
 		expect(fetchMock.mock.calls[3][0]).toBe(
-			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeSeq=20',
+			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeOrdinal=20',
 		);
 		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
 		expect(messages).toMatchObject({
 			historyState: { kind: 'complete' },
-			generationId: 'generation-1',
+			transcriptViewId: 'view-1',
 		});
 
 		await getChatMessages({ chatId: 'c/2' });
@@ -969,9 +970,10 @@ describe('chats API contract', () => {
 			historyState: { kind: 'complete' },
 			chatId: 'c-1',
 			messages: [],
-			generationId: 'generation-1',
-			lastSeq: 0,
-			pageOldestSeq: 0,
+			transcriptViewId: 'view-1',
+			lastOrdinal: 0,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 0,
 			pendingUserInputs: [],
 			hasMore: false,
 			limit: 20,
@@ -979,9 +981,10 @@ describe('chats API contract', () => {
 
 		const cases: Array<[string, Record<string, unknown>]> = [
 			['chatId', { chatId: '' }],
-			['generationId', { generationId: '' }],
-			['lastSeq', { lastSeq: '0' }],
-			['pageOldestSeq', { pageOldestSeq: -1 }],
+			['transcriptViewId', { transcriptViewId: '' }],
+			['lastOrdinal', { lastOrdinal: '0' }],
+			['pageOldestOrdinal', { pageOldestOrdinal: -1 }],
+			['pageNewestOrdinal', { pageNewestOrdinal: -1 }],
 			['pendingUserInputs', { pendingUserInputs: [{ clientRequestId: 'req-1' }] }],
 			['hasMore', { hasMore: 'false' }],
 			['limit', { limit: 0 }],
@@ -1026,10 +1029,10 @@ describe('chats API contract', () => {
 				},
 				chatId: 'c-1',
 				messages: [],
-				lastSeq: 0,
+				lastOrdinal: 0,
 			}),
 		);
-		await expect(getChatMessages({ chatId: 'c-1' })).rejects.toThrow('lastSeq');
+		await expect(getChatMessages({ chatId: 'c-1' })).rejects.toThrow('lastOrdinal');
 	});
 
 	it('deleteChat sends chatId in the JSON body', async () => {
@@ -1192,7 +1195,7 @@ describe('chats API contract', () => {
 		});
 	});
 
-	it('forkChat sends an optional generation-bound message cutoff', async () => {
+	it('forkChat sends an optional view-bound message cutoff', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'codex' }),
 		);
@@ -1201,7 +1204,7 @@ describe('chats API contract', () => {
 			sourceChatId: '1',
 			chatId: '2',
 			upToSeq: 7,
-			generationId: 'generation-1',
+			transcriptViewId: 'view-1',
 		});
 
 		const [, opts] = fetchMock.mock.calls[0];
@@ -1209,7 +1212,7 @@ describe('chats API contract', () => {
 			sourceChatId: '1',
 			chatId: '2',
 			upToSeq: 7,
-			generationId: 'generation-1',
+			transcriptViewId: 'view-1',
 		});
 	});
 

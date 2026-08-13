@@ -626,6 +626,15 @@ export class ErrorMessage {
   constructor(public timestamp: string, public content: string) {}
 }
 
+export class TranscriptNoticeMessage {
+  readonly type = 'transcript-notice' as const;
+  constructor(
+    public timestamp: string,
+    public content: string,
+    public action?: 'reload-native-history',
+  ) {}
+}
+
 export class PermissionRequestMessage {
   readonly type = 'permission-request' as const;
   constructor(public timestamp: string, public permissionRequestId: string, public requestedTool: ToolUseChatMessage) {}
@@ -639,6 +648,11 @@ export class PermissionResolvedMessage {
 export class PermissionCancelledMessage {
   readonly type = 'permission-cancelled' as const;
   constructor(public timestamp: string, public permissionRequestId: string, public reason?: 'cancelled' | 'session-complete' | 'aborted') {}
+}
+
+export class PermissionExpiredMessage {
+  readonly type = 'permission-expired' as const;
+  constructor(public timestamp: string, public permissionRequestId: string) {}
 }
 
 // What initiated a context compaction: an explicit `/compact` command or an
@@ -721,9 +735,11 @@ export type ChatMessage =
   | ToolUseChatMessage
   | ToolResultMessage
   | ErrorMessage
+  | TranscriptNoticeMessage
   | PermissionRequestMessage
   | PermissionResolvedMessage
   | PermissionCancelledMessage
+  | PermissionExpiredMessage
   | CompactionMessage
   | AgentSwitchMessage;
 
@@ -1278,6 +1294,12 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
     case 'error':
       return new ErrorMessage(str(data.timestamp), str(data.content));
+    case 'transcript-notice':
+      return new TranscriptNoticeMessage(
+        str(data.timestamp),
+        str(data.content),
+        data.action === 'reload-native-history' ? data.action : undefined,
+      );
     case 'permission-request': {
       const requestedToolData = asRecord(data.requestedTool);
       const requestedTool = parseChatMessage(requestedToolData);
@@ -1288,6 +1310,8 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       return new PermissionResolvedMessage(str(data.timestamp), str(data.permissionRequestId), Boolean(data.allowed));
     case 'permission-cancelled':
       return new PermissionCancelledMessage(str(data.timestamp), str(data.permissionRequestId), data.reason as 'cancelled' | 'session-complete' | 'aborted' | undefined);
+    case 'permission-expired':
+      return new PermissionExpiredMessage(str(data.timestamp), str(data.permissionRequestId));
     case 'compaction':
       return new CompactionMessage(
         str(data.timestamp),

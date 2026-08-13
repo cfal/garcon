@@ -1,5 +1,10 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { applyChatViewMessages, type ChatViewMessage, type ChatViewPage } from '$shared/chat-view';
+import {
+	applyTranscriptAppend,
+	type TranscriptAppend,
+	type TranscriptMessage,
+	type TranscriptPage,
+} from '$shared/chat-view';
 import {
 	LocalChatTranscriptStorage,
 	type CachedChatCursor,
@@ -8,24 +13,23 @@ import {
 export const CHAT_TRANSCRIPT_CACHE_LIMIT = 25;
 
 export type ChatTranscriptApplyResult =
-	| { status: 'applied'; changed: boolean; lastSeq: number }
+	| { status: 'applied'; changed: boolean; lastOrdinal: number }
 	| { status: 'missing-base' }
-	| { status: 'generation-changed' }
-	| { status: 'gap-detected'; expectedSeq: number; receivedSeq: number }
-	| { status: 'server-ahead'; lastSeq: number; serverLastSeq: number };
+	| { status: 'view-changed' }
+	| { status: 'gap-detected'; expectedOrdinal: number; receivedOrdinal: number };
 
 export interface ChatTranscriptCursor {
 	chatId: string;
-	generationId: string;
-	lastSeq: number;
+	transcriptViewId: string;
+	lastOrdinal: number;
 }
 
 export interface ChatTranscriptSnapshot {
 	chatId: string;
-	generationId: string;
-	messages: ChatViewMessage[];
-	lastSeq: number;
-	oldestSeq: number;
+	transcriptViewId: string;
+	messages: TranscriptMessage[];
+	lastOrdinal: number;
+	oldestOrdinal: number;
 	stale: boolean;
 }
 
@@ -45,9 +49,9 @@ export interface ChatTranscriptCacheOptions {
 
 interface ChatTranscriptPersistDraft {
 	chatId: string;
-	generationId: string;
-	lastSeq: number;
-	messages: ChatViewMessage[];
+	transcriptViewId: string;
+	lastOrdinal: number;
+	messages: TranscriptMessage[];
 }
 
 type TimeoutHandle = ReturnType<typeof setTimeout>;
@@ -61,10 +65,10 @@ function nowIso(): string {
 function snapshotFromEntry(entry: ChatTranscriptEntry): ChatTranscriptSnapshot {
 	return {
 		chatId: entry.chatId,
-		generationId: entry.generationId,
+		transcriptViewId: entry.transcriptViewId,
 		messages: entry.messages,
-		lastSeq: entry.lastSeq,
-		oldestSeq: entry.oldestSeq,
+		lastOrdinal: entry.lastOrdinal,
+		oldestOrdinal: entry.oldestOrdinal,
 		stale: entry.stale,
 	};
 }
@@ -131,8 +135,8 @@ export class ChatTranscriptCache {
 					draft.chatId,
 					draft.messages,
 					{
-						generationId: draft.generationId,
-						lastSeq: draft.lastSeq,
+						transcriptViewId: draft.transcriptViewId,
+						lastOrdinal: draft.lastOrdinal,
 					},
 					{ limit: this.#limit },
 				);
@@ -156,10 +160,10 @@ export class ChatTranscriptCache {
 		if (!restored) return null;
 		const entry: ChatTranscriptEntry = {
 			chatId,
-			generationId: restored.generationId,
+			transcriptViewId: restored.transcriptViewId,
 			messages: restored.entries,
-			lastSeq: restored.lastSeq,
-			oldestSeq: restored.entries[0]?.seq ?? 0,
+			lastOrdinal: restored.lastOrdinal,
+			oldestOrdinal: restored.entries[0]?.ordinal ?? 0,
 			stale: restored.stale,
 			lastAccessedAt: nowIso(),
 			lastValidatedAt: null,
@@ -171,17 +175,17 @@ export class ChatTranscriptCache {
 
 	replaceFromPage(
 		chatId: string,
-		page: ChatViewPage,
+		page: TranscriptPage,
 		options: { stale?: boolean } = {},
 	): ChatTranscriptSnapshot {
 		const windowed = page.messages.slice(-this.#limit);
 		const now = nowIso();
 		const entry: ChatTranscriptEntry = {
 			chatId,
-			generationId: page.generationId,
+			transcriptViewId: page.transcriptViewId,
 			messages: windowed,
-			lastSeq: page.lastSeq,
-			oldestSeq: windowed[0]?.seq ?? 0,
+			lastOrdinal: page.lastOrdinal,
+			oldestOrdinal: windowed[0]?.ordinal ?? 0,
 			stale: options.stale ?? false,
 			lastAccessedAt: now,
 			lastValidatedAt: now,
@@ -194,67 +198,58 @@ export class ChatTranscriptCache {
 
 	replace(
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-		lastSeq: number,
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		lastOrdinal: number,
 	): ChatTranscriptSnapshot {
 		return this.replaceFromPage(chatId, {
-			generationId,
+			transcriptViewId,
 			messages,
-			lastSeq,
-			pageOldestSeq: messages[0]?.seq ?? 0,
+			lastOrdinal,
+			pageOldestOrdinal: messages[0]?.ordinal ?? 0,
+			pageNewestOrdinal: lastOrdinal,
 			hasMore: false,
 		});
 	}
 
 	applyMessages(
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-		serverLastSeq?: number,
+		transcriptViewId: string,
+		append: Pick<TranscriptAppend, 'firstOrdinal' | 'lastOrdinal' | 'messages'>,
 	): ChatTranscriptApplyResult {
-		if (!chatId || !generationId) return { status: 'missing-base' };
+		if (!chatId || !transcriptViewId) return { status: 'missing-base' };
 		let entry = this.#entries.get(chatId);
 		if (!entry) {
 			this.hydrate(chatId);
 			entry = this.#entries.get(chatId);
 		}
-		if (!entry) return this.#createFromInitialBatch(chatId, generationId, messages, serverLastSeq);
-		if (entry.generationId !== generationId) {
+		if (!entry) return this.#createFromInitialBatch(chatId, transcriptViewId, append);
+		if (entry.transcriptViewId !== transcriptViewId) {
 			this.markStale(chatId);
-			return { status: 'generation-changed' };
+			return { status: 'view-changed' };
 		}
 
-		const applied = applyChatViewMessages(entry.messages, messages, entry.lastSeq);
+		const applied = applyTranscriptAppend(entry.messages, append, entry.lastOrdinal);
 		if (applied.status === 'gap-detected') {
 			this.markStale(chatId);
 			return {
 				status: 'gap-detected',
-				expectedSeq: applied.expectedSeq ?? entry.lastSeq + 1,
-				receivedSeq: applied.receivedSeq ?? messages[0]?.seq ?? 0,
+				expectedOrdinal: applied.expectedOrdinal ?? entry.lastOrdinal + 1,
+				receivedOrdinal: applied.receivedOrdinal ?? append.firstOrdinal,
 			};
 		}
-		if (typeof serverLastSeq === 'number' && serverLastSeq > applied.lastSeq) {
-			this.markStale(chatId);
-			return { status: 'server-ahead', lastSeq: applied.lastSeq, serverLastSeq };
-		}
-		if (!applied.changed) {
-			this.#touch(chatId);
-			return { status: 'applied', changed: false, lastSeq: entry.lastSeq };
-		}
-
 		const windowed = applied.messages.slice(-this.#limit);
 		const next: ChatTranscriptEntry = {
 			...entry,
 			messages: windowed,
-			lastSeq: applied.lastSeq,
-			oldestSeq: windowed[0]?.seq ?? 0,
+			lastOrdinal: applied.lastOrdinal,
+			oldestOrdinal: windowed[0]?.ordinal ?? 0,
 			stale: false,
 			lastAccessedAt: nowIso(),
 		};
 		this.#entries.set(chatId, next);
 		this.#persistence.schedule(next);
-		return { status: 'applied', changed: true, lastSeq: next.lastSeq };
+		return { status: 'applied', changed: applied.changed, lastOrdinal: next.lastOrdinal };
 	}
 
 	markStale(chatId: string): void {
@@ -278,13 +273,13 @@ export class ChatTranscriptCache {
 		if (boundedLimit === 0) return [];
 
 		const memory = [...this.#entries.values()]
-			.filter((entry) => entry.generationId && entry.lastSeq > 0 && !entry.stale)
+			.filter((entry) => entry.transcriptViewId && entry.lastOrdinal > 0 && !entry.stale)
 			.sort((left, right) => right.lastAccessedAt.localeCompare(left.lastAccessedAt))
 			.map(
 				(entry): ChatTranscriptCursor => ({
 					chatId: entry.chatId,
-					generationId: entry.generationId,
-					lastSeq: entry.lastSeq,
+					transcriptViewId: entry.transcriptViewId,
+					lastOrdinal: entry.lastOrdinal,
 				}),
 			);
 		if (memory.length >= boundedLimit) return memory.slice(0, boundedLimit);
@@ -309,35 +304,30 @@ export class ChatTranscriptCache {
 
 	#createFromInitialBatch(
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-		serverLastSeq?: number,
+		transcriptViewId: string,
+		append: Pick<TranscriptAppend, 'firstOrdinal' | 'lastOrdinal' | 'messages'>,
 	): ChatTranscriptApplyResult {
-		if (messages[0]?.seq !== 1) {
+		if (append.firstOrdinal !== 1) {
 			this.markStale(chatId);
 			return { status: 'missing-base' };
 		}
-		const applied = applyChatViewMessages([], messages, 0);
+		const applied = applyTranscriptAppend([], append, 0);
 		if (applied.status === 'gap-detected') {
 			this.markStale(chatId);
 			return {
 				status: 'gap-detected',
-				expectedSeq: applied.expectedSeq ?? 1,
-				receivedSeq: applied.receivedSeq ?? messages[0]?.seq ?? 0,
+				expectedOrdinal: applied.expectedOrdinal ?? 1,
+				receivedOrdinal: applied.receivedOrdinal ?? append.firstOrdinal,
 			};
-		}
-		if (typeof serverLastSeq === 'number' && serverLastSeq > applied.lastSeq) {
-			this.markStale(chatId);
-			return { status: 'server-ahead', lastSeq: applied.lastSeq, serverLastSeq };
 		}
 		const windowed = applied.messages.slice(-this.#limit);
 		const now = nowIso();
 		const entry: ChatTranscriptEntry = {
 			chatId,
-			generationId,
+			transcriptViewId,
 			messages: windowed,
-			lastSeq: applied.lastSeq,
-			oldestSeq: windowed[0]?.seq ?? 0,
+			lastOrdinal: applied.lastOrdinal,
+			oldestOrdinal: windowed[0]?.ordinal ?? 0,
 			stale: false,
 			lastAccessedAt: now,
 			lastValidatedAt: now,
@@ -345,7 +335,7 @@ export class ChatTranscriptCache {
 		this.#entries.set(chatId, entry);
 		this.#persistence.schedule(entry);
 		this.#prune();
-		return { status: 'applied', changed: true, lastSeq: entry.lastSeq };
+		return { status: 'applied', changed: true, lastOrdinal: entry.lastOrdinal };
 	}
 
 	#touch(chatId: string): void {

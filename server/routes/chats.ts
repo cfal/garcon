@@ -56,7 +56,7 @@ import {
   QueuePauseChangedError,
   type ChatExecutionService,
 } from '../chat-execution/chat-execution-coordinator.js';
-import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
+import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -167,7 +167,7 @@ interface MetadataDep {
 }
 
 type QueueDep = ChatExecutionService;
-type ChatViewsDep = ChatViewPageReader;
+type ChatViewsDep = TranscriptPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;
 
@@ -566,19 +566,20 @@ export default function createChatRoutes({
       const { limit } = parsePagination(url.searchParams.get('limit'), null, {
         maxLimit: CHAT_MESSAGES_MAX_LIMIT,
       });
-      const beforeSeqRaw = url.searchParams.get('beforeSeq');
-      const beforeSeq = parseBeforeSeq(beforeSeqRaw);
-      if (beforeSeq instanceof Response) return beforeSeq;
+      const beforeOrdinalRaw = url.searchParams.get('beforeOrdinal');
+      const beforeOrdinal = parseBeforeSeq(beforeOrdinalRaw);
+      if (beforeOrdinal instanceof Response) return beforeOrdinal;
 
-      const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
+      const page = await chatViews.page(chatId, limit, beforeOrdinal);
       await pendingInputs.reconcileRetainedHistory(chatId);
       return Response.json({
         historyState: { kind: 'complete' },
         chatId,
-        generationId: page.generationId,
+        transcriptViewId: page.transcriptViewId,
         messages: page.messages,
-        lastSeq: page.lastSeq,
-        pageOldestSeq: page.pageOldestSeq,
+        lastOrdinal: page.lastOrdinal,
+        pageOldestOrdinal: page.pageOldestOrdinal,
+        pageNewestOrdinal: page.pageNewestOrdinal,
         hasMore: page.hasMore,
         limit,
         pendingUserInputs: pendingInputs.listForTransport(chatId),

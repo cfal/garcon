@@ -109,7 +109,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
       }
       return Response.json({
         chatId: request.chatId,
-        seq: request.messageOrdinal,
+        ordinal: request.messageOrdinal,
       } satisfies ChatSearchNavigateResponse);
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);

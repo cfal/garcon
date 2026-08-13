@@ -9,7 +9,7 @@ import {
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import type { ChatTranscriptCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
@@ -59,16 +59,18 @@ export interface ChatReconnectCoordinatorOptions {
 	loadVisibleChatSnapshot?: (chatId: string) => Promise<void> | void;
 	onVisibleChatMessages?: (
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-		lastSeq: number,
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
 	) => Promise<boolean | void> | boolean | void;
 	markBackgroundStale: (chatId: string) => void;
 	onBackgroundMessages?: (
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-		lastSeq: number,
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
 	) => Promise<boolean | void> | boolean | void;
 }
 
@@ -244,24 +246,21 @@ export class ChatReconnectCoordinator {
 	async #resumeSelectedChat(chatId: string, epoch: number): Promise<void> {
 		const cursor = this.options.chatState.getCursor();
 		try {
-			const message = await this.#subscribe(chatId, cursor.generationId, cursor.lastSeq);
+			const message = await this.#subscribe(chatId, cursor.transcriptViewId, cursor.lastOrdinal);
 			if (epoch !== this.#reconnectEpoch || this.options.sessions.selectedChatId !== chatId) return;
-
-			if (message.mode === 'snapshot-required') {
-				await this.#loadSelectedSnapshot(chatId, epoch);
-				return;
-			}
 
 			const result = this.options.chatState.applyMessages(
 				chatId,
-				message.generationId ?? '',
+				message.transcriptViewId,
 				message.messages,
+				message.firstOrdinal,
+				message.lastOrdinal,
 			);
 			if (result !== 'applied') {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
 			}
-			if (message.lastSeq > this.options.chatState.getCursor().lastSeq) {
+			if (message.lastOrdinal > this.options.chatState.getCursor().lastOrdinal) {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
 			}
@@ -298,26 +297,17 @@ export class ChatReconnectCoordinator {
 				continue;
 			}
 			try {
-				const message = await this.#subscribe(chatId, cursor.generationId, cursor.lastSeq);
+				const message = await this.#subscribe(chatId, cursor.transcriptViewId, cursor.lastOrdinal);
 				if (epoch !== this.#reconnectEpoch) return;
-				if (message.mode === 'snapshot-required') {
+				const applied = await this.options.onVisibleChatMessages?.(
+					chatId,
+					message.transcriptViewId,
+					message.messages,
+					message.firstOrdinal,
+					message.lastOrdinal,
+				);
+				if (applied === false) {
 					await this.#loadVisibleSnapshot(chatId, epoch);
-					continue;
-				}
-				if (message.messages.length === 0 && message.lastSeq > cursor.lastSeq) {
-					await this.#loadVisibleSnapshot(chatId, epoch);
-					continue;
-				}
-				if (message.messages.length > 0) {
-					const applied = await this.options.onVisibleChatMessages?.(
-						chatId,
-						message.generationId ?? '',
-						message.messages,
-						message.lastSeq,
-					);
-					if (applied === false) {
-						await this.#loadVisibleSnapshot(chatId, epoch);
-					}
 				}
 			} catch {
 				await this.#loadVisibleSnapshot(chatId, epoch);
@@ -334,39 +324,29 @@ export class ChatReconnectCoordinator {
 		const cursors = this.options
 			.getBackgroundCursors()
 			.filter((cursor) => !excludedChatIds.has(cursor.chatId))
-			.filter((cursor) => cursor.generationId && cursor.lastSeq > 0)
+			.filter((cursor) => cursor.transcriptViewId && cursor.lastOrdinal > 0)
 			.slice(0, BACKGROUND_RESUME_LIMIT);
 
 		let shouldRefresh = false;
 		for (const cursor of cursors) {
 			if (epoch !== this.#reconnectEpoch) return;
 			try {
-				const message = await this.#subscribe(cursor.chatId, cursor.generationId, cursor.lastSeq);
+				const message = await this.#subscribe(cursor.chatId, cursor.transcriptViewId, cursor.lastOrdinal);
 				if (epoch !== this.#reconnectEpoch) return;
-				if (message.mode === 'snapshot-required') {
+				const applied = await this.options.onBackgroundMessages?.(
+					cursor.chatId,
+					message.transcriptViewId,
+					message.messages,
+					message.firstOrdinal,
+					message.lastOrdinal,
+				);
+				if (applied === false) {
 					this.options.markBackgroundStale(cursor.chatId);
-					shouldRefresh = true;
-					continue;
 				}
-				if (message.messages.length === 0 && message.lastSeq > cursor.lastSeq) {
-					this.options.markBackgroundStale(cursor.chatId);
-					shouldRefresh = true;
-					continue;
-				}
-				if (message.messages.length > 0) {
-					const applied = await this.options.onBackgroundMessages?.(
-						cursor.chatId,
-						message.generationId ?? '',
-						message.messages,
-						message.lastSeq,
-					);
-					if (applied === false) {
-						this.options.markBackgroundStale(cursor.chatId);
-					}
-					shouldRefresh = true;
-				}
+				shouldRefresh = message.lastOrdinal > cursor.lastOrdinal || shouldRefresh;
 			} catch {
-				// Background resume is opportunistic; visible selected-chat recovery wins.
+				this.options.markBackgroundStale(cursor.chatId);
+				shouldRefresh = true;
 			}
 		}
 
@@ -385,17 +365,21 @@ export class ChatReconnectCoordinator {
 
 	async #subscribe(
 		chatId: string,
-		generationId: string,
-		afterSeq: number,
+		transcriptViewId: string,
+		afterOrdinal: number,
 	): Promise<ChatSubscribedMessage> {
 		const raw = await this.options.ws.sendRequest({
 			type: 'chat-subscribe',
 			chatId,
-			generationId,
-			afterSeq,
+			transcriptViewId,
+			afterOrdinal,
 		});
 		const message = parseServerWsMessage(raw);
-		if (!(message instanceof ChatSubscribedMessage) || message.chatId !== chatId) {
+		if (
+			!(message instanceof ChatSubscribedMessage)
+			|| message.chatId !== chatId
+			|| message.transcriptViewId !== transcriptViewId
+		) {
 			throw new Error('Unexpected chat-subscribe response');
 		}
 		this.options.conversationUi.setTransientFeedFromSnapshot(message.transientFeed);

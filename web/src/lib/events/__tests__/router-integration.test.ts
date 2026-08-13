@@ -66,8 +66,8 @@ function chatRecord(): ChatSessionRecord {
 	};
 }
 
-function rawMessage(seq: number, message: Record<string, unknown>) {
-	return { seq, message };
+function rawMessage(ordinal: number, message: Record<string, unknown>) {
+	return { ordinal, message };
 }
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
@@ -78,7 +78,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			setPermissionMode: vi.fn(),
 		},
 		chatState: {
-			getCursor: vi.fn(() => ({ generationId: 'generation-current', lastSeq: 1 })),
+			getCursor: vi.fn(() => ({ transcriptViewId: 'generation-current', lastOrdinal: 1 })),
 			applyChatMessages: vi.fn((): 'applied' => 'applied'),
 			reloadChatTranscript: vi.fn(),
 			warmBackgroundTranscript: vi.fn(() => true),
@@ -248,7 +248,9 @@ describe('event router integration', () => {
 				{
 					type: 'chat-messages',
 					chatId: 'chat-a',
-					generationId: 'generation-current',
+					transcriptViewId: 'generation-current',
+					firstOrdinal: 2,
+					lastOrdinal: 2,
 					clientRequestId: 'req-1',
 					upstreamRequestId: 'cursor-req-1',
 					messages: [
@@ -270,7 +272,9 @@ describe('event router integration', () => {
 		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
 			'chat-a',
 			'generation-current',
-			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 2 })]),
+			2,
+			2,
 		);
 		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
 	});
@@ -304,7 +308,9 @@ describe('event router integration', () => {
 				{
 					type: 'chat-messages',
 					chatId: 'chat-a',
-					generationId: 'generation-current',
+					transcriptViewId: 'generation-current',
+					firstOrdinal: 3,
+					lastOrdinal: 3,
 					messages: [
 						rawMessage(3, {
 							type: 'assistant-message',
@@ -320,7 +326,9 @@ describe('event router integration', () => {
 		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
 			'chat-a',
 			'generation-current',
-			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 3 })]),
+			3,
+			3,
 		);
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
@@ -332,7 +340,9 @@ describe('event router integration', () => {
 				{
 					type: 'chat-messages',
 					chatId: 'chat-b',
-					generationId: 'generation-b',
+					transcriptViewId: 'generation-b',
+					firstOrdinal: 1,
+					lastOrdinal: 1,
 					messages: [
 						rawMessage(1, {
 							type: 'assistant-message',
@@ -349,7 +359,9 @@ describe('event router integration', () => {
 		expect(stores.chatState.warmBackgroundTranscript).toHaveBeenCalledWith(
 			'chat-b',
 			'generation-b',
-			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 1 })]),
+			1,
+			1,
 		);
 		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
 	});
@@ -416,7 +428,9 @@ describe('event router integration', () => {
 				{
 					type: 'chat-messages',
 					chatId: 'chat-b',
-					generationId: 'generation-b',
+					transcriptViewId: 'generation-b',
+					firstOrdinal: 1,
+					lastOrdinal: 1,
 					messages: [
 						rawMessage(1, {
 							type: 'assistant-message',
@@ -432,12 +446,16 @@ describe('event router integration', () => {
 		expect(stores.chatState.warmVisibleChatPreview).toHaveBeenCalledWith(
 			'chat-b',
 			'generation-b',
-			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 1 })]),
+			1,
+			1,
 		);
 		expect(stores.chatState.warmBackgroundTranscript).toHaveBeenCalledWith(
 			'chat-b',
 			'generation-b',
-			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 1 })]),
+			1,
+			1,
 		);
 		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
 	});
@@ -459,7 +477,9 @@ describe('event router integration', () => {
 				{
 					type: 'chat-messages',
 					chatId: 'chat-b',
-					generationId: 'generation-b',
+					transcriptViewId: 'generation-b',
+					firstOrdinal: 3,
+					lastOrdinal: 3,
 					messages: [
 						rawMessage(3, {
 							type: 'assistant-message',
@@ -577,7 +597,7 @@ describe('event router integration', () => {
 		const stores = createStores({
 			chatState: {
 				...defaults.chatState,
-				getCursor: () => ({ generationId: 'generation-old', lastSeq: 1 }),
+				getCursor: () => ({ transcriptViewId: 'generation-old', lastOrdinal: 1 }),
 				applyChatMessages: vi.fn((): 'applied' => {
 					calls.push('apply');
 					return 'applied';
@@ -593,7 +613,9 @@ describe('event router integration', () => {
 				{
 					type: 'chat-messages',
 					chatId: 'chat-a',
-					generationId: 'generation-old',
+					transcriptViewId: 'generation-old',
+					firstOrdinal: 2,
+					lastOrdinal: 2,
 					messages: [
 						rawMessage(2, {
 							type: 'assistant-message',
@@ -603,11 +625,11 @@ describe('event router integration', () => {
 					],
 				},
 				{
-					type: 'chat-generation-reset',
+					type: 'chat-transcript-replaced',
 					chatId: 'chat-a',
-					generationId: 'generation-new',
-					reason: 'manual-reload',
-					lastSeq: 0,
+					previousTranscriptViewId: 'generation-old',
+					transcriptViewId: 'generation-new',
+					lastOrdinal: 0,
 				},
 			],
 			stores,
@@ -617,16 +639,16 @@ describe('event router integration', () => {
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
-	it('marks background transcripts stale on generation reset', () => {
+	it('marks background transcripts stale on transcript replacement', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
 			[
 				{
-					type: 'chat-generation-reset',
+					type: 'chat-transcript-replaced',
 					chatId: 'chat-b',
-					generationId: 'generation-new',
-					reason: 'process-error',
-					lastSeq: 2,
+					previousTranscriptViewId: 'generation-old',
+					transcriptViewId: 'generation-new',
+					lastOrdinal: 2,
 				},
 			],
 			stores,
@@ -635,7 +657,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b');
 	});
 
-	it('reloads visible split-pane previews on generation reset', () => {
+	it('reloads visible split-pane previews on transcript replacement', () => {
 		const defaults = createStores();
 		const stores = createStores({
 			chatState: {
@@ -649,11 +671,11 @@ describe('event router integration', () => {
 		renderRouterWithRawMessages(
 			[
 				{
-					type: 'chat-generation-reset',
+					type: 'chat-transcript-replaced',
 					chatId: 'chat-b',
-					generationId: 'generation-new',
-					reason: 'manual-reload',
-					lastSeq: 2,
+					previousTranscriptViewId: 'generation-old',
+					transcriptViewId: 'generation-new',
+					lastOrdinal: 2,
 				},
 			],
 			stores,
@@ -690,7 +712,9 @@ describe('event router integration', () => {
 				{
 					type: 'chat-messages',
 					chatId: 'chat-a',
-					generationId: 'generation-current',
+					transcriptViewId: 'generation-current',
+					firstOrdinal: 2,
+					lastOrdinal: 2,
 					messages: [
 						rawMessage(2, {
 							type: 'assistant-message',

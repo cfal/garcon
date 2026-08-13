@@ -1,4 +1,4 @@
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 
 interface ForkActionInput {
 	supportsFork: boolean;
@@ -7,8 +7,8 @@ interface ForkActionInput {
 }
 
 export interface ForkAtMessageSelection {
-	seq: number;
-	generationId: string;
+	ordinal: number;
+	transcriptViewId: string;
 	messageKey: string;
 	occurrence: number;
 }
@@ -41,23 +41,23 @@ export function canUseForkAtMessageAction(input: ForkAtMessageActionInput): bool
 }
 
 export function selectForkAtMessage(
-	entries: readonly ChatViewMessage[],
-	generationId: string,
-	seq: number,
+	entries: readonly TranscriptMessage[],
+	transcriptViewId: string,
+	ordinal: number,
 ): ForkAtMessageSelection | null {
-	const selectedIndex = entries.findIndex((entry) => entry.seq === seq);
-	if (selectedIndex < 0 || !generationId) return null;
+	const selectedIndex = entries.findIndex((entry) => entry.ordinal === ordinal);
+	if (selectedIndex < 0 || !transcriptViewId) return null;
 	const messageKey = forkMessageKey(entries[selectedIndex]!.message);
 	const occurrence = entries
 		.slice(0, selectedIndex + 1)
 		.filter((entry) => forkMessageKey(entry.message) === messageKey)
 		.length;
-	return { seq, generationId, messageKey, occurrence };
+	return { ordinal, transcriptViewId, messageKey, occurrence };
 }
 
 export function remapForkAtMessage(
-	entries: readonly ChatViewMessage[],
-	generationId: string,
+	entries: readonly TranscriptMessage[],
+	transcriptViewId: string,
 	selection: ForkAtMessageSelection,
 ): ForkAtMessageSelection | null {
 	let occurrence = 0;
@@ -66,8 +66,8 @@ export function remapForkAtMessage(
 		occurrence += 1;
 		if (occurrence === selection.occurrence) {
 			return {
-				seq: entry.seq,
-				generationId,
+				ordinal: entry.ordinal,
+				transcriptViewId,
 				messageKey: selection.messageKey,
 				occurrence,
 			};
@@ -76,7 +76,7 @@ export function remapForkAtMessage(
 	return null;
 }
 
-function forkMessageKey(message: ChatViewMessage['message']): string {
+function forkMessageKey(message: TranscriptMessage['message']): string {
 	const record = message as unknown as Record<string, unknown>;
 	const metadata = isRecord(record.metadata) ? record.metadata : null;
 	if (message.type === 'user-message' && typeof metadata?.clientRequestId === 'string') {

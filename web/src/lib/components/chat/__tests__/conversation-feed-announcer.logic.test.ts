@@ -46,13 +46,13 @@ function assistantRow(id: string, content: string) {
 	return {
 		kind: 'message' as const,
 		id,
-		seq: Number(id),
+		ordinal: Number(id),
 		message: new AssistantMessage('2026-01-01T00:00:00.000Z', content),
 	};
 }
 
 function messageRow(id: string, message: ChatMessage) {
-	return { kind: 'message' as const, id, seq: Number(id), message };
+	return { kind: 'message' as const, id, ordinal: Number(id), message };
 }
 
 const enabled = {
@@ -648,7 +648,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				...enabled,
 			}),
 		).toBe('send once');
-		const durable = { ...pending, id: '3', seq: 3 };
+		const durable = { ...pending, id: '3', ordinal: 3 };
 		expect(
 			announcer.reconcile({
 				surfaceIdentity: 'chat:generation',
@@ -722,7 +722,7 @@ describe('ConversationFeedAnnouncerState', () => {
 		expect(
 			announcer.reconcile({
 				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), { ...pending, id: '3', seq: 3 }],
+				rows: [assistantRow('1', 'existing'), { ...pending, id: '3', ordinal: 3 }],
 				mutationClock: clock(3, 3, 2),
 				...enabled,
 			}),

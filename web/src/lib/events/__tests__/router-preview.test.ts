@@ -13,10 +13,10 @@ import {
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
 import { ChatMessagesMessage } from '$shared/ws-events';
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 
-function entry(seq: number, message: ChatMessage): ChatViewMessage {
-	return { seq, message };
+function entry(ordinal: number, message: ChatMessage): TranscriptMessage {
+	return { ordinal, message };
 }
 
 describe('extractFirstLine', () => {
@@ -53,12 +53,12 @@ describe('createChatMessagesAccumulator', () => {
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-a', 'generation-1', [
 				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first')),
-			]),
+			], 1, 1),
 		);
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-a', 'generation-1', [
 				entry(2, new AssistantMessage('2024-01-01T00:00:01Z', 'second')),
-			]),
+			], 2, 2),
 		);
 		accumulator.flush();
 
@@ -70,12 +70,12 @@ describe('createChatMessagesAccumulator', () => {
 	});
 
 	it('flushes queued chunks when the chat id changes', () => {
-		const writes: Array<{ chatId: string; generationId: string; contents: string[] }> = [];
+		const writes: Array<{ chatId: string; transcriptViewId: string; contents: string[] }> = [];
 		const accumulator = createChatMessagesAccumulator({
-			applyChatMessages: (chatId, generationId, messages) => {
+			applyChatMessages: (chatId, transcriptViewId, messages) => {
 				writes.push({
 					chatId,
-					generationId,
+					transcriptViewId,
 					contents: messages.map((item) => (item.message as AssistantMessage).content),
 				});
 				return 'applied';
@@ -86,32 +86,32 @@ describe('createChatMessagesAccumulator', () => {
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-a', 'generation-1', [
 				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first')),
-			]),
+			], 1, 1),
 		);
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-b', 'generation-1', [
 				entry(1, new AssistantMessage('2024-01-01T00:00:01Z', 'second')),
-			]),
+			], 1, 1),
 		);
 		accumulator.flush();
 
 		expect(writes).toEqual([
-			{ chatId: 'chat-a', generationId: 'generation-1', contents: ['first'] },
-			{ chatId: 'chat-b', generationId: 'generation-1', contents: ['second'] },
+			{ chatId: 'chat-a', transcriptViewId: 'generation-1', contents: ['first'] },
+			{ chatId: 'chat-b', transcriptViewId: 'generation-1', contents: ['second'] },
 		]);
 	});
 
 	it('reloads the transcript when accumulated messages report a generation change', () => {
 		const reloads: string[] = [];
 		const accumulator = createChatMessagesAccumulator({
-			applyChatMessages: () => 'generation-changed',
+			applyChatMessages: () => 'view-changed',
 			reloadChatTranscript: (chatId) => reloads.push(chatId),
 		});
 
 		accumulator.enqueue(
 			new ChatMessagesMessage('chat-a', 'generation-2', [
 				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'fresh')),
-			]),
+			], 1, 1),
 		);
 		accumulator.flush();
 

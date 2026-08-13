@@ -55,7 +55,8 @@
 	const previewRows = $derived.by((): ChatDisplayRow[] =>
 		previewEntry.messages.map((entry) => ({
 			kind: 'message',
-			id: `${previewEntry.generationId}:${entry.seq}`,
+			id: `${previewEntry.transcriptViewId}:${entry.ordinal}`,
+			ordinal: entry.ordinal,
 			message: entry.message,
 		})),
 	);
@@ -108,7 +109,7 @@
 	});
 
 	$effect(() => {
-		previewEntry.lastSeq;
+		previewEntry.lastOrdinal;
 		previewScrollContainer;
 		tick().then(() => {
 			if (previewScrollContainer) {

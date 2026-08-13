@@ -104,9 +104,11 @@ import {
   SnippetService,
 } from './snippets/service.js';
 import {
+  ledgerRowsToMessages,
   TranscriptAdoptionService,
   TranscriptLedgerService,
   TranscriptLedgerStore,
+  TranscriptViewReader,
 } from './ledger/index.js';
 
 // Route factory
@@ -314,6 +316,7 @@ export async function startServer(): Promise<void> {
         agentRegistry.loadLegacyProjectionMessages(entry, chatId, signal)
       ),
     });
+    const transcriptReader = new TranscriptViewReader(transcriptLedger, transcriptAdoption);
     agentRegistry = new AgentRegistry({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -486,23 +489,14 @@ export async function startServer(): Promise<void> {
 
     const chatMessageReader = {
       getMessages(chatId: string) {
-        return chatViews.getLoadedMessages(chatId);
+        return transcriptLedger.currentView(chatId)
+          ? ledgerRowsToMessages(transcriptLedger.currentRows(chatId))
+          : null;
       },
     };
     const chatViewPages = {
-      isChatActive(chatId: string) {
-        return ownsExecution(chatId);
-      },
-      async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
-        return chatViews.getOrCreatePage(
-          chatId,
-          {
-            loadAll: () => loadChatSnapshot(chatId),
-            loadPage: (limit, offset) => transcripts.loadPage(chatId, limit, offset),
-          },
-          limit,
-          beforeSeq,
-        );
+      page(chatId: string, limit: number, beforeOrdinal?: number) {
+        return transcriptReader.page(chatId, limit, beforeOrdinal);
       },
     };
     const pendingInputs = new PendingUserInputService({
@@ -698,13 +692,10 @@ export async function startServer(): Promise<void> {
       processing: chatProcessingActivity,
       chatViews: {
         ...chatViewPages,
-        readReplay: (chatId, generationId, afterSeq) =>
-          chatViews.readReplay(chatId, generationId, afterSeq),
+        readReplay: (chatId, viewId, afterOrdinal) =>
+          transcriptReader.replay(chatId, viewId, afterOrdinal),
       },
-      projectionReload: (chatId) => chatViews.reloadFromProjection(chatId, {
-        loadAll: () => loadChatSnapshot(chatId),
-        loadPage: (limit, offset) => transcripts.loadPage(chatId, limit, offset),
-      }),
+      projectionReload: (chatId) => transcriptReader.page(chatId, 100),
       queue,
       pendingInputs,
       transientFeeds,

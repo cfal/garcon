@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ChatViewMessage } from '../../../../common/chat-view.js';
+import type { TranscriptMessage } from '../../../../common/chat-view.js';
 import { assistantContents, userContents } from '../../../support/chat-assertions.js';
 import { GarconApiError } from '../../../support/garcon-client.js';
 import {
@@ -222,8 +222,8 @@ async function expectEventStreamForkRefusal(promise: Promise<unknown>): Promise<
 }
 
 function expectMatchingPrefix(
-  forked: readonly ChatViewMessage[],
-  source: readonly ChatViewMessage[],
+  forked: readonly TranscriptMessage[],
+  source: readonly TranscriptMessage[],
   upToSeq: number,
 ): void {
   expect(forked.map((entry) => entry.message))

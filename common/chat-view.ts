@@ -2,32 +2,29 @@ import { ErrorMessage, parseChatMessage } from './chat-types';
 import type { ChatMessage } from './chat-types';
 import type { PendingUserInput } from './pending-user-input';
 
-export interface ChatViewMessage {
-  seq: number;
-  message: ChatMessage;
+export interface TranscriptMessage {
+  readonly ordinal: number;
+  readonly message: ChatMessage;
 }
 
-export interface ChatViewPage {
-  generationId: string;
-  messages: ChatViewMessage[];
-  lastSeq: number;
-  pageOldestSeq: number;
-  hasMore: boolean;
+export interface TranscriptPage {
+  readonly transcriptViewId: string;
+  readonly messages: TranscriptMessage[];
+  readonly lastOrdinal: number;
+  readonly pageOldestOrdinal: number;
+  readonly pageNewestOrdinal: number;
+  readonly hasMore: boolean;
 }
 
-// Deferred is a typed non-error wait state, not exhaustion: the projection
-// store cannot serve a safe read yet, and cold selection retries once on the
-// matching execution-to-idle transition.
 export type ChatHistoryState =
   | { readonly kind: 'complete' }
-  | { readonly kind: 'deferred'; readonly retry: 'execution-settled' }
   | {
       readonly kind: 'degraded';
       readonly errorCode: string;
       readonly retryable: boolean;
     };
 
-export interface CompleteChatHistoryResponse extends ChatViewPage {
+export interface CompleteChatHistoryResponse extends TranscriptPage {
   readonly historyState: Extract<ChatHistoryState, { readonly kind: 'complete' }>;
   readonly chatId: string;
   readonly pendingUserInputs: PendingUserInput[];
@@ -38,9 +35,10 @@ export interface UnavailableChatHistoryResponse {
   readonly historyState: Exclude<ChatHistoryState, { readonly kind: 'complete' }>;
   readonly chatId: string;
   readonly messages: readonly [];
-  readonly generationId?: never;
-  readonly lastSeq?: never;
-  readonly pageOldestSeq?: never;
+  readonly transcriptViewId?: never;
+  readonly lastOrdinal?: never;
+  readonly pageOldestOrdinal?: never;
+  readonly pageNewestOrdinal?: never;
   readonly pendingUserInputs?: never;
   readonly hasMore?: never;
   readonly limit?: never;
@@ -63,13 +61,6 @@ export function parseChatHistoryState(value: unknown): ChatHistoryState | null {
   const raw = value as Record<string, unknown>;
   if (raw.kind === 'complete' && Object.keys(raw).length === 1) return { kind: 'complete' };
   if (
-    raw.kind === 'deferred'
-    && raw.retry === 'execution-settled'
-    && Object.keys(raw).length === 2
-  ) {
-    return { kind: 'deferred', retry: 'execution-settled' };
-  }
-  if (
     raw.kind === 'degraded'
     && typeof raw.errorCode === 'string'
     && HISTORY_ERROR_CODE_PATTERN.test(raw.errorCode)
@@ -85,33 +76,24 @@ export function parseChatHistoryState(value: unknown): ChatHistoryState | null {
   return null;
 }
 
-export type ChatReplayResult =
-  | {
-      mode: 'delta';
-      generationId: string;
-      messages: ChatViewMessage[];
-      lastSeq: number;
-    }
-  | {
-      mode: 'snapshot-required';
-      generationId: string;
-      messages: [];
-      lastSeq: number;
-    };
+export interface TranscriptAppend {
+  readonly transcriptViewId: string;
+  readonly firstOrdinal: number;
+  readonly lastOrdinal: number;
+  readonly messages: TranscriptMessage[];
+}
 
-export type ChatGenerationResetReason =
-  | 'manual-reload'
-  | 'process-error'
-  | 'agent-handoff';
-export type ChatViewApplyStatus = 'applied' | 'gap-detected';
+export type TranscriptReplayResult = TranscriptAppend;
 
-export interface ChatViewApplyResult {
-  messages: ChatViewMessage[];
+export type TranscriptApplyStatus = 'applied' | 'gap-detected';
+
+export interface TranscriptApplyResult {
+  messages: TranscriptMessage[];
   changed: boolean;
-  lastSeq: number;
-  status: ChatViewApplyStatus;
-  expectedSeq?: number;
-  receivedSeq?: number;
+  lastOrdinal: number;
+  status: TranscriptApplyStatus;
+  expectedOrdinal?: number;
+  receivedOrdinal?: number;
 }
 
 function isPositiveInt(value: unknown): value is number {
@@ -124,62 +106,86 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-export function parseChatViewMessage(data: unknown): ChatViewMessage | null {
+export function parseTranscriptMessage(data: unknown): TranscriptMessage | null {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   const raw = data as Record<string, unknown>;
-  if (!isPositiveInt(raw.seq)) return null;
+  if (!isPositiveInt(raw.ordinal)) return null;
   const rawMessage = asRecord(raw.message);
   const message = parseChatMessage(rawMessage)
     ?? new ErrorMessage(
       typeof rawMessage.timestamp === 'string' ? rawMessage.timestamp : '',
       'This message type is not supported by this app version. Reload to update.',
     );
-  return { seq: raw.seq, message };
+  return { ordinal: raw.ordinal, message };
 }
 
-// Rejects the whole batch if any envelope is malformed so callers never advance
-// a cursor past a silent gap.
-export function parseChatViewMessages(data: unknown): ChatViewMessage[] | null {
+// Rejects the whole batch if any envelope is malformed so callers never
+// advance a cursor past an invalid row.
+export function parseTranscriptMessages(data: unknown): TranscriptMessage[] | null {
   if (!Array.isArray(data)) return null;
-  const messages: ChatViewMessage[] = [];
-  let previousSeq = 0;
+  const messages: TranscriptMessage[] = [];
+  let previousOrdinal = 0;
   for (const item of data) {
-    const parsed = parseChatViewMessage(item);
-    if (!parsed || parsed.seq <= previousSeq) return null;
+    const parsed = parseTranscriptMessage(item);
+    if (!parsed || parsed.ordinal <= previousOrdinal) return null;
     messages.push(parsed);
-    previousSeq = parsed.seq;
+    previousOrdinal = parsed.ordinal;
   }
   return messages;
 }
 
-export function applyChatViewMessages(
-  current: ChatViewMessage[],
-  incoming: ChatViewMessage[],
-  lastSeq: number,
-): ChatViewApplyResult {
-  if (incoming.length === 0) return { messages: current, changed: false, lastSeq, status: 'applied' };
-  const filtered = incoming.filter((message) => message.seq > lastSeq);
-  if (filtered.length === 0) {
-    return { messages: current, changed: false, lastSeq, status: 'applied' };
+export function applyTranscriptAppend(
+  current: TranscriptMessage[],
+  append: Pick<TranscriptAppend, 'firstOrdinal' | 'lastOrdinal' | 'messages'>,
+  currentLastOrdinal: number,
+): TranscriptApplyResult {
+  let previousMessageOrdinal = 0;
+  const invalidMessageOrdinal = append.messages.some((entry) => {
+    const invalid = !isPositiveInt(entry.ordinal)
+      || entry.ordinal <= previousMessageOrdinal
+      || entry.ordinal < append.firstOrdinal
+      || entry.ordinal > append.lastOrdinal;
+    previousMessageOrdinal = entry.ordinal;
+    return invalid;
+  });
+  if (
+    !isPositiveInt(append.firstOrdinal)
+    || !Number.isSafeInteger(append.lastOrdinal)
+    || append.lastOrdinal < 0
+    || append.lastOrdinal < append.firstOrdinal - 1
+    || (append.lastOrdinal < append.firstOrdinal && append.messages.length > 0)
+    || invalidMessageOrdinal
+  ) {
+    return {
+      messages: current,
+      changed: false,
+      lastOrdinal: currentLastOrdinal,
+      status: 'gap-detected',
+      expectedOrdinal: currentLastOrdinal + 1,
+      receivedOrdinal: append.firstOrdinal,
+    };
   }
-  let expectedSeq = lastSeq + 1;
-  for (const message of filtered) {
-    if (message.seq !== expectedSeq) {
-      return {
-        messages: current,
-        changed: false,
-        lastSeq,
-        status: 'gap-detected',
-        expectedSeq,
-        receivedSeq: message.seq,
-      };
-    }
-    expectedSeq += 1;
+  if (append.lastOrdinal < append.firstOrdinal) {
+    return { messages: current, changed: false, lastOrdinal: currentLastOrdinal, status: 'applied' };
   }
+  if (append.lastOrdinal <= currentLastOrdinal) {
+    return { messages: current, changed: false, lastOrdinal: currentLastOrdinal, status: 'applied' };
+  }
+  if (append.firstOrdinal > currentLastOrdinal + 1) {
+    return {
+      messages: current,
+      changed: false,
+      lastOrdinal: currentLastOrdinal,
+      status: 'gap-detected',
+      expectedOrdinal: currentLastOrdinal + 1,
+      receivedOrdinal: append.firstOrdinal,
+    };
+  }
+  const incoming = append.messages.filter((entry) => entry.ordinal > currentLastOrdinal);
   return {
-    messages: [...current, ...filtered],
-    changed: true,
-    lastSeq: filtered[filtered.length - 1].seq,
+    messages: incoming.length === 0 ? current : [...current, ...incoming],
+    changed: incoming.length > 0,
+    lastOrdinal: append.lastOrdinal,
     status: 'applied',
   };
 }

@@ -861,7 +861,7 @@ describe('openTranscriptResult', () => {
 	}
 
 	it('resolves the epoch-qualified snippet and opens at its seq', async () => {
-		const navigate = vi.fn(async () => ({ chatId: 'chat-1', seq: 4 }));
+		const navigate = vi.fn(async () => ({ chatId: 'chat-1', ordinal: 4 }));
 		const store = navigationStore({ navigateToSearchResult: navigate });
 		const opened = vi.fn();
 
@@ -921,4 +921,3 @@ describe('openTranscriptResult', () => {
 		expect(opened).toHaveBeenCalledWith('chat-1', null);
 	});
 });
-

@@ -682,7 +682,7 @@ function transcriptAccessFailure(
     | { readonly kind: 'degraded'; readonly errorCode: string; readonly retryable: boolean },
 ): TranscriptHistoryUnavailableError {
   return new TranscriptHistoryUnavailableError(result.kind === 'deferred'
-    ? { kind: 'deferred', retry: 'execution-settled' }
+    ? { kind: 'degraded', errorCode: 'TRANSCRIPT_DEFERRED', retryable: true }
     : { kind: 'degraded', errorCode: result.errorCode, retryable: result.retryable });
 }
 

@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { ChatViewPage } from '../../common/chat-view.js';
+import type { TranscriptPage } from '../../common/chat-view.js';
 import type { AgentProjectionState } from '@garcon/server-agent-interface';
 
 interface NativeTranscriptWindowBase {
@@ -14,8 +14,8 @@ export type NativeTranscriptWindow =
   | (NativeTranscriptWindowBase & { readonly kind: 'page' })
   | (NativeTranscriptWindowBase & { readonly kind: 'snapshot' });
 
-export interface ChatViewPageReader {
-  getOrCreatePage(chatId: string, limit: number, beforeSeq?: number): Promise<ChatViewPage>;
+export interface TranscriptPageReader {
+  page(chatId: string, limit: number, beforeOrdinal?: number): Promise<TranscriptPage>;
 }
 
 // Complete point-in-time capture of the durable composite ledger: immutable

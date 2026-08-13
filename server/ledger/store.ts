@@ -237,6 +237,29 @@ export class TranscriptLedgerStore {
     });
   }
 
+  rowsAfter(
+    chatId: string,
+    viewId: TranscriptViewId,
+    afterOrdinal: number,
+  ): readonly LedgerRow[] {
+    if (!Number.isSafeInteger(afterOrdinal) || afterOrdinal < 0) {
+      throw new TypeError('Transcript replay cursor must be a non-negative integer');
+    }
+    return this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      const highWatermark = entry.nextOrdinal - 1;
+      if (afterOrdinal > highWatermark) {
+        throw new TypeError('Transcript replay cursor is ahead of the current view');
+      }
+      return entry.db.query<StoredLedgerRow, [string, number]>(`
+        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
+        FROM transcript_rows
+        WHERE view_id = ? AND ordinal > ?
+        ORDER BY ordinal
+      `).all(viewId, afterOrdinal).map(decodeLedgerRow);
+    });
+  }
+
   rowsThrough(
     chatId: string,
     watermark: TranscriptWatermark,

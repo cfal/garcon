@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	AgentRunFailedMessage,
 	AgentRunFinishedMessage,
-	ChatGenerationResetMessage,
+	ChatTranscriptReplacedMessage,
 	ChatProjectionGenerationTransitionMessage,
 	ChatListRefreshRequestedMessage,
 	ChatMessagesMessage,
@@ -38,7 +38,7 @@ import { CHAT_STOP_OUTCOMES, ErrorMessage } from '$shared/chat-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 const chatViewMessage = {
-	seq: 1,
+	ordinal: 1,
 	message: { type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' },
 };
 
@@ -110,8 +110,10 @@ describe('parseServerWsMessage', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-messages',
 			chatId: 'c-1',
-			generationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			messages: [chatViewMessage],
+			firstOrdinal: 1,
+			lastOrdinal: 1,
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
 			upstreamRequestId: 'cursor-req-1',
@@ -119,7 +121,7 @@ describe('parseServerWsMessage', () => {
 
 		expect(msg).toBeInstanceOf(ChatMessagesMessage);
 		expect((msg as ChatMessagesMessage).chatId).toBe('c-1');
-		expect((msg as ChatMessagesMessage).generationId).toBe('generation-1');
+		expect((msg as ChatMessagesMessage).transcriptViewId).toBe('generation-1');
 		expect((msg as ChatMessagesMessage).messages).toHaveLength(1);
 		expect((msg as ChatMessagesMessage).turnId).toBe('turn-1');
 		expect((msg as ChatMessagesMessage).clientRequestId).toBe('req-1');
@@ -131,10 +133,12 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'chat-messages',
 				chatId: 'c-1',
-				generationId: 'generation-1',
+				transcriptViewId: 'generation-1',
+				firstOrdinal: 1,
+				lastOrdinal: 1,
 				messages: [
 					{
-						seq: 0,
+						ordinal: 0,
 						message: { type: 'user-message', timestamp: '2025-01-01T00:00:00Z', content: 'bad' },
 					},
 				],
@@ -145,8 +149,10 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'chat-messages',
 				chatId: 'c-1',
-				generationId: 'generation-1',
-				messages: [chatViewMessage, { ...chatViewMessage, seq: 1 }],
+				transcriptViewId: 'generation-1',
+				messages: [chatViewMessage, { ...chatViewMessage, ordinal: 1 }],
+				firstOrdinal: 1,
+				lastOrdinal: 1,
 			}),
 		).toBeNull();
 	});
@@ -155,10 +161,12 @@ describe('parseServerWsMessage', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-messages',
 			chatId: 'c-1',
-			generationId: 'generation-1',
+			transcriptViewId: 'generation-1',
+			firstOrdinal: 1,
+			lastOrdinal: 1,
 			messages: [
 				{
-					seq: 1,
+					ordinal: 1,
 					message: { type: 'future-message', timestamp: '2025-01-01T00:00:00Z', payload: {} },
 				},
 			],
@@ -168,15 +176,15 @@ describe('parseServerWsMessage', () => {
 		expect((msg as ChatMessagesMessage).messages[0].message).toBeInstanceOf(ErrorMessage);
 	});
 
-	it('parses chat-subscribed delta responses', () => {
+	it('parses chat-subscribed replay responses', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-subscribed',
 			clientRequestId: 'req-subscribe',
 			chatId: 'c-1',
-			generationId: 'generation-1',
-			mode: 'delta',
+			transcriptViewId: 'generation-1',
 			messages: [chatViewMessage],
-			lastSeq: 1,
+			firstOrdinal: 1,
+			lastOrdinal: 1,
 			transientFeed: transientFeed(),
 			pendingUserInputs: [
 				{
@@ -191,39 +199,21 @@ describe('parseServerWsMessage', () => {
 		});
 
 		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
-		expect((msg as ChatSubscribedMessage).mode).toBe('delta');
-		expect((msg as ChatSubscribedMessage).generationId).toBe('generation-1');
+		expect((msg as ChatSubscribedMessage).transcriptViewId).toBe('generation-1');
 		expect((msg as ChatSubscribedMessage).pendingUserInputs[0].attachments).toEqual([
 			{ name: 'context.pdf', mimeType: 'application/pdf' },
 		]);
 	});
 
-	it('parses unloaded chat-subscribe snapshot-required with null generationId', () => {
-		const msg = parseServerWsMessage({
-			type: 'chat-subscribed',
-			clientRequestId: 'req-subscribe',
-			chatId: 'c-1',
-			generationId: null,
-			mode: 'snapshot-required',
-			messages: [],
-			lastSeq: 0,
-			transientFeed: transientFeed('pending:owner-1'),
-			pendingUserInputs: [],
-		});
-
-		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
-		expect((msg as ChatSubscribedMessage).generationId).toBeNull();
-	});
-
-	it('rejects chat-subscribe transient state for another chat or transcript generation', () => {
+	it('rejects chat-subscribe transient state for another chat or transcript view', () => {
 		const response = {
 			type: 'chat-subscribed',
 			clientRequestId: 'req-subscribe',
 			chatId: 'c-1',
-			generationId: 'generation-1',
-			mode: 'delta',
+			transcriptViewId: 'generation-1',
 			messages: [],
-			lastSeq: 0,
+			firstOrdinal: 1,
+			lastOrdinal: 0,
 			pendingUserInputs: [],
 		};
 		expect(parseServerWsMessage({
@@ -263,10 +253,10 @@ describe('parseServerWsMessage', () => {
 				type: 'chat-subscribed',
 				clientRequestId: 'req-subscribe',
 				chatId: 'c-1',
-				generationId: 'generation-1',
-				mode: 'delta',
+				transcriptViewId: 'generation-1',
 				messages: [],
-				lastSeq: 0,
+				firstOrdinal: 1,
+				lastOrdinal: 0,
 			}),
 		).toBeNull();
 		expect(
@@ -274,10 +264,10 @@ describe('parseServerWsMessage', () => {
 				type: 'chat-subscribed',
 				clientRequestId: 'req-subscribe',
 				chatId: 'c-1',
-				generationId: 'generation-1',
-				mode: 'delta',
+				transcriptViewId: 'generation-1',
 				messages: [],
-				lastSeq: 0,
+				firstOrdinal: 1,
+				lastOrdinal: 0,
 				pendingUserInputs: [{ clientRequestId: 'missing-fields' }],
 			}),
 		).toBeNull();
@@ -286,10 +276,10 @@ describe('parseServerWsMessage', () => {
 				type: 'chat-subscribed',
 				clientRequestId: 'req-subscribe',
 				chatId: 'c-1',
-				generationId: 'generation-1',
-				mode: 'delta',
+				transcriptViewId: 'generation-1',
 				messages: [],
-				lastSeq: 0,
+				firstOrdinal: 1,
+				lastOrdinal: 0,
 				pendingUserInputs: [
 					{
 						chatId: 'c-1',
@@ -304,12 +294,14 @@ describe('parseServerWsMessage', () => {
 		).toBeNull();
 	});
 
-	it('rejects missing generationId except for snapshot-required chat-subscribed null', () => {
+	it('rejects missing or null transcript view IDs', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'chat-messages',
 				chatId: 'c-1',
 				messages: [],
+				firstOrdinal: 1,
+				lastOrdinal: 0,
 			}),
 		).toBeNull();
 
@@ -318,9 +310,11 @@ describe('parseServerWsMessage', () => {
 				type: 'chat-subscribed',
 				clientRequestId: 'req-subscribe',
 				chatId: 'c-1',
-				mode: 'delta',
 				messages: [],
-				lastSeq: 0,
+				firstOrdinal: 1,
+				lastOrdinal: 0,
+				pendingUserInputs: [],
+				transientFeed: transientFeed(),
 			}),
 		).toBeNull();
 
@@ -329,26 +323,28 @@ describe('parseServerWsMessage', () => {
 				type: 'chat-subscribed',
 				clientRequestId: 'req-subscribe',
 				chatId: 'c-1',
-				generationId: null,
-				mode: 'delta',
+				transcriptViewId: null,
 				messages: [],
-				lastSeq: 0,
+				firstOrdinal: 1,
+				lastOrdinal: 0,
+				pendingUserInputs: [],
+				transientFeed: transientFeed(),
 			}),
 		).toBeNull();
 	});
 
-	it('parses lightweight generation reset messages', () => {
+	it('parses transcript replacement messages', () => {
 		const msg = parseServerWsMessage({
-			type: 'chat-generation-reset',
+			type: 'chat-transcript-replaced',
 			chatId: 'c-1',
-			generationId: 'generation-2',
-			reason: 'process-error',
-			lastSeq: 2,
+			previousTranscriptViewId: 'generation-1',
+			transcriptViewId: 'generation-2',
+			lastOrdinal: 2,
 		});
 
-		expect(msg).toBeInstanceOf(ChatGenerationResetMessage);
-		expect((msg as ChatGenerationResetMessage).reason).toBe('process-error');
-		expect((msg as ChatGenerationResetMessage).lastSeq).toBe(2);
+		expect(msg).toBeInstanceOf(ChatTranscriptReplacedMessage);
+		expect((msg as ChatTranscriptReplacedMessage).previousTranscriptViewId).toBe('generation-1');
+		expect((msg as ChatTranscriptReplacedMessage).lastOrdinal).toBe(2);
 	});
 
 	it('parses chat-reloaded responses with request correlation', () => {
@@ -356,16 +352,17 @@ describe('parseServerWsMessage', () => {
 			type: 'chat-reloaded',
 			clientRequestId: 'req-reload',
 			chatId: 'c-1',
-			generationId: 'generation-2',
+			transcriptViewId: 'generation-2',
 			messages: [chatViewMessage],
-			lastSeq: 1,
-			pageOldestSeq: 1,
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 1,
 			hasMore: false,
 		});
 
 		expect(msg).toBeInstanceOf(ChatReloadedMessage);
 		expect((msg as ChatReloadedMessage).clientRequestId).toBe('req-reload');
-		expect((msg as ChatReloadedMessage).generationId).toBe('generation-2');
+		expect((msg as ChatReloadedMessage).transcriptViewId).toBe('generation-2');
 	});
 
 	it('rejects legacy event-log payloads', () => {
@@ -860,12 +857,12 @@ describe('parseClientWsMessage', () => {
 			type: 'chat-subscribe',
 			clientRequestId: 'req-subscribe',
 			chatId: 'c-1',
-			generationId: 'generation-1',
-			afterSeq: 7,
+			transcriptViewId: 'generation-1',
+			afterOrdinal: 7,
 		});
 		expect(subscribe).toBeInstanceOf(ChatSubscribeRequest);
-		expect((subscribe as ChatSubscribeRequest).generationId).toBe('generation-1');
-		expect((subscribe as ChatSubscribeRequest).afterSeq).toBe(7);
+		expect((subscribe as ChatSubscribeRequest).transcriptViewId).toBe('generation-1');
+		expect((subscribe as ChatSubscribeRequest).afterOrdinal).toBe(7);
 
 		expect(
 			parseClientWsMessage({
@@ -889,13 +886,13 @@ describe('parseClientWsMessage', () => {
 			type: 'chat-subscribe',
 			clientRequestId: 'req-subscribe',
 			chatId: 'c-1',
-			generationId: 123,
-			afterSeq: -1,
+			transcriptViewId: 123,
+			afterOrdinal: -1,
 		});
 
 		expect(subscribe).toBeInstanceOf(ChatSubscribeRequest);
-		expect((subscribe as ChatSubscribeRequest).generationId).toBe('');
-		expect((subscribe as ChatSubscribeRequest).afterSeq).toBe(0);
+		expect((subscribe as ChatSubscribeRequest).transcriptViewId).toBe('');
+		expect((subscribe as ChatSubscribeRequest).afterOrdinal).toBe(0);
 	});
 
 	it('rejects unknown client request messages', () => {

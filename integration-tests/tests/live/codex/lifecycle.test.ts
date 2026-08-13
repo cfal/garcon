@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ChatViewMessage } from '../../../../common/chat-view.js';
+import type { TranscriptMessage } from '../../../../common/chat-view.js';
 import type {
   PendingUserInputClearedMessage,
   PendingUserInputStatusUpdatedMessage,
@@ -538,7 +538,7 @@ function expectPersistedCommand(
 }
 
 function toolExecutionProjections(
-  messages: readonly ChatViewMessage[],
+  messages: readonly TranscriptMessage[],
   excludedToolIds: ReadonlySet<string> = new Set(),
 ): Array<{
   bash: { toolId: string; command: string; description?: string };

@@ -244,7 +244,7 @@ export class ForkCommands {
         const cursor = this.deps.chatViews.getCursor(sourceChatId);
         if (cursor === null || cursor.generationId !== input.generationId) {
           throw new CommandValidationError(
-            'STALE_VIEW_GENERATION',
+            'STALE_TRANSCRIPT_VIEW',
             'The view changed since this fork point was chosen. Refetch and pick the message again.',
             409,
             true,

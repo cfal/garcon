@@ -7,7 +7,7 @@ import type { DrainHandle } from '$lib/ws/drain';
 import type { ServerWsMessage, EventKey } from '$shared/ws-events';
 import {
 	ChatMessagesMessage,
-	ChatGenerationResetMessage,
+	ChatTranscriptReplacedMessage,
 	ChatOperationalNoticeMessage,
 	ChatProjectionGenerationTransitionMessage,
 	ChatTransientFeedMutationMessage,
@@ -27,7 +27,7 @@ import {
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -106,20 +106,26 @@ export type EventRouterChatStateStore = Pick<
 > & {
 	applyChatMessages: (
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-	) => 'applied' | 'generation-changed' | 'gap-detected';
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
+	) => 'applied' | 'view-changed' | 'gap-detected';
 	reloadChatTranscript: (chatId: string) => void;
 	warmBackgroundTranscript: (
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
 	) => boolean;
 	isVisiblePreviewChat: (chatId: string) => boolean;
 	warmVisibleChatPreview: (
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
 	) => boolean | void;
 	loadVisibleChatPreview: (chatId: string) => Promise<void> | void;
 	markVisibleChatPreviewStale: (chatId: string) => void;
@@ -197,32 +203,50 @@ export function selectPreviewFromBatch(
 export function createChatMessagesAccumulator(
 	chatState: Pick<EventRouterChatStateStore, 'applyChatMessages' | 'reloadChatTranscript'>,
 ) {
-	let pendingMessages: ChatViewMessage[] = [];
-	let pendingGenerationId = '';
+	let pendingMessages: TranscriptMessage[] = [];
+	let pendingTranscriptViewId = '';
 	let pendingChatId = '';
+	let pendingFirstOrdinal = 0;
+	let pendingLastOrdinal = 0;
+	let hasPending = false;
 
 	return {
 		enqueue(msg: ChatMessagesMessage) {
-			if (msg.messages.length === 0) return;
 			if (
-				pendingMessages.length > 0 &&
-				(msg.generationId !== pendingGenerationId || msg.chatId !== pendingChatId)
+				hasPending &&
+				(msg.transcriptViewId !== pendingTranscriptViewId ||
+					msg.chatId !== pendingChatId ||
+					msg.firstOrdinal > pendingLastOrdinal + 1)
 			) {
 				this.flush();
 			}
-			pendingGenerationId = msg.generationId;
+			if (!hasPending) pendingFirstOrdinal = msg.firstOrdinal;
+			hasPending = true;
+			pendingTranscriptViewId = msg.transcriptViewId;
 			pendingChatId = msg.chatId;
+			pendingLastOrdinal = Math.max(pendingLastOrdinal, msg.lastOrdinal);
 			pendingMessages.push(...msg.messages);
 		},
 		flush() {
-			if (pendingMessages.length === 0) return;
+			if (!hasPending) return;
 			const messages = pendingMessages;
-			const generationId = pendingGenerationId;
+			const transcriptViewId = pendingTranscriptViewId;
 			const chatId = pendingChatId;
+			const firstOrdinal = pendingFirstOrdinal;
+			const lastOrdinal = pendingLastOrdinal;
 			pendingMessages = [];
-			pendingGenerationId = '';
+			pendingTranscriptViewId = '';
 			pendingChatId = '';
-			const result = chatState.applyChatMessages(chatId, generationId, messages);
+			pendingFirstOrdinal = 0;
+			pendingLastOrdinal = 0;
+			hasPending = false;
+			const result = chatState.applyChatMessages(
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+			);
 			if (result !== 'applied') {
 				chatState.reloadChatTranscript(chatId);
 			}
@@ -316,18 +340,18 @@ function buildDispatch(
 				const result = stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
 				if (result.kind === 'applied' && previousGenerationId
 					&& previousGenerationId !== snapshot.transientFeed.generationId) {
-					handleGenerationTransition(chatId, snapshot.transientFeed.generationId);
+					handleViewTransition(chatId, snapshot.transientFeed.generationId);
 				}
 			})
 			.catch(() => undefined);
 	};
 
-	const handleGenerationTransition = (chatId: string, generationId: string) => {
+	const handleViewTransition = (chatId: string, transcriptViewId: string) => {
 		messagesAccumulator.flush();
 		const selectedChatId = stores.sessions.selectedChat?.id ?? null;
 		if (selectedChatId === chatId) {
 			const cursor = stores.chatState.getCursor();
-			if (cursor.generationId !== generationId) {
+			if (cursor.transcriptViewId !== transcriptViewId) {
 				stores.chatState.reloadChatTranscript(chatId);
 			} else {
 				stores.chatState.markChatTranscriptValidated(chatId);
@@ -349,9 +373,9 @@ function buildDispatch(
 			handlePlanModeMessages(batch, planModeCtx);
 			handlePermissionLifecycleFromBatch(batch, permLifecycleCtx);
 		},
-		'chat-generation-reset': (msg) => {
-			if (!(msg instanceof ChatGenerationResetMessage)) return;
-			handleGenerationTransition(msg.chatId, msg.generationId);
+		'chat-transcript-replaced': (msg) => {
+			if (!(msg instanceof ChatTranscriptReplacedMessage)) return;
+			handleViewTransition(msg.chatId, msg.transcriptViewId);
 		},
 		'chat-transient-feed-mutation': (msg) => {
 			if (!(msg instanceof ChatTransientFeedMutationMessage)) return;
@@ -366,7 +390,7 @@ function buildDispatch(
 			if (result.kind === 'snapshot-required' || result.kind === 'corrupt') {
 				refreshTransientFeed(msg.chatId);
 			}
-			if (result.kind === 'applied') handleGenerationTransition(msg.chatId, msg.generationId);
+			if (result.kind === 'applied') handleViewTransition(msg.chatId, msg.generationId);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
@@ -492,13 +516,15 @@ export function createEventRouter(
 				// background transcripts are warmed only when already contiguous.
 				if (event.message instanceof ChatMessagesMessage) {
 					const agentMsg = event.message;
-					if (agentMsg.chatId && agentMsg.messages.length > 0) {
+					if (agentMsg.chatId) {
 						if (agentMsg.chatId !== activeViewChatId) {
 							if (stores.chatState.isVisiblePreviewChat(agentMsg.chatId)) {
 								const applied = stores.chatState.warmVisibleChatPreview(
 									agentMsg.chatId,
-									agentMsg.generationId,
+									agentMsg.transcriptViewId,
 									agentMsg.messages,
+									agentMsg.firstOrdinal,
+									agentMsg.lastOrdinal,
 								);
 								if (applied === false) {
 									stores.chatState.markVisibleChatPreviewStale(agentMsg.chatId);
@@ -507,8 +533,10 @@ export function createEventRouter(
 							}
 							stores.chatState.warmBackgroundTranscript(
 								agentMsg.chatId,
-								agentMsg.generationId,
+								agentMsg.transcriptViewId,
 								agentMsg.messages,
+								agentMsg.firstOrdinal,
+								agentMsg.lastOrdinal,
 							);
 						}
 						const preview = selectPreviewFromBatch(agentMsg.messages.map((entry) => entry.message));

@@ -1,5 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { isUnavailableChatHistoryResponse, type ChatViewMessage } from '$shared/chat-view';
+import { isUnavailableChatHistoryResponse, type TranscriptMessage } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -8,9 +8,9 @@ const PREVIEW_LIMIT = 50;
 
 export interface SplitPanePreviewEntry {
 	chatId: string;
-	generationId: string | null;
-	lastSeq: number;
-	messages: ChatViewMessage[];
+	transcriptViewId: string | null;
+	lastOrdinal: number;
+	messages: TranscriptMessage[];
 	isLoading: boolean;
 	isStale: boolean;
 	error: string | null;
@@ -18,15 +18,15 @@ export interface SplitPanePreviewEntry {
 
 export interface SplitPanePreviewCursor {
 	chatId: string;
-	generationId: string;
-	lastSeq: number;
+	transcriptViewId: string;
+	lastOrdinal: number;
 }
 
 function emptyEntry(chatId: string): SplitPanePreviewEntry {
 	return {
 		chatId,
-		generationId: null,
-		lastSeq: 0,
+		transcriptViewId: null,
+		lastOrdinal: 0,
 		messages: [],
 		isLoading: false,
 		isStale: false,
@@ -49,8 +49,8 @@ export class SplitPanePreviewStore {
 
 	cursor(chatId: string): SplitPanePreviewCursor | null {
 		const entry = this.#entries.get(chatId);
-		if (!entry?.generationId || entry.lastSeq <= 0) return null;
-		return { chatId, generationId: entry.generationId, lastSeq: entry.lastSeq };
+		if (!entry?.transcriptViewId || entry.lastOrdinal <= 0) return null;
+		return { chatId, transcriptViewId: entry.transcriptViewId, lastOrdinal: entry.lastOrdinal };
 	}
 
 	restore(chatId: string): void {
@@ -60,8 +60,8 @@ export class SplitPanePreviewStore {
 		const messages = restored.messages.slice(-PREVIEW_LIMIT);
 		this.#entries.set(chatId, {
 			chatId,
-			generationId: restored.generationId,
-			lastSeq: restored.lastSeq,
+			transcriptViewId: restored.transcriptViewId,
+			lastOrdinal: restored.lastOrdinal,
 			messages,
 			isLoading: false,
 			isStale: restored.stale,
@@ -106,26 +106,26 @@ export class SplitPanePreviewStore {
 
 	replaceSnapshot(
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-		lastSeq: number,
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		lastOrdinal: number,
 	): void {
 		this.#invalidateSnapshotLoad(chatId);
-		this.#transcriptCache.replace(chatId, generationId, messages, lastSeq);
+		this.#transcriptCache.replace(chatId, transcriptViewId, messages, lastOrdinal);
 		this.restore(chatId);
 	}
 
 	applyMessages(
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-		serverLastSeq?: number,
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
 	): boolean {
 		const result = this.#transcriptCache.applyMessages(
 			chatId,
-			generationId,
-			messages,
-			serverLastSeq,
+			transcriptViewId,
+			{ messages, firstOrdinal, lastOrdinal },
 		);
 		if (result.status !== 'applied') {
 			this.markStale(chatId);

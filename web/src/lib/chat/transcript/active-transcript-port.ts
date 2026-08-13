@@ -1,4 +1,4 @@
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import type { ChatMessage, UserMessageDeliveryStatus } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeType } from './local-notice.js';
@@ -15,23 +15,25 @@ export interface ChatRestoreResult {
 }
 
 export interface ChatCursor {
-	generationId: string;
-	lastSeq: number;
+	transcriptViewId: string;
+	lastOrdinal: number;
 }
 
 export interface ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
 	activeChatId: string | null;
-	readonly entries: readonly ChatViewMessage[];
+	readonly entries: readonly TranscriptMessage[];
 	readonly chatMessages: ChatMessage[];
 	readonly feedMutationClock: ConversationFeedMutationClock;
 	isUserScrolledUp: boolean;
 	getCursor(): ChatCursor;
 	applyMessages(
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-	): 'applied' | 'generation-changed' | 'gap-detected';
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
+	): 'applied' | 'view-changed' | 'gap-detected';
 	loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]>;
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
 	appendServerNotice(chatId: string, noticeType: LocalNoticeType, content: string): void;

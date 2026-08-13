@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { ChatViewMessage } from '../../common/chat-view.js';
+import type { LegacyChatViewMessage } from './chat-view-contracts.js';
 
-export function lowerBoundBySeq(messages: ChatViewMessage[], seq: number): number {
+export function lowerBoundBySeq(messages: LegacyChatViewMessage[], seq: number): number {
   let lo = 0;
   let hi = messages.length;
   while (lo < hi) {

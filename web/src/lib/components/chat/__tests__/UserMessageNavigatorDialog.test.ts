@@ -7,7 +7,7 @@ import UserMessageNavigatorDialogTestHost from './UserMessageNavigatorDialogTest
 function item(id: string, content: string): UserMessageNavigatorItem {
 	return {
 		id,
-		seq: Number(id.split(':').at(-1)),
+		ordinal: Number(id.split(':').at(-1)),
 		content,
 		timestamp: '2026-07-22T00:00:00.000Z',
 		attachmentCount: 0,

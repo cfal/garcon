@@ -40,7 +40,7 @@ function scrollState(
 		canLoadLater: false,
 		displayMessageCount: 1,
 		feedMutationClock: mutationClock(),
-		generationId: 'generation-1',
+		transcriptViewId: 'generation-1',
 		hasLaterMessages: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
@@ -670,7 +670,7 @@ describe('ConversationScrollController', () => {
 		expect(
 			await controller.jumpToMessageRow({
 				chatId: 'chat-1',
-				generationId: 'generation-1',
+				transcriptViewId: 'generation-1',
 				rowId: 'generation-1:7',
 			}),
 		).toBe('completed');
@@ -693,7 +693,7 @@ describe('ConversationScrollController', () => {
 		expect(
 			await controller.jumpToMessageRow({
 				chatId: 'chat-1',
-				generationId: 'generation-2',
+				transcriptViewId: 'generation-2',
 				rowId: 'generation-2:1',
 			}),
 		).toBe('unavailable');
@@ -709,7 +709,7 @@ describe('ConversationScrollController', () => {
 		await expect(
 			controller.jumpToMessageRow({
 				chatId: 'chat-1',
-				generationId: 'generation-1',
+				transcriptViewId: 'generation-1',
 				rowId: 'generation-1:7',
 			}),
 		).resolves.toBe('cancelled');
@@ -727,7 +727,7 @@ describe('ConversationScrollController', () => {
 		await expect(
 			controller.jumpToMessageRow({
 				chatId: 'chat-1',
-				generationId: 'generation-1',
+				transcriptViewId: 'generation-1',
 				rowId: 'generation-1:7',
 			}),
 		).resolves.toBe('unavailable');
@@ -861,7 +861,7 @@ describe('ConversationScrollController', () => {
 		await vi.waitFor(() => expect(measureViewportFill).toHaveBeenCalledOnce());
 		const navigation = controller.jumpToMessageRow({
 			chatId: 'chat-1',
-			generationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			rowId: 'generation-1:7',
 		});
 		await vi.waitFor(() => expect(scrollToTarget).toHaveBeenCalledOnce());
@@ -1049,7 +1049,7 @@ describe('ConversationScrollController', () => {
 		await expect(
 			controller.jumpToMessageRow({
 				chatId: 'chat-1',
-				generationId: 'generation-1',
+				transcriptViewId: 'generation-1',
 				rowId: 'generation-1:7',
 			}),
 		).resolves.toBe('completed');
@@ -1065,7 +1065,7 @@ describe('ConversationScrollController', () => {
 		controller.setViewportVisible(false);
 		const navigation = controller.jumpToMessageRow({
 			chatId: 'chat-1',
-			generationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			rowId: 'generation-1:7',
 		});
 		controller.setViewportVisible(true);

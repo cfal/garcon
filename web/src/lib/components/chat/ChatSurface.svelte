@@ -433,8 +433,19 @@
 					getVisibleChatIds={getVisibleSplitChatIds}
 					isVisiblePreviewChat={isVisibleSplitChat}
 					getVisiblePreviewCursor={(chatId) => splitPanePreviews.cursor(chatId)}
-					applyVisiblePreviewMessages={(chatId, generationId, messages, lastSeq) =>
-						splitPanePreviews.applyMessages(chatId, generationId, messages, lastSeq)}
+				applyVisiblePreviewMessages={(
+					chatId,
+					transcriptViewId,
+					messages,
+					firstOrdinal,
+					lastOrdinal,
+				) => splitPanePreviews.applyMessages(
+					chatId,
+					transcriptViewId,
+					messages,
+					firstOrdinal,
+					lastOrdinal,
+				)}
 					loadVisiblePreviewSnapshot={(chatId) => splitPanePreviews.loadSnapshot(chatId)}
 					markVisiblePreviewStale={(chatId) => splitPanePreviews.markStale(chatId)}
 				/>

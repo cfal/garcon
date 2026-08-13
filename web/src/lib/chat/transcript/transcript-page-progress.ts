@@ -1,4 +1,4 @@
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 
 export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
 export type TranscriptPageDirection = 'earlier' | 'later';
@@ -16,9 +16,9 @@ export const idlePageState = (): TranscriptPageState => ({ status: 'idle', error
 export const ACTIVE_TRANSCRIPT_RETENTION_LIMIT = 200;
 
 export function retainTranscriptEntries(
-	entries: ChatViewMessage[],
+	entries: TranscriptMessage[],
 	edge: 'earlier' | 'later',
-): ChatViewMessage[] {
+): TranscriptMessage[] {
 	if (entries.length <= ACTIVE_TRANSCRIPT_RETENTION_LIMIT) return entries;
 	return edge === 'earlier'
 		? entries.slice(0, ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
@@ -27,12 +27,12 @@ export function retainTranscriptEntries(
 
 export function collectEarlierTranscriptMessages(
 	currentOldestSeq: number,
-	pageMessages: readonly ChatViewMessage[],
-): ChatViewMessage[] {
+	pageMessages: readonly TranscriptMessage[],
+): TranscriptMessage[] {
 	const pageSeqs = new Set<number>();
 	return pageMessages.filter((message) => {
-		if (message.seq >= currentOldestSeq || pageSeqs.has(message.seq)) return false;
-		pageSeqs.add(message.seq);
+		if (message.ordinal >= currentOldestSeq || pageSeqs.has(message.ordinal)) return false;
+		pageSeqs.add(message.ordinal);
 		return true;
 	});
 }

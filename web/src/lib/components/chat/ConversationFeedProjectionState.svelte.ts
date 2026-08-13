@@ -33,7 +33,7 @@ export interface ConversationFeedProjectionInput {
 	showEarlierBoundary: boolean;
 	showLaterBoundary: boolean;
 	reserveComposerTraySpace: boolean;
-	transcriptGenerationId: string;
+	transcriptViewId: string;
 	pendingPermissions: PendingPermissionRequest[];
 }
 
@@ -77,7 +77,7 @@ function sameInput(
 		left.showEarlierBoundary === right.showEarlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
 		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
-		left.transcriptGenerationId === right.transcriptGenerationId &&
+		left.transcriptViewId === right.transcriptViewId &&
 		left.pendingPermissions === right.pendingPermissions,
 	);
 }
@@ -98,7 +98,7 @@ function sameProjectionConfiguration(
 		left.showEarlierBoundary === right.showEarlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
 		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
-		left.transcriptGenerationId === right.transcriptGenerationId &&
+		left.transcriptViewId === right.transcriptViewId &&
 		left.pendingPermissions.length === right.pendingPermissions.length &&
 		left.pendingPermissions.every(
 			(permission, index) => permission === right.pendingPermissions[index],
@@ -138,7 +138,7 @@ export class ConversationFeedProjectionState {
 			showEarlierBoundary: input.showEarlierBoundary,
 			showLaterBoundary: input.showLaterBoundary,
 			reserveComposerTraySpace: input.reserveComposerTraySpace,
-			transcriptGenerationId: input.transcriptGenerationId,
+			transcriptViewId: input.transcriptViewId,
 			transcriptItems: visibleTranscriptItems,
 			pendingPermissions: input.pendingPermissions,
 		});

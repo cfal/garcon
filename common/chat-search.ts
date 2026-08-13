@@ -64,7 +64,7 @@ export interface ChatSearchNavigateRequest {
 
 export interface ChatSearchNavigateResponse {
   readonly chatId: string;
-  readonly seq: number;
+  readonly ordinal: number;
 }
 
 export interface ChatSearchResult {

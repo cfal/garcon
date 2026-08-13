@@ -67,7 +67,7 @@ import {
   parseChatExecutionControlState,
 	type ChatExecutionControlState,
 } from '../../common/chat-execution-control.js';
-import { parseChatViewMessages, type ChatViewMessage } from '../../common/chat-view.js';
+import { parseTranscriptMessages, type TranscriptMessage } from '../../common/chat-view.js';
 import { normalizePendingUserInput, type PendingUserInput } from '../../common/pending-user-input.js';
 import type {
   RemoteSettingsSnapshot,
@@ -147,7 +147,7 @@ export interface DirectHandoffInput extends DirectRunInput {
 
 export interface ChatMessagesPage {
   chatId: string;
-  messages: ChatViewMessage[];
+  messages: TranscriptMessage[];
   generationId: string;
   lastSeq: number;
   pageOldestSeq: number;
@@ -761,7 +761,7 @@ export class GarconTestClient {
         historyState as UnavailableChatHistoryError['historyState'],
       );
     }
-    const messages = parseChatViewMessages(response.messages);
+    const messages = parseTranscriptMessages(response.messages);
     if (!messages) throw new Error(`Invalid messages response: ${JSON.stringify(response)}`);
     if (!Array.isArray(response.pendingUserInputs)) {
       throw new Error(`Invalid pendingUserInputs response: ${JSON.stringify(response)}`);

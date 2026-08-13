@@ -1,47 +1,47 @@
-import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
+import { parseTranscriptMessages, type TranscriptMessage } from '$shared/chat-view';
 import {
 	CHAT_TRANSCRIPT_INDEX_KEY as INDEX_KEY,
 	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX as SNAPSHOT_PREFIX,
 	setLocalStorageWithCacheRecovery,
 } from '$lib/utils/local-storage-cache-recovery';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const MAX_ENTRIES = 25;
 const MAX_SNAPSHOT_CHARACTERS = 1_500_000;
 
 interface ChatSnapshotEnvelope {
-	version: 3;
+	version: 4;
 	chatId: string;
 	savedAt: string;
-	generationId: string;
-	lastSeq: number;
-	entries: ChatViewMessage[];
+	transcriptViewId: string;
+	lastOrdinal: number;
+	entries: TranscriptMessage[];
 }
 
 interface ChatSnapshotIndexEntry {
 	chatId: string;
 	lastAccessedAt: string;
 	lastValidatedAt: string | null;
-	schemaVersion: 3;
+	schemaVersion: 4;
 	stale: boolean;
 }
 
 interface ChatSnapshotIndex {
-	version: 3;
+	version: 4;
 	entries: ChatSnapshotIndexEntry[];
 }
 
 export interface RestoredChatTranscript {
-	entries: ChatViewMessage[];
-	generationId: string;
-	lastSeq: number;
+	entries: TranscriptMessage[];
+	transcriptViewId: string;
+	lastOrdinal: number;
 	stale: boolean;
 }
 
 export interface CachedChatCursor {
 	chatId: string;
-	generationId: string;
-	lastSeq: number;
+	transcriptViewId: string;
+	lastOrdinal: number;
 }
 
 export interface ChatTranscriptWindowOptions {
@@ -81,9 +81,9 @@ function writeIndex(index: ChatSnapshotIndex): void {
 }
 
 function windowEntries(
-	entries: ChatViewMessage[],
+	entries: TranscriptMessage[],
 	options: ChatTranscriptWindowOptions = {},
-): ChatViewMessage[] {
+): TranscriptMessage[] {
 	const limit = Number.isFinite(options.limit) ? Math.floor(options.limit ?? 0) : 0;
 	if (limit <= 0 || entries.length <= limit) return entries;
 	return entries.slice(-limit);
@@ -164,8 +164,8 @@ export class LocalChatTranscriptStorage {
 				this.remove(chatId);
 				return null;
 			}
-			const entries = parseChatViewMessages(parsed.entries);
-			if (entries === null || typeof parsed.generationId !== 'string' || !parsed.generationId) {
+			const entries = parseTranscriptMessages(parsed.entries);
+			if (entries === null || typeof parsed.transcriptViewId !== 'string' || !parsed.transcriptViewId) {
 				this.remove(chatId);
 				return null;
 			}
@@ -174,8 +174,8 @@ export class LocalChatTranscriptStorage {
 			writeIndex(pruneIndex(upsertEntry(index, chatId, { lastAccessedAt: nowIso() })));
 			return {
 				entries: windowEntries(entries, options),
-				generationId: parsed.generationId,
-				lastSeq: Number(parsed.lastSeq) || 0,
+				transcriptViewId: parsed.transcriptViewId,
+				lastOrdinal: Number(parsed.lastOrdinal) || 0,
 				stale: entry?.stale ?? false,
 			};
 		} catch {
@@ -186,12 +186,12 @@ export class LocalChatTranscriptStorage {
 
 	persist(
 		chatId: string,
-		entries: ChatViewMessage[],
-		cursor: { generationId: string; lastSeq: number },
+		entries: TranscriptMessage[],
+		cursor: { transcriptViewId: string; lastOrdinal: number },
 		options: ChatTranscriptWindowOptions = {},
 	): void {
 		if (!chatId) return;
-		if (entries.length === 0 || !cursor.generationId) {
+		if (entries.length === 0 || !cursor.transcriptViewId) {
 			this.remove(chatId);
 			return;
 		}
@@ -199,8 +199,8 @@ export class LocalChatTranscriptStorage {
 			version: SCHEMA_VERSION,
 			chatId,
 			savedAt: nowIso(),
-			generationId: cursor.generationId,
-			lastSeq: cursor.lastSeq,
+			transcriptViewId: cursor.transcriptViewId,
+			lastOrdinal: cursor.lastOrdinal,
 			entries: windowEntries(entries, options),
 		};
 		try {
@@ -284,17 +284,17 @@ export class LocalChatTranscriptStorage {
 				if (
 					parsed.version !== SCHEMA_VERSION ||
 					parsed.chatId !== entry.chatId ||
-					typeof parsed.generationId !== 'string' ||
-					!parsed.generationId ||
-					!(Number(parsed.lastSeq) > 0)
+					typeof parsed.transcriptViewId !== 'string' ||
+					!parsed.transcriptViewId ||
+					!(Number(parsed.lastOrdinal) > 0)
 				) {
 					this.remove(entry.chatId);
 					continue;
 				}
 				cursors.push({
 					chatId: entry.chatId,
-					generationId: parsed.generationId,
-					lastSeq: Number(parsed.lastSeq),
+					transcriptViewId: parsed.transcriptViewId,
+					lastOrdinal: Number(parsed.lastOrdinal),
 				});
 			}
 			return cursors;

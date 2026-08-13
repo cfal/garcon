@@ -54,12 +54,12 @@ function snapshot(overrides = {}) {
     pendingUserInputs: [],
     transcript: {
       availability: 'available',
-      generationId: 'generation-1',
+      transcriptViewId: 'generation-1',
       messages: [{
-        seq: 4,
+        ordinal: 4,
         message: { type: 'assistant-message', timestamp: TIMESTAMP, content: 'Working' },
       }, {
-        seq: 5,
+        ordinal: 5,
         message: {
           type: 'bash-tool-use',
           timestamp: TIMESTAMP,
@@ -67,8 +67,9 @@ function snapshot(overrides = {}) {
           command: 'bun test',
         },
       }],
-      lastSeq: 5,
-      pageOldestSeq: 4,
+      lastOrdinal: 5,
+      pageOldestOrdinal: 4,
+      pageNewestOrdinal: 5,
       hasMore: true,
     },
     ...overrides,
@@ -80,7 +81,7 @@ describe('chat snapshot contract', () => {
     expect(parseChatSnapshotResponse(snapshot())).toMatchObject({
       chat: { id: CHAT_ID, tags: ['cli', 'review'] },
       processingPhase: 'running',
-      transcript: { availability: 'available', lastSeq: 5 },
+      transcript: { availability: 'available', lastOrdinal: 5 },
     });
     expect(parseChatSnapshotResponse(snapshot({
       transcript: {
@@ -110,26 +111,27 @@ describe('chat snapshot contract', () => {
     expect(parseChatSnapshotResponse(snapshot({
       transcript: {
         availability: 'available',
-        generationId: 'generation-2',
-        messages: [],
-        lastSeq: 42,
-        pageOldestSeq: 17,
+		transcriptViewId: 'generation-2',
+		messages: [],
+		lastOrdinal: 42,
+		pageOldestOrdinal: 17,
+		pageNewestOrdinal: 42,
         hasMore: true,
       },
       transientFeed: {
         ...snapshot().transientFeed,
         generationId: 'generation-2',
       },
-    })).transcript).toMatchObject({ lastSeq: 42, pageOldestSeq: 17, hasMore: true });
+	})).transcript).toMatchObject({ lastOrdinal: 42, pageOldestOrdinal: 17, hasMore: true });
   });
 
-  test('requires transcript and transient state to share one browser generation', () => {
+  test('requires transcript and transient state to share one transcript view', () => {
     expect(() => parseChatSnapshotResponse(snapshot({
       transientFeed: {
         ...snapshot().transientFeed,
         generationId: 'generation-2',
       },
-    }))).toThrow('generations differ');
+    }))).toThrow('views differ');
   });
 
   test.each([
@@ -146,7 +148,7 @@ describe('chat snapshot contract', () => {
     ['message count', (value) => ({ ...value, messageLimit: 1 })],
     ['message cursor', (value) => ({
       ...value,
-      transcript: { ...value.transcript, lastSeq: 4 },
+        transcript: { ...value.transcript, lastOrdinal: 4 },
     })],
     ['pending input chat', (value) => ({
       ...value,

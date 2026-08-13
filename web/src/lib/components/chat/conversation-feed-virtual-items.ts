@@ -51,7 +51,7 @@ export interface ConversationVirtualFeedInput {
 	showLaterBoundary: boolean;
 	reserveComposerTraySpace: boolean;
 	surfaceIdentity: string;
-	transcriptGenerationId: string;
+	transcriptViewId: string;
 	transcriptItems: ReconciledConversationFeedRenderItem[];
 	pendingPermissions: PendingPermissionRequest[];
 }
@@ -109,7 +109,7 @@ export function buildConversationVirtualFeedModel(
 	const detachedPermissions: PendingPermissionRequest[] = [];
 	for (const permission of input.pendingPermissions) {
 		const anchor = permission.transcript;
-		if (!anchor || anchor.generationId !== input.transcriptGenerationId) {
+		if (!anchor || anchor.generationId !== input.transcriptViewId) {
 			detachedPermissions.push(permission);
 			continue;
 		}
@@ -119,9 +119,9 @@ export function buildConversationVirtualFeedModel(
 	}
 
 	for (const [transcriptIndex, item] of input.transcriptItems.entries()) {
-		const seqs = transcriptItemSequences(item);
-		const anchored = seqs.flatMap((seq) => permissionByAnchor.get(seq) ?? []);
-		for (const seq of seqs) permissionByAnchor.delete(seq);
+		const ordinals = transcriptItemOrdinals(item);
+		const anchored = ordinals.flatMap((ordinal) => permissionByAnchor.get(ordinal) ?? []);
+		for (const ordinal of ordinals) permissionByAnchor.delete(ordinal);
 		items.push({
 			kind: 'transcript',
 			key: key(`transcript:${item.virtualKey}`),
@@ -208,10 +208,10 @@ function permissionItem(
 	};
 }
 
-function transcriptItemSequences(item: ReconciledConversationFeedRenderItem): number[] {
-	if (item.kind === 'message') return item.seq === undefined ? [] : [item.seq];
+function transcriptItemOrdinals(item: ReconciledConversationFeedRenderItem): number[] {
+	if (item.kind === 'message') return item.ordinal === undefined ? [] : [item.ordinal];
 	if (item.kind === 'bash-group' || item.kind === 'read-group') {
-		return item.rows.flatMap((row) => row.seq === undefined ? [] : [row.seq]);
+		return item.rows.flatMap((row) => row.ordinal === undefined ? [] : [row.ordinal]);
 	}
 	return [];
 }

@@ -23,7 +23,7 @@ import type { SettingsStore } from '../settings/store.js';
 import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { MetadataIndex } from '../chats/metadata-store.js';
-import type { ChatViewPageReader, CompositeSnapshotPort } from '../chats/chat-message-reader.js';
+import type { TranscriptPageReader, CompositeSnapshotPort } from '../chats/chat-message-reader.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
@@ -78,7 +78,7 @@ export default function createAllRoutes({
   queue: ChatExecutionService;
   pathCache: PathCache;
   metadata: MetadataIndex;
-  chatViews: ChatViewPageReader;
+  chatViews: TranscriptPageReader;
   compositeSnapshots: CompositeSnapshotPort;
   agents: AgentRegistry;
   pendingInputs: PendingUserInputServiceContract;

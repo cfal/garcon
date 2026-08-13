@@ -3,7 +3,7 @@ import { SplitPanePreviewStore } from '../split-pane-preview-store.svelte.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { LocalChatTranscriptStorage } from '$lib/chat/transcript/chat-transcript-storage.js';
 import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 
 vi.mock('$lib/api/chats.js', () => ({
@@ -12,29 +12,30 @@ vi.mock('$lib/api/chats.js', () => ({
 
 const TS = '2026-06-17T00:00:00.000Z';
 
-function entry(seq: number, content: string): ChatViewMessage {
+function entry(ordinal: number, content: string): TranscriptMessage {
 	return {
-		seq,
+		ordinal,
 		message: new AssistantMessage(TS, content) as ChatMessage,
 	};
 }
 
-function userEntry(seq: number, content: string): ChatViewMessage {
+function userEntry(ordinal: number, content: string): TranscriptMessage {
 	return {
-		seq,
+		ordinal,
 		message: new UserMessage(TS, content) as ChatMessage,
 	};
 }
 
-function page(messages: ChatViewMessage[], generationId = 'generation-1') {
+function page(messages: TranscriptMessage[], transcriptViewId = 'generation-1') {
 	return {
 		historyState: { kind: 'complete' as const },
 		chatId: 'chat-1',
-		generationId,
+		transcriptViewId,
 		messages,
 		pendingUserInputs: [],
-		lastSeq: messages.at(-1)?.seq ?? 0,
-		pageOldestSeq: messages[0]?.seq ?? 0,
+		lastOrdinal: messages.at(-1)?.ordinal ?? 0,
+		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
+		pageNewestOrdinal: messages.at(-1)?.ordinal ?? 0,
 		hasMore: false,
 		limit: 50,
 	};
@@ -49,8 +50,8 @@ describe('SplitPanePreviewStore', () => {
 	it('restores a cached preview and exposes its cursor', () => {
 		const storage = new LocalChatTranscriptStorage();
 		storage.persist('chat-1', [userEntry(1, 'hello')], {
-			generationId: 'generation-1',
-			lastSeq: 1,
+			transcriptViewId: 'generation-1',
+			lastOrdinal: 1,
 		});
 		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
 		const store = new SplitPanePreviewStore(transcriptCache);
@@ -60,8 +61,8 @@ describe('SplitPanePreviewStore', () => {
 		expect(store.entry('chat-1').messages).toHaveLength(1);
 		expect(store.cursor('chat-1')).toEqual({
 			chatId: 'chat-1',
-			generationId: 'generation-1',
-			lastSeq: 1,
+			transcriptViewId: 'generation-1',
+			lastOrdinal: 1,
 		});
 	});
 
@@ -80,8 +81,8 @@ describe('SplitPanePreviewStore', () => {
 
 		transcriptCache.flush();
 		const restored = storage.restore('chat-1');
-		expect(restored?.generationId).toBe('generation-1');
-		expect(restored?.lastSeq).toBe(1);
+		expect(restored?.transcriptViewId).toBe('generation-1');
+		expect(restored?.lastOrdinal).toBe(1);
 	});
 
 	it('shows degraded history without exposing a preview cursor', async () => {
@@ -101,8 +102,8 @@ describe('SplitPanePreviewStore', () => {
 		await store.loadSnapshot('chat-1');
 
 		expect(store.entry('chat-1')).toMatchObject({
-			generationId: null,
-			lastSeq: 0,
+			transcriptViewId: null,
+			lastOrdinal: 0,
 			messages: [],
 			isLoading: false,
 			error: expect.any(String),
@@ -115,10 +116,10 @@ describe('SplitPanePreviewStore', () => {
 		const store = new SplitPanePreviewStore();
 		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
 
-		const applied = store.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 2);
+		const applied = store.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 2, 2);
 
 		expect(applied).toBe(true);
-		expect(store.entry('chat-1').lastSeq).toBe(2);
+		expect(store.entry('chat-1').lastOrdinal).toBe(2);
 		expect(
 			store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content),
 		).toEqual(['first', 'second']);
@@ -128,32 +129,32 @@ describe('SplitPanePreviewStore', () => {
 		const store = new SplitPanePreviewStore();
 		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
 
-		const applied = store.applyMessages('chat-1', 'generation-2', [entry(2, 'second')], 2);
+		const applied = store.applyMessages('chat-1', 'generation-2', [entry(2, 'second')], 2, 2);
 
 		expect(applied).toBe(false);
 		expect(store.entry('chat-1').isStale).toBe(true);
 	});
 
-	it('marks stale when incoming messages have a seq gap', () => {
+	it('marks stale when incoming messages have a ordinal gap', () => {
 		const store = new SplitPanePreviewStore();
 		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
 
-		const applied = store.applyMessages('chat-1', 'generation-1', [entry(3, 'third')], 3);
+		const applied = store.applyMessages('chat-1', 'generation-1', [entry(3, 'third')], 3, 3);
 
 		expect(applied).toBe(false);
 		expect(store.entry('chat-1').isStale).toBe(true);
-		expect(store.entry('chat-1').lastSeq).toBe(1);
+		expect(store.entry('chat-1').lastOrdinal).toBe(1);
 	});
 
-	it('marks stale when server lastSeq remains ahead after apply', () => {
+	it('advances across a hidden ledger row after the visible append', () => {
 		const store = new SplitPanePreviewStore();
 		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
 
-		const applied = store.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 3);
+		const applied = store.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 2, 3);
 
-		expect(applied).toBe(false);
-		expect(store.entry('chat-1').isStale).toBe(true);
-		expect(store.entry('chat-1').lastSeq).toBe(1);
+		expect(applied).toBe(true);
+		expect(store.entry('chat-1').isStale).toBe(false);
+		expect(store.entry('chat-1').lastOrdinal).toBe(3);
 	});
 
 	it('ignores stale snapshot load results', async () => {
@@ -173,7 +174,7 @@ describe('SplitPanePreviewStore', () => {
 		resolveFirst(page([entry(1, 'old')], 'generation-old'));
 		await first;
 
-		expect(store.entry('chat-1').generationId).toBe('generation-new');
+		expect(store.entry('chat-1').transcriptViewId).toBe('generation-new');
 		expect(
 			store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content),
 		).toEqual(['new']);
@@ -190,11 +191,11 @@ describe('SplitPanePreviewStore', () => {
 		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
 
 		const load = store.loadSnapshot('chat-1');
-		expect(store.applyMessages('chat-1', 'generation-1', [entry(2, 'live')], 2)).toBe(true);
+		expect(store.applyMessages('chat-1', 'generation-1', [entry(2, 'live')], 2, 2)).toBe(true);
 		resolveSnapshot(page([entry(1, 'first')], 'generation-1'));
 		await load;
 
-		expect(store.entry('chat-1').lastSeq).toBe(2);
+		expect(store.entry('chat-1').lastOrdinal).toBe(2);
 		expect(
 			store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content),
 		).toEqual(['first', 'live']);
@@ -214,11 +215,11 @@ describe('SplitPanePreviewStore', () => {
 		expect(store.entry('chat-2').messages).toEqual([]);
 		expect(storage.restore('chat-1')).toBeTruthy();
 		expect(storage.restore('chat-2')).toBeTruthy();
-		expect(transcriptCache.get('chat-2')?.generationId).toBe('generation-2');
+		expect(transcriptCache.get('chat-2')?.transcriptViewId).toBe('generation-2');
 		expect(storage.listCursors()).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ chatId: 'chat-1', generationId: 'generation-1', lastSeq: 1 }),
-				expect.objectContaining({ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 }),
+				expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 1 }),
+				expect.objectContaining({ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 1 }),
 			]),
 		);
 	});
@@ -229,10 +230,14 @@ describe('SplitPanePreviewStore', () => {
 		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
 
 		store.prune([]);
-		const result = transcriptCache.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 2);
+		const result = transcriptCache.applyMessages('chat-1', 'generation-1', {
+			firstOrdinal: 2,
+			lastOrdinal: 2,
+			messages: [entry(2, 'second')],
+		});
 
-		expect(result).toEqual({ status: 'applied', changed: true, lastSeq: 2 });
-		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([1, 2]);
+		expect(result).toEqual({ status: 'applied', changed: true, lastOrdinal: 2 });
+		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([1, 2]);
 	});
 
 	it('removes preview entries and cached transcripts when a chat is deleted everywhere', () => {

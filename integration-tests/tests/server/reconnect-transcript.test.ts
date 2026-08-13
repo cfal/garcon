@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { applyChatViewMessages, type ChatViewMessage } from '../../../common/chat-view.js';
+import { applyTranscriptMessages, type TranscriptMessage } from '../../../common/chat-view.js';
 import type { ChatGenerationResetMessage } from '../../../common/ws-events.js';
 import { countUserContent, userContents } from '../../support/chat-assertions.js';
 import { GarconWsRequestError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
-function transcriptProjection(messages: readonly ChatViewMessage[]): Array<{
+function transcriptProjection(messages: readonly TranscriptMessage[]): Array<{
   seq: number;
   type: string;
   content?: string;
@@ -138,7 +138,7 @@ describe('reconnect and transcript stability', () => {
         content: 'echo:missed-delta',
       });
 
-      const applied = applyChatViewMessages(initial.messages, replay.messages, initial.lastSeq);
+      const applied = applyTranscriptMessages(initial.messages, replay.messages, initial.lastSeq);
       expect(applied.status).toBe('applied');
       const canonical = await fixture.client.getMessages(chatId);
       expect(applied.messages).toEqual(canonical.messages);

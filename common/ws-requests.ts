@@ -49,22 +49,24 @@ export class ChatSubscribeRequest {
   constructor(
     public clientRequestId: string | null,
     public chatId: string | null,
-    public generationId: string,
-    public afterSeq: number,
+    public transcriptViewId: string,
+    public afterOrdinal: number,
   ) { }
 
   static fromJson(data: Record<string, unknown>): ChatSubscribeRequest {
-    const afterSeq = typeof data.afterSeq === 'number'
-      && Number.isInteger(data.afterSeq)
-      && data.afterSeq >= 0
-      ? data.afterSeq
+    const afterOrdinal = typeof data.afterOrdinal === 'number'
+      && Number.isInteger(data.afterOrdinal)
+      && data.afterOrdinal >= 0
+      ? data.afterOrdinal
       : 0;
-    const generationId = typeof data.generationId === 'string' ? data.generationId : '';
+    const transcriptViewId = typeof data.transcriptViewId === 'string'
+      ? data.transcriptViewId
+      : '';
     return new ChatSubscribeRequest(
       strOrNull(data.clientRequestId),
       strOrNull(data.chatId),
-      generationId,
-      afterSeq,
+      transcriptViewId,
+      afterOrdinal,
     );
   }
 }

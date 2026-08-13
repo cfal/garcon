@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ChatViewMessage } from '../../../../common/chat-view.js';
+import type { TranscriptMessage } from '../../../../common/chat-view.js';
 import { assistantContents, userContents } from '../../../support/chat-assertions.js';
 import { GarconApiError } from '../../../support/garcon-client.js';
 import {
@@ -196,8 +196,8 @@ async function expectEventStreamForkRefusal(promise: Promise<unknown>): Promise<
 // Claude rewrites transcript entries when it forks, so the prefix is compared by rendered
 // content rather than by wire identity.
 function expectMatchingPrefixContents(
-  forked: readonly ChatViewMessage[],
-  source: readonly ChatViewMessage[],
+  forked: readonly TranscriptMessage[],
+  source: readonly TranscriptMessage[],
   upToSeq: number,
 ): void {
   const prefix = source.filter((entry) => entry.seq <= upToSeq);

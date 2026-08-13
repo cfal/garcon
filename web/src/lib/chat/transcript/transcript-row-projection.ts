@@ -1,12 +1,12 @@
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 
 export interface ChatTranscriptRow {
 	kind: 'message';
 	id: string;
 	message: ChatMessage;
-	seq?: number;
+	ordinal?: number;
 }
 
 export function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {
@@ -21,7 +21,7 @@ export function normalizePendingInputs(inputs: readonly unknown[]): PendingUserI
 	);
 }
 
-export function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMessage[] {
+export function uniqueEntriesByClientRequestId(entries: TranscriptMessage[]): TranscriptMessage[] {
 	const seenClientRequestIds = new Set<string>();
 	return entries.filter((entry) => {
 		const message = entry.message;
@@ -33,9 +33,9 @@ export function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): Chat
 }
 
 export function applyPendingDeliveryStatuses(
-	entries: ChatViewMessage[],
+	entries: TranscriptMessage[],
 	pendingInputs: PendingUserInput[],
-): ChatViewMessage[] {
+): TranscriptMessage[] {
 	const unsettledStatuses = new Map(
 		pendingInputs
 			.filter(

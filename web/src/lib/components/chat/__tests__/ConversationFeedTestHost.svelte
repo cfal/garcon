@@ -52,7 +52,7 @@
 			'generation-1',
 			[
 				{
-					seq: 1,
+					ordinal: 1,
 					message: new UserMessage('2026-07-01T00:00:00.000Z', 'Durable user message'),
 				},
 			],
@@ -78,7 +78,7 @@
 					? 5
 					: 120;
 		const messages = Array.from({ length: messageCount }, (_, index) => ({
-			seq: index + 1,
+			ordinal: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
@@ -106,7 +106,7 @@
 
 	function shrinkTranscript(): void {
 		const messages = Array.from({ length: 20 }, (_, index) => ({
-			seq: index + 1,
+			ordinal: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
@@ -119,7 +119,7 @@
 
 	function shrinkTranscriptKeepingTail(): void {
 		const messages = Array.from({ length: 20 }, (_, index) => ({
-			seq: index + 101,
+			ordinal: index + 101,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 101}`),
 		}));
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
@@ -175,7 +175,7 @@
 	onLoadEarlier={retryEarlierPage}
 	isVisible={true}
 	pinnedToBottom={true}
-	surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.generationId}`}
+	surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
 />
 {#if showAnnouncementTrigger}
 	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}

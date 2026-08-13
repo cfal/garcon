@@ -151,7 +151,7 @@ export class SidebarSearchStore {
 				messageOrdinal: snippet.messageOrdinal,
 				anchor: snippet.anchor,
 			});
-			onOpen(chatId, resolved.seq);
+			onOpen(chatId, resolved.ordinal);
 		} catch (error) {
 			if (error instanceof ApiError && error.errorCode === 'SEARCH_RESULT_STALE') {
 				this.transcriptSearchResults = this.transcriptSearchResults.filter(

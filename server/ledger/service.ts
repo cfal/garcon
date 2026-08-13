@@ -266,6 +266,14 @@ export class TranscriptLedgerService {
     return this.#store.page(chatId, viewId, limit, before);
   }
 
+  rowsAfter(
+    chatId: string,
+    viewId: TranscriptViewId,
+    afterOrdinal: number,
+  ): readonly LedgerRow[] {
+    return this.#store.rowsAfter(chatId, viewId, afterOrdinal);
+  }
+
   currentRows(chatId: string): readonly LedgerRow[] {
     return this.#store.currentRows(chatId);
   }

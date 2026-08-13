@@ -11,7 +11,7 @@ import {
   type ThinkingMode,
 } from './chat-modes.js';
 import type { ChatProcessingPhase } from './chat-types.js';
-import { parseChatViewMessages, type ChatViewMessage } from './chat-view.js';
+import { parseTranscriptMessages, type TranscriptMessage } from './chat-view.js';
 import {
   parseChatTransientFeedSnapshot,
   type ChatTransientFeedSnapshot,
@@ -47,16 +47,15 @@ export interface ChatSnapshotChat {
 
 export interface AvailableChatSnapshotTranscript {
   availability: 'available';
-  generationId: string;
-  messages: ChatViewMessage[];
-  lastSeq: number;
-  pageOldestSeq: number;
+  transcriptViewId: string;
+  messages: TranscriptMessage[];
+  lastOrdinal: number;
+  pageOldestOrdinal: number;
+  pageNewestOrdinal: number;
   hasMore: boolean;
 }
 
-// Carries the typed non-complete history state: TRANSCRIPT_DEFERRED while the
-// projection defers reads until execution settles, otherwise the degraded
-// store code (TRANSCRIPT_UNAVAILABLE when no more specific code exists).
+// Carries a typed ledger read failure without making the rest of the snapshot unusable.
 export interface UnavailableChatSnapshotTranscript {
   availability: 'unavailable';
   errorCode: string;
@@ -123,8 +122,8 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
   }
   const transcript = parseTranscript(raw.transcript, messageLimit);
   if (transcript.availability === 'available'
-      && transcript.generationId !== transientFeed.generationId) {
-    fail('transientFeed and transcript generations differ');
+      && transcript.transcriptViewId !== transientFeed.generationId) {
+    fail('transientFeed and transcript views differ');
   }
 
   return {
@@ -214,20 +213,31 @@ function parseTranscript(value: unknown, messageLimit: number): ChatSnapshotTran
     };
   }
   if (raw.availability !== 'available') fail('transcript.availability is invalid');
-  const messages = parseChatViewMessages(raw.messages);
+  const messages = parseTranscriptMessages(raw.messages);
   if (!messages || messages.length > messageLimit) fail('transcript.messages is invalid');
-  const lastSeq = nonNegativeInteger(raw.lastSeq, 'transcript.lastSeq');
-  const pageOldestSeq = nonNegativeInteger(raw.pageOldestSeq, 'transcript.pageOldestSeq');
+  const lastOrdinal = nonNegativeInteger(raw.lastOrdinal, 'transcript.lastOrdinal');
+  const pageOldestOrdinal = nonNegativeInteger(
+    raw.pageOldestOrdinal,
+    'transcript.pageOldestOrdinal',
+  );
+  const pageNewestOrdinal = nonNegativeInteger(
+    raw.pageNewestOrdinal,
+    'transcript.pageNewestOrdinal',
+  );
   if (typeof raw.hasMore !== 'boolean') fail('transcript.hasMore is invalid');
-  if (messages.length > 0 && messages[messages.length - 1]!.seq > lastSeq) {
-    fail('transcript sequence metadata is inconsistent');
+  if (messages.length > 0 && messages[messages.length - 1]!.ordinal > lastOrdinal) {
+    fail('transcript ordinal metadata is inconsistent');
   }
   return {
     availability: 'available',
-    generationId: requiredString(raw.generationId, 'transcript.generationId'),
+    transcriptViewId: requiredString(
+      raw.transcriptViewId,
+      'transcript.transcriptViewId',
+    ),
     messages,
-    lastSeq,
-    pageOldestSeq,
+    lastOrdinal,
+    pageOldestOrdinal,
+    pageNewestOrdinal,
     hasMore: raw.hasMore,
   };
 }

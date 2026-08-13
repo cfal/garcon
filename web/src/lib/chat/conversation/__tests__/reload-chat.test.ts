@@ -28,17 +28,17 @@ describe('reloadChatFromNative', () => {
 			type: 'chat-reloaded',
 			clientRequestId: 'req-1',
 			chatId: 'chat-1',
-			generationId: 'generation-2',
-			lastSeq: 4,
-			pageOldestSeq: 3,
+			transcriptViewId: 'generation-2',
+			lastOrdinal: 4,
+			pageOldestOrdinal: 3,
 			hasMore: true,
 			messages: [
 				{
-					seq: 3,
+					ordinal: 3,
 					message: { type: 'assistant-message', timestamp: TS, content: 'three' },
 				},
 				{
-					seq: 4,
+					ordinal: 4,
 					message: { type: 'assistant-message', timestamp: TS, content: 'four' },
 				},
 			],
@@ -46,15 +46,16 @@ describe('reloadChatFromNative', () => {
 		vi.mocked(getChatMessages).mockResolvedValue({
 			historyState: { kind: 'complete' },
 			chatId: 'chat-1',
-			generationId: 'generation-2',
-			lastSeq: 4,
-			pageOldestSeq: 1,
+			transcriptViewId: 'generation-2',
+			lastOrdinal: 4,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 4,
 			hasMore: false,
 			limit: 50,
 			pendingUserInputs: [],
 			messages: [
-				{ seq: 1, message: new AssistantMessage(TS, 'one') },
-				{ seq: 2, message: new AssistantMessage(TS, 'two') },
+				{ ordinal: 1, message: new AssistantMessage(TS, 'one') },
+				{ ordinal: 2, message: new AssistantMessage(TS, 'two') },
 			],
 		});
 		const chat = new ActiveTranscriptState();
@@ -65,22 +66,22 @@ describe('reloadChatFromNative', () => {
 			type: 'chat-reload',
 			chatId: 'chat-1',
 		});
-		expect(chat.getCursor()).toEqual({ generationId: 'generation-2', lastSeq: 4 });
-		expect(chat.oldestSeq).toBe(3);
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-2', lastOrdinal: 4 });
+		expect(chat.oldestOrdinal).toBe(3);
 		expect(chat.hasEarlierMessages).toBe(true);
 		expect(chat.chatMessages[0]).toBeInstanceOf(AssistantMessage);
 		expect(chat.chatMessages.map((message) => (message as AssistantMessage).content)).toEqual([
 			'three',
 			'four',
 		]);
-		expect(chat.transcriptCache.get('chat-1')?.lastSeq).toBe(4);
+		expect(chat.transcriptCache.get('chat-1')?.lastOrdinal).toBe(4);
 
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
 
 		expect(getChatMessages).toHaveBeenCalledWith({
 			chatId: 'chat-1',
 			limit: 50,
-			beforeSeq: 3,
+			beforeOrdinal: 3,
 		});
 		expect(chat.chatMessages.map((message) => (message as AssistantMessage).content)).toEqual([
 			'one',
@@ -96,10 +97,10 @@ describe('reloadChatFromNative', () => {
 			type: 'chat-subscribed',
 			clientRequestId: 'req-1',
 			chatId: 'chat-1',
-			generationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			mode: 'delta',
 			messages: [],
-			lastSeq: 0,
+			lastOrdinal: 0,
 		});
 
 		await expect(reloadChatFromNative(ws, new ActiveTranscriptState(), 'chat-1')).rejects.toThrow(

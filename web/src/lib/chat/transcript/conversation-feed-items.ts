@@ -23,7 +23,7 @@ export interface PermissionTerminalState {
 export interface GroupedTranscriptRow<TMessage extends ChatMessage> {
 	id: string;
 	message: TMessage;
-	seq?: number;
+	ordinal?: number;
 }
 
 export type ConversationFeedRenderItem =
@@ -33,7 +33,7 @@ export type ConversationFeedRenderItem =
 			rowIds: readonly [string];
 			message: ChatMessage;
 			index: number;
-			seq?: number;
+			ordinal?: number;
 			prevMessage: ChatMessage | null;
 	  }
 	| {
@@ -295,7 +295,7 @@ export function buildConversationFeedRenderModel(
 					continue;
 				}
 				if (!(candidate instanceof BashToolUseMessage)) break;
-				groupRows.push({ id: candidateRow.id, message: candidate, seq: candidateRow.seq });
+				groupRows.push({ id: candidateRow.id, message: candidate, ordinal: candidateRow.ordinal });
 				previousRenderable = candidate;
 				index += 1;
 			}
@@ -316,7 +316,7 @@ export function buildConversationFeedRenderModel(
 					rowIds: [groupRows[0].id],
 					message: groupRows[0].message,
 					index: firstIndex,
-					seq: groupRows[0].seq,
+					ordinal: groupRows[0].ordinal,
 					prevMessage,
 				});
 			}
@@ -338,7 +338,7 @@ export function buildConversationFeedRenderModel(
 					continue;
 				}
 				if (!(candidate instanceof ReadToolUseMessage)) break;
-				groupRows.push({ id: candidateRow.id, message: candidate, seq: candidateRow.seq });
+				groupRows.push({ id: candidateRow.id, message: candidate, ordinal: candidateRow.ordinal });
 				previousRenderable = candidate;
 				index += 1;
 			}
@@ -359,7 +359,7 @@ export function buildConversationFeedRenderModel(
 					rowIds: [groupRows[0].id],
 					message: groupRows[0].message,
 					index: firstIndex,
-					seq: groupRows[0].seq,
+					ordinal: groupRows[0].ordinal,
 					prevMessage,
 				});
 			}
@@ -372,7 +372,7 @@ export function buildConversationFeedRenderModel(
 			rowIds: [row.id],
 			message,
 			index,
-			seq: row.seq,
+			ordinal: row.ordinal,
 			prevMessage: previousRenderable,
 		});
 		previousRenderable = message;

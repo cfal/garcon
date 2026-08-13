@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import { sameProjectionState } from '@garcon/server-agent-common/transcript-projection/identity';
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { ChatReplayResult, ChatViewMessage, ChatViewPage } from '../../common/chat-view.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
 import {
@@ -12,6 +11,7 @@ import {
 import type {
   ChatHistoryPage,
   ChatTranscriptSnapshot,
+  LegacyChatViewMessage,
   ChatViewGenerationTransition as GenerationTransition,
   ChatViewLoader,
   MutableChatView as ChatView,
@@ -28,6 +28,28 @@ export type {
   ProjectionCommitViewApplication,
   ProjectionCommitViewInput,
 } from './chat-view-contracts.js';
+
+export interface LegacyChatViewPage {
+  readonly generationId: string;
+  readonly messages: LegacyChatViewMessage[];
+  readonly lastSeq: number;
+  readonly pageOldestSeq: number;
+  readonly hasMore: boolean;
+}
+
+export type LegacyChatReplayResult =
+  | {
+      readonly mode: 'delta';
+      readonly generationId: string;
+      readonly messages: LegacyChatViewMessage[];
+      readonly lastSeq: number;
+    }
+  | {
+      readonly mode: 'snapshot-required';
+      readonly generationId: string;
+      readonly messages: [];
+      readonly lastSeq: number;
+    };
 
 const logger = createLogger('chat-view');
 
@@ -132,7 +154,7 @@ export class ChatViewStore {
     loader: ChatViewLoader,
     limit: number,
     beforeSeq?: number,
-  ): Promise<ChatViewPage> {
+  ): Promise<LegacyChatViewPage> {
     return this.#withChat(chatId, async () => {
       let view = this.#views.get(chatId);
       if (!view) {
@@ -187,7 +209,7 @@ export class ChatViewStore {
     });
   }
 
-  async replaceFromProjection(chatId: string, snapshot: ChatTranscriptSnapshot): Promise<ChatViewPage> {
+  async replaceFromProjection(chatId: string, snapshot: ChatTranscriptSnapshot): Promise<LegacyChatViewPage> {
     return this.#withChat(chatId, async () => {
       const previous = this.#views.get(chatId);
       this.invalidateFence(chatId);
@@ -203,7 +225,7 @@ export class ChatViewStore {
   // generation. Execution ownership refuses the reload because the running
   // turn's exact commits already keep the view current; ownership is rechecked
   // after each held read so a turn that starts mid-load wins.
-  async reloadFromProjection(chatId: string, loader: ChatViewLoader): Promise<ChatViewPage> {
+  async reloadFromProjection(chatId: string, loader: ChatViewLoader): Promise<LegacyChatViewPage> {
     return this.#withChat(chatId, async () => {
       const assertIdle = () => {
         if (this.#isChatActive(chatId)) throw new ChatRunningError(chatId);
@@ -277,13 +299,13 @@ export class ChatViewStore {
     });
   }
 
-  readPage(chatId: string, limit: number, beforeSeq?: number): ChatViewPage | null {
+  readPage(chatId: string, limit: number, beforeSeq?: number): LegacyChatViewPage | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
     return this.#readPageFromView(view, limit, beforeSeq);
   }
 
-  readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null {
+  readReplay(chatId: string, generationId: string, afterSeq: number): LegacyChatReplayResult | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
     this.#touch(view);
@@ -520,7 +542,7 @@ export class ChatViewStore {
     return view;
   }
 
-  #appendToView(view: ChatView, messages: ChatMessage[]): ChatViewMessage[] {
+  #appendToView(view: ChatView, messages: ChatMessage[]): LegacyChatViewMessage[] {
     if (messages.length === 0) return [];
     const appended = messages.map((message) => {
       assertValidChatMessage(message);
@@ -559,7 +581,7 @@ export class ChatViewStore {
     this.#touch(view);
   }
 
-  #messagesFromHistoryPage(page: ChatHistoryPage): ChatViewMessage[] {
+  #messagesFromHistoryPage(page: ChatHistoryPage): LegacyChatViewMessage[] {
     if (
       !Number.isSafeInteger(page.total)
       || page.total < 0
@@ -581,7 +603,7 @@ export class ChatViewStore {
     });
   }
 
-  #pageFromHistoryPage(view: ChatView, page: ChatHistoryPage): ChatViewPage {
+  #pageFromHistoryPage(view: ChatView, page: ChatHistoryPage): LegacyChatViewPage {
     const messages = this.#messagesFromHistoryPage(page);
     return {
       generationId: view.generationId,
@@ -597,7 +619,7 @@ export class ChatViewStore {
     page: ChatHistoryPage,
     limit: number,
     beforeSeq?: number,
-  ): ChatViewPage {
+  ): LegacyChatViewPage {
     const pageMessages = this.#messagesFromHistoryPage(page);
     const combined = pageMessages.at(-1)?.seq === (view.messages[0]?.seq ?? 1) - 1
       ? [...pageMessages, ...view.messages]
@@ -610,7 +632,7 @@ export class ChatViewStore {
     messages: ChatMessage[],
     limit: number,
     beforeSeq?: number,
-  ): ChatViewPage {
+  ): LegacyChatViewPage {
     return this.#readPageFromMessages(
       view,
       messages.map((message, index) => ({ seq: index + 1, message })),
@@ -689,17 +711,17 @@ export class ChatViewStore {
     };
   }
 
-  #readPageFromView(view: ChatView, limit: number, beforeSeq?: number): ChatViewPage {
+  #readPageFromView(view: ChatView, limit: number, beforeSeq?: number): LegacyChatViewPage {
     this.#touch(view);
     return this.#readPageFromMessages(view, view.messages, limit, beforeSeq);
   }
 
   #readPageFromMessages(
     view: ChatView,
-    messages: ChatViewMessage[],
+    messages: LegacyChatViewMessage[],
     limit: number,
     beforeSeq?: number,
-  ): ChatViewPage {
+  ): LegacyChatViewPage {
     const boundedLimit = Math.max(0, Math.floor(limit));
     const end = beforeSeq && beforeSeq > 0
       ? lowerBoundBySeq(messages, beforeSeq)

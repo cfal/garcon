@@ -135,9 +135,9 @@
 		<ConversationMessage
 			{message}
 			rowId={item.id}
-			anchorId={item.seq === undefined ? undefined : item.id}
+			anchorId={item.ordinal === undefined ? undefined : item.id}
 			index={item.index}
-			forkUpToSeq={item.seq}
+			forkUpToSeq={item.ordinal}
 			prevMessage={item.prevMessage}
 			{toolResult}
 			permissionTerminal={permTerminal}

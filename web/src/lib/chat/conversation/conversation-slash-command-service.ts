@@ -42,7 +42,7 @@ import {
 	selectForkAtMessage,
 	type ForkAtMessageSelection,
 } from '$lib/chat/actions/fork-at-message-action.js';
-import type { ChatViewMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ReorderChatResponse } from '$shared/chat-order-contracts';
@@ -63,9 +63,9 @@ interface SlashCommandSessions {
 
 interface SlashCommandChatState {
 	activeChatId: string | null;
-	entries: readonly ChatViewMessage[];
+	entries: readonly TranscriptMessage[];
 	isUserScrolledUp: boolean;
-	getCursor(): { generationId: string; lastSeq: number };
+	getCursor(): { transcriptViewId: string; lastOrdinal: number };
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
 }
 
@@ -709,7 +709,7 @@ export class ConversationSlashCommandService {
 			? null
 			: selectForkAtMessage(
 				this.deps.chatState.entries,
-				this.deps.chatState.getCursor().generationId,
+				this.deps.chatState.getCursor().transcriptViewId,
 				upToSeq,
 			);
 		if (upToSeq !== undefined && !selection) {
@@ -733,7 +733,7 @@ export class ConversationSlashCommandService {
 			}
 			const remapped = remapForkAtMessage(
 				this.deps.chatState.entries,
-				this.deps.chatState.getCursor().generationId,
+				this.deps.chatState.getCursor().transcriptViewId,
 				selection,
 			);
 			if (!remapped) throw error;
@@ -783,17 +783,17 @@ export class ConversationSlashCommandService {
 
 function forkPointParams(selection: ForkAtMessageSelection): {
 	upToSeq: number;
-	generationId: string;
+	transcriptViewId: string;
 } {
 	return {
-		upToSeq: selection.seq,
-		generationId: selection.generationId,
+		upToSeq: selection.ordinal,
+		transcriptViewId: selection.transcriptViewId,
 	};
 }
 
 function isStaleForkPointError(error: unknown): error is ApiError {
 	return error instanceof ApiError
-		&& error.errorCode === 'STALE_VIEW_GENERATION';
+		&& error.errorCode === 'STALE_TRANSCRIPT_VIEW';
 }
 
 // A fork point the server could not resolve against native history is a recoverable state the

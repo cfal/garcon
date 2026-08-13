@@ -1,6 +1,10 @@
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { ChatViewMessage } from '../../common/chat-view.js';
 import type { AgentProjectionState } from '@garcon/server-agent-interface';
+
+export interface LegacyChatViewMessage {
+  readonly seq: number;
+  readonly message: ChatMessage;
+}
 
 export interface ChatHistoryPage {
   messages: ChatMessage[];
@@ -34,7 +38,7 @@ export interface ChatViewLoader {
 export interface MutableChatView {
   chatId: string;
   generationId: string;
-  messages: ChatViewMessage[];
+  messages: LegacyChatViewMessage[];
   lastSeq: number;
   historyLastSeq: number;
   complete: boolean;
@@ -83,7 +87,7 @@ export type ProjectionCommitViewApplication =
   | {
       readonly kind: 'applied';
       readonly generationId: string;
-      readonly messages: ChatViewMessage[];
+      readonly messages: LegacyChatViewMessage[];
       readonly lastSeq: number;
     }
   | {

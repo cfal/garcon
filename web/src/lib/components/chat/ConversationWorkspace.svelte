@@ -16,7 +16,7 @@
 		ActiveTranscriptState,
 		INITIAL_VISIBLE_MESSAGES,
 	} from '$lib/chat/transcript/active-transcript-state.svelte.js';
-	import type { ChatViewMessage } from '$shared/chat-view';
+	import type { TranscriptMessage } from '$shared/chat-view';
 	import type { ChatProcessingPhase } from '$shared/chat-types';
 	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
@@ -105,9 +105,10 @@
 		getVisiblePreviewCursor?: (chatId: string) => SplitPanePreviewCursor | null;
 		applyVisiblePreviewMessages?: (
 			chatId: string,
-			generationId: string,
-			messages: ChatViewMessage[],
-			lastSeq?: number,
+			transcriptViewId: string,
+			messages: TranscriptMessage[],
+			firstOrdinal: number,
+			lastOrdinal: number,
 		) => boolean | void;
 		loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
 		markVisiblePreviewStale?: (chatId: string) => void;
@@ -168,22 +169,13 @@
 		},
 		applyProcessingPhase: (chatId, phase) => {
 			lifecycle.applyProcessingPhase(chatId, phase);
-			retryDeferredHistoryOnIdle(chatId, phase);
 		},
 		applyProcessingSnapshotPhase: (chatId, phase, sentAt) => {
 			lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt);
-			retryDeferredHistoryOnIdle(chatId, phase);
 		},
 		clearTurnPermissionRequests: () => conversationUi.clearTurnPermissionRequests(),
 	});
 
-	// A deferred history response is a typed wait state; it retries exactly once
-	// on the matching execution-to-idle transition rather than polling.
-	function retryDeferredHistoryOnIdle(chatId: string, phase: ChatProcessingPhase | null): void {
-		if (phase !== null) return;
-		if (!chatState.consumeDeferredHistoryRetry(chatId)) return;
-		void chatState.loadMessages(chatId).catch(() => {});
-	}
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
 	let composerEditorOpenRequestId = $state(0);
@@ -206,11 +198,21 @@
 		getVisibleChatIds: () => getVisibleChatIds?.() ?? [],
 		getVisibleChatCursor: (chatId) => getVisiblePreviewCursor?.(chatId) ?? null,
 		loadVisibleChatSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
-		onVisibleChatMessages: (chatId, generationId, messages, lastSeq) =>
-			applyVisiblePreviewMessages?.(chatId, generationId, messages, lastSeq),
+		onVisibleChatMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) =>
+			applyVisiblePreviewMessages?.(
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+			),
 		markBackgroundStale: (chatId) => transcriptCache.markStale(chatId),
-		onBackgroundMessages: (chatId, generationId, messages, lastSeq) => {
-			const applied = transcriptCache.applyMessages(chatId, generationId, messages, lastSeq);
+		onBackgroundMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
+			const applied = transcriptCache.applyMessages(chatId, transcriptViewId, {
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+			});
 			if (applied.status !== 'applied') return false;
 			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
 			if (preview) sessions.patchPreview(chatId, preview.content, preview.timestamp);
@@ -317,7 +319,7 @@
 	let conversationViewport: ConversationViewportPort | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
 	const conversationSurfaceIdentity = $derived(
-		`${chatState.activeChatId ?? 'none'}:${chatState.generationId}`,
+		`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`,
 	);
 
 	// WS drain and event router.
@@ -342,8 +344,14 @@
 		backgroundTranscriptLoader,
 		visiblePreviews: {
 			isVisible: (chatId) => isVisiblePreviewChat?.(chatId) ?? false,
-			applyMessages: (chatId, generationId, messages) =>
-				applyVisiblePreviewMessages?.(chatId, generationId, messages),
+			applyMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) =>
+				applyVisiblePreviewMessages?.(
+					chatId,
+					transcriptViewId,
+					messages,
+					firstOrdinal,
+					lastOrdinal,
+				),
 			loadSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
 			markStale: (chatId) => markVisiblePreviewStale?.(chatId),
 		},
@@ -419,13 +427,13 @@
 		const chatId = chatState.activeChatId;
 		if (!chatId || chatState.loadStatus !== 'loaded') return;
 		if (!searchResultNavigation.peek(chatId)) return;
-		if (chatState.generationId === '') return;
-		const seq = searchResultNavigation.take(chatId);
-		if (seq === null || seq > chatState.lastSeq) return;
+		if (chatState.transcriptViewId === '') return;
+		const ordinal = searchResultNavigation.take(chatId);
+		if (ordinal === null || ordinal > chatState.lastOrdinal) return;
 		void scroll.jumpToMessageRow({
 			chatId,
-			generationId: chatState.generationId,
-			rowId: `${chatState.generationId}:${seq}`,
+			transcriptViewId: chatState.transcriptViewId,
+			rowId: `${chatState.transcriptViewId}:${ordinal}`,
 		});
 	});
 
@@ -470,8 +478,8 @@
 
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
-		const generationId = chatState.generationId;
-		userMessageNavigator.reconcileActiveTranscript(chatId, generationId);
+		const transcriptViewId = chatState.transcriptViewId;
+		userMessageNavigator.reconcileActiveTranscript(chatId, transcriptViewId);
 	});
 
 	const isPreparingInitialScroll = $derived(

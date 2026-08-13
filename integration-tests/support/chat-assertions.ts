@@ -1,8 +1,8 @@
 import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
-import type { ChatViewMessage } from '../../common/chat-view.js';
+import type { TranscriptMessage } from '../../common/chat-view.js';
 
 export function messagesOfType<TType extends ChatMessage['type']>(
-  messages: readonly ChatViewMessage[],
+  messages: readonly TranscriptMessage[],
   type: TType,
 ): Array<Extract<ChatMessage, { type: TType }>> {
   return messages
@@ -10,19 +10,19 @@ export function messagesOfType<TType extends ChatMessage['type']>(
     .filter((message): message is Extract<ChatMessage, { type: TType }> => message.type === type);
 }
 
-export function userMessages(messages: readonly ChatViewMessage[]): UserMessage[] {
+export function userMessages(messages: readonly TranscriptMessage[]): UserMessage[] {
   return messagesOfType(messages, 'user-message');
 }
 
-export function userContents(messages: readonly ChatViewMessage[]): string[] {
+export function userContents(messages: readonly TranscriptMessage[]): string[] {
   return userMessages(messages).map((message) => message.content);
 }
 
-export function assistantContents(messages: readonly ChatViewMessage[]): string[] {
+export function assistantContents(messages: readonly TranscriptMessage[]): string[] {
   return messagesOfType(messages, 'assistant-message').map((message) => message.content);
 }
 
-export function countUserContent(messages: readonly ChatViewMessage[], content: string): number {
+export function countUserContent(messages: readonly TranscriptMessage[], content: string): number {
   return userMessages(messages).filter((message) => message.content === content).length;
 }
 

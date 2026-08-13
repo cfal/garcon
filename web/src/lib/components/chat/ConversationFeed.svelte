@@ -212,7 +212,7 @@
 				chatState.pageStates.earlier.error !== null),
 		showLaterBoundary: chatState.canLoadLater || chatState.pageStates.later.status !== 'idle',
 		reserveComposerTraySpace,
-		transcriptGenerationId: chatState.getCursor().generationId,
+		transcriptViewId: chatState.getCursor().transcriptViewId,
 		pendingPermissions:
 			projectedPendingPermissionRequests.length > 0 && onPermissionDecision
 				? projectedPendingPermissionRequests

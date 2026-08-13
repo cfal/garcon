@@ -9,7 +9,7 @@ import { parseChatId, type ChatId } from '../../common/chat-id.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
 import type { ChatExecutionQueries } from '../chat-execution/types.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
-import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
+import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
@@ -23,7 +23,7 @@ const defaultLogger = createLogger('routes:chat-snapshot');
 interface ChatSnapshotRouteDeps {
   summaries: Pick<ChatListProjector, 'buildSummary'>;
   execution: Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
-  chatViews: Pick<ChatViewPageReader, 'getOrCreatePage'>;
+  chatViews: Pick<TranscriptPageReader, 'page'>;
   transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
   pendingInputs: Pick<
     PendingUserInputServiceContract,
@@ -58,7 +58,7 @@ export function createChatSnapshotRoutes(deps: ChatSnapshotRouteDeps): RouteMap 
           );
           const transcript = await readTranscript(deps, chatId, messageLimit);
           const generationId = transcript.availability === 'available'
-            ? transcript.generationId
+            ? transcript.transcriptViewId
             : deps.transientFeeds.currentSnapshot(chatId)?.generationId
               ?? `pending:${summary.chat.agentOwnershipEpoch}`;
           const transientFeed = deps.transientFeeds.snapshot({
@@ -94,7 +94,7 @@ async function readTranscript(
 ): Promise<ChatSnapshotTranscript> {
   if (messageLimit === 0) return { availability: 'not-requested' };
   try {
-    const page = await deps.chatViews.getOrCreatePage(chatId, messageLimit);
+    const page = await deps.chatViews.page(chatId, messageLimit);
     return { availability: 'available', ...page };
   } catch (error) {
     // Typed deferred/degraded reads keep the rest of the snapshot usable: the
@@ -102,9 +102,7 @@ async function readTranscript(
     if (error instanceof TranscriptHistoryUnavailableError) {
       return {
         availability: 'unavailable',
-        errorCode: error.historyState.kind === 'deferred'
-          ? 'TRANSCRIPT_DEFERRED'
-          : error.historyState.errorCode,
+        errorCode: error.historyState.errorCode,
         retryable: error.retryable,
         message: error.message,
       };

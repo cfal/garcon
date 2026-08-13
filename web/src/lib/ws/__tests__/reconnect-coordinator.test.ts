@@ -10,6 +10,7 @@ import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import ReconnectCoordinatorTestHost from './ReconnectCoordinatorTestHost.svelte';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { WsMessageConsumer } from '../connection.svelte.js';
+import type { TranscriptMessage } from '$shared/chat-view';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -42,19 +43,19 @@ function controlState(
 	};
 }
 
-function messageJson(seq: number, content: string) {
+function messageJson(ordinal: number, content: string) {
 	return {
-		seq,
+		ordinal,
 		message: { type: 'assistant-message', timestamp: TS, content },
 	};
 }
 
-function transientFeed(chatId: string, generationId: string) {
+function transientFeed(chatId: string, transcriptViewId: string) {
 	return {
 		serverInstanceId: 'server-instance-test',
 		chatId,
 		agentOwnershipEpoch: 'ownership-1',
-		generationId,
+		generationId: transcriptViewId,
 		resetTransactionId: null,
 		transientRevision: 0,
 		stateDigest: 'empty-feed',
@@ -86,38 +87,39 @@ function reconnectStateResponse(
 
 function deltaResponse(
 	chatId: string,
-	generationId = `generation-${chatId}`,
+	transcriptViewId = `generation-${chatId}`,
 	messages: unknown[] = [],
 	pendingUserInputs: unknown[] = [],
 ) {
-	const last = messages.at(-1) as { seq?: unknown } | undefined;
+	const first = messages[0] as { ordinal?: unknown } | undefined;
+	const last = messages.at(-1) as { ordinal?: unknown } | undefined;
 	return {
 		type: 'chat-subscribed',
 		clientRequestId: `req-${chatId}`,
 		chatId,
-		generationId,
-		mode: 'delta',
+		transcriptViewId,
 		messages,
-		lastSeq: typeof last?.seq === 'number' ? last.seq : 0,
+		firstOrdinal: typeof first?.ordinal === 'number' ? first.ordinal : 1,
+		lastOrdinal: typeof last?.ordinal === 'number' ? last.ordinal : 0,
 		pendingUserInputs,
-		transientFeed: transientFeed(chatId, generationId),
+		transientFeed: transientFeed(chatId, transcriptViewId),
 	};
 }
 
 function snapshotRequiredResponse(
 	chatId: string,
-	generationId: string | null = `generation-${chatId}`,
+	transcriptViewId: string | null = `generation-${chatId}`,
 ) {
 	return {
 		type: 'chat-subscribed',
 		clientRequestId: `req-${chatId}`,
 		chatId,
-		generationId,
-		mode: 'snapshot-required',
+		transcriptViewId,
 		messages: [],
-		lastSeq: 0,
+		firstOrdinal: 1,
+		lastOrdinal: 0,
 		pendingUserInputs: [],
-		transientFeed: transientFeed(chatId, generationId ?? `pending:${chatId}`),
+		transientFeed: transientFeed(chatId, transcriptViewId ?? `pending:${chatId}`),
 	};
 }
 
@@ -144,18 +146,18 @@ function createReconnectDeps(
 		selectedChatId?: string | null;
 		runningIds?: string[];
 		subscribeResponses?: Record<string, Record<string, unknown>>;
-		backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
+		backgroundCursors?: Array<{ chatId: string; transcriptViewId: string; lastOrdinal: number }>;
 		visibleChatIds?: string[];
 		controlChatIds?: string[];
 		controlStates?: Record<string, ChatExecutionControlState>;
 		visibleCursors?: Record<
 			string,
-			{ chatId: string; generationId: string; lastSeq: number } | null
+			{ chatId: string; transcriptViewId: string; lastOrdinal: number } | null
 		>;
 	} = {},
 ) {
 	const selectedChatId = options.selectedChatId ?? 'chat-1';
-	let selectedCursor = { generationId: 'generation-selected', lastSeq: 2 };
+	let selectedCursor = { transcriptViewId: 'generation-selected', lastOrdinal: 2 };
 	const sendRequest = vi.fn(async (request: object) => {
 		if (!('type' in request)) throw new Error('Request is missing a type');
 		if (request.type === 'reconnect-state-query') {
@@ -174,11 +176,14 @@ function createReconnectDeps(
 	const chatState = {
 		getCursor: vi.fn(() => selectedCursor),
 		applyMessages: vi.fn(
-			(_chatId: string, generationId: string, messages: Array<{ seq?: unknown }>) => {
-				const last = messages.at(-1);
-				if (typeof last?.seq === 'number') {
-					selectedCursor = { generationId, lastSeq: last.seq };
-				}
+			(
+				_chatId: string,
+				transcriptViewId: string,
+				_messages: TranscriptMessage[],
+				_firstOrdinal: number,
+				lastOrdinal: number,
+			) => {
+				selectedCursor = { transcriptViewId, lastOrdinal };
 				return 'applied' as const;
 			},
 		),
@@ -382,7 +387,7 @@ describe('ChatReconnectCoordinator', () => {
 
 	it('does not reject background resume when its follow-up chat-list refresh fails', async () => {
 		const deps = createReconnectDeps({
-			backgroundCursors: [{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 2 }],
+			backgroundCursors: [{ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 2 }],
 			subscribeResponses: {
 				'chat-1': deltaResponse('chat-1', 'generation-selected'),
 				'chat-2': deltaResponse('chat-2', 'generation-2', [messageJson(3, 'later')]),
@@ -397,6 +402,7 @@ describe('ChatReconnectCoordinator', () => {
 				'chat-2',
 				'generation-2',
 				expect.any(Array),
+				3,
 				3,
 			);
 			expect(warn).toHaveBeenCalled();
@@ -429,14 +435,16 @@ describe('ChatReconnectCoordinator', () => {
 			expect.objectContaining({
 				type: 'chat-subscribe',
 				chatId: 'chat-1',
-				generationId: 'generation-selected',
-				afterSeq: 2,
+				transcriptViewId: 'generation-selected',
+				afterOrdinal: 2,
 			}),
 		);
 		expect(deps.chatState.applyMessages).toHaveBeenCalledWith(
 			'chat-1',
 			'generation-selected',
-			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 3 })]),
+			3,
+			3,
 		);
 	});
 
@@ -463,7 +471,9 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.applyMessages).toHaveBeenCalledWith(
 			'chat-1',
 			'generation-selected',
-			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 3 })]),
+			3,
+			3,
 		);
 
 		controlState.resolve(reconnectStateResponse([], ['chat-1']));
@@ -782,9 +792,9 @@ describe('ChatReconnectCoordinator', () => {
 			controlChatIds: ['chat-2'],
 			visibleChatIds: ['chat-3'],
 			visibleCursors: {
-				'chat-3': { chatId: 'chat-3', generationId: 'generation-3', lastSeq: 1 },
+				'chat-3': { chatId: 'chat-3', transcriptViewId: 'generation-3', lastOrdinal: 1 },
 			},
-			backgroundCursors: [{ chatId: 'chat-4', generationId: 'generation-4', lastSeq: 1 }],
+			backgroundCursors: [{ chatId: 'chat-4', transcriptViewId: 'generation-4', lastOrdinal: 1 }],
 			subscribeResponses: {
 				'chat-1': deltaResponse('chat-1', 'generation-selected'),
 				'chat-3': deltaResponse('chat-3', 'generation-3', [messageJson(2, 'visible')]),
@@ -851,19 +861,19 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('falls back to selected snapshot when reconnect delta lastSeq stays ahead after apply', async () => {
+	it('advances selected coverage through hidden reconnect rows without loading a snapshot', async () => {
 		const deps = createReconnectDeps({
 			subscribeResponses: {
 				'chat-1': {
 					...deltaResponse('chat-1', 'generation-selected', [messageJson(3, 'partial')]),
-					lastSeq: 4,
+					lastOrdinal: 4,
 				},
 			},
 		});
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
@@ -923,8 +933,8 @@ describe('ChatReconnectCoordinator', () => {
 	it('resumes a bounded set of background cached cursors', async () => {
 		const backgroundCursors = Array.from({ length: 25 }, (_, index) => ({
 			chatId: `chat-${index + 2}`,
-			generationId: `generation-${index + 2}`,
-			lastSeq: 1,
+			transcriptViewId: `generation-${index + 2}`,
+			lastOrdinal: 1,
 		}));
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
@@ -933,7 +943,7 @@ describe('ChatReconnectCoordinator', () => {
 				['chat-1', deltaResponse('chat-1', 'generation-selected')],
 				...backgroundCursors.map((cursor) => [
 					cursor.chatId,
-					deltaResponse(cursor.chatId, cursor.generationId, [messageJson(2, cursor.chatId)]),
+					deltaResponse(cursor.chatId, cursor.transcriptViewId, [messageJson(2, cursor.chatId)]),
 				]),
 			]),
 		});
@@ -952,11 +962,11 @@ describe('ChatReconnectCoordinator', () => {
 			selectedChatId: 'chat-1',
 			visibleChatIds: ['chat-2'],
 			visibleCursors: {
-				'chat-2': { chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 },
+				'chat-2': { chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 1 },
 			},
 			backgroundCursors: [
-				{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 },
-				{ chatId: 'chat-3', generationId: 'generation-3', lastSeq: 1 },
+				{ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 1 },
+				{ chatId: 'chat-3', transcriptViewId: 'generation-3', lastOrdinal: 1 },
 			],
 			subscribeResponses: {
 				'chat-1': deltaResponse('chat-1', 'generation-selected'),
@@ -970,14 +980,16 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.onVisibleChatMessages).toHaveBeenCalledWith(
 			'chat-2',
 			'generation-2',
-			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 2 })]),
+			2,
 			2,
 		);
 		expect(deps.onBackgroundMessages).toHaveBeenCalledTimes(1);
 		expect(deps.onBackgroundMessages).toHaveBeenCalledWith(
 			'chat-3',
 			'generation-3',
-			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+			expect.arrayContaining([expect.objectContaining({ ordinal: 2 })]),
+			2,
 			2,
 		);
 
@@ -1014,7 +1026,7 @@ describe('ChatReconnectCoordinator', () => {
 			selectedChatId: 'chat-1',
 			visibleChatIds: ['chat-2'],
 			visibleCursors: {
-				'chat-2': { chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 },
+				'chat-2': { chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 1 },
 			},
 			subscribeResponses: {
 				'chat-1': deltaResponse('chat-1', 'generation-selected'),
@@ -1031,7 +1043,7 @@ describe('ChatReconnectCoordinator', () => {
 	it('defers background snapshots for non-resumable cached cursors', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
-			backgroundCursors: [{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 }],
+			backgroundCursors: [{ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 1 }],
 			subscribeResponses: {
 				'chat-1': deltaResponse('chat-1', 'generation-selected'),
 				'chat-2': snapshotRequiredResponse('chat-2', 'generation-3'),
@@ -1047,7 +1059,7 @@ describe('ChatReconnectCoordinator', () => {
 	it('defers background snapshots when background delta apply reports a gap', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
-			backgroundCursors: [{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 }],
+			backgroundCursors: [{ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 1 }],
 			subscribeResponses: {
 				'chat-1': deltaResponse('chat-1', 'generation-selected'),
 				'chat-2': deltaResponse('chat-2', 'generation-2', [messageJson(3, 'later')]),
@@ -1064,13 +1076,13 @@ describe('ChatReconnectCoordinator', () => {
 	it('marks twenty non-resumable background cursors stale without loading snapshots', async () => {
 		const backgroundCursors = Array.from({ length: 20 }, (_, index) => ({
 			chatId: `chat-${index + 2}`,
-			generationId: `generation-${index + 2}`,
-			lastSeq: 1,
+			transcriptViewId: `generation-${index + 2}`,
+			lastOrdinal: 1,
 		}));
 		const subscribeResponses = Object.fromEntries(
 			backgroundCursors.map((cursor) => [
 				cursor.chatId,
-				snapshotRequiredResponse(cursor.chatId, `next-${cursor.generationId}`),
+				snapshotRequiredResponse(cursor.chatId, `next-${cursor.transcriptViewId}`),
 			]),
 		);
 		const deps = createReconnectDeps({
@@ -1133,7 +1145,7 @@ describe('ChatReconnectCoordinator', () => {
 		const deps = createReconnectDeps({
 			visibleChatIds: ['chat-2'],
 			visibleCursors: {
-				'chat-2': { chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 },
+				'chat-2': { chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 1 },
 			},
 		});
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(

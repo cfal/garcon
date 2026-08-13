@@ -39,7 +39,7 @@ export type ConversationScrollState = Pick<
 	| 'canLoadLater'
 	| 'displayMessageCount'
 	| 'feedMutationClock'
-	| 'generationId'
+	| 'transcriptViewId'
 	| 'hasLaterMessages'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
@@ -368,7 +368,7 @@ export class ConversationScrollController {
 	): Promise<UserMessageNavigatorSelectionResult> {
 		if (
 			this.deps.sessions.selectedChatId !== target.chatId ||
-			this.deps.chatState.generationId !== target.generationId
+			this.deps.chatState.transcriptViewId !== target.transcriptViewId
 		) {
 			return 'unavailable';
 		}
@@ -380,7 +380,7 @@ export class ConversationScrollController {
 			await tick();
 			if (
 				this.deps.sessions.selectedChatId !== target.chatId ||
-				this.deps.chatState.generationId !== target.generationId
+				this.deps.chatState.transcriptViewId !== target.transcriptViewId
 			) {
 				return 'cancelled';
 			}
@@ -663,7 +663,7 @@ export class ConversationScrollController {
 	#earlierBoundarySignature(): string {
 		return [
 			this.deps.sessions.selectedChatId ?? '',
-			this.deps.chatState.generationId,
+			this.deps.chatState.transcriptViewId,
 			this.deps.chatState.windowRevision,
 			this.deps.chatState.feedMutationClock.lastRevisionByKind['history-earlier'],
 		].join(':');

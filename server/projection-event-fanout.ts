@@ -5,7 +5,6 @@ import type {
   AgentTranscriptProvenance,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '../common/chat-types.js';
-import type { ChatViewMessage } from '../common/chat-view.js';
 import {
   ChatMessagesMessage,
   ChatProjectionGenerationTransitionMessage,
@@ -19,6 +18,7 @@ import type {
   ChatTranscriptSnapshot,
   ChatViewStore,
 } from './chats/chat-view-store.js';
+import type { LegacyChatViewMessage } from './chats/chat-view-contracts.js';
 import type { AgentProjectionState } from '@garcon/server-agent-interface';
 
 export interface ProjectionEventFanoutDeps {
@@ -194,17 +194,20 @@ function broadcastCommitRows(
   deps: ProjectionEventFanoutDeps,
   event: AgentTranscriptCommitEvent,
   generationId: string,
-  rows: readonly ChatViewMessage[],
+  rows: readonly LegacyChatViewMessage[],
 ): void {
   let offset = 0;
   for (const group of groupEntriesByProvenance(event.appended)) {
     const groupRows = rows.slice(offset, offset + group.entries.length);
     offset += group.entries.length;
     const provenance = group.provenance;
+    const messages = groupRows.map((row) => ({ ordinal: row.seq, message: row.message }));
     deps.broadcast(new ChatMessagesMessage(
       event.chatId,
       generationId,
-      groupRows,
+      messages,
+      groupRows[0]?.seq ?? event.previous.projection.total + 1,
+      groupRows.at(-1)?.seq ?? event.checkpoint.projection.total,
       provenance?.turnOwner.turnId ?? provenance?.turnId,
       provenance?.turnOwner.clientRequestId ?? provenance?.clientRequestId ?? undefined,
       provenance?.upstreamRequestId ?? undefined,

@@ -1,5 +1,5 @@
 import { AssistantMessage } from '../../common/chat-types.js';
-import { applyChatViewMessages, type ChatViewMessage } from '../../common/chat-view.js';
+import { applyTranscriptAppend, type TranscriptMessage } from '../../common/chat-view.js';
 
 const MESSAGE_COUNT = Number(process.env.GARCON_PROFILE_MESSAGE_COUNT ?? 20_000);
 const RETENTION_LIMIT = Number(process.env.GARCON_PROFILE_RETENTION_LIMIT ?? 200);
@@ -24,25 +24,25 @@ function collectGarbage(): void {
 
 function ingest(retentionLimit: number | null): IngestionSample {
 	collectGarbage();
-	let entries: ChatViewMessage[] = [];
-	let lastSeq = 0;
+	let entries: TranscriptMessage[] = [];
+	let lastOrdinal = 0;
 	const startedAt = performance.now();
 	let tailStartedAt = startedAt;
-	for (let seq = 1; seq <= MESSAGE_COUNT; seq += 1) {
-		if (seq === MESSAGE_COUNT - TAIL_MESSAGE_COUNT + 1) tailStartedAt = performance.now();
+	for (let ordinal = 1; ordinal <= MESSAGE_COUNT; ordinal += 1) {
+		if (ordinal === MESSAGE_COUNT - TAIL_MESSAGE_COUNT + 1) tailStartedAt = performance.now();
 		const incoming = [
 			{
-				seq,
-				message: new AssistantMessage(TIMESTAMP, `message-${seq}-${'x'.repeat(48)}`),
+				ordinal,
+				message: new AssistantMessage(TIMESTAMP, `message-${ordinal}-${'x'.repeat(48)}`),
 			},
 		];
-		const applied = applyChatViewMessages(entries, incoming, lastSeq);
-		if (applied.status !== 'applied') throw new Error(`Unexpected gap at ${seq}`);
+		const applied = applyTranscriptAppend(entries, incoming, lastOrdinal);
+		if (applied.status !== 'applied') throw new Error(`Unexpected gap at ${ordinal}`);
 		entries =
 			retentionLimit && applied.messages.length > retentionLimit
 				? applied.messages.slice(-retentionLimit)
 				: applied.messages;
-		lastSeq = applied.lastSeq;
+		lastOrdinal = applied.lastOrdinal;
 	}
 	const durationMs = performance.now() - startedAt;
 	return {

@@ -9,7 +9,6 @@ import {
   WsFaultMessage,
   ClientRequestErrorMessage,
   ChatSubscribedMessage,
-  ChatGenerationResetMessage,
   ChatReloadedMessage,
   WsPongMessage,
 } from '../../common/ws-events.ts';
@@ -28,13 +27,18 @@ import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
 import { isDomainError } from '../lib/domain-error.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
-import type { ChatReplayResult } from '../../common/chat-view.js';
+import type { TranscriptReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatExecutionQueries } from '../chat-execution/chat-execution-coordinator.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
+import {
+  StaleTranscriptViewError,
+  transcriptViewId,
+  type TranscriptViewId,
+} from '../ledger/index.js';
 
 const logger = createLogger('ws:chat');
 
@@ -44,10 +48,14 @@ type WS = import('bun').ServerWebSocket<unknown>;
 type QueueDep = Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
 type ChatViewsDep = {
-  readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
+  readReplay(
+    chatId: string,
+    viewId: TranscriptViewId,
+    afterOrdinal: number,
+  ): Promise<TranscriptReplayResult>;
 };
 // Serves the manual reload as a fresh view over the authoritative projection.
-type ProjectionReload = (chatId: string) => Promise<import('../../common/chat-view.js').ChatViewPage>;
+type ProjectionReload = (chatId: string) => Promise<import('../../common/chat-view.js').TranscriptPage>;
 
 type WsRequestHandler = (data: ClientWsMessage, writer: WebSocketWriter) => Promise<void> | void;
 type ChatIdRequest = { type: string; chatId?: string | null };
@@ -244,46 +252,33 @@ export class ChatHandler {
         });
         return;
       }
-      const replay = this.#chatViews.readReplay(chatId, data.generationId, data.afterSeq);
-      if (!replay) {
-        const transientFeed = this.#transientFeeds.currentSnapshot(chatId)
-          ?? this.#transientFeeds.snapshot({
-            chatId,
-            agentOwnershipEpoch: session.agentOwnershipEpoch,
-            generationId: `pending:${session.agentOwnershipEpoch}`,
-          });
-        writer.send(new ChatSubscribedMessage(
-          clientRequestId,
-          chatId,
-          null,
-          'snapshot-required',
-          [],
-          0,
-          this.#pendingInputs.listForTransport(chatId),
-          transientFeed,
-        ));
-        return;
-      }
+      const replay = await this.#chatViews.readReplay(
+        chatId,
+        transcriptViewId(data.transcriptViewId),
+        data.afterOrdinal,
+      );
       writer.send(new ChatSubscribedMessage(
         clientRequestId,
         chatId,
-        replay.generationId,
-        replay.mode,
+        replay.transcriptViewId,
         replay.messages,
-        replay.lastSeq,
+        replay.firstOrdinal,
+        replay.lastOrdinal,
         this.#pendingInputs.listForTransport(chatId),
         this.#transientFeeds.snapshot({
           chatId,
           agentOwnershipEpoch: session.agentOwnershipEpoch,
-          generationId: replay.generationId,
+          generationId: replay.transcriptViewId,
         }),
       ));
     } catch (error: unknown) {
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
-        code: 'HISTORY_LOAD_FAILED',
+        code: error instanceof StaleTranscriptViewError
+          ? 'STALE_TRANSCRIPT_VIEW'
+          : 'HISTORY_LOAD_FAILED',
         message: (error as Error).message || 'Failed to replay chat messages',
-        retryable: true, chatId,
+        retryable: !(error instanceof StaleTranscriptViewError), chatId,
       });
     }
   }
@@ -307,28 +302,23 @@ export class ChatHandler {
       const reload = await this.#projectionReload(chatId);
       // The reload replaced the browser generation; carry the transient rows
       // into it so later subscribes see one matching snapshot.
-      if (previousFeed && previousFeed.generationId !== reload.generationId) {
+      if (previousFeed && previousFeed.generationId !== reload.transcriptViewId) {
         this.#transientFeeds.rebaseGeneration({
           chatId,
           agentOwnershipEpoch: session.agentOwnershipEpoch,
           previousGenerationId: previousFeed.generationId,
-          generationId: reload.generationId,
+          generationId: reload.transcriptViewId,
         });
       }
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,
-        reload.generationId,
+        reload.transcriptViewId,
         reload.messages,
-        reload.lastSeq,
-        reload.pageOldestSeq,
+        reload.lastOrdinal,
+        reload.pageOldestOrdinal,
+        reload.pageNewestOrdinal,
         reload.hasMore,
-      ));
-      writer.publish(new ChatGenerationResetMessage(
-        chatId,
-        reload.generationId,
-        'manual-reload',
-        reload.lastSeq,
       ));
     } catch (error: unknown) {
       const message = (error as Error).message || 'Failed to reload chat';
