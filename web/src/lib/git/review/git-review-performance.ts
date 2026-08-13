@@ -6,7 +6,11 @@ export type GitReviewPerformancePhase =
 	| 'body-visible'
 	| 'body-prefetch'
 	| 'json-decode'
-	| 'patch-index';
+	| 'patch-index'
+	| 'syntax-reconstruct'
+	| 'syntax-language-load'
+	| 'syntax-parse'
+	| 'syntax-project';
 
 export interface GitReviewPerformanceSpan {
 	phase: GitReviewPerformancePhase;

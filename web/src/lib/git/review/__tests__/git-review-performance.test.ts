@@ -56,4 +56,18 @@ describe('Git review performance marks', () => {
 			performance.getEntriesByName('garcon.git-review.visible-body-ready', 'measure'),
 		).toHaveLength(1);
 	});
+
+	it.each([
+		'syntax-reconstruct',
+		'syntax-language-load',
+		'syntax-parse',
+		'syntax-project',
+	] as const)('records the %s phase without source metadata', (phase) => {
+		const span = startGitReviewPerformanceSpan(phase);
+
+		finishGitReviewPerformanceSpan(span);
+
+		expect(performance.getEntriesByName(`garcon.git-review.${phase}`, 'measure')).toHaveLength(1);
+		expect(performance.getEntriesByType('mark')).toHaveLength(0);
+	});
 });
