@@ -1,6 +1,6 @@
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
-import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
@@ -170,9 +170,9 @@ export class TranscriptReloadService {
         false,
       );
     }
-    return imported.flatMap((row, index) => importedDraft(
-      sanitized.messages[index]!,
-      row.providerMeta,
+    return sanitized.messages.flatMap((message, index) => importedDraft(
+      message,
+      imported[index]!.providerMeta,
       this.#now,
     ));
   }

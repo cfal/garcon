@@ -25,8 +25,8 @@ import type {
   TranscriptWatermark,
 } from './contracts.js';
 import { transcriptViewId } from './contracts.js';
-import { TranscriptLedgerStore } from './store.js';
 import { PermissionNotActionableError } from './errors.js';
+import { TranscriptLedgerStore } from './store.js';
 
 export class TranscriptSinkClosedError extends Error {
   constructor() {
@@ -147,11 +147,11 @@ export class TranscriptLedgerService {
     if (!ownerAgentId) throw new TypeError('Producer owner agent ID is required');
     const view = this.#store.currentView(chatId);
     if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
-    const current = this.#leases.get(chatId);
-    if (current && !current.closed) {
+    const existing = this.#leases.get(chatId);
+    if (existing && !existing.closed) {
       throw new TypeError(`Transcript producer sink is already open for ${chatId}`);
     }
-    const lease = new ProducerLease(chatId, view.viewId, (event) => {
+    const lease = new ProducerLease((event) => {
       if (this.#leases.get(chatId) !== lease) throw new TranscriptSinkClosedError();
       this.#publish(chatId, view.viewId, ownerAgentId, event);
     }, () => {
@@ -474,20 +474,12 @@ export class TranscriptLedgerService {
   }
 
   closeChat(chatId: string): void {
-    this.closeProducer(chatId);
-    this.#activeRuns.delete(chatId);
-    this.#activePermissions.delete(chatId);
-    this.#deletePermissionClaims(chatId);
-    this.#deletePreparedInputs(chatId);
+    this.#clearChatState(chatId);
     this.#store.closeChat(chatId);
   }
 
   deleteChat(chatId: string): void {
-    this.closeProducer(chatId);
-    this.#activeRuns.delete(chatId);
-    this.#activePermissions.delete(chatId);
-    this.#deletePermissionClaims(chatId);
-    this.#deletePreparedInputs(chatId);
+    this.#clearChatState(chatId);
     this.#store.deleteChat(chatId);
   }
 
@@ -507,6 +499,14 @@ export class TranscriptLedgerService {
     for (const key of this.#preparedInputs.keys()) {
       if (key.startsWith(prefix)) this.#preparedInputs.delete(key);
     }
+  }
+
+  #clearChatState(chatId: string): void {
+    this.closeProducer(chatId);
+    this.#activeRuns.delete(chatId);
+    this.#activePermissions.delete(chatId);
+    this.#deletePermissionClaims(chatId);
+    this.#deletePreparedInputs(chatId);
   }
 
   #publish(
@@ -667,8 +667,6 @@ class ProducerLease implements TranscriptProducerLease {
   readonly sink: AgentProducerSink;
 
   constructor(
-    readonly chatId: string,
-    readonly viewId: TranscriptViewId,
     publish: (event: AgentProducerEvent) => void,
     private readonly onClose: () => void,
   ) {

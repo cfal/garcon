@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 import {
   PermissionCancelledMessage,
   PermissionRequestMessage,
@@ -6,14 +7,13 @@ import {
   UserMessage,
   type ChatMessage,
 } from '../../common/chat-types.js';
-import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
-import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type { JsonObject } from '../../common/json.js';
+import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
+import { toAgentChatReference } from '../agents/integration-chat-reference.js';
+import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { toAgentChatReference } from '../agents/integration-chat-reference.js';
-import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
 import { TranscriptLedgerService } from './service.js';
 
@@ -42,10 +42,10 @@ export class TranscriptAdoptionService {
     chatId: string,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<TranscriptView> {
-    const current = this.options.ledger.currentView(chatId);
-    if (current) {
+    const currentView = this.options.ledger.currentView(chatId);
+    if (currentView) {
       this.#repairSessionCache(chatId);
-      return current;
+      return currentView;
     }
     return this.#locks.runExclusive(chatId, async () => {
       const reopened = this.options.ledger.currentView(chatId);
@@ -65,7 +65,7 @@ export class TranscriptAdoptionService {
         // then to an empty ledger when neither source is readable.
       }
       signal.throwIfAborted();
-      const current = await this.#loadCurrent(chatId, entry, integration, signal);
+      const nativeRows = await this.#loadCurrent(chatId, entry, integration, signal);
       signal.throwIfAborted();
       const latest = this.options.registry.getChat(chatId);
       if (!latest || latest.agentOwnershipEpoch !== entry.agentOwnershipEpoch) {
@@ -77,7 +77,7 @@ export class TranscriptAdoptionService {
       const session = sessionDraft(entry, this.#now());
       const view = this.options.ledger.initializeChat(
         chatId,
-        [...prefixRows, ...(session ? [session] : []), ...adoptedRows(current, this.#now)],
+        [...prefixRows, ...(session ? [session] : []), ...adoptedRows(nativeRows, this.#now)],
         contentStartOrdinal,
       );
       this.#repairSessionCache(chatId);

@@ -5,7 +5,10 @@ import {
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ResendCandidate } from '../../common/chat-view.js';
 import type { TranscriptCommitEvent } from './service.js';
-import { ledgerRowsToTranscriptMessages } from './presentation.js';
+import {
+  ledgerRowsToMessages,
+  ledgerRowsToTranscriptMessages,
+} from './presentation.js';
 
 export interface TranscriptEventFanoutDeps {
   chatExists(chatId: string): boolean;
@@ -17,8 +20,10 @@ export interface TranscriptEventFanoutDeps {
   resendCandidates(chatId: string): readonly ResendCandidate[];
 }
 
-export function createTranscriptEventFanout(deps: TranscriptEventFanoutDeps) {
-  return (event: TranscriptCommitEvent): void => {
+export function createTranscriptEventFanout(
+  deps: TranscriptEventFanoutDeps,
+): (event: TranscriptCommitEvent) => void {
+  return function fanout(event: TranscriptCommitEvent): void {
     if (!deps.chatExists(event.chatId)) return;
     deps.schedule(event.chatId, () => applyTranscriptEvent(deps, event));
   };
@@ -43,14 +48,11 @@ function applyTranscriptEvent(
 
   const rows = event.type === 'rows' ? event.rows : [event.row];
   const messages = ledgerRowsToTranscriptMessages(rows);
-  const conversational = rows.filter((row) => (
+  const conversationalMessages = ledgerRowsToMessages(rows.filter((row) => (
     row.kind === 'user-input' || row.kind === 'provider-row'
-  ));
-  if (conversational.length > 0) {
-    deps.updateMetadata(
-      event.chatId,
-      ledgerRowsToTranscriptMessages(conversational).map((entry) => entry.message),
-    );
+  )));
+  if (conversationalMessages.length > 0) {
+    deps.updateMetadata(event.chatId, conversationalMessages);
     deps.markSearchDirty(event.chatId);
   }
   deps.broadcast(new ChatMessagesMessage(

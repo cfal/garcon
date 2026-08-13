@@ -9,7 +9,6 @@ import {
   statSync,
 } from 'node:fs';
 import path from 'node:path';
-import type { UserMessage } from '../../common/chat-types.js';
 import {
   decodeLedgerRow,
   encodeLedgerDraft,
@@ -160,7 +159,7 @@ export class TranscriptLedgerStore {
       detail: request.detail,
       providerMeta: null,
     };
-    const encoded = encodeLedgerDraft(draft);
+    const encoded = { draft, ...encodeLedgerDraft(draft) };
     return this.#write(chatId, (entry) => {
       this.#assertCurrent(entry, request.viewId);
       const existing = request.detail.clientMessageId
@@ -177,14 +176,13 @@ export class TranscriptLedgerStore {
       const ordinal = entry.nextOrdinal;
       const [materialized] = materializeRows(
         request.viewId,
-        [{ draft, ...encoded }],
+        [encoded],
         ordinal,
       );
       const input = materialized as LedgerUserInputRow;
-      let prompt!: readonly LedgerUserInputRow[];
-      runTransaction(entry.db, () => {
-        insertEncodedRows(entry.db, request.viewId, [{ draft, ...encoded }], ordinal);
-        prompt = request.detail.steer
+      const prompt = runTransaction(entry.db, () => {
+        insertEncodedRows(entry.db, request.viewId, [encoded], ordinal);
+        return request.detail.steer
           ? [input]
           : this.#composePrompt(entry, request.viewId, input, request.excludedOrdinals);
       });
@@ -202,19 +200,7 @@ export class TranscriptLedgerStore {
         WHERE view_id = ?
         ORDER BY ordinal DESC
       `).all(view.viewId);
-      const candidates: LedgerUserInputRow[] = [];
-      for (const item of stored) {
-        const row = decodeStoredRow(item);
-        if (row.kind === 'user-input') {
-          candidates.unshift(row);
-          continue;
-        }
-        if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
-        if (row.kind === 'provider-row'
-            || row.kind === 'permission-requested'
-            || row.kind === 'run-ended') break;
-      }
-      return candidates;
+      return collectResendCandidates(stored);
     });
   }
 
@@ -334,25 +320,14 @@ export class TranscriptLedgerStore {
   currentSession(chatId: string): LedgerSessionRow | null {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
-      const stored = entry.db.query<StoredLedgerRow, [string, number]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ? AND ordinal >= ? AND kind = 'session'
-        ORDER BY ordinal DESC LIMIT 1
-      `).get(current.viewId, current.contentStartOrdinal);
-      return stored ? decodeStoredRow(stored) as LedgerSessionRow : null;
+      return this.#currentSession(entry, current);
     });
   }
 
   nativeActivityState(chatId: string): TranscriptNativeActivityState {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
-      const session = entry.db.query<StoredLedgerRow, [string, number]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ? AND ordinal >= ? AND kind = 'session'
-        ORDER BY ordinal DESC LIMIT 1
-      `).get(current.viewId, current.contentStartOrdinal);
+      const session = this.#currentSession(entry, current);
       const watermark = entry.db.query<{ at: string }, [string, number]>(`
         SELECT at
         FROM transcript_rows
@@ -391,7 +366,7 @@ export class TranscriptLedgerStore {
         : null;
       return {
         viewId: current.viewId,
-        session: session ? decodeStoredRow(session) as LedgerSessionRow : null,
+        session,
         providerWatermarkAt: watermark?.at ?? null,
         lastNoticeWatermarkAt: noticeWatermark,
       };
@@ -543,25 +518,23 @@ export class TranscriptLedgerStore {
     current: LedgerUserInputRow,
     excludedOrdinals: ReadonlySet<number> | undefined,
   ): readonly LedgerUserInputRow[] {
-    const collected: LedgerUserInputRow[] = [current];
     const preceding = entry.db.query<StoredLedgerRow, [string, number]>(`
       SELECT view_id, ordinal, kind, at, client_message_id, payload_json
       FROM transcript_rows
       WHERE view_id = ? AND ordinal < ?
       ORDER BY ordinal DESC
     `).all(viewId, current.ordinal);
-    for (const stored of preceding) {
-      const row = decodeStoredRow(stored);
-      if (row.kind === 'user-input') {
-        if (!excludedOrdinals?.has(row.ordinal)) collected.unshift(row);
-        continue;
-      }
-      if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
-      if (row.kind === 'provider-row'
-          || row.kind === 'permission-requested'
-          || row.kind === 'run-ended') break;
-    }
-    return collected;
+    return [...collectResendCandidates(preceding, excludedOrdinals), current];
+  }
+
+  #currentSession(entry: ConnectionEntry, current: TranscriptView): LedgerSessionRow | null {
+    const stored = entry.db.query<StoredLedgerRow, [string, number]>(`
+      SELECT view_id, ordinal, kind, at, client_message_id, payload_json
+      FROM transcript_rows
+      WHERE view_id = ? AND ordinal >= ? AND kind = 'session'
+      ORDER BY ordinal DESC LIMIT 1
+    `).get(current.viewId, current.contentStartOrdinal);
+    return stored ? decodeStoredRow(stored) as LedgerSessionRow : null;
   }
 
   #submission(
@@ -679,6 +652,25 @@ function decodeStoredRow(row: StoredLedgerRow): LedgerRow {
   } catch (error) {
     throw new Error('Stored transcript row is invalid', { cause: error });
   }
+}
+
+function collectResendCandidates(
+  storedRows: readonly StoredLedgerRow[],
+  excludedOrdinals?: ReadonlySet<number>,
+): readonly LedgerUserInputRow[] {
+  const candidates: LedgerUserInputRow[] = [];
+  for (const stored of storedRows) {
+    const row = decodeStoredRow(stored);
+    if (row.kind === 'user-input') {
+      if (!excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
+      continue;
+    }
+    if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
+    if (row.kind === 'provider-row'
+        || row.kind === 'permission-requested'
+        || row.kind === 'run-ended') break;
+  }
+  return candidates;
 }
 
 function insertEncodedRows(
@@ -830,11 +822,12 @@ function nextOrdinal(db: Database, viewId: TranscriptViewId): number {
   return (row?.maximum ?? 0) + 1;
 }
 
-function runTransaction(db: Database, work: () => void): void {
+function runTransaction<T>(db: Database, work: () => T): T {
   db.exec('BEGIN IMMEDIATE');
   try {
-    work();
+    const result = work();
     db.exec('COMMIT');
+    return result;
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
