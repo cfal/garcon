@@ -9,74 +9,108 @@ import {
 	renderUnifiedDiffRow,
 	type GitDiffComposerDraft,
 } from '$lib/git/review/git-diff-rows.js';
+import type { GitDiffFileSyntaxResult } from '$lib/git/review/git-diff-syntax.js';
 
 function makeReviewData(): GitRenderedDiffRow[] {
 	return [
-			{
-				key: 'hunk:0:hunk-0',
-				kind: 'hunk',
-				hunkIndex: 0,
-				hunkId: 'hunk-0',
-				beforeLine: null,
-				afterLine: null,
-				text: '@@ -1,3 +1,4 @@',
-				diffLineIndex: -1,
-			},
-			{
-				key: 'line:0:context:1:1',
-				kind: 'context',
-				hunkIndex: 0,
-				hunkId: 'hunk-0',
-				beforeLine: 1,
-				afterLine: 1,
-				text: 'const a = 1;',
-				diffLineIndex: 0,
-			},
-			{
-				key: 'line:1:del:2',
-				kind: 'del',
-				hunkIndex: 0,
-				hunkId: 'hunk-0',
-				beforeLine: 2,
-				afterLine: null,
-				text: 'const b = 2;',
-				diffLineIndex: 1,
-			},
-			{
-				key: 'line:2:add:2',
-				kind: 'add',
-				hunkIndex: 0,
-				hunkId: 'hunk-0',
-				beforeLine: null,
-				afterLine: 2,
-				text: 'const b = 3;',
-				diffLineIndex: 2,
-			},
-			{
-				key: 'line:3:add:3',
-				kind: 'add',
-				hunkIndex: 0,
-				hunkId: 'hunk-0',
-				beforeLine: null,
-				afterLine: 3,
-				text: 'const c = 4;',
-				diffLineIndex: 3,
-			},
-			{
-				key: 'line:4:context:3:4',
-				kind: 'context',
-				hunkIndex: 0,
-				hunkId: 'hunk-0',
-				beforeLine: 3,
-				afterLine: 4,
-				text: 'console.log(a);',
-				diffLineIndex: 4,
-			},
+		{
+			key: 'hunk:0:hunk-0',
+			kind: 'hunk',
+			hunkIndex: 0,
+			hunkId: 'hunk-0',
+			beforeLine: null,
+			afterLine: null,
+			text: '@@ -1,3 +1,4 @@',
+			diffLineIndex: -1,
+		},
+		{
+			key: 'line:0:context:1:1',
+			kind: 'context',
+			hunkIndex: 0,
+			hunkId: 'hunk-0',
+			beforeLine: 1,
+			afterLine: 1,
+			text: 'const a = 1;',
+			diffLineIndex: 0,
+		},
+		{
+			key: 'line:1:del:2',
+			kind: 'del',
+			hunkIndex: 0,
+			hunkId: 'hunk-0',
+			beforeLine: 2,
+			afterLine: null,
+			text: 'const b = 2;',
+			diffLineIndex: 1,
+		},
+		{
+			key: 'line:2:add:2',
+			kind: 'add',
+			hunkIndex: 0,
+			hunkId: 'hunk-0',
+			beforeLine: null,
+			afterLine: 2,
+			text: 'const b = 3;',
+			diffLineIndex: 2,
+		},
+		{
+			key: 'line:3:add:3',
+			kind: 'add',
+			hunkIndex: 0,
+			hunkId: 'hunk-0',
+			beforeLine: null,
+			afterLine: 3,
+			text: 'const c = 4;',
+			diffLineIndex: 3,
+		},
+		{
+			key: 'line:4:context:3:4',
+			kind: 'context',
+			hunkIndex: 0,
+			hunkId: 'hunk-0',
+			beforeLine: 3,
+			afterLine: 4,
+			text: 'console.log(a);',
+			diffLineIndex: 4,
+		},
 	];
 }
 
 function buildUnifiedDiffRows(rows: GitRenderedDiffRow[]) {
 	return rows.map(renderUnifiedDiffRow);
+}
+
+function syntaxResult(): GitDiffFileSyntaxResult {
+	return {
+		cacheKey: 'syntax',
+		filePath: 'src/app.ts',
+		bodyFingerprint: 'fingerprint',
+		before: {
+			path: 'src/app.ts',
+			languageKey: 'typescript',
+			lines: new Map([
+				[0, [{ text: 'const a = 1;', className: 'cm-code-name' }]],
+				[1, [{ text: 'const b = 2;', className: 'cm-code-deletion' }]],
+				[4, [{ text: 'console.log(a);', className: 'cm-code-name' }]],
+			]),
+			characterCount: 42,
+			segmentCount: 3,
+		},
+		after: {
+			path: 'src/app.ts',
+			languageKey: 'typescript',
+			lines: new Map([
+				[0, [{ text: 'const a = 1;', className: 'cm-code-keyword' }]],
+				[2, [{ text: 'const b = 3;', className: 'cm-code-addition' }]],
+				[3, [{ text: 'const c = 4;', className: 'cm-code-addition' }]],
+				[4, [{ text: 'console.log(a);', className: 'cm-code-title' }]],
+			]),
+			characterCount: 55,
+			segmentCount: 4,
+		},
+		characterCount: 97,
+		segmentCount: 7,
+	};
 }
 
 describe('git diff rows', () => {
@@ -173,5 +207,43 @@ describe('git diff rows', () => {
 		expect(views[2].right?.selectionKey).toBe(
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'after', 2),
 		);
+	});
+
+	it('projects before and after syntax segments onto unified rows', () => {
+		const views = buildUnifiedDiffRowViews({
+			rows: buildUnifiedDiffRows(makeReviewData()),
+			filePath: 'src/app.ts',
+			activeTab: 'unstaged',
+			readOnly: false,
+			selectedLineKeys: new Set(),
+			composerTarget: null,
+			syntaxResult: syntaxResult(),
+		});
+
+		expect(views[0].segments).toBeUndefined();
+		expect(views[1].segments?.[0].className).toBe('cm-code-keyword');
+		expect(views[2].segments?.[0].className).toBe('cm-code-deletion');
+		expect(views[3].segments?.[0].className).toBe('cm-code-addition');
+		expect(views[5].segments?.[0].className).toBe('cm-code-title');
+		expect(views[2].text).toBe('const b = 2;');
+	});
+
+	it('projects each split cell from its own syntax side', () => {
+		const views = buildSplitDiffRowViews({
+			rows: buildSplitDiffRows(buildUnifiedDiffRows(makeReviewData())),
+			filePath: 'src/app.ts',
+			activeTab: 'unstaged',
+			readOnly: false,
+			selectedLineKeys: new Set(),
+			composerTarget: null,
+			syntaxResult: syntaxResult(),
+		});
+
+		expect(views[0].left).toBeNull();
+		expect(views[1].left?.segments?.[0].className).toBe('cm-code-name');
+		expect(views[1].right?.segments?.[0].className).toBe('cm-code-keyword');
+		expect(views[2].left?.segments?.[0].className).toBe('cm-code-deletion');
+		expect(views[2].right?.segments?.[0].className).toBe('cm-code-addition');
+		expect(views[3].left?.segments).toBeUndefined();
 	});
 });

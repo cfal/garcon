@@ -11,6 +11,7 @@
 	} from '$lib/git/review/git-diff-rows.js';
 	import GitVirtualCommentComposer from './GitVirtualCommentComposer.svelte';
 	import GitCommentAppendError from './GitCommentAppendError.svelte';
+	import GitDiffSyntaxText from './GitDiffSyntaxText.svelte';
 	import type {
 		GitDiffCommentInteraction,
 		GitDiffRowInteraction,
@@ -286,15 +287,21 @@
 								row.selectableLineKeys(),
 							)}
 					>
-						<span class="{row.view.textClass} select-text"
-							>{row.view.textPrefix}{row.view.text}</span
-						>
+						<GitDiffSyntaxText
+							className="{row.view.textClass} select-text"
+							prefix={row.view.textPrefix}
+							text={row.view.text}
+							segments={row.view.segments}
+						/>
 					</button>
 				{:else}
 					<div class="whitespace-pre-wrap break-all pl-2 pr-8 text-left">
-						<span class="{row.view.textClass} select-text"
-							>{row.view.textPrefix}{row.view.text}</span
-						>
+						<GitDiffSyntaxText
+							className="{row.view.textClass} select-text"
+							prefix={row.view.textPrefix}
+							text={row.view.text}
+							segments={row.view.segments}
+						/>
 					</div>
 				{/if}
 				{@render reviewAffordance(row.file.path, defaultTarget)}
@@ -413,9 +420,12 @@
 												row.selectableLineKeys(),
 											)}
 									>
-										<span class="{cellView.textClass} select-text"
-											>{cellView.textPrefix}{cellView.cell.text}</span
-										>
+										<GitDiffSyntaxText
+											className="{cellView.textClass} select-text"
+											prefix={cellView.textPrefix}
+											text={cellView.cell.text}
+											segments={cellView.segments}
+										/>
 									</button>
 								{:else}
 									<div
@@ -424,9 +434,12 @@
 											? 'pl-7'
 											: 'pl-2'}"
 									>
-										<span class="{cellView.textClass} select-text"
-											>{cellView.textPrefix}{cellView.cell.text}</span
-										>
+										<GitDiffSyntaxText
+											className="{cellView.textClass} select-text"
+											prefix={cellView.textPrefix}
+											text={cellView.cell.text}
+											segments={cellView.segments}
+										/>
 									</div>
 								{/if}
 								{#if workbenchControls && row.actionTarget && (cellView.cell.kind === 'add' || cellView.cell.kind === 'del')}

@@ -1,5 +1,7 @@
 import type { GitDiffTab } from '$lib/api/git.js';
+import type { CodeHighlightSegment } from '$lib/highlighting/code-highlight-types.js';
 import type { GitRenderedDiffRow } from './git-rendered-diff-types.js';
+import type { GitDiffFileSyntaxResult } from './git-diff-syntax.js';
 import type { GitDiffSeverity, GitDiffSide } from '$lib/git/review/git-inline-comment.svelte.js';
 import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
 
@@ -68,6 +70,7 @@ export interface UnifiedDiffRowView {
 	textClass: string;
 	textPrefix: string;
 	text: string;
+	segments?: readonly CodeHighlightSegment[];
 	showComposer: boolean;
 	beforeContextTarget: GitDiffLineContextTarget | null;
 	afterContextTarget: GitDiffLineContextTarget | null;
@@ -83,6 +86,7 @@ export interface SplitDiffCellView {
 	lineNumClass: string;
 	textClass: string;
 	textPrefix: string;
+	segments?: readonly CodeHighlightSegment[];
 	contextTarget: GitDiffLineContextTarget | null;
 }
 
@@ -102,6 +106,7 @@ interface BuildUnifiedRowViewsOptions {
 	readOnly: boolean;
 	selectedLineKeys: Set<string>;
 	composerTarget: GitDiffComposerTarget | null;
+	syntaxResult?: GitDiffFileSyntaxResult;
 }
 
 interface BuildSplitRowViewsOptions {
@@ -111,6 +116,7 @@ interface BuildSplitRowViewsOptions {
 	readOnly: boolean;
 	selectedLineKeys: Set<string>;
 	composerTarget: GitDiffComposerTarget | null;
+	syntaxResult?: GitDiffFileSyntaxResult;
 }
 
 export function renderUnifiedDiffRow(row: GitRenderedDiffRow): RenderedDiffRow {
@@ -248,27 +254,29 @@ export function buildUnifiedDiffRowView(
 	options: Omit<BuildUnifiedRowViewsOptions, 'rows'>,
 	row: RenderedDiffRow,
 ): UnifiedDiffRowView {
-		const selectionKey = getUnifiedSelectionKey(row, options.filePath, options.activeTab);
-		const isSelectable = !options.readOnly && selectionKey !== null;
-		const isSelected = isSelectable && options.selectedLineKeys.has(selectionKey);
-		const showComposer = isComposerForUnifiedRow(row, options.composerTarget);
+	const selectionKey = getUnifiedSelectionKey(row, options.filePath, options.activeTab);
+	const isSelectable = !options.readOnly && selectionKey !== null;
+	const isSelected = isSelectable && options.selectedLineKeys.has(selectionKey);
+	const showComposer = isComposerForUnifiedRow(row, options.composerTarget);
+	const segments = unifiedSyntaxSegments(row, options.syntaxResult);
 
-		return {
-			key: row.key,
-			row,
-			isHunkHeader: row.kind === 'hunk-header',
-			isSelectable,
-			selectionKey,
-			bgClass: rowBgClass(row.kind, isSelected, showComposer),
-			lineNumClass: lineNumClass(row.kind),
-			textClass: unifiedTextClass(row.kind),
-			textPrefix: unifiedTextPrefix(row.kind),
-			text: unifiedText(row),
-			showComposer,
-			beforeContextTarget: getUnifiedContextTarget(row, 'before'),
-			afterContextTarget: getUnifiedContextTarget(row, 'after'),
-			rowContextTarget: getUnifiedContextTarget(row, row.kind === 'del' ? 'before' : 'after'),
-		};
+	return {
+		key: row.key,
+		row,
+		isHunkHeader: row.kind === 'hunk-header',
+		isSelectable,
+		selectionKey,
+		bgClass: rowBgClass(row.kind, isSelected, showComposer),
+		lineNumClass: lineNumClass(row.kind),
+		textClass: unifiedTextClass(row.kind),
+		textPrefix: unifiedTextPrefix(row.kind),
+		text: unifiedText(row),
+		...(segments ? { segments } : {}),
+		showComposer,
+		beforeContextTarget: getUnifiedContextTarget(row, 'before'),
+		afterContextTarget: getUnifiedContextTarget(row, 'after'),
+		rowContextTarget: getUnifiedContextTarget(row, row.kind === 'del' ? 'before' : 'after'),
+	};
 }
 
 export function buildSplitDiffRowViews(options: BuildSplitRowViewsOptions): SplitDiffRowView[] {
@@ -300,6 +308,7 @@ function buildSplitCellView(
 	const isSelected = isSelectable && options.selectedLineKeys.has(selectionKey);
 	const isComposerTarget =
 		cell.line !== null && isComposerForCell(side, cell.line, options.composerTarget);
+	const segments = splitSyntaxSegments(cell, side, options.syntaxResult);
 
 	return {
 		side,
@@ -310,8 +319,27 @@ function buildSplitCellView(
 		lineNumClass: splitLineNumClass(cell.kind),
 		textClass: splitTextClass(cell.kind),
 		textPrefix: splitTextPrefix(cell.kind),
+		...(segments ? { segments } : {}),
 		contextTarget: getSplitContextTarget(cell, side, hunkIndex),
 	};
+}
+
+function unifiedSyntaxSegments(
+	row: RenderedDiffRow,
+	result: GitDiffFileSyntaxResult | undefined,
+): readonly CodeHighlightSegment[] | undefined {
+	if (row.kind === 'hunk-header') return undefined;
+	const side = row.kind === 'del' ? result?.before : result?.after;
+	return side?.lines.get(row.diffLineIndex);
+}
+
+function splitSyntaxSegments(
+	cell: SplitDiffCell,
+	side: GitDiffSide,
+	result: GitDiffFileSyntaxResult | undefined,
+): readonly CodeHighlightSegment[] | undefined {
+	if (cell.kind === 'empty') return undefined;
+	return (side === 'before' ? result?.before : result?.after)?.lines.get(cell.diffLineIndex);
 }
 
 function getUnifiedSelectionKey(

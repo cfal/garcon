@@ -5,6 +5,7 @@ import type { GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import type { GitDiffSyntaxResults } from '$lib/git/review/git-diff-syntax.js';
 import GitVirtualDiffRow from '../GitVirtualDiffRow.svelte';
 
 function buildVirtualRows(options: Parameters<typeof buildGitVirtualReviewRowSource>[0]) {
@@ -32,7 +33,39 @@ const file: GitReviewFileSummary = {
 	isTooLarge: false,
 };
 
-function buildRows(diffMode: 'unified' | 'split'): DiffContentRow[] {
+function syntaxResults(): GitDiffSyntaxResults {
+	return {
+		[file.path]: {
+			cacheKey: 'syntax',
+			filePath: file.path,
+			bodyFingerprint: file.bodyFingerprint,
+			before: {
+				path: file.path,
+				languageKey: 'typescript',
+				lines: new Map([
+					[0, [{ text: 'old line', className: 'cm-code-string' }]],
+					[2, [{ text: 'shared line', className: 'cm-code-name' }]],
+				]),
+				characterCount: 19,
+				segmentCount: 2,
+			},
+			after: {
+				path: file.path,
+				languageKey: 'typescript',
+				lines: new Map([
+					[1, [{ text: 'new line', className: 'cm-code-keyword' }]],
+					[2, [{ text: 'shared line', className: 'cm-code-comment' }]],
+				]),
+				characterCount: 19,
+				segmentCount: 2,
+			},
+			characterCount: 38,
+			segmentCount: 4,
+		},
+	};
+}
+
+function buildRows(diffMode: 'unified' | 'split', highlighted = false): DiffContentRow[] {
 	const patch =
 		'diff --git a/src/example.ts b/src/example.ts\n@@ -1,2 +1,2 @@\n-old line\n+new line\n shared line\n';
 	const body: GitReviewFileBody = {
@@ -85,6 +118,7 @@ function buildRows(diffMode: 'unified' | 'split'): DiffContentRow[] {
 			},
 			selectedLineKeys: new Set(),
 		},
+		...(highlighted ? { syntaxResults: syntaxResults() } : {}),
 	}).filter((row): row is DiffContentRow => row.kind === 'unified-row' || row.kind === 'split-row');
 }
 
@@ -131,14 +165,14 @@ function renderRow(row: DiffContentRow, overrides: Partial<GitVirtualDiffRowProp
 	return { ...render(GitVirtualDiffRow, { props }), props };
 }
 
-function findUnifiedRow(kind: 'add' | 'context'): UnifiedContentRow {
-	return buildRows('unified').find(
+function findUnifiedRow(kind: 'add' | 'context', highlighted = false): UnifiedContentRow {
+	return buildRows('unified', highlighted).find(
 		(row): row is UnifiedContentRow => row.kind === 'unified-row' && row.view.row.kind === kind,
 	)!;
 }
 
-function findSplitChangeRow(): SplitContentRow {
-	return buildRows('split').find(
+function findSplitChangeRow(highlighted = false): SplitContentRow {
+	return buildRows('split', highlighted).find(
 		(row): row is SplitContentRow => row.kind === 'split-row' && row.view.left?.cell.kind === 'del',
 	)!;
 }
@@ -290,5 +324,44 @@ describe('GitVirtualDiffRow', () => {
 		for (const button of container.querySelectorAll('button')) {
 			expect(button.textContent?.trim() || button.getAttribute('aria-label')).toBeTruthy();
 		}
+	});
+
+	it('renders unified syntax spans without absorbing the diff prefix', async () => {
+		const row = findUnifiedRow('add', true);
+		const onAddComment = vi.fn();
+		const { container } = renderRow(row, {
+			interaction: { ...renderRowInteraction(), onAddComment },
+		});
+		const token = container.querySelector<HTMLElement>('.cm-code-keyword');
+		const text = token?.closest<HTMLElement>('.code-highlight');
+
+		expect(token?.textContent).toBe('new line');
+		expect(text?.textContent).toBe('+new line');
+		expect(text?.childNodes[0]?.textContent).toBe('+');
+		await fireEvent.click(token!);
+		expect(onAddComment).toHaveBeenCalledWith(file.path, 'after', 1);
+	});
+
+	it('renders independent before and after syntax in split mode', () => {
+		const { container } = renderRow(findSplitChangeRow(true));
+		const before = container.querySelector<HTMLElement>('.cm-code-string');
+		const after = container.querySelector<HTMLElement>('.cm-code-keyword');
+
+		expect(before?.closest('.code-highlight')?.textContent).toBe('-old line');
+		expect(after?.closest('.code-highlight')?.textContent).toBe('+new line');
+	});
+
+	it('renders malicious-looking highlighted source as text', () => {
+		const unsafeText = '<img src=x onerror=alert(1)>';
+		const row = findUnifiedRow('add');
+		row.view = {
+			...row.view,
+			text: unsafeText,
+			segments: [{ text: unsafeText, className: 'cm-code-string' }],
+		};
+		const { container } = renderRow(row);
+
+		expect(container.querySelector('img')).toBeNull();
+		expect(container.querySelector('.code-highlight')?.textContent).toBe(`+${unsafeText}`);
 	});
 });

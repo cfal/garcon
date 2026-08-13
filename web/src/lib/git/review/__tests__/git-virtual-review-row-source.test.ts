@@ -6,6 +6,7 @@ import {
 	buildGitVirtualReviewRowSource,
 	type GitVirtualReviewRowSource,
 } from '$lib/git/review/git-virtual-review-row-source.js';
+import type { GitDiffFileSyntaxResult } from '$lib/git/review/git-diff-syntax.js';
 
 function summary(path: string, renderedRows: number): GitReviewFileSummary {
 	return {
@@ -282,5 +283,97 @@ describe('Git virtual review row source', () => {
 		expect(buildGitVirtualReviewRowSource(composerOpen).measurementRevision).not.toBe(
 			buildGitVirtualReviewRowSource(composerClosed).measurementRevision,
 		);
+	});
+
+	it('joins syntax by file and diff line without changing virtualization identity', () => {
+		const file = {
+			...summary('src/new.py', 4),
+			originalPath: 'src/old.ts',
+		};
+		const patch = `diff --git a/src/old.ts b/src/new.py
+@@ -1,2 +1,2 @@
+-const oldValue = 1;
++new_value = 2
+ shared
+`;
+		const patchIndex = createGitPatchIndex(patch);
+		const body: GitReviewFileBody = {
+			path: file.path,
+			bodyFingerprint: file.bodyFingerprint,
+			bodyState: 'loaded',
+			category: 'normal',
+			isBinary: false,
+			isTooLarge: false,
+			renderedRowCount: patchIndex.rowCount,
+			patchBytes: patch.length,
+			patch,
+			patchIndex,
+		};
+		const syntax: GitDiffFileSyntaxResult = {
+			cacheKey: 'syntax',
+			filePath: file.path,
+			bodyFingerprint: body.bodyFingerprint,
+			before: {
+				path: 'src/old.ts',
+				languageKey: 'typescript',
+				lines: new Map([
+					[0, [{ text: 'const oldValue = 1;', className: 'cm-code-keyword' }]],
+					[2, [{ text: 'shared', className: 'cm-code-name' }]],
+				]),
+				characterCount: 25,
+				segmentCount: 2,
+			},
+			after: {
+				path: 'src/new.py',
+				languageKey: 'python',
+				lines: new Map([
+					[1, [{ text: 'new_value = 2', className: 'cm-code-name' }]],
+					[2, [{ text: 'shared', className: 'cm-code-title' }]],
+				]),
+				characterCount: 20,
+				segmentCount: 2,
+			},
+			characterCount: 45,
+			segmentCount: 4,
+		};
+		const baseOptions = options([file], { [file.path]: body });
+		const plain = buildGitVirtualReviewRowSource(baseOptions);
+		const highlighted = buildGitVirtualReviewRowSource({
+			...baseOptions,
+			syntaxResults: { [file.path]: syntax },
+		});
+
+		expect(highlighted.rowCount).toBe(plain.rowCount);
+		expect(highlighted.measurementRevision).toBe(plain.measurementRevision);
+		for (let index = 0; index < plain.rowCount; index += 1) {
+			expect(highlighted.rowKey(index)).toBe(plain.rowKey(index));
+			expect(highlighted.estimateRowHeight(index, 20)).toBe(plain.estimateRowHeight(index, 20));
+			expect(highlighted.rowAt(index)?.id).toBe(plain.rowAt(index)?.id);
+		}
+		expect(highlighted.rowAt(2)).toMatchObject({
+			kind: 'unified-row',
+			view: { segments: [{ text: 'const oldValue = 1;', className: 'cm-code-keyword' }] },
+		});
+		expect(highlighted.rowAt(3)).toMatchObject({
+			kind: 'unified-row',
+			view: { segments: [{ text: 'new_value = 2', className: 'cm-code-name' }] },
+		});
+		expect(highlighted.rowAt(4)).toMatchObject({
+			kind: 'unified-row',
+			view: { segments: [{ text: 'shared', className: 'cm-code-title' }] },
+		});
+
+		const split = buildGitVirtualReviewRowSource({
+			...baseOptions,
+			diffMode: 'split',
+			syntaxResults: { [file.path]: syntax },
+		});
+		expect(split.rowAt(2)).toMatchObject({
+			kind: 'split-row',
+			view: {
+				left: { segments: [{ className: 'cm-code-keyword' }] },
+				right: { segments: [{ className: 'cm-code-name' }] },
+			},
+		});
 	});
 });

@@ -599,6 +599,9 @@ function interactionForFile(options: BuildVirtualRowsOptions, file: GitReviewFil
 		readOnly: !workbench,
 		selectedLineKeys: workbench?.selectedLineKeys ?? new Set<string>(),
 		composerTarget,
+		...(options.syntaxResults?.[file.path]
+			? { syntaxResult: options.syntaxResults[file.path] }
+			: {}),
 	};
 	const actionTarget: GitDiffActionTarget | null = workbench
 		? {

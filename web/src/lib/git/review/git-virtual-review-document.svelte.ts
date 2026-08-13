@@ -13,6 +13,7 @@ import { type SplitDiffRowView, type UnifiedDiffRowView } from '$lib/git/review/
 import * as m from '$lib/paraglide/messages.js';
 import type { DiffMode, GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
 import type { CommentComposerState } from '$lib/git/review/git-inline-comment.svelte.js';
+import type { GitDiffSyntaxResults } from '$lib/git/review/git-diff-syntax.js';
 import type { GitWorkbenchLoadGuard } from '$lib/git/workbench/git-workbench-types.js';
 import { GitReviewBodyScheduler } from './git-review-body-scheduler.js';
 import {
@@ -136,6 +137,7 @@ export interface BuildVirtualRowsOptions {
 	diffMode: DiffMode;
 	contextLines: number;
 	interaction: GitVirtualRowInteraction;
+	syntaxResults?: GitDiffSyntaxResults;
 	collapsedFilePaths?: ReadonlySet<string>;
 	placeholderLimit?: {
 		title: string;
