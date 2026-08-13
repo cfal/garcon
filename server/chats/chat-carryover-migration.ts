@@ -10,7 +10,7 @@ import {
 } from '../../common/transcript-seed.js';
 import { isRecord } from '../../common/json.js';
 import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
-import type { AgentOwnershipJournalFileV4 } from './agent-ownership-journal.js';
+import type { AgentOwnershipJournalFileV5 } from './agent-ownership-journal.js';
 import { assertMigrationCapacity } from './carryover-migration-budget.js';
 import { CarryOverTranscriptStore } from './carryover-transcript-store.js';
 import { readChatRegistryVersion, readLegacyChatRegistryV3 } from './legacy-chat-registry-v3.js';
@@ -617,17 +617,16 @@ function parseTargetRegistry(bytes: Buffer): {
   return { version: 5, sessions };
 }
 
-function parseTargetJournal(bytes: Buffer): AgentOwnershipJournalFileV4 {
+function parseTargetJournal(bytes: Buffer): AgentOwnershipJournalFileV5 {
   const value: unknown = JSON.parse(bytes.toString('utf8'));
   if (
     !isRecord(value)
-    || value.version !== 4
+    || value.version !== 5
     || !Array.isArray(value.ownershipIntents)
-    || !Array.isArray(value.transferCleanup)
   ) {
     throw new Error('Invalid migrated ownership journal');
   }
-  return value as unknown as AgentOwnershipJournalFileV4;
+  return value as unknown as AgentOwnershipJournalFileV5;
 }
 
 async function validateMigratedRoots(

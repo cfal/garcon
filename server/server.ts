@@ -523,9 +523,13 @@ export async function startServer(): Promise<void> {
       carryOver,
       capture: new ProjectionCaptureService(),
       ownership: agentOwnership,
+      ledger: transcriptLedger,
       onCommitted(chatId) {
         eventWiring?.notifyAgentHandoff(chatId);
       },
+    });
+    void handoffs.recoverPendingHandoffs().catch((error) => {
+      logger.warn('Pending agent handoff recovery failed:', errorMessage(error));
     });
 
     const shareStore = new ShareStore(workspaceDir);

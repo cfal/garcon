@@ -391,6 +391,19 @@ export class TranscriptLedgerService {
     return this.#store.highWatermark(chatId);
   }
 
+  checkpointForHandoff(chatId: string): TranscriptWatermark {
+    const checkpoint = this.#store.checkpointForHandoff(chatId);
+    return { viewId: checkpoint.viewId, ordinal: checkpoint.ordinal };
+  }
+
+  advanceContentStart(
+    chatId: string,
+    viewId: TranscriptViewId,
+    contentStartOrdinal: number,
+  ): TranscriptView {
+    return this.#store.advanceContentStart(chatId, viewId, contentStartOrdinal);
+  }
+
   replaceCurrentView(
     chatId: string,
     expectedViewId: TranscriptViewId,
