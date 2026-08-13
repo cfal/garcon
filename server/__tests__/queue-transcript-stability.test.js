@@ -261,6 +261,7 @@ describe('queue and transcript stability', () => {
         },
         {
           register: mock(async () => undefined),
+          bindNativeUserPosition: mock(() => true),
           discard: mock(() => true),
           markFailed: mock(() => true),
           markUnconfirmed: mock(() => true),
@@ -444,6 +445,7 @@ describe('queue and transcript stability', () => {
           return pendingInputs.register(...args);
         }),
         discard: pendingInputs.discard.bind(pendingInputs),
+        bindNativeUserPosition: pendingInputs.bindNativeUserPosition.bind(pendingInputs),
         markFailed: pendingInputs.markFailed.bind(pendingInputs),
         markUnconfirmed: pendingInputs.markUnconfirmed.bind(pendingInputs),
       };
@@ -628,6 +630,7 @@ describe('queue and transcript stability', () => {
         },
         {
           register: mock(async () => undefined),
+          bindNativeUserPosition: mock(() => true),
           discard: mock(() => true),
           markFailed: mock(() => true),
           markUnconfirmed: mock(() => true),

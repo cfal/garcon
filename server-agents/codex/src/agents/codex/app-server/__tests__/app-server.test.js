@@ -1559,6 +1559,7 @@ describe('CodexAppServerRuntime', () => {
       },
       {
         register: async () => {},
+        bindNativeUserPosition: () => true,
         discard: () => true,
         markFailed: () => true,
         markUnconfirmed,
