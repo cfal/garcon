@@ -43,6 +43,7 @@ import { CodexAppServerClient } from './agents/codex/app-server/client.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
+import { createCodexNativeActivityProbe } from './agents/codex/native-activity.js';
 
 const CODEX_DESCRIPTOR = {
   id: 'codex',
@@ -82,7 +83,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
   readonly producerExecution;
   readonly transcript;
   readonly nativeHistoryImport;
-  readonly nativeActivity = null;
+  readonly nativeActivity;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -136,6 +137,7 @@ export default class CodexAgentIntegration implements AgentIntegrationV4 {
     const nativeEvidence = createCodexNativeEvidence(runtime, nativeSessions, logger);
     this.producerExecution = createAgentProducerAdapter(execution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
+    this.nativeActivity = createCodexNativeActivityProbe(nativeSessions);
     const projection = createAgentOwnedProjection({
       ownerId: 'codex',
       host,

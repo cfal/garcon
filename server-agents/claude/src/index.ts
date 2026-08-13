@@ -45,6 +45,7 @@ import {
   resolveClaudeNativePath,
 } from './agents/claude/native-path.js';
 import { ClaudeSlashCommandDiscovery } from './agents/claude/slash-command-discovery.js';
+import { createClaudeNativeActivityProbe } from './agents/claude/native-activity.js';
 
 const CLAUDE_DESCRIPTOR = {
   id: 'claude',
@@ -84,7 +85,7 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
   readonly producerExecution;
   readonly transcript;
   readonly nativeHistoryImport;
-  readonly nativeActivity = null;
+  readonly nativeActivity;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -169,6 +170,7 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
     });
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
+    this.nativeActivity = createClaudeNativeActivityProbe(nativeSessions);
     const projection = createAgentOwnedProjection({
       ownerId: 'claude',
       host,

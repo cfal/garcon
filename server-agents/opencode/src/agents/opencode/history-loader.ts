@@ -77,6 +77,7 @@ export interface OpenCodeHistoryLoadOptions {
   signal?: AbortSignal;
   throwOnError?: boolean;
   logger?: AgentLogger;
+  limit?: number;
 }
 
 interface OpenCodePreview {
@@ -306,7 +307,10 @@ export async function fetchOpenCodeStoredMessages(
       'message fetch',
       createOpenCodeRequestScope(options.directory),
       (scope) => {
-        const args = withOpenCodeRequestScope({ sessionID: sessionId }, scope);
+        const args = withOpenCodeRequestScope({
+          sessionID: sessionId,
+          ...(options.limit === undefined ? {} : { limit: options.limit }),
+        }, scope);
         return options.signal
           ? client.session.messages(args, { signal: options.signal })
           : client.session.messages(args);
@@ -410,4 +414,16 @@ export async function loadOpenCodeChatMessages(
 ): Promise<ChatMessage[]> {
   const stored = await fetchOpenCodeStoredMessages(sessionId, getClient, options);
   return convertOpenCodeStoredMessages(stored);
+}
+
+export function latestOpenCodeStoredActivityAt(
+  rawMessages: readonly OpenCodeMessage[],
+): string | null {
+  const messages = visibleOpenCodeStoredMessages(rawMessages);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (convertOpenCodeStoredMessages([message]).length === 0) continue;
+    return dateToIso(message.info?.time?.created);
+  }
+  return null;
 }

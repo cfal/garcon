@@ -326,6 +326,18 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEventInpu
   return messages;
 }
 
+export function factoryStoredEventActivityTimestamp(value: unknown): string | null | undefined {
+  if (!isFactoryStoredEvent(value)) return undefined;
+  if (loadFactoryChatMessagesFromEvents([value]).length === 0) return undefined;
+  return toIsoString(value.timestamp);
+}
+
+function isFactoryStoredEvent(value: unknown): value is FactoryStoredEvent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const type = (value as { readonly type?: unknown }).type;
+  return type === 'session_start' || type === 'message';
+}
+
 export async function loadFactoryChatMessages(
   sessionPath: string,
   logger: AgentLogger = SILENT_LOGGER,

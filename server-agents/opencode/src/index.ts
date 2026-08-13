@@ -27,6 +27,7 @@ import { OpenCodeExecution } from './agents/opencode/execution.js';
 import { loadOpenCodeChatMessages } from './agents/opencode/history-loader.js';
 import { getOpenCodeAuthStatus } from './agents/opencode/opencode-auth.js';
 import { OpenCodeRuntime } from './agents/opencode/opencode.js';
+import { createOpenCodeNativeActivityProbe } from './agents/opencode/native-activity.js';
 
 const OPENCODE_DESCRIPTOR = {
   id: 'opencode',
@@ -63,7 +64,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
   readonly producerExecution;
   readonly transcript;
   readonly nativeHistoryImport;
-  readonly nativeActivity = null;
+  readonly nativeActivity;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -95,6 +96,11 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
     const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId, logger);
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
+    this.nativeActivity = createOpenCodeNativeActivityProbe({
+      nativeSessions,
+      logger,
+      withClient: (operation) => runtime.withClientLease((client) => operation(async () => client)),
+    });
     const projection = createAgentOwnedProjection({
       ownerId: 'opencode',
       host,

@@ -24,6 +24,7 @@ import { FactoryCliRuntime, runSingleQuery } from './agents/factory/factory-cli.
 import { FactoryExecution } from './agents/factory/execution.js';
 import { FactoryModelCatalogService } from './agents/factory/factory-models.js';
 import { createFactoryTranscriptSource } from './agents/factory/factory-transcript-source.js';
+import { createFactoryNativeActivityProbe } from './agents/factory/native-activity.js';
 
 const FACTORY_DESCRIPTOR = {
   id: 'factory',
@@ -60,7 +61,7 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
   readonly producerExecution;
   readonly transcript;
   readonly nativeHistoryImport;
-  readonly nativeActivity = null;
+  readonly nativeActivity;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -93,6 +94,7 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
     const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions);
     this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
+    this.nativeActivity = createFactoryNativeActivityProbe(nativeSessions);
     const projection = createAgentOwnedProjection({
       ownerId: 'factory',
       host,
