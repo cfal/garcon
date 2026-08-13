@@ -307,7 +307,8 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.page.waitForSelector(`${historyPanel} .cm-code-keyword`);
 
       await app.setViewport(390, 844);
-      await app.clickButton('Chat');
+      await app.waitForButton('Close view');
+      await app.clickButton('Close view');
       await fixture.page.waitForSelector(
         '[role="tabpanel"][data-workspace-surface-id="singleton:chat"][aria-hidden="false"]',
       );
