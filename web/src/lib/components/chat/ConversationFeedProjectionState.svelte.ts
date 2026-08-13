@@ -11,6 +11,7 @@ import {
 	type ConversationFeedRenderModelReconciliation,
 } from '$lib/chat/transcript/conversation-feed-render-model.js';
 import {
+	conversationFeedItemLayout,
 	filterHiddenToolRenderItems,
 	type ConversationFeedRenderItem,
 	type ConversationFeedRenderModel,
@@ -255,7 +256,10 @@ export class ConversationFeedProjectionState {
 	): ConversationFeedRenderItem[] {
 		return filterHiddenToolRenderItems(items, input.hiddenToolTypes).filter(
 			(item) =>
-				item.kind !== 'message' || !(item.message instanceof ThinkingMessage) || input.showThinking,
+				conversationFeedItemLayout(item) !== 'hidden' &&
+				(item.kind !== 'message' ||
+					!(item.message instanceof ThinkingMessage) ||
+					input.showThinking),
 		);
 	}
 

@@ -93,10 +93,7 @@
 	{@const toolResultRowId = isToolUseMessage(message)
 		? renderModel.toolResultRowIdByUseRowId.get(item.id)
 		: undefined}
-	{@const pairedToolUse =
-		message instanceof ToolResultMessage
-			? renderModel.toolUseByResultRowId.get(item.id)
-			: undefined}
+	{@const pairedToolUse = message instanceof ToolResultMessage ? item.pairedToolUse : undefined}
 	{@const permTerminal = permissionTerminalFor(message)}
 	<svelte:boundary>
 		<ConversationMessage

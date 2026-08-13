@@ -209,13 +209,15 @@ function codexSubagentItemsMarkdown(value: unknown): string | undefined {
 
 function codexSubagentStatesMarkdown(value: unknown): string | undefined {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-	const lines = Object.entries(value as Record<string, unknown>).map(([target, value]) => {
-		if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
-		const agentState = value as Record<string, unknown>;
-		const status = String(agentState.status ?? '').trim();
-		const message = String(agentState.message ?? '').trim();
-		return status ? `- ${target}: ${status}${message ? ` — ${message}` : ''}` : '';
-	}).filter(Boolean);
+	const lines = Object.entries(value as Record<string, unknown>)
+		.map(([target, value]) => {
+			if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+			const agentState = value as Record<string, unknown>;
+			const status = String(agentState.status ?? '').trim();
+			const message = String(agentState.message ?? '').trim();
+			return status ? `- ${target}: ${status}${message ? ` — ${message}` : ''}` : '';
+		})
+		.filter(Boolean);
 	return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
@@ -250,22 +252,7 @@ function codexSubagentMarkdown(input: Record<string, unknown>): string {
 
 export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 	'bash-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Bash',
-			getValue: (input) => String(input.command ?? ''),
-			getSecondary: (input) => input.description as string | undefined,
-			action: 'copyValue',
-			style: 'terminal',
-			wrapText: true,
-			language: 'bash',
-			colorScheme: {
-				primary: 'text-foreground font-mono',
-				secondary: 'text-muted-foreground',
-				background: '',
-				border: 'border-status-success-border',
-			},
-		},
+		input: { mode: 'inline' },
 		result: {
 			hideOnSuccess: true,
 			mode: 'special',

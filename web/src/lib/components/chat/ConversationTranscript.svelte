@@ -7,6 +7,7 @@
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import {
 		buildConversationFeedRenderModel,
+		conversationFeedItemLayout,
 		filterHiddenToolRenderItems,
 	} from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { HideableToolType } from '$lib/stores/local-settings.svelte';
@@ -49,7 +50,11 @@
 	}: Props = $props();
 
 	const renderModel = $derived(buildConversationFeedRenderModel(rows));
-	const renderItems = $derived(filterHiddenToolRenderItems(renderModel.items, hiddenToolTypes));
+	const renderItems = $derived(
+		filterHiddenToolRenderItems(renderModel.items, hiddenToolTypes).filter(
+			(item) => conversationFeedItemLayout(item) !== 'hidden',
+		),
+	);
 </script>
 
 <div

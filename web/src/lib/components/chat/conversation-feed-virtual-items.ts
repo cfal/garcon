@@ -1,6 +1,9 @@
 import { isToolUseMessage, ToolResultMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
-import type { ConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-items.js';
+import {
+	conversationFeedItemLayout,
+	type ConversationFeedRenderItem,
+} from '$lib/chat/transcript/conversation-feed-items.js';
 
 export type ConversationFeedSpacing = 'responsive-feed' | 'scaled-transcript' | 'none';
 
@@ -71,9 +74,7 @@ function toolAnchorIds(item: ConversationFeedRenderItem): string[] {
 }
 
 function transcriptSpacing(item: ConversationFeedRenderItem): ConversationFeedSpacing {
-	return item.kind === 'message' && item.message instanceof ToolResultMessage
-		? 'none'
-		: 'scaled-transcript';
+	return conversationFeedItemLayout(item) === 'hidden' ? 'none' : 'scaled-transcript';
 }
 
 export function buildConversationVirtualFeedModel(
@@ -245,8 +246,10 @@ export function estimateConversationFeedItemSize(
 	const renderItem = item.item;
 	const scale = Math.max(0.5, Math.min(textScale, 2));
 	const spacing = item.spacingAfter === 'scaled-transcript' ? 12 * scale : 0;
+	const layout = conversationFeedItemLayout(renderItem);
+	if (layout === 'hidden') return 0;
+	if (layout === 'permission') return 240 * scale + spacing;
 	if (renderItem.kind === 'local-notice') return 52 * scale + spacing;
-	if (renderItem.message instanceof ToolResultMessage) return 0;
 	if (renderItem.message.type === 'user-message') return 112 * scale + spacing;
 	if (renderItem.message.type === 'assistant-message') return 180 * scale + spacing;
 	if (renderItem.message.type === 'thinking') return 160 * scale + spacing;

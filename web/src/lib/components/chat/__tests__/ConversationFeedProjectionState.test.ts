@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AssistantMessage, UserMessage } from '$shared/chat-types';
+import {
+	AssistantMessage,
+	BashToolUseMessage,
+	GlobToolUseMessage,
+	ToolResultMessage,
+	UserMessage,
+} from '$shared/chat-types';
 import {
 	ActiveTranscriptState,
 	type ChatDisplayRow,
@@ -69,6 +75,45 @@ describe('ConversationFeedProjectionState', () => {
 		expect(projection.model.items[0]?.key).toContain('chat-1:generation-1');
 		expect(projection.model.indexByRowId.get('generation-1:1')).toBe(1);
 		expect(projection.renderModel.items[0]?.id).toBe('generation-1:1');
+	});
+
+	it('keeps hidden result rows canonical but excludes them from virtual geometry', () => {
+		const projection = new ConversationFeedProjectionState().reconcile(
+			input({
+				rows: [
+					{
+						kind: 'message',
+						id: 'generation-1:1',
+						message: new BashToolUseMessage(TS, 'bash-1', 'pwd'),
+					},
+					{
+						kind: 'message',
+						id: 'generation-1:2',
+						message: new ToolResultMessage(TS, 'bash-1', { raw: '/tmp' }, false),
+					},
+					{
+						kind: 'message',
+						id: 'generation-1:3',
+						message: new GlobToolUseMessage(TS, 'glob-1', '**/*.ts'),
+					},
+					{
+						kind: 'message',
+						id: 'generation-1:4',
+						message: new ToolResultMessage(TS, 'glob-1', { filenames: ['a.ts'] }, false),
+					},
+				],
+			}),
+		);
+
+		expect(projection.renderModel.items.map((item) => item.id)).toEqual([
+			'generation-1:1',
+			'generation-1:2',
+			'generation-1:3',
+			'generation-1:4',
+		]);
+		expect(projection.model.indexByRowId.has('generation-1:2')).toBe(false);
+		expect(projection.model.indexByRowId.has('generation-1:4')).toBe(true);
+		expect(projection.geometry.estimates).not.toContain(0);
 	});
 
 	it('acknowledges content-only streaming without publishing new geometry', () => {

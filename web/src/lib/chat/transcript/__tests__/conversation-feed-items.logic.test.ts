@@ -4,6 +4,7 @@ import {
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
 	ExecToolUseMessage,
+	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	PermissionCancelledMessage,
 	PermissionRequestMessage,
@@ -16,6 +17,7 @@ import {
 import {
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
+	conversationFeedItemLayout,
 	filterHiddenToolRenderItems,
 	visiblePendingPermissionRequests,
 } from '$lib/chat/transcript/conversation-feed-items.js';
@@ -107,37 +109,70 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(model.items.map((item) => item.index)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 		expect(model.toolResultByUseRowId.get('row-1')).toBe(messages[2]);
 		expect(model.toolResultRowIdByUseRowId.get('row-1')).toBe('row-2');
-		expect(model.toolUseByResultRowId.get('row-2')).toBe(messages[1]);
+		expect(model.items[2]).toMatchObject({ pairedToolUse: messages[1] });
 	});
 
 	it('filters each hidden tool row without changing the remaining order', () => {
-		const items = buildConversationFeedRenderItems(
+		const model = buildConversationFeedRenderModel(
 			rows([
 				new UserMessage(TS, 'start'),
 				new BashToolUseMessage(TS, 'bash-1', 'pwd'),
+				new ToolResultMessage(TS, 'bash-1', { raw: '/tmp' }, false),
 				new ExecToolUseMessage(TS, 'exec-1', 'text("ok")', 'javascript'),
+				new ToolResultMessage(TS, 'exec-1', { raw: 'ok' }, false),
 				new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
 				new AssistantMessage(TS, 'done'),
 			]),
 		);
 
 		const visibleTypes = (hiddenToolTypes: readonly string[]) =>
-			filterHiddenToolRenderItems(items, hiddenToolTypes).flatMap((item) =>
+			filterHiddenToolRenderItems(model.items, hiddenToolTypes).flatMap((item) =>
 				item.kind === 'message' ? [item.message.type] : [],
 			);
 
 		expect(visibleTypes(['bash-tool-use'])).toEqual([
 			'user-message',
 			'exec-tool-use',
+			'tool-result',
 			'assistant-message',
 		]);
 		expect(visibleTypes(['exec-tool-use'])).toEqual([
 			'user-message',
 			'bash-tool-use',
+			'tool-result',
 			'bash-tool-use',
 			'assistant-message',
 		]);
-		expect(filterHiddenToolRenderItems(items, [])).toBe(items);
+		expect(filterHiddenToolRenderItems(model.items, [])).toBe(model.items);
+	});
+
+	it('assigns layout only to rows with visible standalone presentation', () => {
+		const model = buildConversationFeedRenderModel(
+			rows([
+				new BashToolUseMessage(TS, 'bash-1', 'pwd'),
+				new ToolResultMessage(TS, 'bash-1', { raw: '/tmp' }, false),
+				new GlobToolUseMessage(TS, 'glob-1', '**/*.ts'),
+				new ToolResultMessage(TS, 'glob-1', { filenames: ['a.ts'] }, false),
+				questionTool('question-1'),
+				new ToolResultMessage(
+					TS,
+					'question-1',
+					{ toolUseResult: { answers: { 'Which mode?': 'Careful' } } },
+					false,
+				),
+				new PermissionResolvedMessage(TS, 'permission-1', true),
+			]),
+		);
+
+		expect(model.items.map(conversationFeedItemLayout)).toEqual([
+			'standard',
+			'hidden',
+			'standard',
+			'standard',
+			'hidden',
+			'permission',
+			'hidden',
+		]);
 	});
 
 	it('uses transcript row identity even when providers repeat tool ids', () => {
@@ -175,7 +210,7 @@ describe('buildConversationFeedRenderItems', () => {
 			'row-4',
 		]);
 		expect(model.toolResultByUseRowId.get('row-0')).toBe(result);
-		expect(model.toolUseByResultRowId.get('row-1')).toBe(tool);
+		expect(model.items[1]).toMatchObject({ pairedToolUse: tool });
 		expect(model.permissionTerminalById.get('perm-1')).toEqual({
 			state: 'resolved',
 			allowed: true,
@@ -216,8 +251,8 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(model.toolResultByUseRowId.get('row-1')).toBe(secondResult);
 		expect(model.toolResultRowIdByUseRowId.get('row-0')).toBe('row-2');
 		expect(model.toolResultRowIdByUseRowId.get('row-1')).toBe('row-3');
-		expect(model.toolUseByResultRowId.get('row-2')).toBe(first);
-		expect(model.toolUseByResultRowId.get('row-3')).toBe(second);
+		expect(model.items[2]).toMatchObject({ pairedToolUse: first });
+		expect(model.items[3]).toMatchObject({ pairedToolUse: second });
 	});
 
 	it('pairs repeated provider tool ids by exact FIFO occurrence', () => {
@@ -258,7 +293,7 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(suffix.items.map((item) => item.id)).toEqual(['row-2', 'row-3']);
 		expect(prepended.items.map((item) => item.id)).toEqual(['row-1', 'row-2', 'row-3']);
 		expect(prepended.toolResultByUseRowId.get('row-1')).toBe(result);
-		expect(prepended.toolUseByResultRowId.get('row-2')).toBe(tool);
+		expect(prepended.items[1]).toMatchObject({ pairedToolUse: tool });
 	});
 
 	it('keeps local notices as individual rows', () => {
@@ -306,13 +341,7 @@ describe('buildConversationFeedRenderItems', () => {
 		const laterStandalone = questionTool('reused-question');
 
 		const model = buildConversationFeedRenderModel(
-			rows([
-				firstStandalone,
-				secondStandalone,
-				firstWrapper,
-				secondWrapper,
-				laterStandalone,
-			]),
+			rows([firstStandalone, secondStandalone, firstWrapper, secondWrapper, laterStandalone]),
 		);
 
 		expect(model.items.map((item) => item.id)).toEqual([
@@ -348,6 +377,18 @@ describe('visiblePendingPermissionRequests', () => {
 		]);
 
 		expect(visiblePendingPermissionRequests(visibleRows, pending)).toEqual([pending[1]]);
+	});
+
+	it('does not float an exit-plan request already represented by its canonical tool row', () => {
+		const exitPlan = new ExitPlanModeToolUseMessage(TS, 'plan-1', 'Implement carefully.');
+		const pending: PendingPermissionRequest = {
+			permissionRequestId: 'plan-exit-plan-1',
+			requestedTool: exitPlan,
+			chatId: 'chat-1',
+			receivedAt: new Date(TS),
+		};
+
+		expect(visiblePendingPermissionRequests(rows([exitPlan]), [pending])).toEqual([]);
 	});
 
 	it('omits terminal and replayed pending permission ids', () => {

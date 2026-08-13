@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { BashToolUseMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
+import {
+	BashToolUseMessage,
+	GlobToolUseMessage,
+	ToolResultMessage,
+	UserMessage,
+} from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import type { ConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-items.js';
+import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
 import {
 	appendConversationVirtualTranscriptTail,
 	buildConversationVirtualFeedModel,
@@ -105,6 +111,19 @@ describe('conversation virtual feed model', () => {
 		});
 		expect(model.items[2]).toMatchObject({ spacingAfter: 'none' });
 		expect(estimateConversationFeedItemSize(model.items[2], 1)).toBe(0);
+	});
+
+	it('gives visible collapsible tool results their own estimated geometry', () => {
+		const tool = new GlobToolUseMessage('', 'glob-1', '**/*.ts');
+		const result = new ToolResultMessage('', 'glob-1', { filenames: ['a.ts'] }, false);
+		const renderModel = buildConversationFeedRenderModel([
+			{ kind: 'message', id: 'generation-1:10', seq: 10, message: tool },
+			{ kind: 'message', id: 'generation-1:11', seq: 11, message: result },
+		]);
+		const model = build(renderModel.items);
+
+		expect(model.items[2]).toMatchObject({ spacingAfter: 'scaled-transcript' });
+		expect(estimateConversationFeedItemSize(model.items[2], 1)).toBeGreaterThan(0);
 	});
 
 	it('scales transcript estimates without scaling feed controls', () => {

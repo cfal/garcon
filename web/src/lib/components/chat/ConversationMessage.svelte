@@ -10,6 +10,7 @@
 		CompactionMessage,
 		AgentSwitchMessage,
 		ToolResultMessage,
+		AskUserQuestionToolUseMessage,
 	} from '$shared/chat-types';
 	import type {
 		ChatMessage,
@@ -45,6 +46,7 @@
 	import MessageActionMenu from './MessageActionMenu.svelte';
 	import MessageTextSelectionDialog from './MessageTextSelectionDialog.svelte';
 	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { historicalAskUserQuestion } from '$lib/chat/transcript/ask-user-question-history.js';
 	import type {
 		ConversationDisclosureStatePort,
 		PermissionQuestionDraft,
@@ -147,7 +149,18 @@
 	const asPermissionRequest = $derived(
 		message instanceof PermissionRequestMessage ? message : null,
 	);
+	const exitPlanPermissionRequest = $derived(
+		asToolUse?.type === 'exit-plan-mode-tool-use'
+			? new PermissionRequestMessage(message.timestamp, `plan-exit-${asToolUse.toolId}`, asToolUse)
+			: null,
+	);
+	const historicalQuestion = $derived.by(() => {
+		if (!(asToolResult && pairedToolUse instanceof AskUserQuestionToolUseMessage)) return null;
+		return historicalAskUserQuestion(pairedToolUse, asToolResult);
+	});
 	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
+
+	function ignorePermissionDecision(): void {}
 
 	function deliveryTitle(status: UserMessageDeliveryStatus | null): string {
 		switch (status) {
@@ -567,6 +580,28 @@
 								</span>
 							{/snippet}
 						</ChatEventCard>
+					{:else if exitPlanPermissionRequest}
+						<PermissionRequestRow
+							request={exitPlanPermissionRequest}
+							terminal={permissionTerminal}
+							onDecision={onPermissionDecision ?? ignorePermissionDecision}
+							{onExitPlanMode}
+							{chatContext}
+							draft={permissionDraft?.(exitPlanPermissionRequest.permissionRequestId)}
+							{acquireTransientActivity}
+							onDraftChange={onPermissionDraftChange
+								? (draft) =>
+										onPermissionDraftChange(exitPlanPermissionRequest.permissionRequestId, draft)
+								: undefined}
+						/>
+					{:else if historicalQuestion}
+						<PermissionRequestRow
+							request={historicalQuestion.request}
+							terminal={historicalQuestion.terminal}
+							onDecision={ignorePermissionDecision}
+							{chatContext}
+							{acquireTransientActivity}
+						/>
 					{:else if asToolUse}
 						<ChatToolEventRenderer
 							toolMessage={asToolUse}

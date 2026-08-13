@@ -1,4 +1,5 @@
 import {
+	AskUserQuestionToolUseMessage,
 	PermissionCancelledMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
@@ -9,6 +10,8 @@ import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
 import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
+import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
+import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 
 export interface PermissionTerminalState {
 	state: 'resolved' | 'cancelled';
@@ -17,14 +20,17 @@ export interface PermissionTerminalState {
 	selectedQuestionOptions?: Record<string, string[]>;
 }
 
+export interface ConversationFeedMessageRenderItem {
+	kind: 'message';
+	id: string;
+	message: ChatMessage;
+	index: number;
+	seq?: number;
+	pairedToolUse?: ToolUseChatMessage;
+}
+
 export type ConversationFeedRenderItem =
-	| {
-			kind: 'message';
-			id: string;
-			message: ChatMessage;
-			index: number;
-			seq?: number;
-	  }
+	| ConversationFeedMessageRenderItem
 	| {
 			kind: 'local-notice';
 			id: string;
@@ -36,9 +42,10 @@ export interface ConversationFeedRenderModel {
 	items: ConversationFeedRenderItem[];
 	toolResultByUseRowId: Map<string, ToolResultMessage>;
 	toolResultRowIdByUseRowId: Map<string, string>;
-	toolUseByResultRowId: Map<string, ToolUseChatMessage>;
 	permissionTerminalById: Map<string, PermissionTerminalState>;
 }
+
+export type ConversationFeedItemLayout = 'hidden' | 'standard' | 'permission';
 
 export function filterHiddenToolRenderItems<T extends ConversationFeedRenderItem>(
 	items: T[],
@@ -46,19 +53,53 @@ export function filterHiddenToolRenderItems<T extends ConversationFeedRenderItem
 ): T[] {
 	if (hiddenToolTypes.length === 0) return items;
 	const hidden = new Set(hiddenToolTypes);
-	return items.filter((item) => item.kind !== 'message' || !hidden.has(item.message.type));
+	return items.filter((item) => {
+		if (item.kind !== 'message') return true;
+		const toolType =
+			item.message instanceof ToolResultMessage ? item.pairedToolUse?.type : item.message.type;
+		return !toolType || !hidden.has(toolType);
+	});
 }
 
-function pairToolResults(
-	rows: ChatDisplayRow[],
-): Pick<
-	ConversationFeedRenderModel,
-	'toolResultByUseRowId' | 'toolResultRowIdByUseRowId' | 'toolUseByResultRowId'
-> {
-	const pendingByToolId = new Map<
-		string,
-		Array<{ rowId: string; message: ToolUseChatMessage }>
-	>();
+export function conversationFeedItemLayout(
+	item: ConversationFeedRenderItem,
+): ConversationFeedItemLayout {
+	if (item.kind === 'local-notice') return 'standard';
+	const message = item.message;
+	if (
+		message instanceof PermissionResolvedMessage ||
+		message instanceof PermissionCancelledMessage
+	) {
+		return 'hidden';
+	}
+	if (message instanceof PermissionRequestMessage) return 'permission';
+	if (message instanceof ToolResultMessage) {
+		const tool = item.pairedToolUse;
+		if (!tool) return 'hidden';
+		if (tool instanceof AskUserQuestionToolUseMessage) return 'permission';
+		const rule = resolveDisplayRule(TOOL_DISPLAY_REGISTRY, tool.type);
+		return shouldRenderToolResult(rule, {
+			content: message.content,
+			isError: message.isError,
+		})
+			? 'standard'
+			: 'hidden';
+	}
+	if (!isToolUseMessage(message)) return 'standard';
+	if (message.type === 'exit-plan-mode-tool-use') return 'permission';
+	if (message.type === 'enter-plan-mode-tool-use') return 'standard';
+	const rule = resolveDisplayRule(TOOL_DISPLAY_REGISTRY, message.type);
+	return rule.input.mode === 'hidden' ? 'hidden' : 'standard';
+}
+
+interface ConversationToolPairs {
+	toolResultByUseRowId: Map<string, ToolResultMessage>;
+	toolResultRowIdByUseRowId: Map<string, string>;
+	toolUseByResultRowId: Map<string, ToolUseChatMessage>;
+}
+
+function pairToolResults(rows: ChatDisplayRow[]): ConversationToolPairs {
+	const pendingByToolId = new Map<string, Array<{ rowId: string; message: ToolUseChatMessage }>>();
 	const toolResultByUseRowId = new Map<string, ToolResultMessage>();
 	const toolResultRowIdByUseRowId = new Map<string, string>();
 	const toolUseByResultRowId = new Map<string, ToolUseChatMessage>();
@@ -122,10 +163,18 @@ export function buildConversationFeedRenderModel(
 			message,
 			index,
 			seq: row.seq,
+			...(message instanceof ToolResultMessage
+				? { pairedToolUse: toolPairs.toolUseByResultRowId.get(row.id) }
+				: {}),
 		});
 	}
 
-	return { items, ...toolPairs, permissionTerminalById };
+	return {
+		items,
+		toolResultByUseRowId: toolPairs.toolResultByUseRowId,
+		toolResultRowIdByUseRowId: toolPairs.toolResultRowIdByUseRowId,
+		permissionTerminalById,
+	};
 }
 
 export function buildConversationFeedRenderItems(
@@ -145,6 +194,9 @@ export function visiblePendingPermissionRequests(
 		if (row.kind !== 'message') continue;
 		if (row.message instanceof PermissionRequestMessage) {
 			renderedPermissionIds.add(row.message.permissionRequestId);
+		}
+		if (row.message.type === 'exit-plan-mode-tool-use') {
+			renderedPermissionIds.add(`plan-exit-${row.message.toolId}`);
 		}
 		if (
 			row.message instanceof PermissionResolvedMessage ||

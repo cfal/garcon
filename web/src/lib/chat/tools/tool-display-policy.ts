@@ -4,16 +4,15 @@
 
 import type { ToolPayload, ToolDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 
-/** Returns true when the tool result should be hidden from the display. */
-export function shouldHideToolResult(
+export function shouldRenderToolResult(
 	rule: ToolDisplayRule,
 	toolResult: ToolPayload | null | undefined,
 ): boolean {
 	const result = rule.result;
-	if (!result) return false;
-	if (result.hidden) return true;
-	if (result.hideOnSuccess && toolResult && !toolResult.isError) return true;
-	return false;
+	if (!result || result.hidden) return false;
+	if (result.hideOnSuccess && toolResult && !toolResult.isError) return false;
+	const mode = result.mode;
+	return mode === 'inline' || mode === 'collapsible';
 }
 
 /** Resolves the display rule for a given tool type, falling back to default. */
