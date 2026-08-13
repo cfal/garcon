@@ -5,6 +5,7 @@ import {
   type AgentEstablishedSession,
   type AgentExecutionV5,
   type AgentPermissionLifecycle,
+  type AgentProducedRow,
   type AgentProducerSink,
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
@@ -43,6 +44,16 @@ export interface AgentProducerAdapter {
 export function createAgentProducerAdapter(runtime: AgentRuntimeExecution): AgentProducerAdapter {
   const bindings = new Map<string, ProducerBinding>();
 
+  function bindProducer(chatId: string, sink: AgentProducerSink): ProducerBinding {
+    const binding: ProducerBinding = {
+      sink,
+      permissions: new Map(),
+      publishedSession: null,
+    };
+    bindings.set(chatId, binding);
+    return binding;
+  }
+
   runtime.subscribeRuntimeEvents((event) => {
     const binding = bindings.get(event.chatId);
     if (binding) publishRuntimeEvent(binding, event);
@@ -50,12 +61,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution): Agen
 
   const execution: AgentExecutionV5 = {
     async start(request) {
-      const binding: ProducerBinding = {
-        sink: request.sink,
-        permissions: new Map<string, string>(),
-        publishedSession: null,
-      };
-      bindings.set(request.chatId, binding);
+      const binding = bindProducer(request.chatId, request.sink);
       const session = await runtime.start(withoutSink(request));
       if (!sameSession(binding.publishedSession, session)) {
         binding.sink.publish({ type: 'session', session });
@@ -65,14 +71,9 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution): Agen
     },
 
     async resume(request) {
-      const binding: ProducerBinding = {
-        sink: request.sink,
-        permissions: new Map(),
-        publishedSession: null,
-      };
-      bindings.set(request.chatId, binding);
-      const execution = runtime.resume(withoutSink(request));
-      void execution.catch((error) => {
+      const binding = bindProducer(request.chatId, request.sink);
+      const completion = runtime.resume(withoutSink(request));
+      void completion.catch((error) => {
         try {
           binding.sink.publish({
             type: 'run-ended',
@@ -102,11 +103,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution): Agen
     request: T,
     operation: (request: Omit<T, 'sink'>) => Promise<R>,
   ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }> {
-    bindings.set(request.chatId, {
-      sink: request.sink,
-      permissions: new Map(),
-      publishedSession: null,
-    });
+    bindProducer(request.chatId, request.sink);
     const value = await operation(withoutSink(request));
     return { handle: handle(request.agentSessionId), value };
   }
@@ -146,12 +143,13 @@ function publishMessages(
   runId: string | null,
   messages: Extract<AgentRuntimeEvent, { readonly type: 'messages' }>['rows'],
 ): void {
-  let rows: typeof messages = [];
-  const flush = () => {
-    if (rows.length === 0) return;
-    binding.sink.publish({ type: 'rows', rows });
-    rows = [];
-  };
+  let pendingRows: AgentProducedRow[] = [];
+
+  function flush(): void {
+    if (pendingRows.length === 0) return;
+    binding.sink.publish({ type: 'rows', rows: pendingRows });
+    pendingRows = [];
+  }
 
   for (const row of messages) {
     const { message } = row;
@@ -194,7 +192,7 @@ function publishMessages(
       binding.permissions.delete(message.permissionRequestId);
       continue;
     }
-    rows = [...rows, row];
+    pendingRows.push(row);
   }
   flush();
 }
