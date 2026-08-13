@@ -21,8 +21,8 @@ import {
   nativePrefixMatchesView,
   reconcileNativeSnapshotView,
 } from './chat-view-native-reconciliation.js';
-import { nativeMessageSourceKey } from './native-user-identity-registry.js';
 import { ChatViewOperationalNotices } from './chat-view-operational-notices.js';
+import { pendingNativeUserPositionForAppend } from './pending-native-user-position.js';
 import {
   assertValidChatMessage,
   lowerBoundBySeq,
@@ -306,7 +306,7 @@ export class ChatViewStore {
       if (options.fence !== undefined && options.fence !== view.streamFence) {
         return { generationId: view.generationId, messages: [], lastSeq: view.lastSeq, skipped: true };
       }
-      const pendingNativeUserPosition = this.#pendingNativeUserPosition(view, messages);
+      const pendingNativeUserPosition = pendingNativeUserPositionForAppend(view, messages);
       const appended = this.#appendLiveToView(view, messages);
       return {
         generationId: view.generationId,
@@ -775,32 +775,6 @@ export class ChatViewStore {
       unique.push(message);
     }
     return this.#appendToView(view, unique);
-  }
-
-  #pendingNativeUserPosition(
-    view: ChatView,
-    messages: readonly ChatMessage[],
-  ): AppendedChatViewMessages['pendingNativeUserPosition'] {
-    if (messages.length !== 1 || !(messages[0] instanceof UserMessage)) return undefined;
-    const previousNativeUser = view.messages.findLast((entry) => (
-      entry.seq > view.archivedLogicalCount
-      && entry.seq <= view.historyLastSeq
-      && entry.message instanceof UserMessage
-    ));
-    const previousNativeUserSourceKey = previousNativeUser
-      ? nativeMessageSourceKey(previousNativeUser.message)
-      : null;
-    if (previousNativeUser && !previousNativeUserSourceKey) return undefined;
-    const liveUserCount = view.messages.filter((entry) => (
-      entry.seq > view.historyLastSeq
-      && entry.message instanceof UserMessage
-      && entry.message.metadata?.deliveryStatus !== 'failed'
-      && entry.message.metadata?.deliveryStatus !== 'unconfirmed'
-    )).length;
-    return {
-      previousNativeUserSourceKey,
-      userOffset: liveUserCount + 1,
-    };
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {
