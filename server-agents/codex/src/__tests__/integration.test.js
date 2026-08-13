@@ -27,7 +27,6 @@ describe('CodexAgentIntegration', () => {
 
     expect(CodexAgentIntegration.integrationId).toBe('codex');
     expect(CodexAgentIntegration.apiVersion).toBe(4);
-    expect(CodexAgentIntegration.transcriptIndex.apiVersion).toBe(2);
     expect(integration.descriptor.id).toBe('codex');
     expect(integration.steering?.steer).toBeDefined();
     expect(integration.goals?.submitControl).toBeDefined();

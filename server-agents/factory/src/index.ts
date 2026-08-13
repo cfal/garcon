@@ -8,7 +8,6 @@ import {
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
@@ -46,15 +45,6 @@ const FACTORY_DESCRIPTOR = {
 export default class FactoryAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'factory';
   static readonly apiVersion = 4 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 2,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: 'factory',
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
   readonly descriptor = FACTORY_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;

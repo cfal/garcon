@@ -1,14 +1,12 @@
 import type {
-  AgentLogger,
   AgentIntegrationClassV4,
   AgentIntegrationV4,
-  AgentTranscriptIndexerModuleV4,
 } from '../index.js';
 
 export interface AgentIntegrationConformanceOptions {
   readonly integrationClass: Pick<
     AgentIntegrationClassV4,
-    'integrationId' | 'apiVersion' | 'transcriptIndex'
+    'integrationId' | 'apiVersion'
   >;
   readonly integration: AgentIntegrationV4;
 }
@@ -41,10 +39,6 @@ export function validateAgentIntegration(
   }
   if ('transcriptSearch' in integration) {
     throw new Error(`Agent integration ${integration.descriptor.id} exposes removed transcriptSearch state`);
-  }
-  if (integrationClass.transcriptIndex.apiVersion !== 2
-      || !integrationClass.transcriptIndex.moduleUrl) {
-    throw new Error(`Agent integration ${integration.descriptor.id} is missing its transcript index module`);
   }
   for (const method of ['resolveIndexSource', 'refreshIndexSource', 'describeSource'] as const) {
     if (typeof integration.transcript[method] !== 'function') {
@@ -142,25 +136,6 @@ export async function runAgentIntegrationConformance(
       await integration.lifecycle.stop();
     }
   }
-}
-
-export async function runAgentTranscriptIndexerConformance(options: {
-  readonly integrationId: string;
-  readonly moduleUrl: string;
-  readonly logger: AgentLogger;
-}): Promise<void> {
-  const imported = await import(options.moduleUrl) as { default?: unknown };
-  const module = imported.default as Partial<AgentTranscriptIndexerModuleV4> | undefined;
-  if (!module || module.apiVersion !== 2 || module.integrationId !== options.integrationId
-      || typeof module.create !== 'function') {
-    throw new Error(`Agent integration ${options.integrationId} has an invalid transcript index module`);
-  }
-  const source = module.create({ agentId: options.integrationId, logger: options.logger });
-  if (!source || typeof source.open !== 'function' || typeof source.close !== 'function') {
-    throw new Error(`Agent integration ${options.integrationId} has an invalid transcript index source`);
-  }
-  await source.close();
-  await source.close();
 }
 
 function assertSettingsEnvelope(

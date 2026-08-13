@@ -92,8 +92,6 @@ function integrationClass(id, options = {}) {
   return class TestIntegration {
     static integrationId = id;
     static apiVersion = options.apiVersion ?? 4;
-    static transcriptIndex = { apiVersion: 2, moduleUrl: import.meta.url };
-
     constructor(host) {
       options.onConstruct?.(host);
       Object.assign(this, createFacetIntegration(host, id, options.lifecycle));

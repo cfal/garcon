@@ -13,7 +13,6 @@ import {
   type AgentIntegrationV4,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { classifyDirectIntegrationError } from '@garcon/server-agent-common/direct/errors';
 import { DirectExecution } from '@garcon/server-agent-common/direct/execution';
 import { relocateLegacySessionDirectory } from '@garcon/server-agent-common/direct/legacy-session-relocation';
@@ -48,15 +47,6 @@ const DESCRIPTOR = {
 export default class DirectAnthropicCompatibleIntegration implements AgentIntegrationV4 {
   static readonly integrationId = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 4 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 2,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
   readonly descriptor = DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: [

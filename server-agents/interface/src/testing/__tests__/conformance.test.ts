@@ -81,7 +81,6 @@ describe('validateAgentIntegration', () => {
   test('rejects a descriptor and class ID mismatch', () => {
     const integrationClass = {
       integrationId: 'fake', apiVersion: 4 as const,
-      transcriptIndex: { apiVersion: 2 as const, moduleUrl: import.meta.url },
     };
     expect(() => validateAgentIntegration({
       integrationClass,
@@ -92,7 +91,6 @@ describe('validateAgentIntegration', () => {
   test('rejects duplicate descriptor values', () => {
     const integrationClass = {
       integrationId: 'other', apiVersion: 4 as const,
-      transcriptIndex: { apiVersion: 2 as const, moduleUrl: import.meta.url },
     };
     expect(() => validateAgentIntegration({
       integrationClass,
@@ -109,7 +107,6 @@ describe('validateAgentIntegration', () => {
   test('rejects a steering facet without admission-time target capture', () => {
     const integrationClass = {
       integrationId: 'other', apiVersion: 4 as const,
-      transcriptIndex: { apiVersion: 2 as const, moduleUrl: import.meta.url },
     };
 
     expect(() => validateAgentIntegration({

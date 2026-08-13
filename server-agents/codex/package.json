@@ -18,9 +18,7 @@
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "codex",
-    "standaloneEntrypoints": {
-      "transcript-index-source": "./src/transcript-index-source.ts"
-    },
+    "standaloneEntrypoints": {},
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }

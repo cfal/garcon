@@ -8,7 +8,6 @@ import {
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import {
   createArtificialNativePath,
   getArtificialAgentSessionId,
@@ -49,15 +48,6 @@ const OPENCODE_DESCRIPTOR = {
 export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'opencode';
   static readonly apiVersion = 4 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 2,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: 'opencode',
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
   readonly descriptor = OPENCODE_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;

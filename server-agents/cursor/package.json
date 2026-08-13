@@ -10,9 +10,7 @@
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "cursor",
-    "standaloneEntrypoints": {
-      "transcript-index-source": "./src/transcript-index-source.ts"
-    },
+    "standaloneEntrypoints": {},
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }

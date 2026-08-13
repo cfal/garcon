@@ -39,7 +39,7 @@ async function createFixture(options = {}) {
     garconBuild: options.garconBuild ?? {
       apiVersion: 2,
       integrationId: 'fixture',
-      standaloneEntrypoints: { 'transcript-index-source': './src/worker.ts' },
+      standaloneEntrypoints: { 'fixture-worker': './src/worker.ts' },
       preMainModules: ['./src/prepare.ts'],
       embeddedDependencyMetadata: ['fixture-sdk/package.json'],
     },
@@ -70,7 +70,7 @@ describe('collectAgentBuildContributions', () => {
     expect(contribution.integrationId).toBe('fixture');
     expect(contribution.packageRoot).toBe(fixture.packageDir);
     expect(contribution.standaloneEntrypoints).toEqual({
-      'transcript-index-source': path.join(fixture.packageDir, 'src', 'worker.ts'),
+      'fixture-worker': path.join(fixture.packageDir, 'src', 'worker.ts'),
     });
     expect(contribution.preMainModules).toEqual([
       path.join(fixture.packageDir, 'src', 'prepare.ts'),
@@ -99,7 +99,7 @@ describe('collectAgentBuildContributions', () => {
       garconBuild: {
         apiVersion: 2,
         integrationId: 'fixture',
-        standaloneEntrypoints: { 'transcript-index-source': './src/escaped.ts' },
+        standaloneEntrypoints: { 'fixture-worker': './src/escaped.ts' },
         preMainModules: [],
         embeddedDependencyMetadata: [],
       },

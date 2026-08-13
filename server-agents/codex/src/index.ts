@@ -11,7 +11,6 @@ import {
   type AgentIntegrationV4,
 } from '@garcon/server-agent-interface';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
@@ -66,15 +65,6 @@ const CODEX_DESCRIPTOR = {
 export default class CodexAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'codex';
   static readonly apiVersion = 4 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 2,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: 'codex',
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
   readonly descriptor = CODEX_DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,

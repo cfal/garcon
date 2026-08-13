@@ -125,9 +125,6 @@ function stringRecord(packageName, field, value) {
     }
     result[name] = entry;
   }
-  if (typeof result['transcript-index-source'] !== 'string') {
-    throw new Error(`${packageName} garconBuild.${field} is missing transcript-index-source`);
-  }
   return result;
 }
 

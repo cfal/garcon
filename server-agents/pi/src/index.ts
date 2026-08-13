@@ -9,7 +9,6 @@ import {
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import {
   createArtificialNativePath,
   getArtificialAgentSessionId,
@@ -56,15 +55,6 @@ const PI_DESCRIPTOR = {
 export default class PiAgentIntegration implements AgentIntegrationV4 {
   static readonly integrationId = 'pi';
   static readonly apiVersion = 4 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 2,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: 'pi',
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
   readonly descriptor = PI_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
