@@ -277,6 +277,81 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(false);
 	});
 
+	it('prunes an expanded live window without dropping tail presentation state', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+		const chat = new ActiveTranscriptState(transcriptCache);
+		const messages = Array.from({ length: 250 }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastSeq: 250,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.visibleMessageCount = 250;
+		chat.setPendingUserInputs([pendingInput()]);
+		chat.appendLocalNotice('warning', 'local warning');
+		const previousRevision = chat.feedMutationClock.dataRevision;
+		const previousWindowRevision = chat.windowRevision;
+
+		expect(chat.hasExpandedLiveHistory).toBe(true);
+		expect(chat.pruneLoadedHistoryAtLiveEnd()).toBe(true);
+
+		expect(chat.entries.map((message) => message.seq)).toEqual(
+			Array.from({ length: 100 }, (_, index) => index + 151),
+		);
+		expect(chat.generationId).toBe('generation-1');
+		expect(chat.lastSeq).toBe(250);
+		expect(chat.oldestSeq).toBe(151);
+		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.totalMessages).toBe(100);
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
+		expect(chat.pendingUserInputs).toEqual([pendingInput()]);
+		expect(chat.localNotices).toEqual([
+			expect.objectContaining({ content: 'local warning', noticeType: 'warning' }),
+		]);
+		expect(chat.windowRevision).toBe(previousWindowRevision + 1);
+		expect(chat.feedMutationClock.dataRevision).toBe(previousRevision + 1);
+		expect(chat.feedMutationClock.lastRevisionByKind['history-pruned']).toBe(previousRevision + 1);
+		expect(transcriptCache.get('chat-1')?.messages.map((message) => message.seq)).toEqual(
+			Array.from({ length: 100 }, (_, index) => index + 151),
+		);
+	});
+
+	it.each([
+		{
+			name: 'detached window',
+			messages: Array.from({ length: 150 }, (_, index) =>
+				entry(index + 1, assistant(`message-${index + 1}`)),
+			),
+			lastSeq: 250,
+			visibleCount: 150,
+		},
+		{
+			name: 'bounded live window',
+			messages: Array.from({ length: 100 }, (_, index) =>
+				entry(index + 151, assistant(`message-${index + 151}`)),
+			),
+			lastSeq: 250,
+			visibleCount: 100,
+		},
+	])('does not prune a $name', ({ messages, lastSeq, visibleCount }) => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastSeq,
+			pageOldestSeq: messages[0]!.seq,
+			hasMore: messages[0]!.seq > 1,
+		});
+		chat.visibleMessageCount = visibleCount;
+		const previousRevision = chat.feedMutationClock.dataRevision;
+
+		expect(chat.hasExpandedLiveHistory).toBe(false);
+		expect(chat.pruneLoadedHistoryAtLiveEnd()).toBe(false);
+		expect(chat.entries).toEqual(messages);
+		expect(chat.feedMutationClock.dataRevision).toBe(previousRevision);
+	});
+
 	it('keeps a scrolled-up window contiguous while live messages arrive below it', () => {
 		const chat = new ActiveTranscriptState();
 		const initialCount = 200;

@@ -35,6 +35,7 @@ function clock(
 			'live-append': 0,
 			'history-earlier': 0,
 			'history-later': 0,
+			'history-pruned': 0,
 			replacement: 0,
 			'presentation-structure': 0,
 			...overrides,

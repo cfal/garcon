@@ -9,6 +9,71 @@ export interface ChatTranscriptRow {
 	seq?: number;
 }
 
+export function projectTranscriptRows(
+	entries: readonly ChatViewMessage[],
+	generationId: string,
+	pendingInputs: readonly PendingUserInput[],
+): ChatTranscriptRow[] {
+	const durableRows = entries.map((entry) => ({
+		kind: 'message' as const,
+		id: `${generationId}:${entry.seq}`,
+		seq: entry.seq,
+		message: entry.message,
+	}));
+	return pendingInputs.length === 0
+		? durableRows
+		: mergeRowsWithPendingInputs(durableRows, pendingInputs);
+}
+
+export function projectVisibleTranscriptRows<TNotice>(input: {
+	entries: readonly ChatViewMessage[];
+	generationId: string;
+	pendingInputs: readonly PendingUserInput[];
+	notices: readonly TNotice[];
+	visibleCount: number;
+}): Array<ChatTranscriptRow | TNotice> {
+	const noticeCount = Math.min(input.notices.length, input.visibleCount);
+	const visibleNotices = input.notices.slice(-noticeCount);
+	const messageLimit = input.visibleCount - noticeCount;
+	if (messageLimit === 0) return visibleNotices;
+	const messageRows = projectTranscriptRows(
+		input.entries.slice(-messageLimit),
+		input.generationId,
+		input.pendingInputs,
+	).slice(-messageLimit);
+	return [...messageRows, ...visibleNotices];
+}
+
+export function echoedTranscriptRequestIds(entries: readonly ChatViewMessage[]): Set<string> {
+	const ids = new Set<string>();
+	for (const { message } of entries) {
+		if (message instanceof UserMessage && message.metadata?.clientRequestId) {
+			ids.add(message.metadata.clientRequestId);
+		}
+	}
+	return ids;
+}
+
+export function pendingInputsForTranscript(
+	hasLaterMessages: boolean,
+	inputs: readonly PendingUserInput[],
+	echoedRequestIds: ReadonlySet<string>,
+): PendingUserInput[] {
+	return hasLaterMessages
+		? []
+		: inputs.filter((input) => !echoedRequestIds.has(input.clientRequestId));
+}
+
+export function hasEarlierTranscriptRows(
+	entries: readonly ChatViewMessage[],
+	visibleRows: readonly { kind: string; seq?: number }[],
+): boolean {
+	const firstVisibleSeq = visibleRows.find(
+		(row) => row.kind === 'message' && row.seq !== undefined,
+	)?.seq;
+	return firstVisibleSeq !== undefined && (entries[0]?.seq ?? firstVisibleSeq) < firstVisibleSeq;
+}
+
 export function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {
 	return inputs.slice().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
@@ -72,8 +137,8 @@ function pendingInputToRow(input: PendingUserInput): ChatTranscriptRow {
 }
 
 export function mergeRowsWithPendingInputs(
-	rows: ChatTranscriptRow[],
-	pendingInputs: PendingUserInput[],
+	rows: readonly ChatTranscriptRow[],
+	pendingInputs: readonly PendingUserInput[],
 ): ChatTranscriptRow[] {
 	if (rows.length === 0) return pendingInputs.map(pendingInputToRow);
 

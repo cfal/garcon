@@ -5,7 +5,7 @@ import {
 	type ChatViewMessage,
 	type ChatViewPage,
 } from '$shared/chat-view';
-import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '$shared/chat-types';
+import type { ChatMessage, UserMessageDeliveryStatus } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
@@ -25,13 +25,19 @@ import type {
 import { validateRequestedTranscriptPage } from './transcript-page-progress.js';
 import {
 	retainLoadedTranscriptPrefix,
+	pruneTranscriptToLatestWindow,
 	stageLatestTranscriptWindow,
+	stageTranscriptWindowNavigation,
 } from './transcript-window-loader.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import {
 	applyPendingDeliveryStatuses,
-	mergeRowsWithPendingInputs,
+	echoedTranscriptRequestIds,
+	hasEarlierTranscriptRows,
 	normalizePendingInputs,
+	pendingInputsForTranscript,
+	projectTranscriptRows,
+	projectVisibleTranscriptRows,
 	sortPendingInputs,
 	type ChatTranscriptRow,
 } from './transcript-row-projection.js';
@@ -111,69 +117,45 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		applyPendingDeliveryStatuses(this.entries, this.pendingUserInputs),
 	);
 
-	#echoedClientRequestIds = $derived.by(() => {
-		const ids = new Set<string>();
-		for (const entry of this.#renderEntries) {
-			const message = entry.message;
-			if (message instanceof UserMessage && message.metadata?.clientRequestId) {
-				ids.add(message.metadata.clientRequestId);
-			}
-		}
-		return ids;
-	});
+	#echoedClientRequestIds = $derived.by(() => echoedTranscriptRequestIds(this.#renderEntries));
 
 	#displayLocalNotices = $derived(
 		displayLocalNotices(this.hasLaterMessages, this.historyState, this.localNotices),
 	);
 
-	#displayRows = $derived.by(() => {
-		const durableRows = this.#renderEntries.map((entry) => ({
-			kind: 'message' as const,
-			id: `${this.generationId}:${entry.seq}`,
-			seq: entry.seq,
-			message: entry.message,
-		}));
-		const merged =
-			this.visiblePendingInputs.length === 0
-				? durableRows
-				: mergeRowsWithPendingInputs(durableRows, this.visiblePendingInputs);
-		if (this.#displayLocalNotices.length === 0) return merged;
-		return [...merged, ...this.#displayLocalNotices];
+	readonly displayRows = $derived.by(() => {
+		const rows = projectTranscriptRows(
+			this.#renderEntries,
+			this.generationId,
+			this.visiblePendingInputs,
+		);
+		if (this.#displayLocalNotices.length === 0) return rows;
+		return [...rows, ...this.#displayLocalNotices];
 	});
 
-	#displayMessages = $derived.by(() =>
-		this.#displayRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
+	readonly displayMessages = $derived.by(() =>
+		this.displayRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
 	);
 
-	#displayMessageCount = $derived.by(
+	readonly displayMessageCount = $derived.by(
 		() =>
 			this.#renderEntries.length +
 			this.visiblePendingInputs.length +
 			this.#displayLocalNotices.length,
 	);
 
-	#visibleRows = $derived.by(() => {
-		const noticeCount = Math.min(this.#displayLocalNotices.length, this.visibleMessageCount);
-		const visibleNotices = this.#displayLocalNotices.slice(-noticeCount);
-		const messageLimit = this.visibleMessageCount - noticeCount;
-		if (messageLimit === 0) return visibleNotices;
+	readonly visibleRows = $derived.by(() =>
+		projectVisibleTranscriptRows({
+			entries: this.#renderEntries,
+			generationId: this.generationId,
+			pendingInputs: this.visiblePendingInputs,
+			notices: this.#displayLocalNotices,
+			visibleCount: this.visibleMessageCount,
+		}),
+	);
 
-		const durableRows = this.#renderEntries.slice(-messageLimit).map((entry) => ({
-			kind: 'message' as const,
-			id: `${this.generationId}:${entry.seq}`,
-			seq: entry.seq,
-			message: entry.message,
-		}));
-		const pendingInputs = this.visiblePendingInputs;
-		const messageRows =
-			pendingInputs.length === 0
-				? durableRows
-				: mergeRowsWithPendingInputs(durableRows, pendingInputs).slice(-messageLimit);
-		return [...messageRows, ...visibleNotices];
-	});
-
-	#visibleMessages = $derived.by(() =>
-		this.#visibleRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
+	readonly visibleMessages = $derived.by(() =>
+		this.visibleRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
 	);
 
 	get chatMessages(): ChatMessage[] {
@@ -184,26 +166,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return this.#feedMutations.clock;
 	}
 
-	get displayMessages(): ChatMessage[] {
-		return this.#displayMessages;
-	}
-
-	get displayRows(): readonly ChatDisplayRow[] {
-		return this.#displayRows;
-	}
-
-	get visibleRows(): ChatDisplayRow[] {
-		return this.#visibleRows;
-	}
-
-	get displayMessageCount(): number {
-		return this.#displayMessageCount;
-	}
-
-	get visibleMessages(): ChatMessage[] {
-		return this.#visibleMessages;
-	}
-
 	get newestLoadedSeq(): number {
 		return this.entries.at(-1)?.seq ?? 0;
 	}
@@ -212,13 +174,16 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return this.newestLoadedSeq > 0 && this.newestLoadedSeq < this.lastSeq;
 	}
 
-	get hasEarlierRowsToReveal(): boolean {
-		const firstVisibleSeq = this.#visibleRows.find(
-			(row): row is ChatTranscriptRow => row.kind === 'message' && row.seq !== undefined,
-		)?.seq;
+	get hasExpandedLiveHistory(): boolean {
 		return (
-			firstVisibleSeq !== undefined && (this.entries[0]?.seq ?? firstVisibleSeq) < firstVisibleSeq
+			!this.hasLaterMessages &&
+			this.entries.length > INITIAL_VISIBLE_MESSAGES &&
+			this.visibleMessageCount > INITIAL_VISIBLE_MESSAGES
 		);
+	}
+
+	get hasEarlierRowsToReveal(): boolean {
+		return hasEarlierTranscriptRows(this.entries, this.visibleRows);
 	}
 
 	get canLoadEarlier(): boolean {
@@ -234,9 +199,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get visiblePendingInputs(): PendingUserInput[] {
-		if (this.hasLaterMessages) return [];
-		return this.pendingUserInputs.filter(
-			(input) => !this.#echoedClientRequestIds.has(input.clientRequestId),
+		return pendingInputsForTranscript(
+			this.hasLaterMessages,
+			this.pendingUserInputs,
+			this.#echoedClientRequestIds,
 		);
 	}
 
@@ -808,6 +774,43 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (changed) this.#recordFeedMutation('initial');
 	}
 
+	pruneLoadedHistoryAtLiveEnd(): boolean {
+		const chatId = this.activeChatId;
+		if (
+			!chatId ||
+			!this.hasExpandedLiveHistory ||
+			this.#snapshotBuffer ||
+			this.isLoadingMessages ||
+			Object.values(this.pageStates).some((pageState) => pageState.status !== 'idle')
+		) {
+			return false;
+		}
+		const page = pruneTranscriptToLatestWindow(
+			{
+				generationId: this.generationId,
+				messages: this.entries,
+				lastSeq: this.lastSeq,
+				pageOldestSeq: this.oldestSeq,
+				hasMore: this.hasEarlierMessages,
+			},
+			INITIAL_VISIBLE_MESSAGES,
+		);
+		if (!page) return false;
+		this.#windowNavigationEpoch += 1;
+		this.#loadEpoch += 1;
+		this.#invalidatePageLoad();
+		this.#preserveExpandedVisibleWindow = false;
+		this.transcriptCache.replaceFromPage(chatId, page);
+		this.windowRevision += 1;
+		this.entries = page.messages;
+		this.oldestSeq = page.pageOldestSeq;
+		this.hasEarlierMessages = page.hasMore;
+		this.totalMessages = page.messages.length;
+		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
+		this.#recordFeedMutation('history-pruned');
+		return true;
+	}
+
 	async navigateToWindow(
 		chatId: string,
 		target: TranscriptWindowTarget,
@@ -830,17 +833,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 		const generationId = this.generationId;
 		const latestLastSeq = this.lastSeq;
-		const request =
-			target === 'initial'
-				? {
-						chatId,
-						limit: MESSAGES_PER_PAGE,
-						beforeSeq: Math.min(latestLastSeq + 1, MESSAGES_PER_PAGE + 1),
-					}
-				: { chatId, limit: MESSAGES_PER_PAGE };
-
 		try {
-			const page = await getChatMessages(request);
+			const page = await stageTranscriptWindowNavigation(chatId, target, latestLastSeq);
 			if (
 				windowNavigationEpoch !== this.#windowNavigationEpoch ||
 				loadEpoch !== this.#loadEpoch ||
@@ -853,15 +847,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				this.#setDegradedHistory(chatId, page.historyState);
 				return 'loaded';
 			}
-			if (page.chatId !== chatId) {
-				throw new Error('Transcript page belongs to another chat');
-			}
 			if (page.generationId !== generationId) {
 				this.transcriptCache.markStale(chatId);
 				return 'invalidated';
-			}
-			if (!validateRequestedTranscriptPage(request, page)) {
-				throw new Error('Transcript page did not match the requested window');
 			}
 
 			if (target === 'latest') {

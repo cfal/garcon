@@ -23,6 +23,7 @@ describe('conversation feed mutations', () => {
 				'live-append': 7,
 				'history-earlier': 6,
 				'history-later': 0,
+				'history-pruned': 0,
 				replacement: 0,
 				'presentation-structure': 8,
 			}),
@@ -40,6 +41,9 @@ describe('conversation feed mutations', () => {
 	it('restores only live-window appends and presentation structure', () => {
 		expect(conversationFeedEndBehavior(new Set(['live-append']), true)).toBe('restore-if-pinned');
 		expect(conversationFeedEndBehavior(new Set(['presentation-structure']), true)).toBe(
+			'restore-if-pinned',
+		);
+		expect(conversationFeedEndBehavior(new Set(['history-pruned']), true)).toBe(
 			'restore-if-pinned',
 		);
 		expect(conversationFeedEndBehavior(new Set(['live-append']), false)).toBe(

@@ -1,8 +1,10 @@
 import {
 	isDegradedChatHistoryResponse,
+	isContiguousChatViewWindow,
 	type ChatHistoryResponse,
 	type CompleteChatHistoryResponse,
 	type ChatViewMessage,
+	type ChatViewPage,
 	type ChatViewPageRequest,
 } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
@@ -38,6 +40,24 @@ export function retainLoadedTranscriptPrefix<TPage extends RetainableTranscriptP
 	};
 }
 
+export function pruneTranscriptToLatestWindow(
+	page: ChatViewPage,
+	limit: number,
+): ChatViewPage | null {
+	const boundedLimit = Math.max(0, Math.floor(limit));
+	if (
+		boundedLimit === 0 ||
+		page.messages.length <= boundedLimit ||
+		page.messages.at(-1)?.seq !== page.lastSeq ||
+		!isContiguousChatViewWindow(page)
+	) {
+		return null;
+	}
+	const messages = page.messages.slice(-boundedLimit);
+	const pageOldestSeq = messages[0]!.seq;
+	return { ...page, messages, pageOldestSeq, hasMore: pageOldestSeq > 1 };
+}
+
 export async function stageLatestTranscriptWindow(
 	chatId: string,
 	minimumMessageCount: number,
@@ -54,6 +74,25 @@ export async function stageLatestTranscriptWindow(
 	if (isDegradedChatHistoryResponse(latest)) return latest;
 	assertPage(chatId, latestRequest, latest);
 	return latest;
+}
+
+export async function stageTranscriptWindowNavigation(
+	chatId: string,
+	target: 'initial' | 'latest',
+	lastSeq: number,
+): Promise<TranscriptWindowStageResult> {
+	const request =
+		target === 'initial'
+			? {
+					chatId,
+					limit: DEFAULT_PAGE_SIZE,
+					beforeSeq: Math.min(lastSeq + 1, DEFAULT_PAGE_SIZE + 1),
+				}
+			: { chatId, limit: DEFAULT_PAGE_SIZE };
+	const page = await getChatMessages(request);
+	if (isDegradedChatHistoryResponse(page)) return page;
+	assertPage(chatId, request, page);
+	return page;
 }
 
 function assertPage(

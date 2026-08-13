@@ -3,6 +3,7 @@ import { AssistantMessage } from '$shared/chat-types';
 import type { CompleteChatHistoryResponse } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import {
+	pruneTranscriptToLatestWindow,
 	retainLoadedTranscriptPrefix,
 	stageLatestTranscriptWindow,
 } from '../transcript-window-loader.js';
@@ -64,5 +65,23 @@ describe('stageLatestTranscriptWindow', () => {
 		expect(retained.hasMore).toBe(false);
 		expect(retainLoadedTranscriptPrefix('generation-2', loaded, latest)).toBe(latest);
 		expect(retainLoadedTranscriptPrefix('generation-1', loaded.slice(0, 99), latest)).toBe(latest);
+	});
+
+	it('prunes only a contiguous live window to its exact latest suffix', () => {
+		const expanded = page('generation-1', 1, 250, 250, 250);
+
+		const pruned = pruneTranscriptToLatestWindow(expanded, 100);
+
+		expect(pruned).toMatchObject({
+			generationId: 'generation-1',
+			lastSeq: 250,
+			pageOldestSeq: 151,
+			hasMore: true,
+		});
+		expect(pruned?.messages.map((entry) => entry.seq)).toEqual(
+			Array.from({ length: 100 }, (_, index) => index + 151),
+		);
+		expect(pruneTranscriptToLatestWindow(page('generation-1', 151, 100, 250, 100), 100)).toBe(null);
+		expect(pruneTranscriptToLatestWindow(page('generation-1', 1, 100, 250, 100), 50)).toBe(null);
 	});
 });

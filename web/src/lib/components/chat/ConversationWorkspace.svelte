@@ -347,6 +347,7 @@
 		chatState,
 		sessions,
 	});
+	onDestroy(() => scroll.destroy());
 	function scrollToBottomAndFill(): void {
 		void scroll.scrollToLatest().then(() => scroll.fillUnderfilledViewport());
 	}

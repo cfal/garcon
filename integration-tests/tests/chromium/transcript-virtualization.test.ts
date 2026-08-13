@@ -26,6 +26,7 @@ import {
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
 const ITEM_SELECTOR = '[data-chat-virtual-item]';
+const LIVE_HISTORY_PRUNE_IDLE_MS = 3 * 60_000;
 
 interface ReadingAnchor {
   key: string;
@@ -3623,11 +3624,39 @@ async function verifyContinuousHistoryPaging(fixture: ChromiumFixture): Promise<
     expect(requestedBeforeSeqs).not.toContain(initialPage.lastSeq + 1);
     const requestCountAfterEarlierPages = requestedBeforeSeqs.length;
 
+    await fixture.page.clock.install();
+    await fixture.page.clock.fastForward(1);
     await scrollToPosition(fixture.page, 'end');
+    await fixture.page.locator(`[data-chat-row-id="${newestRowId}"]`).waitFor({ state: 'visible' });
+    expect(
+      await fixture.page.locator(FEED_SELECTOR).getAttribute('data-chat-pinned-to-bottom'),
+    ).toBe('true');
+    expect(
+      await fixture.page.locator(`[data-chat-row-id="${newestRowId}"]`).textContent(),
+    ).toContain(newestText);
+    expect(requestedBeforeSeqs).toHaveLength(requestCountAfterEarlierPages);
+    await assertMountedTranscriptMatches(fixture.page, completeRows);
+    await fixture.page.clock.fastForward(LIVE_HISTORY_PRUNE_IDLE_MS - 30_000);
+    expect(await transcriptEntryCount(fixture.page)).toBe(completeTranscript.lastSeq);
+    expect(
+      await fixture.page.locator(`[data-chat-row-id="${newestRowId}"]`).textContent(),
+    ).toContain(newestText);
+
+    await fixture.page.clock.runFor(31_000);
+    await fixture.page.clock.resume();
+    await fixture.page.waitForFunction(
+      ({ selector, expectedCount }) =>
+        Number(
+          document.querySelector<HTMLElement>(selector)?.dataset.chatTranscriptEntryCount ?? 0,
+        ) === expectedCount,
+      { selector: SIZER_SELECTOR, expectedCount: 100 },
+    );
+    expect(await transcriptEntryCount(fixture.page)).toBe(100);
     await fixture.page.locator(`[data-chat-row-id="${newestRowId}"]`).waitFor({ state: 'visible' });
     expect(
       await fixture.page.locator(`[data-chat-row-id="${newestRowId}"]`).textContent(),
     ).toContain(newestText);
+    await waitForDistanceFromEnd(fixture.page, 1);
     expect(requestedBeforeSeqs).toHaveLength(requestCountAfterEarlierPages);
     await assertMountedTranscriptMatches(fixture.page, completeRows);
 
@@ -3648,14 +3677,14 @@ async function verifyContinuousHistoryPaging(fixture: ChromiumFixture): Promise<
         return counts;
       });
     expect(new Set(restoredEntryCounts), JSON.stringify(restoredEntryCounts)).toEqual(
-      new Set([completeTranscript.lastSeq]),
+      new Set([100]),
     );
     await assertMountedTranscriptMatches(fixture.page, completeRows);
 
     const continuousGeometry = await transcriptGeometry(fixture.page);
     expect(continuousGeometry.itemCount).toBeGreaterThan(2);
     expect(continuousGeometry.transcriptItemCount).toBeGreaterThan(1);
-    expect(continuousGeometry.modelCount).toBe(initialPage.lastSeq + 3);
+    expect(continuousGeometry.modelCount).toBe(103);
     expect(continuousGeometry.overlaps).toEqual([]);
     expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
     fixture.assertNoBrowserErrors();
