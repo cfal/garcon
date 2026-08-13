@@ -1,6 +1,12 @@
-import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
-import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
+import {
+  CHAT_SEARCH_MIN_PREFIX_CHARS,
+  type ChatSearchIndexStatus,
+  type ChatSearchQueryV1,
+  type ChatSearchResult,
+} from '@garcon/common/chat-search';
+import type { ChatMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '@garcon/server-agent-common/search/message-projector';
+import type { HistoricalSearchMessageRow } from '@garcon/server-agent-common/search/rows';
 import type { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import type {
   LedgerRow,
@@ -32,7 +38,6 @@ export class TranscriptSearchController {
   readonly #deps: TranscriptSearchControllerDeps;
   readonly #lifecycleAbort = new AbortController();
   readonly #chatTails = new Map<string, Promise<void>>();
-  readonly #fencedChatIds = new Set<string>();
   readonly #unsubscribe: () => void;
   #enabled = false;
   #admissionFailed = false;
@@ -82,7 +87,6 @@ export class TranscriptSearchController {
   }
 
   deleteChat(chatId: string): void {
-    this.#fencedChatIds.delete(chatId);
     if (!this.#enabled || this.#closed) return;
     void this.#enqueue(chatId, () => this.#deps.service.deleteChat(chatId));
   }
@@ -115,13 +119,14 @@ export class TranscriptSearchController {
     timeout.unref?.();
     try {
       const allowedViews = new Map<string, TranscriptViewId>();
+      const fencedChatIds = new Set<string>();
       for (const chatId of options.allowedChatIds) {
         let view: TranscriptView | null;
         try {
           view = this.#deps.ledger.currentView(chatId);
         } catch (error) {
           if (!(error instanceof LedgerFencedError)) throw error;
-          this.#fencedChatIds.add(chatId);
+          fencedChatIds.add(chatId);
           continue;
         }
         if (view) allowedViews.set(chatId, view.viewId);
@@ -135,15 +140,13 @@ export class TranscriptSearchController {
         limit: clampLimit(options.limit),
         signal: abort.signal,
       });
-      const failedLedgerCount = [...new Set(options.allowedChatIds)]
-        .filter((chatId) => this.#fencedChatIds.has(chatId)).length;
       return {
         results: response.results.filter(
           (result) => allowedViews.get(result.chatId) === result.transcriptViewId,
         ),
         index: {
           ...response.index,
-          failedChatCount: response.index.failedChatCount + failedLedgerCount,
+          failedChatCount: response.index.failedChatCount + fencedChatIds.size,
         },
       };
     } catch {
@@ -163,7 +166,6 @@ export class TranscriptSearchController {
       return this.#deps.ledger.currentView(chatId)?.viewId === transcriptViewId;
     } catch (error) {
       if (!(error instanceof LedgerFencedError)) throw error;
-      this.#fencedChatIds.add(chatId);
       return false;
     }
   }
@@ -171,7 +173,6 @@ export class TranscriptSearchController {
   async disableAndDelete(): Promise<void> {
     this.#enabled = false;
     this.#admissionFailed = false;
-    this.#fencedChatIds.clear();
     await Promise.allSettled(this.#chatTails.values());
     this.#chatTails.clear();
     await this.#deps.service.disableAndDelete(new AbortController().signal);
@@ -181,7 +182,6 @@ export class TranscriptSearchController {
     if (this.#closed) return;
     this.#closed = true;
     this.#enabled = false;
-    this.#fencedChatIds.clear();
     this.#lifecycleAbort.abort();
     this.#unsubscribe();
     await Promise.allSettled(this.#chatTails.values());
@@ -192,10 +192,6 @@ export class TranscriptSearchController {
   async #syncAll(): Promise<void> {
     if (!this.#enabled || this.#closed) return;
     const chatIds = [...new Set(this.#deps.listChatIds())];
-    const registered = new Set(chatIds);
-    for (const chatId of this.#fencedChatIds) {
-      if (!registered.has(chatId)) this.#fencedChatIds.delete(chatId);
-    }
     await Promise.all(chatIds.map((chatId) => this.#enqueue(chatId, () => this.#syncChat(chatId))));
     await this.#deps.service.pruneChats(chatIds);
   }
@@ -203,7 +199,6 @@ export class TranscriptSearchController {
   async #syncChat(chatId: string): Promise<void> {
     if (!this.#enabled || this.#closed) return;
     if (!this.#deps.listChatIds().includes(chatId)) {
-      this.#fencedChatIds.delete(chatId);
       await this.#deps.service.deleteChat(chatId);
       return;
     }
@@ -214,7 +209,6 @@ export class TranscriptSearchController {
       rows = view ? this.#deps.ledger.currentRows(chatId) : [];
     } catch (error) {
       if (!(error instanceof LedgerFencedError)) throw error;
-      this.#fencedChatIds.add(chatId);
       await this.#deps.service.deleteChat(chatId);
       return;
     }
@@ -225,7 +219,6 @@ export class TranscriptSearchController {
       throughOrdinal: rows.at(-1)?.ordinal ?? 0,
       rows: searchableRows(rows),
     });
-    this.#fencedChatIds.delete(chatId);
   }
 
   #onCommit(event: TranscriptCommitEvent): void {
@@ -266,17 +259,24 @@ function rowsForCommit(event: Exclude<TranscriptCommitEvent, { type: 'view-repla
   return event.type === 'rows' ? event.rows : [event.row];
 }
 
-function searchableRows(rows: readonly LedgerRow[]) {
+function searchableRows(rows: readonly LedgerRow[]): HistoricalSearchMessageRow[] {
   return rows.flatMap((row) => {
-    const message = row.kind === 'user-input'
-      ? row.detail.message
-      : row.kind === 'provider-row'
-        ? row.message
-        : null;
+    const message = searchableMessage(row);
     if (!message) return [];
     const projected = projectSearchMessage(message);
     return projected ? [{ ordinal: row.ordinal, ...projected }] : [];
   });
+}
+
+function searchableMessage(row: LedgerRow): ChatMessage | null {
+  switch (row.kind) {
+    case 'user-input':
+      return row.detail.message;
+    case 'provider-row':
+      return row.message;
+    default:
+      return null;
+  }
 }
 
 function compileQuery(query: string, textTokens?: readonly string[]): ChatSearchQueryV1 {
