@@ -116,7 +116,10 @@ async function withReload(run) {
       return { entries: this.queueEntries };
     },
   };
-  const registry = { getChat: () => entry };
+  const registry = {
+    getChat: () => entry,
+    updateChat: (_chatId, patch) => Object.assign(entry, patch),
+  };
   const integrations = {
     get: () => integration,
     require: () => integration,
