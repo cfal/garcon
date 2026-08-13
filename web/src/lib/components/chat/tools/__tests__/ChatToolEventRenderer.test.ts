@@ -252,7 +252,7 @@ describe('ChatToolEventRenderer', () => {
 		expect(container.childElementCount).toBe(0);
 	});
 
-	it('highlights Bash in place without adding code-block layout', async () => {
+	it('renders Bash as one unframed highlighted shell command', async () => {
 		const command = 'if true; then echo "ready"; fi';
 		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new BashToolUseMessage('', 'bash-1', command),
@@ -260,7 +260,7 @@ describe('ChatToolEventRenderer', () => {
 		});
 
 		const code = container.querySelector('code.code-highlight');
-		expect(code?.textContent).toBe(command);
+		expect(code?.textContent).toBe(`$ ${command}`);
 		expect(code?.classList.contains('text-xs')).toBe(true);
 		expect(code?.classList.contains('font-mono')).toBe(true);
 		expect(code?.classList.contains('block')).toBe(true);
@@ -268,6 +268,11 @@ describe('ChatToolEventRenderer', () => {
 		expect(code?.classList.contains('break-all')).toBe(true);
 		expect(container.querySelector('.markdown-code-block')).toBeNull();
 		expect(container.querySelector('pre')).toBeNull();
+		expect(container.querySelector('div')).toBeNull();
+		expect(container.querySelector('button')).toBeNull();
+		expect(screen.queryByText('Bash')).toBeNull();
+		expect(container.children).toHaveLength(1);
+		expect(container.firstElementChild?.tagName).toBe('CODE');
 
 		await waitFor(
 			() => {
@@ -276,7 +281,7 @@ describe('ChatToolEventRenderer', () => {
 			},
 			{ timeout: 5_000 },
 		);
-		expect(code?.textContent).toBe(command);
+		expect(code?.textContent).toBe(`$ ${command}`);
 	});
 
 	it('highlights unknown tool inputs as JSON within the existing details view', async () => {
@@ -346,37 +351,41 @@ describe('tool result and jump behavior', () => {
 		const toolResult = {
 			content: { filenames: ['a.ts', 'b.ts'], numFiles: 2 },
 		};
-		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-1', '**/*.ts'),
-			toolResult,
-			mode: 'input',
-		});
+			render(ChatToolEventRenderer, {
+				toolMessage: new GlobToolUseMessage('', 'tool-glob-1', '**/*.ts'),
+				toolResult,
+				mode: 'input',
+				resultAnchorId: 'tool-result-generation-1:23',
+			});
 
 		const jumpLink = screen.getByLabelText('Jump to results');
 		expect(jumpLink).toBeTruthy();
-		expect(jumpLink.getAttribute('href')).toBe('#tool-result-tool-glob-1');
+		expect(jumpLink.getAttribute('href')).toBe('#tool-result-generation-1:23');
+		expect(document.querySelector('[data-chat-tool-result-placeholder]')).toBeNull();
 	});
 
-	it('does not render jump link for Glob when toolResult is absent', () => {
-		render(ChatToolEventRenderer, {
+	it('reserves the result-link geometry before a Glob result arrives', () => {
+		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new GlobToolUseMessage('', 'tool-glob-2', '**/*.ts'),
 			mode: 'input',
 		});
 
 		expect(screen.queryByLabelText('Jump to results')).toBeNull();
+		expect(container.querySelector('[data-chat-tool-result-placeholder]')).toBeTruthy();
 	});
 
-	it('renders result section with anchor id for Glob tool result', () => {
+		it('renders a Glob result as its own anchored row', () => {
 		const toolResult = {
 			content: { filenames: ['src/a.ts', 'src/b.ts'], numFiles: 2 },
 		};
-		const { container } = render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-3', '**/*.ts'),
-			toolResult,
-			mode: 'input',
-		});
+			const { container } = render(ChatToolEventRenderer, {
+				toolMessage: new GlobToolUseMessage('', 'tool-glob-3', '**/*.ts'),
+				toolResult,
+				mode: 'result',
+				resultAnchorId: 'tool-result-generation-1:25',
+			});
 
-		const anchor = container.querySelector('#tool-result-tool-glob-3');
+			const anchor = container.querySelector('[id="tool-result-generation-1:25"]');
 		expect(anchor).toBeTruthy();
 	});
 
@@ -384,10 +393,10 @@ describe('tool result and jump behavior', () => {
 		const toolResult = {
 			content: { filenames: ['one.ts'], numFiles: 1 },
 		};
-		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-4', '*.ts'),
-			toolResult,
-			mode: 'input',
+			render(ChatToolEventRenderer, {
+				toolMessage: new GlobToolUseMessage('', 'tool-glob-4', '*.ts'),
+				toolResult,
+				mode: 'result',
 			autoExpandTools: true,
 		});
 
@@ -398,10 +407,10 @@ describe('tool result and jump behavior', () => {
 		const toolResult = {
 			content: { filenames: ['a.ts', 'b.ts', 'c.ts'], numFiles: 3 },
 		};
-		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-5', '*.ts'),
-			toolResult,
-			mode: 'input',
+			render(ChatToolEventRenderer, {
+				toolMessage: new GlobToolUseMessage('', 'tool-glob-5', '*.ts'),
+				toolResult,
+				mode: 'result',
 			autoExpandTools: true,
 		});
 
@@ -416,10 +425,10 @@ describe('tool result and jump behavior', () => {
 				totalMatches: 5,
 			},
 		};
-		render(ChatToolEventRenderer, {
-			toolMessage: new GrepToolUseMessage('', 'tool-grep-1', 'needle', 'src'),
-			toolResult,
-			mode: 'input',
+			render(ChatToolEventRenderer, {
+				toolMessage: new GrepToolUseMessage('', 'tool-grep-1', 'needle', 'src'),
+				toolResult,
+				mode: 'result',
 			autoExpandTools: true,
 		});
 

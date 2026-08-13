@@ -150,13 +150,6 @@
 	function toggleThinking(messageIndex: number) {
 		thinkingStates[messageIndex] = !thinkingStates[messageIndex];
 	}
-
-	function isGroupedWith(prev: ChatMessage | null, current: ChatMessage): boolean {
-		if (!prev) return false;
-		const prevCategory = prev instanceof AssistantMessage ? 'assistant' : prev.type;
-		const currentCategory = current instanceof AssistantMessage ? 'assistant' : current.type;
-		return prevCategory === currentCategory;
-	}
 </script>
 
 <svelte:head>
@@ -243,18 +236,14 @@
 						<div class="h-px flex-1 bg-border/70"></div>
 					</div>
 				{/if}
-				{#each messages as entry, idx (entry.index)}
+				{#each messages as entry (entry.index)}
 					{@const message = entry.message}
-					{@const prevMessage = idx > 0 ? messages[idx - 1].message : null}
-					{@const isGrouped = isGroupedWith(prevMessage, message)}
 					<svelte:boundary>
 						{#snippet failed(error)}
 							<MessageRenderFallback {error} />
 						{/snippet}
 						<div
-							class="chat-message {message instanceof UserMessage
-								? 'flex justify-start'
-								: ''} {isGrouped ? '' : 'mt-3'}"
+							class="chat-message {message instanceof UserMessage ? 'flex justify-start' : ''} mt-3"
 						>
 							{#if message instanceof UserMessage}
 								<div class="sm:max-w-[85%] min-w-0">

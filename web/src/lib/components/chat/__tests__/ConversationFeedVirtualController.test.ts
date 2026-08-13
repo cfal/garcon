@@ -45,12 +45,29 @@ import {
 	conversationAnchorViewportOffset,
 	ConversationEarlierPrependAnchorOwnership,
 	ConversationPreCommitAnchorBuffer,
+	ConversationProgrammaticScrollOwnership,
 	positionCommittedConversationAnchor,
 	positionPendingConversationAnchor,
 } from '../conversation-feed-virtual-runtime';
 import ConversationFeedVirtualControllerTestHost from './ConversationFeedVirtualControllerTestHost.svelte';
 
 describe('ConversationFeedVirtualController helpers', () => {
+	it('invalidates superseded programmatic scroll ownership epochs', () => {
+		const ownership = new ConversationProgrammaticScrollOwnership();
+		const first = ownership.begin();
+		expect(ownership.ownsPosition).toBe(true);
+
+		ownership.cancel();
+		expect(ownership.isCurrent(first)).toBe(false);
+		expect(ownership.ownsPosition).toBe(false);
+
+		const second = ownership.begin();
+		ownership.finish(first);
+		expect(ownership.ownsPosition).toBe(true);
+		ownership.finish(second);
+		expect(ownership.ownsPosition).toBe(false);
+	});
+
 	it('consumes only the matching pre-commit anchor policy', () => {
 		const buffer = new ConversationPreCommitAnchorBuffer();
 		const nearest = { key: 'nearest', viewportOffset: 4, fallbackKeys: [] };
@@ -81,6 +98,57 @@ describe('ConversationFeedVirtualController helpers', () => {
 		ownership.carry(anchor, true);
 		expect(ownership.preserves(null, anchor, 0)).toBe(true);
 		expect(ownership.preserves('earlier', anchor, 80)).toBe(false);
+	});
+
+	it('retains mounted rows only through the owning prepend restore', () => {
+		const ownership = new ConversationEarlierPrependAnchorOwnership();
+		const anchor = { key: 'anchor', viewportOffset: 0, fallbackKeys: [] };
+		ownership.beginMountedRowRetention(['mounted']);
+		ownership.retainMountedRow('attached');
+		expect(ownership.retainedMountedRowKeys).toEqual(new Set(['mounted', 'attached']));
+		expect(
+			ownership.retainedIndexes(
+				[1],
+				new Map([
+					['mounted', 4],
+					['attached', 5],
+				]),
+			),
+		).toEqual([1, 4, 5]);
+
+		ownership.carry(anchor, true);
+		ownership.complete(anchor);
+		expect(ownership.retainedMountedRowKeys).toBeNull();
+	});
+
+	it('keeps a prepend clamped when its publication begins before the anchor is carried', () => {
+		const ownership = new ConversationEarlierPrependAnchorOwnership();
+		const anchor = { key: 'anchor', viewportOffset: 0, fallbackKeys: [] };
+		ownership.beginMountedRowRetention([], true);
+
+		expect(ownership.preserves('earlier', null, 0)).toBe(true);
+		ownership.carry(anchor, true);
+
+		expect(ownership.preserves('earlier', anchor, 80)).toBe(true);
+	});
+
+	it('blocks stale thumb motion until a clamped prepend drag moves later or ends', () => {
+		const ownership = new ConversationEarlierPrependAnchorOwnership();
+		const anchor = { key: 'anchor', viewportOffset: 12, fallbackKeys: [] };
+		ownership.beginMountedRowRetention([], true, true);
+		ownership.carry(anchor, true);
+
+		expect(ownership.preserves('earlier', anchor, 7_900, 'scrollbar-drag')).toBe(true);
+		expect(ownership.blocksViewportMutation('scrollbar-drag')).toBe(true);
+		expect(ownership.blocksViewportMutation('viewport')).toBe(false);
+		ownership.complete(anchor);
+		expect(ownership.blocksViewportMutation('scrollbar-drag')).toBe(true);
+
+		expect(ownership.preserves('later', null, 7_900, 'scrollbar-drag')).toBe(false);
+		expect(ownership.blocksViewportMutation('scrollbar-drag')).toBe(false);
+		ownership.beginMountedRowRetention([], true, true);
+		ownership.finishScrollbarDrag();
+		expect(ownership.blocksViewportMutation('scrollbar-drag')).toBe(false);
 	});
 
 	it('positions a committed anchor before its next animation frame', () => {
@@ -186,13 +254,21 @@ describe('ConversationFeedVirtualController helpers', () => {
 	});
 
 	it('publishes a fresh range extractor when retention policy changes', () => {
-		const first = createRetainedConversationRangeExtractor([], 7);
-		const second = createRetainedConversationRangeExtractor([0], 7);
+		const first = createRetainedConversationRangeExtractor([], 7, 0);
+		const second = createRetainedConversationRangeExtractor([0], 7, 0);
 		const range = { startIndex: 2, endIndex: 3, overscan: 0, count: 10 };
 
 		expect(second).not.toBe(first);
 		expect(first(range)).toEqual([2, 3, 7, 8, 9]);
 		expect(second(range)).toEqual([0, 2, 3, 7, 8, 9]);
+	});
+
+	it('keeps a following row buffer mounted below the active range', () => {
+		const extract = createRetainedConversationRangeExtractor([]);
+		const indexes = extract({ startIndex: 10, endIndex: 12, overscan: 2, count: 50 });
+
+		expect(indexes).toContain(24);
+		expect(indexes).not.toContain(25);
 	});
 
 	it('preserves detached edge changes without overriding pinned or navigation policy', () => {
@@ -503,18 +579,26 @@ describe('ConversationFeedVirtualController', () => {
 		const { exposure } = await renderController();
 		const measure = vi.spyOn(exposure.instance, 'measure');
 		const setOptions = vi.spyOn(exposure.instance, 'setOptions');
+		const rangeExtractor = exposure.instance.options.rangeExtractor;
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Publish content' }));
 		await nextFrame();
 		expect(setOptions).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Retain first' }));
-		await waitFor(() => expect(setOptions).toHaveBeenCalled());
+		await waitFor(() => expect(setOptions).toHaveBeenCalledOnce());
 		expect(Object.keys(setOptions.mock.lastCall?.[0] ?? {})).toEqual(['rangeExtractor']);
+		expect(exposure.instance.options.rangeExtractor).not.toBe(rangeExtractor);
+		expect(
+			exposure.instance.options.rangeExtractor({
+				startIndex: 2,
+				endIndex: 3,
+				overscan: 0,
+				count: 12,
+			}),
+		).toContain(0);
 
-		// The adapter reattaches its own setOptions binding on every store emission, so the spy
-		// above detached when the retention publication emitted. Assert the same-surface count
-		// shrink through the options TanStack actually applied: new options, no measurement pass.
+		// A same-surface count shrink still updates TanStack without a measurement pass.
 		await fireEvent.click(screen.getByRole('button', { name: 'Shrink' }));
 		await waitFor(() => {
 			expect(

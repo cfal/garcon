@@ -5,7 +5,10 @@ import type {
 	TranscriptPageLoadResult,
 	TranscriptWindowTarget,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
+import type {
+	ConversationViewportIntentSource,
+	ConversationViewportPort,
+} from '$lib/chat/transcript/conversation-viewport-port.js';
 import type {
 	UserMessageNavigatorSelectionResult,
 	UserMessageNavigatorTarget,
@@ -33,7 +36,6 @@ interface UserScrollIntent {
 
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
-	| 'compactToRecentMessages'
 	| 'canAutoFillEarlier'
 	| 'canLoadEarlier'
 	| 'canLoadLater'
@@ -109,7 +111,6 @@ export class ConversationScrollController {
 		if (!chatId) return;
 		if (!this.deps.chatState.hasLaterMessages && !this.isScrollingToTop) {
 			this.scrollToBottom();
-			this.deps.chatState.compactToRecentMessages();
 			return;
 		}
 		const result = await this.#navigateToWindow(chatId, 'latest', () =>
@@ -117,7 +118,6 @@ export class ConversationScrollController {
 		);
 		if (result === 'invalidated') return;
 		this.scrollToBottom();
-		this.deps.chatState.compactToRecentMessages();
 	}
 
 	async restoreLatestWindow(chatId: string): Promise<boolean> {
@@ -136,8 +136,15 @@ export class ConversationScrollController {
 		this.deps.chatState.isUserScrolledUp = !this.isPinnedToBottom;
 	}
 
-	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
-		this.deps.getViewport()?.cancelForUserIntent(direction);
+	noteUserScrollIntent(
+		direction: TranscriptPageDirection | null = null,
+		source: ConversationViewportIntentSource = 'viewport',
+	): boolean {
+		const viewport = this.deps.getViewport();
+		const preventViewportMutation =
+			source === 'viewport'
+				? (viewport?.cancelForUserIntent(direction) ?? false)
+				: (viewport?.cancelForUserIntent(direction, source) ?? false);
 		// Continued scrolling owns the page's viewport position without cancelling its
 		// data request. Explicit navigation still advances the shared operation epoch.
 		if (this.#isPageMutationInProgress) {
@@ -168,6 +175,7 @@ export class ConversationScrollController {
 				this.#handleBoundaryProximity(direction, this.#isNearPageBoundary(direction));
 			});
 		}
+		return preventViewportMutation;
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {
@@ -253,7 +261,6 @@ export class ConversationScrollController {
 				this.setPinnedToBottom(true);
 				this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
 				this.deps.getViewport()?.scrollToEnd();
-				void this.#compactAtLiveEdge(this.deps.sessions.selectedChatId);
 			} else if (!nearBottom || this.#userScrollIntent.direction === 'earlier') {
 				this.#preserveHistoryBrowsing();
 			}
@@ -696,14 +703,6 @@ export class ConversationScrollController {
 		} else {
 			void this.fillUnderfilledViewport();
 		}
-	}
-
-	async #compactAtLiveEdge(chatId: string | null): Promise<void> {
-		if (!chatId || !this.deps.chatState.compactToRecentMessages()) return;
-		await tick();
-		if (this.deps.sessions.selectedChatId !== chatId || this.deps.chatState.isUserScrolledUp)
-			return;
-		this.scrollToBottom();
 	}
 
 	async #navigateToWindow(

@@ -39,7 +39,7 @@ function setup(messages: ChatViewMessage[] = [entry(1, user('first'))]) {
 	transcript.replaceGeneration('chat-1', 'generation-1', messages, {
 		lastSeq: messages.at(-1)?.seq ?? 0,
 		pageOldestSeq: messages[0]?.seq ?? 0,
-		hasMore: false,
+		hasMore: (messages[0]?.seq ?? 1) > 1,
 	});
 	let selectedChatId: string | null = 'chat-1';
 	const reloadTranscript = vi.fn(async () => undefined);

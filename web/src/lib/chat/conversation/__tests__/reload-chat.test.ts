@@ -106,4 +106,33 @@ describe('reloadChatFromNative', () => {
 			'Unexpected chat reload response',
 		);
 	});
+
+	it('rejects a reloaded suffix with a sequence gap before replacing the transcript', async () => {
+		const ws = wsWithResponse({
+			type: 'chat-reloaded',
+			clientRequestId: 'req-1',
+			chatId: 'chat-1',
+			generationId: 'generation-2',
+			lastSeq: 4,
+			pageOldestSeq: 2,
+			hasMore: true,
+			messages: [
+				{
+					seq: 2,
+					message: { type: 'assistant-message', timestamp: TS, content: 'two' },
+				},
+				{
+					seq: 4,
+					message: { type: 'assistant-message', timestamp: TS, content: 'four' },
+				},
+			],
+		});
+		const chat = new ActiveTranscriptState();
+
+		await expect(reloadChatFromNative(ws, chat, 'chat-1')).rejects.toThrow(
+			'Reloaded transcript is not an ascending contiguous suffix',
+		);
+		expect(chat.chatMessages).toEqual([]);
+		expect(chat.getCursor()).toEqual({ generationId: '', lastSeq: 0 });
+	});
 });

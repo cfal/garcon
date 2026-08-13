@@ -11,6 +11,7 @@ import {
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import {
+	isRequestedChatViewPage,
 	parseChatHistoryState,
 	parseChatViewMessages,
 	type ChatHistoryResponse,
@@ -384,9 +385,10 @@ export async function getChatMessages(params: {
 	limit?: number;
 	beforeSeq?: number;
 }): Promise<ChatHistoryResponse> {
+	const limit = params.limit ?? 50;
 	const query = new URLSearchParams({
 		chatId: params.chatId,
-		limit: String(params.limit ?? 50),
+		limit: String(limit),
 	});
 	if (params.beforeSeq !== undefined) query.set('beforeSeq', String(params.beforeSeq));
 	const response = await apiGet<{
@@ -426,7 +428,7 @@ export async function getChatMessages(params: {
 	if (typeof response.hasMore !== 'boolean') {
 		throw new Error('Invalid chat messages page: hasMore');
 	}
-	return {
+	const page = {
 		historyState,
 		chatId,
 		messages,
@@ -437,6 +439,16 @@ export async function getChatMessages(params: {
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
 	};
+	if (page.chatId !== params.chatId) throw new Error('Invalid chat messages page: chatId');
+	if (
+		!isRequestedChatViewPage(
+			{ limit, beforeSeq: params.beforeSeq },
+			page,
+		)
+	) {
+		throw new Error('Invalid chat messages page: requested window');
+	}
+	return page;
 }
 
 export async function searchChatTranscripts(

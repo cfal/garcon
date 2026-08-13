@@ -173,11 +173,13 @@ describe('ConversationFeed', () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		let feedViewport: HTMLElement | null = null;
 		const observedScrollTops: number[] = [];
-		const onUserScrollIntent = vi.fn(() => observedScrollTops.push(feedViewport?.scrollTop ?? -1));
+		const onUserScrollIntent = vi.fn(() => {
+			observedScrollTops.push(feedViewport?.scrollTop ?? -1);
+		});
 		try {
 			const { container } = render(ConversationFeedTestHost, {
 				onUserScrollIntent,
-				transcriptScenario: 'twenty-thousand',
+				transcriptScenario: 'local-truncation',
 			});
 			const { scrollbar, thumb, viewport } = await showFeedScrollbar(container);
 			feedViewport = viewport;
@@ -199,11 +201,13 @@ describe('ConversationFeed', () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		let feedViewport: HTMLElement | null = null;
 		const observedScrollTops: number[] = [];
-		const onUserScrollIntent = vi.fn(() => observedScrollTops.push(feedViewport?.scrollTop ?? -1));
+		const onUserScrollIntent = vi.fn(() => {
+			observedScrollTops.push(feedViewport?.scrollTop ?? -1);
+		});
 		try {
 			const { container } = render(ConversationFeedTestHost, {
 				onUserScrollIntent,
-				transcriptScenario: 'twenty-thousand',
+				transcriptScenario: 'local-truncation',
 			});
 			const { scrollbar, viewport } = await showFeedScrollbar(container);
 			feedViewport = viewport;
@@ -228,7 +232,7 @@ describe('ConversationFeed', () => {
 		try {
 			const { container } = render(ConversationFeedTestHost, {
 				onUserScrollIntent,
-				transcriptScenario: 'twenty-thousand',
+				transcriptScenario: 'local-truncation',
 			});
 			const { thumb, viewport } = await showFeedScrollbar(container);
 			viewport.scrollTop = 500;
@@ -240,8 +244,50 @@ describe('ConversationFeed', () => {
 			await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 120, pointerId: 2 });
 			await fireEvent.pointerUp(thumb, { button: 0, clientY: 120, pointerId: 2 });
 
-			expect(onUserScrollIntent.mock.calls).toEqual([[null], ['earlier'], ['later']]);
+			expect(onUserScrollIntent.mock.calls).toEqual([
+				[null],
+				['earlier', 'scrollbar-drag'],
+				['later', 'scrollbar-drag'],
+			]);
 		} finally {
+			restoreResizeObserver();
+		}
+	});
+
+	it('stops a blocked thumb move before the scrollbar document handler mutates the viewport', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		let documentHandler: ((event: PointerEvent) => void) | null = null;
+		const onUserScrollIntent = vi.fn(
+			(direction: 'earlier' | 'later' | null, source?: 'viewport' | 'scrollbar-drag') =>
+				direction === 'earlier' && source === 'scrollbar-drag',
+		);
+		try {
+			const { container } = render(ConversationFeedTestHost, {
+				onUserScrollIntent,
+				transcriptScenario: 'local-truncation',
+			});
+			const { thumb, viewport } = await showFeedScrollbar(container);
+			viewport.scrollTop = 500;
+			let documentMoves = 0;
+			documentHandler = () => {
+				documentMoves += 1;
+				viewport.scrollTop = 0;
+			};
+			document.addEventListener('pointermove', documentHandler);
+
+			await fireEvent.pointerDown(thumb, { button: 0, clientY: 100, pointerId: 3 });
+			// Represents the owned prepend restore that lands while the thumb remains captured.
+			viewport.scrollTop = 500;
+			await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 80, pointerId: 3 });
+			expect(viewport.scrollTop).toBe(500);
+			expect(documentMoves).toBe(0);
+
+			await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 120, pointerId: 3 });
+			expect(documentMoves).toBe(1);
+			expect(viewport.scrollTop).toBe(0);
+			await fireEvent.pointerUp(thumb, { button: 0, clientY: 120, pointerId: 3 });
+		} finally {
+			if (documentHandler) document.removeEventListener('pointermove', documentHandler);
 			restoreResizeObserver();
 		}
 	});
@@ -376,15 +422,15 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy();
 	});
 
-	it('bounds a twenty-thousand-entry payload before virtual projection', async () => {
+	it('keeps a twenty-thousand-entry transcript while bounding its virtual DOM projection', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'twenty-thousand',
 		});
 		await waitFor(
 			() => {
 				const sizer = container.querySelector('[data-chat-virtual-sizer]');
-				expect(sizer?.getAttribute('data-chat-transcript-entry-count')).toBe('200');
-				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('202');
+				expect(sizer?.getAttribute('data-chat-transcript-entry-count')).toBe('20000');
+				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('20002');
 				const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
 				const mountedTranscriptRows = container.querySelectorAll('[data-chat-row-id]').length;
 				expect(mountedItems).toBeGreaterThan(0);

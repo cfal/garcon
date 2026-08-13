@@ -36,7 +36,10 @@
 	import { ConversationFeedProjectionState } from './ConversationFeedProjectionState.svelte.js';
 	import { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
 	import { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
-	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
+	import type {
+		ConversationViewportIntentSource,
+		ConversationViewportPort,
+	} from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
 	import {
 		ConversationFeedAnnouncementBatcher,
@@ -48,7 +51,10 @@
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
-		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
+		onUserScrollIntent?: (
+			direction: 'earlier' | 'later' | null,
+			source?: ConversationViewportIntentSource,
+		) => boolean | void;
 		onPermissionDecision?: (
 			permissionRequestId: string,
 			decision: PermissionDecisionPayload & { message?: string },
@@ -146,7 +152,10 @@
 		if (scrollbarPointerY === null || (event.buttons & 1) === 0) return;
 		const direction = conversationScrollbarScrollDirection(scrollbarPointerY, event.clientY);
 		scrollbarPointerY = event.clientY;
-		if (direction) onUserScrollIntent?.(direction);
+		if (onUserScrollIntent?.(direction, 'scrollbar-drag') === true) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
 	}
 
 	function handleScrollbarWheel(event: WheelEvent): void {
@@ -156,6 +165,7 @@
 
 	function finishScrollbarPointerIntent(): void {
 		scrollbarPointerY = null;
+		virtualController.finishScrollbarDrag();
 	}
 
 	const feedScrollAreaClass = 'h-full overflow-hidden relative';
@@ -279,7 +289,11 @@
 		untrack(() => {
 			const nextProjection = projectionState.reconcile(input);
 			// Captures old coordinates before publishing the projection that changes row geometry.
-			virtualController.prepareForGeometryPublication(nextProjection.geometry.geometryRevision);
+			virtualController.prepareForGeometryPublication(
+				nextProjection.geometry.geometryRevision,
+				nextProjection.geometry.mutationKinds.has('history-earlier'),
+				scrollbarPointerY !== null,
+			);
 			projection = nextProjection;
 			itemState.reconcile(
 				input.surfaceIdentity,
@@ -463,7 +477,7 @@
 		data-chat-feed-scrollbar
 		onpointerdowncapture={handleScrollbarPointerDownCapture}
 		onwheel={handleScrollbarWheel}
-		onpointermove={handleScrollbarPointerMove}
+		onpointermovecapture={handleScrollbarPointerMove}
 		onpointerup={finishScrollbarPointerIntent}
 		onpointercancel={finishScrollbarPointerIntent}
 		onlostpointercapture={finishScrollbarPointerIntent}

@@ -5,7 +5,6 @@ import {
 	type ChatDisplayRow,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationFeedMutationClock } from '$lib/chat/transcript/conversation-feed-mutations.js';
-import { ACTIVE_TRANSCRIPT_RETENTION_LIMIT } from '$lib/chat/transcript/transcript-page-progress.js';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
 import { estimateConversationFeedItemSize } from '../conversation-feed-virtual-items.js';
 
@@ -87,10 +86,10 @@ describe('ConversationFeedProjectionState', () => {
 		expect(streamed.renderModel).not.toBe(first.renderModel);
 	});
 
-	it('extends a retained transcript incrementally below the retention limit', () => {
+	it('extends a deep transcript incrementally without evicting loaded rows', () => {
 		const transcript = new ActiveTranscriptState();
 		const projections = new ConversationFeedProjectionState();
-		const initialCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT - 1;
+		const initialCount = 249;
 		const deepEntries = Array.from({ length: initialCount }, (_, index) => ({
 			seq: index + 1,
 			message:
@@ -112,7 +111,7 @@ describe('ConversationFeedProjectionState', () => {
 
 		transcript.applyMessages('chat-1', 'generation-1', [
 			{
-				seq: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+				seq: initialCount + 1,
 				message: new AssistantMessage(TS, 'new response'),
 			},
 		]);
@@ -124,8 +123,8 @@ describe('ConversationFeedProjectionState', () => {
 			input({ rows: appendedRows, mutationClock: transcript.feedMutationClock }),
 		);
 
-		const appendedRowId = `generation-1:${ACTIVE_TRANSCRIPT_RETENTION_LIMIT}`;
-		expect(appendedRows).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		const appendedRowId = `generation-1:${initialCount + 1}`;
+		expect(appendedRows).toHaveLength(initialCount + 1);
 		expect(appendedRows[0]?.id).toBe(initialRows[0]?.id);
 		expect(appended.renderModel.items[100]).toBe(first.renderModel.items[100]);
 		expect(appended.model.items[101]).toBe(first.model.items[101]);
@@ -136,7 +135,7 @@ describe('ConversationFeedProjectionState', () => {
 		expect(first.model.targetByDomAnchorId.has(appendedRowId)).toBe(false);
 		expect(oldEndKey).toBeDefined();
 		expect(first.model.indexByKey.get(oldEndKey!)).toBe(first.model.items.length - 1);
-		expect(appended.model.indexByRowId.get(appendedRowId)).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(appended.model.indexByRowId.get(appendedRowId)).toBe(initialCount + 1);
 		expect(appended.model.items.at(-2)).toMatchObject({
 			kind: 'transcript',
 			item: { message: appendedTail.message },

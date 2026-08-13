@@ -9,9 +9,12 @@ import {
 import {
 	ConversationFeedRenderModelController,
 	type ConversationFeedRenderModelReconciliation,
-	type ReconciledConversationFeedRenderModel,
 } from '$lib/chat/transcript/conversation-feed-render-model.js';
-import { filterHiddenToolRenderItems } from '$lib/chat/transcript/conversation-feed-items.js';
+import {
+	filterHiddenToolRenderItems,
+	type ConversationFeedRenderItem,
+	type ConversationFeedRenderModel,
+} from '$lib/chat/transcript/conversation-feed-items.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import {
 	buildConversationVirtualFeedModel,
@@ -47,7 +50,7 @@ export interface ConversationVirtualGeometrySnapshot {
 }
 
 export interface ConversationFeedProjection {
-	renderModel: ReconciledConversationFeedRenderModel;
+	renderModel: ConversationFeedRenderModel;
 	model: ConversationVirtualFeedModel;
 	geometry: ConversationVirtualGeometrySnapshot;
 	projectedDataRevision: number;
@@ -121,13 +124,7 @@ export class ConversationFeedProjectionState {
 		const incremental = this.#reconcileIncremental(input, reconciliation, mutationKinds);
 		if (incremental) return incremental;
 
-		const visibleTranscriptItems = filterHiddenToolRenderItems(
-			renderModel.items,
-			input.hiddenToolTypes,
-		).filter(
-			(item) =>
-				item.kind !== 'message' || !(item.message instanceof ThinkingMessage) || input.showThinking,
-		);
+		const visibleTranscriptItems = this.#visibleTranscriptItems(renderModel.items, input);
 		const model = buildConversationVirtualFeedModel({
 			surfaceIdentity: input.surfaceIdentity,
 			showTopToolbarSpacer: input.showTopToolbarSpacer,
@@ -169,15 +166,7 @@ export class ConversationFeedProjectionState {
 				}
 			: previousGeometry;
 
-		this.#lastProjectedDataRevision = input.mutationClock.dataRevision;
-		this.#lastInput = input;
-		this.#lastProjection = {
-			renderModel,
-			model,
-			geometry,
-			projectedDataRevision: input.mutationClock.dataRevision,
-		};
-		return this.#lastProjection;
+		return this.#commitProjection(input, renderModel, model, geometry);
 	}
 
 	#reconcileIncremental(
@@ -193,10 +182,17 @@ export class ConversationFeedProjectionState {
 		if (reconciliation.change.kind === 'unchanged') {
 			model = previous.model;
 		} else if (reconciliation.change.kind === 'tail-appended') {
+			const visibleAppendedItems = this.#visibleTranscriptItems(
+				reconciliation.change.appendedItems,
+				input,
+			);
+			if (visibleAppendedItems.length === 0) {
+				return this.#commitProjection(input, reconciliation.model, previous.model, geometry);
+			}
 			const appended = appendConversationVirtualTranscriptTail(
 				previous.model,
 				input.surfaceIdentity,
-				reconciliation.change.appendedItems,
+				visibleAppendedItems,
 			);
 			if (!appended) return null;
 			model = appended;
@@ -210,19 +206,15 @@ export class ConversationFeedProjectionState {
 					input.textScale,
 				);
 			}
-			keys.splice(
+			const insertedItems = model.items.slice(
 				insertIndex,
-				0,
-				...model.items
-					.slice(insertIndex, insertIndex + reconciliation.change.appendedItems.length)
-					.map((item) => item.key),
+				insertIndex + visibleAppendedItems.length,
 			);
+			keys.splice(insertIndex, 0, ...insertedItems.map((item) => item.key));
 			estimates.splice(
 				insertIndex,
 				0,
-				...model.items
-					.slice(insertIndex, insertIndex + reconciliation.change.appendedItems.length)
-					.map((item) => estimateConversationFeedItemSize(item, input.textScale)),
+				...insertedItems.map((item) => estimateConversationFeedItemSize(item, input.textScale)),
 			);
 			geometry = {
 				surfaceIdentity: input.surfaceIdentity,
@@ -237,15 +229,34 @@ export class ConversationFeedProjectionState {
 			return null;
 		}
 
+		return this.#commitProjection(input, reconciliation.model, model, geometry);
+	}
+
+	#commitProjection(
+		input: ConversationFeedProjectionInput,
+		renderModel: ConversationFeedRenderModel,
+		model: ConversationVirtualFeedModel,
+		geometry: ConversationVirtualGeometrySnapshot,
+	): ConversationFeedProjection {
 		this.#lastProjectedDataRevision = input.mutationClock.dataRevision;
 		this.#lastInput = input;
 		this.#lastProjection = {
-			renderModel: reconciliation.model,
+			renderModel,
 			model,
 			geometry,
 			projectedDataRevision: input.mutationClock.dataRevision,
 		};
 		return this.#lastProjection;
+	}
+
+	#visibleTranscriptItems(
+		items: ConversationFeedRenderItem[],
+		input: ConversationFeedProjectionInput,
+	): ConversationFeedRenderItem[] {
+		return filterHiddenToolRenderItems(items, input.hiddenToolTypes).filter(
+			(item) =>
+				item.kind !== 'message' || !(item.message instanceof ThinkingMessage) || input.showThinking,
+		);
 	}
 
 	reset(): void {

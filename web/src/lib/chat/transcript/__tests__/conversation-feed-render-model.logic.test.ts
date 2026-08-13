@@ -3,6 +3,8 @@ import {
 	AssistantMessage,
 	BashToolUseMessage,
 	ReadToolUseMessage,
+	ToolResultMessage,
+	UserMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
 import { ConversationFeedRenderModelController } from '../conversation-feed-render-model.js';
@@ -10,85 +12,131 @@ import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 
 const TS = '2026-08-03T00:00:00.000Z';
 
-function row(id: string, message: ChatMessage): ChatDisplayRow {
-	return { kind: 'message', id, message };
-}
-
-function bash(id: string): ChatDisplayRow {
-	return row(id, new BashToolUseMessage(TS, `tool-${id}`, id));
-}
-
-function read(id: string): ChatDisplayRow {
-	return row(id, new ReadToolUseMessage(TS, `tool-${id}`, `/tmp/${id}`));
-}
-
-function separator(id: string): ChatDisplayRow {
-	return row(id, new AssistantMessage(TS, id));
+function row(seq: number, message: ChatMessage): ChatDisplayRow {
+	return { kind: 'message', id: `generation-1:${seq}`, seq, message };
 }
 
 describe('ConversationFeedRenderModelController', () => {
-	it('preserves one run key through singleton, group, and singleton transitions', () => {
+	it('publishes streamed message and tool rows once in exact transcript order', () => {
 		const controller = new ConversationFeedRenderModelController();
-		const singleton = controller.reconcile('chat-1:generation-1', [bash('a')]);
-		const key = singleton.items[0]?.virtualKey;
+		const source = [
+			row(1, new UserMessage(TS, 'run this')),
+			row(2, new AssistantMessage(TS, 'I will inspect it.')),
+			row(3, new BashToolUseMessage(TS, 'bash-1', 'pwd')),
+			row(4, new ToolResultMessage(TS, 'bash-1', { content: '/tmp' }, false)),
+			row(5, new AssistantMessage(TS, 'The first result is ready.')),
+			row(6, new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts')),
+			row(7, new BashToolUseMessage(TS, 'bash-2', 'bun test')),
+			row(8, new AssistantMessage(TS, 'Finished.')),
+		];
+		const expectedIds: string[][] = [
+			['generation-1:1'],
+			['generation-1:1', 'generation-1:2'],
+			['generation-1:1', 'generation-1:2', 'generation-1:3'],
+			['generation-1:1', 'generation-1:2', 'generation-1:3', 'generation-1:4'],
+			['generation-1:1', 'generation-1:2', 'generation-1:3', 'generation-1:4', 'generation-1:5'],
+			[
+				'generation-1:1',
+				'generation-1:2',
+				'generation-1:3',
+				'generation-1:4',
+				'generation-1:5',
+				'generation-1:6',
+			],
+			[
+				'generation-1:1',
+				'generation-1:2',
+				'generation-1:3',
+				'generation-1:4',
+				'generation-1:5',
+				'generation-1:6',
+				'generation-1:7',
+			],
+			[
+				'generation-1:1',
+				'generation-1:2',
+				'generation-1:3',
+				'generation-1:4',
+				'generation-1:5',
+				'generation-1:6',
+				'generation-1:7',
+				'generation-1:8',
+			],
+		];
 
-		const group = controller.reconcile('chat-1:generation-1', [bash('a'), bash('b')]);
-		expect(group.items[0]?.virtualKey).toBe(key);
-		expect(group.items[0]?.rowIds).toEqual(['a', 'b']);
-
-		const trimmed = controller.reconcile('chat-1:generation-1', [bash('b')]);
-		expect(trimmed.items[0]?.virtualKey).toBe(key);
-		expect(trimmed.items[0]?.id).toBe('b');
+		for (let count = 1; count <= source.length; count += 1) {
+			const reconciliation = controller.reconcileDetailed(
+				'chat-1:generation-1',
+				source.slice(0, count),
+			);
+			expect(reconciliation.model.items.map((item) => item.id)).toEqual(expectedIds[count - 1]);
+			expect(new Set(reconciliation.model.items.map((item) => item.id)).size).toBe(
+				reconciliation.model.items.length,
+			);
+		}
 	});
 
-	it('gives a split run key to the fragment with the greatest overlap', () => {
+	it('reports only individual tool and message rows as incremental appends', () => {
 		const controller = new ConversationFeedRenderModelController();
-		const initial = controller.reconcile('chat-1:generation-1', [
-			bash('a'),
-			bash('b'),
-			bash('c'),
-			bash('d'),
-		]);
-		const key = initial.items[0]?.virtualKey;
+		const user = row(1, new UserMessage(TS, 'start'));
+		const bash = row(2, new BashToolUseMessage(TS, 'bash-1', 'pwd'));
+		const result = row(3, new ToolResultMessage(TS, 'bash-1', { content: '/tmp' }, false));
+		const assistant = row(4, new AssistantMessage(TS, 'done'));
 
-		const split = controller.reconcile('chat-1:generation-1', [
-			bash('a'),
-			separator('separator'),
-			bash('b'),
-			bash('c'),
-			bash('d'),
-		]);
-		const fragments = split.items.filter((item) => item.virtualKey === key);
-
-		expect(fragments).toHaveLength(1);
-		expect(fragments[0]?.rowIds).toEqual(['b', 'c', 'd']);
+		expect(controller.reconcileDetailed('surface', [user]).change.kind).toBe('rebuilt');
+		expect(controller.reconcileDetailed('surface', [user, bash]).change).toMatchObject({
+			kind: 'tail-appended',
+			appendedItems: [{ id: bash.id }],
+		});
+		expect(controller.reconcileDetailed('surface', [user, bash, result]).change).toMatchObject({
+			kind: 'tail-appended',
+			appendedItems: [{ id: result.id }],
+		});
+		expect(
+			controller.reconcileDetailed('surface', [user, bash, result, assistant]).change,
+		).toMatchObject({ kind: 'tail-appended', appendedItems: [{ id: assistant.id }] });
 	});
 
-	it('preserves runs independently across prepend and append changes', () => {
+	it('rebuilds an interior insertion without changing surviving row identity', () => {
 		const controller = new ConversationFeedRenderModelController();
-		const initial = controller.reconcile('chat-1:generation-1', [read('b'), read('c')]);
-		const key = initial.items[0]?.virtualKey;
+		const first = row(1, new AssistantMessage(TS, 'first'));
+		const last = row(3, new AssistantMessage(TS, 'last'));
+		controller.reconcile('surface', [first, last]);
 
-		const expanded = controller.reconcile('chat-1:generation-1', [
-			read('a'),
-			read('b'),
-			read('c'),
-			read('d'),
+		const inserted = row(2, new BashToolUseMessage(TS, 'bash-1', 'pwd'));
+		const reconciliation = controller.reconcileDetailed('surface', [first, inserted, last]);
+
+		expect(reconciliation.change.kind).toBe('rebuilt');
+		expect(reconciliation.model.items.map((item) => item.id)).toEqual([
+			first.id,
+			inserted.id,
+			last.id,
 		]);
-
-		expect(expanded.items[0]?.virtualKey).toBe(key);
-		expect(expanded.items[0]?.rowIds).toEqual(['a', 'b', 'c', 'd']);
 	});
 
-	it('resets run identity when the active transcript surface changes', () => {
+	it('keeps distinct identical assistant messages because their row ids differ', () => {
 		const controller = new ConversationFeedRenderModelController();
-		controller.reconcile('chat-1:generation-1', [bash('a'), bash('b')]);
-		const beforeSwitch = controller.reconcile('chat-1:generation-1', [bash('c'), bash('d')]);
-		const afterSwitch = controller.reconcile('chat-2:generation-1', [bash('c'), bash('d')]);
+		const messages = [
+			row(10, new AssistantMessage(TS, 'Standing by.')),
+			row(11, new AssistantMessage(TS, 'Standing by.')),
+		];
 
-		expect(beforeSwitch.items[0]?.virtualKey).not.toBe(afterSwitch.items[0]?.virtualKey);
-		expect(afterSwitch.items[0]?.rowIds).toEqual(['c', 'd']);
-		// The final virtual feed key adds the surface namespace; the reconciler
-		// intentionally keeps run identity local to one resettable surface.
+		const model = controller.reconcile('surface', messages);
+
+		expect(model.items.map((item) => item.id)).toEqual(['generation-1:10', 'generation-1:11']);
+		expect(model.items).toHaveLength(2);
+	});
+
+	it('reuses an unchanged model and rebuilds on a surface change', () => {
+		const controller = new ConversationFeedRenderModelController();
+		const messages = [row(1, new AssistantMessage(TS, 'one'))];
+		const first = controller.reconcileDetailed('chat-1:generation-1', messages);
+		const unchanged = controller.reconcileDetailed('chat-1:generation-1', messages);
+		const switched = controller.reconcileDetailed('chat-2:generation-1', messages);
+
+		expect(unchanged.change.kind).toBe('unchanged');
+		expect(unchanged.model).toBe(first.model);
+		expect(switched.change.kind).toBe('rebuilt');
+		expect(switched.model.items.map((item) => item.id)).toEqual(['generation-1:1']);
 	});
 });

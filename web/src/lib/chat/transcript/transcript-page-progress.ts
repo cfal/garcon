@@ -1,25 +1,27 @@
-import type { ChatViewMessage } from '$shared/chat-view';
+import {
+	isContiguousChatViewWindow,
+	isRequestedChatViewPage,
+	type ChatViewMessage,
+	type ChatViewPageRequest,
+	type ChatViewWindow,
+} from '$shared/chat-view';
 
-export const ACTIVE_TRANSCRIPT_RETENTION_LIMIT = 200;
-
-export function retainTranscriptEntries(
-	entries: ChatViewMessage[],
-	edge: 'earlier' | 'later',
-): ChatViewMessage[] {
-	if (entries.length <= ACTIVE_TRANSCRIPT_RETENTION_LIMIT) return entries;
-	return edge === 'earlier'
-		? entries.slice(0, ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
-		: entries.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+export function validateRequestedTranscriptPage(
+	request: ChatViewPageRequest,
+	page: ChatViewWindow & { readonly limit: number },
+): boolean {
+	return isRequestedChatViewPage(request, page);
 }
 
-export function collectEarlierTranscriptMessages(
-	currentOldestSeq: number,
+export function validateLatestTranscriptWindow(
+	pageOldestSeq: number,
+	lastSeq: number,
+	hasMore: boolean,
 	pageMessages: readonly ChatViewMessage[],
-): ChatViewMessage[] {
-	const pageSeqs = new Set<number>();
-	return pageMessages.filter((message) => {
-		if (message.seq >= currentOldestSeq || pageSeqs.has(message.seq)) return false;
-		pageSeqs.add(message.seq);
-		return true;
-	});
+): boolean {
+	if (!isContiguousChatViewWindow({ pageOldestSeq, lastSeq, hasMore, messages: pageMessages })) {
+		return false;
+	}
+	if (pageMessages.length === 0) return lastSeq === 0;
+	return pageMessages.at(-1)?.seq === lastSeq;
 }

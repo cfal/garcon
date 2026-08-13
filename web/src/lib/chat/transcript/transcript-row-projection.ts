@@ -21,17 +21,6 @@ export function normalizePendingInputs(inputs: readonly unknown[]): PendingUserI
 	);
 }
 
-export function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMessage[] {
-	const seenClientRequestIds = new Set<string>();
-	return entries.filter((entry) => {
-		const message = entry.message;
-		if (!(message instanceof UserMessage) || !message.metadata?.clientRequestId) return true;
-		if (seenClientRequestIds.has(message.metadata.clientRequestId)) return false;
-		seenClientRequestIds.add(message.metadata.clientRequestId);
-		return true;
-	});
-}
-
 export function applyPendingDeliveryStatuses(
 	entries: ChatViewMessage[],
 	pendingInputs: PendingUserInput[],

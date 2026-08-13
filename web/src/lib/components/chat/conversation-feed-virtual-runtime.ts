@@ -9,6 +9,7 @@ import {
 import {
 	attainableConversationTargetOffset,
 	CHAT_GEOMETRY_END_THRESHOLD_PX,
+	classifyMeasuredConversationViewportFill,
 	isConversationVirtualViewportCovered,
 	isConversationTargetLayoutReady,
 	resolveConversationViewportRect,
@@ -29,16 +30,78 @@ export interface ConversationVirtualAnchor {
 	fallbackKeys: readonly string[];
 }
 
-// Keeps prepend provenance with the keyed restore instead of the latest geometry snapshot. The clamped
-// latch lasts only for the bounded eight-iteration anchor restore, so coasting survives its offset writes.
-// Source-aware intent can later let a discrete track jump override the latch without weakening coasting.
+export class ConversationProgrammaticScrollOwnership {
+	#active = false;
+	#epoch = 0;
+
+	get ownsPosition(): boolean {
+		return this.#active;
+	}
+
+	begin(): number {
+		this.#active = true;
+		return ++this.#epoch;
+	}
+
+	cancel(): void {
+		this.#active = false;
+		this.#epoch += 1;
+	}
+
+	isCurrent(epoch: number): boolean {
+		return epoch === this.#epoch;
+	}
+
+	finish(epoch: number): void {
+		if (!this.isCurrent(epoch)) return;
+		this.#active = false;
+	}
+}
+
+// Keeps clamped prepend provenance with the bounded keyed restore so coasting and
+// edge-origin scrollbar drags survive its programmatic offset writes.
 export class ConversationEarlierPrependAnchorOwnership {
 	#anchor: ConversationVirtualAnchor | null = null;
 	#clamped = false;
+	#publicationBeganClamped = false;
+	#blocksScrollbarDrag = false;
+	// Prepend measurements can move TanStack's range repeatedly before settlement. Once mounted,
+	// a row stays sticky for that restore so Svelte never destroys and recreates a visible node.
+	#retainedMountedRowKeys: Set<string> | null = null;
+
+	get retainedMountedRowKeys(): ReadonlySet<string> | null {
+		return this.#retainedMountedRowKeys;
+	}
 
 	clear(): void {
 		this.#anchor = null;
 		this.#clamped = false;
+		this.#publicationBeganClamped = false;
+		this.#blocksScrollbarDrag = false;
+		this.#retainedMountedRowKeys = null;
+	}
+
+	beginMountedRowRetention(
+		keys: Iterable<string>,
+		beganClamped = false,
+		scrollbarDragActive = false,
+	): void {
+		this.#retainedMountedRowKeys = new Set(keys);
+		this.#publicationBeganClamped = beganClamped;
+		this.#blocksScrollbarDrag ||= beganClamped && scrollbarDragActive;
+	}
+
+	retainMountedRow(key: string): void {
+		this.#retainedMountedRowKeys?.add(key);
+	}
+
+	retainedIndexes(base: readonly number[], indexByKey: ReadonlyMap<string, number>): number[] {
+		const indexes = [...base];
+		for (const key of this.#retainedMountedRowKeys ?? []) {
+			const index = indexByKey.get(key);
+			if (index !== undefined) indexes.push(index);
+		}
+		return indexes;
 	}
 
 	carry(anchor: ConversationVirtualAnchor | null, isEarlierPublication: boolean): void {
@@ -47,9 +110,9 @@ export class ConversationEarlierPrependAnchorOwnership {
 			return;
 		}
 		if (isEarlierPublication) {
-			if (this.#anchor !== anchor) {
-				this.#clamped = false;
-			}
+			if (this.#anchor !== anchor) this.#clamped = this.#publicationBeganClamped;
+			else if (this.#publicationBeganClamped) this.#clamped = true;
+			this.#publicationBeganClamped = false;
 			this.#anchor = anchor;
 		} else if (this.#anchor !== anchor) {
 			this.clear();
@@ -60,8 +123,16 @@ export class ConversationEarlierPrependAnchorOwnership {
 		direction: 'earlier' | 'later' | null,
 		anchor: ConversationVirtualAnchor | null,
 		scrollTop: number,
+		source: 'viewport' | 'scrollbar-drag' = 'viewport',
 	): boolean {
-		if (!anchor || this.#anchor !== anchor) return false;
+		if (source === 'scrollbar-drag' && this.#blocksScrollbarDrag) {
+			if (direction !== 'later') return true;
+			this.#blocksScrollbarDrag = false;
+		}
+		if (!anchor) {
+			return this.#publicationBeganClamped && direction !== 'later';
+		}
+		if (this.#anchor !== anchor) return false;
 		// A directionless press is stateless; its movement is classified before scrolling.
 		if (direction === null) return true;
 		if (direction !== 'earlier') return false;
@@ -72,8 +143,20 @@ export class ConversationEarlierPrependAnchorOwnership {
 		return true;
 	}
 
+	blocksViewportMutation(source: 'viewport' | 'scrollbar-drag'): boolean {
+		return source === 'scrollbar-drag' && this.#blocksScrollbarDrag;
+	}
+
+	finishScrollbarDrag(): void {
+		this.#blocksScrollbarDrag = false;
+	}
+
 	complete(anchor: ConversationVirtualAnchor): void {
-		if (this.#anchor === anchor) this.clear();
+		if (this.#anchor !== anchor) return;
+		this.#anchor = null;
+		this.#clamped = false;
+		this.#publicationBeganClamped = false;
+		this.#retainedMountedRowKeys = null;
 	}
 }
 
@@ -470,6 +553,50 @@ export async function settleConversationScroll(input: {
 		}
 		previousOffset = offset;
 	}
+}
+
+export async function measureConversationViewportFill(input: {
+	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
+	keys: readonly string[];
+	renderedKeys: ReadonlySet<string>;
+	estimates: readonly number[];
+	leadingSize: number;
+	viewport(): HTMLDivElement | null;
+	isCurrent(): boolean;
+	restoreEnd: boolean;
+	readingAnchor: ConversationVirtualAnchor | null;
+	restoreReadingAnchor(anchor: ConversationVirtualAnchor): Promise<boolean>;
+	scrollToEnd(): void;
+}): Promise<'overflow' | 'underfilled' | 'unsettled'> {
+	for (let attempt = 0; attempt < MAX_EARLY_END_RESTORE_ITERATIONS; attempt += 1) {
+		await nextConversationLayoutFrame();
+		if (!input.isCurrent()) return 'unsettled';
+		const viewport = input.viewport();
+		if (!viewport) return 'unsettled';
+		const classification = classifyMeasuredConversationViewportFill({
+			keys: input.keys,
+			measuredSizes: input.instance.itemSizeCache,
+			renderedKeys: input.renderedKeys,
+			estimates: input.estimates,
+			leadingSize: input.leadingSize,
+			viewportHeight: viewport.clientHeight,
+		});
+		if (classification) {
+			if (input.restoreEnd) input.scrollToEnd();
+			else if (input.readingAnchor && !(await input.restoreReadingAnchor(input.readingAnchor))) {
+				return 'unsettled';
+			}
+			return classification;
+		}
+		const nextUnmeasuredIndex = input.keys.findIndex(
+			(key) => !input.instance.itemSizeCache.has(key) && !input.renderedKeys.has(key),
+		);
+		if (nextUnmeasuredIndex < 0) return 'unsettled';
+		input.instance.scrollToIndex(nextUnmeasuredIndex, { align: 'start', behavior: 'auto' });
+	}
+	if (input.restoreEnd && input.isCurrent()) input.scrollToEnd();
+	else if (input.readingAnchor) await input.restoreReadingAnchor(input.readingAnchor);
+	return 'unsettled';
 }
 
 export async function performConversationOwnedScroll(input: {

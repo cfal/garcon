@@ -647,7 +647,8 @@
 			<ConversationFeed
 				bind:scrollContainer
 				onscroll={() => scroll.handleScroll()}
-				onUserScrollIntent={(direction) => scroll.noteUserScrollIntent(direction)}
+				onUserScrollIntent={(direction, source) =>
+					scroll.noteUserScrollIntent(direction, source)}
 				onLoadEarlier={() => void scroll.requestPage('earlier', 'button')}
 				onLoadLater={() => void scroll.requestPage('later', 'button')}
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}

@@ -4,6 +4,7 @@ import {
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
 	ExecToolUseMessage,
+	GlobToolUseMessage,
 	PermissionCancelledMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
@@ -13,8 +14,6 @@ import {
 	type ChatMessage,
 } from '$shared/chat-types';
 import {
-	askUserQuestionPermissionId,
-	askUserQuestionTerminalFromResult,
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
 	filterHiddenToolRenderItems,
@@ -29,6 +28,7 @@ function rows(messages: ChatMessage[]) {
 	return messages.map((message, index) => ({
 		kind: 'message' as const,
 		id: `row-${index}`,
+		seq: index + 1,
 		message,
 	}));
 }
@@ -71,30 +71,52 @@ function pendingPermission(
 }
 
 describe('buildConversationFeedRenderItems', () => {
-	it('filters single and grouped command calls when command execution is hidden', () => {
-		const items = buildConversationFeedRenderItems(
-			rows([
-				new UserMessage(TS, 'start'),
-				new BashToolUseMessage(TS, 'bash-1', 'pwd'),
-				new AssistantMessage(TS, 'between'),
-				new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
-				new BashToolUseMessage(TS, 'bash-3', 'bun run test'),
-			]),
-		);
+	it('keeps every renderable transcript message in exact source order', () => {
+		const messages = [
+			new UserMessage(TS, 'start'),
+			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
+			new ToolResultMessage(TS, 'bash-1', { content: '/tmp' }, false),
+			new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
+			new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
+			new ReadToolUseMessage(TS, 'read-2', '/tmp/b.ts'),
+			new AssistantMessage(TS, 'done'),
+		];
 
-		expect(filterHiddenToolRenderItems(items, ['bash-tool-use']).map((item) => item.kind)).toEqual([
-			'message',
-			'message',
+		const model = buildConversationFeedRenderModel(rows(messages));
+
+		expect(model.items.map((item) => item.id)).toEqual([
+			'row-0',
+			'row-1',
+			'row-2',
+			'row-3',
+			'row-4',
+			'row-5',
+			'row-6',
 		]);
-		expect(filterHiddenToolRenderItems(items, [])).toBe(items);
+		expect(
+			model.items.flatMap((item) => (item.kind === 'message' ? [item.message.type] : [])),
+		).toEqual([
+			'user-message',
+			'bash-tool-use',
+			'tool-result',
+			'bash-tool-use',
+			'read-tool-use',
+			'read-tool-use',
+			'assistant-message',
+		]);
+		expect(model.items.map((item) => item.index)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+		expect(model.toolResultByUseRowId.get('row-1')).toBe(messages[2]);
+		expect(model.toolResultRowIdByUseRowId.get('row-1')).toBe('row-2');
+		expect(model.toolUseByResultRowId.get('row-2')).toBe(messages[1]);
 	});
 
-	it('filters Bash and Exec tool calls independently', () => {
+	it('filters each hidden tool row without changing the remaining order', () => {
 		const items = buildConversationFeedRenderItems(
 			rows([
 				new UserMessage(TS, 'start'),
 				new BashToolUseMessage(TS, 'bash-1', 'pwd'),
 				new ExecToolUseMessage(TS, 'exec-1', 'text("ok")', 'javascript'),
+				new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
 				new AssistantMessage(TS, 'done'),
 			]),
 		);
@@ -112,163 +134,48 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(visibleTypes(['exec-tool-use'])).toEqual([
 			'user-message',
 			'bash-tool-use',
+			'bash-tool-use',
 			'assistant-message',
 		]);
+		expect(filterHiddenToolRenderItems(items, [])).toBe(items);
 	});
 
-	it('filters grouped file reads when file reads are hidden', () => {
+	it('uses transcript row identity even when providers repeat tool ids', () => {
 		const items = buildConversationFeedRenderItems(
 			rows([
-				new UserMessage(TS, 'start'),
-				new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
-				new ReadToolUseMessage(TS, 'read-2', '/tmp/b.ts'),
+				new BashToolUseMessage(TS, 'duplicate-tool', 'pwd'),
+				new BashToolUseMessage(TS, 'duplicate-tool', 'ls'),
+				new ReadToolUseMessage(TS, 'duplicate-tool', '/tmp/a.ts'),
+				new ReadToolUseMessage(TS, 'duplicate-tool', '/tmp/b.ts'),
+			]),
+		);
+
+		expect(items.map((item) => item.id)).toEqual(['row-0', 'row-1', 'row-2', 'row-3']);
+		expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
+	});
+
+	it('keeps paired results and permission terminals as standalone rows', () => {
+		const tool = new ExecToolUseMessage(TS, 'exec-1', 'text("ok")', 'javascript');
+		const result = new ToolResultMessage(TS, 'exec-1', { raw: 'ok' }, false);
+		const model = buildConversationFeedRenderModel(
+			rows([
+				tool,
+				result,
+				new PermissionResolvedMessage(TS, 'perm-1', true),
+				new PermissionCancelledMessage(TS, 'perm-2', 'cancelled'),
 				new AssistantMessage(TS, 'done'),
 			]),
 		);
 
-		expect(filterHiddenToolRenderItems(items, ['read-tool-use']).map((item) => item.kind)).toEqual([
-			'message',
-			'message',
+		expect(model.items.map((item) => item.id)).toEqual([
+			'row-0',
+			'row-1',
+			'row-2',
+			'row-3',
+			'row-4',
 		]);
-	});
-
-	it('groups adjacent bash tool uses into one render item', () => {
-		const messages = [
-			new UserMessage(TS, 'start'),
-			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
-			new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
-			new AssistantMessage(TS, 'done'),
-		];
-
-		const items = buildConversationFeedRenderItems(rows(messages));
-
-		expect(items).toHaveLength(3);
-		expect(items[1]).toMatchObject({ kind: 'bash-group' });
-		if (items[1].kind !== 'bash-group') throw new Error('expected bash group');
-		expect(items[1].rows.map((row) => row.message.command)).toEqual(['pwd', 'rg foo']);
-		expect(items[2]).toMatchObject({ kind: 'message', prevMessage: messages[2] });
-	});
-
-	it('keeps a single bash tool use as a normal message', () => {
-		const messages = [
-			new UserMessage(TS, 'start'),
-			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
-			new ReadToolUseMessage(TS, 'read-1', '/tmp/file.ts'),
-		];
-
-		const items = buildConversationFeedRenderItems(rows(messages));
-
-		expect(items).toHaveLength(3);
-		expect(items[1]).toMatchObject({ kind: 'message', message: messages[1] });
-	});
-
-	it('groups adjacent read tool uses into one render item', () => {
-		const messages = [
-			new UserMessage(TS, 'start'),
-			new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
-			new ReadToolUseMessage(TS, 'read-2', '/tmp/b.ts'),
-			new AssistantMessage(TS, 'done'),
-		];
-
-		const items = buildConversationFeedRenderItems(rows(messages));
-
-		expect(items).toHaveLength(3);
-		expect(items[1]).toMatchObject({ kind: 'read-group' });
-		if (items[1].kind !== 'read-group') throw new Error('expected read group');
-		expect(items[1].rows.map((row) => row.message.filePath)).toEqual(['/tmp/a.ts', '/tmp/b.ts']);
-		expect(items[2]).toMatchObject({ kind: 'message', prevMessage: messages[2] });
-	});
-
-	it('keeps a single read tool use as a normal message', () => {
-		const messages = [
-			new UserMessage(TS, 'start'),
-			new ReadToolUseMessage(TS, 'read-1', '/tmp/file.ts'),
-			new AssistantMessage(TS, 'done'),
-		];
-
-		const items = buildConversationFeedRenderItems(rows(messages));
-
-		expect(items).toHaveLength(3);
-		expect(items[1]).toMatchObject({ kind: 'message', message: messages[1] });
-	});
-
-	it('groups bash tool uses across hidden tool results', () => {
-		const messages = [
-			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
-			new ToolResultMessage(TS, 'bash-1', { content: 'ok' }, false),
-			new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
-			new ToolResultMessage(TS, 'bash-2', { content: 'ok' }, false),
-		];
-
-		const items = buildConversationFeedRenderItems(rows(messages));
-
-		expect(items).toHaveLength(1);
-		expect(items[0]).toMatchObject({ kind: 'bash-group' });
-		if (items[0].kind !== 'bash-group') throw new Error('expected bash group');
-		expect(items[0].rows.map((row) => row.message.toolId)).toEqual(['bash-1', 'bash-2']);
-	});
-
-	it('groups read tool uses across hidden tool results', () => {
-		const messages = [
-			new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
-			new ToolResultMessage(TS, 'read-1', { content: 'a' }, false),
-			new ReadToolUseMessage(TS, 'read-2', ''),
-			new ToolResultMessage(TS, 'read-2', { content: 'b' }, false),
-		];
-
-		const model = buildConversationFeedRenderModel(rows(messages));
-
-		expect(model.items).toHaveLength(1);
-		expect(model.items[0]).toMatchObject({ kind: 'read-group' });
-		if (model.items[0].kind !== 'read-group') throw new Error('expected read group');
-		expect(model.items[0].rows.map((row) => row.message.toolId)).toEqual(['read-1', 'read-2']);
-		expect(model.toolResultIndex.get('read-1')?.content).toEqual({ content: 'a' });
-		expect(model.toolResultIndex.get('read-2')?.content).toEqual({ content: 'b' });
-	});
-
-	it('keeps the group id stable as more adjacent bash tool uses arrive', () => {
-		const firstBatch = [
-			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
-			new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
-		];
-		const secondBatch = [...firstBatch, new BashToolUseMessage(TS, 'bash-3', 'bun run test')];
-
-		const firstItems = buildConversationFeedRenderItems(rows(firstBatch));
-		const secondItems = buildConversationFeedRenderItems(rows(secondBatch));
-
-		expect(firstItems[0]).toMatchObject({ kind: 'bash-group' });
-		expect(secondItems[0]).toMatchObject({ kind: 'bash-group' });
-		expect(firstItems[0].id).toBe(secondItems[0].id);
-	});
-
-	it('keeps the read group id stable as more adjacent read tool uses arrive', () => {
-		const firstBatch = [
-			new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
-			new ReadToolUseMessage(TS, 'read-2', ''),
-		];
-		const secondBatch = [...firstBatch, new ReadToolUseMessage(TS, 'read-3', '/tmp/c.ts')];
-
-		const firstItems = buildConversationFeedRenderItems(rows(firstBatch));
-		const secondItems = buildConversationFeedRenderItems(rows(secondBatch));
-
-		expect(firstItems[0]).toMatchObject({ kind: 'read-group' });
-		expect(secondItems[0]).toMatchObject({ kind: 'read-group' });
-		expect(firstItems[0].id).toBe(secondItems[0].id);
-	});
-
-	it('builds render items and terminal lookup indexes in one pass', () => {
-		const messages = [
-			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
-			new ToolResultMessage(TS, 'bash-1', { content: 'ok' }, false),
-			new PermissionResolvedMessage(TS, 'perm-1', true),
-			new PermissionCancelledMessage(TS, 'perm-2', 'cancelled'),
-			new AssistantMessage(TS, 'done'),
-		];
-
-		const model = buildConversationFeedRenderModel(rows(messages));
-
-		expect(model.items.map((item) => item.kind)).toEqual(['message', 'message']);
-		expect(model.toolResultIndex.get('bash-1')?.content).toEqual({ content: 'ok' });
+		expect(model.toolResultByUseRowId.get('row-0')).toBe(result);
+		expect(model.toolUseByResultRowId.get('row-1')).toBe(tool);
 		expect(model.permissionTerminalById.get('perm-1')).toEqual({
 			state: 'resolved',
 			allowed: true,
@@ -279,128 +186,161 @@ describe('buildConversationFeedRenderItems', () => {
 		});
 	});
 
-	it('indexes Exec results without rendering them as standalone rows', () => {
-		const tool = new ExecToolUseMessage(TS, 'exec-1', 'text("ok")', 'javascript');
-		const result = new ToolResultMessage(TS, 'exec-1', { raw: 'ok' }, false);
-		const model = buildConversationFeedRenderModel(rows([tool, result]));
+	it('pairs interleaved results to individual tool rows in source order', () => {
+		const first = new GlobToolUseMessage(TS, 'glob-1', 'src/**/*.ts');
+		const second = new GlobToolUseMessage(TS, 'glob-2', 'test/**/*.ts');
+		const firstResult = new ToolResultMessage(
+			TS,
+			'glob-1',
+			{ filenames: ['src/a.ts'], numFiles: 1 },
+			false,
+		);
+		const secondResult = new ToolResultMessage(
+			TS,
+			'glob-2',
+			{ filenames: ['test/a.ts'], numFiles: 1 },
+			false,
+		);
+		const model = buildConversationFeedRenderModel(
+			rows([first, second, firstResult, secondResult, new AssistantMessage(TS, 'done')]),
+		);
 
-		expect(model.items).toHaveLength(1);
-		expect(model.items[0]).toMatchObject({ kind: 'message', message: tool });
-		expect(model.toolResultIndex.get('exec-1')).toBe(result);
+		expect(model.items.map((item) => item.id)).toEqual([
+			'row-0',
+			'row-1',
+			'row-2',
+			'row-3',
+			'row-4',
+		]);
+		expect(model.toolResultByUseRowId.get('row-0')).toBe(firstResult);
+		expect(model.toolResultByUseRowId.get('row-1')).toBe(secondResult);
+		expect(model.toolResultRowIdByUseRowId.get('row-0')).toBe('row-2');
+		expect(model.toolResultRowIdByUseRowId.get('row-1')).toBe('row-3');
+		expect(model.toolUseByResultRowId.get('row-2')).toBe(first);
+		expect(model.toolUseByResultRowId.get('row-3')).toBe(second);
 	});
 
-	it('keeps local notices as their own render items and breaks assistant grouping', () => {
-		const firstAssistant = new AssistantMessage(TS, 'before');
-		const secondAssistant = new AssistantMessage(TS, 'after');
-		const localNotice = notice('Chat interrupted by user.');
+	it('pairs repeated provider tool ids by exact FIFO occurrence', () => {
+		const first = new BashToolUseMessage(TS, 'reused-tool', 'printf first');
+		const firstResult = new ToolResultMessage(TS, 'reused-tool', { raw: 'first' }, false);
+		const second = new BashToolUseMessage(TS, 'reused-tool', 'printf second');
+		const secondResult = new ToolResultMessage(TS, 'reused-tool', { raw: 'second' }, false);
+		const model = buildConversationFeedRenderModel(
+			rows([first, firstResult, second, secondResult]),
+		);
 
-		const items = buildConversationFeedRenderItems([
-			{ kind: 'message', id: 'assistant-1', message: firstAssistant },
-			localNotice,
-			{ kind: 'message', id: 'assistant-2', message: secondAssistant },
+		expect(model.items.map((item) => item.id)).toEqual(['row-0', 'row-1', 'row-2', 'row-3']);
+		expect(model.toolResultByUseRowId.get('row-0')).toBe(firstResult);
+		expect(model.toolResultByUseRowId.get('row-2')).toBe(secondResult);
+		expect(model.toolResultRowIdByUseRowId.get('row-0')).toBe('row-1');
+		expect(model.toolResultRowIdByUseRowId.get('row-2')).toBe('row-3');
+	});
+
+	it('keeps a suffix result row mounted when its use arrives from an earlier page', () => {
+		const tool = new GlobToolUseMessage(TS, 'glob-1', 'src/**/*.ts');
+		const result = new ToolResultMessage(
+			TS,
+			'glob-1',
+			{ filenames: ['src/a.ts'], numFiles: 1 },
+			false,
+		);
+		const assistant = new AssistantMessage(TS, 'done');
+		const resultRow = { kind: 'message' as const, id: 'row-2', seq: 2, message: result };
+		const assistantRow = { kind: 'message' as const, id: 'row-3', seq: 3, message: assistant };
+
+		const suffix = buildConversationFeedRenderModel([resultRow, assistantRow]);
+		const prepended = buildConversationFeedRenderModel([
+			{ kind: 'message', id: 'row-1', seq: 1, message: tool },
+			resultRow,
+			assistantRow,
 		]);
 
-		expect(items.map((item) => item.kind)).toEqual(['message', 'local-notice', 'message']);
-		expect(items[1]).toMatchObject({
-			kind: 'local-notice',
-			notice: localNotice,
-			prevMessage: firstAssistant,
-		});
-		expect(items[2]).toMatchObject({
-			kind: 'message',
-			message: secondAssistant,
-			prevMessage: null,
-		});
+		expect(suffix.items.map((item) => item.id)).toEqual(['row-2', 'row-3']);
+		expect(prepended.items.map((item) => item.id)).toEqual(['row-1', 'row-2', 'row-3']);
+		expect(prepended.toolResultByUseRowId.get('row-1')).toBe(result);
+		expect(prepended.toolUseByResultRowId.get('row-2')).toBe(tool);
 	});
 
-	it('derives unique render keys for bash groups with duplicate starting tool IDs', () => {
-		const messages = [
-			new BashToolUseMessage(TS, 'dup-bash', 'pwd'),
-			new BashToolUseMessage(TS, 'bash-2', 'ls'),
-			new AssistantMessage(TS, 'separator'),
-			new BashToolUseMessage(TS, 'dup-bash', 'git status'),
-			new BashToolUseMessage(TS, 'bash-4', 'bun test'),
-		];
+	it('keeps local notices as individual rows', () => {
+		const localNotice = notice('Chat interrupted by user.');
+		const items = buildConversationFeedRenderItems([
+			{ kind: 'message', id: 'assistant-1', message: new AssistantMessage(TS, 'before') },
+			localNotice,
+			{ kind: 'message', id: 'assistant-2', message: new AssistantMessage(TS, 'after') },
+		]);
 
-		const items = buildConversationFeedRenderItems(rows(messages));
-		const keys = items.map((item) => item.id);
-
-		expect(items.filter((item) => item.kind === 'bash-group')).toHaveLength(2);
-		expect(new Set(keys).size).toBe(keys.length);
+		expect(items.map((item) => [item.kind, item.id])).toEqual([
+			['message', 'assistant-1'],
+			['local-notice', localNotice.id],
+			['message', 'assistant-2'],
+		]);
 	});
 
-	it('derives unique render keys for read groups with duplicate starting tool IDs', () => {
-		const messages = [
-			new ReadToolUseMessage(TS, 'dup-read', '/tmp/a.ts'),
-			new ReadToolUseMessage(TS, 'read-2', '/tmp/b.ts'),
-			new AssistantMessage(TS, 'separator'),
-			new ReadToolUseMessage(TS, 'dup-read', '/tmp/c.ts'),
-			new ReadToolUseMessage(TS, 'read-4', '/tmp/d.ts'),
-		];
-
-		const items = buildConversationFeedRenderItems(rows(messages));
-		const keys = items.map((item) => item.id);
-
-		expect(items.filter((item) => item.kind === 'read-group')).toHaveLength(2);
-		expect(new Set(keys).size).toBe(keys.length);
-	});
-
-	it('reconstructs answered AskUserQuestion terminal selections from toolUseResult metadata', () => {
-		const terminal = askUserQuestionTerminalFromResult(
-			questionTool('tool-question'),
-			new ToolResultMessage(
-				TS,
-				'tool-question',
-				{ toolUseResult: { answers: { 'Which mode?': 'Careful' } } },
-				false,
-			),
-		);
-
-		expect(terminal).toEqual({
-			state: 'resolved',
-			allowed: true,
-			selectedQuestionOptions: { 'Which mode?': ['Careful'] },
-		});
-	});
-
-	it('reconstructs skipped AskUserQuestion terminal state from empty answers', () => {
-		const terminal = askUserQuestionTerminalFromResult(
-			questionTool('tool-question'),
-			new ToolResultMessage(
-				TS,
-				'tool-question',
-				{
-					raw: 'The user did not answer the questions.',
-					toolUseResult: { answers: {} },
-				},
-				false,
-			),
-		);
-
-		expect(terminal).toEqual({
-			state: 'resolved',
-			allowed: false,
-			reason: 'The user did not answer the questions.',
-		});
-	});
-
-	it('skips standalone AskUserQuestion tools when an explicit permission request row exists', () => {
+	it('keeps an AskUserQuestion tool and its permission wrapper as separate rows', () => {
 		const standalone = questionTool('tool-question');
 		const explicit = new PermissionRequestMessage(
 			TS,
-			askUserQuestionPermissionId('tool-question'),
+			'ask-user-question-tool-question',
 			questionTool('tool-question'),
 		);
 
 		const model = buildConversationFeedRenderModel(rows([standalone, explicit]));
 
-		expect(model.items).toHaveLength(1);
-		expect(model.items[0]).toMatchObject({ kind: 'message', message: explicit });
+		expect(model.items.map((item) => item.id)).toEqual(['row-0', 'row-1']);
+		expect(model.items[1]).toMatchObject({ kind: 'message', message: explicit });
+	});
+
+	it('keeps repeated AskUserQuestion tool ids as distinct canonical rows', () => {
+		const firstStandalone = questionTool('reused-question');
+		const secondStandalone = questionTool('reused-question');
+		const firstWrapper = new PermissionRequestMessage(
+			TS,
+			'permission-1',
+			questionTool('reused-question'),
+		);
+		const secondWrapper = new PermissionRequestMessage(
+			TS,
+			'permission-2',
+			questionTool('reused-question'),
+		);
+		const laterStandalone = questionTool('reused-question');
+
+		const model = buildConversationFeedRenderModel(
+			rows([
+				firstStandalone,
+				secondStandalone,
+				firstWrapper,
+				secondWrapper,
+				laterStandalone,
+			]),
+		);
+
+		expect(model.items.map((item) => item.id)).toEqual([
+			'row-0',
+			'row-1',
+			'row-2',
+			'row-3',
+			'row-4',
+		]);
+	});
+
+	it('keeps a permission wrapper that precedes repeated standalone tools in source order', () => {
+		const wrapper = new PermissionRequestMessage(
+			TS,
+			'permission-1',
+			questionTool('reused-question'),
+		);
+
+		const model = buildConversationFeedRenderModel(
+			rows([wrapper, questionTool('reused-question'), questionTool('reused-question')]),
+		);
+
+		expect(model.items.map((item) => item.id)).toEqual(['row-0', 'row-1', 'row-2']);
 	});
 });
 
 describe('visiblePendingPermissionRequests', () => {
-	it('returns pending requests that do not already have a visible transcript row', () => {
+	it('returns pending requests without a visible transcript row', () => {
 		const pending = [pendingPermission('perm-1'), pendingPermission('perm-2')];
 		const visibleRows = rows([
 			new AssistantMessage(TS, 'before'),
@@ -410,20 +350,12 @@ describe('visiblePendingPermissionRequests', () => {
 		expect(visiblePendingPermissionRequests(visibleRows, pending)).toEqual([pending[1]]);
 	});
 
-	it('omits pending requests that already have visible terminal state', () => {
-		const pending = [pendingPermission('perm-1'), pendingPermission('perm-2')];
-		const visibleRows = rows([
-			new PermissionResolvedMessage(TS, 'perm-1', true),
-			new PermissionCancelledMessage(TS, 'perm-2', 'cancelled'),
-		]);
-
-		expect(visiblePendingPermissionRequests(visibleRows, pending)).toEqual([]);
-	});
-
-	it('deduplicates replayed pending requests by permission id', () => {
+	it('omits terminal and replayed pending permission ids', () => {
 		const first = pendingPermission('perm-1');
 		const replay = pendingPermission('perm-1');
+		const second = pendingPermission('perm-2');
+		const visibleRows = rows([new PermissionResolvedMessage(TS, 'perm-2', true)]);
 
-		expect(visiblePendingPermissionRequests([], [first, replay])).toEqual([first]);
+		expect(visiblePendingPermissionRequests(visibleRows, [first, replay, second])).toEqual([first]);
 	});
 });

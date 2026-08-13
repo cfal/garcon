@@ -92,7 +92,6 @@
 	{rowId}
 	index={0}
 	{forkUpToSeq}
-	prevMessage={null}
 	agentId="claude"
 	{onForkChat}
 	{onGenerateTitleFromMessage}

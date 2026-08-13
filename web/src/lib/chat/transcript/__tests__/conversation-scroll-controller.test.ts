@@ -34,7 +34,6 @@ function scrollState(
 	overrides: Partial<ConversationScrollState> = {},
 ): MutableConversationScrollState {
 	return {
-		compactToRecentMessages: vi.fn(() => false),
 		canAutoFillEarlier: false,
 		canLoadEarlier: false,
 		canLoadLater: false,
@@ -184,6 +183,14 @@ describe('ConversationScrollController', () => {
 		const { controller, viewport } = controllerFixture();
 		controller.noteUserScrollIntent('earlier');
 		expect(viewport.cancelForUserIntent).toHaveBeenCalledWith('earlier');
+	});
+
+	it('returns the viewport suppression decision for a scrollbar drag', () => {
+		const cancelForUserIntent = vi.fn(() => true);
+		const { controller } = controllerFixture({ viewport: fakeViewport({ cancelForUserIntent }) });
+
+		expect(controller.noteUserScrollIntent('earlier', 'scrollbar-drag')).toBe(true);
+		expect(cancelForUserIntent).toHaveBeenCalledWith('earlier', 'scrollbar-drag');
 	});
 
 	it('requires fresh downward intent to repin inside the later threshold', () => {
@@ -1185,16 +1192,14 @@ describe('ConversationScrollController', () => {
 		expect(fixture.viewport.scrollToStart).toHaveBeenCalledOnce();
 	});
 
-	it('navigates to latest and compacts expanded history', async () => {
-		const compactToRecentMessages = vi.fn(() => true);
+	it('navigates to latest without discarding the loaded transcript', async () => {
 		const navigateToWindow = vi.fn(async () => 'loaded' as const);
 		const { controller, viewport } = controllerFixture({
-			state: { hasLaterMessages: true, compactToRecentMessages, navigateToWindow },
+			state: { hasLaterMessages: true, navigateToWindow },
 		});
 		await controller.scrollToLatest();
 		expect(navigateToWindow).toHaveBeenCalledWith('chat-1', 'latest');
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
-		expect(compactToRecentMessages).toHaveBeenCalledOnce();
 	});
 
 	it('finishes committed latest navigation when layout settling is superseded', async () => {
@@ -1264,7 +1269,6 @@ describe('ConversationScrollController', () => {
 		await navigation;
 
 		expect(fixture.viewport.scrollToEnd).not.toHaveBeenCalled();
-		expect(fixture.state.compactToRecentMessages).not.toHaveBeenCalled();
 		expect(fixture.state.invalidatePendingWindowNavigation).toHaveBeenCalledTimes(2);
 	});
 

@@ -20,7 +20,10 @@
 	} from '$lib/context';
 
 	interface Props {
-		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
+		onUserScrollIntent?: (
+			direction: 'earlier' | 'later' | null,
+			source?: 'viewport' | 'scrollbar-drag',
+		) => boolean | void;
 		reserveTopFloatingToolbar?: boolean;
 		isPreparingInitialScroll?: boolean;
 		showAnnouncementTrigger?: boolean;
@@ -125,7 +128,7 @@
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastSeq: 120,
 			pageOldestSeq: 101,
-			hasMore: false,
+			hasMore: true,
 		});
 		chatState.revealAllLoadedMessages();
 	}

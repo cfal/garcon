@@ -3,7 +3,6 @@ import {
 	ActiveTranscriptState,
 	INITIAL_VISIBLE_MESSAGES,
 } from '../active-transcript-state.svelte.js';
-import { ACTIVE_TRANSCRIPT_RETENTION_LIMIT } from '../transcript-page-progress.js';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import {
 	AssistantMessage,
@@ -95,12 +94,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('renders degraded history without retaining sequence or cache state', async () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
-		transcriptCache.replace(
-			'chat-1',
-			'generation-old',
-			[entry(1, assistant('stale'))],
-			1,
-		);
+		transcriptCache.replace('chat-1', 'generation-old', [entry(1, assistant('stale'))], 1);
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
 			historyState: {
 				kind: 'degraded',
@@ -126,8 +120,9 @@ describe('ActiveTranscriptState', () => {
 			expect.objectContaining({ kind: 'local-notice', noticeType: 'error' }),
 		]);
 		expect(transcriptCache.get('chat-1')).toBeNull();
-		expect(chat.applyMessages('chat-1', 'generation-new', [entry(1, assistant('ignored'))]))
-			.toBe('gap-detected');
+		expect(chat.applyMessages('chat-1', 'generation-new', [entry(1, assistant('ignored'))])).toBe(
+			'gap-detected',
+		);
 	});
 
 	it('records applied feed mutations by provenance without counting duplicates', () => {
@@ -190,9 +185,9 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 3 });
 	});
 
-	it('bounds a bottom-pinned live transcript to the recent message window', () => {
+	it('retains the complete live transcript while initially rendering its recent suffix', () => {
 		const chat = new ActiveTranscriptState();
-		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 51;
+		const messageCount = 251;
 
 		chat.applyMessages(
 			'chat-1',
@@ -202,17 +197,17 @@ describe('ActiveTranscriptState', () => {
 			),
 		);
 
-		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		expect(contentOf(chat.chatMessages[0])).toBe('message-52');
+		expect(chat.chatMessages).toHaveLength(messageCount);
+		expect(contentOf(chat.chatMessages[0])).toBe('message-1');
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: messageCount });
-		expect(chat.oldestSeq).toBe(52);
-		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.oldestSeq).toBe(1);
+		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
 	});
 
-	it('bounds oversized generation replacements to the recent message window', () => {
+	it('retains every row in an oversized generation replacement', () => {
 		const chat = new ActiveTranscriptState();
-		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 25;
+		const messageCount = 225;
 		const messages = Array.from({ length: messageCount }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
@@ -223,16 +218,16 @@ describe('ActiveTranscriptState', () => {
 			hasMore: false,
 		});
 
-		expect(chat.entries).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		expect(chat.entries[0]?.seq).toBe(26);
+		expect(chat.entries).toHaveLength(messageCount);
+		expect(chat.entries[0]?.seq).toBe(1);
 		expect(chat.entries.at(-1)?.seq).toBe(messageCount);
-		expect(chat.oldestSeq).toBe(26);
-		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.oldestSeq).toBe(1);
+		expect(chat.hasEarlierMessages).toBe(false);
 	});
 
-	it('bounds oversized snapshot pages to the recent message window', () => {
+	it('retains every row in an oversized snapshot page', () => {
 		const chat = new ActiveTranscriptState();
-		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 25;
+		const messageCount = 225;
 		const messages = Array.from({ length: messageCount }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
@@ -245,20 +240,21 @@ describe('ActiveTranscriptState', () => {
 				epoch,
 			),
 		).toBe('applied');
-		expect(chat.entries).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		expect(chat.entries[0]?.seq).toBe(26);
+		expect(chat.entries).toHaveLength(messageCount);
+		expect(chat.entries[0]?.seq).toBe(1);
 		expect(chat.entries.at(-1)?.seq).toBe(messageCount);
-		expect(chat.oldestSeq).toBe(26);
-		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.oldestSeq).toBe(1);
+		expect(chat.hasEarlierMessages).toBe(false);
 	});
 
-	it('bounds expanded history while retaining the live edge', () => {
+	it('retains expanded history and the live edge in one contiguous window', () => {
 		const chat = new ActiveTranscriptState();
-		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
+		const initialCount = 200;
+		const initial = Array.from({ length: initialCount }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
 		chat.replaceGeneration('chat-1', 'generation-1', initial, {
-			lastSeq: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+			lastSeq: initialCount,
 			pageOldestSeq: 1,
 			hasMore: false,
 		});
@@ -269,53 +265,87 @@ describe('ActiveTranscriptState', () => {
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
-				entry(
-					ACTIVE_TRANSCRIPT_RETENTION_LIMIT + index + 1,
-					assistant(`message-${ACTIVE_TRANSCRIPT_RETENTION_LIMIT + index + 1}`),
-				),
+				entry(initialCount + index + 1, assistant(`message-${initialCount + index + 1}`)),
 			),
 		);
 
-		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		expect(contentOf(chat.chatMessages[0])).toBe('message-51');
+		expect(chat.chatMessages).toHaveLength(initialCount + 50);
+		expect(contentOf(chat.chatMessages[0])).toBe('message-1');
+		expect(contentOf(chat.chatMessages.at(-1)!)).toBe('message-250');
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 50);
-		expect(chat.oldestSeq).toBe(51);
-		expect(chat.hasEarlierMessages).toBe(true);
-		expect(chat.compactToRecentMessages()).toBe(false);
+		expect(chat.oldestSeq).toBe(1);
+		expect(chat.hasEarlierMessages).toBe(false);
 	});
 
-	it('detaches a scrolled-up window when live growth reaches the retention limit', () => {
+	it('keeps a scrolled-up window contiguous while live messages arrive below it', () => {
 		const chat = new ActiveTranscriptState();
-		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
+		const initialCount = 200;
+		const initial = Array.from({ length: initialCount }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
 		chat.replaceGeneration('chat-1', 'generation-1', initial, {
-			lastSeq: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+			lastSeq: initialCount,
 			pageOldestSeq: 1,
 			hasMore: false,
 		});
 		chat.isUserScrolledUp = true;
+		const visibleBefore = chat.visibleRows.map((row) => row.id);
 
 		chat.applyMessages(
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
-				entry(
-					ACTIVE_TRANSCRIPT_RETENTION_LIMIT + index + 1,
-					assistant(`message-${ACTIVE_TRANSCRIPT_RETENTION_LIMIT + index + 1}`),
-				),
+				entry(initialCount + index + 1, assistant(`message-${initialCount + index + 1}`)),
 			),
 		);
 
 		expect(chat.entries.map((message) => message.seq)).toEqual(
-			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) => index + 1),
+			Array.from({ length: initialCount + 50 }, (_, index) => index + 1),
 		);
-		expect(chat.lastSeq).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
+		expect(chat.lastSeq).toBe(initialCount + 50);
 		expect(chat.hasEarlierMessages).toBe(false);
-		expect(chat.hasLaterMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.visibleRows.slice(0, visibleBefore.length).map((row) => row.id)).toEqual(
+			visibleBefore,
+		);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(
+			Array.from({ length: 150 }, (_, index) => `message-${index + 101}`),
+		);
 	});
 
-	it('deduplicates overlapping earlier pages before extending the loaded window', async () => {
+	it.each([
+		{
+			name: 'reversed sequences',
+			messages: [entry(50, assistant('message-50')), entry(49, assistant('message-49'))],
+			pageOldestSeq: 50,
+		},
+		{
+			name: 'duplicate sequences',
+			messages: [entry(49, assistant('message-49')), entry(49, assistant('duplicate-49'))],
+			pageOldestSeq: 49,
+		},
+		{
+			name: 'gapped sequences',
+			messages: [entry(48, assistant('message-48')), entry(50, assistant('message-50'))],
+			pageOldestSeq: 48,
+		},
+		{
+			name: 'overlap with the loaded window',
+			messages: [entry(50, assistant('message-50')), entry(51, assistant('overlap-51'))],
+			pageOldestSeq: 50,
+		},
+		{
+			name: 'inconsistent oldest-sequence metadata',
+			messages: [entry(49, assistant('message-49')), entry(50, assistant('message-50'))],
+			pageOldestSeq: 48,
+		},
+		{
+			name: 'inconsistent continuation metadata',
+			messages: [entry(49, assistant('message-49')), entry(50, assistant('message-50'))],
+			pageOldestSeq: 49,
+			hasMore: false,
+		},
+	])('rejects an earlier page with $name without mutating its window', async (malformed) => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration(
 			'chat-1',
@@ -325,29 +355,38 @@ describe('ActiveTranscriptState', () => {
 			),
 			{ lastSeq: 100, pageOldestSeq: 51, hasMore: true },
 		);
+		const originalEntries = chat.entries;
+		const originalMutationRevision = chat.feedMutationClock.dataRevision;
+		const originalVisibleMessageCount = chat.visibleMessageCount;
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
 			chatId: 'chat-1',
 			limit: 50,
 			...page({
-				messages: [
-					entry(50, assistant('message-50')),
-					entry(50, assistant('duplicate-50')),
-					entry(51, assistant('overlap-51')),
-				],
+				messages: malformed.messages,
 				lastSeq: 100,
-				pageOldestSeq: 50,
-				hasMore: false,
+				pageOldestSeq: malformed.pageOldestSeq,
+				hasMore: 'hasMore' in malformed ? malformed.hasMore : true,
 			}),
 		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
 
-		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
+		expect(chat.entries).toBe(originalEntries);
 		expect(chat.entries.map((message) => message.seq)).toEqual(
-			Array.from({ length: 51 }, (_, index) => index + 50),
+			Array.from({ length: 50 }, (_, index) => index + 51),
 		);
-		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 1);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 100 });
+		expect(chat.oldestSeq).toBe(51);
+		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.visibleMessageCount).toBe(originalVisibleMessageCount);
+		expect(chat.feedMutationClock.dataRevision).toBe(originalMutationRevision);
+		expect(chat.pageStates.earlier).toEqual({
+			status: 'error',
+			error: 'Transcript page did not match the requested window',
+		});
 	});
 
-	it('keeps repeated bidirectional paging within the retained entry window', async () => {
+	it('keeps every loaded row while repeatedly auto-loading earlier pages', async () => {
 		const chat = new ActiveTranscriptState();
 		const total = 400;
 		chat.replaceGeneration(
@@ -379,22 +418,32 @@ describe('ActiveTranscriptState', () => {
 
 		for (let pageIndex = 0; pageIndex < 7; pageIndex += 1) {
 			await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
-			expect(chat.entries.length).toBeLessThanOrEqual(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+			expect(chat.entries.at(-1)?.seq).toBe(total);
 		}
 		expect(chat.entries[0]?.seq).toBe(1);
-		expect(chat.entries.at(-1)?.seq).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		expect(chat.hasEarlierMessages).toBe(false);
-		expect(chat.hasLaterMessages).toBe(true);
-
-		for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
-			await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
-			expect(chat.entries.length).toBeLessThanOrEqual(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		}
-		expect(chat.entries[0]?.seq).toBe(201);
 		expect(chat.entries.at(-1)?.seq).toBe(total);
-		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.entries).toHaveLength(total);
+		expect(chat.entries.map((message) => message.seq)).toEqual(
+			Array.from({ length: total }, (_, index) => index + 1),
+		);
+		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.hasLaterMessages).toBe(false);
-		expect(chat.visibleMessageCount).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(chat.visibleMessageCount).toBe(total);
+		expect(chat.transcriptCache.get('chat-1')?.messages.map((message) => message.seq)).toEqual(
+			Array.from({ length: total }, (_, index) => index + 1),
+		);
+
+		expect(chat.activateChat('chat-2')).toBeNull();
+		expect(chat.activateChat('chat-1')).toEqual({ count: total, stale: false });
+		expect(chat.entries.map((message) => message.seq)).toEqual(
+			Array.from({ length: total }, (_, index) => index + 1),
+		);
+		expect(
+			chat.visibleRows.flatMap((row) => (row.kind === 'message' && row.seq ? [row.seq] : [])),
+		).toEqual(
+			Array.from({ length: total }, (_, index) => index + 1),
+		);
+		expect(chat.visibleMessageCount).toBe(total);
 	});
 
 	it('fails an earlier page that claims more history without advancing', async () => {
@@ -419,7 +468,7 @@ describe('ActiveTranscriptState', () => {
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
 		expect(chat.pageStates.earlier).toMatchObject({
 			status: 'error',
-			error: 'Earlier transcript page did not advance the loaded window',
+			error: 'Transcript page did not match the requested window',
 		});
 		expect(chat.chatMessages).toHaveLength(1);
 	});
@@ -441,7 +490,7 @@ describe('ActiveTranscriptState', () => {
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
 		expect(chat.pageStates.earlier).toMatchObject({
 			status: 'error',
-			error: 'Earlier transcript page did not advance the loaded window',
+			error: 'Transcript page did not match the requested window',
 		});
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
@@ -473,9 +522,11 @@ describe('ActiveTranscriptState', () => {
 			chatId: 'chat-1',
 			limit: 50,
 			...page({
-				messages: [entry(50, assistant('message-50'))],
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 1, assistant(`message-${index + 1}`)),
+				),
 				lastSeq: 100,
-				pageOldestSeq: 50,
+				pageOldestSeq: 1,
 				hasMore: false,
 			}),
 		});
@@ -622,7 +673,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
 	});
 
-	it('renders one user row for repeated durable messages with the same request identity', () => {
+	it('retains repeated durable messages with the same request identity', () => {
 		const chat = new ActiveTranscriptState();
 
 		chat.applyMessages('chat-1', 'generation-1', [
@@ -630,7 +681,7 @@ describe('ActiveTranscriptState', () => {
 			entry(2, user('once', { clientRequestId: 'req-1' })),
 		]);
 
-		expect(chat.displayMessages.map(contentOf)).toEqual(['once']);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['once', 'once']);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
 	});
 
@@ -653,6 +704,209 @@ describe('ActiveTranscriptState', () => {
 			{ kind: 'message', id: 'generation-1:1', seq: 1 },
 			{ kind: 'message', id: 'pending:request-1' },
 		]);
+	});
+
+	it('stages an oversized replacement window without dropping the visible reading range', async () => {
+		const chat = new ActiveTranscriptState();
+		const oldEntries = Array.from({ length: 300 }, (_, index) =>
+			entry(index + 1, assistant(`old-${index + 1}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', oldEntries, {
+			lastSeq: 300,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.visibleMessageCount = 300;
+		chat.revealAllLoadedMessages();
+		const publishedEntries = chat.entries;
+		const initialWindowRevision = chat.windowRevision;
+		let resolveEarlier!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 200,
+				...page({
+					generationId: 'generation-2',
+					messages: Array.from({ length: 200 }, (_, index) =>
+						entry(index + 101, assistant(`new-${index + 101}`)),
+					),
+					lastSeq: 300,
+					pageOldestSeq: 101,
+					hasMore: true,
+				}),
+			})
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveEarlier = resolve;
+				}),
+			);
+
+		const replacement = chat.loadMessages('chat-1');
+		await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
+
+		expect(getChatMessages).toHaveBeenNthCalledWith(1, { chatId: 'chat-1', limit: 200 });
+		expect(getChatMessages).toHaveBeenNthCalledWith(2, {
+			chatId: 'chat-1',
+			limit: 100,
+			beforeSeq: 101,
+		});
+		expect(chat.generationId).toBe('generation-1');
+		expect(chat.entries).toBe(publishedEntries);
+		expect(chat.windowRevision).toBe(initialWindowRevision);
+		expect(chat.visibleRows.find((row) => row.kind === 'message' && row.seq === 91)).toBeTruthy();
+
+		resolveEarlier({
+			chatId: 'chat-1',
+			limit: 100,
+			...page({
+				generationId: 'generation-2',
+				messages: Array.from({ length: 100 }, (_, index) =>
+					entry(index + 1, assistant(`new-${index + 1}`)),
+				),
+				lastSeq: 300,
+				pageOldestSeq: 1,
+				hasMore: false,
+			}),
+		});
+
+		await expect(replacement).resolves.toHaveLength(300);
+		expect(chat.generationId).toBe('generation-2');
+		expect(chat.entries.map((item) => item.seq)).toEqual(
+			Array.from({ length: 300 }, (_, index) => index + 1),
+		);
+		expect(chat.entries[90]).toMatchObject({ seq: 91, message: { content: 'new-91' } });
+		expect(chat.visibleMessageCount).toBe(300);
+		expect(chat.visibleRows.find((row) => row.kind === 'message' && row.seq === 91)).toBeTruthy();
+		expect(chat.windowRevision).toBe(initialWindowRevision + 1);
+	});
+
+	it('retries a moving paged snapshot atomically while preserving buffered live messages', async () => {
+		const chat = new ActiveTranscriptState();
+		const firstLatest = Array.from({ length: 200 }, (_, index) =>
+			entry(index + 101, assistant(`first-${index + 101}`)),
+		);
+		const stableLatest = Array.from({ length: 200 }, (_, index) =>
+			entry(index + 102, assistant(`stable-${index + 102}`)),
+		);
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 200,
+				...page({
+					messages: firstLatest,
+					lastSeq: 300,
+					pageOldestSeq: 101,
+					hasMore: true,
+					pendingUserInputs: [pendingInput({ clientRequestId: 'first-latest' })],
+				}),
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 100,
+				...page({
+					messages: Array.from({ length: 100 }, (_, index) =>
+						entry(index + 1, assistant(`moving-${index + 1}`)),
+					),
+					lastSeq: 301,
+					pageOldestSeq: 1,
+					hasMore: false,
+				}),
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 200,
+				...page({
+					messages: stableLatest,
+					lastSeq: 301,
+					pageOldestSeq: 102,
+					hasMore: true,
+					pendingUserInputs: [
+						pendingInput({ clientRequestId: 'stable-latest', content: 'stable pending' }),
+					],
+				}),
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 100,
+				...page({
+					messages: Array.from({ length: 100 }, (_, index) =>
+						entry(index + 2, assistant(`stable-${index + 2}`)),
+					),
+					lastSeq: 301,
+					pageOldestSeq: 2,
+					hasMore: true,
+					pendingUserInputs: [
+						pendingInput({ clientRequestId: 'stale-earlier', content: 'stale pending' }),
+					],
+				}),
+			});
+
+		const snapshot = chat.loadMessages('chat-1', { minimumLimit: 300 });
+		expect(chat.applyMessages('chat-1', 'generation-1', [entry(302, assistant('live-302'))])).toBe(
+			'applied',
+		);
+
+		await expect(snapshot).resolves.toHaveLength(301);
+		expect(getChatMessages).toHaveBeenCalledTimes(4);
+		expect(chat.entries.map((message) => message.seq)).toEqual(
+			Array.from({ length: 301 }, (_, index) => index + 2),
+		);
+		expect(contentOf(chat.chatMessages.at(-1)!)).toBe('live-302');
+		expect(chat.pendingUserInputs).toMatchObject([
+			{ clientRequestId: 'stable-latest', content: 'stable pending' },
+		]);
+	});
+
+	it('invalidates a pending earlier request before publishing an authoritative replacement', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 50 }, (_, index) => entry(index + 51, assistant(`old-${index + 51}`))),
+			{ lastSeq: 100, pageOldestSeq: 51, hasMore: true },
+		);
+		let resolvePendingEarlier!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages)
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolvePendingEarlier = resolve;
+				}),
+			)
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					generationId: 'generation-2',
+					messages: Array.from({ length: 50 }, (_, index) =>
+						entry(index + 101, assistant(`new-${index + 101}`)),
+					),
+					lastSeq: 150,
+					pageOldestSeq: 101,
+					hasMore: true,
+				}),
+			});
+
+		const pendingEarlier = chat.loadEarlierPage('chat-1');
+		expect(chat.pageStates.earlier.status).toBe('loading');
+		await chat.loadMessages('chat-1');
+		expect(chat.pageStates.earlier.status).toBe('idle');
+		expect(chat.generationId).toBe('generation-2');
+
+		resolvePendingEarlier({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				generationId: 'generation-1',
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 1, assistant(`stale-${index + 1}`)),
+				),
+				lastSeq: 100,
+				pageOldestSeq: 1,
+				hasMore: false,
+			}),
+		});
+		await expect(pendingEarlier).resolves.toBe('invalidated');
+		expect(chat.entries[0]).toMatchObject({ seq: 101, message: { content: 'new-101' } });
 	});
 
 	it('buffers live same-generation messages while a snapshot is loading', () => {
@@ -886,8 +1140,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.loadError).toBeNull();
 	});
 
-	it('surfaces buffered same-generation gaps during snapshot load', () => {
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+	it('does not publish a snapshot candidate with a buffered same-generation gap', () => {
 		const chat = new ActiveTranscriptState();
 		const epoch = chat.beginSnapshotLoad();
 
@@ -903,9 +1156,10 @@ describe('ActiveTranscriptState', () => {
 		);
 
 		expect(result).toBe('gap-detected');
-		expect(chat.chatMessages.map(contentOf)).toEqual(['one', 'two', 'three']);
-		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 3 });
-		warn.mockRestore();
+		expect(chat.chatMessages).toEqual([]);
+		expect(chat.getCursor()).toEqual({ generationId: '', lastSeq: 0 });
+		expect(chat.isLoadingMessages).toBe(true);
+		chat.abortSnapshotLoad(epoch);
 	});
 
 	it('does not install a stale snapshot when buffered messages indicate a new generation', () => {
@@ -1023,6 +1277,26 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.visiblePendingInputs).toHaveLength(0);
 		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
+	});
+
+	it('keeps every canonical sequence when exact request identities repeat', () => {
+		const chat = new ActiveTranscriptState();
+		chat.applyMessages('chat-1', 'generation-1', [
+			entry(1, user('first occurrence', { clientRequestId: 'req-reused' })),
+			entry(2, assistant('between occurrences')),
+			entry(3, user('second occurrence', { clientRequestId: 'req-reused' })),
+		]);
+
+		expect(chat.visibleRows.map((row) => row.id)).toEqual([
+			'generation-1:1',
+			'generation-1:2',
+			'generation-1:3',
+		]);
+		expect(chat.displayMessages.map(contentOf)).toEqual([
+			'first occurrence',
+			'between occurrences',
+			'second occurrence',
+		]);
 	});
 
 	it('renders byte-free attachment placeholders for restored pending inputs', () => {
@@ -1304,8 +1578,8 @@ describe('ActiveTranscriptState', () => {
 			),
 		);
 
-		expect(chat.visibleRows).toHaveLength(150);
-		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-2:77', seq: 77 });
+		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-2:127', seq: 127 });
 	});
 
 	it('retains expanded-window growth across a same-generation snapshot', () => {
@@ -1665,6 +1939,7 @@ describe('ActiveTranscriptState', () => {
 					),
 					lastSeq: 100,
 					pageOldestSeq: 51,
+					hasMore: true,
 				}),
 			});
 
@@ -1722,6 +1997,69 @@ describe('ActiveTranscriptState', () => {
 			'applied',
 		);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 101 });
+	});
+
+	it.each([
+		{
+			name: 'initial window with a gap',
+			target: 'initial' as const,
+			messages: [
+				...Array.from({ length: 25 }, (_, index) =>
+					entry(index + 1, assistant(`first-${index + 1}`)),
+				),
+				...Array.from({ length: 25 }, (_, index) =>
+					entry(index + 27, assistant(`second-${index + 27}`)),
+				),
+			],
+			pageOldestSeq: 1,
+			hasMore: false,
+		},
+		{
+			name: 'latest window with a displaced tail row',
+			target: 'latest' as const,
+			messages: [
+				...Array.from({ length: 49 }, (_, index) =>
+					entry(index + 51, assistant(`latest-${index + 51}`)),
+				),
+				entry(101, assistant('displaced-tail')),
+			],
+			pageOldestSeq: 51,
+			hasMore: true,
+		},
+	])('rejects an invalid $name without publishing it', async (malformed) => {
+		const chat = new ActiveTranscriptState();
+		const latestWindow = Array.from({ length: 50 }, (_, index) =>
+			entry(index + 51, assistant(`existing-${index + 51}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+			lastSeq: 100,
+			pageOldestSeq: 51,
+			hasMore: true,
+		});
+		if (malformed.target === 'latest') {
+			chat.entries = Array.from({ length: 50 }, (_, index) =>
+				entry(index + 1, assistant(`initial-${index + 1}`)),
+			);
+			chat.oldestSeq = 1;
+			chat.hasEarlierMessages = false;
+		}
+		const publishedEntries = chat.entries;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: malformed.messages,
+				lastSeq: 100,
+				pageOldestSeq: malformed.pageOldestSeq,
+				hasMore: malformed.hasMore,
+			}),
+		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await expect(chat.navigateToWindow('chat-1', malformed.target)).resolves.toBe('failed');
+		expect(chat.entries).toBe(publishedEntries);
+		expect(chat.entries).not.toContainEqual(expect.objectContaining({ seq: 101 }));
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 100 });
 	});
 
 	it('keeps the latest window when Bottom supersedes a pending Initial request', async () => {
@@ -2551,17 +2889,19 @@ describe('ActiveTranscriptState', () => {
 			chatId: 'chat-1',
 			limit: 50,
 			...page({
-				messages: [],
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 1, assistant(`fresh-${index + 1}`)),
+				),
 				lastSeq: 100,
-				pageOldestSeq: 0,
+				pageOldestSeq: 1,
 				hasMore: false,
 			}),
 		});
-		await expect(newLoad).resolves.toBe('exhausted');
+		await expect(newLoad).resolves.toBe('loaded');
 		expect(chat.pageStates.earlier.status).toBe('idle');
 	});
 
-	it('keeps loaded earlier selected messages while the shared cache stays windowed', () => {
+	it('keeps the complete loaded window in memory while persistence stays bounded', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 2 });
 		const chat = new ActiveTranscriptState(transcriptCache);
 
@@ -2572,12 +2912,12 @@ describe('ActiveTranscriptState', () => {
 			{ lastSeq: 3, pageOldestSeq: 1, hasMore: false },
 		);
 
-		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([2, 3]);
+		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([1, 2, 3]);
 
 		const result = chat.applyMessages('chat-1', 'generation-1', [entry(4, assistant('fourth'))]);
 
 		expect(result).toBe('applied');
 		expect(chat.chatMessages.map(contentOf)).toEqual(['first', 'second', 'third', 'fourth']);
-		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([3, 4]);
+		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([1, 2, 3, 4]);
 	});
 });

@@ -5,7 +5,7 @@
 	import type { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
 	import type { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
 	import type { ConversationVirtualFeedItem } from './conversation-feed-virtual-items.js';
-	import type { ReconciledConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-render-model.js';
+	import type { ConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { TranscriptPageState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { SessionAgentId } from '$lib/types/app';
@@ -26,7 +26,7 @@
 		item: ConversationVirtualFeedItem;
 		controller: ConversationFeedVirtualController;
 		retention: ConversationFeedRetentionState;
-		renderModel: ReconciledConversationFeedRenderModel;
+		renderModel: ConversationFeedRenderModel;
 		agentId: SessionAgentId | string;
 		showThinking: boolean;
 		textScale: number;
