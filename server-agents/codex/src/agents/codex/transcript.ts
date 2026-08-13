@@ -3,7 +3,7 @@ import {
   type AgentChatReference,
   type AgentLogger,
 } from '@garcon/server-agent-interface';
-import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { CodexAppServerRuntime } from './app-server/runtime.js';
 import { resolveCodexNativePath } from './native-path.js';

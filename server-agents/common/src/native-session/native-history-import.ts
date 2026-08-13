@@ -1,6 +1,6 @@
 import type { AgentNativeHistoryImport } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from './evidence-source.js';
-import { nativeAlias } from './seed-entries.js';
+import { providerMetadata } from './provider-metadata.js';
 
 export function createNativeHistoryImport(
   source: Pick<AgentNativeEvidenceSource, 'load'>,
@@ -9,10 +9,10 @@ export function createNativeHistoryImport(
     async *load(request) {
       const snapshot = await source.load(request);
       yield snapshot.messages.map((message) => {
-        const providerMeta = nativeAlias(message);
+        const metadata = providerMetadata(message);
         return {
           message,
-          ...(providerMeta ? { providerMeta } : {}),
+          ...(metadata ? { providerMeta: metadata } : {}),
         };
       });
     },

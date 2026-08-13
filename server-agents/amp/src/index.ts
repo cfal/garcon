@@ -6,7 +6,7 @@ import {
   type AgentIntegrationV4,
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
@@ -17,7 +17,7 @@ import { createVersionedSettings } from '@garcon/server-agent-common/settings/ve
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/transcript-projection/native-history-import';
+import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createAmpConfig } from './config.js';
 import { getAmpAuthStatus } from './agents/amp/amp-auth.js';
 import { AmpCliRuntime, runSingleQuery } from './agents/amp/amp-cli.js';

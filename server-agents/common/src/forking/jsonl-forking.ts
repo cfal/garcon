@@ -11,7 +11,7 @@ import {
   type AgentStartedSession,
   type NativeMessageSource,
 } from '@garcon/server-agent-interface';
-import type { AgentNativeEvidenceSource } from '../transcript-projection/evidence-source.js';
+import type { AgentNativeEvidenceSource } from '../native-session/evidence-source.js';
 import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
 import {
   forkJsonlTranscript,

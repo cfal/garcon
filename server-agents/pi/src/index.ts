@@ -7,7 +7,7 @@ import {
   type AgentHost,
   type AgentIntegrationV4,
 } from '@garcon/server-agent-interface';
-import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import {
   createArtificialNativePath,
@@ -22,7 +22,7 @@ import { createVersionedSettings } from '@garcon/server-agent-common/settings/ve
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/transcript-projection/native-history-import';
+import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createPiNativeActivityProbe } from './agents/pi/native-activity.js';
 import { createPiConfig } from './config.js';
 import { PiExecution } from './agents/pi/execution.js';

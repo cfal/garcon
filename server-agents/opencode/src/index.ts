@@ -6,7 +6,7 @@ import {
   type AgentHost,
   type AgentIntegrationV4,
 } from '@garcon/server-agent-interface';
-import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/transcript-projection/evidence-source';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import {
   createArtificialNativePath,
@@ -20,7 +20,7 @@ import { createVersionedSettings } from '@garcon/server-agent-common/settings/ve
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/transcript-projection/native-history-import';
+import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createOpenCodeConfig } from './config.js';
 import { OpenCodeExecution } from './agents/opencode/execution.js';
 import { loadOpenCodeChatMessages } from './agents/opencode/history-loader.js';

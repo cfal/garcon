@@ -12,7 +12,7 @@ import {
   type AgentNativeForkOutcome,
   type AgentNativeForkRequest,
 } from '@garcon/server-agent-interface';
-import type { AgentNativeEvidenceSource } from '../../transcript-projection/evidence-source.js';
+import type { AgentNativeEvidenceSource } from '../../native-session/evidence-source.js';
 import { createPathNativeSessionCodec } from '../../native-session/path-native-session.js';
 import type { ForkTranscriptEntryContext } from '../fork-jsonl.js';
 import { createJsonlNativeForking } from '../jsonl-forking.js';
