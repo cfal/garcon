@@ -45,6 +45,7 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		tags: [],
 		...overrides,
@@ -73,6 +74,7 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		...overrides,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};

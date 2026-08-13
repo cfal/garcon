@@ -140,6 +140,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		isProcessing,
 		processingPhase: isProcessing ? 'running' : null,
 		isUnread: true,
+		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
@@ -196,6 +197,7 @@ function createServerEntry(id: string) {
 		processingPhase: null,
 		agentOwnershipEpoch: 'epoch-1',
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 	};
 }
 

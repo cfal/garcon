@@ -30,6 +30,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],
 		...overrides,

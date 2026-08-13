@@ -76,6 +76,7 @@ function chat(): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,
 		tags: [],

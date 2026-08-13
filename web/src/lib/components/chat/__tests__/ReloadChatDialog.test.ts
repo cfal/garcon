@@ -48,9 +48,12 @@ describe('ReloadChatDialog', () => {
 			onConfirm: vi.fn(),
 		});
 
-		expect(screen.getByRole('button', { name: m.sidebar_actions_cancel() })).toBeDisabled();
+		expect(screen.getByRole('button', { name: m.sidebar_actions_cancel() })).toHaveProperty(
+			'disabled',
+			true,
+		);
 		expect(
 			screen.getByRole('button', { name: m.sidebar_chats_reload_confirm_button() }),
-		).toBeDisabled();
+		).toHaveProperty('disabled', true);
 	});
 });

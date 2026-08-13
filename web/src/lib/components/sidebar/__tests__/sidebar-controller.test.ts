@@ -48,6 +48,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		tags: [],
 		...overrides,
@@ -185,6 +186,7 @@ describe('SidebarController', () => {
 					isProcessing: false,
 					processingPhase: null,
 					isUnread: false,
+					canReloadFromNativeHistory: false,
 				},
 			});
 

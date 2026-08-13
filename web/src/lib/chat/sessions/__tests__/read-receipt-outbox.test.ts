@@ -151,6 +151,7 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: true,
+				canReloadFromNativeHistory: false,
 			},
 		]);
 
@@ -195,6 +196,7 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: true,
+				canReloadFromNativeHistory: false,
 			},
 			{
 				id: 'b',
@@ -221,6 +223,7 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: false,
+				canReloadFromNativeHistory: false,
 			},
 		]);
 

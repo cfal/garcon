@@ -33,6 +33,7 @@ function chat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: '',
 		tags: [],

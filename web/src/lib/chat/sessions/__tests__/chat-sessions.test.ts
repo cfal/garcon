@@ -24,6 +24,7 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		isProcessing: processingPhase !== null,
 		processingPhase,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		...overrides,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',

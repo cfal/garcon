@@ -42,6 +42,7 @@ function createChat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: `${title} preview`,
 		tags: [],

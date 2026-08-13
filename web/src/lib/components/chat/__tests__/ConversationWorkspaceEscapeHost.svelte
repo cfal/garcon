@@ -46,6 +46,7 @@
 		isProcessing: true,
 		processingPhase: 'running',
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
