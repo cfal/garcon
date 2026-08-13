@@ -3,9 +3,11 @@ import type {
   TranscriptPage as PresentedTranscriptPage,
   TranscriptReplayResult,
 } from '../../common/chat-view.js';
+import type { ChatMessage } from '../../common/chat-types.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import type { TranscriptViewId } from './contracts.js';
 import { ledgerRowsToTranscriptMessages } from './presentation.js';
+import { ledgerRowsToMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
 
 const RAW_PAGE_SIZE = 256;
@@ -70,6 +72,24 @@ export class TranscriptViewReader {
       firstOrdinal: afterOrdinal + 1,
       lastOrdinal,
       messages: ledgerRowsToTranscriptMessages(rows),
+    };
+  }
+
+  async renderingSnapshot(
+    chatId: string,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<{
+    readonly transcriptViewId: TranscriptViewId;
+    readonly lastOrdinal: number;
+    readonly messages: readonly ChatMessage[];
+  }> {
+    const view = await this.#adoption.ensure(chatId, signal);
+    signal.throwIfAborted();
+    const rows = this.#ledger.currentRows(chatId);
+    return {
+      transcriptViewId: view.viewId,
+      lastOrdinal: rows.at(-1)?.ordinal ?? 0,
+      messages: ledgerRowsToMessages(rows),
     };
   }
 }

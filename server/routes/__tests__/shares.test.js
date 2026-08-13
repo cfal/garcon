@@ -50,12 +50,8 @@ function createCapture(overrides = {}) {
         content: 'durable prompt',
       },
     ],
-    contentEpoch: 'search-content-v1:abc',
-    compositeRevision: 'composite-rev-1',
-    carryOverRevision: 'carry-v1:0',
-    agentOwnershipEpoch: 'owner-1',
-    durableCount: 1,
-    archivedLogicalCount: 0,
+    transcriptViewId: 'view-1',
+    lastOrdinal: 1,
     ...overrides,
   };
 }
@@ -72,9 +68,9 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = 
     init: mock(() => Promise.resolve(undefined)),
     ...overrides.shareStore,
   };
-  const compositeSnapshots = {
-    captureDurableSnapshot: mock(() => Promise.resolve(createCapture())),
-    ...overrides.compositeSnapshots,
+  const transcripts = {
+    renderingSnapshot: mock(() => Promise.resolve(createCapture())),
+    ...overrides.transcripts,
   };
   const routes = createShareRoutes(
     shareStore,
@@ -87,15 +83,15 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = 
       getRemoteSettingsVersion: mock(() => (appTitle ? 3 : 0)),
     },
     { getChatMetadata: mock(() => null) },
-    compositeSnapshots,
+    transcripts,
   );
-  return { routes, shareStore, compositeSnapshots };
+  return { routes, shareStore, transcripts };
 }
 
 describe('share creation route', () => {
   it('creates the share from one pinned durable snapshot and records its origin', async () => {
     const created = [];
-    const { routes, compositeSnapshots } = createRoutes(createSnapshot(), null, {
+    const { routes, transcripts } = createRoutes(createSnapshot(), null, {
       session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },
       shareStore: {
         createShare: mock((chatId, partial) => {
@@ -121,21 +117,20 @@ describe('share creation route', () => {
       shareToken: 'new-token',
       shareUrl: '/shared/new-token',
     });
-    expect(compositeSnapshots.captureDurableSnapshot).toHaveBeenCalledWith('123');
+    expect(transcripts.renderingSnapshot).toHaveBeenCalledWith('123');
     expect(created).toHaveLength(1);
     expect(created[0].messages.map((message) => message.content)).toEqual(['durable prompt']);
     expect(created[0].origin).toEqual({
-      contentEpoch: 'search-content-v1:abc',
-      compositeRevision: 'composite-rev-1',
-      durableCount: 1,
+      transcriptViewId: 'view-1',
+      lastOrdinal: 1,
     });
   });
 
   it('maps a still-racing capture to its domain status instead of 500', async () => {
     const { routes } = createRoutes(createSnapshot(), null, {
       session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },
-      compositeSnapshots: {
-        captureDurableSnapshot: mock(() => Promise.reject(
+      transcripts: {
+        renderingSnapshot: mock(() => Promise.reject(
           new DomainError('SOURCE_REVISION_CHANGED', 'Chat ownership changed.', 409, true),
         )),
       },

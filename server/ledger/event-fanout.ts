@@ -41,9 +41,14 @@ function applyTranscriptEvent(
 
   const rows = event.type === 'rows' ? event.rows : [event.row];
   const messages = ledgerRowsToTranscriptMessages(rows);
-  const rendered = messages.map((entry) => entry.message);
-  if (rendered.length > 0) deps.updateMetadata(event.chatId, rendered);
-  if (rows.some((row) => row.kind === 'user-input' || row.kind === 'provider-row')) {
+  const conversational = rows.filter((row) => (
+    row.kind === 'user-input' || row.kind === 'provider-row'
+  ));
+  if (conversational.length > 0) {
+    deps.updateMetadata(
+      event.chatId,
+      ledgerRowsToTranscriptMessages(conversational).map((entry) => entry.message),
+    );
     deps.markSearchDirty(event.chatId);
   }
   deps.broadcast(new ChatMessagesMessage(

@@ -52,12 +52,14 @@ describe('transcript event fanout', () => {
 
   it('broadcasts lifecycle-only commits without inventing rendered messages', () => {
     const broadcast = mock(() => undefined);
+    const updateMetadata = mock(() => undefined);
+    const markSearchDirty = mock(() => undefined);
     const fanout = createTranscriptEventFanout({
       chatExists: () => true,
       schedule: (_chatId, task) => task(),
       broadcast,
-      updateMetadata: () => undefined,
-      markSearchDirty: () => undefined,
+      updateMetadata,
+      markSearchDirty,
       resendCandidates: () => [],
     });
 
@@ -80,5 +82,7 @@ describe('transcript event fanout', () => {
       messages: [],
       turnId: 'run-1',
     }));
+    expect(updateMetadata).not.toHaveBeenCalled();
+    expect(markSearchDirty).not.toHaveBeenCalled();
   });
 });

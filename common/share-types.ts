@@ -1,11 +1,9 @@
 // Shared types for the chat sharing feature.
 
-// Identity of the pinned composite-ledger snapshot a share was captured from.
-// Absent only on shares written before capture pinning existed.
+// Identity of the transcript view copied into the self-contained share.
 export interface SharedChatOrigin {
-  contentEpoch: string | null;
-  compositeRevision: string;
-  durableCount: number;
+  transcriptViewId: string;
+  lastOrdinal: number;
 }
 
 export interface SharedChatSnapshot {

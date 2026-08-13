@@ -63,6 +63,36 @@ describe('TranscriptViewReader', () => {
       });
     });
   });
+
+  it('captures the rendering fold as a self-contained view snapshot', async () => {
+    await withReader(async ({ ledger, reader, viewId }) => {
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId,
+        message: new UserMessage(TS, 'prompt'),
+        attachments: [],
+        clientMessageId: 'message-1',
+        steer: false,
+      });
+      const producer = ledger.openProducer('chat-1');
+      producer.sink.publish({
+        type: 'session',
+        session: { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null },
+      });
+      producer.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'answer') }],
+      });
+
+      const snapshot = await reader.renderingSnapshot('chat-1');
+
+      expect(snapshot).toMatchObject({
+        transcriptViewId: viewId,
+        lastOrdinal: 3,
+      });
+      expect(snapshot.messages.map((message) => message.content)).toEqual(['prompt', 'answer']);
+    });
+  });
 });
 
 async function withReader(run) {

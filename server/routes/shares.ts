@@ -20,7 +20,6 @@ import {
 import { loadStaticText } from './static.js';
 import { extractFirstLine } from '../lib/text.js';
 import type { RouteMap } from '../lib/http-route-types.js';
-import type { CompositeSnapshotPort } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import { isDomainError } from '../lib/domain-error.js';
 import {
@@ -36,6 +35,14 @@ interface SettingsDep {
 
 interface MetadataDep {
   getChatMetadata(chatId: string): ChatMetadata | null;
+}
+
+export interface ShareTranscriptSnapshotPort {
+  renderingSnapshot(chatId: string): Promise<{
+    readonly transcriptViewId: string;
+    readonly lastOrdinal: number;
+    readonly messages: readonly unknown[];
+  }>;
 }
 
 
@@ -191,7 +198,7 @@ export default function createShareRoutes(
   registry: IChatRegistry,
   settings: SettingsDep,
   metadata: MetadataDep,
-  compositeSnapshots: CompositeSnapshotPort,
+  transcripts: ShareTranscriptSnapshotPort,
 ): RouteMap {
   // POST /api/v1/chats/share - Creates or returns existing share.
   async function postShareChat(
@@ -214,9 +221,7 @@ export default function createShareRoutes(
         );
       }
 
-      // One pinned durable composite snapshot: the artifact excludes the
-      // active suffix, and its metadata names the content it was produced from.
-      const capture = await compositeSnapshots.captureDurableSnapshot(chatId);
+      const capture = await transcripts.renderingSnapshot(chatId);
 
       const meta = metadata.getChatMetadata(chatId);
       const overrideTitle = settings.getChatName(chatId);
@@ -232,9 +237,8 @@ export default function createShareRoutes(
         projectPath: session.projectPath as string,
         sharedAt: new Date().toISOString(),
         origin: {
-          contentEpoch: capture.contentEpoch,
-          compositeRevision: capture.compositeRevision,
-          durableCount: capture.durableCount,
+          transcriptViewId: capture.transcriptViewId,
+          lastOrdinal: capture.lastOrdinal,
         },
         messages: [...capture.messages],
       };

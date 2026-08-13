@@ -664,7 +664,7 @@ export async function startServer(): Promise<void> {
       pathCache,
       metadata,
       chatViews: chatViewPages,
-      compositeSnapshots: transcripts,
+      shareSnapshots: transcriptReader,
       agents: agentRegistry,
       pendingInputs,
       telegramNotifier,
