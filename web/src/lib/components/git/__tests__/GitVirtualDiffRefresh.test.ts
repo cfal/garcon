@@ -622,6 +622,62 @@ describe('Git virtual diff refresh', () => {
 		observer.disconnect();
 	});
 
+	it('does not restore presentation scroll over a newer user scroll', async () => {
+		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
+		const props = makeSurfaceProps(rows);
+		const { container, rerender } = render(GitVirtualDiffSurface, { props });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		viewport.scrollTop = 60;
+		let userScrolled = false;
+		const observer = new MutationObserver(() => {
+			if (userScrolled || !container.querySelector('.cm-code-keyword')) return;
+			userScrolled = true;
+			viewport.dispatchEvent(new WheelEvent('wheel'));
+			viewport.scrollTop = 90;
+		});
+		observer.observe(viewport, { childList: true, subtree: true });
+
+		const highlightedRows = rows.map((row) =>
+			row.kind === 'unified-row'
+				? {
+						...row,
+						view: {
+							...row.view,
+							segments: [{ text: 'added line', className: 'cm-code-keyword' }],
+						},
+					}
+				: row,
+		);
+
+		await rerender({
+			...props,
+			source: arrayGitVirtualReviewRowSource(highlightedRows, fileIndexes(highlightedRows)),
+		});
+
+		await waitFor(() => expect(userScrolled).toBe(true));
+		await waitFor(() => expect(viewport.scrollTop).toBe(90));
+		observer.disconnect();
+	});
+
+	it('lets a layout reset win over presentation scroll restoration', async () => {
+		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
+		const props = makeSurfaceProps(rows);
+		const { container, rerender } = render(GitVirtualDiffSurface, { props });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		viewport.scrollTop = 300;
+		const replacementRows = rows.map((row) =>
+			row.kind === 'file-header' ? { ...row, isFocused: true } : row,
+		);
+
+		await rerender({
+			...props,
+			layoutIdentity: 'layout-b',
+			source: arrayGitVirtualReviewRowSource(replacementRows, fileIndexes(replacementRows)),
+		});
+
+		await waitFor(() => expect(viewport.scrollTop).toBe(0));
+	});
+
 	it('republishes a new review document without resetting the layout scroll', async () => {
 		const rows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
 		const onBodyDemand = vi.fn();

@@ -63,6 +63,7 @@
 	let configuredScrollElement: HTMLDivElement | null = null;
 	let presentedSource: GitVirtualReviewRowSource | null = null;
 	let presentedMeasurementRevision = '';
+	let scrollIntentRevision = 0;
 	let demandEffectRuns = 0;
 	let demandPublications = 0;
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
@@ -117,6 +118,7 @@
 	});
 
 	function completeScrollRequest(): void {
+		scrollIntentRevision += 1;
 		if (servicedScrollRequestId) completedScrollRequestId = servicedScrollRequestId;
 	}
 
@@ -144,6 +146,9 @@
 		const scrollElement = viewportRef;
 		if (!scrollElement || nextLayoutIdentity === measuredLayoutIdentity) return;
 		measuredLayoutIdentity = nextLayoutIdentity;
+		scrollIntentRevision += 1;
+		presentedSource = null;
+		presentedMeasurementRevision = '';
 		lastScrollRequestKey = '';
 		pendingScrollRequestKey = '';
 		scrollRequestSequence += 1;
@@ -169,11 +174,13 @@
 		if (!preserveScroll || !scrollElement) return;
 
 		const scrollTop = scrollElement.scrollTop;
+		const intentRevision = scrollIntentRevision;
 		void tick().then(() => {
 			if (
 				source === nextSource &&
 				viewportRef === scrollElement &&
-				nextSource.measurementRevision === nextMeasurementRevision
+				nextSource.measurementRevision === nextMeasurementRevision &&
+				scrollIntentRevision === intentRevision
 			) {
 				if (scrollElement.scrollTop !== scrollTop) scrollElement.scrollTop = scrollTop;
 			}
@@ -305,6 +312,7 @@
 		}
 		const requestKey = `${requestId}\0${targetIndex}\0${targetState}`;
 		if (requestKey === lastScrollRequestKey || requestKey === pendingScrollRequestKey) return;
+		scrollIntentRevision += 1;
 		pendingScrollRequestKey = requestKey;
 		const requestSequence = ++scrollRequestSequence;
 		const start = Math.max(0, targetIndex - 6);
@@ -349,6 +357,7 @@
 				}
 				pendingScrollRequestKey = '';
 				lastScrollRequestKey = requestKey;
+				scrollIntentRevision += 1;
 				$virtualizer.scrollToIndex(targetIndex, { align: 'start' });
 				servicedScrollRequestId = requestId;
 				servicedScrollRequestState = targetState;
