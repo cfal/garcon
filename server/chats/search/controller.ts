@@ -1,74 +1,44 @@
-import type {
-  AgentChatReferenceV4,
-  AgentTranscriptIndexSourceRefV4,
-} from '@garcon/server-agent-interface';
 import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
 import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
-import { compositeContentEpoch as compositeSearchContentEpoch } from '../composite-content-epoch.js';
-import type { IntegrationRegistry } from '../../agents/integration-registry.js';
-
-export { compositeContentEpoch as compositeSearchContentEpoch } from '../composite-content-epoch.js';
+import { projectSearchMessage } from '@garcon/server-agent-common/search/message-projector';
+import type { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import type {
-  TranscriptSearchCatalogEntry,
-  TranscriptSearchGeneration,
-  TranscriptSearchService,
-  TranscriptSearchSourceRefreshRequest,
-} from '@garcon/server-agent-common/search/transcript-search-service';
+  LedgerRow,
+  TranscriptViewId,
+} from '../../ledger/contracts.js';
+import type {
+  TranscriptCommitEvent,
+  TranscriptLedgerService,
+} from '../../ledger/service.js';
 import { TranscriptSearchUnavailableError } from './errors.js';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const DEFAULT_SEARCH_TIMEOUT_MS = 5_000;
-const RECONCILE_DELAY_MS = 100;
-const SOURCE_RESOLUTION_CONCURRENCY = 8;
-// First resolution of a cold chat opens its segment, which may run the
-// one-time native import; the per-integration lane keeps that burst from
-// serializing one provider's entire history behind the global pool.
-const PER_INTEGRATION_SOURCE_RESOLUTION_CONCURRENCY = 2;
-const RECONCILE_RETRY_MS = [5_000, 30_000, 5 * 60_000] as const;
-
-export interface TranscriptSearchChatRegistration {
-  readonly agentId: string;
-  readonly reference: AgentChatReferenceV4;
-  readonly updatedAt: string | null;
-  readonly transcriptContentEpoch: string | null;
-}
 
 export interface TranscriptSearchControllerDeps {
-  readonly integrations: IntegrationRegistry;
-  readonly listChats: () => readonly TranscriptSearchChatRegistration[];
+  readonly listChatIds: () => readonly string[];
+  readonly ledger: Pick<
+    TranscriptLedgerService,
+    'currentView' | 'currentRows' | 'subscribe'
+  >;
   readonly service: TranscriptSearchService;
-  readonly persistContentEpoch: (request: {
-    readonly chatId: string;
-    readonly agentOwnershipEpoch: string;
-    readonly contentEpoch: string;
-  }) => Promise<void>;
-  // Acquires the transcript-snapshot reservation for an idle chat, or null
-  // while any operation owns execution. The mirror backfill's first open may
-  // run the one-time native import and must be fenced against admission.
-  readonly reserveIdleTranscriptSnapshot: (chatId: string) => (() => Promise<void>) | null;
   readonly searchTimeoutMs?: number;
 }
 
 export class TranscriptSearchController {
   readonly #deps: TranscriptSearchControllerDeps;
-  readonly #epoch: string;
   readonly #lifecycleAbort = new AbortController();
-  #sequence = 0;
+  readonly #chatTails = new Map<string, Promise<void>>();
+  readonly #unsubscribe: () => void;
   #enabled = false;
   #admissionFailed = false;
   #closed = false;
-  #reconcileTimer: ReturnType<typeof setTimeout> | null = null;
-  #reconcileAbort: AbortController | null = null;
-  readonly #reconcileTasks = new Set<Promise<void>>();
-  #reconcileRetryAttempt = 0;
-  #catalogEntries = new Map<string, TranscriptSearchCatalogEntry>();
 
   constructor(deps: TranscriptSearchControllerDeps) {
     this.#deps = deps;
-    this.#epoch = deps.service.operationEpoch();
-    deps.service.setSourceRefreshHandler((request) => this.#refreshIndexSource(request));
-    deps.service.setCatalogRefreshHandler((chatId) => this.catalogMayHaveChanged(chatId));
+    this.#unsubscribe = deps.ledger.subscribe((event) => this.#onCommit(event));
+    deps.service.setResyncHandler(() => this.#syncAll());
   }
 
   async initialize(enabled: boolean): Promise<void> {
@@ -80,17 +50,10 @@ export class TranscriptSearchController {
     if (this.#closed) throw new Error('Transcript search controller is closed');
     if (this.#enabled) return;
     try {
-      await this.#deps.service.enable({
-        modules: this.#deps.integrations.classes().map((integrationClass) => ({
-          agentId: integrationClass.integrationId,
-          reference: integrationClass.transcriptIndex,
-        })),
-        signal: this.#lifecycleAbort.signal,
-      });
-      this.#lifecycleAbort.signal.throwIfAborted();
+      await this.#deps.service.enable(this.#lifecycleAbort.signal);
       this.#enabled = true;
       this.#admissionFailed = false;
-      this.#scheduleCatalogReconcile(0);
+      await this.#syncAll();
     } catch (error) {
       this.#enabled = false;
       this.#admissionFailed = true;
@@ -99,28 +62,25 @@ export class TranscriptSearchController {
   }
 
   sourceMayHaveChanged(chatId: string): void {
-    if (!this.#enabled || this.#closed) return;
-    const known = this.#deps.listChats().some((entry) => entry.reference.chatId === chatId);
-    if (!known) return;
-    this.#deps.service.sourceMayHaveChanged({ chatId, generation: this.#nextGeneration() });
-    this.#scheduleCatalogReconcile();
+    this.catalogMayHaveChanged(chatId);
   }
 
   markDirty(chatId: string): void {
-    this.sourceMayHaveChanged(chatId);
+    this.catalogMayHaveChanged(chatId);
   }
 
   catalogMayHaveChanged(chatId?: string): void {
     if (!this.#enabled || this.#closed) return;
-    if (chatId && !this.#deps.listChats().some((entry) => entry.reference.chatId === chatId)) return;
-    this.#scheduleCatalogReconcile();
+    if (chatId) {
+      void this.#enqueue(chatId, () => this.#syncChat(chatId));
+      return;
+    }
+    void this.#syncAll();
   }
 
   deleteChat(chatId: string): void {
     if (!this.#enabled || this.#closed) return;
-    this.#deps.service.deleteChat({ chatId, generation: this.#nextGeneration() });
-    this.#catalogEntries.delete(chatId);
-    this.#scheduleCatalogReconcile();
+    void this.#enqueue(chatId, () => this.#deps.service.deleteChat(chatId));
   }
 
   async search(options: {
@@ -130,17 +90,10 @@ export class TranscriptSearchController {
     readonly limit?: number;
   }): Promise<{ results: ChatSearchResult[]; index: ChatSearchIndexStatus }> {
     if (!this.#enabled) {
-      if (this.#admissionFailed) {
-        throw new TranscriptSearchUnavailableError(
-          'SEARCH_INDEX_UNAVAILABLE',
-          'Transcript search is unavailable',
-          true,
-        );
-      }
       throw new TranscriptSearchUnavailableError(
-        'TRANSCRIPT_SEARCH_DISABLED',
-        'Transcript search is disabled',
-        false,
+        this.#admissionFailed ? 'SEARCH_INDEX_UNAVAILABLE' : 'TRANSCRIPT_SEARCH_DISABLED',
+        this.#admissionFailed ? 'Transcript search is unavailable' : 'Transcript search is disabled',
+        this.#admissionFailed,
       );
     }
     if (this.#closed) {
@@ -157,25 +110,27 @@ export class TranscriptSearchController {
     );
     timeout.unref?.();
     try {
-      const allowed = new Set(options.allowedChatIds);
-      const allowedChats = options.allowedChatIds.flatMap((chatId) => {
-        const contentEpoch = this.#catalogEntries.get(chatId)?.contentEpoch;
-        return contentEpoch ? [{ chatId, contentEpoch }] : [];
-      });
+      const allowedViews = new Map<string, TranscriptViewId>();
+      for (const chatId of options.allowedChatIds) {
+        const view = this.#deps.ledger.currentView(chatId);
+        if (view) allowedViews.set(chatId, view.viewId);
+      }
       const response = await this.#deps.service.search({
         query: compileQuery(options.query, options.textTokens),
-        allowedChats,
+        allowedChats: [...allowedViews].map(([chatId, transcriptViewId]) => ({
+          chatId,
+          transcriptViewId,
+        })),
         limit: clampLimit(options.limit),
         signal: abort.signal,
       });
       return {
-        results: response.results.filter((result) => (
-          allowed.has(result.chatId)
-          && this.#catalogEntries.get(result.chatId)?.contentEpoch === result.contentEpoch
-        )),
+        results: response.results.filter(
+          (result) => allowedViews.get(result.chatId) === result.transcriptViewId,
+        ),
         index: response.index,
       };
-    } catch (error) {
+    } catch {
       throw new TranscriptSearchUnavailableError(
         abort.signal.aborted ? 'SEARCH_INDEX_BUSY' : 'SEARCH_INDEX_UNAVAILABLE',
         abort.signal.aborted ? 'Transcript search is busy' : 'Transcript search is unavailable',
@@ -186,21 +141,18 @@ export class TranscriptSearchController {
     }
   }
 
-  // Navigation admission: a result is only resolvable while its composite
-  // content epoch is still the chat's current one.
-  validateResultEpoch(chatId: string, contentEpoch: string): boolean {
-    if (!this.#enabled || this.#closed) return false;
-    return this.#catalogEntries.get(chatId)?.contentEpoch === contentEpoch;
+  validateResultView(chatId: string, transcriptViewId: string): boolean {
+    return this.#enabled
+      && !this.#closed
+      && this.#deps.ledger.currentView(chatId)?.viewId === transcriptViewId;
   }
 
   async disableAndDelete(): Promise<void> {
     this.#enabled = false;
     this.#admissionFailed = false;
-    this.#cancelScheduledReconcile();
-    await Promise.allSettled(this.#reconcileTasks);
+    await Promise.allSettled(this.#chatTails.values());
+    this.#chatTails.clear();
     await this.#deps.service.disableAndDelete(new AbortController().signal);
-    this.#catalogEntries.clear();
-    this.#reconcileRetryAttempt = 0;
   }
 
   async close(): Promise<void> {
@@ -208,271 +160,85 @@ export class TranscriptSearchController {
     this.#closed = true;
     this.#enabled = false;
     this.#lifecycleAbort.abort();
-    this.#cancelScheduledReconcile();
-    await Promise.allSettled(this.#reconcileTasks);
+    this.#unsubscribe();
+    await Promise.allSettled(this.#chatTails.values());
+    this.#chatTails.clear();
     await this.#deps.service.close();
   }
 
-  #scheduleCatalogReconcile(delayMs = RECONCILE_DELAY_MS): void {
+  async #syncAll(): Promise<void> {
     if (!this.#enabled || this.#closed) return;
-    if (this.#reconcileTimer) clearTimeout(this.#reconcileTimer);
-    this.#reconcileTimer = setTimeout(() => {
-      this.#reconcileTimer = null;
-      void this.#reconcileNow();
-    }, delayMs);
-    this.#reconcileTimer.unref?.();
+    const chatIds = [...new Set(this.#deps.listChatIds())];
+    await Promise.all(chatIds.map((chatId) => this.#enqueue(chatId, () => this.#syncChat(chatId))));
+    await this.#deps.service.pruneChats(chatIds);
   }
 
-  async #reconcileNow(): Promise<void> {
+  async #syncChat(chatId: string): Promise<void> {
     if (!this.#enabled || this.#closed) return;
-    const previous = this.#reconcileAbort;
-    const abort = new AbortController();
-    this.#reconcileAbort = abort;
-    previous?.abort();
-    const generation = this.#nextGeneration();
-    const work = this.#buildCatalog(generation, abort.signal).then(async (chats) => {
-      if (abort.signal.aborted || !this.#enabled || this.#closed) return;
-      await this.#deps.service.reconcile({ generation, chats });
-      this.#catalogEntries = new Map(chats.map((entry) => [entry.chatId, entry]));
-      if (chats.some((entry) => entry.source.state === 'failed' && entry.source.retryable)) {
-        this.#scheduleCatalogReconcile(this.#nextReconcileRetryDelay());
-      } else {
-        this.#reconcileRetryAttempt = 0;
-      }
+    if (!this.#deps.listChatIds().includes(chatId)) {
+      await this.#deps.service.deleteChat(chatId);
+      return;
+    }
+    const view = this.#deps.ledger.currentView(chatId);
+    if (!view) return;
+    const rows = this.#deps.ledger.currentRows(chatId);
+    await this.#deps.service.replaceChat({
+      chatId,
+      transcriptViewId: view.viewId,
+      throughOrdinal: rows.at(-1)?.ordinal ?? 0,
+      rows: searchableRows(rows),
     });
-    this.#reconcileTasks.add(work);
-    try {
-      await work;
-    } catch (error) {
-      if (!abort.signal.aborted && this.#enabled && !this.#closed) {
-        this.#scheduleCatalogReconcile(this.#nextReconcileRetryDelay());
-      }
-    } finally {
-      this.#reconcileTasks.delete(work);
-      if (this.#reconcileAbort === abort) this.#reconcileAbort = null;
-    }
   }
 
-  async #buildCatalog(
-    _generation: TranscriptSearchGeneration,
-    signal: AbortSignal,
-  ): Promise<TranscriptSearchCatalogEntry[]> {
-    const registrations = [...this.#deps.listChats()];
-    const results = new Array<TranscriptSearchCatalogEntry>(registrations.length);
-    const pending = registrations.map((registration, index) => ({ registration, index }));
-    const inFlightByAgent = new Map<string, number>();
-    const workers = Array.from(
-      { length: Math.min(SOURCE_RESOLUTION_CONCURRENCY, registrations.length) },
-      async () => {
-        while (pending.length > 0) {
-          signal.throwIfAborted();
-          const slot = pending.findIndex(({ registration }) => (
-            (inFlightByAgent.get(registration.agentId) ?? 0)
-              < PER_INTEGRATION_SOURCE_RESOLUTION_CONCURRENCY
-          ));
-          if (slot === -1) {
-            await new Promise((resolve) => setTimeout(resolve, 5));
-            continue;
-          }
-          const { registration, index } = pending.splice(slot, 1)[0];
-          inFlightByAgent.set(registration.agentId, (inFlightByAgent.get(registration.agentId) ?? 0) + 1);
-          try {
-            results[index] = await this.#resolveCatalogEntry(registration, signal);
-          } finally {
-            inFlightByAgent.set(registration.agentId, (inFlightByAgent.get(registration.agentId) ?? 0) - 1);
-          }
-        }
-      },
-    );
-    await Promise.all(workers);
-    return results.sort((left, right) => left.chatId.localeCompare(right.chatId));
-  }
-
-  async #resolveCatalogEntry(
-    registration: TranscriptSearchChatRegistration,
-    signal: AbortSignal,
-  ): Promise<TranscriptSearchCatalogEntry> {
-    const integration = this.#deps.integrations.get(registration.agentId);
-    let source: TranscriptSearchCatalogEntry['source'];
-    // A chat without a durable mirror has never completed a V4 open, so its
-    // first resolution is the backfill: it runs only while the chat is idle,
-    // under the transcript-snapshot reservation, held through the registry
-    // flush. Busy chats stay search-pending and retry after idle.
-    let releaseReservation: (() => Promise<void>) | null = null;
-    if (integration && registration.transcriptContentEpoch === null) {
-      releaseReservation = this.#deps.reserveIdleTranscriptSnapshot(
-        registration.reference.chatId,
-      );
-      if (!releaseReservation) {
-        return this.#catalogEntry(registration, {
-          state: 'failed',
-          code: 'CHAT_BUSY',
-          retryable: true,
-        });
-      }
+  #onCommit(event: TranscriptCommitEvent): void {
+    if (!this.#enabled || this.#closed) return;
+    if (event.type === 'view-replaced') {
+      void this.#enqueue(event.chatId, () => this.#syncChat(event.chatId));
+      return;
     }
-    if (!integration) {
-      source = { state: 'failed', code: 'INTEGRATION_UNAVAILABLE', retryable: false };
-    } else {
+    const rows = rowsForCommit(event);
+    if (rows.length === 0) return;
+    void this.#enqueue(event.chatId, async () => {
       try {
-        const result = await integration.transcript.resolveIndexSource({
-          chat: registration.reference,
-          signal,
+        await this.#deps.service.appendRows({
+          chatId: event.chatId,
+          transcriptViewId: event.viewId,
+          expectedAfterOrdinal: rows[0]!.ordinal - 1,
+          throughOrdinal: rows.at(-1)!.ordinal,
+          rows: searchableRows(rows),
         });
-        if (result.kind !== 'ready') {
-          source = result.kind === 'deferred'
-            ? { state: 'failed', code: 'SOURCE_DEFERRED', retryable: true }
-            : { state: 'failed', code: result.errorCode, retryable: result.retryable };
-          return this.#catalogEntry(registration, source);
-        }
-        const reference = result.value;
-        if (!reference) source = { state: 'absent' };
-        else {
-          validateIndexSource(reference, registration.agentId, registration.reference);
-          if (registration.transcriptContentEpoch !== reference.checkpoint.contentEpoch) {
-            await this.#deps.persistContentEpoch({
-              chatId: registration.reference.chatId,
-              agentOwnershipEpoch: registration.reference.agentOwnershipEpoch,
-              contentEpoch: reference.checkpoint.contentEpoch,
-            });
-          }
-          source = { state: 'ready', reference };
-        }
-      } catch (error) {
-        signal.throwIfAborted();
-        const failure = sanitizeResolutionFailure(error);
-        source = { state: 'failed', code: failure.code, retryable: failure.retryable };
-      } finally {
-        await releaseReservation?.().catch(() => {});
+      } catch {
+        await this.#syncChat(event.chatId);
       }
-    }
-    return this.#catalogEntry(registration, source);
-  }
-
-  #catalogEntry(
-    registration: TranscriptSearchChatRegistration,
-    source: TranscriptSearchCatalogEntry['source'],
-  ): TranscriptSearchCatalogEntry {
-    const segmentContentEpoch = source.state === 'ready'
-      ? source.reference.checkpoint.contentEpoch
-      : registration.transcriptContentEpoch;
-    return {
-      chatId: registration.reference.chatId,
-      agentId: registration.agentId,
-      model: registration.reference.model,
-      updatedAt: registration.updatedAt,
-      source,
-      contentEpoch: segmentContentEpoch
-        ? compositeSearchContentEpoch({
-            carryOverRevision: registration.reference.carryOverRevision,
-            agentOwnershipEpoch: registration.reference.agentOwnershipEpoch,
-            segmentContentEpoch,
-          })
-        : null,
-      carryOverRevision: registration.reference.carryOverRevision,
-      agentSessionId: registration.reference.agentSessionId,
-      nativeSeedReceipt: registration.reference.nativeSeedReceipt,
-    };
-  }
-
-  #cancelScheduledReconcile(): void {
-    if (this.#reconcileTimer) clearTimeout(this.#reconcileTimer);
-    this.#reconcileTimer = null;
-    this.#reconcileAbort?.abort();
-    this.#reconcileAbort = null;
-  }
-
-  #nextReconcileRetryDelay(): number {
-    const delay = RECONCILE_RETRY_MS[Math.min(
-      this.#reconcileRetryAttempt,
-      RECONCILE_RETRY_MS.length - 1,
-    )];
-    this.#reconcileRetryAttempt += 1;
-    return delay;
-  }
-
-  async #refreshIndexSource(request: TranscriptSearchSourceRefreshRequest): Promise<void> {
-    if (!this.#enabled || this.#closed) return;
-    const registration = this.#deps.listChats().find(
-      (entry) => entry.reference.chatId === request.chatId && entry.agentId === request.agentId,
-    );
-    const integration = this.#deps.integrations.get(request.agentId);
-    if (!registration || !integration) return;
-    const signal = AbortSignal.any([request.signal, this.#lifecycleAbort.signal]);
-    const result = await integration.transcript.refreshIndexSource({
-      chat: registration.reference,
-      failedSource: request.failedSource,
-      failureCode: request.failureCode,
-      signal,
     });
-    signal.throwIfAborted();
-    if (result.kind !== 'ready') return;
-    const reference = result.value;
-    if (reference) validateIndexSource(reference, request.agentId, registration.reference);
-    this.#scheduleCatalogReconcile(0);
   }
 
-  #nextGeneration(): TranscriptSearchGeneration {
-    return { epoch: this.#epoch, sequence: ++this.#sequence };
+  #enqueue(chatId: string, work: () => Promise<void>): Promise<void> {
+    const previous = this.#chatTails.get(chatId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(work);
+    this.#chatTails.set(chatId, next);
+    void next.finally(() => {
+      if (this.#chatTails.get(chatId) === next) this.#chatTails.delete(chatId);
+    });
+    return next;
   }
 }
 
-function validateIndexSource(
-  reference: AgentTranscriptIndexSourceRefV4,
-  agentId: string,
-  chat: AgentChatReferenceV4,
-): void {
-  if (reference.ownerId !== agentId
-      || reference.apiVersion !== 2
-      || reference.schemaVersion !== 2
-      || reference.checkpoint.chatId !== chat.chatId
-      || reference.checkpoint.agentOwnershipEpoch !== chat.agentOwnershipEpoch
-      || reference.checkpoint.contentEpoch.length === 0
-      || !Number.isSafeInteger(reference.checkpoint.durableCount)
-      || reference.checkpoint.durableCount < 0
-      || reference.checkpoint.durableRevision.length === 0
-      || !reference.value
-      || typeof reference.value !== 'object'
-      || Array.isArray(reference.value)
-      || !isJsonValue(reference.value, new Set())) {
-    throw new Error('INVALID_INDEX_SOURCE');
-  }
-  if (Buffer.byteLength(JSON.stringify(reference)) > 64 * 1024) {
-    throw new Error('INDEX_SOURCE_TOO_LARGE');
-  }
+function rowsForCommit(event: Exclude<TranscriptCommitEvent, { type: 'view-replaced' }>): readonly LedgerRow[] {
+  return event.type === 'rows' ? event.rows : [event.row];
 }
 
-function isJsonValue(value: unknown, ancestors: Set<object>): boolean {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (typeof value !== 'object') return false;
-  if (ancestors.has(value)) return false;
-  if (!Array.isArray(value)) {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return false;
-  }
-  ancestors.add(value);
-  const valid = Array.isArray(value)
-    ? value.every((entry) => isJsonValue(entry, ancestors))
-    : Object.values(value as Record<string, unknown>)
-      .every((entry) => isJsonValue(entry, ancestors));
-  ancestors.delete(value);
-  return valid;
-}
-
-function sanitizeResolutionFailure(error: unknown): { code: string; retryable: boolean } {
-  const failure = error && typeof error === 'object'
-    ? (error as { failure?: { code?: unknown; retryable?: unknown } }).failure
-    : null;
-  if (typeof failure?.code === 'string'
-      && /^[A-Z][A-Z0-9_]{0,63}$/.test(failure.code)
-      && typeof failure.retryable === 'boolean') {
-    return { code: failure.code, retryable: failure.retryable };
-  }
-  if (error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)) {
-    return { code: error.message, retryable: false };
-  }
-  return { code: 'SOURCE_RESOLUTION_INTERNAL', retryable: false };
+function searchableRows(rows: readonly LedgerRow[]) {
+  return rows.flatMap((row) => {
+    const message = row.kind === 'user-input'
+      ? row.detail.message
+      : row.kind === 'provider-row'
+        ? row.message
+        : null;
+    if (!message) return [];
+    const projected = projectSearchMessage(message);
+    return projected ? [{ ordinal: row.ordinal, ...projected }] : [];
+  });
 }
 
 function compileQuery(query: string, textTokens?: readonly string[]): ChatSearchQueryV1 {

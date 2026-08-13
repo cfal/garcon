@@ -211,17 +211,12 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c1',
-							contentEpoch: 'content-1',
+							transcriptViewId: 'view-1',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [
 								{
-									messageOrdinal: 2,
-									anchor: {
-										kind: 'current-entry',
-										agentOwnershipEpoch: 'owner-1',
-										entryId: 'entry-2',
-									},
+									ordinal: 2,
 									role: 'assistant',
 									timestamp: null,
 									text: 'needle appears in the transcript',
@@ -283,7 +278,7 @@ describe('SidebarSearchStore', () => {
 			});
 			store.transcriptSearchResults = [{
 				chatId: 'c1',
-				contentEpoch: 'content-1',
+				transcriptViewId: 'view-1',
 				score: 1,
 				matchedMessageCount: 1,
 				snippets: [],
@@ -426,7 +421,7 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c1',
-							contentEpoch: 'content-1',
+							transcriptViewId: 'view-1',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [],
@@ -519,17 +514,12 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c2',
-							contentEpoch: 'content-2',
+							transcriptViewId: 'view-2',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [
 								{
-									messageOrdinal: 4,
-									anchor: {
-										kind: 'current-entry',
-										agentOwnershipEpoch: 'owner-2',
-										entryId: 'entry-4',
-									},
+									ordinal: 4,
 									role: 'user',
 									timestamp: null,
 									text: 'needle was only in the chat body',
@@ -563,7 +553,7 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c1',
-							contentEpoch: 'content-1',
+							transcriptViewId: 'view-1',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [],
@@ -606,17 +596,12 @@ describe('SidebarSearchStore', () => {
 					results: [
 						{
 							chatId: 'c2',
-							contentEpoch: 'content-2',
+							transcriptViewId: 'view-2',
 							score: 1,
 							matchedMessageCount: 1,
 							snippets: [
 								{
-									messageOrdinal: 4,
-									anchor: {
-										kind: 'current-entry',
-										agentOwnershipEpoch: 'owner-2',
-										entryId: 'entry-4',
-									},
+									ordinal: 4,
 									role: 'user',
 									timestamp: null,
 									text: 'needle was only in the chat body',
@@ -830,16 +815,11 @@ describe('openTranscriptResult', () => {
 	function resultFor(chatId: string) {
 		return {
 			chatId,
-			contentEpoch: 'composite-1',
+			transcriptViewId: 'view-1',
 			score: 1,
 			matchedMessageCount: 1,
 			snippets: [{
-				messageOrdinal: 4,
-				anchor: {
-					kind: 'current-entry' as const,
-					agentOwnershipEpoch: 'owner-1',
-					entryId: 'entry-4',
-				},
+				ordinal: 4,
 				role: 'assistant' as const,
 				text: 'needle',
 				highlights: [],
@@ -860,7 +840,7 @@ describe('openTranscriptResult', () => {
 		return store;
 	}
 
-	it('resolves the epoch-qualified snippet and opens at its seq', async () => {
+	it('resolves the view-qualified snippet and opens at its seq', async () => {
 		const navigate = vi.fn(async () => ({ chatId: 'chat-1', ordinal: 4 }));
 		const store = navigationStore({ navigateToSearchResult: navigate });
 		const opened = vi.fn();
@@ -869,13 +849,8 @@ describe('openTranscriptResult', () => {
 
 		expect(navigate).toHaveBeenCalledWith({
 			chatId: 'chat-1',
-			contentEpoch: 'composite-1',
-			messageOrdinal: 4,
-			anchor: {
-				kind: 'current-entry',
-				agentOwnershipEpoch: 'owner-1',
-				entryId: 'entry-4',
-			},
+			transcriptViewId: 'view-1',
+			ordinal: 4,
 		});
 		expect(opened).toHaveBeenCalledWith('chat-1', 4);
 	});

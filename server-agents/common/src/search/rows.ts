@@ -1,6 +1,5 @@
 import type {
   ChatSearchSnippetRole,
-  TranscriptSearchEntryAnchor,
 } from '@garcon/common/chat-search';
 
 export interface SearchMessageRowInput {
@@ -10,6 +9,5 @@ export interface SearchMessageRowInput {
 }
 
 export interface HistoricalSearchMessageRow extends SearchMessageRowInput {
-  readonly messageOrdinal: number;
-  readonly anchor: TranscriptSearchEntryAnchor;
+  readonly ordinal: number;
 }

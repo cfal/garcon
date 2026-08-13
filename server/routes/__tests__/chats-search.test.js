@@ -124,11 +124,12 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     clearChat: mock(() => undefined),
   };
   const searchIndex = {
-    validateResultEpoch: mock(() => true),
+    validateResultView: mock(() => true),
     search: mock((request) => ({
       results: request.allowedChatIds.length > 0 ? [
         {
           chatId: request.allowedChatIds[0],
+          transcriptViewId: 'view-1',
           score: 1,
           matchedMessageCount: 1,
           snippets: [],
@@ -326,13 +327,8 @@ describe('POST /api/v1/chats/search', () => {
 describe('POST /api/v1/chats/search/navigate', () => {
   const request = (overrides = {}) => ({
     chatId: 'c1',
-    contentEpoch: 'composite-epoch-1',
-    messageOrdinal: 3,
-    anchor: {
-      kind: 'current-entry',
-      agentOwnershipEpoch: 'owner-1',
-      entryId: 'entry-3',
-    },
+    transcriptViewId: 'view-1',
+    ordinal: 3,
     ...overrides,
   });
 
@@ -346,7 +342,7 @@ describe('POST /api/v1/chats/search/navigate', () => {
     );
   }
 
-  it('resolves an epoch-qualified anchor to its browser seq', async () => {
+  it('resolves a view-qualified ledger row', async () => {
     const fixture = createRoutesFixture();
     fixture.registry.getChat.mockImplementation(() => ({
       agentId: 'claude',
@@ -361,42 +357,14 @@ describe('POST /api/v1/chats/search/navigate', () => {
     const response = await navigate(fixture, request());
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ chatId: 'c1', seq: 3 });
-    expect(fixture.searchIndex.validateResultEpoch)
-      .toHaveBeenCalledWith('c1', 'composite-epoch-1');
-    expect(fixture.agents.verifyProjectionEntry).toHaveBeenCalledWith(
-      expect.anything(),
-      'c1',
-      3,
-      'entry-3',
-    );
+    await expect(response.json()).resolves.toEqual({ chatId: 'c1', ordinal: 3 });
+    expect(fixture.searchIndex.validateResultView)
+      .toHaveBeenCalledWith('c1', 'view-1');
   });
 
-  it('rejects a result whose composite content epoch rotated', async () => {
+  it('rejects a result whose transcript view was replaced', async () => {
     const fixture = createRoutesFixture();
-    fixture.searchIndex.validateResultEpoch.mockImplementation(() => false);
-
-    const response = await navigate(fixture, request());
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      errorCode: 'SEARCH_RESULT_STALE',
-    });
-    expect(fixture.agents.verifyProjectionEntry).not.toHaveBeenCalled();
-  });
-
-  it('rejects an anchor whose entry identity no longer resolves', async () => {
-    const fixture = createRoutesFixture();
-    fixture.registry.getChat.mockImplementation(() => ({
-      agentId: 'claude',
-      agentSessionId: 's1',
-      agentOwnershipEpoch: 'owner-1',
-      carryOverSegments: [],
-      projectPath: '/tmp/project',
-      tags: [],
-      model: 'sonnet',
-    }));
-    fixture.agents.verifyProjectionEntry.mockImplementation(async () => false);
+    fixture.searchIndex.validateResultView.mockImplementation(() => false);
 
     const response = await navigate(fixture, request());
 
@@ -409,7 +377,7 @@ describe('POST /api/v1/chats/search/navigate', () => {
   it('validates the navigation payload', async () => {
     const fixture = createRoutesFixture();
 
-    const response = await navigate(fixture, request({ messageOrdinal: 0 }));
+    const response = await navigate(fixture, request({ ordinal: 0 }));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({

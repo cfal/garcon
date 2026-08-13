@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { TranscriptSearchEntryAnchor } from '../../common/chat-search.js';
 import { boundProjectedMessage, isProjectableMessage } from '../../common/transcript-seed.js';
 import { AgentSwitchMessage } from '../../common/chat-types.js';
 import { DomainError } from '../lib/domain-error.js';
@@ -375,41 +374,6 @@ export class CarryOverTranscriptStore {
       if (page.messages.length === 0) break;
       yield page.messages;
       offset += page.messages.length;
-    }
-  }
-
-  async *streamSearchEntries(input: {
-    readonly refs: readonly CarryOverSegmentRef[];
-    readonly maxMessagesPerBatch: number;
-    readonly signal?: AbortSignal;
-  }): AsyncIterable<readonly {
-    readonly message: ChatMessage;
-    readonly anchor: TranscriptSearchEntryAnchor;
-  }[]> {
-    const layout = carryOverLayout(input.refs);
-    let sequence = 1;
-    let layoutIndex = 0;
-    for await (const messages of this.stream(input)) {
-      const entries = messages.map((message) => {
-        while (layoutIndex < layout.length) {
-          const item = layout[layoutIndex]!;
-          const end = item.boundarySequence ?? item.payloadEndSequence;
-          if (sequence <= end) break;
-          layoutIndex += 1;
-        }
-        const item = layout[layoutIndex];
-        if (!item) throw new CarryOverPageIntegrityError('Carryover search anchor is missing');
-        const anchor: TranscriptSearchEntryAnchor = item.boundarySequence === sequence
-          ? { kind: 'agent-switch', segmentId: item.ref.id }
-          : {
-              kind: 'carryover-entry',
-              segmentId: item.ref.id,
-              localOrdinal: sequence - item.startSequence + 1,
-            };
-        sequence += 1;
-        return { message, anchor };
-      });
-      yield entries;
     }
   }
 

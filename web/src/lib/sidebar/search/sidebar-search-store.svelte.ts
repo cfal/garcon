@@ -131,9 +131,7 @@ export class SidebarSearchStore {
 		return new Map(this.transcriptSearchResults.map((result) => [result.chatId, result]));
 	}
 
-	// Opens one transcript search result under its composite content epoch. A
-	// stale result is removed and the query re-runs instead of scrolling to a
-	// possibly reused ordinal; the chat still opens without a seq.
+	// Revalidates the transcript view before scrolling to a durable row.
 	async openTranscriptResult(
 		chatId: string,
 		onOpen: (chatId: string, seq: number | null) => void,
@@ -147,9 +145,8 @@ export class SidebarSearchStore {
 		try {
 			const resolved = await (this.deps.navigateToSearchResult ?? navigateToSearchResultApi)({
 				chatId,
-				contentEpoch: result.contentEpoch,
-				messageOrdinal: snippet.messageOrdinal,
-				anchor: snippet.anchor,
+				transcriptViewId: result.transcriptViewId,
+				ordinal: snippet.ordinal,
 			});
 			onOpen(chatId, resolved.ordinal);
 		} catch (error) {

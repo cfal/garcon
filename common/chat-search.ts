@@ -26,40 +26,22 @@ export interface ChatSearchRequest {
   limit?: number;
 }
 
-export type TranscriptSearchEntryAnchor =
-  | {
-      readonly kind: 'carryover-entry';
-      readonly segmentId: string;
-      readonly localOrdinal: number;
-    }
-  | { readonly kind: 'agent-switch'; readonly segmentId: string }
-  | {
-      readonly kind: 'current-entry';
-      readonly agentOwnershipEpoch: string;
-      readonly entryId: string;
-    };
-
 export interface TranscriptSearchAllowedChat {
   readonly chatId: string;
-  readonly contentEpoch: string;
+  readonly transcriptViewId: string;
 }
 
 export interface ChatSearchSnippet {
-  messageOrdinal: number;
-  anchor: TranscriptSearchEntryAnchor;
+  ordinal: number;
   role: ChatSearchSnippetRole;
   timestamp: string | null;
   text: string;
 }
 
-// Content-epoch-qualified navigation to one search snippet. The epoch names
-// the composite lineage the ordinal is valid in; a stale result is rejected
-// instead of scrolling to a possibly reused ordinal.
 export interface ChatSearchNavigateRequest {
   readonly chatId: string;
-  readonly contentEpoch: string;
-  readonly messageOrdinal: number;
-  readonly anchor: TranscriptSearchEntryAnchor;
+  readonly transcriptViewId: string;
+  readonly ordinal: number;
 }
 
 export interface ChatSearchNavigateResponse {
@@ -69,7 +51,7 @@ export interface ChatSearchNavigateResponse {
 
 export interface ChatSearchResult {
   chatId: string;
-  contentEpoch: string;
+  transcriptViewId: string;
   score: number;
   matchedMessageCount: number;
   snippets: ChatSearchSnippet[];

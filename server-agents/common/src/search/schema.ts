@@ -1,13 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { canonicalDigest } from './digest.js';
 import type { HistoricalSearchMessageRow } from './rows.js';
-import type { AgentTranscriptIndexCheckpointV4 } from '@garcon/server-agent-interface';
 
-export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 6;
+export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 7;
 
-export type SearchChatStatus = 'pending' | 'sealed' | 'failed' | 'unsupported';
+export type SearchChatStatus = 'indexed' | 'failed' | 'unsupported';
 
 export interface SearchDatabase {
   readonly db: Database;
@@ -17,56 +15,12 @@ export interface SearchDatabase {
 
 export interface SearchChatState {
   readonly chatId: string;
-  readonly agentId: string;
-  readonly model: string;
-  readonly sourceDescriptorHash: string | null;
-  readonly sourceRevision: string | null;
-  readonly contentEpoch: string | null;
-  readonly indexedDurableCount: number;
-  readonly indexedDurableRevision: string | null;
-  readonly targetDurableCount: number;
-  readonly targetDurableRevision: string | null;
-  readonly carryOverRevision: string;
-  readonly agentSessionId: string | null;
-  readonly nativeSeedReceiptDigest: string;
-  readonly contentDigest: string | null;
-  readonly sealedSourceKey: string | null;
-  readonly operationEpoch: string;
-  readonly operationSequence: number;
-  readonly messageCount: number;
+  readonly transcriptViewId: string;
+  readonly indexedThrough: number;
   readonly status: SearchChatStatus;
-  readonly lastCheckedAt: string | null;
-}
-
-export interface SearchChatAttempt {
-  readonly chatId: string;
-  readonly agentId: string;
-  readonly model: string;
-  readonly sourceApiVersion: number;
-  readonly projectorVersion: number;
-  readonly sourceDescriptorHash: string | null;
-  readonly sourceRevision: string | null;
-  readonly contentEpoch: string | null;
-  readonly sourceCheckpoint: AgentTranscriptIndexCheckpointV4 | null;
-  readonly carryOverRevision: string;
-  readonly agentSessionId: string | null;
-  readonly nativeSeedReceiptDigest: string;
-  readonly operationEpoch: string;
-  readonly operationSequence: number;
-}
-
-export interface SearchChatSeal extends SearchChatAttempt {
-  readonly contentEpoch: string;
-  readonly contentDigest: string;
-  readonly sealedSourceKey: string;
-  readonly messageCount: number;
 }
 
 const ROLE_CODES = { user: 0, assistant: 1, tool: 2, system: 3 } as const;
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 function runTransaction(db: Database, work: () => void): void {
   db.exec('BEGIN IMMEDIATE');
@@ -90,51 +44,29 @@ export function configureConnection(db: Database): void {
 export function createSchema(db: Database): void {
   db.exec('PRAGMA auto_vacuum = INCREMENTAL');
   db.exec(`
-    CREATE TABLE search_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    ) STRICT;
     CREATE TABLE search_chat_state (
-      chat_id TEXT PRIMARY KEY,
-      agent_id TEXT NOT NULL,
-      model TEXT NOT NULL,
-      source_api_version INTEGER NOT NULL,
-      projector_version INTEGER NOT NULL,
-      source_descriptor_hash TEXT,
-      source_revision TEXT,
-      content_epoch TEXT,
-      indexed_durable_count INTEGER NOT NULL,
-      indexed_durable_revision TEXT,
-      target_durable_count INTEGER NOT NULL,
-      target_durable_revision TEXT,
-      carry_over_revision TEXT NOT NULL,
-      agent_session_id TEXT,
-      native_seed_receipt_digest TEXT NOT NULL,
-      content_digest TEXT,
-      sealed_source_key TEXT,
-      operation_epoch TEXT NOT NULL,
-      operation_sequence INTEGER NOT NULL,
-      message_count INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('pending', 'sealed', 'failed', 'unsupported')),
-      last_error_code TEXT,
-      last_checked_at TEXT,
-      indexed_at TEXT,
-      updated_at TEXT NOT NULL
+      chat_id            TEXT PRIMARY KEY,
+      transcript_view_id TEXT NOT NULL,
+      indexed_through    INTEGER NOT NULL,
+      status             TEXT NOT NULL CHECK(status IN ('indexed', 'failed', 'unsupported')),
+      last_error_code    TEXT,
+      updated_at         TEXT NOT NULL
     ) WITHOUT ROWID, STRICT;
+
     CREATE TABLE search_chunks (
-      id INTEGER PRIMARY KEY,
-      chat_id TEXT NOT NULL REFERENCES search_chat_state(chat_id) ON DELETE CASCADE,
-      content_epoch TEXT NOT NULL,
-      message_ordinal INTEGER NOT NULL,
-      role INTEGER NOT NULL CHECK(role IN (0, 1, 2, 3)),
-      timestamp TEXT,
-      body TEXT NOT NULL,
-      entry_anchor TEXT NOT NULL,
-      chat_scope TEXT NOT NULL GENERATED ALWAYS AS (
+      id                 INTEGER PRIMARY KEY,
+      chat_id            TEXT NOT NULL REFERENCES search_chat_state(chat_id) ON DELETE CASCADE,
+      transcript_view_id TEXT NOT NULL,
+      ordinal            INTEGER NOT NULL,
+      role               INTEGER NOT NULL CHECK(role IN (0, 1, 2, 3)),
+      timestamp          TEXT,
+      body               TEXT NOT NULL,
+      chat_scope         TEXT NOT NULL GENERATED ALWAYS AS (
         'c' || lower(hex(CAST(chat_id AS BLOB)))
       ) STORED,
-      UNIQUE(chat_id, content_epoch, message_ordinal)
+      UNIQUE(chat_id, transcript_view_id, ordinal)
     ) STRICT;
+
     CREATE VIRTUAL TABLE search_chunks_fts USING fts5(
       body,
       chat_scope,
@@ -143,14 +75,17 @@ export function createSchema(db: Database): void {
       columnsize=0,
       tokenize='unicode61 remove_diacritics 2'
     );
+
     CREATE TRIGGER search_chunks_ai AFTER INSERT ON search_chunks BEGIN
       INSERT INTO search_chunks_fts(rowid, body, chat_scope)
       VALUES (new.id, new.body, new.chat_scope);
     END;
+
     CREATE TRIGGER search_chunks_ad AFTER DELETE ON search_chunks BEGIN
       INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body, chat_scope)
       VALUES ('delete', old.id, old.body, old.chat_scope);
     END;
+
     CREATE TRIGGER search_chunks_au AFTER UPDATE OF body, chat_id ON search_chunks BEGIN
       INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body, chat_scope)
       VALUES ('delete', old.id, old.body, old.chat_scope);
@@ -164,68 +99,18 @@ export function createSchema(db: Database): void {
 }
 
 function validateExistingSchema(db: Database): void {
-  const version = Number(db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0);
-  const autoVacuum = Number(db.query<{ auto_vacuum: number }, []>('PRAGMA auto_vacuum').get()?.auto_vacuum ?? 0);
-  if (version !== TRANSCRIPT_SEARCH_SCHEMA_VERSION || autoVacuum !== 2) {
-    throw new Error('Transcript search schema version or auto-vacuum mode is invalid');
-  }
-  const required = new Set([
-    'search_meta', 'search_chat_state', 'search_chunks', 'search_chunks_fts',
-    'search_chunks_ai', 'search_chunks_ad', 'search_chunks_au',
-  ]);
-  const rows = db.query<{ name: string }, []>(`
-    SELECT name FROM sqlite_master WHERE name IN (
-      'search_meta', 'search_chat_state', 'search_chunks', 'search_chunks_fts',
-      'search_chunks_ai', 'search_chunks_ad', 'search_chunks_au'
-    )
-  `).all();
-  for (const row of rows) required.delete(row.name);
-  if (required.size > 0) throw new Error('Transcript search schema is incomplete');
-  const chunksSql = db.query<{ sql: string | null }, []>(
-    "SELECT sql FROM sqlite_master WHERE name = 'search_chunks'",
-  ).get()?.sql ?? '';
-  if (!/entry_anchor/i.test(chunksSql) || !/content_epoch/i.test(chunksSql)
-      || !/chat_scope/i.test(chunksSql)) {
-    throw new Error('Transcript search chunk schema is invalid');
-  }
-  requireColumns(db, 'search_chat_state', [
-    'chat_id', 'agent_id', 'model', 'source_api_version', 'projector_version',
-    'source_descriptor_hash', 'source_revision', 'carry_over_revision',
-    'content_epoch', 'indexed_durable_count', 'indexed_durable_revision',
-    'target_durable_count', 'target_durable_revision',
-    'agent_session_id', 'native_seed_receipt_digest',
-    'content_digest', 'sealed_source_key', 'operation_epoch', 'operation_sequence',
-    'message_count', 'status', 'last_error_code', 'last_checked_at', 'indexed_at',
-    'updated_at',
-  ]);
-  requireColumns(db, 'search_chunks', [
-    'id', 'chat_id', 'content_epoch', 'message_ordinal', 'role', 'timestamp', 'body',
-    'entry_anchor', 'chat_scope',
-  ]);
-  const ftsSql = db.query<{ sql: string | null }, []>(
-    "SELECT sql FROM sqlite_master WHERE name = 'search_chunks_fts'",
-  ).get()?.sql ?? '';
-  if (!/fts5/i.test(ftsSql) || !/columnsize\s*=\s*0/i.test(ftsSql)
-      || !/content\s*=\s*'search_chunks'/i.test(ftsSql)) {
-    throw new Error('Transcript search FTS schema is invalid');
-  }
-  const foreignKey = db.query<{ table: string; from: string; to: string; on_delete: string }, []>(
-    'PRAGMA foreign_key_list(search_chunks)',
-  ).all().some((entry) => entry.table === 'search_chat_state'
-    && entry.from === 'chat_id' && entry.to === 'chat_id' && entry.on_delete === 'CASCADE');
-  if (!foreignKey) throw new Error('Transcript search foreign key schema is invalid');
-}
-
-function requireColumns(db: Database, table: string, expected: readonly string[]): void {
-  const actual = new Set(db.query<{ name: string }, []>(`PRAGMA table_xinfo(${table})`).all()
-    .map((column) => column.name));
-  if (expected.some((column) => !actual.has(column))) {
-    throw new Error(`Transcript search ${table} schema is incomplete`);
+  const version = Number(
+    db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0,
+  );
+  if (version !== TRANSCRIPT_SEARCH_SCHEMA_VERSION) {
+    throw new Error('Transcript search schema version is invalid');
   }
 }
 
 async function unlinkDatabaseFiles(dbPath: string): Promise<void> {
-  await Promise.all([dbPath, `${dbPath}-wal`, `${dbPath}-shm`].map((file) => fs.rm(file, { force: true })));
+  await Promise.all(
+    [dbPath, `${dbPath}-wal`, `${dbPath}-shm`].map((file) => fs.rm(file, { force: true })),
+  );
 }
 
 async function protectDatabaseFiles(dbPath: string): Promise<void> {
@@ -238,13 +123,6 @@ async function protectDatabaseFiles(dbPath: string): Promise<void> {
   }));
 }
 
-function markCleanShutdown(db: Database, clean: boolean): void {
-  db.query(`
-    INSERT INTO search_meta(key, value) VALUES ('clean_shutdown', ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-  `).run(clean ? '1' : '0');
-}
-
 async function createFreshDatabase(dbPath: string): Promise<SearchDatabase> {
   const db = new Database(dbPath);
   try {
@@ -252,7 +130,6 @@ async function createFreshDatabase(dbPath: string): Promise<SearchDatabase> {
     db.exec('VACUUM');
     configureConnection(db);
     createSchema(db);
-    markCleanShutdown(db, false);
     await protectDatabaseFiles(dbPath);
     return { db, dbPath, recreated: true };
   } catch (error) {
@@ -263,14 +140,15 @@ async function createFreshDatabase(dbPath: string): Promise<SearchDatabase> {
 
 export async function openSearchDatabase(dbPath: string): Promise<SearchDatabase> {
   await fs.mkdir(path.dirname(dbPath), { recursive: true, mode: 0o700 });
-  const exists = await fs.stat(dbPath).then((entry) => entry.isFile() && entry.size > 0).catch(() => false);
+  const exists = await fs.stat(dbPath)
+    .then((entry) => entry.isFile() && entry.size > 0)
+    .catch(() => false);
   if (!exists) return createFreshDatabase(dbPath);
   let db: Database | null = null;
   try {
     db = new Database(dbPath);
     configureConnection(db);
     validateExistingSchema(db);
-    markCleanShutdown(db, false);
     await protectDatabaseFiles(dbPath);
     return { db, dbPath, recreated: false };
   } catch {
@@ -287,8 +165,6 @@ export function openSearchReadDatabase(dbPath: string): Database {
     db.exec('PRAGMA busy_timeout = 2000');
     validateExistingSchema(db);
     db.exec('PRAGMA query_only = ON');
-    const queryOnly = Number(db.query<{ query_only: number }, []>('PRAGMA query_only').get()?.query_only ?? 0);
-    if (queryOnly !== 1) throw new Error('Transcript search reader is not query-only');
     return db;
   } catch (error) {
     db.close();
@@ -298,217 +174,125 @@ export function openSearchReadDatabase(dbPath: string): Database {
 
 export function closeSearchDatabase(db: Database): void {
   try {
-    markCleanShutdown(db, true);
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   } finally {
     db.close();
   }
 }
 
-export function prepareChatBuild(db: Database): void {
-  db.exec(`
-    CREATE TEMP TABLE IF NOT EXISTS temp_search_build (
-      message_ordinal INTEGER PRIMARY KEY,
-      role INTEGER NOT NULL,
-      timestamp TEXT,
-      body TEXT NOT NULL,
-      entry_anchor TEXT NOT NULL
-    ) WITHOUT ROWID
-  `);
-  db.query('DELETE FROM temp_search_build').run();
-}
-
-export function stageChatRows(db: Database, rows: readonly HistoricalSearchMessageRow[]): void {
-  const insert = db.query(`
-    INSERT INTO temp_search_build(message_ordinal, role, timestamp, body, entry_anchor)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  runTransaction(db, () => {
-    for (const row of rows) {
-      insert.run(row.messageOrdinal, ROLE_CODES[row.role], row.timestamp, row.body, JSON.stringify(row.anchor));
-    }
-  });
-}
-
 export function getChatState(db: Database, chatId: string): SearchChatState | null {
   return db.query<SearchChatState, [string]>(`
-    SELECT chat_id AS chatId, agent_id AS agentId, model,
-      source_descriptor_hash AS sourceDescriptorHash, source_revision AS sourceRevision,
-      content_epoch AS contentEpoch,
-      indexed_durable_count AS indexedDurableCount,
-      indexed_durable_revision AS indexedDurableRevision,
-      target_durable_count AS targetDurableCount,
-      target_durable_revision AS targetDurableRevision,
-      carry_over_revision AS carryOverRevision, agent_session_id AS agentSessionId,
-      native_seed_receipt_digest AS nativeSeedReceiptDigest,
-      content_digest AS contentDigest,
-      sealed_source_key AS sealedSourceKey, operation_epoch AS operationEpoch,
-      operation_sequence AS operationSequence, message_count AS messageCount, status,
-      last_checked_at AS lastCheckedAt
+    SELECT chat_id AS chatId, transcript_view_id AS transcriptViewId,
+      indexed_through AS indexedThrough, status
     FROM search_chat_state WHERE chat_id = ?
   `).get(chatId) ?? null;
 }
 
-export function getChatSafetyStates(
+function insertRows(
   db: Database,
-): Map<string, { readonly sourceRevision: string | null; readonly lastCheckedAt: string | null }> {
-  const rows = db.query<{
-    chatId: string;
-    sourceRevision: string | null;
-    lastCheckedAt: string | null;
-  }, []>(`
-    SELECT chat_id AS chatId, source_revision AS sourceRevision,
-      last_checked_at AS lastCheckedAt
-    FROM search_chat_state
-  `).all();
-  return new Map(rows.map((row) => [row.chatId, row]));
-}
-
-export function markChatAttempt(
-  db: Database,
-  attempt: SearchChatAttempt,
-  status: Exclude<SearchChatStatus, 'sealed'>,
-  errorCode: string | null = null,
+  chatId: string,
+  transcriptViewId: string,
+  rows: readonly HistoricalSearchMessageRow[],
 ): void {
-  const timestamp = nowIso();
-  db.query(`
-    INSERT INTO search_chat_state(
-      chat_id, agent_id, model, source_api_version, projector_version,
-      source_descriptor_hash, source_revision, carry_over_revision,
-      content_epoch, indexed_durable_count, indexed_durable_revision,
-      target_durable_count, target_durable_revision,
-      agent_session_id, native_seed_receipt_digest,
-      operation_epoch, operation_sequence, message_count, status,
-      last_error_code, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-    ON CONFLICT(chat_id) DO UPDATE SET
-      agent_id = excluded.agent_id,
-      model = excluded.model,
-      source_api_version = excluded.source_api_version,
-      projector_version = excluded.projector_version,
-      source_descriptor_hash = excluded.source_descriptor_hash,
-      source_revision = excluded.source_revision,
-      content_epoch = excluded.content_epoch,
-      target_durable_count = excluded.target_durable_count,
-      target_durable_revision = excluded.target_durable_revision,
-      carry_over_revision = excluded.carry_over_revision,
-      agent_session_id = excluded.agent_session_id,
-      native_seed_receipt_digest = excluded.native_seed_receipt_digest,
-      operation_epoch = excluded.operation_epoch,
-      operation_sequence = excluded.operation_sequence,
-      status = excluded.status,
-      last_error_code = excluded.last_error_code,
-      updated_at = excluded.updated_at
-  `).run(
-    attempt.chatId, attempt.agentId, attempt.model, attempt.sourceApiVersion,
-    attempt.projectorVersion, attempt.sourceDescriptorHash, attempt.sourceRevision,
-    attempt.carryOverRevision, attempt.contentEpoch,
-    attempt.sourceCheckpoint?.durableCount ?? 0,
-    attempt.sourceCheckpoint?.durableRevision ?? null,
-    attempt.agentSessionId, attempt.nativeSeedReceiptDigest,
-    attempt.operationEpoch, attempt.operationSequence,
-    status, errorCode, timestamp,
-  );
+  const insert = db.query(`
+    INSERT INTO search_chunks(
+      chat_id, transcript_view_id, ordinal, role, timestamp, body
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  for (const row of rows) {
+    insert.run(
+      chatId,
+      transcriptViewId,
+      row.ordinal,
+      ROLE_CODES[row.role],
+      row.timestamp,
+      row.body,
+    );
+  }
 }
 
-export function sealChatFromStaging(db: Database, seal: SearchChatSeal): void {
-  const timestamp = nowIso();
+export function replaceChatRows(
+  db: Database,
+  input: {
+    readonly chatId: string;
+    readonly transcriptViewId: string;
+    readonly throughOrdinal: number;
+    readonly rows: readonly HistoricalSearchMessageRow[];
+  },
+): void {
+  const timestamp = new Date().toISOString();
   runTransaction(db, () => {
     db.query(`
       INSERT INTO search_chat_state(
-        chat_id, agent_id, model, source_api_version, projector_version,
-        source_descriptor_hash, source_revision, carry_over_revision,
-        content_epoch, indexed_durable_count, indexed_durable_revision,
-        target_durable_count, target_durable_revision,
-        agent_session_id, native_seed_receipt_digest,
-        content_digest, sealed_source_key, operation_epoch, operation_sequence,
-        message_count, status, last_error_code, last_checked_at, indexed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sealed', NULL, ?, ?, ?)
+        chat_id, transcript_view_id, indexed_through, status, last_error_code, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, ?)
       ON CONFLICT(chat_id) DO UPDATE SET
-        agent_id = excluded.agent_id,
-        model = excluded.model,
-        source_api_version = excluded.source_api_version,
-        projector_version = excluded.projector_version,
-        source_descriptor_hash = excluded.source_descriptor_hash,
-        source_revision = excluded.source_revision,
-        content_epoch = excluded.content_epoch,
-        indexed_durable_count = excluded.indexed_durable_count,
-        indexed_durable_revision = excluded.indexed_durable_revision,
-        target_durable_count = excluded.target_durable_count,
-        target_durable_revision = excluded.target_durable_revision,
-        carry_over_revision = excluded.carry_over_revision,
-        agent_session_id = excluded.agent_session_id,
-        native_seed_receipt_digest = excluded.native_seed_receipt_digest,
-        content_digest = excluded.content_digest,
-        sealed_source_key = excluded.sealed_source_key,
-        operation_epoch = excluded.operation_epoch,
-        operation_sequence = excluded.operation_sequence,
-        message_count = excluded.message_count,
-        status = 'sealed', last_error_code = NULL,
-        last_checked_at = excluded.last_checked_at,
-        indexed_at = excluded.indexed_at, updated_at = excluded.updated_at
+        transcript_view_id = excluded.transcript_view_id,
+        indexed_through = excluded.indexed_through,
+        status = excluded.status,
+        last_error_code = NULL,
+        updated_at = excluded.updated_at
     `).run(
-      seal.chatId, seal.agentId, seal.model, seal.sourceApiVersion, seal.projectorVersion,
-      seal.sourceDescriptorHash, seal.sourceRevision, seal.carryOverRevision,
-      seal.contentEpoch,
-      seal.sourceCheckpoint?.durableCount ?? 0,
-      seal.sourceCheckpoint?.durableRevision ?? null,
-      seal.sourceCheckpoint?.durableCount ?? 0,
-      seal.sourceCheckpoint?.durableRevision ?? null,
-      seal.agentSessionId, seal.nativeSeedReceiptDigest,
-      seal.contentDigest, seal.sealedSourceKey, seal.operationEpoch, seal.operationSequence,
-      seal.messageCount, timestamp, timestamp, timestamp,
+      input.chatId,
+      input.transcriptViewId,
+      input.throughOrdinal,
+      input.rows.length > 0 ? 'indexed' : 'unsupported',
+      timestamp,
     );
-    db.query('DELETE FROM search_chunks WHERE chat_id = ?').run(seal.chatId);
-    db.query(`
-      INSERT INTO search_chunks(chat_id, content_epoch, message_ordinal, role, timestamp, body, entry_anchor)
-      SELECT ?, ?, message_ordinal, role, timestamp, body, entry_anchor
-      FROM temp_search_build ORDER BY message_ordinal
-    `).run(seal.chatId, seal.contentEpoch);
+    db.query('DELETE FROM search_chunks WHERE chat_id = ?').run(input.chatId);
+    insertRows(db, input.chatId, input.transcriptViewId, input.rows);
   });
 }
 
-export function appendChatFromStaging(db: Database, seal: SearchChatSeal): void {
-  const timestamp = nowIso();
+export function appendChatRows(
+  db: Database,
+  input: {
+    readonly chatId: string;
+    readonly transcriptViewId: string;
+    readonly expectedAfterOrdinal: number;
+    readonly throughOrdinal: number;
+    readonly rows: readonly HistoricalSearchMessageRow[];
+  },
+): void {
+  const state = getChatState(db, input.chatId);
+  if (!state || state.transcriptViewId !== input.transcriptViewId) {
+    throw new Error('SEARCH_VIEW_MISMATCH');
+  }
+  if (state.indexedThrough >= input.throughOrdinal) return;
+  if (state.indexedThrough !== input.expectedAfterOrdinal) throw new Error('SEARCH_INDEX_GAP');
+  const timestamp = new Date().toISOString();
   runTransaction(db, () => {
-    const current = db.query<{ contentEpoch: string | null }, [string]>(`
-      SELECT content_epoch AS contentEpoch FROM search_chat_state WHERE chat_id = ?
-    `).get(seal.chatId);
-    if (current?.contentEpoch !== seal.contentEpoch) {
-      throw new Error('SEARCH_CONTENT_EPOCH_MISMATCH');
-    }
+    insertRows(db, input.chatId, input.transcriptViewId, input.rows);
+    const searchable = Number(db.query<{ count: number }, [string]>(`
+      SELECT COUNT(*) AS count FROM search_chunks WHERE chat_id = ?
+    `).get(input.chatId)?.count ?? 0);
     db.query(`
-      INSERT INTO search_chunks(chat_id, content_epoch, message_ordinal, role, timestamp, body, entry_anchor)
-      SELECT ?, ?, message_ordinal, role, timestamp, body, entry_anchor
-      FROM temp_search_build ORDER BY message_ordinal
-    `).run(seal.chatId, seal.contentEpoch);
-    const searchable = Number(db.query<{ count: number }, [string, string]>(`
-      SELECT COUNT(*) AS count FROM search_chunks WHERE chat_id = ? AND content_epoch = ?
-    `).get(seal.chatId, seal.contentEpoch)?.count ?? 0);
-    db.query(`
-      UPDATE search_chat_state SET
-        agent_id = ?, model = ?, source_api_version = ?, projector_version = ?,
-        source_descriptor_hash = ?, source_revision = ?, carry_over_revision = ?,
-        indexed_durable_count = ?, indexed_durable_revision = ?,
-        target_durable_count = ?, target_durable_revision = ?,
-        agent_session_id = ?, native_seed_receipt_digest = ?, content_digest = ?,
-        sealed_source_key = ?, operation_epoch = ?, operation_sequence = ?,
-        message_count = ?, status = ?, last_error_code = NULL,
-        last_checked_at = ?, indexed_at = ?, updated_at = ?
-      WHERE chat_id = ? AND content_epoch = ?
+      UPDATE search_chat_state SET indexed_through = ?, status = ?,
+        last_error_code = NULL, updated_at = ?
+      WHERE chat_id = ? AND transcript_view_id = ?
     `).run(
-      seal.agentId, seal.model, seal.sourceApiVersion, seal.projectorVersion,
-      seal.sourceDescriptorHash, seal.sourceRevision, seal.carryOverRevision,
-      seal.sourceCheckpoint?.durableCount ?? 0,
-      seal.sourceCheckpoint?.durableRevision ?? null,
-      seal.sourceCheckpoint?.durableCount ?? 0,
-      seal.sourceCheckpoint?.durableRevision ?? null,
-      seal.agentSessionId, seal.nativeSeedReceiptDigest, seal.contentDigest,
-      seal.sealedSourceKey, seal.operationEpoch, seal.operationSequence,
-      seal.messageCount, searchable > 0 ? 'sealed' : 'unsupported',
-      timestamp, timestamp, timestamp, seal.chatId, seal.contentEpoch,
+      input.throughOrdinal,
+      searchable > 0 ? 'indexed' : 'unsupported',
+      timestamp,
+      input.chatId,
+      input.transcriptViewId,
     );
   });
+}
+
+export function markChatFailed(
+  db: Database,
+  chatId: string,
+  transcriptViewId: string,
+  errorCode: string,
+): void {
+  db.query(`
+    INSERT INTO search_chat_state(
+      chat_id, transcript_view_id, indexed_through, status, last_error_code, updated_at
+    ) VALUES (?, ?, 0, 'failed', ?, ?)
+    ON CONFLICT(chat_id) DO UPDATE SET status = 'failed',
+      last_error_code = excluded.last_error_code, updated_at = excluded.updated_at
+  `).run(chatId, transcriptViewId, errorCode, new Date().toISOString());
 }
 
 export function deleteChatRows(db: Database, chatId: string): void {
@@ -516,45 +300,12 @@ export function deleteChatRows(db: Database, chatId: string): void {
 }
 
 export function pruneMissingChats(db: Database, chatIds: readonly string[]): void {
-  const json = JSON.stringify([...new Set(chatIds)]);
   db.query(`
     DELETE FROM search_chat_state
     WHERE chat_id NOT IN (SELECT CAST(value AS TEXT) FROM json_each(?))
-  `).run(json);
+  `).run(JSON.stringify([...new Set(chatIds)]));
 }
 
 export function runIdleMaintenance(db: Database): void {
   db.exec('PRAGMA incremental_vacuum(2048)');
-}
-
-// Retains the benchmark helper while the production writer uses explicit v5 seals.
-export function replaceChatRows(
-  db: Database,
-  chatId: string,
-  generation: number,
-  sourceKey: string,
-  rows: HistoricalSearchMessageRow[],
-): boolean {
-  prepareChatBuild(db);
-  stageChatRows(db, rows);
-  sealChatFromStaging(db, {
-    chatId,
-    agentId: 'benchmark',
-    model: '',
-    sourceApiVersion: 1,
-    projectorVersion: 1,
-    sourceDescriptorHash: null,
-    sourceRevision: sourceKey,
-    contentEpoch: `benchmark:${sourceKey}`,
-    sourceCheckpoint: null,
-    carryOverRevision: 'carry-v1:0',
-    agentSessionId: null,
-    nativeSeedReceiptDigest: canonicalDigest(null),
-    contentDigest: sourceKey,
-    sealedSourceKey: sourceKey,
-    operationEpoch: 'benchmark',
-    operationSequence: generation,
-    messageCount: rows.length,
-  });
-  return true;
 }

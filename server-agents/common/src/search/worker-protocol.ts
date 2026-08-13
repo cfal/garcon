@@ -1,24 +1,15 @@
-import type { ChatMessage } from '@garcon/common/chat-types';
 import type {
   ChatSearchIndexStatus,
   ChatSearchQueryV1,
   ChatSearchResult,
   TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
-import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
-import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
-import type {
-  TranscriptSearchCatalogEntry,
-  TranscriptSearchCatalogSnapshot,
-  TranscriptSearchGeneration,
-} from './transcript-search-service.js';
-import { canonicalDigest } from './digest.js';
-
-export interface TranscriptIndexModuleRegistration {
-  readonly agentId: string;
-  readonly moduleUrl: string;
-  readonly apiVersion: 2;
-}
+import {
+  CHAT_SEARCH_MAX_TERMS,
+  CHAT_SEARCH_MAX_WORDS,
+  CHAT_SEARCH_MIN_PREFIX_CHARS,
+} from '@garcon/common/chat-search';
+import type { HistoricalSearchMessageRow } from './rows.js';
 
 interface RequestBase {
   readonly requestId: number;
@@ -26,97 +17,28 @@ interface RequestBase {
 }
 
 export type IndexerRequest =
+  | (RequestBase & { readonly type: 'open'; readonly dbPath: string })
   | (RequestBase & {
-      readonly type: 'open';
-      readonly operationEpoch: string;
-      readonly dbPath: string;
-      readonly scratchDirectory: string;
-      readonly modules: readonly TranscriptIndexModuleRegistration[];
-      readonly quarantines: readonly { readonly chatId: string; readonly sourceSignature: string }[];
+      readonly type: 'index-start';
+      readonly mode: 'replace' | 'append';
+      readonly chatId: string;
+      readonly transcriptViewId: string;
+      readonly expectedAfterOrdinal: number;
+      readonly throughOrdinal: number;
     })
   | (RequestBase & {
-      readonly type: 'catalog-chunk';
-      readonly generation: TranscriptSearchGeneration;
+      readonly type: 'index-chunk';
       readonly chunkIndex: number;
-      readonly chats: TranscriptSearchCatalogSnapshot['chats'];
+      readonly rows: readonly HistoricalSearchMessageRow[];
       readonly done: boolean;
     })
-  | (RequestBase & {
-      readonly type: 'source-dirty';
-      readonly chatId: string;
-      readonly generation: TranscriptSearchGeneration;
-    })
-  | (RequestBase & {
-      readonly type: 'delete-chat';
-      readonly chatId: string;
-      readonly generation: TranscriptSearchGeneration;
-    })
-  | (RequestBase & {
-      readonly type: 'carry-over-chunk';
-      readonly chunkIndex: number;
-      readonly revision: string;
-      readonly entries: readonly import('./transcript-search-service.js').TranscriptSearchCarryOverEntry[];
-      readonly done: boolean;
-      readonly code?: string;
-      readonly retryable?: boolean;
-    })
+  | (RequestBase & { readonly type: 'delete-chat'; readonly chatId: string })
+  | (RequestBase & { readonly type: 'prune-chats'; readonly chatIds: readonly string[] })
   | (RequestBase & { readonly type: 'close' });
 
 export type IndexerEvent =
   | (RequestBase & { readonly type: 'opened' | 'ack' | 'closed' })
-  | (RequestBase & {
-      readonly type: 'error';
-      readonly code: string;
-      readonly retryable: boolean;
-    })
-  | {
-      readonly type: 'progress';
-      readonly lifecycleEpoch: string;
-      readonly status: ChatSearchIndexStatus;
-      readonly queueDepth: number;
-      readonly oldestPendingMs: number;
-    }
-  | {
-      readonly type: 'source-status';
-      readonly lifecycleEpoch: string;
-      readonly chatId: string;
-      readonly agentId: string;
-      readonly generation: TranscriptSearchGeneration;
-      readonly state: 'sealed' | 'pending' | 'failed' | 'unsupported';
-      readonly errorCode: string | null;
-      readonly retryable: boolean | null;
-    }
-  | {
-      readonly type: 'refresh-source-reference';
-      readonly lifecycleEpoch: string;
-      readonly chatId: string;
-      readonly agentId: string;
-      readonly generation: TranscriptSearchGeneration;
-      readonly sourceDescriptorHash: string;
-      readonly reasonCode: string;
-      readonly retryAfterMs: number;
-    }
-  | {
-      readonly type: 'job-state';
-      readonly lifecycleEpoch: string;
-      readonly state: 'started' | 'finished';
-      readonly chatId: string;
-      readonly sourceSignature: string;
-    }
-  | {
-      readonly type: 'fatal';
-      readonly lifecycleEpoch: string;
-      readonly code: string;
-    }
-  | (RequestBase & {
-      readonly type: 'carry-over-open';
-      readonly chatId: string;
-      readonly expectedRevision: string;
-      readonly currentAgentId: string;
-      readonly currentModel: string;
-    })
-  | (RequestBase & { readonly type: 'carry-over-pull' })
-  | (RequestBase & { readonly type: 'carry-over-cancel' });
+  | (RequestBase & { readonly type: 'error'; readonly code: string; readonly retryable: boolean });
 
 export type ReaderRequest =
   | (RequestBase & { readonly type: 'open'; readonly dbPath: string })
@@ -160,15 +82,6 @@ function requestBase(value: unknown): UnknownRecord | null {
     : null;
 }
 
-function generation(value: unknown): boolean {
-  const candidate = record(value);
-  return Boolean(candidate)
-    && typeof candidate!.epoch === 'string'
-    && candidate!.epoch.length > 0
-    && Number.isSafeInteger(candidate!.sequence)
-    && Number(candidate!.sequence) > 0;
-}
-
 function failureCode(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value);
 }
@@ -191,43 +104,20 @@ function indexStatus(value: unknown): boolean {
 function searchResult(value: unknown): boolean {
   const candidate = record(value);
   if (!candidate
-      || typeof candidate.chatId !== 'string'
-      || candidate.chatId.length === 0
-      || typeof candidate.contentEpoch !== 'string'
-      || candidate.contentEpoch.length === 0
-      || typeof candidate.score !== 'number'
-      || !Number.isFinite(candidate.score)
+      || typeof candidate.chatId !== 'string' || candidate.chatId.length === 0
+      || typeof candidate.transcriptViewId !== 'string' || candidate.transcriptViewId.length === 0
+      || typeof candidate.score !== 'number' || !Number.isFinite(candidate.score)
       || !Number.isSafeInteger(candidate.matchedMessageCount)
       || Number(candidate.matchedMessageCount) < 0
-      || !Array.isArray(candidate.snippets)
-      || candidate.snippets.length > 3) return false;
+      || !Array.isArray(candidate.snippets) || candidate.snippets.length > 3) return false;
   return candidate.snippets.every((valueSnippet) => {
     const snippet = record(valueSnippet);
     return Boolean(snippet)
-      && Number.isSafeInteger(snippet!.messageOrdinal)
-      && Number(snippet!.messageOrdinal) >= 0
-      && searchAnchor(snippet!.anchor)
+      && Number.isSafeInteger(snippet!.ordinal) && Number(snippet!.ordinal) > 0
       && ['user', 'assistant', 'tool', 'system'].includes(String(snippet!.role))
       && (snippet!.timestamp === null || typeof snippet!.timestamp === 'string')
       && typeof snippet!.text === 'string';
   });
-}
-
-function searchAnchor(value: unknown): boolean {
-  const candidate = record(value);
-  if (!candidate) return false;
-  if (candidate.kind === 'carryover-entry') {
-    return typeof candidate.segmentId === 'string' && candidate.segmentId.length > 0
-      && Number.isSafeInteger(candidate.localOrdinal) && Number(candidate.localOrdinal) > 0;
-  }
-  if (candidate.kind === 'agent-switch') {
-    return typeof candidate.segmentId === 'string' && candidate.segmentId.length > 0;
-  }
-  return candidate.kind === 'current-entry'
-    && typeof candidate.agentOwnershipEpoch === 'string'
-    && candidate.agentOwnershipEpoch.length > 0
-    && typeof candidate.entryId === 'string'
-    && candidate.entryId.length > 0;
 }
 
 function allowedChats(value: unknown): value is TranscriptSearchAllowedChat[] {
@@ -235,14 +125,16 @@ function allowedChats(value: unknown): value is TranscriptSearchAllowedChat[] {
     const candidate = record(entry);
     return Boolean(candidate)
       && typeof candidate!.chatId === 'string' && candidate!.chatId.length > 0
-      && typeof candidate!.contentEpoch === 'string' && candidate!.contentEpoch.length > 0;
+      && typeof candidate!.transcriptViewId === 'string'
+      && candidate!.transcriptViewId.length > 0;
   });
 }
 
 function searchQuery(value: unknown): boolean {
   const candidate = record(value);
   if (!candidate || candidate.version !== 1
-      || !Array.isArray(candidate.clauses) || candidate.clauses.length > 16
+      || !Array.isArray(candidate.clauses)
+      || candidate.clauses.length > CHAT_SEARCH_MAX_TERMS
       || !jsonBytesWithin(candidate, 64 * 1024)) return false;
   let tokenCount = 0;
   for (const valueClause of candidate.clauses) {
@@ -250,7 +142,7 @@ function searchQuery(value: unknown): boolean {
     if (!clause || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
         || !Array.isArray(clause.tokens) || clause.tokens.length === 0) return false;
     tokenCount += clause.tokens.length;
-    if (tokenCount > 32) return false;
+    if (tokenCount > CHAT_SEARCH_MAX_WORDS) return false;
     for (const valueToken of clause.tokens) {
       const token = record(valueToken);
       if (!token || typeof token.text !== 'string' || typeof token.normalized !== 'string'
@@ -261,6 +153,15 @@ function searchQuery(value: unknown): boolean {
     }
   }
   return true;
+}
+
+function searchRow(value: unknown): boolean {
+  const row = record(value);
+  return Boolean(row)
+    && Number.isSafeInteger(row!.ordinal) && Number(row!.ordinal) > 0
+    && ['user', 'assistant', 'tool', 'system'].includes(String(row!.role))
+    && (row!.timestamp === null || typeof row!.timestamp === 'string')
+    && typeof row!.body === 'string';
 }
 
 export function workerRequestIdentity(
@@ -277,46 +178,27 @@ export function isIndexerRequest(value: unknown): value is IndexerRequest {
   if (!candidate) return false;
   switch (candidate.type) {
     case 'open':
-      return typeof candidate.operationEpoch === 'string'
-        && typeof candidate.dbPath === 'string'
-        && typeof candidate.scratchDirectory === 'string'
-        && Array.isArray(candidate.modules) && candidate.modules.length <= 256
-        && candidate.modules.every((entry) => {
-          const module = record(entry);
-          return Boolean(module)
-            && typeof module!.agentId === 'string'
-            && typeof module!.moduleUrl === 'string' && module!.moduleUrl.length <= 64 * 1024
-            && module!.apiVersion === 2;
-        })
-        && Array.isArray(candidate.quarantines) && candidate.quarantines.length <= 10_000
-        && candidate.quarantines.every((entry) => {
-          const quarantine = record(entry);
-          return Boolean(quarantine)
-            && typeof quarantine!.chatId === 'string'
-            && typeof quarantine!.sourceSignature === 'string';
-        });
-    case 'catalog-chunk':
-      return generation(candidate.generation)
-        && Number.isSafeInteger(candidate.chunkIndex)
-        && Array.isArray(candidate.chats) && candidate.chats.length <= 500
-        && jsonBytesWithin(candidate.chats, 8 * 1024 * 1024)
+      return typeof candidate.dbPath === 'string' && candidate.dbPath.length > 0;
+    case 'index-start':
+      return (candidate.mode === 'replace' || candidate.mode === 'append')
+        && typeof candidate.chatId === 'string' && candidate.chatId.length > 0
+        && typeof candidate.transcriptViewId === 'string' && candidate.transcriptViewId.length > 0
+        && Number.isSafeInteger(candidate.expectedAfterOrdinal)
+        && Number(candidate.expectedAfterOrdinal) >= 0
+        && Number.isSafeInteger(candidate.throughOrdinal)
+        && Number(candidate.throughOrdinal) >= Number(candidate.expectedAfterOrdinal);
+    case 'index-chunk':
+      return Number.isSafeInteger(candidate.chunkIndex) && Number(candidate.chunkIndex) >= 0
+        && Array.isArray(candidate.rows) && candidate.rows.length <= 250
+        && candidate.rows.every(searchRow)
+        && jsonBytesWithin(candidate.rows, 8 * 1024 * 1024)
         && typeof candidate.done === 'boolean';
-    case 'source-dirty':
     case 'delete-chat':
-      return typeof candidate.chatId === 'string' && candidate.chatId.length > 0
-        && generation(candidate.generation);
-    case 'carry-over-chunk':
-      return Number.isSafeInteger(candidate.chunkIndex)
-        && typeof candidate.revision === 'string'
-        && Array.isArray(candidate.entries) && candidate.entries.length <= 250
-        && candidate.entries.every((entry) => {
-          const carry = record(entry);
-          return Boolean(carry) && record(carry!.message) !== null && searchAnchor(carry!.anchor);
-        })
-        && jsonBytesWithin(candidate.entries, 8 * 1024 * 1024)
-        && typeof candidate.done === 'boolean'
-        && (candidate.code === undefined || failureCode(candidate.code))
-        && (candidate.retryable === undefined || typeof candidate.retryable === 'boolean');
+      return typeof candidate.chatId === 'string' && candidate.chatId.length > 0;
+    case 'prune-chats':
+      return Array.isArray(candidate.chatIds) && candidate.chatIds.length <= 10_000
+        && candidate.chatIds.every((chatId) => typeof chatId === 'string' && chatId.length > 0)
+        && jsonBytesWithin(candidate.chatIds, 8 * 1024 * 1024);
     case 'close':
       return true;
     default:
@@ -333,12 +215,10 @@ export function isReaderRequest(value: unknown): value is ReaderRequest {
     case 'search-start':
       return searchQuery(candidate.query)
         && Number.isSafeInteger(candidate.limit)
-        && Number(candidate.limit) >= 1
-        && Number(candidate.limit) <= 100;
+        && Number(candidate.limit) >= 1 && Number(candidate.limit) <= 100;
     case 'search-allowlist-chunk':
-      return Number.isSafeInteger(candidate.chunkIndex)
-        && allowedChats(candidate.allowedChats)
-        && candidate.allowedChats.length <= 2_000
+      return Number.isSafeInteger(candidate.chunkIndex) && Number(candidate.chunkIndex) >= 0
+        && allowedChats(candidate.allowedChats) && candidate.allowedChats.length <= 2_000
         && jsonBytesWithin(candidate.allowedChats, 8 * 1024 * 1024)
         && typeof candidate.done === 'boolean';
     case 'close':
@@ -349,57 +229,14 @@ export function isReaderRequest(value: unknown): value is ReaderRequest {
 }
 
 export function isIndexerEvent(value: unknown): value is IndexerEvent {
-  const candidate = record(value);
-  if (!candidate || typeof candidate.type !== 'string'
-      || typeof candidate.lifecycleEpoch !== 'string'
-      || candidate.lifecycleEpoch.length === 0) return false;
-  if (candidate.type === 'progress') {
-    return indexStatus(candidate.status)
-      && Number.isSafeInteger(candidate.queueDepth) && Number(candidate.queueDepth) >= 0
-      && typeof candidate.oldestPendingMs === 'number' && candidate.oldestPendingMs >= 0;
+  const candidate = requestBase(value);
+  if (!candidate) return false;
+  if (candidate.type === 'opened' || candidate.type === 'ack' || candidate.type === 'closed') {
+    return true;
   }
-  if (candidate.type === 'source-status') {
-    return typeof candidate.chatId === 'string'
-      && typeof candidate.agentId === 'string'
-      && generation(candidate.generation)
-      && ['sealed', 'pending', 'failed', 'unsupported'].includes(String(candidate.state))
-      && (candidate.errorCode === null || failureCode(candidate.errorCode))
-      && (candidate.retryable === null || typeof candidate.retryable === 'boolean');
-  }
-  if (candidate.type === 'refresh-source-reference') {
-    return typeof candidate.chatId === 'string'
-      && typeof candidate.agentId === 'string'
-      && typeof candidate.sourceDescriptorHash === 'string'
-      && /^[a-f0-9]{64}$/.test(candidate.sourceDescriptorHash)
-      && failureCode(candidate.reasonCode)
-      && generation(candidate.generation)
-      && typeof candidate.retryAfterMs === 'number' && candidate.retryAfterMs >= 0;
-  }
-  if (candidate.type === 'job-state') {
-    return (candidate.state === 'started' || candidate.state === 'finished')
-      && typeof candidate.chatId === 'string'
-      && typeof candidate.sourceSignature === 'string'
-      && /^[a-f0-9]{64}$/.test(candidate.sourceSignature);
-  }
-  if (candidate.type === 'fatal') return failureCode(candidate.code);
-  if (!requestBase(candidate)) return false;
-  switch (candidate.type) {
-    case 'opened':
-    case 'ack':
-    case 'closed':
-    case 'carry-over-pull':
-    case 'carry-over-cancel':
-      return true;
-    case 'error':
-      return failureCode(candidate.code) && typeof candidate.retryable === 'boolean';
-    case 'carry-over-open':
-      return typeof candidate.chatId === 'string'
-        && typeof candidate.expectedRevision === 'string'
-        && typeof candidate.currentAgentId === 'string'
-        && typeof candidate.currentModel === 'string';
-    default:
-      return false;
-  }
+  return candidate.type === 'error'
+    && failureCode(candidate.code)
+    && typeof candidate.retryable === 'boolean';
 }
 
 export function isReaderEvent(value: unknown): value is ReaderEvent {
@@ -413,31 +250,8 @@ export function isReaderEvent(value: unknown): value is ReaderEvent {
       return failureCode(candidate.code) && typeof candidate.retryable === 'boolean';
     case 'search-result':
       return Array.isArray(candidate.results) && candidate.results.length <= 100
-        && candidate.results.every(searchResult)
-        && indexStatus(candidate.index);
+        && candidate.results.every(searchResult) && indexStatus(candidate.index);
     default:
       return false;
   }
-}
-
-export function compareGeneration(
-  left: TranscriptSearchGeneration,
-  right: TranscriptSearchGeneration,
-): number | null {
-  if (left.epoch !== right.epoch) return null;
-  return left.sequence - right.sequence;
-}
-
-// The receipt enters the descriptor only as its digest: the indexer persists
-// this hash, so the form is fixed, and the digest keeps it bounded. Host and
-// worker must hash the identical shape or every refresh event is dropped at
-// the comparison in the host.
-export function nativeSeedReceiptDigest(receipt: NativeSeedReceipt | null): string {
-  return canonicalDigest(receipt);
-}
-
-export function catalogSourceDescriptorHash(entry: TranscriptSearchCatalogEntry): string | null {
-  return entry.source.state === 'ready'
-    ? canonicalDigest(entry.source.reference)
-    : null;
 }

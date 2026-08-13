@@ -56,7 +56,6 @@ import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
 import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
 import { migrateAgentIntegrationCoreRecords } from './agents/core-record-migration.js';
-import { toAgentChatReference } from './agents/integration-chat-reference.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
@@ -132,7 +131,6 @@ import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,
 } from './lib/http-route-types.js';
-import { TranscriptSearchCarryOverError } from '@garcon/server-agent-common/search/transcript-search-service';
 
 const logger = createLogger('server');
 
@@ -399,80 +397,11 @@ export async function startServer(): Promise<void> {
     const transcriptSearchService = new TranscriptSearchService({
       workspaceDirectory: workspaceDir,
       logger,
-      async openCarryOverStream(request) {
-        request.signal.throwIfAborted();
-        const entry = chatRegistry.getChat(request.chatId);
-        if (!entry || entry.carryOverMigrationQuarantine) {
-          throw new TranscriptSearchCarryOverError({
-            kind: 'transcript-search-carry-over-failure',
-            code: 'CARRY_OVER_UNAVAILABLE',
-            retryable: false,
-          });
-        }
-        const revision = carryOver.revision(
-          entry.carryOverSegments,
-          entry.carryOverMigrationQuarantine,
-        );
-        if (revision !== request.expectedRevision) {
-          throw new TranscriptSearchCarryOverError({
-            kind: 'transcript-search-carry-over-failure',
-            code: 'CARRY_OVER_REVISION_CHANGED',
-            retryable: true,
-          });
-        }
-        return {
-          revision,
-          batches: carryOver.streamSearchEntries({
-            refs: entry.carryOverSegments,
-            maxMessagesPerBatch: request.limits.maxMessagesPerBatch,
-            signal: request.signal,
-          }),
-        };
-      },
     });
     const chatSearch = new TranscriptSearchController({
-      integrations: integrationRegistry,
       service: transcriptSearchService,
-      persistContentEpoch: async (request) => {
-        const current = chatRegistry.getChat(request.chatId);
-        if (!current || current.agentOwnershipEpoch !== request.agentOwnershipEpoch) {
-          throw new Error('SEARCH_CONTENT_EPOCH_STALE_OWNER');
-        }
-        if (current.transcriptContentEpoch === request.contentEpoch) return;
-        await chatRegistry.updateChat(
-          request.chatId,
-          { transcriptContentEpoch: request.contentEpoch },
-          { flush: true },
-        );
-      },
-      // Runs at reconcile time, after startup wired the coordinator below.
-      reserveIdleTranscriptSnapshot: (chatId) => {
-        let reservation;
-        try {
-          reservation = queue.reserveTranscriptSnapshot(chatId);
-        } catch {
-          return null;
-        }
-        return () => queue.releaseTranscriptSnapshot(reservation);
-      },
-      listChats: () => Object.entries(chatRegistry.listAllChats()).flatMap(([chatId, session]) => {
-        const integration = integrationRegistry.get(session.agentId);
-        if (!integration) return [];
-        return [{
-          agentId: session.agentId,
-          reference: toAgentChatReference(
-            integration,
-            chatId,
-            session,
-            carryOver.revision(
-              session.carryOverSegments,
-              session.carryOverMigrationQuarantine,
-            ),
-          ),
-          updatedAt: metadata.getChatMetadata(chatId)?.lastActivity ?? null,
-          transcriptContentEpoch: session.transcriptContentEpoch,
-        }];
-      }),
+      ledger: transcriptLedger,
+      listChatIds: () => Object.keys(chatRegistry.listAllChats()),
     });
     try {
       await chatSearch.initialize(

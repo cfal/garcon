@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  compareGeneration,
   isIndexerEvent,
   isIndexerRequest,
   isReaderEvent,
@@ -10,28 +9,46 @@ import {
 const base = { requestId: 1, lifecycleEpoch: 'worker-epoch' };
 
 describe('transcript search Worker protocol', () => {
-  it('rejects malformed and oversized framed requests', () => {
+  it('accepts bounded ledger index frames', () => {
     expect(isIndexerRequest({
       ...base,
-      type: 'catalog-chunk',
-      generation: { epoch: 'operation', sequence: 1 },
+      type: 'index-start',
+      mode: 'append',
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      expectedAfterOrdinal: 2,
+      throughOrdinal: 3,
+    })).toBe(true);
+    expect(isIndexerRequest({
+      ...base,
+      type: 'index-chunk',
       chunkIndex: 0,
-      chats: Array.from({ length: 501 }, () => ({})),
+      rows: [{ ordinal: 3, role: 'assistant', timestamp: null, body: 'hello' }],
       done: true,
-    })).toBe(false);
+    })).toBe(true);
+  });
+
+  it('rejects malformed and oversized requests', () => {
     expect(isIndexerRequest({
       ...base,
-      type: 'carry-over-chunk',
+      type: 'index-chunk',
       chunkIndex: 0,
-      revision: 'carry-v1:1',
-      messages: Array.from({ length: 251 }, () => ({})),
+      rows: Array.from({ length: 251 }, (_, index) => ({
+        ordinal: index + 1,
+        role: 'assistant',
+        timestamp: null,
+        body: 'hello',
+      })),
       done: true,
     })).toBe(false);
     expect(isReaderRequest({
       ...base,
       type: 'search-allowlist-chunk',
       chunkIndex: 0,
-      allowedChatIds: Array.from({ length: 2_001 }, (_, index) => String(index)),
+      allowedChats: Array.from({ length: 2_001 }, (_, index) => ({
+        chatId: String(index),
+        transcriptViewId: 'view-1',
+      })),
       done: true,
     })).toBe(false);
     expect(isReaderRequest({
@@ -40,41 +57,26 @@ describe('transcript search Worker protocol', () => {
       query: { version: 1, clauses: [] },
       limit: 101,
     })).toBe(false);
+  });
+
+  it('validates result identities and event envelopes', () => {
+    expect(isIndexerEvent({ ...base, type: 'ack' })).toBe(true);
     expect(isReaderEvent({
       ...base,
       type: 'search-result',
-      results: [{ chatId: 'chat-1', score: Number.NaN, matchedMessageCount: 1, snippets: [] }],
+      results: [{
+        chatId: 'chat-1',
+        transcriptViewId: 'view-1',
+        score: 1,
+        matchedMessageCount: 1,
+        snippets: [{ ordinal: 2, role: 'assistant', timestamp: null, text: 'hello' }],
+      }],
       index: {
         indexedChatCount: 1,
         pendingChatCount: 0,
         failedChatCount: 0,
         unsupportedChatCount: 0,
       },
-    })).toBe(false);
-  });
-
-  it('validates lifecycle events and operation generations independently', () => {
-    expect(isIndexerEvent({
-      type: 'job-state',
-      lifecycleEpoch: 'worker-epoch',
-      state: 'started',
-      chatId: 'chat-1',
-      sourceSignature: 'a'.repeat(64),
     })).toBe(true);
-    expect(isIndexerEvent({
-      type: 'job-state',
-      lifecycleEpoch: 'worker-epoch',
-      state: 'started',
-      chatId: 'chat-1',
-      sourceSignature: 'not-a-digest',
-    })).toBe(false);
-    expect(compareGeneration(
-      { epoch: 'operation', sequence: 2 },
-      { epoch: 'operation', sequence: 1 },
-    )).toBeGreaterThan(0);
-    expect(compareGeneration(
-      { epoch: 'new-operation', sequence: 1 },
-      { epoch: 'old-operation', sequence: 10 },
-    )).toBeNull();
   });
 });

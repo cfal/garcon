@@ -342,7 +342,6 @@ export default function createChatRoutes({
   const commands = commandService;
   const searchRoutes = createChatSearchRoutes({
     registry,
-    agents,
     pathCache,
     chatListProjector,
     searchIndex,

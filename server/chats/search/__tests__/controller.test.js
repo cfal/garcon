@@ -1,336 +1,158 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { compositeSearchContentEpoch, TranscriptSearchController } from '../controller.js';
+import { UserMessage, AssistantMessage } from '../../../../common/chat-types.js';
+import { TranscriptSearchController } from '../controller.js';
 
-const emptyStatus = {
-  indexedChatCount: 0,
-  pendingChatCount: 0,
-  failedChatCount: 0,
-  unsupportedChatCount: 0,
-};
-
-function registration(agentId, chatId) {
+function userRow(viewId, ordinal, content) {
+  const message = new UserMessage('2026-08-10T10:00:00.000Z', content);
   return {
-    agentId,
-    reference: {
-      chatId,
-      projectPath: '/repo',
-      model: 'model',
-      nativeSession: null,
-      carryOverRevision: 'carry-v1:0',
-      agentOwnershipEpoch: `owner-${chatId}`,
-    },
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    transcriptContentEpoch: `segment-${chatId}`,
+    kind: 'user-input',
+    viewId,
+    ordinal,
+    at: message.timestamp,
+    detail: { clientMessageId: `message-${ordinal}`, message, attachments: [], steer: false },
+    providerMeta: null,
   };
 }
 
-function source(agentId, chatId) {
+function providerRow(viewId, ordinal, content) {
+  const message = new AssistantMessage('2026-08-10T10:00:01.000Z', content);
   return {
-    apiVersion: 2,
-    ownerId: agentId,
-    schemaVersion: 2,
-    checkpoint: {
-      chatId,
-      agentOwnershipEpoch: `owner-${chatId}`,
-      contentEpoch: `segment-${chatId}`,
-      durableCount: 0,
-      durableRevision: 'revision-empty',
-    },
-    value: { directory: '/tmp/projection' },
+    kind: 'provider-row',
+    viewId,
+    ordinal,
+    at: message.timestamp,
+    message,
+    providerMeta: null,
   };
 }
 
-function compositeEpoch(chatId) {
-  return compositeSearchContentEpoch({
-    carryOverRevision: 'carry-v1:0',
-    agentOwnershipEpoch: `owner-${chatId}`,
-    segmentContentEpoch: `segment-${chatId}`,
-  });
-}
-
-function integration(agentId, source = null) {
-  return {
-    descriptor: { id: agentId },
-    transcript: {
-      resolveIndexSource: mock(async () => ({ kind: 'ready', value: source })),
-      refreshIndexSource: mock(async () => ({ kind: 'ready', value: source })),
-    },
-  };
-}
-
-function createService(overrides = {}) {
-  return {
-    operationEpoch: () => 'operation-epoch',
-    setSourceRefreshHandler: mock(() => {}),
-    setCatalogRefreshHandler: mock(() => {}),
-    enable: mock(async () => {}),
-    reconcile: mock(async () => {}),
-    sourceMayHaveChanged: mock(() => {}),
-    deleteChat: mock(() => {}),
-    search: mock(async () => ({ results: [], index: emptyStatus })),
-    disableAndDelete: mock(async () => {}),
-    close: mock(async () => {}),
-    ...overrides,
-  };
-}
-
-function controllerFixture(integrations, registrations, service = createService()) {
-  const byId = new Map(integrations.map((entry) => [entry.descriptor.id, entry]));
-  const classes = integrations.map((entry) => ({
-    integrationId: entry.descriptor.id,
-    apiVersion: 4,
-    transcriptIndex: { apiVersion: 2, moduleUrl: import.meta.url },
-  }));
-  const persistContentEpoch = mock(async () => {});
-  const releases = [];
-  const reserveIdleTranscriptSnapshot = mock(() => {
-    const release = mock(async () => {});
-    releases.push(release);
-    return release;
-  });
-  return {
-    controller: new TranscriptSearchController({
-      integrations: {
-        classes: () => classes,
-        get: (agentId) => byId.get(agentId) ?? null,
+function harness() {
+  const views = new Map([['chat-1', { viewId: 'view-1', contentStartOrdinal: 1 }]]);
+  const rows = new Map([['chat-1', [
+    userRow('view-1', 1, 'hello'),
+    providerRow('view-1', 2, 'world'),
+  ]] ]);
+  let listener = null;
+  const service = {
+    setResyncHandler: mock(() => undefined),
+    enable: mock(async () => undefined),
+    replaceChat: mock(async () => undefined),
+    appendRows: mock(async () => undefined),
+    deleteChat: mock(async () => undefined),
+    pruneChats: mock(async () => undefined),
+    search: mock(async ({ allowedChats }) => ({
+      results: allowedChats.map(({ chatId, transcriptViewId }) => ({
+        chatId,
+        transcriptViewId,
+        score: 1,
+        matchedMessageCount: 1,
+        snippets: [],
+      })),
+      index: {
+        indexedChatCount: allowedChats.length,
+        pendingChatCount: 0,
+        failedChatCount: 0,
+        unsupportedChatCount: 0,
       },
-      listChats: () => registrations,
-      service,
-      persistContentEpoch,
-      reserveIdleTranscriptSnapshot,
-    }),
-    service,
-    persistContentEpoch,
-    reserveIdleTranscriptSnapshot,
-    releases,
+    })),
+    disableAndDelete: mock(async () => undefined),
+    close: mock(async () => undefined),
   };
+  const ledger = {
+    currentView: mock((chatId) => views.get(chatId) ?? null),
+    currentRows: mock((chatId) => rows.get(chatId) ?? []),
+    subscribe: mock((candidate) => {
+      listener = candidate;
+      return () => { listener = null; };
+    }),
+  };
+  const controller = new TranscriptSearchController({
+    listChatIds: () => [...views.keys()],
+    ledger,
+    service,
+  });
+  return { controller, ledger, listener: () => listener, rows, service, views };
 }
 
-function mirrorless(entry) {
-  return { ...entry, transcriptContentEpoch: null };
+async function settle() {
+  await Bun.sleep(0);
+  await Bun.sleep(0);
 }
 
 describe('TranscriptSearchController', () => {
-  it('cleans shared search storage while disabled', async () => {
-    const { controller, service } = controllerFixture([], []);
+  it('indexes each current ledger view when enabled', async () => {
+    const test = harness();
 
-    await controller.initialize(false);
+    await test.controller.initialize(true);
 
-    expect(service.disableAndDelete).toHaveBeenCalledWith(expect.any(AbortSignal));
-  });
-
-  it('awaits Worker admission but resolves sources in a background catalog build', async () => {
-    let release;
-    const blockedSource = new Promise((resolve) => { release = resolve; });
-    const provider = integration('claude');
-    provider.transcript.resolveIndexSource = mock(() => blockedSource);
-    const { controller, service } = controllerFixture([provider], [registration('claude', 'chat-1')]);
-
-    await controller.start();
-
-    expect(service.enable).toHaveBeenCalledWith({
-      modules: [{
-        agentId: 'claude',
-        reference: { apiVersion: 2, moduleUrl: import.meta.url },
-      }],
-      signal: expect.any(AbortSignal),
-    });
-    expect(service.reconcile).not.toHaveBeenCalled();
-    release({
-      kind: 'ready',
-      value: source('claude', 'chat-1'),
-    });
-    await Bun.sleep(10);
-    expect(service.reconcile).toHaveBeenCalledWith({
-      generation: { epoch: 'operation-epoch', sequence: 1 },
-      chats: [expect.objectContaining({
-        chatId: 'chat-1',
-        source: { state: 'ready', reference: expect.objectContaining({ ownerId: 'claude' }) },
-      })],
-    });
-    await controller.close();
-  });
-
-  it('sends only a targeted payload-free dirty hint', async () => {
-    const { controller, service } = controllerFixture(
-      [integration('claude')],
-      [registration('claude', 'chat-1')],
-    );
-    await controller.start();
-
-    controller.sourceMayHaveChanged('chat-1');
-    controller.sourceMayHaveChanged('missing');
-
-    expect(service.sourceMayHaveChanged).toHaveBeenCalledTimes(1);
-    expect(service.sourceMayHaveChanged).toHaveBeenCalledWith({
+    expect(test.service.replaceChat).toHaveBeenCalledWith({
       chatId: 'chat-1',
-      generation: { epoch: 'operation-epoch', sequence: 1 },
+      transcriptViewId: 'view-1',
+      throughOrdinal: 2,
+      rows: [
+        expect.objectContaining({ ordinal: 1, role: 'user', body: 'hello' }),
+        expect.objectContaining({ ordinal: 2, role: 'assistant', body: 'world' }),
+      ],
     });
-    await controller.close();
+    expect(test.service.pruneChats).toHaveBeenCalledWith(['chat-1']);
   });
 
-  it('forwards one global search and defensively filters its result', async () => {
-    const service = createService({
-      search: mock(async () => ({
-        results: [
-          { chatId: 'allowed', contentEpoch: compositeEpoch('allowed'), score: 2, matchedMessageCount: 1, snippets: [] },
-          { chatId: 'stale', contentEpoch: 'superseded-content-epoch', score: 1.5, matchedMessageCount: 1, snippets: [] },
-          { chatId: 'outside', contentEpoch: compositeEpoch('outside'), score: 1, matchedMessageCount: 1, snippets: [] },
-        ],
-        index: { ...emptyStatus, indexedChatCount: 1 },
-      })),
-    });
-    const providers = [
-      integration('claude', source('claude', 'allowed')),
-      integration('pi', source('pi', 'stale')),
-      integration('codex', source('codex', 'outside')),
-    ];
-    const { controller } = controllerFixture(
-      providers,
-      [
-        registration('claude', 'allowed'),
-        registration('pi', 'stale'),
-        registration('codex', 'outside'),
-      ],
-      service,
-    );
-    await controller.start();
-    await Bun.sleep(10);
+  it('indexes only the committed suffix during normal appends', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.appendRows.mockClear();
+    const row = providerRow('view-1', 3, 'later');
+    test.rows.get('chat-1').push(row);
 
-    const response = await controller.search({
-      query: 'needle',
-      allowedChatIds: ['allowed', 'stale'],
-    });
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [row] });
+    await settle();
 
-    expect(response.results.map((result) => result.chatId)).toEqual(['allowed']);
-    expect(service.search).toHaveBeenCalledWith(expect.objectContaining({
-      allowedChats: [
-        { chatId: 'allowed', contentEpoch: compositeEpoch('allowed') },
-        { chatId: 'stale', contentEpoch: compositeEpoch('stale') },
-      ],
-      limit: 20,
-      query: expect.objectContaining({ version: 1 }),
+    expect(test.service.appendRows).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      expectedAfterOrdinal: 2,
+      throughOrdinal: 3,
+      rows: [expect.objectContaining({ ordinal: 3, body: 'later' })],
+    });
+  });
+
+  it('replaces old-view entries before accepting new-view navigation', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.replaceChat.mockClear();
+    test.views.set('chat-1', { viewId: 'view-2', contentStartOrdinal: 1 });
+    test.rows.set('chat-1', [userRow('view-2', 1, 'reloaded')]);
+
+    test.listener()({
+      type: 'view-replaced',
+      chatId: 'chat-1',
+      previousViewId: 'view-1',
+      view: test.views.get('chat-1'),
+    });
+    await settle();
+
+    expect(test.controller.validateResultView('chat-1', 'view-1')).toBe(false);
+    expect(test.controller.validateResultView('chat-1', 'view-2')).toBe(true);
+    expect(test.service.replaceChat).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 'chat-1',
+      transcriptViewId: 'view-2',
     }));
-    await controller.close();
   });
 
-  it('deletes immediately and follows with a complete catalog', async () => {
-    const { controller, service } = controllerFixture(
-      [integration('claude')],
-      [registration('claude', 'chat-1')],
-    );
-    await controller.start();
+  it('qualifies searches by each current transcript view', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
 
-    controller.deleteChat('chat-1');
-
-    expect(service.deleteChat).toHaveBeenCalledWith({
-      chatId: 'chat-1',
-      generation: { epoch: 'operation-epoch', sequence: 1 },
+    const result = await test.controller.search({
+      query: 'hello',
+      allowedChatIds: ['chat-1', 'missing'],
     });
-    await controller.close();
-  });
 
-  it('caps concurrent source resolution per integration during the catalog sweep', async () => {
-    const inFlight = new Map();
-    const peaks = new Map();
-    const provider = (agentId) => {
-      const entry = integration(agentId);
-      entry.transcript.resolveIndexSource = mock(async ({ chat }) => {
-        inFlight.set(agentId, (inFlight.get(agentId) ?? 0) + 1);
-        peaks.set(agentId, Math.max(peaks.get(agentId) ?? 0, inFlight.get(agentId)));
-        await Bun.sleep(10);
-        inFlight.set(agentId, inFlight.get(agentId) - 1);
-        return { kind: 'ready', value: source(agentId, chat.chatId) };
-      });
-      return entry;
-    };
-    const registrations = ['claude', 'codex'].flatMap((agentId) => (
-      Array.from({ length: 6 }, (_, index) => registration(agentId, `${agentId}-${index}`))
-    ));
-    const { controller, service } = controllerFixture(
-      [provider('claude'), provider('codex')],
-      registrations,
-    );
-
-    await controller.start();
-    while (service.reconcile.mock.calls.length === 0) await Bun.sleep(5);
-
-    expect(peaks.get('claude')).toBeLessThanOrEqual(2);
-    expect(peaks.get('codex')).toBeLessThanOrEqual(2);
-    expect(service.reconcile.mock.calls[0][0].chats).toHaveLength(12);
-    await controller.close();
-  });
-
-  it('backfills a mirror-less chat only under the idle reservation', async () => {
-    const provider = integration('claude', source('claude', 'chat-1'));
-    const fixture = controllerFixture(
-      [provider],
-      [mirrorless(registration('claude', 'chat-1'))],
-    );
-
-    await fixture.controller.start();
-    while (fixture.service.reconcile.mock.calls.length === 0) await Bun.sleep(5);
-
-    expect(fixture.reserveIdleTranscriptSnapshot).toHaveBeenCalledWith('chat-1');
-    expect(fixture.releases).toHaveLength(1);
-    expect(fixture.releases[0]).toHaveBeenCalledTimes(1);
-    // The registry mirror flush happened while the reservation was held.
-    expect(fixture.persistContentEpoch).toHaveBeenCalledWith({
-      chatId: 'chat-1',
-      agentOwnershipEpoch: 'owner-chat-1',
-      contentEpoch: 'segment-chat-1',
-    });
-    const entry = fixture.service.reconcile.mock.calls[0][0].chats[0];
-    expect(entry.source.state).toBe('ready');
-    await fixture.controller.close();
-  });
-
-  it('defers a busy mirror-less chat as retryable without opening it', async () => {
-    const provider = integration('claude', source('claude', 'chat-1'));
-    const fixture = controllerFixture(
-      [provider],
-      [mirrorless(registration('claude', 'chat-1'))],
-    );
-    fixture.reserveIdleTranscriptSnapshot.mockImplementation(() => null);
-
-    await fixture.controller.start();
-    while (fixture.service.reconcile.mock.calls.length === 0) await Bun.sleep(5);
-
-    const entry = fixture.service.reconcile.mock.calls[0][0].chats[0];
-    expect(entry.source).toEqual({ state: 'failed', code: 'CHAT_BUSY', retryable: true });
-    expect(provider.transcript.resolveIndexSource).not.toHaveBeenCalled();
-    expect(fixture.persistContentEpoch).not.toHaveBeenCalled();
-    await fixture.controller.close();
-  });
-
-  it('resolves mirrored chats without acquiring a reservation', async () => {
-    const provider = integration('claude', source('claude', 'chat-1'));
-    const fixture = controllerFixture([provider], [registration('claude', 'chat-1')]);
-
-    await fixture.controller.start();
-    while (fixture.service.reconcile.mock.calls.length === 0) await Bun.sleep(5);
-
-    expect(fixture.reserveIdleTranscriptSnapshot).not.toHaveBeenCalled();
-    expect(fixture.service.reconcile.mock.calls[0][0].chats[0].source.state).toBe('ready');
-    await fixture.controller.close();
-  });
-
-  it('reports failed admission as retryable and permits a later retry', async () => {
-    const service = createService();
-    service.enable.mockImplementationOnce(async () => {
-      throw new Error('reader unavailable');
-    });
-    const { controller } = controllerFixture([], [], service);
-
-    await expect(controller.start()).rejects.toThrow('reader unavailable');
-    await expect(controller.search({ query: 'needle', allowedChatIds: [] }))
-      .rejects.toMatchObject({
-        code: 'SEARCH_INDEX_UNAVAILABLE',
-        retryable: true,
-      });
-    await controller.start();
-
-    expect(service.enable).toHaveBeenCalledTimes(2);
-    await controller.close();
+    expect(test.service.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1' }],
+    }));
+    expect(result.results).toEqual([
+      expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'view-1' }),
+    ]);
   });
 });

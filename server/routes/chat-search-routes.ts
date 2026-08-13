@@ -5,8 +5,6 @@ import type {
   ChatSearchResponse,
 } from '../../common/chat-search.js';
 import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
-import type { AgentRegistryServiceContract } from '../agents/registry.js';
-import { archivedLogicalCount } from '../chats/carryover-segments.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -21,7 +19,7 @@ const MAX_SEARCH_CHAT_ID_CHARS = 512;
 
 export interface ChatSearchDep {
   catalogMayHaveChanged(chatId?: string): void;
-  validateResultEpoch(chatId: string, contentEpoch: string): boolean;
+  validateResultView(chatId: string, transcriptViewId: string): boolean;
   search(options: {
     query: string;
     textTokens?: string[];
@@ -35,7 +33,6 @@ export interface ChatSearchDep {
 
 interface ChatSearchRouteDeps {
   registry: IChatRegistry;
-  agents: Pick<AgentRegistryServiceContract, 'verifyProjectionEntry'>;
   pathCache: {
     resolveProjectPaths(projectPaths: string[]): Promise<
       Map<string, { available: boolean; effectiveProjectKey: string | null }>
@@ -49,7 +46,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   postSearchChats(body: unknown): Promise<Response>;
   postSearchNavigate(body: unknown): Promise<Response>;
 } {
-  const { registry, agents, pathCache, chatListProjector, searchIndex } = deps;
+  const { registry, pathCache, chatListProjector, searchIndex } = deps;
 
   async function postSearchChats(body: unknown): Promise<Response> {
     try {
@@ -83,33 +80,17 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
     }
   }
 
-  // Resolves one search snippet to a browser seq under the current composite
-  // content epoch. A result that raced a reset, handoff, or carryover change
-  // is rejected as stale so the client requeries instead of scrolling to a
-  // possibly reused ordinal; ordinary tail append preserves navigation.
   async function postSearchNavigate(body: unknown): Promise<Response> {
     try {
       const request = parseSearchNavigateRequest(body);
       const session = registry.getChat(request.chatId);
       if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-      if (!searchIndex?.validateResultEpoch(request.chatId, request.contentEpoch)) {
+      if (!searchIndex?.validateResultView(request.chatId, request.transcriptViewId)) {
         return jsonError('The search result no longer matches the chat', 409, 'SEARCH_RESULT_STALE');
-      }
-      if (request.anchor.kind === 'current-entry') {
-        const verified = request.anchor.agentOwnershipEpoch === session.agentOwnershipEpoch
-          && await agents.verifyProjectionEntry(
-            session,
-            request.chatId,
-            request.messageOrdinal - archivedLogicalCount(session.carryOverSegments),
-            request.anchor.entryId,
-          );
-        if (!verified) {
-          return jsonError('The search result no longer matches the chat', 409, 'SEARCH_RESULT_STALE');
-        }
       }
       return Response.json({
         chatId: request.chatId,
-        ordinal: request.messageOrdinal,
+        ordinal: request.ordinal,
       } satisfies ChatSearchNavigateResponse);
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
@@ -121,34 +102,19 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
 
 function parseSearchNavigateRequest(body: unknown): ChatSearchNavigateRequest {
   const raw = body && typeof body === 'object' ? body as Record<string, unknown> : null;
-  const anchor = raw?.anchor && typeof raw.anchor === 'object'
-    ? raw.anchor as Record<string, unknown>
-    : null;
-  const anchorKind = anchor?.kind;
-  const validAnchor = anchor !== null && (
-    (anchorKind === 'carryover-entry'
-      && typeof anchor.segmentId === 'string'
-      && Number.isSafeInteger(anchor.localOrdinal))
-    || (anchorKind === 'agent-switch' && typeof anchor.segmentId === 'string')
-    || (anchorKind === 'current-entry'
-      && typeof anchor.agentOwnershipEpoch === 'string'
-      && typeof anchor.entryId === 'string')
-  );
   if (
     !raw
     || typeof raw.chatId !== 'string' || raw.chatId.length === 0
-    || typeof raw.contentEpoch !== 'string' || raw.contentEpoch.length === 0
-    || !Number.isSafeInteger(raw.messageOrdinal)
-    || (raw.messageOrdinal as number) < 1
-    || !validAnchor
+    || typeof raw.transcriptViewId !== 'string' || raw.transcriptViewId.length === 0
+    || !Number.isSafeInteger(raw.ordinal)
+    || (raw.ordinal as number) < 1
   ) {
     throw new ValidationDomainError('Invalid search navigation request');
   }
   return {
     chatId: raw.chatId,
-    contentEpoch: raw.contentEpoch,
-    messageOrdinal: raw.messageOrdinal as number,
-    anchor: raw.anchor as ChatSearchNavigateRequest['anchor'],
+    transcriptViewId: raw.transcriptViewId,
+    ordinal: raw.ordinal as number,
   };
 }
 

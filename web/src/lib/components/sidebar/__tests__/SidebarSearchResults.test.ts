@@ -160,17 +160,12 @@ describe('SidebarSearchResults', () => {
 	it('renders a transcript snippet for matching chats', () => {
 		const transcriptMatch: ChatSearchResult = {
 			chatId: 'chat-1',
-			contentEpoch: 'content-1',
+			transcriptViewId: 'view-1',
 			score: 1,
 			matchedMessageCount: 1,
 			snippets: [
 				{
-					messageOrdinal: 3,
-					anchor: {
-						kind: 'current-entry',
-						agentOwnershipEpoch: 'owner-1',
-						entryId: 'entry-3',
-					},
+					ordinal: 3,
 					role: 'assistant',
 					timestamp: '2025-01-01T00:00:00.000Z',
 					text: 'Found the deployment token rotation detail',
