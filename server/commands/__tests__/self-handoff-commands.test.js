@@ -26,17 +26,11 @@ function sourceChat(overrides = {}) {
   };
 }
 
-function harness({ source = sourceChat(), capture } = {}) {
+function harness({ source = sourceChat() } = {}) {
   const chats = new Map([[SOURCE_ID, source]]);
   const added = [];
-  const captured = capture ?? {
-    segments: [
-      ...source.carryOverSegments,
-      { id: 'seg-new', agentId: 'claude', model: 'opus', storedMessageCount: 4 },
-    ],
-    prepared: { releaseRoot: mock(() => undefined), discard: mock(async () => undefined) },
-    assertUnchanged: mock(async () => undefined),
-  };
+  const seedContinuationLedger = mock(() => ({ viewId: 'source-view', ordinal: 4 }));
+  const deleteContinuationLedger = mock(() => undefined);
   const scheduled = [];
   const support = {
     deps: {
@@ -56,7 +50,13 @@ function harness({ source = sourceChat(), capture } = {}) {
           record: { key: 'k', chatId: input.chatId, turnId: input.turnId, status: 'accepted' },
         })),
       },
-      handoffs: { captureContinuationSegments: mock(async () => captured) },
+      handoffs: { seedContinuationLedger, deleteContinuationLedger },
+      ownership: {
+        delete: mock(async (id) => {
+          chats.delete(id);
+          deleteContinuationLedger(id);
+        }),
+      },
       queue: { ownsExecution: mock(() => false) },
       settings: {
         ensureInNormal: mock(async () => undefined),
@@ -90,7 +90,7 @@ function harness({ source = sourceChat(), capture } = {}) {
       return { status: 'accepted', turnId: 'turn-1' };
     }),
   };
-  return { commands: new SelfHandoffCommands(support), support, chats, added, scheduled, captured };
+  return { commands: new SelfHandoffCommands(support), support, chats, added, scheduled };
 }
 
 function request(overrides = {}) {
@@ -105,8 +105,8 @@ function request(overrides = {}) {
 }
 
 describe('self handoff commands', () => {
-  it('creates a target under the same agent carrying the captured segments', async () => {
-    const { commands, added, captured, support } = harness();
+  it('creates a target under the same agent after seeding its ledger', async () => {
+    const { commands, added, support } = harness();
 
     const response = await commands.submitSelfHandoffRun(request());
 
@@ -116,16 +116,15 @@ describe('self handoff commands', () => {
     expect(target.agentId).toBe('claude');
     expect(target.model).toBe('opus');
     expect(target.projectPath).toBe('/workspace');
-    expect(target.carryOverSegments).toEqual(captured.segments);
-    // A fresh provider session is what makes the target seed itself from the
-    // projection on its first turn.
+    expect(target.carryOverSegments).toEqual([]);
     expect(target.agentSessionId).toBeNull();
     expect(target.nativeSession).toBeNull();
     expect(target.nativeSeedReceipt).toBeNull();
     expect(target.agentOwnershipEpoch).not.toBe('epoch-1');
-    expect(captured.prepared.releaseRoot).toHaveBeenCalledTimes(1);
-    expect(support.deps.handoffs.captureContinuationSegments.mock.calls[0][0].target)
-      .toEqual({ agentId: 'claude', model: 'opus' });
+    expect(support.deps.handoffs.seedContinuationLedger).toHaveBeenCalledWith({
+      sourceChatId: SOURCE_ID,
+      targetChatId: TARGET_ID,
+    });
   });
 
   it('leaves the source chat untouched', async () => {
@@ -149,15 +148,14 @@ describe('self handoff commands', () => {
     expect(scheduled[0].input.command).toBe('keep going on the auth fix');
   });
 
-  it('discards the prepared segment when registration fails', async () => {
-    const { commands, support, captured } = harness();
+  it('deletes the prepared ledger when registration fails', async () => {
+    const { commands, support } = harness();
     support.deps.chats.addChat = mock(() => false);
 
     await expect(commands.submitSelfHandoffRun(request())).rejects.toMatchObject({
       code: 'IDEMPOTENCY_CONFLICT',
     });
-    expect(captured.prepared.discard).toHaveBeenCalledTimes(1);
-    expect(captured.prepared.releaseRoot).not.toHaveBeenCalled();
+    expect(support.deps.handoffs.deleteContinuationLedger).toHaveBeenCalledWith(TARGET_ID);
   });
 
   it('recreates and schedules after a retryable pre-schedule failure', async () => {
@@ -201,7 +199,7 @@ describe('self handoff commands', () => {
   });
 
   it('rolls back a target that fails after it was registered', async () => {
-    const { commands, support, chats, captured } = harness();
+    const { commands, support, chats } = harness();
     // The window between `addChat` publishing the target and `#createContinuation`
     // returning. Compensation has to cover it, or the failed handoff strands a
     // half-built chat in the registry.
@@ -214,16 +212,12 @@ describe('self handoff commands', () => {
     expect(chats.has(TARGET_ID)).toBeFalse();
     expect(support.deps.settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_ID);
     expect(support.deps.settings.removeSessionName).toHaveBeenCalledWith(TARGET_ID);
-    // Discarding while the target still referenced the segment would have left
-    // the registry entry pointing at deleted pages. The writer root still has to
-    // go, or every later sweep retains the segment for the process lifetime.
-    expect(captured.prepared.discard).not.toHaveBeenCalled();
-    expect(captured.prepared.releaseRoot).toHaveBeenCalledTimes(1);
+    expect(support.deps.handoffs.deleteContinuationLedger).toHaveBeenCalledWith(TARGET_ID);
   });
 
   it('keeps a surviving target named rather than orphaning it', async () => {
-    const { commands, support, chats, captured } = harness();
-    support.deps.chats.removeChat = mock(async () => {
+    const { commands, support, chats } = harness();
+    support.deps.ownership.delete = mock(async () => {
       throw new Error('registry write failed');
     });
     support.deps.settings.ensureInNormal = mock(async () => {
@@ -237,8 +231,6 @@ describe('self handoff commands', () => {
     expect(chats.has(TARGET_ID)).toBeTrue();
     expect(support.deps.settings.removeFromAllOrderLists).not.toHaveBeenCalled();
     expect(support.deps.settings.removeSessionName).not.toHaveBeenCalled();
-    // A failed cleanup step must not strand the lease either.
-    expect(captured.prepared.releaseRoot).toHaveBeenCalledTimes(1);
   });
 
   it('finishes clearing the name after the placement removal fails', async () => {
@@ -255,15 +247,15 @@ describe('self handoff commands', () => {
     expect(support.deps.settings.removeSessionName).toHaveBeenCalledWith(TARGET_ID);
   });
 
-  it('discards the prepared segment when it fails before registering', async () => {
-    const { commands, captured, chats } = harness();
-    captured.assertUnchanged = mock(async () => {
+  it('deletes the prepared ledger when seeding fails before registering', async () => {
+    const { commands, support, chats } = harness();
+    support.deps.handoffs.seedContinuationLedger = mock(() => {
       throw new Error('source changed');
     });
 
     await expect(commands.submitSelfHandoffRun(request())).rejects.toThrow('source changed');
 
-    expect(captured.prepared.discard).toHaveBeenCalled();
+    expect(support.deps.handoffs.deleteContinuationLedger).not.toHaveBeenCalled();
     expect(chats.has(TARGET_ID)).toBeFalse();
   });
 
@@ -386,13 +378,13 @@ describe('self handoff commands', () => {
     expect(added).toHaveLength(0);
   });
 
-  it('refuses a quarantined source rather than continuing empty history', async () => {
+  it('continues an adopted source even when its legacy carryover is quarantined', async () => {
     const { commands } = harness({
       source: sourceChat({ carryOverMigrationQuarantine: { artifactId: 'a', errorCode: 'E' } }),
     });
 
-    await expect(commands.submitSelfHandoffRun(request())).rejects.toMatchObject({
-      code: 'TRANSCRIPT_UNAVAILABLE',
+    await expect(commands.submitSelfHandoffRun(request())).resolves.toMatchObject({
+      chat: { id: TARGET_ID },
     });
   });
 

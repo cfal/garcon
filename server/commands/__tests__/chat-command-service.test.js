@@ -689,6 +689,13 @@ function makeService(overrides = {}) {
   };
   const handoffs = { ...defaultHandoffs, ...overrides.handoffs };
   const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
+  const transcripts = overrides.transcripts ?? {
+    currentView: mock(() => null),
+    highWatermark: mock(() => ({ viewId: 'view-1', ordinal: 0 })),
+    rowsThrough: mock(() => []),
+    initializeChat: mock(() => ({ viewId: 'view-2' })),
+    deleteChat: mock(() => undefined),
+  };
   const chatListProjector = {
     buildOne: mock((chatId) => {
       const chat = sessions.get(chatId);
@@ -727,7 +734,7 @@ function makeService(overrides = {}) {
     chatListProjector,
     pathCache,
     forkChatFileCopy,
-    carryOver,
+    transcripts,
     ownership,
     handoffs,
     transientFeeds: overrides.transientFeeds ?? {

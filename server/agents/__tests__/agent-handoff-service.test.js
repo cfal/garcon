@@ -61,6 +61,32 @@ function context() {
 }
 
 describe('AgentHandoffService', () => {
+  it('copies a frozen conversational prefix into a target ledger', () => {
+    const ledger = {
+      currentView: mock(() => null),
+      highWatermark: mock(() => ({ viewId: 'view-1', ordinal: 3 })),
+      rowsThrough: mock(() => [
+        { kind: 'user-input', at: 't1', detail: { message: { type: 'user-message' } } },
+        { kind: 'notice', at: 't2', message: 'ignored', detail: {} },
+        { kind: 'provider-row', at: 't3', message: { type: 'assistant-message' }, providerMeta: {} },
+      ]),
+      initializeChat: mock(() => ({})),
+      deleteChat: mock(() => {}),
+    };
+    const service = createService({ ledger });
+
+    const watermark = service.seedContinuationLedger({
+      sourceChatId: 'source',
+      targetChatId: 'target',
+    });
+
+    expect(watermark).toEqual({ viewId: 'view-1', ordinal: 3 });
+    expect(ledger.initializeChat).toHaveBeenCalledWith('target', [
+      expect.objectContaining({ kind: 'user-input', providerMeta: null }),
+      expect.objectContaining({ kind: 'provider-row', providerMeta: null }),
+    ], 3);
+  });
+
   it('closes, checkpoints, decides, and rolls ownership forward in order', async () => {
     const current = sourceChat();
     const calls = [];

@@ -61,7 +61,14 @@ export function createRouteChatListProjector({ registry, settings, metadata, age
         : null;
     },
   };
-  return new ChatListProjector({ registry, settings, metadata, processing, pathCache });
+  return new ChatListProjector({
+    registry,
+    settings,
+    metadata,
+    processing,
+    pathCache,
+    canReloadFromNativeHistory: () => false,
+  });
 }
 
 export function createRouteCommandService({
@@ -79,6 +86,13 @@ export function createRouteCommandService({
   ownership,
   transientFeeds,
 }) {
+  const transcripts = {
+    currentView: () => null,
+    highWatermark: () => ({ viewId: 'view-1', ordinal: 0 }),
+    rowsThrough: () => [],
+    initializeChat: () => ({ viewId: 'view-2' }),
+    deleteChat: () => undefined,
+  };
   return new ChatCommandService({
     chats: registry,
     queue,
@@ -114,6 +128,12 @@ export function createRouteCommandService({
 			prepare: async () => undefined,
 			compensate: async () => undefined,
 		}),
+		seedContinuationLedger: ({ sourceChatId, targetChatId }) => {
+			const watermark = transcripts.highWatermark(sourceChatId);
+			transcripts.initializeChat(targetChatId, [], 1);
+			return watermark;
+		},
+		deleteContinuationLedger: (chatId) => transcripts.deleteChat(chatId),
 	},
     fileMentions: { resolve: async (command) => command },
     ownership: ownership ?? {
@@ -157,5 +177,6 @@ export function createRouteCommandService({
 		},
 	},
     forkChatFileCopy: forkChatFileCopyOverride ?? forkChatFileCopy,
+    transcripts,
   });
 }

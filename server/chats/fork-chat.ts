@@ -6,12 +6,10 @@ import type {
 } from '../agents/session-types.js';
 import { extractFirstLine } from '../lib/text.js';
 import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
-import type {
-  CarryOverTranscriptStore,
-} from './carryover-transcript-store.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
-import { CommandValidationError } from '../lib/command-validation-error.js';
+import type { TranscriptLedgerService } from '../ledger/service.js';
+import { frozenConversationDrafts } from '../ledger/projection.js';
 
 const logger = createLogger('chats:fork');
 
@@ -28,11 +26,6 @@ interface ForkChatMetadata {
   addNewChatMetadata(chatId: string, firstMessage: string): void;
 }
 
-type ForkChatCarryOver = Pick<
-  CarryOverTranscriptStore,
-  'assertAvailable' | 'logicalMessageCount' | 'resolveCutoff'
->;
-
 interface ForkChatInput {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
@@ -41,9 +34,11 @@ interface ForkChatInput {
   registry: IChatRegistry;
   settings: ForkChatSettings;
   metadata: ForkChatMetadata;
-  carryOver: ForkChatCarryOver;
+  ledger: Pick<
+    TranscriptLedgerService,
+    'currentView' | 'highWatermark' | 'rowsThrough' | 'initializeChat' | 'deleteChat'
+  >;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
-  getViewCursor(chatId: string): { lastSeq: number } | null;
   forkAgentSession: (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
@@ -100,36 +95,35 @@ export async function forkChatFileCopy({
   registry,
   settings,
   metadata,
-  carryOver,
+  ledger,
   ownership,
-  getViewCursor,
   forkAgentSession,
   discardForkedAgentSession,
 }: ForkChatInput): Promise<ForkChatFileCopyResult> {
   const startedAt = Date.now();
   const sourceAgentSessionId = sourceSession.agentSessionId;
   const targetEpoch = crypto.randomUUID();
-  const sourceSegments = sourceSession.carryOverSegments;
-  await carryOver.assertAvailable(sourceSegments);
-  const sourceArchivedCount = carryOver.logicalMessageCount(sourceSegments);
-  let selectedArchivedCount = sourceArchivedCount;
-  let targetSegments = sourceSegments;
-  if (upToSequence !== undefined && upToSequence <= sourceArchivedCount) {
-    selectedArchivedCount = upToSequence;
-    targetSegments = carryOver.resolveCutoff(sourceSegments, upToSequence);
+  const sourceView = ledger.currentView(sourceChatId);
+  if (!sourceView) {
+    throw new DomainError('TRANSCRIPT_UNAVAILABLE', 'Source transcript is unavailable', 422);
   }
-  const selectedNativeCount = upToSequence === undefined
-    ? null
-    : upToSequence - selectedArchivedCount;
-  if (selectedNativeCount !== null && selectedNativeCount > 0 && !sourceAgentSessionId) {
+  const sourceWatermark = ledger.highWatermark(sourceChatId);
+  const selectedOrdinal = upToSequence ?? sourceWatermark.ordinal;
+  if (!Number.isSafeInteger(selectedOrdinal)
+      || selectedOrdinal < 0
+      || selectedOrdinal > sourceWatermark.ordinal) {
     throw new DomainError(
       'TRANSCRIPT_UNAVAILABLE',
       'Fork message is outside the source transcript',
       422,
     );
   }
+  const selectedWatermark = { viewId: sourceWatermark.viewId, ordinal: selectedOrdinal };
+  const frozenRows = frozenConversationDrafts(
+    ledger.rowsThrough(sourceChatId, selectedWatermark),
+  );
   const needsNativeFork = Boolean(sourceAgentSessionId)
-    && (selectedNativeCount === null || selectedNativeCount > 0);
+    && selectedOrdinal >= sourceView.contentStartOrdinal;
   let forkOutcome: ForkedAgentSessionOutcome | null = null;
   try {
     if (needsNativeFork) {
@@ -143,26 +137,40 @@ export async function forkChatFileCopy({
   } catch (error) {
     throw error;
   }
-  if (needsNativeFork && !forkOutcome) {
-    throw new Error(`Failed to create fork target for chat ${targetChatId}`);
-  }
-  if (
-    forkOutcome?.kind === 'unmaterialized'
-    && (getViewCursor(sourceChatId)?.lastSeq ?? 0)
-      > selectedArchivedCount
-  ) {
-    // Empty-snapshot forks succeed only when the user cannot see anything the child would lose;
-    // otherwise the provider transcript is still flushing and the fork is retryable.
-    throw new CommandValidationError(
-      'TRANSCRIPT_NOT_YET_PERSISTED',
-      "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
-      409,
-      true,
-    );
-  }
   const nativeFork = forkOutcome?.kind === 'materialized' ? forkOutcome.session : null;
   try {
     validateForkedSeedReceipt(sourceSession, nativeFork);
+  } catch (error) {
+    const cleanupErrors = await discardForkResources(
+      nativeFork,
+      sourceSession.agentId,
+      discardForkedAgentSession,
+    );
+    if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors]);
+    throw error;
+  }
+
+  if (ledger.currentView(targetChatId)) {
+    const error = new Error(`Chat ID collision: ${targetChatId}`);
+    const cleanupErrors = await discardForkResources(
+      nativeFork,
+      sourceSession.agentId,
+      discardForkedAgentSession,
+    );
+    if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors], error.message);
+    throw error;
+  }
+  const contentStartOrdinal = frozenRows.length + 1;
+  try {
+    ledger.initializeChat(targetChatId, [
+      ...frozenRows,
+      ...(nativeFork ? [{
+        kind: 'session' as const,
+        at: new Date().toISOString(),
+        detail: nativeFork,
+        providerMeta: null,
+      }] : []),
+    ], contentStartOrdinal);
   } catch (error) {
     const cleanupErrors = await discardForkResources(
       nativeFork,
@@ -194,11 +202,12 @@ export async function forkChatFileCopy({
       permissionMode: sourceSession.permissionMode,
       thinkingMode: sourceSession.thinkingMode,
       agentSettingsById: { ...sourceSession.agentSettingsById },
-      carryOverSegments: targetSegments,
+      carryOverSegments: [],
       nativeSeedReceipt: nativeFork?.nativeSeedReceipt ?? null,
-      carryOverMigrationQuarantine: sourceSession.carryOverMigrationQuarantine,
+      carryOverMigrationQuarantine: null,
     });
   } catch (error) {
+    ledger.deleteChat(targetChatId);
     const cleanupErrors = await discardForkResources(
       nativeFork,
       sourceSession.agentId,
@@ -209,6 +218,7 @@ export async function forkChatFileCopy({
   }
   if (!created) {
     const error = new Error(`Chat ID collision: ${targetChatId}`);
+    ledger.deleteChat(targetChatId);
     const cleanupErrors = await discardForkResources(
       nativeFork,
       sourceSession.agentId,
@@ -277,7 +287,7 @@ export async function forkChatFileCopy({
     agentId: sourceSession.agentId,
     kind: nativeFork ? 'native' : 'lazy',
     point: upToSequence ?? null,
-    carryOverMessages: selectedArchivedCount,
+    copiedRows: frozenRows.length,
     durationMs: Date.now() - startedAt,
   });
 

@@ -3,37 +3,20 @@ import type {
   AgentHandoffRequest,
 } from '../../common/chat-command-contracts.js';
 import type { AgentCatalogEntry } from '../../common/agents.js';
-import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { DirectInputPreparationContext } from '../chat-execution/types.js';
 import type {
   AgentHandoffIntent,
   AgentOwnershipJournal,
 } from '../chats/agent-ownership-journal.js';
-import {
-  CarryOverTranscriptError,
-  type CarryOverTranscriptStore,
-  type PreparedCarryOverSegment,
-} from '../chats/carryover-transcript-store.js';
-import type {
-  CarryOverSegmentRef,
-  ChatRegistryEntry,
-  IChatRegistry,
-} from '../chats/store.js';
-import {
-  carryOverRevision,
-  emptyEraId,
-  handoffSegmentId,
-  reconcileArchivedTail,
-} from '../chats/carryover-segments.js';
-import type { SeedSanitationOutcome } from '../chats/carryover-segment-types.js';
+import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import type { IntegrationRegistry } from './integration-registry.js';
-import { toAgentChatReference } from './integration-chat-reference.js';
 import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
-import type { ProjectionCaptureService } from './projection-capture.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
+import type { TranscriptWatermark } from '../ledger/contracts.js';
+import { frozenConversationDrafts } from '../ledger/projection.js';
 
 const logger = createLogger('agents:handoff');
 
@@ -51,158 +34,32 @@ export class AgentHandoffService {
     readonly catalog: {
       getAgentCatalogEntry(agentId: string): Promise<AgentCatalogEntry | null>;
     };
-    readonly carryOver: CarryOverTranscriptStore;
-    readonly capture: ProjectionCaptureService;
     readonly ownership: AgentOwnershipJournal;
     readonly ledger: TranscriptLedgerService;
     readonly onCommitted?: (chatId: string) => void | Promise<void>;
   }) {}
 
-  // Archives a chat's live provider era into immutable segments and returns the
-  // refs a continuation should inherit. Shared with `/handoff`, which continues
-  // under the same agent in a new chat rather than switching owner in place, so
-  // both paths capture the source identically and only differ in what they do
-  // with the result. The caller owns the returned handle and must release or
-  // discard it, exactly as the in-place handoff does around its commit.
-  async captureContinuationSegments(input: {
-    readonly chatId: string;
-    readonly source: ChatRegistryEntry;
-    readonly target: { readonly agentId: string; readonly model: string };
-    readonly operationId: string;
-    readonly clientRequestId: string;
-    readonly signal: AbortSignal;
-  }): Promise<{
-    readonly segments: readonly CarryOverSegmentRef[];
-    readonly prepared: PreparedCarryOverSegment | null;
-    // Re-asserts that the provider transcript still matches what was captured.
-    // Resolves immediately when the source had no session to capture.
-    assertUnchanged(signal: AbortSignal): Promise<void>;
-  }> {
-    const source = input.source;
-    const integration = this.deps.integrations.get(source.agentId);
-    if (!integration) {
+  seedContinuationLedger(input: {
+    readonly sourceChatId: string;
+    readonly targetChatId: string;
+  }): TranscriptWatermark {
+    if (this.deps.ledger.currentView(input.targetChatId)) {
       throw new DomainError(
-        'SOURCE_TRANSCRIPT_UNAVAILABLE',
-        'The source agent integration is unavailable.',
-        422,
+        'IDEMPOTENCY_CONFLICT',
+        `Session already exists: ${input.targetChatId}`,
+        409,
       );
     }
-    await this.deps.carryOver.assertAvailable(source.carryOverSegments, input.signal);
-    const reference = toAgentChatReference(
-      integration,
-      input.chatId,
-      source,
-      this.deps.carryOver.revision(
-        source.carryOverSegments,
-        source.carryOverMigrationQuarantine,
-      ),
+    const watermark = this.deps.ledger.highWatermark(input.sourceChatId);
+    const rows = frozenConversationDrafts(
+      this.deps.ledger.rowsThrough(input.sourceChatId, watermark),
     );
-    const snapshot = source.agentSessionId
-      ? await this.deps.capture.loadStable({
-          chatId: input.chatId,
-          integration,
-          reference,
-          signal: input.signal,
-        })
-      : null;
-    const sanitized = sanitizeRecordedCarriedContext({
-      messages: snapshot?.messages ?? [],
-      receipt: source.nativeSeedReceipt,
-      agentSessionId: source.agentSessionId,
-    });
-    if (sanitized.kind === 'mismatch') {
-      throw new DomainError(
-        'CONTEXT_ENVELOPE_MISMATCH',
-        'The recorded carried-context envelope does not match this native session.',
-        422,
-      );
-    }
-
-    const staged = await this.#prepareCarryOver({
-      chatId: input.chatId,
-      source,
-      target: input.target,
-      operationId: input.operationId,
-      clientRequestId: input.clientRequestId,
-      messages: sanitized.messages,
-      seedSanitation: sanitized.kind,
-      signal: input.signal,
-    });
-    return {
-      segments: staged.segments,
-      prepared: staged.prepared,
-      assertUnchanged: async (signal) => {
-        if (!snapshot) return;
-        await this.deps.capture.assertRevision({
-          integration,
-          reference,
-          expectedRevision: snapshot.revision,
-          signal,
-        });
-      },
-    };
+    this.deps.ledger.initializeChat(input.targetChatId, rows, rows.length + 1);
+    return watermark;
   }
 
-  async #prepareCarryOver(input: {
-    readonly chatId: string;
-    readonly source: ChatRegistryEntry;
-    readonly target: { readonly agentId: string; readonly model: string };
-    readonly operationId: string;
-    readonly clientRequestId: string;
-    readonly messages: readonly import('../../common/chat-types.js').ChatMessage[];
-    readonly seedSanitation: SeedSanitationOutcome;
-    readonly signal: AbortSignal;
-  }): Promise<{
-    readonly segments: readonly CarryOverSegmentRef[];
-    readonly prepared: PreparedCarryOverSegment | null;
-  }> {
-    const capturedAt = new Date().toISOString();
-    let segments = reconcileArchivedTail(
-      input.source.carryOverSegments,
-      { agentId: input.source.agentId, model: input.source.model },
-      () => emptyEraId(input.chatId, input.operationId),
-      capturedAt,
-    );
-    const segmentId = handoffSegmentId(input.chatId, input.clientRequestId);
-    const trailingHandoff = { agentId: input.target.agentId, model: input.target.model };
-    let prepared: PreparedCarryOverSegment | null = null;
-    if (input.messages.length > 0) {
-      prepared = await this.deps.carryOver.prepareSegment({
-        operationId: input.operationId,
-        id: segmentId,
-        seedSanitation: input.seedSanitation,
-        messages: input.messages,
-        signal: input.signal,
-      });
-      try {
-        await prepared.commit();
-        const ref: CarryOverSegmentRef = {
-          id: prepared.id,
-          agentId: input.source.agentId,
-          model: input.source.model,
-          capturedAt,
-          storedMessageCount: prepared.messageCount,
-          visibleMessageCount: prepared.messageCount,
-          trailingHandoff,
-        };
-        await this.deps.carryOver.verifySegment(ref, input.signal);
-        segments = [...segments, ref];
-      } catch (error) {
-        await prepared.discard().catch(() => undefined);
-        throw error;
-      }
-    } else if (input.source.agentSessionId || segments.length > 0) {
-      segments = [...segments, {
-        id: segmentId,
-        agentId: input.source.agentId,
-        model: input.source.model,
-        capturedAt,
-        storedMessageCount: 0,
-        visibleMessageCount: 0,
-        trailingHandoff,
-      }];
-    }
-    return { segments, prepared };
+  deleteContinuationLedger(chatId: string): void {
+    this.deps.ledger.deleteChat(chatId);
   }
 
   async resolveTarget(input: {
@@ -217,7 +74,6 @@ export class AgentHandoffService {
         409,
       );
     }
-    assertCarryOverAvailable(input.chat);
     const requested = input.handoff.target;
     if (requested.agentId === input.chat.agentId) {
       throw new DomainError(
@@ -386,7 +242,7 @@ export class AgentHandoffService {
             await this.#notifyCommitted(input.chatId);
             return;
           }
-          throw mapCarryOverError(error);
+          throw error;
         }
       },
       compensate: async () => {
@@ -472,19 +328,12 @@ async function retryHandoffStep<T>(label: string, operation: () => Promise<T>): 
 interface OwnershipFence {
   readonly agentId: string;
   readonly agentOwnershipEpoch: string;
-  readonly agentSessionId: string | null;
-  readonly carryOverRevision: string;
 }
 
 function ownershipFence(entry: ChatRegistryEntry): OwnershipFence {
   return {
     agentId: entry.agentId,
     agentOwnershipEpoch: entry.agentOwnershipEpoch,
-    agentSessionId: entry.agentSessionId,
-    carryOverRevision: carryOverRevision(
-      entry.carryOverSegments,
-      entry.carryOverMigrationQuarantine,
-    ),
   };
 }
 
@@ -493,12 +342,7 @@ function matchesOwnershipFence(
   expected: OwnershipFence,
 ): boolean {
   return entry?.agentId === expected.agentId
-    && entry.agentOwnershipEpoch === expected.agentOwnershipEpoch
-    && entry.agentSessionId === expected.agentSessionId
-    && carryOverRevision(
-      entry.carryOverSegments,
-      entry.carryOverMigrationQuarantine,
-    ) === expected.carryOverRevision;
+    && entry.agentOwnershipEpoch === expected.agentOwnershipEpoch;
 }
 
 function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
@@ -540,29 +384,6 @@ function assertSupported(values: readonly string[], value: string, label: string
       422,
     );
   }
-}
-
-function assertCarryOverAvailable(entry: ChatRegistryEntry): void {
-  if (!entry.carryOverMigrationQuarantine) return;
-  throw new DomainError(
-    'CARRYOVER_HISTORY_UNAVAILABLE',
-    'Archived chat history is unavailable.',
-    422,
-    false,
-  );
-}
-
-function mapCarryOverError(error: unknown): unknown {
-  if (error instanceof CarryOverTranscriptError) {
-    return new DomainError(
-      'INTERNAL_ERROR',
-      'The archived chat history could not be prepared.',
-      500,
-      false,
-      { cause: error },
-    );
-  }
-  return error;
 }
 
 export function resolvedRunOptions(target: ResolvedAgentHandoffTarget): {

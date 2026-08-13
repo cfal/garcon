@@ -1,9 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
-
-import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
+import { UserMessage, AssistantMessage } from '../../../common/chat-types.js';
 import { forkChatFileCopy } from '../fork-chat.js';
+import { transcriptViewId } from '../../ledger/contracts.js';
 
-const HEAD_ID = '11111111-1111-4111-8111-111111111111';
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 
 function sourceSession(overrides = {}) {
@@ -13,10 +12,7 @@ function sourceSession(overrides = {}) {
     agentSessionId: 'source-native',
     nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'source-native' } },
     agentOwnershipEpoch: 'source-epoch',
-    agentSettingsById: {
-      test: envelope('test', { mode: 'careful' }),
-      other: envelope('other', { retained: true }),
-    },
+    agentSettingsById: { test: envelope('test', { mode: 'careful' }) },
     model: 'model-a',
     apiProviderId: 'provider-a',
     modelEndpointId: 'endpoint-a',
@@ -50,6 +46,27 @@ function makeDeps(overrides = {}) {
     }),
     flush: mock(async () => undefined),
   };
+  const targetViews = new Set();
+  const rows = [
+    userRow(1, 'first'),
+    providerRow(2, 'answer'),
+    userRow(3, 'second'),
+  ];
+  const ledger = {
+    currentView: mock((chatId) => targetViews.has(chatId)
+      ? { viewId: `view-${chatId}`, contentStartOrdinal: 1 }
+      : chatId === 'source-chat'
+        ? { viewId: 'source-view', contentStartOrdinal: 1 }
+        : null),
+    highWatermark: mock(() => ({ viewId: transcriptViewId('source-view'), ordinal: rows.length })),
+    rowsThrough: mock((_chatId, watermark) => rows.slice(0, watermark.ordinal)),
+    initializeChat: mock((chatId, drafts, contentStartOrdinal) => {
+      targetViews.add(chatId);
+      return { viewId: `view-${chatId}`, drafts, contentStartOrdinal };
+    }),
+    deleteChat: mock((chatId) => targetViews.delete(chatId)),
+    ...overrides.ledger,
+  };
   const settings = {
     getChatName: mock(() => 'Source title'),
     ensureInNormal: mock(async () => undefined),
@@ -62,18 +79,12 @@ function makeDeps(overrides = {}) {
     getChatMetadata: mock(() => ({ firstMessage: 'First prompt' })),
     addNewChatMetadata: mock(() => undefined),
   };
-  const carryOver = {
-    assertAvailable: mock(async () => undefined),
-    logicalMessageCount: mock(() => 0),
-    resolveCutoff: mock((refs) => refs),
-    ...overrides.carryOver,
-  };
   const ownership = overrides.ownership ?? {
     delete: mock(async (chatId) => {
       sessions.delete(chatId);
+      ledger.deleteChat(chatId);
     }),
   };
-  const getViewCursor = overrides.getViewCursor ?? mock(() => null);
   const forkAgentSession = overrides.forkAgentSession ?? mock(async () => ({
     kind: 'materialized',
     session: {
@@ -82,204 +93,31 @@ function makeDeps(overrides = {}) {
       nativeSeedReceipt: null,
     },
   }));
-  const discardForkedAgentSession = overrides.discardForkedAgentSession
-    ?? mock(async () => undefined);
   return {
     registry,
     settings,
     metadata,
-    carryOver,
+    ledger,
     ownership,
-    getViewCursor,
     forkAgentSession,
-    discardForkedAgentSession,
+    discardForkedAgentSession: overrides.discardForkedAgentSession
+      ?? mock(async () => undefined),
     sessions,
   };
 }
 
 describe('forkChatFileCopy', () => {
-  it('shares whole archived segments without creating pages or a provider session', async () => {
-    const refs = [segmentRef()];
-    const deps = makeDeps({
-      source: sourceSession({
-        agentSessionId: null,
-        nativeSession: null,
-        carryOverSegments: refs,
-      }),
-      carryOver: { logicalMessageCount: mock(() => 3) },
+  it('builds the frozen target ledger before registering the chat', async () => {
+    const deps = makeDeps({ source: sourceSession({ agentSessionId: null, nativeSession: null }) });
+    const order = [];
+    deps.ledger.initializeChat.mockImplementation((...args) => {
+      order.push('ledger');
+      return { viewId: 'target-view', args };
     });
-
-    const result = await forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      ...deps,
-    });
-
-    expect(result.agentSessionId).toBeNull();
-    expect(deps.forkAgentSession).not.toHaveBeenCalled();
-    expect(deps.sessions.get('target-chat')).toMatchObject({
-      agentSessionId: null,
-      nativeSession: null,
-      carryOverSegments: refs,
-      agentOwnershipEpoch: expect.any(String),
-    });
-  });
-
-  it('slices references for a point inside archived history without writing a prefix artifact', async () => {
-    const quarantine = { artifactId: 'legacy', errorCode: 'INVALID_CARRYOVER_ENTRY' };
-    const refs = [segmentRef({ storedMessageCount: 4, visibleMessageCount: 4 })];
-    const selected = [segmentRef({
-      storedMessageCount: 4,
-      visibleMessageCount: 2,
-      trailingHandoff: null,
-    })];
-    const deps = makeDeps({
-      source: sourceSession({ carryOverSegments: refs, carryOverMigrationQuarantine: quarantine }),
-      carryOver: {
-        logicalMessageCount: mock(() => 4),
-        resolveCutoff: mock(() => selected),
-      },
-    });
-
-    const result = await forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      upToSequence: 2,
-      ...deps,
-    });
-
-    expect(result.agentSessionId).toBeNull();
-    expect(deps.forkAgentSession).not.toHaveBeenCalled();
-    expect(deps.sessions.get('target-chat')).toMatchObject({
-      carryOverSegments: selected,
-      carryOverMigrationQuarantine: quarantine,
-    });
-  });
-
-  it('keeps a lazy whole child when an unmaterialized fork loses no visible native messages', async () => {
-    const deps = makeDeps({
-      source: sourceSession({ carryOverSegments: [segmentRef()] }),
-      carryOver: { logicalMessageCount: mock(() => 2) },
-      getViewCursor: mock(() => ({ lastSeq: 2 })),
-      forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
-    });
-
-    const result = await forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      ...deps,
-    });
-
-    expect(result.agentSessionId).toBeNull();
-    expect(deps.sessions.get('target-chat')).toMatchObject({
-      agentSessionId: null,
-      nativeSession: null,
-      carryOverSegments: [segmentRef()],
-    });
-  });
-
-  it('refuses an unmaterialized provider fork when the source view has native messages', async () => {
-    const deps = makeDeps({
-      getViewCursor: mock(() => ({ lastSeq: 1 })),
-      forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
-    });
-
-    await expect(forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      ...deps,
-    })).rejects.toMatchObject({
-      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
-      status: 409,
-      retryable: true,
-    });
-
-    expect(deps.registry.addChat).not.toHaveBeenCalled();
-  });
-
-  it('rejects a point beyond archived history when no native session exists', async () => {
-    const deps = makeDeps({
-      source: sourceSession({
-        agentSessionId: null,
-        nativeSession: null,
-        carryOverSegments: [segmentRef()],
-      }),
-      carryOver: { logicalMessageCount: mock(() => 2) },
-    });
-
-    await expect(forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      upToSequence: 3,
-      ...deps,
-    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', status: 422 });
-
-    expect(deps.registry.addChat).not.toHaveBeenCalled();
-  });
-
-  it('translates a combined point into a native provider fork and preserves settings', async () => {
-    const deps = makeDeps({
-      source: sourceSession({ carryOverSegments: [segmentRef()] }),
-      carryOver: { logicalMessageCount: mock(() => 2) },
-    });
-
-    const result = await forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      upToSequence: 3,
-      ...deps,
-    });
-
-    expect(result).toMatchObject({
-      sourceChatId: 'source-chat',
-      chatId: 'target-chat',
-      agentId: 'test',
-      agentSessionId: 'target-native',
-    });
-    expect(deps.forkAgentSession).toHaveBeenCalledWith({
-      sourceSession: expect.objectContaining({ agentSessionId: 'source-native' }),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      messageSequence: 3,
-    });
-    expect(deps.sessions.get('target-chat')).toMatchObject({
-      agentId: 'test',
-      agentSessionId: 'target-native',
-      carryOverSegments: [segmentRef()],
-      model: 'model-a',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'high',
-      agentSettingsById: {
-        test: envelope('test', { mode: 'careful' }),
-        other: envelope('other', { retained: true }),
-      },
-    });
-  });
-
-  it('retargets and persists an exact provider seed receipt', async () => {
-    const sourceReceipt = createNativeSeedReceipt({
-      agentSessionId: 'source-native',
-      placement: 'user-prefix',
-      prefix: 'seed',
-    });
-    const targetReceipt = { ...sourceReceipt, agentSessionId: 'target-native' };
-    const deps = makeDeps({
-      source: sourceSession({ carryOverSegments: [segmentRef()], nativeSeedReceipt: sourceReceipt }),
-      carryOver: { logicalMessageCount: mock(() => 2) },
-      forkAgentSession: mock(async () => ({
-        kind: 'materialized',
-        session: {
-          agentSessionId: 'target-native',
-          nativeSession: { ownerId: 'test', schemaVersion: 1, value: {} },
-          nativeSeedReceipt: targetReceipt,
-        },
-      })),
+    deps.registry.addChat.mockImplementation((entry) => {
+      order.push('registry');
+      deps.sessions.set(entry.id, entry);
+      return true;
     });
 
     await forkChatFileCopy({
@@ -289,41 +127,100 @@ describe('forkChatFileCopy', () => {
       ...deps,
     });
 
-    expect(deps.sessions.get('target-chat').nativeSeedReceipt).toEqual(targetReceipt);
+    expect(order).toEqual(['ledger', 'registry']);
+    expect(deps.ledger.initializeChat).toHaveBeenCalledWith(
+      'target-chat',
+      [expect.objectContaining({ kind: 'user-input' }),
+        expect.objectContaining({ kind: 'provider-row' }),
+        expect.objectContaining({ kind: 'user-input' })],
+      4,
+    );
+    expect(deps.sessions.get('target-chat')).toMatchObject({
+      agentSessionId: null,
+      carryOverSegments: [],
+    });
   });
 
-  it('rejects and discards a fork with an invalid provider seed receipt', async () => {
-    const sourceReceipt = createNativeSeedReceipt({
-      agentSessionId: 'source-native',
-      placement: 'user-prefix',
-      prefix: 'seed',
+  it('copies only rows through the selected ordinal', async () => {
+    const deps = makeDeps({ source: sourceSession({ agentSessionId: null, nativeSession: null }) });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToSequence: 2,
+      ...deps,
     });
+
+    expect(deps.ledger.rowsThrough).toHaveBeenCalledWith('source-chat', {
+      viewId: 'source-view',
+      ordinal: 2,
+    });
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
+  });
+
+  it('does not fork the current native session for a point in the frozen prefix', async () => {
     const deps = makeDeps({
-      source: sourceSession({ carryOverSegments: [segmentRef()], nativeSeedReceipt: sourceReceipt }),
-      forkAgentSession: mock(async () => ({
-        kind: 'materialized',
-        session: {
-          agentSessionId: 'target-native',
-          nativeSession: { ownerId: 'test', schemaVersion: 1, value: {} },
-          nativeSeedReceipt: { ...sourceReceipt, agentSessionId: 'wrong-session' },
-        },
-      })),
+      ledger: {
+        currentView: mock((chatId) => chatId === 'source-chat'
+          ? { viewId: 'source-view', contentStartOrdinal: 3 }
+          : null),
+      },
     });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToSequence: 2,
+      ...deps,
+    });
+
+    expect(deps.forkAgentSession).not.toHaveBeenCalled();
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
+  });
+
+  it('materializes a native session while retaining the ledger prefix', async () => {
+    const deps = makeDeps();
+
+    const result = await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToSequence: 2,
+      ...deps,
+    });
+
+    expect(result.agentSessionId).toBe('target-native');
+    expect(deps.forkAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+      messageSequence: 2,
+    }));
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'user-input' }),
+      expect.objectContaining({ kind: 'provider-row' }),
+      expect.objectContaining({ kind: 'session' }),
+    ]);
+    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(3);
+  });
+
+  it('rejects a point beyond the ledger watermark before creating artifacts', async () => {
+    const deps = makeDeps();
 
     await expect(forkChatFileCopy({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
+      upToSequence: 4,
       ...deps,
-    })).rejects.toThrow('invalid carried-context receipt');
+    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', status: 422 });
 
-    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
-    expect(deps.registry.addChat).not.toHaveBeenCalled();
+    expect(deps.forkAgentSession).not.toHaveBeenCalled();
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
   });
 
-  it('discards a native fork when the registry target collides', async () => {
+  it('deletes an orphan target ledger when registry publication fails', async () => {
     const deps = makeDeps();
-    deps.sessions.set('target-chat', sourceSession({ id: 'target-chat' }));
+    deps.registry.addChat.mockReturnValue(false);
 
     await expect(forkChatFileCopy({
       sourceSession: deps.sessions.get('source-chat'),
@@ -332,48 +229,11 @@ describe('forkChatFileCopy', () => {
       ...deps,
     })).rejects.toThrow('Chat ID collision');
 
+    expect(deps.ledger.deleteChat).toHaveBeenCalledWith('target-chat');
     expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
   });
 
-  it('rolls back a point-fork target when target setup fails', async () => {
-    const failure = new Error('settings failed');
-    const selected = [segmentRef({ visibleMessageCount: 2, trailingHandoff: null })];
-    const deps = makeDeps({
-      source: sourceSession({ carryOverSegments: [segmentRef()] }),
-      carryOver: {
-        logicalMessageCount: mock(() => 4),
-        resolveCutoff: mock(() => selected),
-      },
-      settings: { setSessionName: mock(async () => { throw failure; }) },
-    });
-
-    await expect(forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      upToSequence: 2,
-      ...deps,
-    })).rejects.toBe(failure);
-
-    expect(deps.ownership.delete).toHaveBeenCalledWith('target-chat');
-  });
-
-  it('uses and advances the persisted source fork ordinal', async () => {
-    const deps = makeDeps({ source: sourceSession({ nextForkOrdinal: 4 }) });
-
-    await forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      ...deps,
-    });
-
-    expect(deps.settings.setSessionName).toHaveBeenCalledWith('target-chat', 'Source title (4)');
-    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(5);
-    expect(deps.sessions.get('target-chat').nextForkOrdinal).toBe(1);
-  });
-
-  it('rolls back every durable target side effect idempotently', async () => {
+  it('rolls back registry, ledger, presentation, and native artifacts once', async () => {
     const deps = makeDeps({ source: sourceSession({ nextForkOrdinal: 3 }) });
     const result = await forkChatFileCopy({
       sourceSession: deps.sessions.get('source-chat'),
@@ -390,18 +250,30 @@ describe('forkChatFileCopy', () => {
     expect(deps.ownership.delete).toHaveBeenCalledOnce();
     expect(deps.settings.removeFromAllOrderLists).toHaveBeenCalledOnce();
     expect(deps.settings.removeSessionName).toHaveBeenCalledOnce();
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
   });
 });
 
-function segmentRef(overrides = {}) {
+function userRow(ordinal, content) {
+  const message = new UserMessage('2026-08-07T12:00:00.000Z', content);
   return {
-    id: HEAD_ID,
-    agentId: 'test',
-    model: 'model-a',
-    capturedAt: '2026-08-07T12:00:00.000Z',
-    storedMessageCount: 2,
-    visibleMessageCount: 2,
-    trailingHandoff: { agentId: 'other', model: 'model-b' },
-    ...overrides,
+    kind: 'user-input',
+    viewId: transcriptViewId('source-view'),
+    ordinal,
+    at: message.timestamp,
+    detail: { clientMessageId: `message-${ordinal}`, message, attachments: [], steer: false },
+    providerMeta: null,
+  };
+}
+
+function providerRow(ordinal, content) {
+  const message = new AssistantMessage('2026-08-07T12:00:00.000Z', content);
+  return {
+    kind: 'provider-row',
+    viewId: transcriptViewId('source-view'),
+    ordinal,
+    at: message.timestamp,
+    message,
+    providerMeta: { native: true },
   };
 }

@@ -2,6 +2,7 @@ export * from './adoption.js';
 export * from './contracts.js';
 export * from './errors.js';
 export * from './presentation.js';
+export * from './projection.js';
 export * from './reload.js';
 export * from './service.js';
 export * from './store.js';

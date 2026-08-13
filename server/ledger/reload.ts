@@ -11,6 +11,7 @@ import { DomainError } from '../lib/domain-error.js';
 import type { LedgerRow, LedgerRowDraft, TranscriptView } from './contracts.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import { TranscriptLedgerService } from './service.js';
+import { frozenConversationDrafts } from './projection.js';
 
 interface ReloadExecutionPort {
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
@@ -87,9 +88,10 @@ export class TranscriptReloadService {
     }
 
     this.options.ledger.closeProducer(chatId);
-    const prefix = this.options.ledger.currentRows(chatId)
-      .filter((row) => row.ordinal < current.contentStartOrdinal)
-      .flatMap(frozenDraft);
+    const prefix = frozenConversationDrafts(
+      this.options.ledger.currentRows(chatId)
+        .filter((row) => row.ordinal < current.contentStartOrdinal),
+    );
     const sessionDraft: LedgerRowDraft = {
       kind: 'session',
       at: session.at,
@@ -165,16 +167,6 @@ export class TranscriptReloadService {
       this.#now,
     ));
   }
-}
-
-function frozenDraft(row: LedgerRow): readonly LedgerRowDraft[] {
-  if (row.kind === 'user-input') {
-    return [{ kind: 'user-input', at: row.at, detail: row.detail, providerMeta: null }];
-  }
-  if (row.kind === 'provider-row') {
-    return [{ kind: 'provider-row', at: row.at, message: row.message, providerMeta: null }];
-  }
-  return [];
 }
 
 function importedDraft(

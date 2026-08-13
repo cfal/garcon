@@ -17,6 +17,7 @@ import type {
   IChatRegistry,
 } from './store.js';
 import { carryOverRevision } from './carryover-segments.js';
+import type { TranscriptLedgerService } from '../ledger/service.js';
 
 const logger = createLogger('chats:ownership-journal');
 export const AGENT_OWNERSHIP_JOURNAL_VERSION = 5 as const;
@@ -66,6 +67,7 @@ export class AgentOwnershipJournal {
   readonly #filePath: string;
   readonly #registry: IChatRegistry;
   readonly #integrations: IntegrationRegistry;
+  readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
   readonly #releaseTimeoutMs: number;
   #journal: AgentOwnershipJournalFileV5 = emptyOwnershipJournalV5();
   #cleanupPromise: Promise<void> = Promise.resolve();
@@ -75,11 +77,13 @@ export class AgentOwnershipJournal {
     workspaceDir: string;
     registry: IChatRegistry;
     integrations: IntegrationRegistry;
+    ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
     releaseTimeoutMs?: number;
   }) {
     this.#filePath = path.join(options.workspaceDir, 'agent-ownership-journal.json');
     this.#registry = options.registry;
     this.#integrations = options.integrations;
+    this.#ledger = options.ledger;
     this.#releaseTimeoutMs = options.releaseTimeoutMs ?? DEFAULT_RELEASE_TIMEOUT_MS;
     if (!Number.isSafeInteger(this.#releaseTimeoutMs) || this.#releaseTimeoutMs < 1) {
       throw new Error('Ownership cleanup release timeout must be a positive integer');
@@ -303,6 +307,7 @@ export class AgentOwnershipJournal {
   }
 
   async #finishDelete(intent: DeleteIntentV2): Promise<void> {
+    this.#ledger.deleteChat(intent.chatId);
     let remaining = [...intent.releaseReferences];
     for (const reference of [...remaining]) {
       const integration = this.#integrations.get(reference.agentId);

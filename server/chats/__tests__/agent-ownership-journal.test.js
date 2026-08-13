@@ -118,6 +118,7 @@ describe('AgentOwnershipJournal', () => {
       workspaceDir,
       registry,
       integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
     });
     await journal.initialize();
 
@@ -146,6 +147,7 @@ describe('AgentOwnershipJournal', () => {
       workspaceDir,
       registry,
       integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
     });
     await journal.initialize();
     const input = decisionInput(registry);
@@ -166,6 +168,7 @@ describe('AgentOwnershipJournal', () => {
       workspaceDir,
       registry,
       integrations: createIntegrations(release),
+      ledger: { deleteChat: mock(() => {}) },
     });
     await journal.initialize();
     const intent = await journal.decideHandoff(decisionInput(registry));
@@ -196,6 +199,7 @@ describe('AgentOwnershipJournal', () => {
       workspaceDir,
       registry,
       integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
     });
 
     await journal.initialize();
@@ -214,6 +218,7 @@ describe('AgentOwnershipJournal', () => {
       workspaceDir,
       registry: createRegistry({}),
       integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
     });
 
     await expect(journal.initialize()).rejects.toThrow('Invalid agent ownership journal');
@@ -235,16 +240,19 @@ describe('AgentOwnershipJournal', () => {
       }],
     });
     const release = mock(async () => { throw new Error('provider unavailable'); });
+    const ledger = { deleteChat: mock(() => {}) };
     const journal = new AgentOwnershipJournal({
       workspaceDir,
       registry: createRegistry({}),
       integrations: createIntegrations(release),
+      ledger,
     });
 
     await journal.initialize();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(release).toHaveBeenCalledTimes(1);
+    expect(ledger.deleteChat).toHaveBeenCalledWith('chat');
     expect((await readJournal(workspaceDir)).ownershipIntents).toHaveLength(1);
   });
 });

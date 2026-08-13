@@ -155,6 +155,7 @@ function createRouteAgent(sessionOverrides = {}) {
     }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
     listAllChats: mock(() => Object.fromEntries(sessions.entries())),
+    flush: mock(() => Promise.resolve(undefined)),
   };
   const settings = {
     getChatName: mock(() => null),
@@ -163,6 +164,7 @@ function createRouteAgent(sessionOverrides = {}) {
       normalIds.unshift(chatId);
       return Promise.resolve(undefined);
     }),
+    setSessionName: mock(() => Promise.resolve(undefined)),
     recordChatStartup: mock(() => Promise.resolve(undefined)),
     removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
     removeSessionName: mock(() => Promise.resolve(undefined)),

@@ -37,12 +37,12 @@ import type { AgentHandoffService } from '../agents/agent-handoff-service.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
-import type { CarryOverTranscriptStore } from '../chats/carryover-transcript-store.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
+import type { TranscriptLedgerService } from '../ledger/service.js';
 import {
   CommandExecutionControlError,
   withCurrentExecutionControl,
@@ -73,11 +73,6 @@ export interface MetadataDep {
   addNewChatMetadata(chatId: string, command: string): void;
   getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
-
-export type CarryOverDep = Pick<
-  CarryOverTranscriptStore,
-  'assertAvailable' | 'logicalMessageCount' | 'resolveCutoff'
->;
 
 export type PendingInputsDep = Pick<
   PendingUserInputServiceContract,
@@ -125,9 +120,8 @@ export type ForkChatFileCopyDep = (args: {
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
-  carryOver: CarryOverDep;
+  ledger: TranscriptLedgerService;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
-  getViewCursor(chatId: string): { lastSeq: number } | null;
   forkAgentSession: (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
@@ -158,7 +152,7 @@ export interface ChatCommandServiceDeps {
   pendingInputs: PendingInputsDep;
   fileMentions: FileMentionResolverDep;
   forkChatFileCopy: ForkChatFileCopyDep;
-  carryOver: CarryOverDep;
+  transcripts: TranscriptLedgerService;
   chatIds: Pick<ChatIdAllocator, 'allocate'>;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
@@ -168,7 +162,10 @@ export interface ChatCommandServiceDeps {
   >;
   handoffs: Pick<
     AgentHandoffService,
-    'resolveTarget' | 'createPreparation' | 'captureContinuationSegments'
+    | 'resolveTarget'
+    | 'createPreparation'
+    | 'seedContinuationLedger'
+    | 'deleteContinuationLedger'
   >;
   transientFeeds: Pick<ChatTransientFeedStore, 'validateAction'>;
   chatMutationLock?: KeyedPromiseLock;

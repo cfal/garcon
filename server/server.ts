@@ -97,7 +97,6 @@ import {
 } from './chats/chat-carryover-rollback.js';
 import { OrderedChatTranscriptReader } from './chats/ordered-chat-transcript-reader.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
-import { ProjectionCaptureService } from './agents/projection-capture.js';
 import { SnippetStore } from './snippets/store.js';
 import {
   SnippetProjectPathService,
@@ -247,10 +246,23 @@ export async function startServer(): Promise<void> {
     });
     await chatRegistry.init();
     await settings.init();
+    const transcriptStore = new TranscriptLedgerStore(
+      path.join(workspaceDir, 'transcript-ledgers'),
+    );
+    transcriptStore.removeUnregisteredChatDirectories(
+      new Set(Object.keys(chatRegistry.listAllChats())),
+    );
+    const transcriptLedger = new TranscriptLedgerService(transcriptStore, {
+      serverInstanceId: runtimeState.identity.instanceId,
+      onListenerError(error) {
+        logger.warn('Transcript commit listener failed:', errorMessage(error));
+      },
+    });
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
       registry: chatRegistry,
       integrations: integrationRegistry,
+      ledger: transcriptLedger,
     });
     await agentOwnership.initialize();
     const carryOverGarbageCollector = new CarryOverGarbageCollector({
@@ -286,18 +298,6 @@ export async function startServer(): Promise<void> {
     // which only runs once a session starts.
     let carryOverCompaction: CarryOverCompactionService | null = null;
     let carryOverWarnings: ((chatId: string, message: string) => void) | null = null;
-    const transcriptStore = new TranscriptLedgerStore(
-      path.join(workspaceDir, 'transcript-ledgers'),
-    );
-    transcriptStore.removeUnregisteredChatDirectories(
-      new Set(Object.keys(chatRegistry.listAllChats())),
-    );
-    const transcriptLedger = new TranscriptLedgerService(transcriptStore, {
-      serverInstanceId: runtimeState.identity.instanceId,
-      onListenerError(error) {
-        logger.warn('Transcript commit listener failed:', errorMessage(error));
-      },
-    });
     let agentRegistry!: AgentRegistry;
     const transcriptAdoption = new TranscriptAdoptionService({
       ledger: transcriptLedger,
@@ -520,8 +520,6 @@ export async function startServer(): Promise<void> {
       integrations: integrationRegistry,
       endpointResolver,
       catalog: agentRegistry,
-      carryOver,
-      capture: new ProjectionCaptureService(),
       ownership: agentOwnership,
       ledger: transcriptLedger,
       onCommitted(chatId) {
@@ -587,7 +585,7 @@ export async function startServer(): Promise<void> {
       pendingInputs,
       fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
-      carryOver,
+      transcripts: transcriptLedger,
       chatIds,
       chatListProjector,
       pathCache,
