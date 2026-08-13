@@ -86,8 +86,25 @@ function client(overrides: Partial<ChatControlClient> = {}): ChatControlClient &
           activity: { createdAt: null, lastActivityAt: null },
         },
         processingPhase: null,
-        transientFeed: { serverInstanceId: 'id', chatId: CHAT_ID, agentOwnershipEpoch: 'epoch-1', generationId: 'view-1', resetTransactionId: null, transientRevision: 0, stateDigest: '', rows: [] },
-        pendingUserInputs: [],
+        control: {
+          serverInstanceId: 'id',
+          queue: {
+            entries: [],
+            steeringEntryId: null,
+            recentlyDispatched: [],
+            pause: null,
+            reorderRevision: 0,
+          },
+          version: 0,
+          updatedAt: null,
+        },
+        transientFeed: {
+          serverInstanceId: 'id',
+          chatId: CHAT_ID,
+          transcriptViewId: 'view-1',
+          transientRevision: 0,
+          rows: [],
+        },
         transcript: { availability: 'available', transcriptViewId: 'view-1', messages: [], lastOrdinal: 0, pageOldestOrdinal: 0, pageNewestOrdinal: 0, hasMore: false },
       };
     },

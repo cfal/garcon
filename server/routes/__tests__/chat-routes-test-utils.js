@@ -12,31 +12,6 @@ export function createRouteCommandLedger(label = 'chat-routes') {
   return new CommandLedger(path.join(os.tmpdir(), `garcon-${label}-ledger-${randomUUID()}`));
 }
 
-export function createRoutePendingInputs() {
-  return {
-    register: () => Promise.resolve(undefined),
-    reconcileRetainedHistory: () => Promise.resolve(undefined),
-    reconcileNativeHistory: () => Promise.resolve(undefined),
-    listForChat: () => [],
-    hasInFlightForChat: () => false,
-    clearChat: () => undefined,
-    discardChat: () => 0,
-    discard: () => false,
-  };
-}
-
-export function createRouteChatViews() {
-  return {
-    getOrCreatePage: () => Promise.resolve({
-      messages: [],
-      generationId: 'generation-1',
-      lastSeq: 0,
-      pageOldestSeq: 0,
-      hasMore: false,
-    }),
-  };
-}
-
 export function createRoutePathCache() {
   return {
     resolveProjectPath: mock(async (projectPath) => ({
@@ -78,7 +53,6 @@ export function createRouteCommandService({
   metadata,
   agents,
   commandLedger,
-  pendingInputs,
 	handoffs,
 	pathCache,
 	chatListProjector,
@@ -96,10 +70,7 @@ export function createRouteCommandService({
   return new ChatCommandService({
     chats: registry,
     queue,
-    chatViews: {
-      getNativeHistoryLastSeq: () => null,
-      getCursor: () => null,
-    },
+    transcripts,
     settings,
     recentTitleIcons: {
       getRecentIcons: () => [],
@@ -107,7 +78,6 @@ export function createRouteCommandService({
     metadata,
     agents,
     ledger: commandLedger,
-    pendingInputs,
     transientFeeds: transientFeeds ?? { validateAction: () => undefined },
 	handoffs: handoffs ?? {
 		resolveTarget: async ({ handoff }) => ({
@@ -142,8 +112,6 @@ export function createRouteCommandService({
         registry.removeChat(chatId);
         return true;
       },
-      abandonedTransferCleanups: () => [],
-      retryRetainedTransferCleanups: async () => ({ retried: [], abandoned: [] }),
     },
     chatIds: new ChatIdAllocator(registry),
 	pathCache: pathCache ?? createRoutePathCache(),

@@ -10,8 +10,7 @@ function createDeps() {
 	const deps = {
 		chatState: {
 			appendLocalNotice: vi.fn(),
-			clearPendingUserInput: vi.fn(),
-			updatePendingUserInputDeliveryStatus: vi.fn(),
+			clearOptimisticUserInput: vi.fn(),
 		},
 		composerState: {
 			inputText: 'current',
@@ -28,24 +27,21 @@ const failures = [
 		kind: 'unknown',
 		error: () => new CommandOutcomeUnknownError(),
 		outcome: 'unknown',
-		deliveryStatus: 'unconfirmed',
-		clearsPending: false,
+		clearsOptimistic: false,
 		refreshes: true,
 	},
 	{
 		kind: 'rejected',
 		error: () => new ApiError(400, 'rejected', 'VALIDATION_FAILED'),
 		outcome: 'rejected',
-		deliveryStatus: 'failed',
-		clearsPending: false,
+		clearsOptimistic: true,
 		refreshes: false,
 	},
 	{
 		kind: 'admission conflict',
 		error: () => new ApiError(409, 'busy', 'SESSION_BUSY', undefined, true),
 		outcome: 'rejected',
-		deliveryStatus: null,
-		clearsPending: true,
+		clearsOptimistic: true,
 		refreshes: true,
 	},
 ] as const;
@@ -67,27 +63,19 @@ describe('settleSubmissionFailure', () => {
 					},
 					failure.error(),
 					{
-						clientRequestId: 'request-1',
+						clientMessageId: 'message-1',
 						unknownNotice: 'unknown notice',
 						rejectedNotice: () => 'rejected notice',
-						clearPendingOnAdmissionConflict: true,
+						refreshOnAdmissionConflict: true,
 						refreshControl,
 						onRejected,
 					},
 				);
 
 				expect(result).toBe(failure.outcome);
-				expect(deps.chatState.clearPendingUserInput).toHaveBeenCalledTimes(
-					failure.clearsPending ? 1 : 0,
+				expect(deps.chatState.clearOptimisticUserInput).toHaveBeenCalledTimes(
+					failure.clearsOptimistic ? 1 : 0,
 				);
-				if (failure.deliveryStatus) {
-					expect(deps.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith(
-						'request-1',
-						failure.deliveryStatus,
-					);
-				} else {
-					expect(deps.chatState.updatePendingUserInputDeliveryStatus).not.toHaveBeenCalled();
-				}
 				expect(refreshControl).toHaveBeenCalledTimes(failure.refreshes ? 1 : 0);
 				const restores = ownsComposer && failure.outcome === 'rejected';
 				expect(deps.composerState.inputText).toBe(restores ? 'previous' : 'current');

@@ -26,10 +26,10 @@ describe('ClaudeAgentIntegration', () => {
     const integration = new ClaudeAgentIntegration(host);
 
     expect(ClaudeAgentIntegration.integrationId).toBe('claude');
-    expect(ClaudeAgentIntegration.apiVersion).toBe(4);
+    expect(ClaudeAgentIntegration.apiVersion).toBe(5);
     expect(integration.descriptor.id).toBe('claude');
     expect(integration.descriptor.requiresNativePathForProjectPathUpdate).toBe(false);
-    expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
+    expect(integration.projectPathUpdates).toBeDefined();
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       fork: expect.any(Function),

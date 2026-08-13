@@ -115,10 +115,11 @@ export class TranscriptLedgerStore {
     validateContentStartOrdinal(input.contentStartOrdinal, input.rows?.length ?? 0);
     const viewId = input.viewId ?? this.#createViewId();
     const rows = input.rows ?? [];
+    const encoded = encodeDrafts(rows);
+    materializeRows(viewId, encoded, 1);
     return this.#write(chatId, (entry) => {
       if (entry.current) return entry.current;
       const createdAt = this.#now();
-      const encoded = encodeDrafts(rows);
       runTransaction(entry.db, () => {
         entry.db.query(`
           INSERT INTO transcript_views(view_id, status, created_at, content_start_ordinal)
@@ -142,18 +143,12 @@ export class TranscriptLedgerStore {
     return this.#write(chatId, (entry) => {
       this.#assertCurrent(entry, expectedViewId);
       const firstOrdinal = entry.nextOrdinal;
+      const rows = materializeRows(expectedViewId, encoded, firstOrdinal);
       runTransaction(entry.db, () => {
         insertEncodedRows(entry.db, expectedViewId, encoded, firstOrdinal);
       });
       entry.nextOrdinal += drafts.length;
-      return encoded.map((item, index) => decodeLedgerRow({
-        view_id: expectedViewId,
-        ordinal: firstOrdinal + index,
-        kind: item.draft.kind,
-        at: item.draft.at,
-        client_message_id: item.clientMessageId,
-        payload_json: item.payloadJson,
-      }));
+      return rows;
     });
   }
 
@@ -180,18 +175,15 @@ export class TranscriptLedgerStore {
       }
 
       const ordinal = entry.nextOrdinal;
-      let input!: LedgerUserInputRow;
+      const [materialized] = materializeRows(
+        request.viewId,
+        [{ draft, ...encoded }],
+        ordinal,
+      );
+      const input = materialized as LedgerUserInputRow;
       let prompt!: readonly LedgerUserInputRow[];
       runTransaction(entry.db, () => {
         insertEncodedRows(entry.db, request.viewId, [{ draft, ...encoded }], ordinal);
-        input = decodeLedgerRow({
-          view_id: request.viewId,
-          ordinal,
-          kind: 'user-input',
-          at: request.at,
-          client_message_id: encoded.clientMessageId,
-          payload_json: encoded.payloadJson,
-        }) as LedgerUserInputRow;
         prompt = request.detail.steer
           ? [input]
           : this.#composePrompt(entry, request.viewId, input, request.excludedOrdinals);
@@ -212,7 +204,7 @@ export class TranscriptLedgerStore {
       `).all(view.viewId);
       const candidates: LedgerUserInputRow[] = [];
       for (const item of stored) {
-        const row = decodeLedgerRow(item);
+        const row = decodeStoredRow(item);
         if (row.kind === 'user-input') {
           candidates.unshift(row);
           continue;
@@ -253,7 +245,7 @@ export class TranscriptLedgerStore {
             ORDER BY ordinal DESC
             LIMIT ?
           `).all(viewId, before, boundedLimit);
-      const rows = stored.map(decodeLedgerRow).reverse();
+      const rows = stored.map(decodeStoredRow).reverse();
       const oldest = rows[0]?.ordinal ?? null;
       const hasOlder = oldest !== null && Boolean(entry.db.query<{ found: number }, [string, number]>(`
         SELECT 1 AS found FROM transcript_rows
@@ -282,7 +274,7 @@ export class TranscriptLedgerStore {
         FROM transcript_rows
         WHERE view_id = ? AND ordinal > ?
         ORDER BY ordinal
-      `).all(viewId, afterOrdinal).map(decodeLedgerRow);
+      `).all(viewId, afterOrdinal).map(decodeStoredRow);
     });
   }
 
@@ -300,7 +292,32 @@ export class TranscriptLedgerStore {
         FROM transcript_rows
         WHERE view_id = ? AND ordinal <= ?
         ORDER BY ordinal
-      `).all(watermark.viewId, watermark.ordinal).map(decodeLedgerRow);
+      `).all(watermark.viewId, watermark.ordinal).map(decodeStoredRow);
+    });
+  }
+
+  assistantMessagesForSubmission(
+    chatId: string,
+    viewId: TranscriptViewId,
+    clientMessageId: string,
+    throughOrdinal: number,
+  ): readonly string[] {
+    return this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      const input = this.#submission(entry, viewId, clientMessageId);
+      if (input?.kind !== 'user-input' || input.ordinal >= throughOrdinal) return [];
+      return entry.db.query<StoredLedgerRow, [string, number, number]>(`
+        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
+        FROM transcript_rows
+        WHERE view_id = ? AND ordinal > ? AND ordinal < ? AND kind = 'provider-row'
+        ORDER BY ordinal
+      `).all(viewId, input.ordinal, throughOrdinal)
+        .map(decodeStoredRow)
+        .flatMap((row) => (
+          row.kind === 'provider-row' && row.message.type === 'assistant-message'
+            ? [row.message.content]
+            : []
+        ));
     });
   }
 
@@ -310,7 +327,7 @@ export class TranscriptLedgerStore {
       return entry.db.query<StoredLedgerRow, [string]>(`
         SELECT view_id, ordinal, kind, at, client_message_id, payload_json
         FROM transcript_rows WHERE view_id = ? ORDER BY ordinal
-      `).all(current.viewId).map(decodeLedgerRow);
+      `).all(current.viewId).map(decodeStoredRow);
     });
   }
 
@@ -323,7 +340,7 @@ export class TranscriptLedgerStore {
         WHERE view_id = ? AND ordinal >= ? AND kind = 'session'
         ORDER BY ordinal DESC LIMIT 1
       `).get(current.viewId, current.contentStartOrdinal);
-      return stored ? decodeLedgerRow(stored) as LedgerSessionRow : null;
+      return stored ? decodeStoredRow(stored) as LedgerSessionRow : null;
     });
   }
 
@@ -367,14 +384,14 @@ export class TranscriptLedgerStore {
           AND json_extract(payload_json, '$.value.detail.type') = ?
         ORDER BY ordinal DESC LIMIT 1
       `).get(current.viewId, current.contentStartOrdinal, 'native-transcript-drift');
-      const noticeRow = notice ? decodeLedgerRow(notice) : null;
+      const noticeRow = notice ? decodeStoredRow(notice) : null;
       const noticeWatermark = noticeRow?.kind === 'notice'
         && typeof noticeRow.detail.observedNativeWatermark === 'string'
         ? noticeRow.detail.observedNativeWatermark
         : null;
       return {
         viewId: current.viewId,
-        session: session ? decodeLedgerRow(session) as LedgerSessionRow : null,
+        session: session ? decodeStoredRow(session) as LedgerSessionRow : null,
         providerWatermarkAt: watermark?.at ?? null,
         lastNoticeWatermarkAt: noticeWatermark,
       };
@@ -392,6 +409,7 @@ export class TranscriptLedgerStore {
     validateContentStartOrdinal(input.contentStartOrdinal, input.rows?.length ?? 0);
     const rows = input.rows ?? [];
     const encoded = encodeDrafts(rows);
+    materializeRows(input.viewId, encoded, 1);
     return this.#write(chatId, (entry) => {
       this.#requireCurrent(entry);
       const createdAt = this.#now();
@@ -533,7 +551,7 @@ export class TranscriptLedgerStore {
       ORDER BY ordinal DESC
     `).all(viewId, current.ordinal);
     for (const stored of preceding) {
-      const row = decodeLedgerRow(stored);
+      const row = decodeStoredRow(stored);
       if (row.kind === 'user-input') {
         if (!excludedOrdinals?.has(row.ordinal)) collected.unshift(row);
         continue;
@@ -556,7 +574,7 @@ export class TranscriptLedgerStore {
       FROM transcript_rows
       WHERE view_id = ? AND client_message_id = ?
     `).get(viewId, clientMessageId);
-    return stored ? decodeLedgerRow(stored) : null;
+    return stored ? decodeStoredRow(stored) : null;
   }
 
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
@@ -628,7 +646,39 @@ interface EncodedDraft {
 }
 
 function encodeDrafts(drafts: readonly LedgerRowDraft[]): readonly EncodedDraft[] {
-  return drafts.map((draft) => ({ draft, ...encodeLedgerDraft(draft) }));
+  const encoded = drafts.map((draft) => ({ draft, ...encodeLedgerDraft(draft) }));
+  const clientMessageIds = new Set<string>();
+  for (const row of encoded) {
+    if (!row.clientMessageId) continue;
+    if (clientMessageIds.has(row.clientMessageId)) {
+      throw new LedgerSchemaError('Transcript view contains duplicate client message IDs');
+    }
+    clientMessageIds.add(row.clientMessageId);
+  }
+  return encoded;
+}
+
+function materializeRows(
+  viewId: TranscriptViewId,
+  rows: readonly EncodedDraft[],
+  firstOrdinal: number,
+): readonly LedgerRow[] {
+  return rows.map((item, index) => decodeLedgerRow({
+    view_id: viewId,
+    ordinal: firstOrdinal + index,
+    kind: item.draft.kind,
+    at: item.draft.at,
+    client_message_id: item.clientMessageId,
+    payload_json: item.payloadJson,
+  }));
+}
+
+function decodeStoredRow(row: StoredLedgerRow): LedgerRow {
+  try {
+    return decodeLedgerRow(row);
+  } catch (error) {
+    throw new Error('Stored transcript row is invalid', { cause: error });
+  }
 }
 
 function insertEncodedRows(

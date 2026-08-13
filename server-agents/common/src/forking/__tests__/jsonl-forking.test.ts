@@ -102,7 +102,6 @@ async function createFixture() {
     admission: {
       signal: new AbortController().signal,
       async markStarted() {},
-      markAbortable() {},
     },
     source: {
       chatId: 'source-chat',

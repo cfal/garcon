@@ -26,7 +26,6 @@ import type { MetadataIndex } from '../chats/metadata-store.js';
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import type { ShareTranscriptSnapshotPort } from './shares.js';
 import type { AgentRegistry } from '../agents/registry.js';
-import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore } from '../notifications/telegram-settings-store.js';
 import type { IShareStore } from '../chats/share-store.js';
@@ -43,18 +42,19 @@ import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settin
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { CommandLedger } from '../commands/command-ledger.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
+import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
 
 export default function createAllRoutes({
   registry,
   settings,
   recentTitleIcons,
   queue,
+  processing,
   pathCache,
   metadata,
   chatViews,
   shareSnapshots,
   agents,
-  pendingInputs,
   telegramNotifier,
   telegramSettings,
   shareStore,
@@ -77,12 +77,12 @@ export default function createAllRoutes({
   settings: SettingsStore;
   recentTitleIcons: RecentTitleIconSource;
   queue: ChatExecutionService;
+  processing: ChatProcessingActivity;
   pathCache: PathCache;
   metadata: MetadataIndex;
   chatViews: TranscriptPageReader;
   shareSnapshots: ShareTranscriptSnapshotPort;
   agents: AgentRegistry;
-  pendingInputs: PendingUserInputServiceContract;
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
   shareStore: IShareStore;
@@ -108,7 +108,6 @@ export default function createAllRoutes({
       summaries: chatListProjector,
       execution: queue,
       chatViews,
-      pendingInputs,
       transientFeeds,
     }),
     ...createStaticRoutes(settings),
@@ -120,11 +119,11 @@ export default function createAllRoutes({
       settings,
       recentTitleIcons,
       queue,
+      processing,
       pathCache,
       metadata,
       chatViews,
       agents,
-      pendingInputs,
       commandService: chatCommands,
       chatListProjector,
       lastSelectedChat,

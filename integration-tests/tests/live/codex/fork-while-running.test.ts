@@ -68,7 +68,7 @@ describe('live Codex fork while running', () => {
       // its seqs resolvable while the next turn is in flight.
       await reloadUntilNativeContains(fixture, parentChatId, settledMarker);
       const settledHistory = await fixture.client.getMessages(parentChatId);
-      const settledLastSeq = settledHistory.messages.at(-1)?.seq;
+      const settledLastSeq = settledHistory.messages.at(-1)?.ordinal;
       if (settledLastSeq === undefined) throw new Error('Live Codex settled history is empty.');
 
       // A slow tool keeps the second turn in flight while the fork assertions run.
@@ -91,7 +91,8 @@ describe('live Codex fork while running', () => {
       await expectEventStreamForkRefusal(fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: fixture.newChatId(),
-        upToSeq: streamingSeq,
+        transcriptViewId: settledHistory.transcriptViewId,
+        upToOrdinal: streamingSeq,
       }));
 
       // Settled history stays forkable at a point while the agent works.
@@ -99,7 +100,8 @@ describe('live Codex fork while running', () => {
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: pointChatId,
-        upToSeq: settledLastSeq,
+        transcriptViewId: settledHistory.transcriptViewId,
+        upToOrdinal: settledLastSeq,
       });
       const pointForked = await fixture.client.getMessages(pointChatId);
       expect(userContents(pointForked.messages)).toEqual([settledPrompt]);
@@ -135,25 +137,26 @@ describe('live Codex fork while running', () => {
       let parentAfterTurn = await reloadUntilNativeAnswersAfter(fixture, parentChatId, settledLastSeq);
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const again = await reloadedMessages(fixture, parentChatId);
-        expect(again.messages.map((entry) => [entry.seq, entry.message]))
-          .toEqual(parentAfterTurn.messages.map((entry) => [entry.seq, entry.message]));
+        expect(again.messages.map((entry) => [entry.ordinal, entry.message]))
+          .toEqual(parentAfterTurn.messages.map((entry) => [entry.ordinal, entry.message]));
         parentAfterTurn = again;
       }
 
       // The message that was refused mid-turn is now native history, so it forks.
       const runningAssistant = parentAfterTurn.messages.findLast((entry) =>
-        entry.seq > settledLastSeq && entry.message.type === 'assistant-message');
+        entry.ordinal > settledLastSeq && entry.message.type === 'assistant-message');
       if (!runningAssistant) throw new Error('Live Codex running turn was not persisted.');
 
       const recoveredChatId = fixture.newChatId();
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: recoveredChatId,
-        upToSeq: runningAssistant.seq,
+        transcriptViewId: parentAfterTurn.transcriptViewId,
+        upToOrdinal: runningAssistant.ordinal,
       });
       const recovered = await fixture.client.getMessages(recoveredChatId);
       expect(userContents(recovered.messages)).toEqual([settledPrompt, runningPrompt]);
-      expectMatchingPrefix(recovered.messages, parentAfterTurn.messages, runningAssistant.seq);
+      expectMatchingPrefix(recovered.messages, parentAfterTurn.messages, runningAssistant.ordinal);
 
       // The recovered fork is a working session, not just a transcript copy.
       const resumedMarker = liveMarker('CODEX_FORK_RECOVERED');
@@ -197,7 +200,7 @@ async function waitForSeqBeyond(
   const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const page = await fixture.client.getMessages(chatId);
-    if (page.lastSeq > settledLastSeq) return page.lastSeq;
+    if (page.lastOrdinal > settledLastSeq) return page.lastOrdinal;
     await Bun.sleep(POLL_INTERVAL_MS);
   }
   throw new Error(`Live Codex chat ${chatId} never streamed past seq ${settledLastSeq}.`);
@@ -224,8 +227,8 @@ async function expectEventStreamForkRefusal(promise: Promise<unknown>): Promise<
 function expectMatchingPrefix(
   forked: readonly TranscriptMessage[],
   source: readonly TranscriptMessage[],
-  upToSeq: number,
+  upToOrdinal: number,
 ): void {
   expect(forked.map((entry) => entry.message))
-    .toEqual(source.filter((entry) => entry.seq <= upToSeq).map((entry) => entry.message));
+    .toEqual(source.filter((entry) => entry.ordinal <= upToOrdinal).map((entry) => entry.message));
 }

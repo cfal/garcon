@@ -89,7 +89,8 @@ describe('Codex compaction interleaving', () => {
       await fixture.client.forkChat({
         sourceChatId: chatId,
         chatId: forkId,
-        upToSeq: after.messages[0]!.seq,
+        transcriptViewId: after.transcriptViewId,
+        upToOrdinal: after.messages[0]!.ordinal,
       });
       const forked = await fixture.client.getMessages(forkId);
       expect(rendered(forked)).toEqual([FIRST_PROMPT]);

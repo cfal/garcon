@@ -104,7 +104,6 @@ export abstract class DirectChatRuntimeBase<
     this.#sessions.set(sessionId, session);
     this.emitSessionCreated(request.chatId);
     void this.#runTurnInternal(session, request).catch(() => undefined);
-    request.onAbortable?.();
 
     return {
       agentSessionId: sessionId,
@@ -129,7 +128,6 @@ export abstract class DirectChatRuntimeBase<
 
     const userTurn = this.buildUserTurn(request.command, request.images);
     this.#markSessionRunning(session);
-    request.onAbortable?.();
     try {
       assertDirectExecutionOpen(request);
       session.messages = this.#contextMessages(request.priorContext);
@@ -150,6 +148,7 @@ export abstract class DirectChatRuntimeBase<
     const session = this.#sessions.get(agentSessionId);
     if (!session?.isRunning || session.isFinalizing) return false;
 
+    this.#sessions.delete(agentSessionId);
     session.aborted = true;
     session.abortController?.abort();
     return true;
@@ -247,10 +246,6 @@ export abstract class DirectChatRuntimeBase<
     try {
       if (request.executionAdmission) await markDirectExecutionStarted(request);
       const response = await this.streamSession(session);
-      if (session.aborted) {
-        this.#finishAbortedTurn(session, eventMetadata);
-        return;
-      }
 
       if (!response.trim()) {
         this.#markSessionIdle(session);

@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import {
   codexAssistantMessage,
@@ -96,17 +95,13 @@ describe('scripted Codex strict steering', () => {
       expect(stillPaused.queue.pause?.kind).toBe('manual');
       const futureCursor = fixture.client.markEvents();
       await fixture.client.resumeQueue(chatId, stillPaused.queue.pause!.id);
-      const futureInput = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === futurePrompt
-          && typeof event.input.turnId === 'string',
-        'scripted Codex future queued turn identity',
+      const futureInput = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        futurePrompt,
         { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, futureInput.input.turnId, {
-        afterIndex: futureCursor,
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(futureInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
@@ -123,7 +118,7 @@ describe('scripted Codex strict steering', () => {
     });
   }, 120_000);
 
-  test('delivers two FIFO steers during an in-flight model request', async () => {
+  test('delivers concurrent steers in committed ledger order', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
     const firstPrompt = marker('BATCH_FIRST_PROMPT');
@@ -174,13 +169,14 @@ describe('scripted Codex strict steering', () => {
       expect(requests).toHaveLength(2);
       const steeredRequest = requests.at(-1);
       if (!steeredRequest) throw new Error('Codex did not make the batched steering request.');
-      const firstIndex = steeredRequest.userTexts.indexOf(firstSteer);
-      const secondIndex = steeredRequest.userTexts.indexOf(secondSteer);
-      expect(firstIndex).toBeGreaterThanOrEqual(0);
-      expect(secondIndex).toBeGreaterThan(firstIndex);
 
       const transcript = await fixture.client.getMessages(chatId);
-      expect(userContents(transcript.messages)).toEqual([firstPrompt, firstSteer, secondSteer]);
+      const committedSteers = userContents(transcript.messages).slice(1);
+      expect(committedSteers).toHaveLength(2);
+      expect(new Set(committedSteers)).toEqual(new Set([firstSteer, secondSteer]));
+      expect(steeredRequest.userTexts.filter((text) => (
+        text === firstSteer || text === secondSteer
+      ))).toEqual(committedSteers);
       const assistants = assistantContents(transcript.messages);
       expect(assistants.some((content) => content.includes(firstReply))).toBe(true);
       expect(assistants.some((content) => content.includes(steeredReply))).toBe(true);

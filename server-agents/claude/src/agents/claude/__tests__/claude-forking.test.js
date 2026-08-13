@@ -106,7 +106,6 @@ describe('Claude JSONL forking', () => {
       admission: {
         signal: new AbortController().signal,
         markStarted() {},
-        markAbortable() {},
       },
       source: {
         chatId: 'source-chat',
@@ -212,7 +211,6 @@ describe('Claude JSONL forking', () => {
       admission: {
         signal: new AbortController().signal,
         markStarted() {},
-        markAbortable() {},
       },
       source: {
         chatId: 'source-chat',

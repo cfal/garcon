@@ -1,21 +1,21 @@
 import type {
-  AgentIntegrationClassV4,
-  AgentIntegrationV4,
+  AgentIntegrationClass,
+  AgentIntegration,
 } from '../index.js';
 
 export interface AgentIntegrationConformanceOptions {
   readonly integrationClass: Pick<
-    AgentIntegrationClassV4,
+    AgentIntegrationClass,
     'integrationId' | 'apiVersion'
   >;
-  readonly integration: AgentIntegrationV4;
+  readonly integration: AgentIntegration;
 }
 
 export function validateAgentIntegration(
   options: AgentIntegrationConformanceOptions,
 ): void {
   const { integration, integrationClass } = options;
-  if (integrationClass.apiVersion !== 4) {
+  if (integrationClass.apiVersion !== 5) {
     throw new Error(`Unsupported agent integration API version: ${integrationClass.apiVersion}`);
   }
   if (integrationClass.integrationId !== integration.descriptor.id) {
@@ -23,14 +23,13 @@ export function validateAgentIntegration(
       `Agent integration ID mismatch: ${integrationClass.integrationId} != ${integration.descriptor.id}`,
     );
   }
-  if (!integration.execution || !integration.transcript) {
+  if (!integration.execution) {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing a required facet`);
   }
-  if (!integration.producerExecution
-      || typeof integration.producerExecution.start !== 'function'
-      || typeof integration.producerExecution.resume !== 'function'
-      || typeof integration.producerExecution.abort !== 'function') {
-    throw new Error(`Agent integration ${integration.descriptor.id} is missing its V5 producer execution`);
+  if (typeof integration.execution.start !== 'function'
+      || typeof integration.execution.resume !== 'function'
+      || typeof integration.execution.abort !== 'function') {
+    throw new Error(`Agent integration ${integration.descriptor.id} has an invalid execution facet`);
   }
   for (const facet of [
     'nativeHistoryImport',
@@ -142,7 +141,7 @@ export async function runAgentIntegrationConformance(
 
 function assertSettingsEnvelope(
   agentId: string,
-  value: ReturnType<AgentIntegrationV4['settings']['defaults']>,
+  value: ReturnType<AgentIntegration['settings']['defaults']>,
 ): void {
   if (
     value.ownerId !== agentId

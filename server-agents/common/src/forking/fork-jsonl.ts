@@ -88,10 +88,11 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
   };
   const projectedEntries = selected.entries.map((entry) => {
     if (!request.rewriteEntry) return entry.value;
+    const retainedMessageCount = request.retainedMessageCounts?.get(entry.lineNumber);
     return request.rewriteEntry(entry.value, {
       ...context,
-      ...(request.retainedMessageCounts
-        ? { retainedMessageCount: request.retainedMessageCounts.get(entry.lineNumber) ?? 0 }
+      ...(retainedMessageCount !== undefined
+        ? { retainedMessageCount }
         : {}),
     });
   });

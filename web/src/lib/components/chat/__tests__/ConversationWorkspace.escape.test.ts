@@ -74,7 +74,6 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			pageNewestOrdinal: 0,
 			hasMore: false,
 			limit: 50,
-			pendingUserInputs: [],
 			resendCandidates: [],
 		});
 		mockGetChatExecutionControl.mockResolvedValue({

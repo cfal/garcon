@@ -1,20 +1,20 @@
 import type {
-  AgentIntegrationClassV4,
-  AgentIntegrationV4,
+  AgentIntegrationClass,
+  AgentIntegration,
   AgentMigrationStore,
 } from '@garcon/server-agent-interface';
 import { validateAgentIntegration } from '@garcon/server-agent-interface/testing';
 import { IntegrationHostFactory } from './integration-host.js';
 
 export interface IntegrationRegistryOptions {
-  readonly integrations: readonly AgentIntegrationClassV4[];
+  readonly integrations: readonly AgentIntegrationClass[];
   readonly hostFactory: IntegrationHostFactory;
   readonly migrationStoreFor: (agentId: string) => AgentMigrationStore;
 }
 
 interface IntegrationRecord {
-  readonly integrationClass: AgentIntegrationClassV4;
-  readonly integration: AgentIntegrationV4;
+  readonly integrationClass: AgentIntegrationClass;
+  readonly integration: AgentIntegration;
 }
 
 export class IntegrationRegistry {
@@ -44,21 +44,21 @@ export class IntegrationRegistry {
     return this.#records.has(agentId);
   }
 
-  get(agentId: string): AgentIntegrationV4 | null {
+  get(agentId: string): AgentIntegration | null {
     return this.#records.get(agentId)?.integration ?? null;
   }
 
-  require(agentId: string): AgentIntegrationV4 {
+  require(agentId: string): AgentIntegration {
     const integration = this.get(agentId);
     if (!integration) throw new Error(`Unsupported agent integration: ${agentId}`);
     return integration;
   }
 
-  list(): readonly AgentIntegrationV4[] {
+  list(): readonly AgentIntegration[] {
     return [...this.#records.values()].map((record) => record.integration);
   }
 
-  classes(): readonly AgentIntegrationClassV4[] {
+  classes(): readonly AgentIntegrationClass[] {
     return [...this.#records.values()].map((record) => record.integrationClass);
   }
 
@@ -81,7 +81,7 @@ export class IntegrationRegistry {
   }
 
   async #startAll(): Promise<void> {
-    const started: AgentIntegrationV4[] = [];
+    const started: AgentIntegration[] = [];
     try {
       for (const integration of this.list()) {
         await integration.lifecycle.migrateOwnedStorage(
@@ -123,10 +123,10 @@ export class IntegrationRegistry {
 }
 
 function validateClass(
-  integrationClass: AgentIntegrationClassV4,
+  integrationClass: AgentIntegrationClass,
   existing: ReadonlyMap<string, IntegrationRecord>,
 ): void {
-  if (integrationClass.apiVersion !== 4) {
+  if (integrationClass.apiVersion !== 5) {
     throw new Error(
       `Unsupported agent integration API version for ${integrationClass.integrationId}: ${integrationClass.apiVersion}`,
     );
@@ -139,7 +139,7 @@ function validateClass(
   }
 }
 
-function validateDescriptor(integration: AgentIntegrationV4): void {
+function validateDescriptor(integration: AgentIntegration): void {
   const { descriptor } = integration;
   if (!descriptor.label.trim()) throw new Error(`Agent integration ${descriptor.id} has an empty label`);
   const configurationKeys = new Set<string>();

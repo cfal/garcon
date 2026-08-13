@@ -10,13 +10,6 @@ export interface PiSteerSubmission {
   persisted: boolean;
 }
 
-// Message-entry identities present before the prompt. Unavailable when the
-// file could not be read or held id-less entries, which makes occurrence
-// accounting impossible and keeps the turn unresolved.
-export type PiSettlementBaseline =
-  | { readonly kind: 'ready'; readonly entryIds: ReadonlySet<string> }
-  | { readonly kind: 'unavailable' };
-
 export interface PiActiveTurn {
   turnId: string | undefined;
   stopRequested: boolean;
@@ -25,24 +18,7 @@ export interface PiActiveTurn {
   failureMessage: string | null;
   readonly steerSubmissions: Set<PiSteerSubmission>;
   steeringQueue: readonly string[];
-  // Entry identities captured before the prompt was sent and the ordered
-  // roles of finalized message occurrences the turn must persist; settlement
-  // verifies that sequence appeared among the new entries beyond the
-  // baseline in provider order.
-  settlementBaseline: PiSettlementBaseline;
-  readonly expectedNative: string[];
   settle(): void;
-}
-
-// Settlement evidence captured when a turn finishes on agent_settled; the
-// verdict is computed lazily against the current native file. The turn ID
-// keys the live occurrence identities the proof binds to native entry IDs.
-export interface PiTurnSettlementRecord {
-  readonly steeringUnresolved: boolean;
-  readonly baseline: PiSettlementBaseline;
-  readonly expected: readonly string[];
-  readonly nativePath: string | null;
-  readonly turnId: string | null;
 }
 
 export interface PiRpcSession {

@@ -979,7 +979,7 @@ describe('ConversationSlashCommandService', () => {
 		);
 	});
 
-	it('forks without a message and preserves the requested sequence', async () => {
+	it('forks without a message and preserves the requested ordinal', async () => {
 		const { deps } = createDeps();
 		const forked = createServerEntry('chat-2');
 		mockForkChat.mockResolvedValueOnce({ success: true, chat: forked });
@@ -989,7 +989,7 @@ describe('ConversationSlashCommandService', () => {
 		expect(mockForkChat).toHaveBeenCalledWith({
 			sourceChatId: 'chat-1',
 			chatId: expect.stringMatching(/^\d+$/),
-			upToSeq: 9,
+			upToOrdinal: 9,
 			transcriptViewId: 'view-1',
 		});
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
@@ -1022,12 +1022,12 @@ describe('ConversationSlashCommandService', () => {
 
 		expect(mockForkChat).toHaveBeenCalledTimes(2);
 		expect(mockForkChat.mock.calls[0]?.[0]).toMatchObject({
-			upToSeq: 9,
+			upToOrdinal: 9,
 			transcriptViewId: 'view-1',
 		});
 		expect(mockForkChat.mock.calls[1]?.[0]).toMatchObject({
 			chatId: mockForkChat.mock.calls[0]?.[0].chatId,
-			upToSeq: 12,
+			upToOrdinal: 12,
 			transcriptViewId: 'view-2',
 		});
 		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
@@ -1040,7 +1040,7 @@ describe('ConversationSlashCommandService', () => {
 		mockForkChat.mockRejectedValueOnce(new ApiError(
 			409,
 			'The original stale view',
-			'STALE_VIEW_GENERATION',
+			'STALE_TRANSCRIPT_VIEW',
 			undefined,
 			true,
 		));

@@ -580,15 +580,7 @@ describe('CommandLedger', () => {
       clientRequestId: 'steer-two',
       turnId: 'turn-shared',
     }));
-    const owner = {
-      agentOwnershipEpoch: 'ownership-1',
-      commandType: 'agent-run',
-      clientRequestId: 'owner-request',
-      turnId: 'turn-shared',
-    };
-
-    await ledger.appendProjectionAssistantMessages('chat-1', owner, ['first', 'second']);
-    await ledger.finalizeProjectionOutput('chat-1', owner);
+    await ledger.appendAssistantMessages('chat-1', 'turn-shared', ['first', 'second']);
 
     expect(await ledger.getTurnRecord('chat-1', 'turn-shared')).toMatchObject({
       commandType: 'agent-run',

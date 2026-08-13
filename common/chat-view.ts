@@ -1,6 +1,5 @@
 import { ErrorMessage, parseChatMessage } from './chat-types';
 import type { ChatMessage } from './chat-types';
-import type { PendingUserInput } from './pending-user-input';
 
 export interface TranscriptMessage {
   readonly ordinal: number;
@@ -33,7 +32,6 @@ export type ChatHistoryState =
 export interface CompleteChatHistoryResponse extends TranscriptPage {
   readonly historyState: Extract<ChatHistoryState, { readonly kind: 'complete' }>;
   readonly chatId: string;
-  readonly pendingUserInputs: PendingUserInput[];
   readonly resendCandidates: ResendCandidate[];
   readonly limit: number;
 }
@@ -46,7 +44,6 @@ export interface UnavailableChatHistoryResponse {
   readonly lastOrdinal?: never;
   readonly pageOldestOrdinal?: never;
   readonly pageNewestOrdinal?: never;
-  readonly pendingUserInputs?: never;
   readonly hasMore?: never;
   readonly limit?: never;
 }

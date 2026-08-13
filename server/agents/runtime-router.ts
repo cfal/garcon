@@ -2,14 +2,12 @@ import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
   type AgentGoalControlHandoff,
-  type AgentExecutionContextV4,
-  type AgentTurnOwnerOperationIdentityV4,
   type AgentProjectPathUpdatePreparation,
   type AgentSteerResult,
   type AgentSteerTarget,
   type AgentExecutionHandle,
+  type AgentEstablishedSession,
 } from '@garcon/server-agent-interface';
-import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
@@ -30,9 +28,10 @@ import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolve
 import { getMaxSessions } from '../config.js';
 import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
+import type { TurnReceiptOwner } from '../lib/turn-identity.js';
 import { DomainError, transcriptUnavailableMessage } from '../lib/domain-error.js';
 import type { AgentDirectory } from './directory.js';
-import type { AgentEventBus } from './event-bus.js';
+import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
 import type {
   AgentChatEntry,
   AgentExecutionAdmission,
@@ -46,7 +45,6 @@ import type {
 import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
-import type { AgentProjectionIngress } from './projection-ingress.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { NativeTranscriptActivityService } from '../ledger/native-activity.js';
 import type {
@@ -58,13 +56,23 @@ import {
 } from './runtime-router-errors.js';
 const logger = createLogger('agents:runtime-router');
 
+interface TurnOperation extends TurnReceiptOwner {
+  readonly clientMessageId: string | null;
+  readonly turnOwner: TurnReceiptOwner;
+}
+
 export interface AgentRuntimeRouterOptions {
   registry: IChatRegistry;
   directory: AgentDirectory;
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
-  projection: AgentProjectionIngress;
   getCarryOverRevision(entry: AgentChatEntry): string;
+  createCarriedContext?(
+    chatId: string,
+    entry: AgentChatEntry,
+    messages: readonly ChatMessage[],
+    signal?: AbortSignal,
+  ): Promise<CarriedContext | null>;
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
   nativeActivity?: NativeTranscriptActivityService;
@@ -88,8 +96,8 @@ export class AgentRuntimeRouter {
   readonly #directory: AgentDirectory;
   readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #events: AgentEventBus;
-  readonly #projection: AgentProjectionIngress;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
+  readonly #createCarriedContext: NonNullable<AgentRuntimeRouterOptions['createCarriedContext']>;
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
   readonly #nativeActivity: NativeTranscriptActivityService | null;
@@ -106,8 +114,9 @@ export class AgentRuntimeRouter {
     this.#directory = options.directory;
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
-    this.#projection = options.projection;
     this.#getCarryOverRevision = options.getCarryOverRevision;
+    this.#createCarriedContext = options.createCarriedContext
+      ?? (async (_chatId, _entry, messages) => renderCarriedContext(messages));
     this.#ledger = options.ledger;
     this.#adoption = options.adoption;
     this.#nativeActivity = options.nativeActivity ?? null;
@@ -162,18 +171,25 @@ export class AgentRuntimeRouter {
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     assertExecutionAdmissionOpen(opts);
+    const carriedContext = await this.#createCarriedContext(
+      chatId,
+      entry,
+      prepared.priorContext,
+      opts.executionAdmission?.signal,
+    );
+    assertExecutionAdmissionOpen(opts);
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
     this.#events.trackTurn(chatId, operationMetadata(operation));
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
-      const handle = await integration.producerExecution.start({
+    const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
         priorContext: prepared.priorContext,
         prompt: prepared.prompt,
         attachments: prepared.attachments,
-        carriedContext: renderCarriedContext(prepared.priorContext),
+        carriedContext,
       });
       await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
       assertExecutionAdmissionOpen(opts);
@@ -237,7 +253,7 @@ export class AgentRuntimeRouter {
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
-      const handle = await integration.producerExecution.resume({
+      const handle = await integration.execution.resume({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
         priorContext: prepared.priorContext,
@@ -277,15 +293,6 @@ export class AgentRuntimeRouter {
         422,
       );
     }
-    if (!entry.agentOwnershipEpoch) throw new Error('Agent ownership epoch is required');
-    const active = this.#events.getActiveTurn(chatId);
-    if (!active?.turnOwner) {
-      return {
-        kind: 'rejected',
-        reason: 'no-active-turn',
-        message: 'No active turn receipt owner',
-      };
-    }
     return integration.steering.steer({
       chatId,
       projectPath: entry.projectPath,
@@ -294,14 +301,6 @@ export class AgentRuntimeRouter {
       target,
       input,
       clientMessageId: options.clientMessageId,
-      operation: {
-        agentOwnershipEpoch: agentOwnershipEpoch(entry.agentOwnershipEpoch),
-        commandType: 'steer',
-        clientRequestId: options.clientRequestId,
-        clientMessageId: options.clientMessageId,
-        turnId: active.turnOwner.turnId,
-        turnOwner: active.turnOwner,
-      },
       prepareDelivery: async () => {
         await prepareDelivery();
         this.#ledger.takePreparedInput(chatId, options.clientMessageId);
@@ -341,18 +340,28 @@ export class AgentRuntimeRouter {
     await this.#validateEndpoint(integration, selection);
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
     const previousTurn = this.#events.getActiveTurn(chatId);
+    const previousRunId = this.#ledger.activeRunId(chatId);
+    if (!previousRunId) return false;
+    const producer = this.#producer(chatId);
     return integration.goals.submitControl({
-      ...this.#executionContext(chatId, entry, selection, operation, opts),
+      ...this.#executionContextV5(chatId, entry, selection, operation.turnId, opts),
+      sink: producer.sink,
+      priorContext: this.#ledger.conversationMessages(chatId),
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
       attachments: attachments(opts.images),
-      beforeDelivery: (handoff) => beforeDelivery(this.#events.handoffTurn(
-        chatId,
-        previousTurn,
-        operationMetadata(operation),
-        handoff,
-      )),
+      beforeDelivery: async (handoff) => {
+        await beforeDelivery(this.#goalRunHandoff({
+          chatId,
+          previousRunId,
+          nextRunId: operation.turnId,
+          previousTurn,
+          nextTurn: operationMetadata(operation),
+          downstream: handoff,
+        }));
+        this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
+      },
     });
   }
 
@@ -385,20 +394,25 @@ export class AgentRuntimeRouter {
       );
     }
     const operation = operationIdentity(entry, opts, 'agent-compact');
-    await this.#openProjection(integration, chatId, entry, opts.executionAdmission?.signal);
     const prompt = opts.instructions?.trim() ? `/compact ${opts.instructions.trim()}` : '/compact';
     this.#events.trackTurn(chatId, operationMetadata(operation));
+    const producer = this.#producer(chatId);
+    const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
       const request = {
-        ...this.#executionContext(chatId, entry, selection, operation, opts),
+        ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        sink: producer.sink,
+        priorContext: this.#ledger.conversationMessages(chatId),
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt,
         attachments: [],
       };
-      await compaction.compact(request);
+      const handle = await compaction.compact(request);
+      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
     } catch (error) {
-      this.#events.clearTurn(chatId);
+      this.#pendingAbortRuns.delete(runKey(chatId, runId));
+      this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
       throw error;
     }
   }
@@ -430,31 +444,18 @@ export class AgentRuntimeRouter {
     });
   }
 
-  // Refreshes the open projection segment's provider reference after a
-  // project-path relocation persists the new native session, so the settled
-  // boundary reads the relocated evidence rather than the moved-away path.
-  notifyProjectPathRelocated(chatId: string): void {
-    const entry = this.#registry.getChat(chatId);
-    if (!entry?.agentId) return;
-    const integration = this.#directory.get(entry.agentId);
-    if (!integration) return;
-    integration.transcript.updateNativeReference(
-      toAgentChatReference(integration, chatId, entry, this.#getCarryOverRevision(entry)),
-    );
-  }
-
-  async abortSession(chatId: string): Promise<boolean> {
+  abortSession(chatId: string): Promise<boolean> {
     const runId = this.#ledger.activeRunId(chatId);
-    if (!runId) return false;
+    if (!runId) return Promise.resolve(false);
     const active = this.#executionHandles.get(chatId);
     this.#ledger.interruptRun(chatId);
     if (!active || active.runId !== runId) {
       this.#pendingAbortRuns.add(runKey(chatId, runId));
-      return true;
+      return Promise.resolve(true);
     }
     this.#executionHandles.delete(chatId);
-    await this.#directory.require(active.agentId).producerExecution.abort(active.handle);
-    return true;
+    this.#abortHandleBestEffort(chatId, active.agentId, active.handle, 'accepted interruption');
+    return Promise.resolve(true);
   }
 
   isChatRunning(chatId: string): boolean {
@@ -516,14 +517,14 @@ export class AgentRuntimeRouter {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
-    messageSequence?: number;
+    messageOrdinal?: number;
     providerMeta?: JsonObject | null;
   }): Promise<ForkedAgentSessionOutcome | null> {
     if (
-      args.messageSequence !== undefined
-      && (!Number.isSafeInteger(args.messageSequence) || args.messageSequence <= 0)
+      args.messageOrdinal !== undefined
+      && (!Number.isSafeInteger(args.messageOrdinal) || args.messageOrdinal <= 0)
     ) {
-      throw new DomainError('VALIDATION_FAILED', 'messageSequence must be a positive safe integer', 400);
+      throw new DomainError('VALIDATION_FAILED', 'messageOrdinal must be a positive safe integer', 400);
     }
     try {
       const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
@@ -543,7 +544,7 @@ export class AgentRuntimeRouter {
         source,
         this.#getCarryOverRevision(source),
       );
-      if (args.messageSequence !== undefined && !args.providerMeta) {
+      if (args.messageOrdinal !== undefined && !args.providerMeta) {
         throw new AgentIntegrationError(
           'TRANSCRIPT_UNAVAILABLE',
           'The selected ledger row has no provider-native fork position',
@@ -551,7 +552,13 @@ export class AgentRuntimeRouter {
           { nativeForkReason: 'not-settled' },
         );
       }
-      const context = this.#executionContext(args.targetChatId, source, selection, operation, {});
+      const context = this.#executionContextV5(
+        args.targetChatId,
+        source,
+        selection,
+        operation.turnId,
+        {},
+      );
       const result = await integration.forking.fork({
         chatId: context.chatId,
         projectPath: context.projectPath,
@@ -562,7 +569,7 @@ export class AgentRuntimeRouter {
         endpoint: context.endpoint,
         admission: context.admission,
         source: sourceReference,
-        providerMeta: args.messageSequence === undefined ? null : args.providerMeta ?? null,
+        providerMeta: args.messageOrdinal === undefined ? null : args.providerMeta ?? null,
       });
       if (result.kind === 'unmaterialized') return result;
       return {
@@ -575,22 +582,15 @@ export class AgentRuntimeRouter {
       };
     } catch (error) {
       if (error instanceof AgentIntegrationError && error.code === 'OPERATION_UNSUPPORTED') {
-        throw new DomainError('OPERATION_UNSUPPORTED', error.message, 422, error.retryable);
+        return null;
       }
       if (error instanceof AgentIntegrationError && error.code === 'SOURCE_REVISION_CHANGED') {
         throw new DomainError('SOURCE_REVISION_CHANGED', error.message, 409, error.retryable);
       }
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-        // A point the provider has not settled or persisted yet keeps the
-        // established retry-later contract instead of a hard failure.
         const reason = error.details?.nativeForkReason;
         if (reason === 'not-settled' || reason === 'projection-ahead-of-provider') {
-          throw new DomainError(
-            'MESSAGE_NOT_IN_NATIVE_HISTORY',
-            "This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
-            409,
-            true,
-          );
+          return null;
         }
         throw new DomainError(
           'TRANSCRIPT_UNAVAILABLE',
@@ -701,6 +701,44 @@ export class AgentRuntimeRouter {
     };
   }
 
+  #goalRunHandoff(input: {
+    readonly chatId: string;
+    readonly previousRunId: string;
+    readonly nextRunId: string;
+    readonly previousTurn: TurnEventMetadata | undefined;
+    readonly nextTurn: TurnEventMetadata;
+    readonly downstream: AgentGoalControlHandoff;
+  }): AgentGoalControlHandoff {
+    const eventHandoff = this.#events.handoffTurn(
+      input.chatId,
+      input.previousTurn,
+      input.nextTurn,
+      input.downstream,
+    );
+    const validate = () => {
+      if (!this.#ledger.isRunActive(input.chatId, input.previousRunId)) {
+        throw new Error(`Cannot hand off run for chat ${input.chatId} after its active run changed`);
+      }
+      eventHandoff.validate();
+    };
+    validate();
+    return {
+      validate,
+      commit: () => {
+        validate();
+        eventHandoff.commit();
+        this.#ledger.handoffRun(input.chatId, input.previousRunId, input.nextRunId);
+        const active = this.#executionHandles.get(input.chatId);
+        if (active?.runId === input.previousRunId) {
+          this.#executionHandles.set(input.chatId, {
+            ...active,
+            runId: input.nextRunId,
+          });
+        }
+      },
+    };
+  }
+
   async #retainOrAbortHandle(
     chatId: string,
     agentId: string,
@@ -708,12 +746,7 @@ export class AgentRuntimeRouter {
     handle: AgentExecutionHandle,
   ): Promise<void> {
     if (this.#pendingAbortRuns.delete(runKey(chatId, runId))) {
-      await this.#directory.require(agentId).producerExecution.abort(handle).catch((error) => {
-        logger.warn('Provider abort after an interrupted launch failed', {
-          chatId,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-      });
+      this.#abortHandleBestEffort(chatId, agentId, handle, 'interrupted launch');
       return;
     }
     if (this.#ledger.isRunActive(chatId, runId)) {
@@ -721,12 +754,42 @@ export class AgentRuntimeRouter {
     }
   }
 
+  #abortHandleBestEffort(
+    chatId: string,
+    agentId: string,
+    handle: AgentExecutionHandle,
+    context: string,
+  ): void {
+    const failed = (error: unknown) => {
+      logger.warn(`Provider abort after ${context} failed`, {
+        chatId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    };
+    try {
+      void this.#directory.require(agentId).execution.abort(handle).catch(failed);
+    } catch (error) {
+      failed(error);
+    }
+  }
+
   #producer(chatId: string): TranscriptProducerLease {
     const existing = this.#producerLeases.get(chatId);
     if (existing && !existing.closed) return existing;
-    const lease = this.#ledger.openProducer(chatId);
+    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    const lease = this.#ledger.openProducer(chatId, entry.agentId);
     this.#producerLeases.set(chatId, lease);
     return lease;
+  }
+
+  reopenProducer(chatId: string): void {
+    this.#producerLeases.get(chatId)?.close();
+    this.#producerLeases.delete(chatId);
+    this.#producer(chatId);
+  }
+
+  publishSessionFact(chatId: string, session: AgentEstablishedSession): void {
+    this.#producer(chatId).sink.publish({ type: 'session', session });
   }
 
   #executionContextV5(
@@ -771,87 +834,10 @@ export class AgentRuntimeRouter {
         markStarted: async () => {
           await opts.executionAdmission?.markStarted();
         },
-        markAbortable: () => {
-          const turn = this.#events.getActiveTurn(chatId);
-          if (turn) this.#events.markTurnAbortable(chatId, turn);
-        },
       },
     };
   }
 
-  #executionContext(
-    chatId: string,
-    entry: ReturnType<typeof requireAgentChatEntry>,
-    selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>,
-    operation: AgentTurnOwnerOperationIdentityV4,
-    opts: {
-      permissionMode?: RunAgentTurnOptions['permissionMode'];
-      thinkingMode?: RunAgentTurnOptions['thinkingMode'];
-      agentSettings?: RunAgentTurnOptions['agentSettings'];
-      executionAdmission?: AgentExecutionAdmission;
-    },
-  ): AgentExecutionContextV4 {
-    const integration = this.#directory.require(entry.agentId);
-    const permissionMode = supportedValue(
-      integration.descriptor.supportedPermissionModes,
-      normalizePermissionMode(opts.permissionMode ?? entry.permissionMode),
-      'default',
-    );
-    const thinkingMode = supportedValue(
-      integration.descriptor.supportedThinkingModes,
-      normalizeThinkingMode(opts.thinkingMode ?? entry.thinkingMode),
-      'none',
-    );
-    const settings = integration.settings.parse(
-      opts.agentSettings ??
-        entry.agentSettingsById?.[entry.agentId] ??
-        integration.settings.defaults(),
-    );
-    return {
-      chatId,
-      projectPath: entry.projectPath,
-      model: selection.model,
-      permissionMode,
-      thinkingMode,
-      settings,
-      endpoint: toAgentEndpointSelection(this.#endpointResolver, selection),
-      operation,
-      admission: {
-        signal: opts.executionAdmission?.signal ?? new AbortController().signal,
-        markStarted: async () => {
-          await opts.executionAdmission?.markStarted();
-        },
-        markAbortable: () => this.#events.markTurnAbortable(chatId, operationMetadata(operation)),
-      },
-    };
-  }
-
-  async #openProjection(
-    integration: ReturnType<AgentDirectory['require']>,
-    chatId: string,
-    entry: ReturnType<typeof requireAgentChatEntry>,
-    signal = new AbortController().signal,
-  ): Promise<void> {
-    const opened = await this.#projection.open(
-      integration,
-      toAgentChatReference(
-        integration,
-        chatId,
-        entry,
-        this.#getCarryOverRevision(entry),
-      ),
-      signal,
-    );
-    if (opened.kind === 'ready') return;
-    throw new DomainError(
-      'TRANSCRIPT_UNAVAILABLE',
-      opened.kind === 'deferred'
-        ? 'The transcript is busy. Retry after the current execution settles.'
-        : 'The transcript projection is unavailable.',
-      409,
-      true,
-    );
-  }
 }
 
 function requireAgentChatEntryWithModel(
@@ -869,19 +855,18 @@ function operationIdentity(
   entry: Pick<AgentChatEntry, 'agentOwnershipEpoch'>,
   value: { clientRequestId?: string; clientMessageId?: string; turnId?: string },
   commandType: AgentExecutionCommandType,
-): AgentTurnOwnerOperationIdentityV4 {
+): TurnOperation {
   if (!entry.agentOwnershipEpoch) throw new Error('Agent ownership epoch is required');
   const clientRequestId = value.clientRequestId ?? crypto.randomUUID();
   const turnId = value.turnId ?? crypto.randomUUID();
-  const ownershipEpoch = agentOwnershipEpoch(entry.agentOwnershipEpoch);
   const turnOwner = {
-    agentOwnershipEpoch: ownershipEpoch,
+    agentOwnershipEpoch: entry.agentOwnershipEpoch,
     commandType,
     clientRequestId,
     turnId,
   } as const;
   return {
-    agentOwnershipEpoch: ownershipEpoch,
+    agentOwnershipEpoch: entry.agentOwnershipEpoch,
     commandType,
     clientRequestId,
     clientMessageId: value.clientMessageId ?? null,
@@ -890,7 +875,7 @@ function operationIdentity(
   };
 }
 
-function operationMetadata(operation: AgentTurnOwnerOperationIdentityV4) {
+function operationMetadata(operation: TurnOperation) {
   return {
     commandType: operation.commandType,
     ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),

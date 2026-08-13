@@ -26,10 +26,10 @@ describe('CursorAgentIntegration', () => {
     const integration = new CursorAgentIntegration(host);
 
     expect(CursorAgentIntegration.integrationId).toBe('cursor');
-    expect(CursorAgentIntegration.apiVersion).toBe(4);
+    expect(CursorAgentIntegration.apiVersion).toBe(5);
     expect(integration.descriptor.id).toBe('cursor');
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
-    expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
+    expect(integration.projectPathUpdates).toBeDefined();
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toBeNull();
     expect(integration.auth).toBeDefined();
@@ -48,7 +48,7 @@ describe('CursorAgentIntegration', () => {
       schemaVersion: 1,
       values: {},
     });
-    await expect(integration.transcript.resolveNativeSession({
+    await expect(integration.nativeSessions.resolveNativeSession({
       chat: {
         chatId: 'chat-1',
         agentId: 'cursor',
@@ -61,14 +61,11 @@ describe('CursorAgentIntegration', () => {
       },
       signal,
     })).resolves.toEqual({
-      kind: 'ready',
+      ownerId: 'cursor',
+      schemaVersion: 1,
       value: {
-        ownerId: 'cursor',
-        schemaVersion: 1,
-        value: {
-          path: '!cursor-acp:session-1',
-          agentSessionId: 'session-1',
-        },
+        path: '!cursor-acp:session-1',
+        agentSessionId: 'session-1',
       },
     });
   });

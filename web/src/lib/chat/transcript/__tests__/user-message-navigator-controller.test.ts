@@ -122,20 +122,19 @@ describe('UserMessageNavigatorController', () => {
 		expect(controller.items.map((item) => item.content)).toEqual(['recent prompt']);
 	});
 
-	it('includes pending and failed user rows with attachment metadata', () => {
+	it('includes optimistic user rows with attachment metadata', () => {
 		const { controller, transcript } = setup();
-		transcript.upsertPendingUserInput({
+		transcript.upsertOptimisticUserInput({
 			chatId: 'chat-1',
-			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
 			content: '',
 			createdAt: '2026-07-22T00:00:02.000Z',
-			deliveryStatus: 'failed',
-			attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
+			images: [{ name: 'context.pdf', mimeType: 'application/pdf', data: '' }],
 		});
 		controller.openForActiveChat();
 
 		expect(controller.items[0]).toMatchObject({
-			id: 'pending:request-1',
+			id: 'optimistic:message-1',
 			content: '',
 			attachmentCount: 1,
 		});
@@ -255,16 +254,14 @@ describe('UserMessageNavigatorController', () => {
 		expect(controller.items).toEqual([]);
 	});
 
-	it('jumps to a pending draft row before a transcript generation is established', async () => {
+	it('jumps to an optimistic input before a transcript view is established', async () => {
 		const transcript = new ActiveTranscriptState();
 		transcript.activateChat('chat-1');
-		transcript.upsertPendingUserInput({
+		transcript.upsertOptimisticUserInput({
 			chatId: 'chat-1',
-			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
 			content: 'First message',
 			createdAt: TS,
-			deliveryStatus: 'submitting',
-			attachments: [],
 		});
 		const jumpToRow = vi.fn(async () => 'completed' as const);
 		const controller = new UserMessageNavigatorController({
@@ -282,7 +279,7 @@ describe('UserMessageNavigatorController', () => {
 		expect(jumpToRow).toHaveBeenCalledWith({
 			chatId: 'chat-1',
 			transcriptViewId: '',
-			rowId: 'pending:request-1',
+			rowId: 'optimistic:message-1',
 		});
 		expect(controller.open).toBe(false);
 	});

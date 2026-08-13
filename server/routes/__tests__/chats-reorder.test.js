@@ -25,7 +25,6 @@ import {
   createRouteCommandLedger,
   createRouteCommandService,
   createRoutePathCache,
-  createRoutePendingInputs,
 } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
@@ -61,11 +60,12 @@ const metadata = {
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
     messages: [],
-    generationId: 'generation-1',
-    lastSeq: 0,
-    pageOldestSeq: 0,
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
     hasMore: false,
   })),
 };
@@ -75,7 +75,6 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-reorder');
-const pendingInputs = createRoutePendingInputs();
 const chatListProjector = createRouteChatListProjector({
   registry,
   settings,
@@ -87,11 +86,11 @@ const chatsRoutes = createChatRoutes({
   registry,
   settings,
   queue,
+  processing: { phase: mock(() => null) },
   pathCache,
   metadata,
   chatViews,
   agents,
-  pendingInputs,
   chatListProjector,
   commandService: createRouteCommandService({
     registry,
@@ -100,7 +99,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-    pendingInputs,
     pathCache,
     chatListProjector,
   }),

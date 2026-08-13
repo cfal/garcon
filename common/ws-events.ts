@@ -1,13 +1,10 @@
 import type { ResendCandidate, TranscriptMessage } from './chat-view';
 import { parseResendCandidates, parseTranscriptMessages } from './chat-view';
 import {
-  parseChatProjectionGenerationTransition,
   parseChatTransientFeedMutation,
   parseChatTransientFeedSnapshot,
-  type ChatProjectionGenerationTransition,
   type ChatTransientFeedMutation,
   type ChatTransientFeedSnapshot,
-  type TransientFeedRow,
 } from './chat-transient-feed';
 import {
   CHAT_STOP_OUTCOMES,
@@ -16,13 +13,7 @@ import {
   type ChatProcessingPhase,
   type ChatStopIntent,
   type ChatStopOutcome,
-  type UserMessageDeliveryStatus,
 } from './chat-types';
-import type {
-  PendingUserInput,
-  PendingUserInputClearReason,
-} from './pending-user-input';
-import { normalizePendingUserInput } from './pending-user-input';
 import type { ChatExecutionControlState } from './chat-execution-control';
 import {
   parseChatExecutionControlState,
@@ -65,7 +56,6 @@ export class ChatSubscribedMessage {
     public firstOrdinal: number,
     public lastOrdinal: number,
     public resendCandidates: ResendCandidate[],
-    public pendingUserInputs: PendingUserInput[],
     public transientFeed: ChatTransientFeedSnapshot,
   ) {}
 }
@@ -85,27 +75,9 @@ export class ChatTransientFeedMutationMessage implements ChatTransientFeedMutati
   constructor(
     public serverInstanceId: string,
     public chatId: string,
-    public agentOwnershipEpoch: string,
-    public generationId: string,
+    public transcriptViewId: string,
     public transientRevision: number,
-    public stateDigest: string,
     public mutation: ChatTransientFeedMutation['mutation'],
-  ) {}
-}
-
-export class ChatProjectionGenerationTransitionMessage
-implements ChatProjectionGenerationTransition {
-  readonly type = 'chat-projection-generation-transition' as const;
-  constructor(
-    public resetTransactionId: string,
-    public serverInstanceId: string,
-    public chatId: string,
-    public agentOwnershipEpoch: string,
-    public previousGenerationId: string,
-    public generationId: string,
-    public transientRevision: number,
-    public stateDigest: string,
-    public rows: readonly TransientFeedRow[],
   ) {}
 }
 
@@ -224,29 +196,6 @@ export class ReconnectStateMessage {
     public controlResults: ReconnectControlResult[],
     public serverInstanceId: string,
     public clientRequestId?: string,
-  ) {}
-}
-
-export class PendingUserInputUpdatedMessage {
-  readonly type = 'pending-user-input-updated' as const;
-  constructor(public input: PendingUserInput) {}
-}
-
-export class PendingUserInputStatusUpdatedMessage {
-  readonly type = 'pending-user-input-status-updated' as const;
-  constructor(
-    public chatId: string,
-    public clientRequestId: string,
-    public deliveryStatus: UserMessageDeliveryStatus,
-  ) {}
-}
-
-export class PendingUserInputClearedMessage {
-  readonly type = 'pending-user-input-cleared' as const;
-  constructor(
-    public chatId: string,
-    public clientRequestId: string,
-    public reason: PendingUserInputClearReason,
   ) {}
 }
 
@@ -378,7 +327,6 @@ export type ServerWsMessage =
   | ChatSubscribedMessage
   | ChatTranscriptReplacedMessage
   | ChatTransientFeedMutationMessage
-  | ChatProjectionGenerationTransitionMessage
   | ChatReloadedMessage
   | AgentRunFinishedMessage
   | AgentRunFailedMessage
@@ -389,9 +337,6 @@ export type ServerWsMessage =
   | ChatExecutionControlUpdatedMessage
   | ChatOperationalNoticeMessage
   | ReconnectStateMessage
-  | PendingUserInputUpdatedMessage
-  | PendingUserInputStatusUpdatedMessage
-  | PendingUserInputClearedMessage
   | WsFaultMessage
   | WsPongMessage
   | ChatTitleUpdatedMessage
@@ -484,14 +429,6 @@ function parseChatListInvalidationReason(
   return isChatListInvalidationReason(v) ? v : null;
 }
 
-function parsePendingUserInputs(value: unknown): PendingUserInput[] | null {
-  if (!Array.isArray(value)) return null;
-  const inputs = value.map(normalizePendingUserInput);
-  return inputs.every((input): input is PendingUserInput => input !== null)
-    ? inputs
-    : null;
-}
-
 export function parseServerWsMessage(
   data: Record<string, unknown>,
 ): ServerWsMessage | null {
@@ -540,13 +477,12 @@ export function parseServerWsMessage(
         return null;
       const messages = parseTranscriptMessages(data.messages);
       const resendCandidates = parseResendCandidates(data.resendCandidates);
-      const pendingUserInputs = parsePendingUserInputs(data.pendingUserInputs);
       const transientFeed = parseChatTransientFeedSnapshot(data.transientFeed);
       if (messages === null || resendCandidates === null
-          || pendingUserInputs === null || !transientFeed) return null;
+          || !transientFeed) return null;
       if (!isValidTranscriptSpan(firstOrdinal, lastOrdinal, messages)) return null;
       if (transientFeed.chatId !== chatId
-          || transientFeed.generationId !== transcriptViewId) return null;
+          || transientFeed.transcriptViewId !== transcriptViewId) return null;
       return new ChatSubscribedMessage(
         clientRequestId,
         chatId,
@@ -555,7 +491,6 @@ export function parseServerWsMessage(
         firstOrdinal,
         lastOrdinal,
         resendCandidates,
-        pendingUserInputs,
         transientFeed,
       );
     }
@@ -578,27 +513,9 @@ export function parseServerWsMessage(
         ? new ChatTransientFeedMutationMessage(
             parsed.serverInstanceId,
             parsed.chatId,
-            parsed.agentOwnershipEpoch,
-            parsed.generationId,
+            parsed.transcriptViewId,
             parsed.transientRevision,
-            parsed.stateDigest,
             parsed.mutation,
-          )
-        : null;
-    }
-    case 'chat-projection-generation-transition': {
-      const parsed = parseChatProjectionGenerationTransition(data);
-      return parsed
-        ? new ChatProjectionGenerationTransitionMessage(
-            parsed.resetTransactionId,
-            parsed.serverInstanceId,
-            parsed.chatId,
-            parsed.agentOwnershipEpoch,
-            parsed.previousGenerationId,
-            parsed.generationId,
-            parsed.transientRevision,
-            parsed.stateDigest,
-            parsed.rows,
           )
         : null;
     }
@@ -753,34 +670,6 @@ export function parseServerWsMessage(
           ? data.clientRequestId
           : undefined,
       );
-    }
-    case 'pending-user-input-updated': {
-      const input = normalizePendingUserInput(data.input);
-      return input ? new PendingUserInputUpdatedMessage(input) : null;
-    }
-    case 'pending-user-input-status-updated': {
-      const chatId = requiredStr(data.chatId);
-      const clientRequestId = requiredStr(data.clientRequestId);
-      const deliveryStatus = data.deliveryStatus === 'submitting'
-        || data.deliveryStatus === 'accepted'
-        || data.deliveryStatus === 'unconfirmed'
-        || data.deliveryStatus === 'failed'
-        ? data.deliveryStatus
-        : null;
-      return chatId && clientRequestId && deliveryStatus
-        ? new PendingUserInputStatusUpdatedMessage(chatId, clientRequestId, deliveryStatus)
-        : null;
-    }
-    case 'pending-user-input-cleared': {
-      const chatId = requiredStr(data.chatId);
-      const clientRequestId = requiredStr(data.clientRequestId);
-      const reason = data.reason === 'chat-removed'
-        || data.reason === 'persisted'
-        ? data.reason
-        : null;
-      return chatId && clientRequestId && reason
-        ? new PendingUserInputClearedMessage(chatId, clientRequestId, reason)
-        : null;
     }
     case 'ws-fault':
       return new WsFaultMessage(str(data.error));

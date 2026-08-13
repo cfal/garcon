@@ -45,6 +45,59 @@ function acceptedControlResponse(_input: string | URL | Request, init?: RequestI
   });
 }
 
+function controlSnapshotResponse(): Response {
+  return Response.json({
+    observedAt: '2026-08-04T12:00:00.000Z',
+    messageLimit: 1,
+    chat: {
+      id: CHAT_ID,
+      title: 'Review',
+      agentId: 'codex',
+      agentOwnershipEpoch: 'epoch-1',
+      carryOverRevision: 'carry-v1:0',
+      model: null,
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      projectPath: '/project',
+      tags: [],
+      canReloadFromNativeHistory: false,
+      activity: { createdAt: null, lastActivityAt: null },
+    },
+    processingPhase: null,
+    control: {
+      serverInstanceId: 'instance',
+      queue: {
+        entries: [],
+        steeringEntryId: null,
+        recentlyDispatched: [],
+        pause: null,
+        reorderRevision: 0,
+      },
+      version: 0,
+      updatedAt: null,
+    },
+    transcript: {
+      availability: 'available',
+      transcriptViewId: 'view-1',
+      messages: [],
+      lastOrdinal: 0,
+      pageOldestOrdinal: 0,
+      pageNewestOrdinal: 0,
+      hasMore: false,
+    },
+    transientFeed: {
+      serverInstanceId: 'instance',
+      chatId: CHAT_ID,
+      transcriptViewId: 'view-1',
+      transientRevision: 0,
+      rows: [],
+    },
+  });
+}
+
 describe('main', () => {
   test('status reads one snapshot without reading stdin or resolving a project path', async () => {
     const capture = capturedOutput();
@@ -69,6 +122,7 @@ describe('main', () => {
             thinkingMode: 'none',
             projectPath: '/project/that/need/not/exist',
             tags: ['cli'],
+            canReloadFromNativeHistory: false,
             activity: { createdAt: null, lastActivityAt: null },
           },
           processingPhase: null,
@@ -84,16 +138,12 @@ describe('main', () => {
             version: 0,
             updatedAt: null,
           },
-          pendingUserInputs: [],
           transcript: { availability: 'not-requested' },
           transientFeed: {
             serverInstanceId: 'instance',
             chatId: CHAT_ID,
-            agentOwnershipEpoch: 'epoch-1',
-            generationId: 'generation-0',
-            resetTransactionId: null,
+            transcriptViewId: 'view-1',
             transientRevision: 0,
-            stateDigest: 'transient-v1:empty',
             rows: [],
           },
         });
@@ -226,7 +276,9 @@ describe('main', () => {
     const exitCode = await main([
       'send-async', CHAT_ID, 'Implement the review',
     ], {
-      fetch: acceptedControlResponse,
+      fetch: (input, init) => String(input).includes('/snapshot?')
+        ? controlSnapshotResponse()
+        : acceptedControlResponse(input, init),
       discoverRuntime: stubDiscovery,
       output: capture.output,
     });
@@ -239,12 +291,14 @@ describe('main', () => {
     const exitCode = await main([
       'send-async', CHAT_ID, 'Implement the review',
     ], {
-      fetch: async () => Response.json({
-        success: false,
-        error: 'Chat is busy',
-        errorCode: 'SESSION_BUSY',
-        retryable: true,
-      }, { status: 409 }),
+      fetch: async (input) => String(input).includes('/snapshot?')
+        ? controlSnapshotResponse()
+        : Response.json({
+          success: false,
+          error: 'Chat is busy',
+          errorCode: 'SESSION_BUSY',
+          retryable: true,
+        }, { status: 409 }),
       discoverRuntime: stubDiscovery,
       output: capture.output,
     });
@@ -260,6 +314,7 @@ describe('main', () => {
     ], {
       fetch: async (input, init) => {
         const url = String(input);
+        if (url.includes('/snapshot?')) return controlSnapshotResponse();
         if (url.endsWith('/api/v1/chats/run')) {
           runCalls += 1;
           return Response.json({

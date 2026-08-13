@@ -19,7 +19,6 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import {
-  expectTranscriptNotYetPersisted,
   forkAfterSourceSettles,
   forkWhenTranscriptPersists,
 } from '../../support/fork-test-support.js';
@@ -36,6 +35,7 @@ import {
   startScriptedCodexTestEnvironment,
   type ScriptedCodexTestEnvironment,
 } from '../../support/scripted-codex.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 interface PersistedCodexChatRecord {
   agentSessionId: string | null;
@@ -81,19 +81,16 @@ describe('scripted Codex fork lifecycle matrix', () => {
         permissionMode: 'bypassPermissions',
       }));
       await held.requested;
-      const sourceRecord = await readCodexChatRecord(fixture.dirs.workspace, sourceChatId);
-      const sourcePath = sourceRecord.nativeSession?.value.path;
-      if (!sourcePath) throw new Error('Codex source did not persist its first rollout path.');
-      const sourceSnapshot = await readFile(sourcePath, 'utf8');
-      await writeFile(sourcePath, '');
       const forkChatId = fixture.newChatId();
       try {
-        await expectTranscriptNotYetPersisted(fixture.client.forkChat({
+        await fixture.client.forkChat({
           sourceChatId,
           chatId: forkChatId,
-        }));
+        });
+        const forkedWhileRunning = await fixture.client.getMessages(forkChatId);
+        expect(userContents(forkedWhileRunning.messages)).toEqual([prompt]);
+        expect(assistantContents(forkedWhileRunning.messages)).toEqual([]);
       } finally {
-        await writeFile(sourcePath, sourceSnapshot);
         held.release();
       }
       await waitForVisibleResponse({
@@ -103,15 +100,13 @@ describe('scripted Codex fork lifecycle matrix', () => {
         marker: reply,
         afterIndex: cursor,
       });
-      await forkAfterSourceSettles(fixture, sourceChatId, forkChatId);
-      expect(userContents((await fixture.client.getMessages(forkChatId)).messages)).toEqual([
-        prompt,
-      ]);
+      expect(assistantContents((await fixture.client.getMessages(forkChatId)).messages))
+        .not.toContain(reply);
 
       testEnvironment.model.scriptTurn((request) => {
         expect(request.lastUserText).toContain(childPrompt);
         expect(JSON.stringify(request.body)).toContain(prompt);
-        expect(JSON.stringify(request.body)).toContain(reply);
+        expect(JSON.stringify(request.body)).not.toContain(reply);
         return [codexAssistantMessage(childReply)];
       });
       const childCursor = fixture.client.markEvents();
@@ -130,9 +125,13 @@ describe('scripted Codex fork lifecycle matrix', () => {
 
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([prompt, childPrompt]);
-      expect(assistantContents(fork.messages)).toContain(reply);
+      expect(assistantContents(fork.messages)).not.toContain(reply);
       expect(assistantContents(fork.messages)).toContain(childReply);
-      const materialized = await readCodexChatRecord(fixture.dirs.workspace, forkChatId);
+      const materialized = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId: forkChatId,
+        agentId: 'codex',
+      }) as unknown as PersistedCodexChatRecord;
       expect(materialized.agentSessionId).toEqual(expect.any(String));
       if (!materialized.agentSessionId) {
         throw new Error('Codex child did not persist its materialized session id.');
@@ -230,7 +229,11 @@ describe('scripted Codex fork lifecycle matrix', () => {
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([childPrompt]);
       expect(assistantContents(fork.messages)).toContain(childReply);
-      const materialized = await readCodexChatRecord(fixture.dirs.workspace, forkChatId);
+      const materialized = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId: forkChatId,
+        agentId: 'codex',
+      }) as unknown as PersistedCodexChatRecord;
       expect(materialized.agentSessionId).toEqual(expect.any(String));
       if (!materialized.agentSessionId) {
         throw new Error('Codex child did not persist its materialized session id.');

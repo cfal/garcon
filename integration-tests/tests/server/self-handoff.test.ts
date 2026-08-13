@@ -5,10 +5,7 @@
 // history as its carried context.
 import { describe, expect, test } from 'bun:test';
 import { userContents } from '../../support/chat-assertions.js';
-import { CARRIED_CONTEXT_VERSION } from '../../../common/transcript-seed.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-
-const CARRIED_CONTEXT_MARKER = `<carried-context version="${CARRIED_CONTEXT_VERSION}">`;
 
 describe('self handoff', () => {
   test('continues in a new chat carrying the source history', async () => {
@@ -43,12 +40,12 @@ describe('self handoff', () => {
       expect(response.chat.id).toBe(targetChatId);
 
       const request = await held.received;
-      // The continuation's first prompt carries the archived history, exactly one
-      // envelope, followed by the user's text.
-      expect(request.lastUserText).toContain(CARRIED_CONTEXT_MARKER);
-      expect(request.lastUserText).toContain('the original request');
-      expect(request.lastUserText.endsWith('continue the work')).toBeTrue();
-      expect(occurrences(request.lastUserText, CARRIED_CONTEXT_MARKER)).toBe(1);
+      expect(request.body.messages.map((message) => message.content)).toEqual([
+        'the original request',
+        'echo:the original request',
+        'continue the work',
+      ]);
+      expect(JSON.stringify(request.body)).not.toContain('<carried-context');
       expect(held.releaseText('echo:continue the work')).toBeTrue();
 
       const chats = (await client.listChats()).sessions;
@@ -101,7 +98,3 @@ describe('self handoff', () => {
     });
   }, 60_000);
 });
-
-function occurrences(haystack: string, needle: string): number {
-  return haystack.split(needle).length - 1;
-}

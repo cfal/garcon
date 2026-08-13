@@ -26,13 +26,13 @@ describe('CodexAgentIntegration', () => {
     const integration = new CodexAgentIntegration(host);
 
     expect(CodexAgentIntegration.integrationId).toBe('codex');
-    expect(CodexAgentIntegration.apiVersion).toBe(4);
+    expect(CodexAgentIntegration.apiVersion).toBe(5);
     expect(integration.descriptor.id).toBe('codex');
     expect(integration.steering?.steer).toBeDefined();
     expect(integration.goals?.submitControl).toBeDefined();
     expect(integration.compaction?.compact).toBeDefined();
-    expect(integration.execution.respondToPermission).toBeDefined();
-    expect(integration.execution.prepareProjectPathUpdate).toBeUndefined();
+    expect(integration.permissionDecisions).toBeDefined();
+    expect(integration.projectPathUpdates).toBeNull();
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       fork: expect.any(Function),

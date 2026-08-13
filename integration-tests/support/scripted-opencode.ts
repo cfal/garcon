@@ -9,7 +9,7 @@
 
 import { Database } from 'bun:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
@@ -19,6 +19,7 @@ import type {
 } from '../../common/chat-command-contracts.js';
 import { FakeChatCompletionsModel } from './fake-chat-completions-model.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
+import { waitForPersistedNativeSession } from './persisted-chat.js';
 import {
   buildOpenCodeProviderEnvironment,
   PINNED_OPENCODE_VERSION,
@@ -530,11 +531,11 @@ export async function openCodeNativeSession(
   fixture: { readonly dirs: IntegrationDirectories },
   chatId: string,
 ): Promise<OpenCodeNativeSession> {
-  const registry = JSON.parse(
-    await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
-  ) as { sessions?: Record<string, Record<string, unknown>> };
-  const chat = registry.sessions?.[chatId];
-  if (chat?.agentId !== 'opencode') throw new Error(`Chat ${chatId} is not an OpenCode chat.`);
+  const chat = await waitForPersistedNativeSession({
+    directories: fixture.dirs,
+    chatId,
+    agentId: 'opencode',
+  });
   const agentSessionId = typeof chat.agentSessionId === 'string' ? chat.agentSessionId : '';
   const nativeSession = chat.nativeSession && typeof chat.nativeSession === 'object'
     ? chat.nativeSession as Record<string, unknown>

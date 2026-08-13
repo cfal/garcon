@@ -1,58 +1,51 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
-  AgentIntegrationError,
-} from '@garcon/server-agent-interface';
-import {
-  AgentProjectionProducerEventChannel,
-  projectionProducerMessages,
-  type AgentProjectionRuntimeExecution,
-} from '@garcon/server-agent-common/execution/projection-events';
-import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
+  AgentRuntimeEventChannel,
+  runtimeRows,
+  type AgentRuntimeExecution,
+} from '@garcon/server-agent-common/execution/runtime-events';
+import { AgentRunTracker } from '@garcon/server-agent-common/execution/run-tracker';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { AmpCliRuntime } from './amp-cli.js';
 
-export class AmpExecution implements AgentProjectionRuntimeExecution {
-  readonly #events = new AgentProjectionProducerEventChannel();
-  readonly #operations = new AgentOperationTracker();
+export class AmpExecution implements AgentRuntimeExecution {
+  readonly #events = new AgentRuntimeEventChannel();
+  readonly #runs = new AgentRunTracker();
 
   constructor(
     private readonly runtime: AmpCliRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({
+      this.#events.emit({
         type: 'messages',
         chatId,
-        messages: projectionProducerMessages('amp', messages),
-        operation,
+        rows: runtimeRows(messages),
+        runId: this.#runs.correlate(chatId, metadata),
       });
-    });
-    runtime.onProcessing((chatId, processing) => {
-      const operation = this.#operations.current(chatId);
-      if (operation) this.#events.emit({ type: 'processing', chatId, processing, operation });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({ type: 'finished', chatId, exitCode, operation });
-      this.#operations.finish(chatId, operation);
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
+      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
       this.#events.emit({
-        type: 'failed',
+        type: 'run-ended',
         chatId,
-        error: new AgentIntegrationError('PROVIDER_FAILURE', message, false),
-        operation,
+        runId,
+        outcome: 'failed',
+        error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#operations.finish(chatId, operation);
+      this.#runs.finish(chatId, runId);
     });
   }
 
-  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
-    this.#operations.register(request.chatId, request.operation);
+  async start(request: Parameters<AgentRuntimeExecution['start']>[0]) {
+    this.#runs.register(request.chatId, request.runId);
     request.admission.signal.throwIfAborted();
     const seed = request.carriedContext?.prefix ?? '';
     try {
@@ -63,13 +56,12 @@ export class AmpExecution implements AgentProjectionRuntimeExecution {
         permissionMode: request.permissionMode,
         thinkingMode: request.thinkingMode,
         command: `${seed}${request.prompt}`,
-        clientRequestId: request.operation.clientRequestId ?? undefined,
-        turnId: request.operation.turnId,
+        clientRequestId: request.runId,
+        turnId: request.runId,
         executionAdmission: {
           signal: request.admission.signal,
           markStarted: () => request.admission.markStarted(),
         },
-        onAbortable: () => request.admission.markAbortable(),
       });
       const session = {
         agentSessionId: result.agentSessionId,
@@ -80,21 +72,15 @@ export class AmpExecution implements AgentProjectionRuntimeExecution {
         }),
         nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, result.agentSessionId),
       };
-      this.#events.emit({
-        type: 'session-created',
-        chatId: request.chatId,
-        session,
-        operation: request.operation,
-      });
       return session;
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
 
-  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
-    this.#operations.register(request.chatId, request.operation);
+  async resume(request: Parameters<AgentRuntimeExecution['resume']>[0]): Promise<void> {
+    this.#runs.register(request.chatId, request.runId);
     try {
       await this.runtime.runTurn({
         chatId: request.chatId,
@@ -104,16 +90,15 @@ export class AmpExecution implements AgentProjectionRuntimeExecution {
         thinkingMode: request.thinkingMode,
         command: request.prompt,
         agentSessionId: request.agentSessionId,
-        clientRequestId: request.operation.clientRequestId ?? undefined,
-        turnId: request.operation.turnId,
+        clientRequestId: request.runId,
+        turnId: request.runId,
         executionAdmission: {
           signal: request.admission.signal,
           markStarted: () => request.admission.markStarted(),
         },
-        onAbortable: () => request.admission.markAbortable(),
       });
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
@@ -134,8 +119,8 @@ export class AmpExecution implements AgentProjectionRuntimeExecution {
     }));
   }
 
-  subscribeProjectionEvents(
-    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  subscribeRuntimeEvents(
+    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
   ): () => void {
     return this.#events.subscribe(listener);
   }

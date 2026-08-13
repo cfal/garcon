@@ -17,12 +17,8 @@ const mockCarryOver = {
   loadPage: async () => ({ messages: [] }),
 };
 
-function previewResult(preview, identity = {}) {
-  return {
-    preview,
-    contentEpoch: identity.contentEpoch ?? null,
-    durableRevision: identity.durableRevision ?? null,
-  };
+function previewResult(preview) {
+  return { preview };
 }
 
 function session(overrides = {}) {
@@ -32,7 +28,6 @@ function session(overrides = {}) {
     agentOwnershipEpoch: 'owner-1',
     carryOverSegments: [],
     carryOverMigrationQuarantine: null,
-    transcriptContentEpoch: null,
     ...overrides,
   };
 }
@@ -161,8 +156,6 @@ describe('metadata-store', () => {
     const identity = (overrides = {}) => ({
       carryOverRevision: 'carry-v1:0',
       agentOwnershipEpoch: 'owner-1',
-      contentEpoch: 'content-1',
-      durableRevision: 'durable-1',
       ...overrides,
     });
 
@@ -174,21 +167,20 @@ describe('metadata-store', () => {
       expect(metadata.getChatMetadata(chatId).identity).toEqual(identity());
     });
 
-    it('rebuilds preview text and identity from a destructive reset snapshot', () => {
+    it('rebuilds preview text from a replacement transcript view', () => {
       metadata.updateFromAppendedMessages(chatId, [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'pre-reset tail' },
       ], identity());
 
-      metadata.rebuildFromProjectionReset(chatId, [
+      metadata.replaceFromTranscriptView(chatId, [
         { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'surviving prompt' },
         { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: 'surviving reply' },
-      ], identity({ contentEpoch: 'content-2', durableRevision: 'durable-2' }));
+      ]);
 
       const meta = metadata.getChatMetadata(chatId);
       expect(meta.lastMessage).toBe('surviving reply');
       expect(meta.lastActivity).toBe('2026-01-01T00:01:00Z');
-      expect(meta.identity.contentEpoch).toBe('content-2');
-      expect(meta.identity.durableRevision).toBe('durable-2');
+      expect(meta.identity).toEqual(identity());
     });
   });
 
@@ -226,7 +218,7 @@ describe('metadata-store', () => {
           lastMessage: 'last repaired',
           createdAt: '2026-01-01T00:00:00Z',
           lastActivity: '2026-01-02T00:00:00Z',
-        }, { contentEpoch: 'content-1', durableRevision: 'durable-1' }))),
+        }))),
       };
       const index = new MetadataIndex(
         makeRegistry({ 'missing-chat': session() }),
@@ -284,7 +276,7 @@ describe('metadata-store', () => {
       expect(index.getChatMetadata('stalled-chat').lastMessage).toBe('persisted last');
     });
 
-    it('repairs an entry whose identity no longer matches the mirrored epoch', async () => {
+    it('repairs an entry after ownership changes', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
         'stale-chat': {
@@ -296,8 +288,6 @@ describe('metadata-store', () => {
           identity: {
             carryOverRevision: 'carry-v1:0',
             agentOwnershipEpoch: 'owner-1',
-            contentEpoch: 'content-old',
-            durableRevision: 'durable-old',
           },
         },
       })), 'utf8');
@@ -307,10 +297,10 @@ describe('metadata-store', () => {
           lastMessage: 'fresh last',
           createdAt: '2026-02-01T00:00:00Z',
           lastActivity: '2026-02-02T00:00:00Z',
-        }, { contentEpoch: 'content-new', durableRevision: 'durable-new' }))),
+        }))),
       };
       const index = new MetadataIndex(
-        makeRegistry({ 'stale-chat': session({ transcriptContentEpoch: 'content-new' }) }),
+        makeRegistry({ 'stale-chat': session({ agentOwnershipEpoch: 'owner-2' }) }),
         agents,
         mockCarryOver,
         { metadataPath },
@@ -322,13 +312,11 @@ describe('metadata-store', () => {
       expect(index.getChatMetadata('stale-chat').lastMessage).toBe('fresh last');
       expect(index.getChatMetadata('stale-chat').identity).toEqual({
         carryOverRevision: 'carry-v1:0',
-        agentOwnershipEpoch: 'owner-1',
-        contentEpoch: 'content-new',
-        durableRevision: 'durable-new',
+        agentOwnershipEpoch: 'owner-2',
       });
     });
 
-    it('keeps a matching identity without reopening the projection', async () => {
+    it('keeps a matching identity without reopening the ledger', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
         'fresh-chat': {
@@ -340,14 +328,12 @@ describe('metadata-store', () => {
           identity: {
             carryOverRevision: 'carry-v1:0',
             agentOwnershipEpoch: 'owner-1',
-            contentEpoch: 'content-1',
-            durableRevision: 'durable-1',
           },
         },
       })), 'utf8');
       const agents = { getPreview: mock(() => Promise.resolve(null)) };
       const index = new MetadataIndex(
-        makeRegistry({ 'fresh-chat': session({ transcriptContentEpoch: 'content-1' }) }),
+        makeRegistry({ 'fresh-chat': session() }),
         agents,
         mockCarryOver,
         { metadataPath },

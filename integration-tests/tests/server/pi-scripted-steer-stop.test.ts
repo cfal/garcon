@@ -7,8 +7,8 @@ import {
 } from '../../support/fake-chat-completions-model.js';
 import {
   withIntegrationFixture,
-  type IntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { userContents } from '../../support/chat-assertions.js';
 import { LIVE_TURN_TIMEOUT_MS, waitForVisibleResponse } from '../../support/live-agent.js';
 import {
   piNativeSession,
@@ -30,7 +30,7 @@ describe('scripted Pi steering stop semantics', () => {
     environment = undefined;
   });
 
-  test('discards queued steering but preserves steering already delivered at a boundary', async () => {
+  test('resends stopped steering whether or not Pi persisted it before interruption', async () => {
     const testEnvironment = requireEnvironment();
     const queuedBootstrapPrompt = marker('QUEUED_BOOTSTRAP_PROMPT');
     const queuedBootstrapReply = marker('QUEUED_BOOTSTRAP_REPLY');
@@ -67,9 +67,8 @@ describe('scripted Pi steering stop semantics', () => {
       if (!queuedTurn.turnId) throw new Error('Pi run response omitted its turn id.');
       await queuedHeld.requested;
 
-      const queuedSteerRequestId = crypto.randomUUID();
       await expect(fixture.client.steer({
-        clientRequestId: queuedSteerRequestId,
+        clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId: queuedChatId,
         content: queuedSteer,
@@ -87,13 +86,8 @@ describe('scripted Pi steering stop semantics', () => {
       });
       queuedHeld.release();
 
-      const queuedPending = await waitForPendingStatus(
-        fixture,
-        queuedChatId,
-        queuedSteerRequestId,
-        'unconfirmed',
-      );
-      expect(queuedPending.content).toBe(queuedSteer);
+      expect(userContents((await fixture.client.getMessages(queuedChatId)).messages))
+        .toContain(queuedSteer);
       const queuedNative = await piNativeSession(fixture, queuedChatId);
       expect(await readFile(queuedNative.path, 'utf8')).not.toContain(queuedSteer);
 
@@ -112,8 +106,8 @@ describe('scripted Pi steering stop semantics', () => {
       });
       const queuedRequests = testEnvironment.model.requestsSince(queuedRequestCursor);
       expect(queuedRequests).toHaveLength(2);
-      expect(queuedRequests[1].userTexts).not.toContain(queuedSteer);
-      expect(queuedRequests[1].userTexts.at(-1)).toBe(queuedRecoveryPrompt);
+      expect(queuedRequests[1].userTexts.join('\n')).toContain(queuedSteer);
+      expect(queuedRequests[1].userTexts.at(-1)?.endsWith(queuedRecoveryPrompt)).toBe(true);
 
       const deliveredPrompt = marker('DELIVERED_PROMPT');
       const deliveredSteer = marker('DELIVERED_STEER');
@@ -139,9 +133,8 @@ describe('scripted Pi steering stop semantics', () => {
       if (!deliveredTurn.turnId) throw new Error('Pi start response omitted its turn id.');
       await waitForFile(join(fixture.dirs.project, startedFile));
 
-      const deliveredSteerRequestId = crypto.randomUUID();
       await expect(fixture.client.steer({
-        clientRequestId: deliveredSteerRequestId,
+        clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId: deliveredChatId,
         content: deliveredSteer,
@@ -184,9 +177,10 @@ describe('scripted Pi steering stop semantics', () => {
       });
       const deliveredRequests = testEnvironment.model.requestsSince(deliveredRequestCursor);
       expect(deliveredRequests).toHaveLength(3);
-      expect(deliveredRequests[2].userTexts).toContain(deliveredSteer);
-      expect(deliveredRequests[2].userTexts.at(-1)).toBe(deliveredRecoveryPrompt);
-      await waitForPendingRemoval(fixture, deliveredChatId, deliveredSteerRequestId);
+      expect(deliveredRequests[2].userTexts.join('\n')).toContain(deliveredSteer);
+      expect(deliveredRequests[2].userTexts.at(-1)?.endsWith(deliveredRecoveryPrompt)).toBe(true);
+      expect(userContents((await fixture.client.getMessages(deliveredChatId)).messages))
+        .toContain(deliveredSteer);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
   }, 120_000);
@@ -219,39 +213,6 @@ async function waitForFile(path: string): Promise<void> {
     }
   }
   throw new Error(`Pi never created ${path}.`);
-}
-
-async function waitForPendingStatus(
-  fixture: IntegrationFixture,
-  chatId: string,
-  clientRequestId: string,
-  deliveryStatus: string,
-) {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    const pending = (await fixture.client.getMessages(chatId)).pendingUserInputs.find(
-      (input) => input.clientRequestId === clientRequestId && input.deliveryStatus === deliveryStatus,
-    );
-    if (pending) return pending;
-    await Bun.sleep(25);
-  }
-  throw new Error(`Pi pending input ${clientRequestId} never reached ${deliveryStatus}.`);
-}
-
-async function waitForPendingRemoval(
-  fixture: IntegrationFixture,
-  chatId: string,
-  clientRequestId: string,
-): Promise<void> {
-  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const pending = (await fixture.client.getMessages(chatId)).pendingUserInputs.find(
-      (input) => input.clientRequestId === clientRequestId,
-    );
-    if (!pending) return;
-    await Bun.sleep(25);
-  }
-  throw new Error(`Pi pending input ${clientRequestId} was not reconciled.`);
 }
 
 function marker(label: string): string {

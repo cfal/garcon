@@ -57,6 +57,7 @@ interface RequestWaiter {
 export interface HeldCompletion {
   readonly received: Promise<RecordedCompletionRequest>;
   expectAbort(): Promise<RecordedCompletionRequest>;
+  allowAbort(): void;
   releaseEcho(): void;
   releaseText(content: string): boolean;
   releaseStreamError(message: string): boolean;
@@ -96,6 +97,10 @@ class HeldCompletionController implements HeldCompletion {
       10_000,
       () => 'Timed out waiting for the held fake-provider request to abort',
     );
+  }
+
+  allowAbort(): void {
+    this.#abortExpected = true;
   }
 
   releaseEcho(): void {

@@ -28,7 +28,7 @@ mock.module('../../config.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
 
 const testChats = new Map();
 const normalChatIds = [];
@@ -45,6 +45,7 @@ const registry = {
   }),
   updateChat: mock(() => undefined),
   removeChat: mock((chatId) => testChats.delete(chatId)),
+  flush: mock(() => Promise.resolve(undefined)),
   listAllChats: mock(() => ({})),
 };
 
@@ -107,7 +108,14 @@ const metadata = {
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
@@ -120,18 +128,17 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-start');
-const pendingInputs = createRoutePendingInputs();
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
 
 const routes = createChatRoutes({
   registry,
   settings,
   queue,
+  processing: { phase: mock(() => null) },
   pathCache,
   metadata,
   chatViews,
   agents,
-	pendingInputs,
 	chatListProjector,
   commandService: createRouteCommandService({
     registry,
@@ -140,7 +147,6 @@ const routes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pendingInputs,
 		pathCache,
 		chatListProjector,
   }),
@@ -161,7 +167,7 @@ describe('POST /api/v1/chats/start', () => {
     settings.removeFromAllOrderLists.mockClear();
     settings.recordChatStartup.mockClear();
     metadata.addNewChatMetadata.mockClear();
-    chatViews.getOrCreatePage.mockClear();
+    chatViews.page.mockClear();
     queue.registerPendingUserInput.mockClear();
     queue.reserveDirectTurn.mockClear();
     queue.releaseDirectTurn.mockClear();

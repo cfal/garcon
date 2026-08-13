@@ -30,17 +30,6 @@ function expectSuccessfulTurnContract(
     chatId: input.chatId,
   }));
   expect(events).toContainEqual(expect.objectContaining({
-    type: 'pending-user-input-updated',
-    input: expect.objectContaining({
-      chatId: input.chatId,
-      content: input.content,
-      clientRequestId: input.clientRequestId,
-      clientMessageId: input.clientMessageId,
-      turnId: input.turnId,
-      deliveryStatus: 'accepted',
-    }),
-  }));
-  expect(events).toContainEqual(expect.objectContaining({
     type: 'chat-processing-updated',
     chatId: input.chatId,
     phase: 'running',
@@ -52,40 +41,35 @@ function expectSuccessfulTurnContract(
     && event.messages.some((entry) =>
       entry.message.type === 'user-message' && entry.message.content === input.content));
   expect(userEvent).toMatchObject({
-    clientRequestId: input.clientRequestId,
-    turnId: input.turnId,
+    clientRequestId: undefined,
+    turnId: undefined,
   });
   const user = userEvent?.messages.find((entry) =>
     entry.message.type === 'user-message' && entry.message.content === input.content);
   expect(user?.message).toMatchObject({
     metadata: {
-      clientRequestId: input.clientRequestId,
-      turnId: input.turnId,
-      deliveryStatus: 'accepted',
+      clientMessageId: input.clientMessageId,
     },
   });
+  expect(user?.message.type === 'user-message'
+    ? user.message.metadata?.clientRequestId
+    : undefined).toBeUndefined();
+  expect(user?.message.type === 'user-message'
+    ? user.message.metadata?.turnId
+    : undefined).toBeUndefined();
 
   const assistantIndex = events.findIndex((event) =>
     event.type === 'chat-messages'
     && event.chatId === input.chatId
-    && event.clientRequestId === input.clientRequestId
-    && event.turnId === input.turnId
     && event.messages.some((entry) =>
       entry.message.type === 'assistant-message' && entry.message.content === input.assistantContent));
-  const clearedIndex = events.findIndex((event) =>
-    event.type === 'pending-user-input-cleared'
-    && event.chatId === input.chatId
-    && event.clientRequestId === input.clientRequestId
-    && event.reason === 'persisted');
   const terminalIndex = events.findIndex((event) =>
     event.type === 'agent-run-finished'
     && event.chatId === input.chatId
     && event.clientRequestId === input.clientRequestId
     && event.turnId === input.turnId);
   expect(assistantIndex).toBeGreaterThanOrEqual(0);
-  expect(clearedIndex).toBeGreaterThanOrEqual(0);
   expect(terminalIndex).toBeGreaterThan(assistantIndex);
-  expect(terminalIndex).toBeGreaterThan(clearedIndex);
 }
 
 describe('chat lifecycle', () => {
@@ -140,12 +124,8 @@ describe('chat lifecycle', () => {
       expect(userContents(transcript.messages)).toEqual(['hello-integration']);
       expect(assistantContents(transcript.messages)).toEqual(['echo:hello-integration']);
       expect(countUserContent(transcript.messages, 'hello-integration')).toBe(1);
-      expect(userMessages(transcript.messages)[0].metadata?.deliveryStatus).not.toBe('failed');
-      expect(userMessages(transcript.messages)[0].metadata).toMatchObject({
-        clientRequestId,
-        turnId: accepted.turnId,
-      });
-      expect(transcript.pendingUserInputs).toEqual([]);
+      expect(userMessages(transcript.messages)[0].metadata).toEqual({ clientMessageId });
+      expect(transcript.resendCandidates).toEqual([]);
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
     });
   });
@@ -284,7 +264,7 @@ describe('chat lifecycle', () => {
     });
   });
 
-  test('rejects a concurrent direct turn before mutating pending or transcript state', async () => {
+  test('rejects a concurrent direct turn before mutating transcript state', async () => {
     await withIntegrationFixture('same-chat-direct-admission', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'admission-first' });
@@ -320,9 +300,6 @@ describe('chat lifecycle', () => {
 
       const rejectedEvents = fixture.client.eventsSince(cursor);
       expect(rejectedEvents.some((event) =>
-        event.type === 'pending-user-input-updated'
-        && event.input.clientRequestId === rejectedRequestId)).toBe(false);
-      expect(rejectedEvents.some((event) =>
         event.type === 'chat-messages'
         && (
           event.clientRequestId === rejectedRequestId
@@ -332,9 +309,7 @@ describe('chat lifecycle', () => {
         ))).toBe(false);
       const whileHeld = await fixture.client.getMessages(chatId);
       expect(userContents(whileHeld.messages)).toEqual(['admission-first']);
-      // Projection admission commits the accepted row before provider start, so
-      // it is transcript state, not a pending overlay, while the turn is held.
-      expect(whileHeld.pendingUserInputs).toEqual([]);
+      expect(whileHeld.resendCandidates).toEqual([]);
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
 
       held.releaseEcho();
@@ -342,9 +317,6 @@ describe('chat lifecycle', () => {
         .toBe('agent-run-finished');
       await fixture.client.ping();
       const afterTerminal = fixture.client.eventsSince(cursor);
-      expect(afterTerminal.some((event) =>
-        event.type === 'pending-user-input-updated'
-        && event.input.clientRequestId === rejectedRequestId)).toBe(false);
       expect(afterTerminal.some((event) =>
         event.type === 'chat-messages'
         && (
@@ -354,8 +326,6 @@ describe('chat lifecycle', () => {
             && entry.message.content === 'admission-rejected')
         ))).toBe(false);
       const afterTerminalMessages = await fixture.client.getMessages(chatId);
-      expect(afterTerminalMessages.pendingUserInputs.some((input) =>
-        input.clientRequestId === rejectedRequestId)).toBe(false);
       expect(countUserContent(afterTerminalMessages.messages, 'admission-rejected')).toBe(0);
 
       const later = await fixture.client.runDirectChat({

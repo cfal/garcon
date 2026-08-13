@@ -60,16 +60,10 @@ function startRequest(projectPath, signal = new AbortController().signal) {
       values: { claudeThinkingMode: 'auto' },
     },
     endpoint: null,
-    operation: {
-      clientRequestId: 'req-1',
-      clientMessageId: null,
-      commandType: 'chat-start',
-      turnId: 'turn-1',
-    },
+    runId: 'run-1',
     admission: {
       signal,
       markStarted: mock(async () => undefined),
-      markAbortable: mock(() => undefined),
     },
     prompt: 'hello',
     attachments: [],
@@ -85,8 +79,8 @@ describe('ClaudeExecution', () => {
       const claude = createClaudeStub(startError);
       const execution = createExecution(claude, projectPath);
       const failed = new Promise((resolve) => {
-        execution.subscribeProjectionEvents((event) => {
-          if (event.type === 'failed') resolve(event);
+        execution.subscribeRuntimeEvents((event) => {
+          if (event.type === 'run-ended' && event.outcome === 'failed') resolve(event);
         });
       });
 
@@ -102,16 +96,17 @@ describe('ClaudeExecution', () => {
         'chat-1',
         'missing claude binary',
         {
-          clientRequestId: 'req-1',
+          clientRequestId: 'run-1',
           commandType: 'chat-start',
-          turnId: 'turn-1',
+          turnId: 'run-1',
         },
       );
       expect(failure).toMatchObject({
-        type: 'failed',
+        type: 'run-ended',
         chatId: 'chat-1',
+        runId: 'run-1',
+        outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message: 'missing claude binary' },
-        operation: startRequest(projectPath).operation,
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -129,8 +124,8 @@ describe('ClaudeExecution', () => {
       const execution = createExecution(claude, projectPath);
       const controller = new AbortController();
       const failed = new Promise((resolve) => {
-        execution.subscribeProjectionEvents((event) => {
-          if (event.type === 'failed') resolve(event);
+        execution.subscribeRuntimeEvents((event) => {
+          if (event.type === 'run-ended' && event.outcome === 'failed') resolve(event);
         });
       });
 
@@ -140,10 +135,11 @@ describe('ClaudeExecution', () => {
       rejectStart(reason);
 
       await expect(failed).resolves.toMatchObject({
-        type: 'failed',
+        type: 'run-ended',
         chatId: 'chat-1',
+        runId: 'run-1',
+        outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message: 'server is shutting down' },
-        operation: startRequest(projectPath).operation,
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });

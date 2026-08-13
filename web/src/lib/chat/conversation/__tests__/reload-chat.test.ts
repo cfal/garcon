@@ -31,6 +31,7 @@ describe('reloadChatFromNative', () => {
 			transcriptViewId: 'generation-2',
 			lastOrdinal: 4,
 			pageOldestOrdinal: 3,
+			pageNewestOrdinal: 4,
 			hasMore: true,
 			messages: [
 				{
@@ -52,7 +53,6 @@ describe('reloadChatFromNative', () => {
 			pageNewestOrdinal: 4,
 			hasMore: false,
 			limit: 50,
-			pendingUserInputs: [],
 			resendCandidates: [],
 			messages: [
 				{ ordinal: 1, message: new AssistantMessage(TS, 'one') },

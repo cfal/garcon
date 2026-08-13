@@ -4,7 +4,7 @@ import {
   AgentIntegrationError,
   type AgentChatReference,
   type AgentHost,
-  type AgentIntegrationV4,
+  type AgentIntegration,
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
@@ -14,7 +14,6 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createFactoryConfig } from './config.js';
@@ -42,14 +41,12 @@ const FACTORY_DESCRIPTOR = {
   ],
 } as const;
 
-export default class FactoryAgentIntegration implements AgentIntegrationV4 {
+export default class FactoryAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'factory';
-  static readonly apiVersion = 4 as const;
+  static readonly apiVersion = 5 as const;
   readonly descriptor = FACTORY_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
-  readonly producerExecution;
-  readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
@@ -60,15 +57,14 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
-  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
     const config = createFactoryConfig(host.environment);
@@ -87,17 +83,9 @@ export default class FactoryAgentIntegration implements AgentIntegrationV4 {
     const providerExecution = new FactoryExecution(runtime, nativeSessions);
     const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions);
     this.nativeSessions = nativeEvidence;
-    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createFactoryNativeActivityProbe(nativeSessions);
-    const projection = createAgentOwnedProjection({
-      ownerId: 'factory',
-      host,
-      execution: providerExecution,
-      nativeEvidence,
-    });
-    this.execution = projection.execution;
-    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: FACTORY_MODELS.DEFAULT,

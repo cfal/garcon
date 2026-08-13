@@ -1531,7 +1531,7 @@ describe('CodexAppServerRuntime', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  function createActiveGoalQueue(provider, codexGoalCommand, markUnconfirmed) {
+  function createActiveGoalQueue(provider, codexGoalCommand) {
     return new ChatExecutionCoordinator(
       tmpDir,
       {
@@ -1545,15 +1545,11 @@ describe('CodexAppServerRuntime', () => {
         }), beforeDelivery),
         abortSession: async () => false,
         isChatRunning: () => provider.isRunning('thread-1'),
-        waitUntilTurnAbortable: async () => true,
       },
       {
-        register: async () => {},
-        discard: () => true,
-        markFailed: () => true,
-        markUnconfirmed,
+        admitInput: async () => ({ inserted: true }),
+        admitQueuedInput: () => ({ inserted: true }),
       },
-      { admitInput: async () => ({ discardKnownNotSent: async () => {} }) },
       () => ({
         model: 'gpt-5.4-codex',
         permissionMode: 'default',
@@ -1916,35 +1912,6 @@ describe('CodexAppServerRuntime', () => {
       shutdown.resolve();
       await expect(operation).rejects.toThrow('app-server startup failed');
     }
-  });
-
-  it('reports abortability only after the provider turn id is available', async () => {
-    let resolveTurn;
-    const turn = new Promise((resolve) => { resolveTurn = resolve; });
-    let startRequested;
-    const requested = new Promise((resolve) => { startRequested = resolve; });
-    const fake = new FakeClient({
-      startTurn: async () => {
-        startRequested();
-        return turn;
-      },
-    });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const onAbortable = mock(() => undefined);
-    const run = provider.runTurn(makeRequest({
-      agentSessionId: 'thread-1',
-      nativePath: null,
-      onAbortable,
-    }));
-
-    await requested;
-    expect(onAbortable).not.toHaveBeenCalled();
-    resolveTurn({ turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) });
-    await run;
-
-    expect(onAbortable).toHaveBeenCalledTimes(1);
-    await expect(provider.abort('thread-1')).resolves.toBe(true);
-    expect(fake.interruptTurn).toHaveBeenCalledWith('thread-1', 'turn-1');
   });
 
   it('keeps an interrupted turn attached until the provider terminal notification', async () => {
@@ -4528,87 +4495,6 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startTurn).not.toHaveBeenCalled();
   });
 
-  it('transfers an already-abortable active session to the successor callback at commit', async () => {
-    let fake;
-    fake = new FakeClient({
-      getThreadGoal: async () => ({ goal: null }),
-      setThreadGoal: async (threadId, params) => {
-        queueMicrotask(() => fake.emit('notification', {
-          method: 'turn/started',
-          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
-        }));
-        return { goal: makeGoal(threadId, params.objective) };
-      },
-    });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const predecessorAbortable = mock(() => undefined);
-    const successorAbortable = mock(() => undefined);
-    await provider.runTurn(makeRequest({
-      agentSessionId: 'thread-1',
-      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
-      nativePath: null,
-      onAbortable: predecessorAbortable,
-    }));
-    expect(predecessorAbortable).toHaveBeenCalledTimes(1);
-
-    await provider.submitGoalControl(makeRequest({
-      agentSessionId: 'thread-1',
-      command: 'Take ownership now',
-      nativePath: null,
-      onAbortable: successorAbortable,
-    }), async (handoff) => {
-      expect(successorAbortable).not.toHaveBeenCalled();
-      handoff.validate();
-      handoff.commit();
-      expect(successorAbortable).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it('targets a successor when the provider becomes abortable after handoff commit', async () => {
-    const turnStarted = createDeferred();
-    const fake = new FakeClient({
-      getThreadGoal: async () => ({
-        goal: makeGoal('thread-1', 'Restored work'),
-      }),
-      steerTurn: async () => ({ turnId: 'continuation-turn' }),
-    });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const predecessorAbortable = mock(() => undefined);
-    const successorAbortable = mock(() => undefined);
-    await provider.runTurn(makeRequest({
-      agentSessionId: 'thread-1',
-      command: '/goal status',
-      codexGoalCommand: { kind: 'status' },
-      nativePath: null,
-      onAbortable: predecessorAbortable,
-    }));
-    expect(predecessorAbortable).not.toHaveBeenCalled();
-
-    const delivery = provider.submitGoalControl(makeRequest({
-      agentSessionId: 'thread-1',
-      command: 'Continue after restoration',
-      nativePath: null,
-      onAbortable: successorAbortable,
-    }), async (handoff) => {
-      handoff.validate();
-      handoff.commit();
-      turnStarted.resolve();
-    });
-    await turnStarted.promise;
-    expect(successorAbortable).not.toHaveBeenCalled();
-    fake.emit('notification', {
-      method: 'turn/started',
-      params: {
-        threadId: 'thread-1',
-        turn: makeTurn({ id: 'continuation-turn', status: 'inProgress' }),
-      },
-    });
-
-    await expect(delivery).resolves.toBe(true);
-    expect(predecessorAbortable).not.toHaveBeenCalled();
-    expect(successorAbortable).toHaveBeenCalledTimes(1);
-  });
-
   it('reconciles goal control through the delivered payload and native history loader', async () => {
     const content = 'Preserve goal control & literal markup <exactly>';
     const nativePath = path.join(tmpDir, 'goal-control.jsonl');
@@ -4691,14 +4577,14 @@ describe('CodexAppServerRuntime', () => {
         }), beforeDelivery),
         abortSession: async () => false,
         isChatRunning: () => provider.isRunning('thread-1'),
-        waitUntilTurnAbortable: async () => true,
       },
       {
-        register: async () => { registered = true; },
-        discard: () => true,
-        markFailed: () => true,
+        admitInput: async () => {
+          registered = true;
+          return { inserted: true };
+        },
+        admitQueuedInput: () => ({ inserted: true }),
       },
-      { admitInput: async () => ({ discardKnownNotSent: async () => {} }) },
       () => ({
         model: 'gpt-5.4-codex',
         permissionMode: 'default',
@@ -4740,14 +4626,13 @@ describe('CodexAppServerRuntime', () => {
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
     const emitted = [];
-    const markUnconfirmed = mock(() => true);
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
-    const queue = createActiveGoalQueue(provider, { kind: 'pause' }, markUnconfirmed);
+    const queue = createActiveGoalQueue(provider, { kind: 'pause' });
 
     await expect(queue.deliverGoalControlInput('chat-1', '/goal pause', {
       clientRequestId: 'request-goal-failure',
@@ -4759,7 +4644,6 @@ describe('CodexAppServerRuntime', () => {
       cause: expect.objectContaining({ message: 'goal status unavailable' }),
     });
 
-    expect(markUnconfirmed).toHaveBeenCalledWith('chat-1', 'request-goal-failure');
     expect(emitted.at(-1)?.content).toBe('Codex error: goal status unavailable');
   });
 
@@ -4782,7 +4666,6 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const markUnconfirmed = mock(() => true);
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4792,7 +4675,7 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
-    const queue = createActiveGoalQueue(provider, { kind: 'resume' }, markUnconfirmed);
+    const queue = createActiveGoalQueue(provider, { kind: 'resume' });
 
     const delivery = queue.deliverGoalControlInput('chat-1', '/goal resume', {
       clientRequestId: 'request-goal-cancelled',
@@ -4808,7 +4691,6 @@ describe('CodexAppServerRuntime', () => {
       retryable: false,
       cause: expect.any(Error),
     });
-    expect(markUnconfirmed).toHaveBeenCalledWith('chat-1', 'request-goal-cancelled');
   });
 
   it('declines goal control without accepting its user row after the Codex session ends', async () => {

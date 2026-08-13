@@ -12,14 +12,11 @@ import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentCommandImage } from '@garcon/common/ws-requests';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { CarryOverSegmentRef } from '../chats/store.js';
+import type { TurnCommandType } from '../lib/turn-identity.js';
 
 export type { AgentCommandImage, PermissionMode, ThinkingMode };
 export type AgentName = string;
-export type AgentExecutionCommandType =
-  | 'chat-start'
-  | 'agent-run'
-  | 'fork-run'
-  | 'agent-compact';
+export type AgentExecutionCommandType = TurnCommandType;
 
 export interface PersistedChatExecutionConfig {
   projectPath?: string;
@@ -94,7 +91,6 @@ export interface AgentChatEntry {
   agentSettingsById?: Record<string, AgentSettingsEnvelope>;
   nativeSession?: AgentNativeSessionRef | null;
   agentOwnershipEpoch?: string;
-  transcriptContentEpoch?: string | null;
   nativeSeedReceipt?: NativeSeedReceipt | null;
   carryOverSegments?: readonly CarryOverSegmentRef[];
   carryOverMigrationQuarantine?: { artifactId: string; errorCode: string } | null;

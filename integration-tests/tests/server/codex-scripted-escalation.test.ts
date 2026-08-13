@@ -93,7 +93,7 @@ describe('scripted Codex escalation', () => {
     }
   });
 
-  test('persists the sandboxed failure and escalated retry as separate executions', async () => {
+  test('persists the streamed escalated retry without reconciling native-only output', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
     const serverEnvironment = { ...testEnvironment.serverEnvironment };
@@ -145,18 +145,17 @@ describe('scripted Codex escalation', () => {
           'item/commandExecution/requestApproval',
         ]);
 
-        // The settled boundary imports the rollout's sandboxed failure as
-        // provider-observed row evidence beside the streamed retry.
-        const native = await waitForExecutionCount(fixture, chatId, command, 2);
-        const nativeExecutions = expectExecutions(native, command, marker, 2);
-        expect(nativeExecutions.filter((execution) => !execution.isError)).toHaveLength(1);
-        expect(nativeExecutions.filter((execution) => execution.isError)).toHaveLength(1);
-        expect(assistantContents(native.messages).some((content) => content.includes(reply)))
+        // The sandbox failure exists only in Codex's rollout. The ledger stores
+        // the successful retry that Codex emitted live and never reconciles the
+        // native-only attempt into ordinary history.
+        const streamed = await fixture.client.getMessages(chatId);
+        const streamedExecutions = expectExecutions(streamed, command, marker, 1);
+        expect(assistantContents(streamed.messages).some((content) => content.includes(reply)))
           .toBe(true);
 
         await fixture.restartGarcon();
         const restored = await fixture.client.getMessages(chatId);
-        expect(expectExecutions(restored, command, marker, 2)).toEqual(nativeExecutions);
+        expect(expectExecutions(restored, command, marker, 1)).toEqual(streamedExecutions);
         expect(countUserContent(restored.messages, prompt)).toBe(1);
         testEnvironment.model.assertSettled();
       }, {
@@ -180,26 +179,6 @@ function expectSuccessfulExecution(
 ): void {
   expect(expectExecutions(transcript, command, marker, executionCount)
     .filter((execution) => !execution.isError)).toHaveLength(1);
-}
-
-async function waitForExecutionCount(
-  fixture: Parameters<Parameters<typeof withIntegrationFixture>[1]>[0],
-  chatId: string,
-  command: string,
-  count: number,
-): Promise<Awaited<ReturnType<GarconTestClient['getMessages']>>> {
-  const deadline = Date.now() + 15_000;
-  for (;;) {
-    const transcript = await fixture.client.getMessages(chatId);
-    const executions = transcript.messages.filter((entry) => (
-      entry.message.type === 'bash-tool-use' && entry.message.command === command
-    ));
-    if (executions.length >= count) return transcript;
-    if (Date.now() >= deadline) {
-      throw new Error(`Expected ${count} executions of the scripted command, saw ${executions.length}.`);
-    }
-    await Bun.sleep(100);
-  }
 }
 
 function expectExecutions(

@@ -1,8 +1,7 @@
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AgentChatReference, AgentChatReferenceV4 } from '@garcon/server-agent-interface';
-import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
+import type { AgentChatReference } from '@garcon/server-agent-interface';
 import type { TranscriptWatermark } from '../ledger/contracts.js';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
@@ -274,19 +273,6 @@ export class AgentOwnershipJournal {
     await this.#finishDelete(removed);
   }
 
-  // V4 transfer-release maintenance has no V5 records. These methods remain
-  // until the legacy repair route is deleted with the projection surface.
-  abandonedTransferCleanups(): readonly never[] {
-    return [];
-  }
-
-  async retryRetainedTransferCleanups(): Promise<{
-    readonly retried: readonly never[];
-    readonly unresolved: readonly never[];
-  }> {
-    return { retried: [], unresolved: [] };
-  }
-
   async #recoverDelete(intent: DeleteIntentV2): Promise<void> {
     const current = this.#registry.getChat(intent.chatId);
     if (current) {
@@ -383,7 +369,7 @@ export class AgentOwnershipJournal {
       await Promise.race([
         integration.nativeSessions?.release({
           ...request,
-          chat: releaseReference(request.chat),
+          chat: request.chat,
           signal: controller.signal,
         }),
         deadline,
@@ -459,18 +445,6 @@ function assertAvailable(
 ): void {
   if (!journal.ownershipIntents.some((intent) => intent.chatId === chatId)) return;
   throw new DomainError(code, `Agent ownership change is pending for ${chatId}.`, 409, true);
-}
-
-function releaseReference(reference: AgentChatReference): AgentChatReferenceV4 {
-  if ('agentOwnershipEpoch' in reference
-      && typeof reference.agentOwnershipEpoch === 'string'
-      && reference.agentOwnershipEpoch.length > 0) {
-    return reference as AgentChatReferenceV4;
-  }
-  return {
-    ...reference,
-    agentOwnershipEpoch: agentOwnershipEpoch(`legacy-release:${reference.chatId}`),
-  };
 }
 
 function errorCode(error: unknown): string {

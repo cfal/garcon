@@ -49,7 +49,7 @@ async function seedDirectChat(
   const seededTranscript = await fixture.integration.client.getMessages(chatId, {
     limit: 1,
   });
-  expect(seededTranscript.lastSeq).toBe(turns.length * 2);
+  expect(seededTranscript.lastOrdinal).toBe(turns.length * 2);
   return chatId;
 }
 
@@ -62,7 +62,7 @@ async function installPageRequestGate(page: Page): Promise<void> {
       const requestUrl = input instanceof Request ? input.url : String(input);
       const url = new URL(requestUrl, globalThis.location.href);
       const isPageRequest =
-        url.pathname === "/api/v1/chats/messages" && url.searchParams.has("beforeSeq");
+        url.pathname === "/api/v1/chats/messages" && url.searchParams.has("beforeOrdinal");
       if (!isPageRequest) return nativeFetch(input, init);
       gate.requestCount += 1;
       if (gate.armed) {

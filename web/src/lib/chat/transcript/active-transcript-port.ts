@@ -1,6 +1,6 @@
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
-import type { ChatMessage, UserMessageDeliveryStatus } from '$shared/chat-types';
-import type { PendingUserInput } from '$shared/pending-user-input';
+import type { ChatMessage } from '$shared/chat-types';
+import type { OptimisticUserInput } from './optimistic-user-input.js';
 import type { LocalNoticeType } from './local-notice.js';
 import type { ChatTranscriptCache } from './chat-transcript-cache.svelte.js';
 import type { ConversationFeedMutationClock } from './conversation-feed-mutations.js';
@@ -45,12 +45,7 @@ export interface ActiveTranscriptPort {
 	appendServerNotice(chatId: string, noticeType: LocalNoticeType, content: string): void;
 	discardServerNotices(chatId: string): void;
 	clearLocalNotices(): void;
-	setPendingUserInputs(inputs: PendingUserInput[]): void;
-	upsertPendingUserInput(input: PendingUserInput): void;
-	clearPendingUserInput(clientRequestId: string): void;
-	updatePendingUserInputDeliveryStatus(
-		clientRequestId: string,
-		deliveryStatus: UserMessageDeliveryStatus,
-	): void;
+	upsertOptimisticUserInput(input: OptimisticUserInput): void;
+	clearOptimisticUserInput(clientMessageId: string): void;
 	activateChat(chatId: string | null): ChatRestoreResult | null;
 }

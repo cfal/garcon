@@ -4,7 +4,6 @@ import { chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
-import { GarconApiError } from '../../support/garcon-client.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
@@ -14,7 +13,7 @@ const SETTLED_PROMPT = 'claude-settled-turn';
 const RUNNING_PROMPT = 'claude-running-turn';
 
 describe('Claude fork while a turn is running', () => {
-  test('forks settled history, refuses event-stream points, and recovers after the turn', async () => {
+  test('forks ledger snapshots while native history trails and recovers after the turn', async () => {
     const environment: Record<string, string> = {};
     let turnReleasePath = '';
 
@@ -48,7 +47,7 @@ describe('Claude fork while a turn is running', () => {
       const settledHistory = await fixture.client.getMessages(sourceChatId);
       expect(userContents(settledHistory.messages)).toEqual([SETTLED_PROMPT]);
       expect(assistantContents(settledHistory.messages)).toEqual([`echo:${SETTLED_PROMPT}`]);
-      const settledLastSeq = settledHistory.lastSeq;
+      const settledLastSeq = settledHistory.lastOrdinal;
 
       // This turn streams its assistant reply but holds it out of the transcript.
       const runCursor = fixture.client.markEvents();
@@ -66,30 +65,40 @@ describe('Claude fork while a turn is running', () => {
       // targets the streamed assistant reply itself rather than seq movement.
       const streaming = await waitForAssistantEcho(fixture, sourceChatId, `echo:${RUNNING_PROMPT}`);
 
-      // The streamed assistant reply has no transcript line yet.
-      await expectEventStreamForkRefusal(fixture.client.forkChat({
+      // The ledger prefix is immediately forkable even when no provider-native
+      // position exists yet.
+      const streamingPointChatId = fixture.newChatId();
+      await fixture.client.forkChat({
         sourceChatId,
-        chatId: fixture.newChatId(),
-        upToSeq: streaming.lastSeq,
-      }));
+        chatId: streamingPointChatId,
+        transcriptViewId: streaming.transcriptViewId,
+        upToOrdinal: streaming.lastOrdinal,
+      });
+      const streamingPoint = await fixture.client.getMessages(streamingPointChatId);
+      expect(userContents(streamingPoint.messages)).toEqual(userContents(streaming.messages));
+      expect(assistantContents(streamingPoint.messages))
+        .toEqual(assistantContents(streaming.messages));
 
       // Settled history stays forkable at a point while the agent works.
       const pointChatId = fixture.newChatId();
       await fixture.client.forkChat({
         sourceChatId,
         chatId: pointChatId,
-        upToSeq: settledLastSeq,
+        transcriptViewId: settledHistory.transcriptViewId,
+        upToOrdinal: settledLastSeq,
       });
       const pointForked = await fixture.client.getMessages(pointChatId);
       expect(userContents(pointForked.messages)).toEqual([SETTLED_PROMPT]);
       expect(assistantContents(pointForked.messages)).toEqual([`echo:${SETTLED_PROMPT}`]);
 
       // A whole-chat fork copies the transcript as it stands instead of refusing.
+      const sourceAtWholeFork = await fixture.client.getMessages(sourceChatId);
       const wholeChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: wholeChatId });
       const wholeForked = await fixture.client.getMessages(wholeChatId);
-      expect(userContents(wholeForked.messages)).toEqual([SETTLED_PROMPT, RUNNING_PROMPT]);
-      expect(assistantContents(wholeForked.messages)).toEqual([`echo:${SETTLED_PROMPT}`]);
+      expect(userContents(wholeForked.messages)).toEqual(userContents(sourceAtWholeFork.messages));
+      expect(assistantContents(wholeForked.messages))
+        .toEqual(assistantContents(sourceAtWholeFork.messages));
 
       await writeFile(turnReleasePath, '');
       expect((await fixture.client.waitForTurnTerminal(sourceChatId, running.turnId, {
@@ -108,7 +117,8 @@ describe('Claude fork while a turn is running', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: recoveredChatId,
-        upToSeq: reloaded.lastSeq,
+        transcriptViewId: reloaded.transcriptViewId,
+        upToOrdinal: reloaded.lastOrdinal,
       });
       const recovered = await fixture.client.getMessages(recoveredChatId);
       expect(userContents(recovered.messages)).toEqual([SETTLED_PROMPT, RUNNING_PROMPT]);
@@ -151,22 +161,4 @@ async function waitForAssistantEcho(
     await Bun.sleep(250);
   }
   throw new Error(`Chat ${chatId} never streamed assistant content ${content}`);
-}
-
-async function expectEventStreamForkRefusal(promise: Promise<unknown>): Promise<void> {
-  let failure: unknown;
-  try {
-    await promise;
-  } catch (error) {
-    failure = error;
-  }
-  expect(failure).toBeInstanceOf(GarconApiError);
-  expect(failure).toMatchObject({
-    status: 409,
-    body: {
-      success: false,
-      errorCode: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      retryable: true,
-    },
-  });
 }

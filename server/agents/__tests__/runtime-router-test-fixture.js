@@ -10,33 +10,36 @@ export function createRuntimeTranscriptFixture(options = {}) {
   let activeChatId = 'chat-1';
   let session = options.session ?? null;
   let permissionClaim = null;
-  let closed = false;
+  let currentLease = null;
 
   const emit = (event) => {
     for (const listener of listeners) listener(event);
   };
-  const sink = {
-    publish(event) {
-      if (closed) throw new Error('sink closed');
-      if (event.type === 'session') {
-        session = { kind: 'session', detail: event.session };
-        emit({ type: 'session', chatId: activeChatId, viewId: view.viewId, row: session });
-      } else if (event.type === 'run-ended' && event.runId === activeRunId) {
-        activeRunId = null;
-        emit({
-          type: 'run-ended',
-          chatId: activeChatId,
-          viewId: view.viewId,
-          runId: event.runId,
-          row: { kind: 'run-ended', outcome: event.outcome, error: event.error },
-        });
-      }
-    },
-  };
-  const lease = {
-    sink,
-    get closed() { return closed; },
-    close() { closed = true; activeRunId = null; },
+  const createLease = () => {
+    let closed = false;
+    const sink = {
+      publish(event) {
+        if (closed) throw new Error('sink closed');
+        if (event.type === 'session') {
+          session = { kind: 'session', detail: event.session };
+          emit({ type: 'session', chatId: activeChatId, viewId: view.viewId, row: session });
+        } else if (event.type === 'run-ended' && event.runId === activeRunId) {
+          activeRunId = null;
+          emit({
+            type: 'run-ended',
+            chatId: activeChatId,
+            viewId: view.viewId,
+            runId: event.runId,
+            row: { kind: 'run-ended', outcome: event.outcome, error: event.error },
+          });
+        }
+      },
+    };
+    return {
+      sink,
+      get closed() { return closed; },
+      close() { closed = true; activeRunId = null; },
+    };
   };
   const ledger = {
     subscribe(listener) {
@@ -48,10 +51,11 @@ export function createRuntimeTranscriptFixture(options = {}) {
     currentSession: () => session,
     openProducer: (chatId) => {
       activeChatId = chatId;
-      return lease;
+      if (!currentLease || currentLease.closed) currentLease = createLease();
+      return currentLease;
     },
     beginRun(chatId, runId) {
-      if (closed) throw new Error('sink closed');
+      if (!currentLease || currentLease.closed) throw new Error('sink closed');
       activeChatId = chatId;
       activeRunId = runId;
       return runId;
@@ -85,12 +89,14 @@ export function createRuntimeTranscriptFixture(options = {}) {
       return { kind: 'run-ended', outcome: 'failed', origin: 'core', error };
     },
     takePreparedInput: () => options.composition ?? null,
-    conversationMessages: () => options.priorContext ?? [],
+    conversationMessages: (chatId, excludedOrdinals) => options.conversationMessages
+      ? options.conversationMessages(chatId, excludedOrdinals)
+      : options.priorContext ?? [],
     claimPermissionResolution: (control) => {
       permissionClaim = {
         chatId: control.chatId,
         viewId: view.viewId,
-        runId: control.turnOwner.turnId,
+        runId: control.runId,
         requestId: control.id,
         incarnation: control.incarnation,
         claimId: 'claim-1',
@@ -110,7 +116,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
   return {
     ledger,
     adoption: { ensure: async () => view },
-    sink,
+    get sink() { return currentLease?.sink ?? null; },
     activeRunId: () => activeRunId,
   };
 }

@@ -4,6 +4,7 @@ import {
   PermissionRequestMessage,
   PermissionResolvedMessage,
   TranscriptNoticeMessage,
+  UserMessage,
   type ChatMessage,
 } from '../../common/chat-types.js';
 import type { TranscriptMessage } from '../../common/chat-view.js';
@@ -26,7 +27,17 @@ export function ledgerRowsToTranscriptMessages(rows: readonly LedgerRow[]): Tran
 export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
   switch (row.kind) {
     case 'user-input':
-      return row.detail.message;
+      return row.detail.clientMessageId
+        ? new UserMessage(
+          row.detail.message.timestamp,
+          row.detail.message.content,
+          row.detail.message.images,
+          {
+            ...row.detail.message.metadata,
+            clientMessageId: row.detail.clientMessageId,
+          },
+        )
+        : row.detail.message;
     case 'provider-row':
       return row.message;
     case 'notice':

@@ -1,5 +1,5 @@
 import type { ChatImage } from '$shared/chat-types';
-import type { PendingUserInput } from '$shared/pending-user-input';
+import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import {
 	MAX_CHAT_ATTACHMENT_COUNT,
 	MAX_CHAT_ATTACHMENT_FILE_BYTES,
@@ -39,20 +39,17 @@ function assertAttachmentLimits(files: readonly File[]): void {
 	}
 }
 
-export function pendingUserInput(
+export function optimisticUserInput(
 	chatId: string,
 	content: string,
 	images: ChatImage[],
-	clientRequestId: string,
 	clientMessageId: string,
-): PendingUserInput {
+): OptimisticUserInput {
 	return {
 		chatId,
-		clientRequestId,
 		clientMessageId,
 		content,
 		createdAt: new Date().toISOString(),
-		deliveryStatus: 'submitting',
 		...(images.length > 0 ? { images } : {}),
 	};
 }

@@ -9,7 +9,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function makeRouter(producerExecution) {
+function makeRouter(execution) {
   const transcript = createRuntimeTranscriptFixture();
   const entry = {
     id: 'chat-1',
@@ -35,7 +35,7 @@ function makeRouter(producerExecution) {
       defaults: () => ({ ownerId: 'test', schemaVersion: 1, values: {} }),
       parse: (value) => value,
     },
-    producerExecution,
+    execution,
   };
   const router = new AgentRuntimeRouter({
     registry: {
@@ -61,12 +61,8 @@ function makeRouter(producerExecution) {
     events: {
       trackTurn: mock(() => undefined),
       getActiveTurn: mock(() => null),
-      markTurnAbortable: mock(() => undefined),
     },
-    projection: {},
     getCarryOverRevision: () => 'carry-1',
-    loadCarriedContext: async () => null,
-    getCarryOverMessageCount: async () => 0,
     ledger: transcript.ledger,
     adoption: transcript.adoption,
   });
@@ -75,12 +71,12 @@ function makeRouter(producerExecution) {
 
 describe('AgentRuntimeRouter execution handles', () => {
   it('tracks only live core-owned execution handles', async () => {
-    const producerExecution = {
+    const execution = {
       start: mock(async () => ({ id: 'handle-1' })),
       resume: mock(async () => ({ id: 'handle-1' })),
       abort: mock(async () => undefined),
     };
-    const { router, transcript } = makeRouter(producerExecution);
+    const { router, transcript } = makeRouter(execution);
 
     await router.startSession('chat-1', 'hello', { turnId: 'turn-1' });
     expect(router.getRunningChatIdsSnapshot()).toEqual(['chat-1']);
@@ -94,7 +90,7 @@ describe('AgentRuntimeRouter execution handles', () => {
     const launchStarted = deferred();
     const handleReady = deferred();
     const handle = { id: 'handle-1' };
-    const producerExecution = {
+    const execution = {
       start: mock(async () => {
         launchStarted.resolve();
         return handleReady.promise;
@@ -102,7 +98,7 @@ describe('AgentRuntimeRouter execution handles', () => {
       resume: mock(async () => handle),
       abort: mock(async () => undefined),
     };
-    const { router } = makeRouter(producerExecution);
+    const { router } = makeRouter(execution);
 
     const launching = router.startSession('chat-1', 'hello', { turnId: 'turn-1' });
     await launchStarted.promise;
@@ -112,7 +108,7 @@ describe('AgentRuntimeRouter execution handles', () => {
     handleReady.resolve(handle);
     await launching;
 
-    expect(producerExecution.abort).toHaveBeenCalledWith(handle);
+    expect(execution.abort).toHaveBeenCalledWith(handle);
     expect(router.getRunningChatIdsSnapshot()).toEqual([]);
   });
 });

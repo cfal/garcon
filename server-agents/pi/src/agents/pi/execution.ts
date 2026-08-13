@@ -1,59 +1,52 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
-  AgentIntegrationError,
-  type AgentExecutionContextV4,
-} from '@garcon/server-agent-interface';
-import {
-  AgentProjectionProducerEventChannel,
-  projectionProducerMessages,
-  type AgentProjectionRuntimeExecution,
-} from '@garcon/server-agent-common/execution/projection-events';
-import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
+  AgentRuntimeEventChannel,
+  runtimeRows,
+  type AgentRuntimeExecution,
+  type AgentRuntimeExecutionContext,
+} from '@garcon/server-agent-common/execution/runtime-events';
+import { AgentRunTracker } from '@garcon/server-agent-common/execution/run-tracker';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { LazyPiRuntime } from './lazy-runtime.js';
 
-export class PiExecution implements AgentProjectionRuntimeExecution {
-  readonly #events = new AgentProjectionProducerEventChannel();
-  readonly #operations = new AgentOperationTracker();
+export class PiExecution implements AgentRuntimeExecution {
+  readonly #events = new AgentRuntimeEventChannel();
+  readonly #runs = new AgentRunTracker();
 
   constructor(
     private readonly runtime: LazyPiRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({
+      this.#events.emit({
         type: 'messages',
         chatId,
-        messages: projectionProducerMessages('pi', messages),
-        operation,
+        rows: runtimeRows(messages),
+        runId: this.#runs.correlate(chatId, metadata),
       });
-    });
-    runtime.onProcessing((chatId, processing) => {
-      const operation = this.#operations.current(chatId);
-      if (operation) this.#events.emit({ type: 'processing', chatId, processing, operation });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({ type: 'finished', chatId, exitCode, operation });
-      this.#operations.finish(chatId, operation);
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
+      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
       this.#events.emit({
-        type: 'failed',
+        type: 'run-ended',
         chatId,
-        error: new AgentIntegrationError('PROVIDER_FAILURE', message, false),
-        operation,
+        runId,
+        outcome: 'failed',
+        error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#operations.finish(chatId, operation);
+      this.#runs.finish(chatId, runId);
     });
   }
 
-  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
-    this.#operations.register(request.chatId, request.operation);
+  async start(request: Parameters<AgentRuntimeExecution['start']>[0]) {
+    this.#runs.register(request.chatId, request.runId);
     const seed = request.carriedContext?.prefix ?? '';
     try {
       const result = await this.runtime.startSession({
@@ -70,21 +63,15 @@ export class PiExecution implements AgentProjectionRuntimeExecution {
         }),
         nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, result.agentSessionId),
       };
-      this.#events.emit({
-        type: 'session-created',
-        chatId: request.chatId,
-        session,
-        operation: request.operation,
-      });
       return session;
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
 
-  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
-    this.#operations.register(request.chatId, request.operation);
+  async resume(request: Parameters<AgentRuntimeExecution['resume']>[0]): Promise<void> {
+    this.#runs.register(request.chatId, request.runId);
     try {
       await this.runtime.runTurn({
         ...executionFields(request),
@@ -94,7 +81,7 @@ export class PiExecution implements AgentProjectionRuntimeExecution {
         nativePath: this.nativeSessions.decode(request.nativeSession).path,
       });
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
@@ -116,32 +103,30 @@ export class PiExecution implements AgentProjectionRuntimeExecution {
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<NonNullable<AgentProjectionRuntimeExecution['prepareProjectPathUpdate']>>[0],
+    request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
   ): Promise<void> {
     request.signal.throwIfAborted();
   }
 
-  subscribeProjectionEvents(
-    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  subscribeRuntimeEvents(
+    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
   ): () => void {
     return this.#events.subscribe(listener);
   }
 }
 
-function executionFields(request: AgentExecutionContextV4) {
+function executionFields(request: AgentRuntimeExecutionContext) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
     model: request.model,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
-    clientRequestId: request.operation.clientRequestId ?? undefined,
-    clientMessageId: request.operation.clientMessageId ?? undefined,
-    turnId: request.operation.turnId,
+    clientRequestId: request.runId,
+    turnId: request.runId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
-    onAbortable: () => request.admission.markAbortable(),
   };
 }

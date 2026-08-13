@@ -5,21 +5,19 @@ import type { ExecutionOwnership } from './execution-ownership.ts';
 import { executionTurnIdentity } from './types.ts';
 import type {
   AgentTurnRunnerPort,
-  PendingInputsPort,
-  PendingUserInputRegistrationOptions,
+  UserInputAdmissionOptions,
   QueueDrainOptionsResolver,
 } from './types.ts';
 
 interface GoalControlDeliveryOptions {
   turnRunner: AgentTurnRunnerPort;
-  pendingInputs: PendingInputsPort;
   ownership: ExecutionOwnership;
   getDrainOptions: QueueDrainOptionsResolver;
   readControl(chatId: string): Promise<StoredChatExecutionControlState>;
-  registerPending(
+  admitInput(
     chatId: string,
     content: string,
-    options: PendingUserInputRegistrationOptions,
+    options: UserInputAdmissionOptions,
   ): Promise<void>;
 }
 
@@ -44,7 +42,6 @@ export class GoalControlDelivery {
     const activeAttempt = this.options.ownership.attempt(chatId);
     const predecessor = activeAttempt?.identity();
     const successor = executionTurnIdentity(activeOptions)!;
-    let pendingRegistered = false;
     let deliveryMayHaveStarted = false;
     try {
       const handled = await this.options.turnRunner.submitGoalControl!(
@@ -64,8 +61,7 @@ export class GoalControlDelivery {
             ? activeAttempt.handoffTurn(predecessor, successor, handoff)
             : handoff;
           committedHandoff.validate();
-          await this.options.registerPending(chatId, content, activeOptions);
-          pendingRegistered = true;
+          await this.options.admitInput(chatId, content, activeOptions);
           await afterPendingRegistered?.();
           validateOwner();
           committedHandoff.validate();
@@ -78,11 +74,6 @@ export class GoalControlDelivery {
       }
       return handled;
     } catch (error) {
-      if (deliveryMayHaveStarted) {
-        this.options.pendingInputs.markUnconfirmed(chatId, activeOptions.clientRequestId);
-      } else if (pendingRegistered) {
-        this.options.pendingInputs.markFailed(chatId, activeOptions.clientRequestId);
-      }
       throw new GoalControlDeliveryError(error, deliveryMayHaveStarted);
     }
   }

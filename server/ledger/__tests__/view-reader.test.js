@@ -13,7 +13,7 @@ const TS = '2026-08-12T00:00:00.000Z';
 describe('TranscriptViewReader', () => {
   it('pages visible messages by durable ordinal across hidden lifecycle rows', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
-      const lease = ledger.openProducer('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
       ledger.appendInputAndCompose({
         chatId: 'chat-1',
         viewId,
@@ -49,7 +49,7 @@ describe('TranscriptViewReader', () => {
 
   it('replays the complete committed ordinal range even when no row renders', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
-      const lease = ledger.openProducer('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
       lease.sink.publish({
         type: 'session',
         session: { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null },
@@ -74,7 +74,7 @@ describe('TranscriptViewReader', () => {
         clientMessageId: 'message-1',
         steer: false,
       });
-      const producer = ledger.openProducer('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
       producer.sink.publish({
         type: 'session',
         session: { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null },

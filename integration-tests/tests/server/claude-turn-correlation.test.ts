@@ -4,7 +4,6 @@ import { describe, expect, test } from 'bun:test';
 import type {
   AgentRunFailedMessage,
   ChatMessagesMessage,
-  PendingUserInputUpdatedMessage,
 } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -554,16 +553,13 @@ describe('Claude turn correlation', () => {
       expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
         afterIndex: firstCursor,
       })).type).toBe('agent-run-finished');
-      const pending = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === 'queue-second',
-        'queued Claude follow-up identity',
+      const committed = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        'queue-second',
         { afterIndex: queueCursor },
       );
-      expect((await fixture.client.waitForTurnTerminal(chatId, pending.input.turnId!, {
-        afterIndex: queueCursor,
+      expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(committed) + 1,
       })).type).toBe('agent-run-finished');
 
       const receivedAfterRelease = (await readFile(receivedPath, 'utf8'))
@@ -642,16 +638,13 @@ describe('Claude turn correlation', () => {
       expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
         afterIndex: firstCursor,
       })).type).toBe('agent-run-finished');
-      const pending = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === 'after-background',
-        'queued input after Claude background continuation',
+      const committed = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        'after-background',
         { afterIndex: queueCursor },
       );
-      expect((await fixture.client.waitForTurnTerminal(chatId, pending.input.turnId!, {
-        afterIndex: queueCursor,
+      expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(committed) + 1,
       })).type).toBe('agent-run-finished');
 
       const forkChatId = fixture.newChatId();

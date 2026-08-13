@@ -2,6 +2,7 @@
 	import PromptComposer from '../PromptComposer.svelte';
 	import {
 		setAgentState,
+		setActiveTranscriptState,
 		setAppShell,
 		setConversationLifecycle,
 		setChatSessions,
@@ -15,6 +16,7 @@
 		setWorkspaceShortcuts,
 	} from '$lib/context';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
@@ -95,6 +97,7 @@
 	}: Props = $props();
 
 	const composer = new ComposerState();
+	const transcript = new ActiveTranscriptState();
 	const agent = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const appShell = new AppShellStore();
@@ -211,6 +214,7 @@
 	});
 
 	setComposerState(composer);
+	setActiveTranscriptState(transcript);
 	setAgentState(agent);
 	setConversationLifecycle(lifecycle);
 	setAppShell(appShell);

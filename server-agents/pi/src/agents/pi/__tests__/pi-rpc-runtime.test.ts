@@ -248,27 +248,6 @@ function collect(runtime) {
   return seen;
 }
 
-async function writePiSessionRows(
-  nativePath: string,
-  rows: readonly { role: 'user' | 'assistant' | 'toolResult'; text: string }[],
-): Promise<void> {
-  const entries = [
-    { type: 'session', version: 3, id: 'pi-session-1', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
-    ...rows.map((row, index) => ({
-      type: 'message',
-      id: `row-${index + 1}`,
-      parentId: index === 0 ? null : `row-${index}`,
-      timestamp: `2026-01-01T00:00:0${index + 1}.000Z`,
-      message: row.role === 'user'
-        ? { role: 'user', content: row.text, timestamp: 1767225601000 + index }
-        : row.role === 'toolResult'
-          ? { role: 'toolResult', toolCallId: 'call-1', content: [{ type: 'text', text: row.text }], timestamp: 1767225601000 + index }
-          : { role: 'assistant', content: [{ type: 'text', text: row.text }], api: 'anthropic-messages', provider: 'anthropic', model: 'test', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, stopReason: 'stop', timestamp: 1767225601000 + index },
-    })),
-  ];
-  await fs.writeFile(nativePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
-}
-
 async function settleIo() {
   for (let index = 0; index < 10; index += 1) await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 5));
@@ -415,14 +394,12 @@ describe('PiRpcRuntime', () => {
 
   it('returns initial session identity before prompt preflight completes', async () => {
     spawnOptions.push({ promptBehavior: 'hold' });
-    const onAbortable = mock(() => {});
     const runtime = createRuntime();
     const seen = collect(runtime);
 
-    const started = await runtime.startSession(baseStartRequest({ onAbortable }));
+    const started = await runtime.startSession(baseStartRequest());
 
     expect(started.agentSessionId).toBe('pi-session-1');
-    expect(onAbortable).toHaveBeenCalledTimes(1);
     expect(runtime.isRunning(started.agentSessionId)).toBe(true);
     expect(runtime.captureSteerTarget(started.agentSessionId)).toBeNull();
     expect(runtime.abort(started.agentSessionId)).toBe(true);
@@ -731,20 +708,10 @@ describe('PiRpcRuntime', () => {
     await turn;
     expect(seen.finished).toEqual(['chat-2']);
     expect(seen.messages.flatMap((entry) => entry.messages)).toHaveLength(3);
-    // The journalled occurrences are not in the native file yet, so
-    // settlement stays unresolved until Pi persists every one of them.
-    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
-    await writePiSessionRows(baseResumeRequest().nativePath, [
-      { role: 'user', text: 'continue' },
-      { role: 'assistant', text: 'tool call' },
-      { role: 'toolResult', text: 'hi' },
-      { role: 'assistant', text: 'done' },
-    ]);
-    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('confirmed');
     await runtime.shutdown();
   });
 
-  it('withholds settlement for a tool-only turn until its entries persist', async () => {
+  it('settles a tool-only turn without waiting for native persistence', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
     const turn = runtime.runTurn(baseResumeRequest());
@@ -774,26 +741,7 @@ describe('PiRpcRuntime', () => {
     fake.pushEvent({ type: 'agent_settled' });
     await turn;
 
-    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
-    const entries = [
-      { type: 'session', version: 3, id: 'pi-session-1', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
-      { type: 'message', id: 'turn-user', parentId: null, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'user', content: 'continue', timestamp: 0 } },
-      { type: 'message', id: 'turn-assistant', parentId: 'turn-user', timestamp: '2026-01-01T00:00:02.000Z', message: { role: 'assistant', content: [{ type: 'toolCall', id: 'call-1', name: 'bash', arguments: { command: 'true' } }], api: 'anthropic-messages', provider: 'anthropic', model: 'test', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, stopReason: 'toolUse', timestamp: 0 } },
-    ];
-    await fs.writeFile(
-      baseResumeRequest().nativePath,
-      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-      'utf8',
-    );
-    // The tool result entry is still missing from the file.
-    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
-    entries.push({ type: 'message', id: 'turn-result', parentId: 'turn-assistant', timestamp: '2026-01-01T00:00:03.000Z', message: { role: 'toolResult', content: [{ type: 'text', text: '' }], toolCallId: 'call-1', timestamp: 0 } } as never);
-    await fs.writeFile(
-      baseResumeRequest().nativePath,
-      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-      'utf8',
-    );
-    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('confirmed');
+    await expect(fs.readFile(baseResumeRequest().nativePath, 'utf8')).resolves.toBe('');
     await runtime.shutdown();
   });
 
@@ -882,13 +830,11 @@ describe('PiRpcRuntime', () => {
   it('stops a resumed turn while prompt preflight is still pending', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     spawnOptions.push({ promptBehavior: 'hold' });
-    const onAbortable = mock(() => {});
     const runtime = createRuntime();
-    const turn = runtime.runTurn(baseResumeRequest({ onAbortable }));
+    const turn = runtime.runTurn(baseResumeRequest());
     while (fakes.length === 0) await new Promise((resolve) => setTimeout(resolve, 1));
     await waitForCommand(fakes[0], 'prompt');
 
-    expect(onAbortable).toHaveBeenCalledTimes(1);
     expect(runtime.isRunning('pi-session-1')).toBe(true);
     expect(runtime.captureSteerTarget('pi-session-1')).toBeNull();
     expect(runtime.abort('pi-session-1')).toBe(true);
@@ -1174,7 +1120,6 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
-    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
 
     const nextTurn = runtime.runTurn(baseResumeRequest());
     await waitForActive(runtime);
@@ -1205,7 +1150,6 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
-    await expect(runtime.verifyTurnSettlement('chat-2').then((proof) => proof.verdict)).resolves.toBe('unresolved');
     await runtime.shutdown();
   });
 

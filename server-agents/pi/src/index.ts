@@ -5,7 +5,7 @@ import {
   AgentIntegrationError,
   type AgentChatReference,
   type AgentHost,
-  type AgentIntegrationV4,
+  type AgentIntegration,
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
@@ -20,7 +20,6 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createPiNativeActivityProbe } from './agents/pi/native-activity.js';
@@ -52,33 +51,30 @@ const PI_DESCRIPTOR = {
   ],
 } as const;
 
-export default class PiAgentIntegration implements AgentIntegrationV4 {
+export default class PiAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'pi';
-  static readonly apiVersion = 4 as const;
+  static readonly apiVersion = 5 as const;
   readonly descriptor = PI_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
-  readonly producerExecution;
-  readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
   readonly sessionConfiguration = null;
   readonly permissionDecisions = null;
-  readonly projectPathUpdates: NonNullable<AgentIntegrationV4['projectPathUpdates']>;
+  readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
-  readonly steering: NonNullable<AgentIntegrationV4['steering']>;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
-  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
     const config = createPiConfig(host.environment);
@@ -102,27 +98,9 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
     };
     const nativeEvidence = createPiNativeEvidence(config, nativeSessions);
     this.nativeSessions = nativeEvidence;
-    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createPiNativeActivityProbe(nativeSessions);
-    const projection = createAgentOwnedProjection({
-      ownerId: 'pi',
-      host,
-      execution: providerExecution,
-      nativeEvidence,
-      // Pi finishes turns only on agent_settled, and success additionally
-      // requires the native session file to contain every finalized row the
-      // turn journalled; any journal-ahead window withholds terminal success
-      // until audit or repair. The proof also binds live occurrence
-      // identities to the persisted native entry IDs for the audit.
-      sourceSettlement: async (event) => (
-        event.type === 'finished'
-          ? { kind: 'ready', value: await runtime.verifyTurnSettlement(event.chatId) }
-          : { kind: 'ready', value: { verdict: 'unresolved' } }
-      ),
-    });
-    this.execution = projection.execution;
-    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: PI_MODELS.DEFAULT,
@@ -164,11 +142,7 @@ export default class PiAgentIntegration implements AgentIntegrationV4 {
     };
     this.steering = {
       captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
-      steer: (request) => projection.deliverSteer(
-        request.chatId,
-        request.operation,
-        () => runtime.steer(request),
-      ),
+      steer: (request) => runtime.steer(request),
     };
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),

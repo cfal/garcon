@@ -1,5 +1,5 @@
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface FactoryCommandImage {
   readonly data: string;
@@ -21,7 +21,6 @@ export interface FactoryExecutionRequest {
   readonly clientRequestId?: string;
   readonly turnId?: string;
   readonly executionAdmission?: FactoryExecutionAdmission;
-  readonly onAbortable?: () => void;
 }
 
 export interface FactoryStartRequest extends FactoryExecutionRequest {
@@ -53,7 +52,7 @@ export async function markFactoryExecutionStarted(
 
 export function factoryEventMetadata(
   request: Pick<FactoryExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentTurnReceiptOwner['commandType'],
+  commandType?: RuntimeEventMetadata['commandType'],
 ) {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

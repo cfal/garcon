@@ -54,6 +54,12 @@ describe('ledger-backed transcript search index', () => {
       transcriptViewId: 'view-1',
       snippets: [expect.objectContaining({ ordinal: 2 })],
     })]);
+    expect(result.index).toEqual({
+      indexedChatCount: 1,
+      pendingChatCount: 0,
+      failedChatCount: 0,
+      unsupportedChatCount: 0,
+    });
     closeSearchDatabase(opened.db);
   });
 

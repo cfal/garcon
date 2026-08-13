@@ -62,13 +62,11 @@
 				hasMore: false,
 			},
 		);
-		chatState.upsertPendingUserInput({
+		chatState.upsertOptimisticUserInput({
 			chatId: 'chat-1',
-			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
 			content: 'Pending user message',
 			createdAt: '2026-07-01T00:00:01.000Z',
-			deliveryStatus: 'submitting',
-			attachments: [],
 		});
 	} else if (initialTranscriptScenario !== 'empty') {
 		const messageCount =

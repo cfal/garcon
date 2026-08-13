@@ -1,17 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  BashToolUseMessage,
-  PermissionRequestMessage,
-  UserMessage,
-} from '../../../common/chat-types.ts';
-import { agentOwnershipEpoch } from '@garcon/server-agent-interface';
-import {
-  newAgentStreamEpoch,
-  newAgentTranscriptContentEpoch,
-  newAgentTranscriptEntryId,
-} from '@garcon/server-agent-common/transcript-projection/identity';
-import { createProjectionMaterialization } from '@garcon/server-agent-common/transcript-projection/state';
-import { AgentProjectionEventStream } from '@garcon/server-agent-common/transcript-projection/stream';
+import { BashToolUseMessage } from '../../../common/chat-types.ts';
 import {
   ChatTransientFeedStore,
   TransientControlActionError,
@@ -20,212 +8,170 @@ import {
 const CHAT_ID = '1785337200123456';
 const TIMESTAMP = '2026-08-11T00:00:00.000Z';
 
-function fixture() {
-  const ownershipEpoch = agentOwnershipEpoch('owner-1');
-  const initial = createProjectionMaterialization({
+function permissionEvent({
+  kind = 'requested',
+  requestId = 'permission-1',
+  incarnation = 'one',
+  runId = 'run-1',
+  ordinal = 3,
+  viewId = 'view-1',
+} = {}) {
+  const lifecycle = kind === 'requested'
+    ? {
+        kind,
+        requestId,
+        incarnation,
+        requestedTool: new BashToolUseMessage(TIMESTAMP, `tool-${requestId}`, 'bun test'),
+        options: [],
+      }
+    : kind === 'cancelled'
+      ? { kind, requestId, incarnation, reason: null }
+      : { kind, requestId, incarnation };
+  return {
+    type: 'permission',
     chatId: CHAT_ID,
-    agentOwnershipEpoch: ownershipEpoch,
-    epoch: newAgentStreamEpoch(),
-    contentEpoch: newAgentTranscriptContentEpoch(),
-  });
-  const operation = {
-    agentOwnershipEpoch: ownershipEpoch,
-    commandType: 'agent-run',
-    clientRequestId: 'request-1',
-    clientMessageId: 'message-1',
-    turnId: 'turn-1',
-    turnOwner: {
-      agentOwnershipEpoch: ownershipEpoch,
-      commandType: 'agent-run',
-      clientRequestId: 'request-1',
-      turnId: 'turn-1',
+    viewId,
+    runId,
+    row: {
+      kind: `permission-${kind}`,
+      ordinal,
+      at: TIMESTAMP,
+      providerMeta: null,
+      lifecycle,
     },
   };
+}
+
+function runEndedEvent(runId = 'run-1', ordinal = 4) {
   return {
-    operation,
-    stream: new AgentProjectionEventStream({ initial }),
-    feed: new ChatTransientFeedStore('server-1'),
+    type: 'run-ended',
+    chatId: CHAT_ID,
+    viewId: 'view-1',
+    runId,
+    row: {
+      kind: 'run-ended',
+      ordinal,
+      at: TIMESTAMP,
+      providerMeta: null,
+      outcome: 'finished',
+      origin: 'provider',
+    },
   };
 }
 
-function permission(id, incarnation, operation, anchorEntryId = null) {
+function action(overrides = {}) {
   return {
-    id,
-    incarnation,
-    operation,
-    anchorEntryId,
-    displayOrder: 0,
-    message: new PermissionRequestMessage(
-      TIMESTAMP,
-      id,
-      new BashToolUseMessage(TIMESTAMP, `tool-${id}`, 'bun test'),
-    ),
+    serverInstanceId: 'server-1',
+    chatId: CHAT_ID,
+    runId: 'run-1',
+    id: 'permission-1',
+    incarnation: 'one',
+    ...overrides,
   };
 }
-
-async function emit(stream, operation) {
-  const previous = stream.current;
-  const event = await operation();
-  return { event, previous, current: stream.current };
-}
-
-const context = { generationId: 'generation-1', carryOverMessageCount: 2 };
 
 describe('ChatTransientFeedStore', () => {
-  it('folds incarnations in source order and fences actions to the current row', async () => {
-    const testFixture = fixture();
-    const upsert = await emit(testFixture.stream, () => testFixture.stream.control(
-      testFixture.operation,
-      { kind: 'upsert', row: permission('permission-1', 'one', testFixture.operation) },
-    ));
-    const published = testFixture.feed.apply(upsert, context);
-    expect(published).toMatchObject({
+  it('projects a durable permission request and fences its actionability', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+
+    expect(feed.apply(permissionEvent())).toMatchObject({
       kind: 'mutation',
       value: {
+        transcriptViewId: 'view-1',
         transientRevision: 1,
-        mutation: { kind: 'upsert', row: { transcript: { afterSeq: 2 } } },
+        mutation: {
+          kind: 'upsert',
+          row: {
+            id: 'permission-1',
+            incarnation: 'one',
+            runId: 'run-1',
+            transcript: { transcriptViewId: 'view-1', afterOrdinal: 3 },
+          },
+        },
       },
     });
-    const action = {
-      serverInstanceId: 'server-1',
-      chatId: CHAT_ID,
-      agentOwnershipEpoch: 'owner-1',
-      turnOwner: testFixture.operation.turnOwner,
-      id: 'permission-1',
-      incarnation: 'one',
-    };
-    expect(testFixture.feed.validateAction(action)).toMatchObject({ id: 'permission-1' });
+    expect(feed.validateAction(action())).toMatchObject({ id: 'permission-1' });
 
-    const remove = await emit(testFixture.stream, () => testFixture.stream.control(
-      testFixture.operation,
-      { kind: 'remove', id: 'permission-1', incarnation: 'one' },
-    ));
-    expect(testFixture.feed.apply(remove, context)).toMatchObject({
+    expect(feed.apply(permissionEvent({ kind: 'cancelled', ordinal: 4 }))).toMatchObject({
       kind: 'mutation',
       value: { transientRevision: 2, mutation: { kind: 'remove' } },
     });
-    expect(() => testFixture.feed.validateAction(action)).toThrow(TransientControlActionError);
-
-    const replacement = await emit(testFixture.stream, () => testFixture.stream.control(
-      testFixture.operation,
-      { kind: 'upsert', row: permission('permission-1', 'two', testFixture.operation) },
-    ));
-    expect(testFixture.feed.apply(replacement, context)).toMatchObject({
-      kind: 'mutation',
-      value: {
-        transientRevision: 3,
-        mutation: { kind: 'upsert', row: { incarnation: 'two' } },
-      },
-    });
+    expect(() => feed.validateAction(action())).toThrow(TransientControlActionError);
   });
 
-  it('clears the current operation before publishing its terminal lifecycle', async () => {
-    const testFixture = fixture();
-    const upsert = await emit(testFixture.stream, () => testFixture.stream.control(
-      testFixture.operation,
-      { kind: 'upsert', row: permission('permission-1', 'one', testFixture.operation) },
-    ));
-    testFixture.feed.apply(upsert, context);
-    const terminal = await emit(testFixture.stream, () => testFixture.stream.terminal({
-      operation: testFixture.operation,
-      outcome: { kind: 'failed', error: { code: 'UNKNOWN', message: 'failed', retryable: false } },
-      completeness: { acceptedInputEntryIds: [], attributableEntryCount: 0 },
-      sourceSettlement: 'unresolved',
+  it('clears only controls correlated with the run that ended', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+    feed.apply(permissionEvent());
+    feed.apply(permissionEvent({
+      requestId: 'permission-2',
+      incarnation: 'two',
+      runId: 'run-2',
+      ordinal: 4,
     }));
 
-    expect(testFixture.feed.apply(terminal, context)).toMatchObject({
+    expect(feed.apply(runEndedEvent('run-1', 5))).toMatchObject({
       kind: 'mutation',
-      value: {
-        transientRevision: 2,
-        mutation: { kind: 'clear-operation', turnOwner: testFixture.operation.turnOwner },
-      },
+      value: { mutation: { kind: 'clear-run', runId: 'run-1' } },
     });
-    expect(testFixture.feed.currentSnapshot(CHAT_ID)?.rows).toEqual([]);
+    expect(feed.currentSnapshot(CHAT_ID)?.rows).toMatchObject([
+      { id: 'permission-2', runId: 'run-2' },
+    ]);
+    expect(feed.apply(runEndedEvent('unknown', 6))).toEqual({ kind: 'unchanged' });
   });
 
-  it('preserves one permission through an input-not-sent generation reset', async () => {
-    const testFixture = fixture();
-    const activeEntry = {
-      id: newAgentTranscriptEntryId(),
-      lifetime: 'active',
-      source: null,
-      provenance: { ...testFixture.operation, upstreamRequestId: null },
-      message: new UserMessage(TIMESTAMP, 'steer'),
-    };
-    await testFixture.stream.commit([], [activeEntry]);
-    const upsert = await emit(testFixture.stream, () => testFixture.stream.control(
-      testFixture.operation,
-      { kind: 'upsert', row: permission('permission-1', 'one', testFixture.operation) },
-    ));
-    testFixture.feed.apply(upsert, context);
-    const reset = await emit(testFixture.stream, () => testFixture.stream.reset({
-      reason: 'input-not-sent',
-      epoch: newAgentStreamEpoch(),
-      contentEpoch: testFixture.stream.current.checkpoint.projection.contentEpoch,
-      entries: [],
-    }));
+  it('resets ephemeral controls when the transcript view is replaced', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+    feed.apply(permissionEvent());
 
-    const transition = testFixture.feed.apply(reset, {
-      previousGenerationId: 'generation-1',
-      generationId: 'generation-2',
-      carryOverMessageCount: 2,
-    });
-    expect(transition).toMatchObject({
-      kind: 'generation-transition',
-      value: {
-        previousGenerationId: 'generation-1',
-        generationId: 'generation-2',
-        rows: [{ id: 'permission-1', incarnation: 'one' }],
-      },
-    });
-  });
-
-  it('keeps empty snapshots read-only before the first source mutation', async () => {
-    const testFixture = fixture();
-    expect(testFixture.feed.snapshot({
+    expect(feed.apply({
+      type: 'view-replaced',
       chatId: CHAT_ID,
-      agentOwnershipEpoch: 'owner-1',
-      generationId: 'pending:owner-1',
-    })).toMatchObject({ generationId: 'pending:owner-1', transientRevision: 0, rows: [] });
-    expect(testFixture.feed.currentSnapshot(CHAT_ID)).toBeNull();
-    const upsert = await emit(testFixture.stream, () => testFixture.stream.control(
-      testFixture.operation,
-      { kind: 'upsert', row: permission('permission-1', 'one', testFixture.operation) },
-    ));
-
-    expect(testFixture.feed.apply(upsert, context)).toMatchObject({
-      kind: 'mutation',
-      value: {
-        generationId: 'generation-1',
-        transientRevision: 1,
-        mutation: { kind: 'upsert', row: { id: 'permission-1' } },
+      previousViewId: 'view-1',
+      view: {
+        viewId: 'view-2',
+        createdAt: TIMESTAMP,
+        contentStartOrdinal: 1,
       },
-    });
-  });
-
-  it('rejects stale server, ownership, turn, and incarnation action fences', async () => {
-    const testFixture = fixture();
-    const upsert = await emit(testFixture.stream, () => testFixture.stream.control(
-      testFixture.operation,
-      { kind: 'upsert', row: permission('permission-1', 'one', testFixture.operation) },
-    ));
-    testFixture.feed.apply(upsert, context);
-    const valid = {
+    })).toEqual({ kind: 'unchanged' });
+    expect(feed.currentSnapshot(CHAT_ID)).toEqual({
       serverInstanceId: 'server-1',
       chatId: CHAT_ID,
-      agentOwnershipEpoch: 'owner-1',
-      turnOwner: testFixture.operation.turnOwner,
-      id: 'permission-1',
-      incarnation: 'one',
-    };
+      transcriptViewId: 'view-2',
+      transientRevision: 0,
+      rows: [],
+    });
+  });
 
-    for (const action of [
-      { ...valid, serverInstanceId: 'server-2' },
-      { ...valid, agentOwnershipEpoch: 'owner-2' },
-      { ...valid, turnOwner: { ...valid.turnOwner, turnId: 'turn-2' } },
-      { ...valid, incarnation: 'two' },
+  it('keeps empty snapshots read-only before the first lifecycle mutation', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+
+    expect(feed.snapshot({ chatId: CHAT_ID, transcriptViewId: 'view-1' })).toEqual({
+      serverInstanceId: 'server-1',
+      chatId: CHAT_ID,
+      transcriptViewId: 'view-1',
+      transientRevision: 0,
+      rows: [],
+    });
+    expect(feed.currentSnapshot(CHAT_ID)).toBeNull();
+    expect(feed.apply({
+      type: 'rows',
+      chatId: CHAT_ID,
+      viewId: 'view-1',
+      rows: [],
+    })).toEqual({ kind: 'unchanged' });
+    expect(feed.currentSnapshot(CHAT_ID)).toBeNull();
+  });
+
+  it('rejects stale server, run, and incarnation action fences', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+    feed.apply(permissionEvent());
+
+    for (const candidate of [
+      action({ serverInstanceId: 'server-2' }),
+      action({ runId: 'run-2' }),
+      action({ incarnation: 'two' }),
     ]) {
-      expect(() => testFixture.feed.validateAction(action)).toThrow(TransientControlActionError);
+      expect(() => feed.validateAction(candidate)).toThrow(TransientControlActionError);
     }
   });
 });

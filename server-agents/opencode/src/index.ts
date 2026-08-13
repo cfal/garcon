@@ -4,7 +4,7 @@ import {
   AgentIntegrationError,
   type AgentChatReference,
   type AgentHost,
-  type AgentIntegrationV4,
+  type AgentIntegration,
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
@@ -18,7 +18,6 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createOpenCodeConfig } from './config.js';
@@ -45,33 +44,30 @@ const OPENCODE_DESCRIPTOR = {
   }],
 } as const;
 
-export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
+export default class OpenCodeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'opencode';
-  static readonly apiVersion = 4 as const;
+  static readonly apiVersion = 5 as const;
   readonly descriptor = OPENCODE_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
-  readonly producerExecution;
-  readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
-  readonly sessionConfiguration: NonNullable<AgentIntegrationV4['sessionConfiguration']>;
-  readonly permissionDecisions: NonNullable<AgentIntegrationV4['permissionDecisions']>;
+  readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
+  readonly permissionDecisions: NonNullable<AgentIntegration['permissionDecisions']>;
   readonly projectPathUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
-  readonly steering: NonNullable<AgentIntegrationV4['steering']>;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
-  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
     const config = createOpenCodeConfig(host.environment);
@@ -99,28 +95,16 @@ export default class OpenCodeAgentIntegration implements AgentIntegrationV4 {
     };
     const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId, logger);
     this.nativeSessions = nativeEvidence;
-    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createOpenCodeNativeActivityProbe({
       nativeSessions,
       logger,
       withClient: (operation) => runtime.withClientLease((client) => operation(async () => client)),
     });
-    const projection = createAgentOwnedProjection({
-      ownerId: 'opencode',
-      host,
-      execution: providerExecution,
-      nativeEvidence,
-    });
-    this.execution = projection.execution;
-    this.transcript = projection.transcript;
     this.steering = {
       captureTarget: (request) => runtime.steering.captureTarget(request.agentSessionId),
-      steer: (request) => projection.deliverSteer(
-        request.chatId,
-        request.operation,
-        () => runtime.steering.steer(request),
-      ),
+      steer: (request) => runtime.steering.steer(request),
     };
     this.catalog = createModelCatalog({
       logger: host.logger,

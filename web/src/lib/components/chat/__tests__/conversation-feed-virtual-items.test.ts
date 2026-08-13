@@ -124,22 +124,16 @@ describe('conversation virtual feed model', () => {
 		expect(estimateConversationFeedItemSize(model.items.at(-1), 1)).toBe(56);
 	});
 
-	it('moves a transient permission inline only when its exact generation anchor is loaded', () => {
+	it('moves a transient permission inline only when its exact view anchor is loaded', () => {
 		const permission: PendingPermissionRequest = {
 			chatId: 'chat-1',
 			permissionRequestId: 'permission-1',
 			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
-			transcript: { generationId: 'generation-1', afterSeq: 1 },
+			transcript: { transcriptViewId: 'generation-1', afterOrdinal: 1 },
 			control: {
 				serverInstanceId: 'server-1',
 				chatId: 'chat-1',
-				agentOwnershipEpoch: 'owner-1',
-				turnOwner: {
-					agentOwnershipEpoch: 'owner-1',
-					commandType: 'agent-run',
-					clientRequestId: 'request-1',
-					turnId: 'turn-1',
-				},
+				runId: 'run-1',
 				id: 'permission-1',
 				incarnation: 'incarnation-1',
 			},

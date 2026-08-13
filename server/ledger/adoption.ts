@@ -7,7 +7,7 @@ import {
   type ChatMessage,
 } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
-import type { AgentIntegrationV4 } from '@garcon/server-agent-interface';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type { JsonObject } from '../../common/json.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -23,11 +23,6 @@ export interface TranscriptAdoptionOptions {
   readonly integrations: IntegrationRegistry;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly loadFrozenPrefix: (
-    chatId: string,
-    entry: AgentChatEntry,
-    signal: AbortSignal,
-  ) => Promise<readonly ChatMessage[]>;
-  readonly loadLegacyCurrent: (
     chatId: string,
     entry: AgentChatEntry,
     signal: AbortSignal,
@@ -62,7 +57,13 @@ export class TranscriptAdoptionService {
       const entry = this.options.registry.getChat(chatId);
       if (!entry) throw new TypeError(`Cannot adopt transcript for unknown chat ${chatId}`);
       const integration = this.options.integrations.require(entry.agentId);
-      const prefix = await this.options.loadFrozenPrefix(chatId, entry, signal);
+      let prefix: readonly ChatMessage[] = [];
+      try {
+        prefix = await this.options.loadFrozenPrefix(chatId, entry, signal);
+      } catch {
+        // Legacy projection failures fall through to the provider-native import,
+        // then to an empty ledger when neither source is readable.
+      }
       signal.throwIfAborted();
       const current = await this.#loadCurrent(chatId, entry, integration, signal);
       signal.throwIfAborted();
@@ -104,35 +105,26 @@ export class TranscriptAdoptionService {
   async #loadCurrent(
     chatId: string,
     entry: AgentChatEntry,
-    integration: AgentIntegrationV4,
+    integration: AgentIntegration,
     signal: AbortSignal,
   ): Promise<readonly AdoptionRow[]> {
+    if (!integration.nativeHistoryImport) return [];
     try {
-      const messages = await this.options.loadLegacyCurrent(chatId, entry, signal);
-      return sanitizeCurrent(
-        messages.map((message) => ({ message, providerMeta: null })),
+      const rows: AdoptionRow[] = [];
+      const chat = toAgentChatReference(
+        integration,
+        chatId,
         entry,
+        this.options.getCarryOverRevision(entry),
       );
-    } catch (legacyError) {
-      if (!integration.nativeHistoryImport) return [];
-      try {
-        const rows: AdoptionRow[] = [];
-        const chat = toAgentChatReference(
-          integration,
-          chatId,
-          entry,
-          this.options.getCarryOverRevision(entry),
-        );
-        for await (const batch of integration.nativeHistoryImport.load({ chat, signal })) {
-          for (const row of batch) {
-            rows.push({ message: row.message, providerMeta: row.providerMeta ?? null });
-          }
+      for await (const batch of integration.nativeHistoryImport.load({ chat, signal })) {
+        for (const row of batch) {
+          rows.push({ message: row.message, providerMeta: row.providerMeta ?? null });
         }
-        return sanitizeCurrent(rows, entry);
-      } catch {
-        if (entry.agentSessionId) throw legacyError;
-        return [];
       }
+      return sanitizeCurrent(rows, entry);
+    } catch {
+      return [];
     }
   }
 }

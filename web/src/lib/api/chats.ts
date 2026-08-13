@@ -29,7 +29,6 @@ import type {
 	SetLastSelectedChatRequest,
 	SetLastSelectedChatResponse,
 } from '$shared/chat-list';
-import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import type {
 	AgentInterruptAndSendCommandRequest,
 	AgentInterruptAndSendResponse,
@@ -384,21 +383,6 @@ function requirePositiveInteger(value: unknown, fieldName: string): number {
 	return value;
 }
 
-function parsePendingUserInputs(value: unknown): PendingUserInput[] {
-	if (!Array.isArray(value)) {
-		throw new Error('Invalid chat messages page: pendingUserInputs');
-	}
-	const pendingInputs: PendingUserInput[] = [];
-	for (const item of value) {
-		const pendingInput = normalizePendingUserInput(item);
-		if (pendingInput === null) {
-			throw new Error('Invalid chat messages page: pendingUserInputs');
-		}
-		pendingInputs.push(pendingInput);
-	}
-	return pendingInputs;
-}
-
 export async function getChatMessages(params: {
 	chatId: string;
 	limit?: number;
@@ -417,7 +401,6 @@ export async function getChatMessages(params: {
 		lastOrdinal?: unknown;
 		pageOldestOrdinal?: unknown;
 		pageNewestOrdinal?: unknown;
-		pendingUserInputs?: unknown;
 		resendCandidates?: unknown;
 		hasMore?: unknown;
 		limit?: unknown;
@@ -434,7 +417,6 @@ export async function getChatMessages(params: {
 			'lastOrdinal',
 			'pageOldestOrdinal',
 			'pageNewestOrdinal',
-			'pendingUserInputs',
 			'hasMore',
 			'limit',
 		] as const) {
@@ -462,7 +444,6 @@ export async function getChatMessages(params: {
 		lastOrdinal: requireNonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
 		pageOldestOrdinal: requireNonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
 		pageNewestOrdinal: requireNonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
-		pendingUserInputs: parsePendingUserInputs(response.pendingUserInputs),
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
 	};
@@ -561,7 +542,7 @@ export async function validateStart(
 export interface ForkChatParams {
 	sourceChatId: string;
 	chatId: string;
-	upToSeq?: number;
+	upToOrdinal?: number;
 	transcriptViewId?: string;
 }
 

@@ -18,7 +18,6 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-processing-updated',
 	'chat-transcript-replaced',
 	'chat-transient-feed-mutation',
-	'chat-projection-generation-transition',
 	'chat-execution-control-updated',
 	'chat-title-updated',
 	'chat-project-path-updated',
@@ -35,9 +34,6 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 function getChatId(message: ServerWsMessage): string {
 	if ('chatId' in message) {
 		return typeof message.chatId === 'string' ? message.chatId : '';
-	}
-	if (message.type === 'pending-user-input-updated') {
-		return message.input.chatId;
 	}
 	return '';
 }

@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser, Page } from 'playwright';
-import type { ChatGenerationResetMessage } from '../../../common/ws-events.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
   closeChromiumBrowser,
@@ -357,13 +356,9 @@ async function synchronizeNativeTranscriptGeneration(
   fixture: ChromiumFixture,
   chatId: string,
 ): Promise<void> {
-  // Forces native reconciliation before geometry samples a generation-scoped row key.
-  const liveTranscript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
-  expect(liveTranscript.hasMore).toBe(false);
-  const finalTranscript = await fixture.integration.client.reloadChat(chatId);
-  expect(finalTranscript.hasMore).toBe(false);
-  expect(finalTranscript.lastSeq).toBe(liveTranscript.lastSeq);
-  await waitForSurfaceIdentity(fixture.page, `${chatId}:${finalTranscript.generationId}`);
+  const transcript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  expect(transcript.hasMore).toBe(false);
+  await waitForSurfaceIdentity(fixture.page, `${chatId}:${transcript.transcriptViewId}`);
   await waitForTranscriptReady(fixture.page);
 }
 
@@ -1444,7 +1439,7 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
 
   await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeSeq')) {
+    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
       earlierRequestCount += 1;
       if (earlierRequestCount === 1) {
         resolveFirstPageRequest();
@@ -2218,82 +2213,15 @@ async function verifyChatSwitchBottomRestore(
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture): Promise<void> {
-  const chatId = await seedTranscript(fixture.integration, 15, 'chromium-native-reload-base');
+async function verifyDirectChatHidesNativeReload(fixture: ChromiumFixture): Promise<void> {
+  const chatId = await seedTranscript(fixture.integration, 15, 'chromium-no-native-reload-base');
   await prepareTranscript(fixture, chatId, 20);
   await scrollToPosition(fixture.page, 'end');
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'native-reload-baseline');
-
-  const prompt = 'chromium-native-reload-stream';
-  const accepted = await fixture.integration.client.runDirectChat({
-    chatId,
-    content: prompt,
-    agent: fixture.integration.directAgents.openAi,
-  });
-  expect((await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId)).type).toBe(
-    'agent-run-finished',
-  );
-  await fixture.page.locator(FEED_SELECTOR).getByText(`echo:${prompt}`, { exact: true }).waitFor();
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'native-reload-streamed');
-
-  const beforeReload = await fixture.integration.client.getMessages(chatId);
-  const eventCursor = fixture.integration.client.markEvents();
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'no-native-reload-baseline');
   await openMainWorkspaceActions(fixture.page);
-  await clickMenuItem(fixture.page, 'Reload from native history');
-  const reset = await fixture.integration.client.waitForEvent(
-    (event): event is ChatGenerationResetMessage =>
-      event.type === 'chat-generation-reset' &&
-      event.chatId === chatId &&
-      event.reason === 'manual-reload',
-    'the native-history generation reset',
-    { afterIndex: eventCursor },
-  );
-
-  // Includes the two viewport spacers and the desktop floating-toolbar spacer.
-  const expectedModelCount = beforeReload.messages.length + 3;
-  await waitForStableModelCount(fixture.page, expectedModelCount);
-  const replacement = await fixture.page.locator(FEED_SELECTOR).evaluate(
-    (feedElement, { oldGenerationId, nextGenerationId }) => {
-      const feed = feedElement as HTMLElement;
-      const rows = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')];
-      const rowIds = rows.flatMap((row) => row.dataset.chatRowId ?? []);
-      const sizer = feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
-      return {
-        modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
-        mountedRowCount: rowIds.length,
-        onlyNextGeneration: rowIds.every((rowId) => rowId.startsWith(`${nextGenerationId}:`)),
-        oldGenerationMounted: rowIds.some((rowId) => rowId.startsWith(`${oldGenerationId}:`)),
-      };
-    },
-    {
-      oldGenerationId: beforeReload.generationId,
-      nextGenerationId: reset.generationId,
-    },
-  );
-  expect(replacement).toEqual({
-    modelCount: expectedModelCount,
-    mountedRowCount: expect.any(Number),
-    onlyNextGeneration: true,
-    oldGenerationMounted: false,
-  });
-  expect(replacement.mountedRowCount).toBeGreaterThan(0);
-  expect(replacement.mountedRowCount).toBeLessThan(beforeReload.messages.length);
-  expect(await surfaceIdentity(fixture.page)).toBe(`${chatId}:${reset.generationId}`);
-  const exactTextCounts = await fixture.page.locator(FEED_SELECTOR).evaluate(
-    (feed, expected) => {
-      const leafTexts = [...feed.querySelectorAll<HTMLElement>('*')].flatMap((element) =>
-        element.children.length === 0 ? [element.textContent?.trim() ?? ''] : [],
-      );
-      return expected.map((text) => leafTexts.filter((candidate) => candidate === text).length);
-    },
-    [prompt, `echo:${prompt}`],
-  );
-  expect(exactTextCounts).toEqual([1, 1]);
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'native-reload-applied');
-  expect(await viewportPolicy(fixture.page)).toEqual({
-    pinned: true,
-    userScrolledUp: false,
-  });
+  expect(await fixture.page.getByRole('menuitem', { name: 'Reload from native history' }).count())
+    .toBe(0);
+  await fixture.page.keyboard.press('Escape');
   fixture.assertNoBrowserErrors();
 }
 
@@ -2729,13 +2657,13 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 180_000);
 
-  test('rebuilds a completed streamed turn from native history', async () => {
+  test('hides native-history reload for a direct chat', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
       'transcript-native-history-reload',
       async (fixture, markPhase) => {
-        markPhase('streaming and reloading the native transcript');
-        await verifyNativeHistoryReloadAfterStreaming(fixture);
+        markPhase('checking the direct-chat native reload capability');
+        await verifyDirectChatHidesNativeReload(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },

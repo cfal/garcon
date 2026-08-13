@@ -4,7 +4,6 @@ import type {
   PermissionMode,
   ThinkingMode,
 } from '@garcon/common/chat-modes';
-import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface ClaudeExecutionAdmission {
@@ -26,7 +25,6 @@ export interface ClaudeExecutionRequest {
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Record<string, string>;
-  readonly onAbortable?: () => void;
 }
 
 export interface ClaudeStartRequest extends ClaudeExecutionRequest {
@@ -54,7 +52,7 @@ export function assertClaudeExecutionOpen(
 
 export function claudeEventMetadata(
   request: Pick<ClaudeExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentTurnReceiptOwner['commandType'],
+  commandType?: RuntimeEventMetadata['commandType'],
 ): RuntimeEventMetadata {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

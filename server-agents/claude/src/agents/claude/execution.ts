@@ -3,17 +3,17 @@ import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type { ClaudeThinkingMode } from '@garcon/common/chat-modes';
 import {
   AgentIntegrationError,
-  type AgentExecutionContextV4,
   type AgentHost,
   type AgentLogger,
   type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
 import {
-  AgentProjectionProducerEventChannel,
-  projectionProducerMessages,
-  type AgentProjectionRuntimeExecution,
-} from '@garcon/server-agent-common/execution/projection-events';
-import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
+  AgentRuntimeEventChannel,
+  runtimeRows,
+  type AgentRuntimeExecution,
+  type AgentRuntimeExecutionContext,
+} from '@garcon/server-agent-common/execution/runtime-events';
+import { AgentRunTracker } from '@garcon/server-agent-common/execution/run-tracker';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import {
@@ -28,9 +28,9 @@ import { claudeEventMetadata } from './runtime-types.js';
 import type { ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeConfig } from '../../config.js';
 
-export class ClaudeExecution implements AgentProjectionRuntimeExecution {
-  readonly #events = new AgentProjectionProducerEventChannel();
-  readonly #operations = new AgentOperationTracker();
+export class ClaudeExecution implements AgentRuntimeExecution {
+  readonly #events = new AgentRuntimeEventChannel();
+  readonly #runs = new AgentRunTracker();
 
   constructor(
     private readonly host: AgentHost,
@@ -40,39 +40,35 @@ export class ClaudeExecution implements AgentProjectionRuntimeExecution {
     private readonly config: ClaudeConfig,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({
+      this.#events.emit({
         type: 'messages',
         chatId,
-        messages: projectionProducerMessages('claude', messages),
-        operation,
+        rows: runtimeRows(messages),
+        runId: this.#runs.correlate(chatId, metadata),
       });
-    });
-    runtime.onProcessing((chatId, processing) => {
-      const operation = this.#operations.current(chatId);
-      if (operation) this.#events.emit({ type: 'processing', chatId, processing, operation });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({ type: 'finished', chatId, exitCode, operation });
-      this.#operations.finish(chatId, operation);
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
+      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
       this.#events.emit({
-        type: 'failed',
+        type: 'run-ended',
         chatId,
-        error: new AgentIntegrationError('PROVIDER_FAILURE', message, false),
-        operation,
+        runId,
+        outcome: 'failed',
+        error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#operations.finish(chatId, operation);
+      this.#runs.finish(chatId, runId);
     });
   }
 
-  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
-    this.#operations.register(request.chatId, request.operation);
+  async start(request: Parameters<AgentRuntimeExecution['start']>[0]) {
+    this.#runs.register(request.chatId, request.runId);
     try {
       request.admission.signal.throwIfAborted();
       const envOverrides = await this.#endpointEnvironment(request);
@@ -111,21 +107,15 @@ export class ClaudeExecution implements AgentProjectionRuntimeExecution {
         }),
         nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
       };
-      this.#events.emit({
-        type: 'session-created',
-        chatId: request.chatId,
-        session,
-        operation: request.operation,
-      });
       return session;
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
 
-  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
-    this.#operations.register(request.chatId, request.operation);
+  async resume(request: Parameters<AgentRuntimeExecution['resume']>[0]): Promise<void> {
+    this.#runs.register(request.chatId, request.runId);
     try {
       await this.runtime.runClaudeTurn({
         ...executionFields(request),
@@ -136,7 +126,7 @@ export class ClaudeExecution implements AgentProjectionRuntimeExecution {
         envOverrides: await this.#endpointEnvironment(request),
       });
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
@@ -159,7 +149,7 @@ export class ClaudeExecution implements AgentProjectionRuntimeExecution {
 
   async applySessionConfiguration(
     agentSessionId: string,
-    configuration: Parameters<NonNullable<AgentProjectionRuntimeExecution['applySessionConfiguration']>>[1],
+    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
   ): Promise<void> {
     this.runtime.setInternalPermissionMode(agentSessionId, configuration.permissionMode);
     this.runtime.setInternalThinkingMode(agentSessionId, configuration.thinkingMode);
@@ -171,13 +161,13 @@ export class ClaudeExecution implements AgentProjectionRuntimeExecution {
 
   async respondToPermission(
     permissionRequestId: string,
-    decision: Parameters<NonNullable<AgentProjectionRuntimeExecution['respondToPermission']>>[1],
+    decision: Parameters<import('@garcon/server-agent-interface').AgentPermissionDecisions['respond']>[1],
   ): Promise<void> {
     this.runtime.resolveInternalToolApproval(permissionRequestId, decision);
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<NonNullable<AgentProjectionRuntimeExecution['prepareProjectPathUpdate']>>[0],
+    request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
   ): Promise<AgentProjectPathUpdatePreparation | void> {
     request.signal.throwIfAborted();
     const agentSessionId = request.chat.agentSessionId;
@@ -213,13 +203,13 @@ export class ClaudeExecution implements AgentProjectionRuntimeExecution {
     };
   }
 
-  subscribeProjectionEvents(
-    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  subscribeRuntimeEvents(
+    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
   ): () => void {
     return this.#events.subscribe(listener);
   }
 
-  async #endpointEnvironment(request: AgentExecutionContextV4) {
+  async #endpointEnvironment(request: AgentRuntimeExecutionContext) {
     const endpoint = await resolveAgentEndpoint(
       this.host,
       request.endpoint,
@@ -239,7 +229,7 @@ export class ClaudeExecution implements AgentProjectionRuntimeExecution {
   }
 }
 
-function executionFields(request: AgentExecutionContextV4) {
+function executionFields(request: AgentRuntimeExecutionContext) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
@@ -247,14 +237,12 @@ function executionFields(request: AgentExecutionContextV4) {
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
     claudeThinkingMode: claudeThinkingMode(request.settings.values.claudeThinkingMode),
-    clientRequestId: request.operation.clientRequestId ?? undefined,
-    clientMessageId: request.operation.clientMessageId ?? undefined,
-    turnId: request.operation.turnId,
+    clientRequestId: request.runId,
+    turnId: request.runId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
-    onAbortable: () => request.admission.markAbortable(),
   };
 }
 

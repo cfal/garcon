@@ -27,7 +27,6 @@ export type ReconnectTranscriptState = Pick<
 	ActiveTranscriptPort,
 	| 'getCursor'
 	| 'applyMessages'
-	| 'setPendingUserInputs'
 	| 'setResendCandidates'
 	| 'loadMessages'
 > & {
@@ -268,7 +267,6 @@ export class ChatReconnectCoordinator {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
 			}
-			this.options.chatState.setPendingUserInputs(message.pendingUserInputs);
 			this.options.chatState.setResendCandidates(message.resendCandidates);
 			this.options.chatState.transcriptCache.markValidated(chatId);
 		} catch {

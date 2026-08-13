@@ -5,8 +5,6 @@ import { describe, expect, test } from 'bun:test';
 import type {
   ChatMessagesMessage,
   ChatSessionStoppedMessage,
-  PendingUserInputClearedMessage,
-  PendingUserInputUpdatedMessage,
 } from '../../../common/ws-events.js';
 import { GarconApiError, type GarconTestClient } from '../../support/garcon-client.js';
 import {
@@ -25,27 +23,13 @@ async function waitForFile(filePath: string): Promise<void> {
   throw new Error(`Timed out waiting for ${filePath}`);
 }
 
-async function waitForQueuedTurnIdentity(
+async function waitForQueuedInputCommit(
   client: GarconTestClient,
   chatId: string,
   content: string,
   afterIndex = 0,
 ) {
-  const event = await client.waitForEvent(
-    (message): message is PendingUserInputUpdatedMessage =>
-      message.type === 'pending-user-input-updated'
-      && message.input.chatId === chatId
-      && message.input.content === content,
-    `queued turn identity for ${content}`,
-    { afterIndex },
-  );
-  expect(event.input.clientRequestId).toBeString();
-  expect(event.input.clientMessageId).toBeString();
-  expect(event.input.turnId).toBeString();
-  return event.input as typeof event.input & {
-    clientMessageId: string;
-    turnId: string;
-  };
+  return await client.waitForCommittedUserInput(chatId, content, { afterIndex });
 }
 
 describe('queue lifecycle', () => {
@@ -68,6 +52,7 @@ describe('queue lifecycle', () => {
         chatId,
         content: 'fifo-b',
         clientRequestId: queueRequestId,
+        clientMessageId: crypto.randomUUID(),
       };
       const queuedB = await fixture.client.enqueue(queueRequest);
       const duplicateB = await fixture.client.enqueue(queueRequest);
@@ -100,10 +85,10 @@ describe('queue lifecycle', () => {
       await heldB.received;
       heldB.releaseEcho();
       await heldC.received;
-      const queuedTurnC = await waitForQueuedTurnIdentity(fixture.client, chatId, 'fifo-c');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'fifo-c');
       const finalCursor = fixture.client.markEvents();
       heldC.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, queuedTurnC.turnId, { afterIndex: finalCursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: finalCursor });
 
       expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'fifo-a',
@@ -246,10 +231,10 @@ describe('queue lifecycle', () => {
       await heldC.received;
       heldC.releaseEcho();
       await heldB.received;
-      const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'reorder-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'reorder-b');
       const terminalCursor = fixture.client.markEvents();
       heldB.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, queuedTurnB.turnId, {
+      await fixture.client.waitForTurnTerminal(chatId, undefined, {
         afterIndex: terminalCursor,
       });
 
@@ -310,10 +295,10 @@ describe('queue lifecycle', () => {
       await heldD.received;
       heldD.releaseEcho();
       await heldC.received;
-      const queuedTurnC = await waitForQueuedTurnIdentity(fixture.client, chatId, 'rebase-c');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'rebase-c');
       const terminalCursor = fixture.client.markEvents();
       heldC.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, queuedTurnC.turnId, {
+      await fixture.client.waitForTurnTerminal(chatId, undefined, {
         afterIndex: terminalCursor,
       });
 
@@ -326,7 +311,7 @@ describe('queue lifecycle', () => {
     });
   });
 
-  test('preserves failed-target retry priority after a dispatch rebase', async () => {
+  test('removes a failed committed head and preserves the rebased tail order', async () => {
     await withIntegrationFixture('queue-reorder-target-retry', async (fixture) => {
       const chatId = fixture.newChatId();
       const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-a' });
@@ -359,10 +344,10 @@ describe('queue lifecycle', () => {
         expectedTargetRevision: entryB.revision,
       });
 
-      const firstTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'retry-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'retry-b');
       const failureCursor = fixture.client.markEvents();
       heldB.releaseStreamError('intentional queued turn failure');
-      expect((await fixture.client.waitForTurnTerminal(chatId, firstTurnB.turnId, {
+      expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
         afterIndex: failureCursor,
       })).type).toBe('agent-run-failed');
       const paused = await fixture.client.getExecutionControl(chatId);
@@ -371,30 +356,25 @@ describe('queue lifecycle', () => {
         entryId: entryB.id,
       });
       expect(paused.queue.entries.map((entry) => entry.content)).toEqual([
-        'retry-b',
         'retry-d',
         'retry-c',
       ]);
 
-      const heldRetryB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-b' });
       const heldD = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-d' });
       const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-c' });
       await fixture.client.resumeQueue(chatId, paused.queue.pause!.id);
-      await heldRetryB.received;
-      heldRetryB.releaseEcho();
       await heldD.received;
       heldD.releaseEcho();
       await heldC.received;
-      const queuedTurnC = await waitForQueuedTurnIdentity(fixture.client, chatId, 'retry-c');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'retry-c');
       const terminalCursor = fixture.client.markEvents();
       heldC.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, queuedTurnC.turnId, {
+      await fixture.client.waitForTurnTerminal(chatId, undefined, {
         afterIndex: terminalCursor,
       });
 
       expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'retry-a',
-        'retry-b',
         'retry-b',
         'retry-d',
         'retry-c',
@@ -455,10 +435,10 @@ describe('queue lifecycle', () => {
       const heldEdited = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'edited-b' });
       heldA.releaseEcho();
       await heldEdited.received;
-      const editedTurn = await waitForQueuedTurnIdentity(fixture.client, chatId, 'edited-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'edited-b');
       const cursor = fixture.client.markEvents();
       heldEdited.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, editedTurn.turnId, { afterIndex: cursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
       expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'edit-a',
         'edited-b',
@@ -507,10 +487,10 @@ describe('queue lifecycle', () => {
 		const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'pause-b' });
 		await fixture.client.resumeQueue(chatId, secondPause.control.queue.pause!.id);
       await heldB.received;
-      const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'pause-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'pause-b');
       const cursor = fixture.client.markEvents();
       heldB.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, queuedTurnB.turnId, { afterIndex: cursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
       expect((await fixture.client.getExecutionControl(chatId)).queue.pause).toBeNull();
     });
   });
@@ -557,30 +537,24 @@ describe('queue lifecycle', () => {
         event.type === 'chat-session-stopped'
         && event.chatId === chatId
         && event.intent === 'stop')).toHaveLength(1);
-      const stoppingIndex = stopEvents.findIndex((event) =>
+      expect(stopEvents.some((event) =>
         event.type === 'chat-processing-updated'
         && event.chatId === chatId
-        && event.phase === 'stopping');
-      const outcomeIndex = stopEvents.findIndex((event) =>
-        event.type === 'chat-session-stopped'
-        && event.chatId === chatId
-        && event.intent === 'stop');
-      expect(stoppingIndex).toBeGreaterThanOrEqual(0);
-      expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
+        && event.phase === null)).toBe(true);
       expect(stopped.control.queue.pause).not.toBeNull();
       expect(stopped.control.queue.entries.map((entry) => entry.content)).toEqual(['stop-b']);
       expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['stop-a']);
 
-      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-b' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-a\n\nstop-b' });
       await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
       await heldB.received;
-      const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'stop-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'stop-b');
       const cursor = fixture.client.markEvents();
       heldB.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, queuedTurnB.turnId, { afterIndex: cursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
       expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'stop-a',
-        'stop-b',
+        'stop-a\n\nstop-b',
       ]);
     });
   });
@@ -697,7 +671,7 @@ describe('queue lifecycle', () => {
     });
   });
 
-  test('coalesces unique active Stop commands behind one interrupt latch', async () => {
+  test('treats a second unique Stop after interruption as already idle', async () => {
     const environment: Record<string, string> = {};
     let startedPath = '';
     let releasePath = '';
@@ -730,7 +704,7 @@ describe('queue lifecycle', () => {
 
       expect(results.map((result) => result.outcome)).toEqual([
         'interrupt-requested',
-        'interrupt-requested',
+        'already-idle',
       ]);
       expect((await readFile(interruptPath, 'utf8')).trim().split('\n')).toEqual(['interrupt']);
       expect(fixture.client.eventsSince(cursor).filter((event) =>
@@ -739,7 +713,7 @@ describe('queue lifecycle', () => {
         && event.outcome === 'interrupt-requested')).toHaveLength(1);
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId, phase: 'stopping' }],
+        chats: [],
       });
 
       await writeFile(releasePath, 'release');
@@ -785,69 +759,28 @@ describe('queue lifecycle', () => {
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, accepted.turnId);
 
-      const sourcePath = await fixture.directOpenAiNativePath(sourceChatId);
-      const sourceContent = await readFile(sourcePath);
-      await rm(sourcePath);
-      // Blocks the source read while the transcript-snapshot reservation is live.
-      const mkfifo = Bun.spawn(['mkfifo', sourcePath], {
-        stdout: 'ignore',
-        stderr: 'pipe',
-      });
-      const mkfifoExit = await mkfifo.exited;
-      if (mkfifoExit !== 0) {
-        throw new Error(`mkfifo failed: ${await new Response(mkfifo.stderr).text()}`);
-      }
-
       const targetChatId = fixture.newChatId();
       const eventCursor = fixture.client.markEvents();
-      let forkSettled = false;
-      const fork = fixture.client.forkChat({
+      const forked = await fixture.client.forkChat({
         sourceChatId,
         chatId: targetChatId,
-      }).finally(() => {
-        forkSettled = true;
       });
-      await Bun.sleep(50);
-      let forkResult: PromiseSettledResult<Awaited<typeof fork>>;
-      try {
-        expect(forkSettled).toBe(false);
-        expect((await fixture.client.ping()).processing).toEqual({
-          outcome: 'snapshot',
-          chats: [],
-        });
-        const sourceListEntry = (await fixture.client.listChats()).sessions.find(
-          (entry) => entry.id === sourceChatId,
-        );
-        expect(sourceListEntry).toMatchObject({
-          isProcessing: false,
-          processingPhase: null,
-        });
-        expect(forkSettled).toBe(false);
-        expect(fixture.client.eventsSince(eventCursor).filter((event) =>
-          event.type === 'chat-processing-updated'
-          && event.chatId === sourceChatId
-          && event.phase !== null)).toEqual([]);
-      } finally {
-        const feedSourceReads = (async () => {
-          await writeFile(sourcePath, sourceContent);
-        })();
-        const [settledFork, settledFeed] = await Promise.allSettled([fork, feedSourceReads]);
-        if (settledFeed.status === 'rejected') throw settledFeed.reason;
-        forkResult = settledFork;
-      }
-      expect(forkResult).toMatchObject({
-        status: 'rejected',
-        reason: {
-          status: 409,
-          body: { errorCode: 'SOURCE_REVISION_CHANGED' },
-        },
+      expect(forked.chat.id).toBe(targetChatId);
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
       });
-      await rm(sourcePath);
-      await writeFile(sourcePath, sourceContent);
-      expect((await fixture.client.forkChat({
-        sourceChatId,
-        chatId: targetChatId,
-      })).chat.id).toBe(targetChatId);
+      const sourceListEntry = (await fixture.client.listChats()).sessions.find(
+        (entry) => entry.id === sourceChatId,
+      );
+      expect(sourceListEntry).toMatchObject({
+        isProcessing: false,
+        processingPhase: null,
+      });
+      expect(fixture.client.eventsSince(eventCursor).filter((event) =>
+        event.type === 'chat-processing-updated'
+        && event.chatId === sourceChatId
+        && event.phase !== null)).toEqual([]);
     });
   });
 
@@ -877,40 +810,32 @@ describe('queue lifecycle', () => {
 
       // Admission commits the drained input's user row at dispatch, so it is
       // already durable rather than pending while the provider holds the turn.
-      const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'drain-stop-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'drain-stop-b');
       const duringDrain = await fixture.client.getMessages(chatId);
       expect(countUserContent(duringDrain.messages, 'drain-stop-b')).toBe(1);
       const stopCursor = fixture.client.markEvents();
-      const activeAborted = heldB.expectAbort();
+      heldB.allowAbort();
       const stopped = await fixture.client.stopChat({
         chatId,
         clientRequestId: crypto.randomUUID(),
       });
-      await activeAborted;
+      heldB.releaseEcho();
       expect(stopped.outcome).toBe('interrupt-requested');
-		expect(stopped.control.queue.pause?.kind).toBe('manual');
-		expect(stopped.control.queue.entries.map((entry) => entry.content)).toEqual(['drain-stop-c']);
-		expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(stopped.control.queue.pause?.kind).toBe('manual');
+      expect(stopped.control.queue.entries.map((entry) => entry.content)).toEqual(['drain-stop-c']);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'drain-stop-seed',
         'drain-stop-active',
         'drain-stop-b',
       ]);
-      await fixture.client.waitForEvent(
-        (event): event is PendingUserInputClearedMessage =>
-          event.type === 'pending-user-input-cleared'
-          && event.chatId === chatId
-          && event.clientRequestId === queuedTurnB.clientRequestId
-          && event.reason === 'persisted',
-        'stopped drain persistence settlement',
-      );
-
-		const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'drain-stop-c' });
-		await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
+      const resumedPrompt = 'drain-stop-b\n\ndrain-stop-c';
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: resumedPrompt });
+      await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
       await heldC.received;
-      const queuedTurnC = await waitForQueuedTurnIdentity(fixture.client, chatId, 'drain-stop-c');
+      await waitForQueuedInputCommit(fixture.client, chatId, 'drain-stop-c');
       const completionCursor = fixture.client.markEvents();
       heldC.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, queuedTurnC.turnId, {
+      await fixture.client.waitForTurnTerminal(chatId, undefined, {
         afterIndex: completionCursor,
       });
 
@@ -918,13 +843,13 @@ describe('queue lifecycle', () => {
         'drain-stop-seed',
         'drain-stop-active',
         'drain-stop-b',
-        'drain-stop-c',
+        resumedPrompt,
       ]);
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
       const transcript = await fixture.client.getMessages(chatId);
       expect(countUserContent(transcript.messages, 'drain-stop-b')).toBe(1);
       expect(countUserContent(transcript.messages, 'drain-stop-c')).toBe(1);
-      expect(transcript.pendingUserInputs).toEqual([]);
+      expect(transcript.resendCandidates).toEqual([]);
     });
   });
 
@@ -941,7 +866,8 @@ describe('queue lifecycle', () => {
       await heldA.received;
       await fixture.client.enqueueNew(chatId, 'interrupt-b');
       const eventCursor = fixture.client.markEvents();
-      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'interrupt-b' });
+      const successorPrompt = 'interrupt-a\n\ninterrupt-b';
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: successorPrompt });
 
       const activeAborted = heldA.expectAbort();
       const interruptRequest = {
@@ -966,11 +892,6 @@ describe('queue lifecycle', () => {
         event.type === 'chat-session-stopped'
         && event.chatId === chatId
         && event.intent === 'interrupt-and-send')).toHaveLength(1);
-      expect(interruptEvents.filter((event) =>
-        event.type === 'queue-dispatching'
-        && event.chatId === chatId
-        && event.content === 'interrupt-b')).toHaveLength(1);
-
       const successorMessageEvent = await fixture.client.waitForEvent(
         (event): event is ChatMessagesMessage =>
           event.type === 'chat-messages'
@@ -982,56 +903,26 @@ describe('queue lifecycle', () => {
       );
       const successor = successorMessageEvent.messages.find((entry) =>
         entry.message.type === 'user-message' && entry.message.content === 'interrupt-b');
-      const successorIdentity = await waitForQueuedTurnIdentity(
-        fixture.client,
-        chatId,
-        'interrupt-b',
-        eventCursor,
-      );
-      const clientRequestId = successor?.message.type === 'user-message'
+      expect(successor?.message.type === 'user-message'
+        ? successor.message.metadata?.clientMessageId
+        : undefined).toBeString();
+      expect(successor?.message.type === 'user-message'
         ? successor.message.metadata?.clientRequestId
-        : undefined;
-      expect(clientRequestId).toBe(successorIdentity.clientRequestId);
+        : undefined).toBeUndefined();
       expect(successor?.message.type === 'user-message'
         ? successor.message.metadata?.turnId
-        : undefined).toBe(successorIdentity.turnId);
-      expect(successorMessageEvent).toMatchObject({
-        clientRequestId: successorIdentity.clientRequestId,
-        turnId: successorIdentity.turnId,
-      });
-      expect(fixture.client.events().slice(eventCursor).filter((event) =>
-        event.type === 'pending-user-input-status-updated'
-        && event.chatId === chatId
-        && event.clientRequestId === clientRequestId
-        && event.deliveryStatus === 'failed')).toEqual([]);
-
+        : undefined).toBeUndefined();
+      expect(successorMessageEvent.clientRequestId).toBeUndefined();
+      expect(successorMessageEvent.turnId).toBeUndefined();
       heldA.releaseText('stale response must be ignored');
       const finalCursor = fixture.client.markEvents();
       heldB.releaseEcho();
-      // The successor persisted at admission, before the provider echo, so its
-      // cleared event precedes this release point.
-      await Promise.all([
-        fixture.client.waitForEvent(
-          (event): event is PendingUserInputClearedMessage =>
-            event.type === 'pending-user-input-cleared'
-            && event.chatId === chatId
-            && event.clientRequestId === clientRequestId
-            && event.reason === 'persisted',
-          'interrupt successor persistence',
-          { afterIndex: eventCursor },
-        ),
-        fixture.client.waitForTurnTerminal(chatId, successorIdentity.turnId, {
-          afterIndex: finalCursor,
-        }),
-      ]);
+      await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: finalCursor,
+      });
       const transcript = await fixture.client.getMessages(chatId);
       expect(countUserContent(transcript.messages, 'interrupt-b')).toBe(1);
-      expect(transcript.pendingUserInputs).toEqual([]);
-      expect(fixture.client.events().filter((event) =>
-        event.type === 'pending-user-input-status-updated'
-        && event.chatId === chatId
-        && event.clientRequestId === clientRequestId
-        && event.deliveryStatus === 'failed')).toEqual([]);
+      expect(transcript.resendCandidates).toEqual([]);
     });
   });
 });

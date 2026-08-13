@@ -8,8 +8,3 @@ export async function markExecutionStarted(admission: AgentExecutionAdmission): 
   assertExecutionOpen(admission);
   await admission.markStarted();
 }
-
-export function markExecutionAbortable(admission: AgentExecutionAdmission): void {
-  assertExecutionOpen(admission);
-  admission.markAbortable();
-}

@@ -9,16 +9,12 @@ import {
 	ChatMessagesMessage,
 	ChatTranscriptReplacedMessage,
 	ChatOperationalNoticeMessage,
-	ChatProjectionGenerationTransitionMessage,
 	ChatTransientFeedMutationMessage,
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
 	ChatSessionStoppedMessage,
 	ChatExecutionControlUpdatedMessage,
-	PendingUserInputUpdatedMessage,
-	PendingUserInputStatusUpdatedMessage,
-	PendingUserInputClearedMessage,
 	WsFaultMessage,
 	ChatTitleUpdatedMessage,
 	ChatProjectPathUpdatedMessage,
@@ -98,9 +94,6 @@ export type EventRouterChatStateStore = Pick<
 	| 'getCursor'
 	| 'appendLocalNotice'
 	| 'appendServerNotice'
-	| 'upsertPendingUserInput'
-	| 'clearPendingUserInput'
-	| 'updatePendingUserInputDeliveryStatus'
 	| 'loadMessages'
 > & {
 	applyChatMessages: (
@@ -339,13 +332,13 @@ function buildDispatch(
 	};
 
 	const refreshTransientFeed = (chatId: string) => {
-		const previousGenerationId = stores.conversationUi.getTransientFeed(chatId)?.generationId;
+		const previousTranscriptViewId = stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
 		void getChatSnapshot(chatId, 1)
 			.then((snapshot) => {
 				const result = stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
-				if (result.kind === 'applied' && previousGenerationId
-					&& previousGenerationId !== snapshot.transientFeed.generationId) {
-					handleViewTransition(chatId, snapshot.transientFeed.generationId);
+				if (result.kind === 'applied' && previousTranscriptViewId
+					&& previousTranscriptViewId !== snapshot.transientFeed.transcriptViewId) {
+					handleViewTransition(chatId, snapshot.transientFeed.transcriptViewId);
 				}
 			})
 			.catch(() => undefined);
@@ -380,6 +373,7 @@ function buildDispatch(
 		},
 		'chat-transcript-replaced': (msg) => {
 			if (!(msg instanceof ChatTranscriptReplacedMessage)) return;
+			stores.conversationUi.removeTransientFeed(msg.chatId);
 			handleViewTransition(msg.chatId, msg.transcriptViewId);
 		},
 		'chat-transient-feed-mutation': (msg) => {
@@ -388,14 +382,6 @@ function buildDispatch(
 			if (result.kind === 'snapshot-required' || result.kind === 'corrupt') {
 				refreshTransientFeed(msg.chatId);
 			}
-		},
-		'chat-projection-generation-transition': (msg) => {
-			if (!(msg instanceof ChatProjectionGenerationTransitionMessage)) return;
-			const result = stores.conversationUi.applyProjectionGenerationTransition(msg);
-			if (result.kind === 'snapshot-required' || result.kind === 'corrupt') {
-				refreshTransientFeed(msg.chatId);
-			}
-			if (result.kind === 'applied') handleViewTransition(msg.chatId, msg.generationId);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
@@ -428,22 +414,6 @@ function buildDispatch(
 		'chat-operational-notice': (msg) => {
 			if (!(msg instanceof ChatOperationalNoticeMessage)) return;
 			stores.chatState.appendServerNotice(msg.chatId, msg.noticeType, msg.content);
-		},
-		'pending-user-input-updated': (msg) => {
-			if (!(msg instanceof PendingUserInputUpdatedMessage)) return;
-			stores.chatState.upsertPendingUserInput(msg.input);
-		},
-		'pending-user-input-status-updated': (msg) => {
-			if (!(msg instanceof PendingUserInputStatusUpdatedMessage)) return;
-			stores.chatState.updatePendingUserInputDeliveryStatus(
-				msg.clientRequestId,
-				msg.deliveryStatus,
-			);
-		},
-		'pending-user-input-cleared': (msg) => {
-			if (!(msg instanceof PendingUserInputClearedMessage)) return;
-			messagesAccumulator.flush();
-			stores.chatState.clearPendingUserInput(msg.clientRequestId);
 		},
 		'ws-fault': (msg) => {
 			if (msg instanceof WsFaultMessage) {

@@ -94,11 +94,12 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     addNewChatMetadata: mock(() => undefined),
   };
   const chatViews = {
-    getOrCreatePage: mock(async () => ({
+    page: mock(async () => ({
+      transcriptViewId: 'view-1',
       messages: [],
-      generationId: 'generation-1',
-      lastSeq: 0,
-      pageOldestSeq: 0,
+      lastOrdinal: 0,
+      pageOldestOrdinal: 0,
+      pageNewestOrdinal: 0,
       hasMore: false,
     })),
   };
@@ -113,15 +114,6 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     runSingleQuery: mock(async () => 'title'),
     resolvePermission: mock(() => undefined),
     updateSessionSettings: mock(async () => undefined),
-    verifyProjectionEntry: mock(async () => true),
-  };
-  const pendingInputs = {
-    register: mock(async () => undefined),
-    reconcileRetainedHistory: mock(async () => undefined),
-    reconcileNativeHistory: mock(async () => undefined),
-    listForChat: mock(() => []),
-    hasInFlightForChat: mock(() => false),
-    clearChat: mock(() => undefined),
   };
   const searchIndex = {
     validateResultView: mock(() => true),
@@ -158,11 +150,11 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     registry,
     settings,
     queue,
+    processing: { phase: mock(() => null) },
     pathCache,
     metadata,
     chatViews,
     agents,
-    pendingInputs,
     searchIndex,
     chatListProjector,
     commandService: createRouteCommandService({
@@ -172,7 +164,6 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
       metadata,
       agents,
       commandLedger,
-      pendingInputs,
     }),
   });
 

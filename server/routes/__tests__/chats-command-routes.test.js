@@ -65,7 +65,6 @@ import {
   createRouteCommandLedger,
   createRouteCommandService,
   createRoutePathCache,
-  createRoutePendingInputs,
 } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000700';
@@ -410,12 +409,13 @@ function createRouteAgent(sessionOverrides = {}) {
     getChatMetadata: mock(() => null),
   };
   const chatViews = {
-    getOrCreatePage: mock(() =>
+    page: mock(() =>
       Promise.resolve({
+        transcriptViewId: 'view-1',
         messages: [],
-        generationId: 'generation-1',
-        lastSeq: 0,
-        pageOldestSeq: 0,
+        lastOrdinal: 0,
+        pageOldestOrdinal: 0,
+        pageNewestOrdinal: 0,
         hasMore: false,
       }),
     ),
@@ -445,11 +445,10 @@ function createRouteAgent(sessionOverrides = {}) {
     resolvePermission: mock(() => undefined),
     resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
-    notifyProjectPathRelocated: mock(() => undefined),
+    publishSessionFact: mock(() => undefined),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
   const commandLedger = createRouteCommandLedger('chats-command-routes');
-  const pendingInputs = createRoutePendingInputs();
   const chatListProjector = createRouteChatListProjector({
     registry,
     settings,
@@ -461,11 +460,11 @@ function createRouteAgent(sessionOverrides = {}) {
     registry,
     settings,
     queue,
+    processing: { phase: mock(() => null) },
     pathCache,
     metadata,
     chatViews,
     agents,
-    pendingInputs,
     chatListProjector,
     commandService: createRouteCommandService({
       registry,
@@ -474,7 +473,6 @@ function createRouteAgent(sessionOverrides = {}) {
       metadata,
       agents,
       commandLedger,
-      pendingInputs,
       pathCache,
       chatListProjector,
       forkChatFileCopy: async (args) => {
@@ -518,7 +516,10 @@ async function callJson(handler, body, method = 'POST') {
   const inputBody = body && typeof body === 'object' && 'chatId' in body
     ? {
         ...body,
-        ...(!('transcriptViewId' in body) ? { transcriptViewId: 'view-current' } : {}),
+        ...((('clientMessageId' in body) || ('content' in body))
+          && !('transcriptViewId' in body)
+          ? { transcriptViewId: 'view-current' }
+          : {}),
         ...('content' in body && 'clientRequestId' in body && !('clientMessageId' in body)
           ? { clientMessageId: `message-${body.clientRequestId}` }
           : {}),
@@ -757,7 +758,7 @@ describe('REST chat command routes', () => {
     );
   });
 
-  it('POST /fork-run rejects busy source sessions before copying', async () => {
+  it('POST /fork-run copies committed source rows while the source is running', async () => {
     const agent = createRouteAgent();
     agent.agents.isAgentSessionRunning.mockReturnValue(true);
 
@@ -771,10 +772,10 @@ describe('REST chat command routes', () => {
       }),
     });
 
-    expect(response.status).toBe(409);
-    expect(body.errorCode).toBe('SESSION_BUSY');
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
-    expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(response.status).toBe(202);
+    expect(body.chatId).toBe(TARGET_CHAT_ID);
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledOnce();
   });
 
   it('POST /fork preserves retryable transcript-persistence refusals', async () => {
@@ -1350,13 +1351,7 @@ describe('REST chat command routes', () => {
       control: {
         serverInstanceId: 'server-instance-test',
         chatId: CHAT_ID,
-        agentOwnershipEpoch: 'epoch-1',
-        turnOwner: {
-          agentOwnershipEpoch: 'epoch-1',
-          commandType: 'agent-run',
-          clientRequestId: 'req-run-1',
-          turnId: 'turn-1',
-        },
+        runId: 'run-1',
         id: 'perm-1',
         incarnation: 'incarnation-1',
       },
@@ -1375,7 +1370,7 @@ describe('REST chat command routes', () => {
       allow: true,
       alwaysAllow: false,
       response: { outcome: { outcome: 'accepted' } },
-    });
+    }, decision.control);
   });
 
   it('POST /stop deduplicates pause-and-stop requests', async () => {

@@ -1,4 +1,4 @@
-import type { AgentSteerRequestV4, AgentSteerResult } from '@garcon/server-agent-interface';
+import type { AgentSteerRequest, AgentSteerResult } from '@garcon/server-agent-interface';
 import {
   CodexAppServerDeliveryError,
   CodexAppServerRpcError,
@@ -15,7 +15,7 @@ interface SteerableCodexSession {
 export async function steerCodexSession(
   session: SteerableCodexSession,
   expectedTurnId: string,
-  request: AgentSteerRequestV4,
+  request: AgentSteerRequest,
   flushPendingFinish: () => void,
 ): Promise<AgentSteerResult> {
   session.activeDeliveryReservations += 1;

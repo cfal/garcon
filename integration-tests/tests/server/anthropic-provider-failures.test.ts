@@ -83,7 +83,7 @@ describe('Anthropic provider failures', () => {
         );
         expect(userMessages(failedTranscript.messages).find((message) =>
           message.content === failure.content)?.metadata).toMatchObject({
-            turnId: accepted.turnId,
+            clientMessageId: expect.any(String),
           });
 
         const retryContent = `${failure.content}-retry`;

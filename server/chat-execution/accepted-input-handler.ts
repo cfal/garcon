@@ -33,8 +33,7 @@ import type {
   AcceptedQueueEntrySteerOutcome,
   CapturedSteerTarget,
   DirectTurnReservation,
-  PendingInputsPort,
-  PendingUserInputRegistrationOptions,
+  UserInputAdmissionOptions,
   QueueCommandMutationResult,
 } from './types.ts';
 import type { StoredChatExecutionControlState } from './control-state.ts';
@@ -46,10 +45,10 @@ export interface AcceptedInputCoordinator {
   requestDrain(chatId: string, context: string): void;
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation;
   checkpoint(reservation: DirectTurnReservation): void;
-  registerPending(
+  admitInput(
     chatId: string,
     content: string,
-    options: PendingUserInputRegistrationOptions,
+    options: UserInputAdmissionOptions,
   ): Promise<boolean>;
   releaseDirect(reservation: DirectTurnReservation): Promise<void>;
   runDirect(
@@ -78,18 +77,15 @@ export interface AcceptedInputCoordinator {
 
 export interface AcceptedInputDeps {
   controls: ChatExecutionControlOperations;
-  pendingInputs: PendingInputsPort;
   coordinator: AcceptedInputCoordinator;
 }
 
 export class AcceptedInputHandler {
   readonly #controls: ChatExecutionControlOperations;
-  readonly #pendingInputs: PendingInputsPort;
   readonly #coordinator: AcceptedInputCoordinator;
 
   constructor(deps: AcceptedInputDeps) {
     this.#controls = deps.controls;
-    this.#pendingInputs = deps.pendingInputs;
     this.#coordinator = deps.coordinator;
   }
 
@@ -422,7 +418,6 @@ export class AcceptedInputHandler {
   ): Promise<QueueEntrySteerError> {
     try {
       const control = await this.#controls.releaseSteer(input.command.chatId, input.command.entryId);
-      this.#pendingInputs.markFailed(input.command.chatId, input.command.clientRequestId);
       this.#coordinator.requestDrain(input.command.chatId, 'rejected queued steer released');
       const wrapped = this.#queueSteerError(error, 'not-sent', control);
       await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
@@ -439,12 +434,10 @@ export class AcceptedInputHandler {
           input.command.entryId,
           'completion-uncertain',
         );
-        this.#pendingInputs.markFailed(input.command.chatId, input.command.clientRequestId);
         const wrapped = this.#queueSteerError(error, 'not-sent', control);
         await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
         return wrapped;
       } catch (recoveryError) {
-        this.#pendingInputs.markFailed(input.command.chatId, input.command.clientRequestId);
         const wrapped = new QueueEntrySteerError(
           'QUEUE_STEER_RECOVERY_FAILED',
           QUEUE_STEER_RECOVERY_FAILED_MESSAGE,
@@ -561,7 +554,7 @@ export class AcceptedInputHandler {
         })));
       const inserted = await this.#checkpointAfter(
         reservation,
-        this.#coordinator.registerPending(input.command.chatId, input.content, input.options),
+        this.#coordinator.admitInput(input.command.chatId, input.content, input.options),
       );
       if (inserted === false) {
         await input.settlement.settleDuplicateInput(input.command);
@@ -574,10 +567,6 @@ export class AcceptedInputHandler {
       );
       return reservation;
     } catch (error) {
-      this.#pendingInputs.markFailed(
-        input.command.chatId,
-        input.options.clientRequestId!,
-      );
       let failure: unknown = error;
       let retryable = true;
       let preserveForkPreparation = false;

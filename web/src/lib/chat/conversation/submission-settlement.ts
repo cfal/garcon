@@ -7,8 +7,7 @@ export interface SubmissionSettlementDeps {
 	chatState: Pick<
 		SessionControllerDeps['chatState'],
 		| 'appendLocalNotice'
-		| 'clearPendingUserInput'
-		| 'updatePendingUserInputDeliveryStatus'
+		| 'clearOptimisticUserInput'
 	>;
 	composerState: Pick<
 		SessionControllerDeps['composerState'],
@@ -24,10 +23,10 @@ export interface SubmissionFailureContext {
 }
 
 export interface SubmissionFailureOptions {
-	clientRequestId?: string;
+	clientMessageId?: string;
 	unknownNotice: string;
 	rejectedNotice(error: unknown): string;
-	clearPendingOnAdmissionConflict?: boolean;
+	refreshOnAdmissionConflict?: boolean;
 	composerRevisionAfterClear?: number | null;
 	refreshControl?: () => Promise<void>;
 	restoreRejected?: () => void;
@@ -42,18 +41,11 @@ export async function settleSubmissionFailure(
 ): Promise<ConversationSubmissionOutcome> {
 	const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
 	const admissionConflict =
-		options.clearPendingOnAdmissionConflict === true && isExecutionControlAdmissionConflict(error);
+		options.refreshOnAdmissionConflict === true && isExecutionControlAdmissionConflict(error);
 
-	if (options.clientRequestId) {
-		if (admissionConflict) {
-			deps.chatState.clearPendingUserInput(options.clientRequestId);
-			if (options.refreshControl) await options.refreshControl();
-		} else {
-			deps.chatState.updatePendingUserInputDeliveryStatus(
-				options.clientRequestId,
-				outcomeUnknown ? 'unconfirmed' : 'failed',
-			);
-		}
+	if (options.clientMessageId && !outcomeUnknown) {
+		deps.chatState.clearOptimisticUserInput(options.clientMessageId);
+		if (admissionConflict && options.refreshControl) await options.refreshControl();
 	}
 
 	if (!outcomeUnknown) await options.onRejected?.();

@@ -320,7 +320,7 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-chat-earlier-loading-indicator]')).toBeNull();
 	});
 
-	it('passes durable and pending row identities to mounted virtual rows', async () => {
+	it('passes durable and optimistic row identities to mounted virtual rows', async () => {
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
 
 		await waitFor(() =>
@@ -329,7 +329,7 @@ describe('ConversationFeed', () => {
 					container.querySelectorAll<HTMLElement>('[data-chat-row-id]'),
 					(row) => row.dataset.chatRowId,
 				),
-			).toEqual(['generation-1:1', 'pending:request-1']),
+			).toEqual(['generation-1:1', 'optimistic:message-1']),
 		);
 	});
 

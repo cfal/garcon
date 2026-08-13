@@ -24,8 +24,8 @@ describe('Claude native user-input conversion', () => {
     const content = 'Fixture capture only. Do not inspect or modify files. Preserve this marker as the literal user input in the session transcript: &amp; &lt; &gt; &quot; &#39; <literal>. Reply only: acknowledged';
     const nativeMessages = await loadClaudeChatMessages(fixturePath);
     expect(nativeMessages).toMatchObject([{ type: 'user-message', content }]);
-    // Entity-bearing content never participates in identity: the row carries
-    // its uuid, which is what the projection settles against.
+    // Entity-bearing content never participates in identity: provider metadata
+    // carries the native uuid used for import deduplication and native forks.
     expect(getNativeMessageSource(nativeMessages[0])).toMatchObject({ entryId: expect.any(String) });
   });
 
@@ -264,8 +264,8 @@ describe('Claude JSONL microcompaction', () => {
         ['user-message', 'keep me'],
         ['assistant-message', 'answer'],
       ]);
-      // The rendered rows keep the first occurrence's uuid, the identity the
-      // projection settles against; the re-append does not mint a new one.
+      // The rendered rows keep the first occurrence's native uuid; the
+      // provider re-append does not mint a second logical occurrence.
       expect(getNativeMessageSource(messages[0])).toMatchObject({ entryId: 'user-1' });
       expect(getNativeMessageSource(messages[1])).toMatchObject({ entryId: 'assistant-1' });
     });

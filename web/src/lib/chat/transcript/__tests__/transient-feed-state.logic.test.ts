@@ -1,35 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import {
-	BashToolUseMessage,
-	PermissionRequestMessage,
-} from '$shared/chat-types';
+import { BashToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
 import type {
-	ChatProjectionGenerationTransition,
 	ChatTransientFeedMutation,
 	ChatTransientFeedSnapshot,
 	TransientFeedRow,
 } from '$shared/chat-transient-feed';
 import {
-	applyProjectionGenerationTransition,
 	applyTransientFeedMutation,
 	applyTransientFeedSnapshot,
 	pendingPermissionsFromTransientFeed,
 } from '../transient-feed-state.js';
 
-const owner = {
-	agentOwnershipEpoch: 'owner-1',
-	commandType: 'agent-run' as const,
-	clientRequestId: 'request-1',
-	turnId: 'turn-1',
-};
-
 function row(overrides: Partial<TransientFeedRow> = {}): TransientFeedRow {
 	return {
 		id: 'permission-1',
 		incarnation: 'incarnation-1',
-		operationTurnId: 'turn-1',
-		turnOwner: owner,
-		transcript: { generationId: 'generation-1', afterSeq: 3 },
+		runId: 'run-1',
+		transcript: { transcriptViewId: 'view-1', afterOrdinal: 3 },
 		displayOrder: 0,
 		message: new PermissionRequestMessage(
 			'2026-08-11T00:00:00.000Z',
@@ -44,11 +31,8 @@ function snapshot(overrides: Partial<ChatTransientFeedSnapshot> = {}): ChatTrans
 	return {
 		serverInstanceId: 'server-1',
 		chatId: 'chat-1',
-		agentOwnershipEpoch: 'owner-1',
-		generationId: 'generation-1',
-		resetTransactionId: null,
+		transcriptViewId: 'view-1',
 		transientRevision: 1,
-		stateDigest: 'digest-1',
 		rows: [row()],
 		...overrides,
 	};
@@ -61,17 +45,15 @@ function mutation(
 	return {
 		serverInstanceId: 'server-1',
 		chatId: 'chat-1',
-		agentOwnershipEpoch: 'owner-1',
-		generationId: 'generation-1',
+		transcriptViewId: 'view-1',
 		transientRevision: 2,
-		stateDigest: 'digest-2',
 		mutation: mutationBody,
 		...overrides,
 	};
 }
 
 describe('transient feed browser reducer', () => {
-	it('does not resurrect a removed permission from a delayed duplicate upsert', () => {
+	it('does not resurrect a removed permission from a delayed upsert', () => {
 		const removed = applyTransientFeedMutation(
 			snapshot(),
 			mutation({ kind: 'remove', id: 'permission-1', incarnation: 'incarnation-1' }),
@@ -79,105 +61,68 @@ describe('transient feed browser reducer', () => {
 		expect(removed).toMatchObject({ kind: 'applied', snapshot: { rows: [] } });
 		if (removed.kind !== 'applied') throw new Error('expected applied removal');
 
-		const delayed = applyTransientFeedMutation(
+		expect(applyTransientFeedMutation(
 			removed.snapshot,
-			mutation(
-				{ kind: 'upsert', row: row() },
-				{ transientRevision: 1, stateDigest: 'digest-1' },
-			),
-		);
-		expect(delayed).toEqual({ kind: 'stale' });
+			mutation({ kind: 'upsert', row: row() }, { transientRevision: 1 }),
+		)).toEqual({ kind: 'stale' });
 	});
 
-	it('converges when an older HTTP snapshot and a compound WebSocket reset reorder', () => {
-		const transition: ChatProjectionGenerationTransition = {
-			resetTransactionId: 'reset-1',
-			serverInstanceId: 'server-1',
-			chatId: 'chat-1',
-			agentOwnershipEpoch: 'owner-1',
-			previousGenerationId: 'generation-1',
-			generationId: 'generation-2',
-			transientRevision: 2,
-			stateDigest: 'digest-2',
-			rows: [row({ transcript: { generationId: 'generation-2', afterSeq: 3 } })],
-		};
-		const transitioned = applyProjectionGenerationTransition(snapshot(), transition);
-		expect(transitioned).toMatchObject({
+	it('replaces overlay state when the transcript view changes', () => {
+		const replacementRow = row({
+			transcript: { transcriptViewId: 'view-2', afterOrdinal: 0 },
+		});
+		const replacement = snapshot({
+			transcriptViewId: 'view-2',
+			transientRevision: 0,
+			rows: [replacementRow],
+		});
+
+		expect(applyTransientFeedSnapshot(snapshot(), replacement)).toEqual({
 			kind: 'applied',
-			snapshot: { generationId: 'generation-2' },
-		});
-		if (transitioned.kind !== 'applied') throw new Error('expected transition');
-		expect(applyTransientFeedSnapshot(transitioned.snapshot, snapshot())).toEqual({ kind: 'stale' });
-
-		const resetSnapshot = snapshot({
-			generationId: 'generation-2',
-			resetTransactionId: 'reset-1',
-			transientRevision: 2,
-			stateDigest: 'digest-2',
-			rows: transition.rows,
-		});
-		expect(applyProjectionGenerationTransition(resetSnapshot, transition)).toEqual({
-			kind: 'duplicate',
+			snapshot: replacement,
 		});
 	});
 
-	it('requires a snapshot for gaps and rejects contradictory equal revisions', () => {
+	it('requires a snapshot for revision gaps or view-mismatched mutations', () => {
 		expect(applyTransientFeedMutation(
 			snapshot(),
 			mutation({ kind: 'upsert', row: row() }, { transientRevision: 3 }),
 		)).toEqual({ kind: 'snapshot-required' });
 		expect(applyTransientFeedMutation(
 			snapshot(),
-			mutation(
-				{ kind: 'upsert', row: row() },
-				{ transientRevision: 1, stateDigest: 'different' },
-			),
-		)).toEqual({ kind: 'corrupt' });
+			mutation({ kind: 'clear-run', runId: 'run-1' }, {
+				transcriptViewId: 'view-2',
+			}),
+		)).toEqual({ kind: 'snapshot-required' });
 	});
 
-	it('preserves one actionable permission through a generation transition', () => {
-		const applied = applyProjectionGenerationTransition(snapshot(), {
-			resetTransactionId: 'reset-1',
+	it('projects an actionable permission with run and view fences', () => {
+		const permissions = pendingPermissionsFromTransientFeed(snapshot());
+
+		expect(permissions).toHaveLength(1);
+		expect(permissions[0]?.control).toEqual({
 			serverInstanceId: 'server-1',
 			chatId: 'chat-1',
-			agentOwnershipEpoch: 'owner-1',
-			previousGenerationId: 'generation-1',
-			generationId: 'generation-2',
-			transientRevision: 2,
-			stateDigest: 'digest-2',
-			rows: [row({ transcript: { generationId: 'generation-2', afterSeq: 3 } })],
-		});
-		if (applied.kind !== 'applied') throw new Error('expected transition');
-		const permissions = pendingPermissionsFromTransientFeed(applied.snapshot);
-		expect(permissions).toHaveLength(1);
-		expect(permissions[0]?.control).toMatchObject({
+			runId: 'run-1',
 			id: 'permission-1',
 			incarnation: 'incarnation-1',
 		});
-		expect(permissions[0]?.transcript).toEqual({ generationId: 'generation-2', afterSeq: 3 });
+		expect(permissions[0]?.transcript).toEqual({
+			transcriptViewId: 'view-1',
+			afterOrdinal: 3,
+		});
 	});
 
-	it('accepts a new incarnation while rejecting a delayed prior removal', () => {
-		const removed = applyTransientFeedMutation(
-			snapshot(),
-			mutation({ kind: 'remove', id: 'permission-1', incarnation: 'incarnation-1' }),
+	it('clears only rows belonging to the ended run', () => {
+		const other = row({ id: 'permission-2', incarnation: 'incarnation-2', runId: 'run-2' });
+		const applied = applyTransientFeedMutation(
+			snapshot({ rows: [row(), other] }),
+			mutation({ kind: 'clear-run', runId: 'run-1' }),
 		);
-		if (removed.kind !== 'applied') throw new Error('expected removal');
-		const replacementRow = row({ incarnation: 'incarnation-2' });
-		const replaced = applyTransientFeedMutation(
-			removed.snapshot,
-			mutation(
-				{ kind: 'upsert', row: replacementRow },
-				{ transientRevision: 3, stateDigest: 'digest-3' },
-			),
-		);
-		if (replaced.kind !== 'applied') throw new Error('expected replacement');
-		expect(applyTransientFeedMutation(
-			replaced.snapshot,
-			mutation(
-				{ kind: 'remove', id: 'permission-1', incarnation: 'incarnation-1' },
-				{ transientRevision: 2 },
-			),
-		)).toEqual({ kind: 'stale' });
+
+		expect(applied).toMatchObject({
+			kind: 'applied',
+			snapshot: { rows: [{ id: 'permission-2', runId: 'run-2' }] },
+		});
 	});
 });

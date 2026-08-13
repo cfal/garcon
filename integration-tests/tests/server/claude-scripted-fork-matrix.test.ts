@@ -22,7 +22,6 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import {
-  expectTranscriptNotYetPersisted,
   forkAfterSourceSettles,
   forkWhenTranscriptPersists,
 } from '../../support/fork-test-support.js';
@@ -39,6 +38,7 @@ import {
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 interface PersistedClaudeChatRecord {
   agentSessionId: string | null;
@@ -96,10 +96,13 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await held.requested;
       const forkChatId = fixture.newChatId();
       try {
-        await expectTranscriptNotYetPersisted(fixture.client.forkChat({
+        await fixture.client.forkChat({
           sourceChatId,
           chatId: forkChatId,
-        }));
+        });
+        const forkedWhileRunning = await fixture.client.getMessages(forkChatId);
+        expect(userContents(forkedWhileRunning.messages)).toEqual([prompt]);
+        expect(assistantContents(forkedWhileRunning.messages)).toEqual([]);
       } finally {
         held.release();
       }
@@ -110,15 +113,13 @@ describe('scripted Claude fork lifecycle matrix', () => {
         marker: reply,
         afterIndex: cursor,
       });
-      await forkAfterSourceSettles(fixture, sourceChatId, forkChatId);
-      expect(userContents((await fixture.client.getMessages(forkChatId)).messages)).toEqual([
-        prompt,
-      ]);
+      expect(assistantContents((await fixture.client.getMessages(forkChatId)).messages))
+        .not.toContain(reply);
 
       testEnvironment.model.scriptTurn((request) => {
         expect(request.lastUserText).toContain(childPrompt);
         expect(JSON.stringify(request.body.messages)).toContain(prompt);
-        expect(JSON.stringify(request.body.messages)).toContain(reply);
+        expect(JSON.stringify(request.body.messages)).not.toContain(reply);
         return [claudeText(childReply)];
       });
       const childCursor = fixture.client.markEvents();
@@ -137,10 +138,14 @@ describe('scripted Claude fork lifecycle matrix', () => {
 
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([prompt, childPrompt]);
-      expect(assistantContents(fork.messages)).toContain(reply);
+      expect(assistantContents(fork.messages)).not.toContain(reply);
       expect(assistantContents(fork.messages)).toContain(childReply);
       await waitForNativeFileContains(fixture.dirs.workspace, forkChatId, childReply);
-      const materialized = await readClaudeChat(fixture.dirs.workspace, forkChatId);
+      const materialized = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId: forkChatId,
+        agentId: 'claude',
+      }) as unknown as PersistedClaudeChat;
       expect(materialized.agentSessionId).toEqual(expect.any(String));
       expect(materialized.nativeSession.value.agentSessionId).toBe(
         materialized.agentSessionId,
@@ -218,7 +223,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await reloadUntilNativeContains(fixture, sourceChatId, reply);
 
       const forkChatId = fixture.newChatId();
-      // The projection settles before the provider JSONL flushes, so the fork
+      // The ledger commit can precede the provider JSONL flush, so the fork
       // retries its typed not-yet-persisted refusal until the file exists.
       await forkAfterSourceSettles(fixture, sourceChatId, forkChatId);
       const fork = await fixture.client.getMessages(forkChatId);
@@ -315,7 +320,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
         afterIndex: cursor,
       });
       await reloadUntilNativeContains(fixture, sourceChatId, reply);
-      // The projection settles before the provider JSONL flushes; the appended
+      // The ledger commit can precede the provider JSONL flush; the appended
       // microcompaction needs the actual native file.
       await waitForNativeFileContains(fixture.dirs.workspace, sourceChatId, reply);
       const persisted = await readClaudeChat(fixture.dirs.workspace, sourceChatId);
@@ -359,7 +364,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
       });
       await reloadUntilNativeContains(fixture, sourceChatId, sourceReply);
       // The injected out-of-order hook rows need the actual native file, which
-      // flushes after the projection settles.
+      // can flush after the ledger commit.
       await waitForNativeFileContains(fixture.dirs.workspace, sourceChatId, sourceReply);
       const source = await readClaudeChat(fixture.dirs.workspace, sourceChatId);
       const hookUuids = await injectOutOfOrderHookAttachments(source);
@@ -456,7 +461,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([childPrompt]);
       expect(assistantContents(fork.messages)).toContain(childReply);
-      const materialized = await readClaudeChat(fixture.dirs.workspace, forkChatId);
+      const materialized = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId: forkChatId,
+        agentId: 'claude',
+      }) as unknown as PersistedClaudeChat;
       expect(materialized.agentSessionId).toEqual(expect.any(String));
       testEnvironment.model.assertSettled();
     }, {

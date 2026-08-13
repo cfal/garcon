@@ -8,14 +8,13 @@ import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import {
 	AssistantMessage,
 	BashToolUseMessage,
-	ErrorMessage,
 	UserMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
-import type { PendingUserInput } from '$shared/pending-user-input';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
+import type { OptimisticUserInput } from '../optimistic-user-input.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(),
@@ -62,7 +61,6 @@ function page(
 		pageOldestOrdinal: number;
 		pageNewestOrdinal: number;
 		hasMore: boolean;
-		pendingUserInputs: PendingUserInput[];
 		resendCandidates: ResendCandidate[];
 	}> = {},
 ) {
@@ -77,19 +75,16 @@ function page(
 			?? overrides.lastOrdinal
 			?? 0,
 		hasMore: overrides.hasMore ?? false,
-		pendingUserInputs: overrides.pendingUserInputs ?? [],
 		resendCandidates: overrides.resendCandidates ?? [],
 	};
 }
 
-function pendingInput(overrides: Partial<PendingUserInput> = {}): PendingUserInput {
+function optimisticInput(overrides: Partial<OptimisticUserInput> = {}): OptimisticUserInput {
 	return {
 		chatId: 'chat-1',
-		clientRequestId: 'req-1',
 		clientMessageId: 'msg-1',
-		content: 'pending',
+		content: 'optimistic',
 		createdAt: TS,
-		deliveryStatus: 'accepted',
 		...overrides,
 	};
 }
@@ -155,7 +150,7 @@ describe('ActiveTranscriptState', () => {
 		});
 		expect(chat.getCursor()).toEqual({ transcriptViewId: '', lastOrdinal: 0 });
 		expect(chat.entries).toEqual([]);
-		expect(chat.pendingUserInputs).toEqual([]);
+		expect(chat.optimisticUserInputs).toEqual([]);
 		expect(chat.visibleRows).toEqual([
 			expect.objectContaining({ kind: 'local-notice', noticeType: 'error' }),
 		]);
@@ -597,7 +592,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'next']);
 	});
 
-	it('clears transient local messages when a pending user input is submitted', () => {
+	it('clears transient local messages when an optimistic user input is submitted', () => {
 		const chat = new ActiveTranscriptState();
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, user('server'))]);
 		chat.appendLocalNotice('warning', 'Chat interrupted by user.');
@@ -605,18 +600,16 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.displayMessageCount).toBe(2);
 		expect(noticeBottomRowId).toMatch(/^local_/);
 
-		chat.upsertPendingUserInput({
+		chat.upsertOptimisticUserInput({
 			chatId: 'chat-1',
-			clientRequestId: 'req-1',
 			clientMessageId: 'msg-1',
 			content: 'continue',
 			createdAt: '2026-06-01T00:00:01.000Z',
-			deliveryStatus: 'submitting',
 		});
 
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'continue']);
 		expect(chat.displayMessageCount).toBe(2);
-		expect(chat.visibleRows.at(-1)?.id).toBe('pending:req-1');
+		expect(chat.visibleRows.at(-1)?.id).toBe('optimistic:msg-1');
 		expect(chat.visibleRows.at(-1)?.id).not.toBe(noticeBottomRowId);
 	});
 
@@ -656,7 +649,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 1 });
 	});
 
-	it('renders one user row for repeated durable messages with the same request identity', () => {
+	it('renders repeated durable user rows as distinct transcript occurrences', () => {
 		const chat = new ActiveTranscriptState();
 
 		applyMessages(chat, 'chat-1', 'generation-1', [
@@ -664,28 +657,27 @@ describe('ActiveTranscriptState', () => {
 			entry(2, user('once', { clientRequestId: 'req-1' })),
 		]);
 
-		expect(chat.displayMessages.map(contentOf)).toEqual(['once']);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['once', 'once']);
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 2 });
 	});
 
-	it('exposes canonical durable and pending display row identities', () => {
+	it('exposes canonical durable and optimistic display row identities', () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, user('durable'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			hasMore: false,
 		});
-		chat.upsertPendingUserInput({
+		chat.upsertOptimisticUserInput({
 			chatId: 'chat-1',
-			clientRequestId: 'request-1',
-			content: 'pending',
+			clientMessageId: 'message-1',
+			content: 'optimistic',
 			createdAt: '2026-06-01T00:00:01.000Z',
-			deliveryStatus: 'failed',
 		});
 
 		expect(chat.displayRows).toMatchObject([
 			{ kind: 'message', id: 'generation-1:1', ordinal: 1 },
-			{ kind: 'message', id: 'pending:request-1' },
+			{ kind: 'message', id: 'optimistic:message-1' },
 		]);
 	});
 
@@ -1027,150 +1019,34 @@ describe('ActiveTranscriptState', () => {
 		},
 	);
 
-	it('installs pending inputs from HTTP snapshots and hides them after durable echo', () => {
+	it('keeps an optimistic row until its durable client-message echo arrives', () => {
 		const chat = new ActiveTranscriptState();
-		const epoch = chat.beginSnapshotLoad();
+		chat.upsertOptimisticUserInput(optimisticInput());
 
-		chat.setFromPage(
-			'chat-1',
-			page({
-				messages: [],
-				lastOrdinal: 0,
-				pendingUserInputs: [
-					{
-						chatId: 'chat-1',
-						clientRequestId: 'req-1',
-						content: 'pending',
-						createdAt: TS,
-						deliveryStatus: 'accepted',
-					},
-				],
-			}),
-			epoch,
-		);
-		expect(chat.visiblePendingInputs).toHaveLength(1);
-		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
+		expect(chat.optimisticUserInputs).toEqual([optimisticInput()]);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['optimistic']);
 
 		applyMessages(chat, 'chat-1', 'generation-1', [
-			entry(1, user('pending', { clientRequestId: 'req-1', deliveryStatus: 'accepted' })),
+			entry(1, user('durable', { clientMessageId: 'msg-1' })),
 		]);
 
-		expect(chat.visiblePendingInputs).toHaveLength(0);
-		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
+		expect(chat.optimisticUserInputs).toEqual([]);
+		expect(chat.displayMessages.map(contentOf)).toEqual(['durable']);
 	});
 
-	it('renders byte-free attachment placeholders for restored pending inputs', () => {
+	it('clears optimistic rows when a transcript view is replaced', () => {
 		const chat = new ActiveTranscriptState();
-		chat.setPendingUserInputs([
-			{
-				chatId: 'chat-1',
-				clientRequestId: 'req-attachment',
-				content: '',
-				createdAt: TS,
-				deliveryStatus: 'failed',
-				attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
-			},
-		]);
-
-		expect(chat.displayMessages).toHaveLength(1);
-		expect(chat.displayMessages[0]).toMatchObject({
-			type: 'user-message',
-			content: '',
-			images: [
-				{
-					name: 'context.pdf',
-					mimeType: 'application/octet-stream',
-					data: '',
-				},
-			],
-			metadata: { deliveryStatus: 'failed' },
-		});
-	});
-
-	it('projects a failed pending status onto its durable user row without duplication', () => {
-		const chat = new ActiveTranscriptState();
-		applyMessages(chat, 'chat-1', 'generation-1', [
-			entry(
-				1,
-				user('pending', {
-					clientRequestId: 'req-1',
-					deliveryStatus: 'accepted',
-				}),
-			),
-		]);
-		chat.setPendingUserInputs([
-			{
-				chatId: 'chat-1',
-				clientRequestId: 'req-1',
-				content: 'pending',
-				createdAt: TS,
-				deliveryStatus: 'failed',
-			},
-		]);
-
-		expect(chat.visiblePendingInputs).toHaveLength(0);
-		expect(chat.displayMessages).toHaveLength(1);
-		expect(chat.displayMessages[0]).toMatchObject({
-			type: 'user-message',
-			metadata: { clientRequestId: 'req-1', deliveryStatus: 'failed' },
-		});
-		expect(chat.entries[0].message).toMatchObject({
-			metadata: { clientRequestId: 'req-1', deliveryStatus: 'accepted' },
-		});
-		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 1 });
-	});
-
-	it('projects an unconfirmed pending status onto its durable user row without duplication', () => {
-		const chat = new ActiveTranscriptState();
-		applyMessages(chat, 'chat-1', 'generation-1', [
-			entry(
-				1,
-				user('pending', {
-					clientRequestId: 'req-1',
-					deliveryStatus: 'accepted',
-				}),
-			),
-		]);
-		chat.setPendingUserInputs([
-			{
-				chatId: 'chat-1',
-				clientRequestId: 'req-1',
-				content: 'pending',
-				createdAt: TS,
-				deliveryStatus: 'unconfirmed',
-			},
-		]);
-
-		expect(chat.visiblePendingInputs).toHaveLength(0);
-		expect(chat.displayMessages).toHaveLength(1);
-		expect(chat.displayMessages[0]).toMatchObject({
-			type: 'user-message',
-			metadata: { clientRequestId: 'req-1', deliveryStatus: 'unconfirmed' },
-		});
-	});
-
-	it('clears pending overlays when a generation is replaced without snapshot pending inputs', () => {
-		const chat = new ActiveTranscriptState();
-		chat.setPendingUserInputs([
-			{
-				chatId: 'chat-1',
-				clientRequestId: 'req-1',
-				content: 'pending',
-				createdAt: TS,
-				deliveryStatus: 'accepted',
-			},
-		]);
+		chat.upsertOptimisticUserInput(optimisticInput());
 
 		chat.replaceGeneration(
 			'chat-1',
 			'generation-2',
-			[entry(1, assistant('native')), entry(2, new ErrorMessage(TS, 'The process died.'))],
-			{ lastOrdinal: 2, pageOldestOrdinal: 1, hasMore: false },
+			[entry(1, assistant('native'))],
+			{ lastOrdinal: 1, pageOldestOrdinal: 1, hasMore: false },
 		);
 
-		expect(chat.pendingUserInputs).toEqual([]);
-		expect(chat.chatMessages.map(contentOf)).toEqual(['native', 'The process died.']);
-		expect(chat.chatMessages[1]).toBeInstanceOf(ErrorMessage);
+		expect(chat.optimisticUserInputs).toEqual([]);
+		expect(chat.chatMessages.map(contentOf)).toEqual(['native']);
 	});
 
 	it('persists and activates generation-scoped transcript windows', () => {
@@ -1278,13 +1154,12 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows).toHaveLength(175);
 		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', ordinal: 1 });
 
-		chat.upsertPendingUserInput(
-			pendingInput({ clientRequestId: 'request-176', content: 'message-176' }),
+		chat.upsertOptimisticUserInput(
+			optimisticInput({ clientMessageId: 'message-176', content: 'message-176' }),
 		);
 		applyMessages(chat, 'chat-1', 'generation-1', [
-			entry(176, user('message-176', { clientRequestId: 'request-176' })),
+			entry(176, user('message-176', { clientMessageId: 'message-176' })),
 		]);
-		chat.clearPendingUserInput('request-176');
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(177, assistant('message-177'))]);
 
 		expect(chat.visibleRows).toHaveLength(177);
@@ -1393,7 +1268,6 @@ describe('ActiveTranscriptState', () => {
 					pageOldestOrdinal: messageCount === 0 ? 0 : 1,
 					pageNewestOrdinal: messageCount,
 					hasMore: false,
-					pendingUserInputs: [],
 				},
 				epoch,
 			);
@@ -1429,7 +1303,6 @@ describe('ActiveTranscriptState', () => {
 				pageOldestOrdinal: 1,
 				pageNewestOrdinal: 100,
 				hasMore: false,
-				pendingUserInputs: [],
 			},
 			epoch,
 		);
@@ -1951,16 +1824,7 @@ describe('ActiveTranscriptState', () => {
 		});
 
 		await chat.navigateToWindow('chat-1', 'initial');
-		chat.setPendingUserInputs([
-			{
-				chatId: 'chat-1',
-				clientRequestId: 'req-1',
-				clientMessageId: 'msg-1',
-				content: 'pending-tail',
-				createdAt: '2026-06-01T00:00:01.000Z',
-				deliveryStatus: 'accepted',
-			},
-		]);
+		chat.upsertOptimisticUserInput(optimisticInput({ content: 'optimistic-tail' }));
 		chat.appendLocalNotice('progress', 'tail-only status');
 		expect(chat.visibleRows).toHaveLength(50);
 		expect(applyMessages(chat, 'chat-1', 'generation-1', [entry(101, assistant('live-tail'))])).toBe(
@@ -2040,18 +1904,16 @@ describe('ActiveTranscriptState', () => {
 		{
 			name: 'add',
 			mutate: (chat: ActiveTranscriptState) =>
-				chat.upsertPendingUserInput(
-					pendingInput({
-						clientRequestId: 'req-2',
+				chat.upsertOptimisticUserInput(
+					optimisticInput({
 						clientMessageId: 'msg-2',
 						content: 'added',
 						createdAt: '2026-06-01T00:00:01.000Z',
 					}),
 				),
 			expected: [
-				pendingInput(),
-				pendingInput({
-					clientRequestId: 'req-2',
+				optimisticInput(),
+				optimisticInput({
 					clientMessageId: 'msg-2',
 					content: 'added',
 					createdAt: '2026-06-01T00:00:01.000Z',
@@ -2061,22 +1923,16 @@ describe('ActiveTranscriptState', () => {
 		{
 			name: 'update',
 			mutate: (chat: ActiveTranscriptState) =>
-				chat.upsertPendingUserInput(pendingInput({ content: 'updated' })),
-			expected: [pendingInput({ content: 'updated' })],
+				chat.upsertOptimisticUserInput(optimisticInput({ content: 'updated' })),
+			expected: [optimisticInput({ content: 'updated' })],
 		},
 		{
 			name: 'clear',
-			mutate: (chat: ActiveTranscriptState) => chat.clearPendingUserInput('req-1'),
+			mutate: (chat: ActiveTranscriptState) => chat.clearOptimisticUserInput('msg-1'),
 			expected: [],
 		},
-		{
-			name: 'status update',
-			mutate: (chat: ActiveTranscriptState) =>
-				chat.updatePendingUserInputDeliveryStatus('req-1', 'failed'),
-			expected: [pendingInput({ deliveryStatus: 'failed' })],
-		},
 	])(
-		'preserves a pending-input $name while restoring the latest window',
+		'preserves an optimistic-input $name while restoring the latest window',
 		async ({ mutate, expected }) => {
 			const chat = new ActiveTranscriptState();
 			chat.replaceGeneration(
@@ -2085,13 +1941,9 @@ describe('ActiveTranscriptState', () => {
 				Array.from({ length: 50 }, (_, index) =>
 					entry(index + 51, assistant(`latest-${index + 51}`)),
 				),
-				{
-					lastOrdinal: 100,
-					pageOldestOrdinal: 51,
-					hasMore: true,
-					pendingUserInputs: [pendingInput()],
-				},
+				{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
 			);
+			chat.upsertOptimisticUserInput(optimisticInput());
 			chat.entries = Array.from({ length: 50 }, (_, index) =>
 				entry(index + 1, assistant(`initial-${index + 1}`)),
 			);
@@ -2117,12 +1969,11 @@ describe('ActiveTranscriptState', () => {
 					lastOrdinal: 100,
 					pageOldestOrdinal: 51,
 					hasMore: true,
-					pendingUserInputs: [pendingInput()],
 				}),
 			});
 
 			await expect(latest).resolves.toBe('loaded');
-			expect(chat.pendingUserInputs).toEqual(expected);
+			expect(chat.optimisticUserInputs).toEqual(expected);
 		},
 	);
 

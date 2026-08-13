@@ -1,61 +1,57 @@
 import {
   AgentIntegrationError,
-  type AgentExecutionContextV4,
   type AgentHost,
 } from '@garcon/server-agent-interface';
 import {
-  AgentProjectionProducerEventChannel,
-  projectionProducerMessages,
-  type AgentProjectionRuntimeExecution,
-} from '../execution/projection-events.js';
-import { AgentOperationTracker } from '../execution/operation-tracker.js';
+  AgentRuntimeEventChannel,
+  runtimeRows,
+  type AgentRuntimeExecution,
+  type AgentRuntimeExecutionContext,
+} from '../execution/runtime-events.js';
+import { AgentRunTracker } from '../execution/run-tracker.js';
 import { resolveAgentEndpoint } from '../execution/resolve-endpoint.js';
 import type { DirectEndpointRouterRuntime, DirectCompatibleRuntime } from './router.js';
 
 export class DirectExecution<TRuntime extends DirectCompatibleRuntime>
-implements AgentProjectionRuntimeExecution {
-  readonly #events = new AgentProjectionProducerEventChannel();
-  readonly #operations = new AgentOperationTracker();
+implements AgentRuntimeExecution {
+  readonly #events = new AgentRuntimeEventChannel();
+  readonly #runs = new AgentRunTracker();
 
   constructor(
     private readonly host: AgentHost,
     private readonly runtime: DirectEndpointRouterRuntime<TRuntime>,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({
+      this.#events.emit({
         type: 'messages',
         chatId,
-        messages: projectionProducerMessages(this.host.agentId, messages),
-        operation,
+        rows: runtimeRows(messages),
+        runId: this.#runs.correlate(chatId, metadata),
       });
-    });
-    runtime.onProcessing((chatId, processing) => {
-      const operation = this.#operations.current(chatId);
-      if (operation) this.#events.emit({ type: 'processing', chatId, processing, operation });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({ type: 'finished', chatId, exitCode, operation });
-      this.#operations.finish(chatId, operation);
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
+      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
       this.#events.emit({
-        type: 'failed',
+        type: 'run-ended',
         chatId,
-        error: new AgentIntegrationError('PROVIDER_FAILURE', message, false),
-        operation,
+        runId,
+        outcome: 'failed',
+        error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#operations.finish(chatId, operation);
+      this.#runs.finish(chatId, runId);
     });
   }
 
-  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
+  async start(request: Parameters<AgentRuntimeExecution['start']>[0]) {
     const endpoint = await this.#endpoint(request);
-    this.#operations.register(request.chatId, request.operation);
+    this.#runs.register(request.chatId, request.runId);
     try {
       const result = await this.runtime.startSession({
         ...executionFields(request),
@@ -68,22 +64,16 @@ implements AgentProjectionRuntimeExecution {
         nativeSession: null,
         nativeSeedReceipt: null,
       };
-      this.#events.emit({
-        type: 'session-created',
-        chatId: request.chatId,
-        session,
-        operation: request.operation,
-      });
       return session;
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
 
-  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
+  async resume(request: Parameters<AgentRuntimeExecution['resume']>[0]): Promise<void> {
     const endpoint = await this.#endpoint(request);
-    this.#operations.register(request.chatId, request.operation);
+    this.#runs.register(request.chatId, request.runId);
     try {
       await this.runtime.runTurn({
         ...executionFields(request),
@@ -93,7 +83,7 @@ implements AgentProjectionRuntimeExecution {
         endpoint,
       });
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
@@ -115,18 +105,18 @@ implements AgentProjectionRuntimeExecution {
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<NonNullable<AgentProjectionRuntimeExecution['prepareProjectPathUpdate']>>[0],
+    request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
   ): Promise<void> {
     request.signal.throwIfAborted();
   }
 
-  subscribeProjectionEvents(
-    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  subscribeRuntimeEvents(
+    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
   ): () => void {
     return this.#events.subscribe(listener);
   }
 
-  async #endpoint(request: AgentExecutionContextV4) {
+  async #endpoint(request: AgentRuntimeExecutionContext) {
     const endpoint = await resolveAgentEndpoint(
       this.host,
       request.endpoint,
@@ -143,21 +133,22 @@ implements AgentProjectionRuntimeExecution {
   }
 }
 
-function executionFields(request: AgentExecutionContextV4) {
+function executionFields(
+  request: AgentRuntimeExecutionContext,
+  priorContext = request.priorContext,
+) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
     model: request.model,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
-    clientRequestId: request.operation.clientRequestId ?? undefined,
-    clientMessageId: request.operation.clientMessageId ?? undefined,
-    turnId: request.operation.turnId,
+    clientRequestId: request.runId,
+    turnId: request.runId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
-    onAbortable: () => request.admission.markAbortable(),
-    priorContext: request.priorContext,
+    priorContext,
   };
 }

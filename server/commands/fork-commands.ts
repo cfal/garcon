@@ -21,7 +21,7 @@ interface ForkContext {
   targetChatId: string;
   sourceSession: ChatRegistryEntry;
   sourceNextForkOrdinal: number;
-  upToSeq?: number;
+  upToOrdinal?: number;
 }
 
 export class ForkCommands {
@@ -175,13 +175,28 @@ export class ForkCommands {
   ): Promise<ForkContext> {
     const sourceChatId = this.support.requireChatId(input.sourceChatId, 'sourceChatId');
     const targetChatId = this.support.requireChatId(input.chatId);
-    const upToSeq = input.upToSeq;
+    const upToOrdinal = input.upToOrdinal;
 
-    if (upToSeq !== undefined && (!Number.isSafeInteger(upToSeq) || upToSeq <= 0)) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'upToSeq must be a positive safe integer');
+    if (
+      upToOrdinal !== undefined
+      && (!Number.isSafeInteger(upToOrdinal) || upToOrdinal <= 0)
+    ) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        'upToOrdinal must be a positive safe integer',
+      );
     }
-    if (input.generationId !== undefined && upToSeq === undefined) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'generationId requires upToSeq');
+    if (input.transcriptViewId !== undefined && upToOrdinal === undefined) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        'transcriptViewId requires upToOrdinal',
+      );
+    }
+    if (upToOrdinal !== undefined && input.transcriptViewId === undefined) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        'upToOrdinal requires transcriptViewId',
+      );
     }
 
     if (sourceChatId === targetChatId) {
@@ -202,17 +217,20 @@ export class ForkCommands {
         422,
       );
     }
-    if (upToSeq !== undefined && !this.deps.agents.supportsForkAtMessage(sourceSession.agentId)) {
+    if (
+      upToOrdinal !== undefined
+      && !this.deps.agents.supportsForkAtMessage(sourceSession.agentId)
+    ) {
       throw new CommandValidationError(
         'UNSUPPORTED_AGENT',
         `Fork at message unsupported for agent: ${sourceSession.agentId}`,
         422,
       );
     }
-    if (upToSeq !== undefined) {
-      if (input.generationId !== undefined) {
-        const cursor = this.deps.chatViews.getCursor(sourceChatId);
-        if (cursor === null || cursor.generationId !== input.generationId) {
+    if (upToOrdinal !== undefined) {
+      if (input.transcriptViewId !== undefined) {
+        const view = this.deps.transcripts.currentView(sourceChatId);
+        if (view === null || view.viewId !== input.transcriptViewId) {
           throw new CommandValidationError(
             'STALE_TRANSCRIPT_VIEW',
             'The view changed since this fork point was chosen. Refetch and pick the message again.',
@@ -231,7 +249,7 @@ export class ForkCommands {
       targetChatId,
       sourceSession,
       sourceNextForkOrdinal: normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1,
-      ...(upToSeq ? { upToSeq } : {}),
+      ...(upToOrdinal ? { upToOrdinal } : {}),
     };
   }
 
@@ -275,7 +293,7 @@ export class ForkCommands {
       sourceSession: context.sourceSession,
       sourceChatId: context.sourceChatId,
       targetChatId: context.targetChatId,
-      ...(context.upToSeq ? { upToSequence: context.upToSeq } : {}),
+      ...(context.upToOrdinal ? { upToOrdinal: context.upToOrdinal } : {}),
       registry: this.deps.chats,
       settings: this.deps.settings,
       metadata: this.deps.metadata,

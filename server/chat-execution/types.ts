@@ -5,10 +5,8 @@ import type {
 } from '../../common/chat-command-contracts.ts';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import type {
-  ChatImage,
   ChatStopIntent,
   ChatStopOutcome,
-  UserMessageDeliveryStatus,
 } from '../../common/chat-types.ts';
 import type {
   AgentGoalControlHandoff,
@@ -35,7 +33,7 @@ import type {
   TransitionRejection,
 } from './chat-execution-control-transitions.ts';
 
-export type PendingUserInputRegistrationOptions = Pick<
+export type UserInputAdmissionOptions = Pick<
   RunAgentTurnOptions,
   | 'clientRequestId'
   | 'clientMessageId'
@@ -45,9 +43,6 @@ export type PendingUserInputRegistrationOptions = Pick<
   | 'excludedResendOrdinals'
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
-  deliveryStatus?: UserMessageDeliveryStatus;
-  // Anchors the admitted message timestamp so an idempotent dispatch retry
-  // rebuilds the byte-identical admission payload.
   createdAt?: string;
 };
 
@@ -263,47 +258,16 @@ export interface AgentTurnRunnerPort {
   ): Promise<boolean>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
-  waitUntilTurnAbortable(
-    chatId: string,
-    turn: TurnIdentity,
-    signal?: AbortSignal,
-  ): Promise<boolean>;
-}
-
-export interface PendingInputsPort {
-  register(
-    chatId: string,
-    content: string,
-    options?: {
-      clientRequestId?: string;
-      clientMessageId?: string;
-      turnId?: string;
-      images?: ChatImage[];
-      deliveryStatus?: UserMessageDeliveryStatus;
-    },
-  ): unknown;
-  discard(chatId: string, clientRequestId: string): boolean;
-  settleCommitted(chatId: string, clientRequestId: string): boolean;
-  markFailed(chatId: string, clientRequestId: string): boolean;
-  markUnconfirmed(chatId: string, clientRequestId: string): boolean;
 }
 
 export type ExecutionControlUpdatedCallback = (
   chatId: string,
   control: StoredChatExecutionControlState,
 ) => void;
-export type SessionStopRequestedCallback = (
-  chatId: string,
-  stopId: string,
-  turn: TurnIdentity | undefined,
-  intent: ChatStopIntent,
-) => void;
 export type SessionStoppedCallback = (
   chatId: string,
   outcome: ChatStopOutcome,
   intent: ChatStopIntent,
-  stopId: string,
-  waitMs: number,
 ) => void;
 export type ChatIdleCallback = (chatId: string) => void;
 export type ProcessingInvalidatedCallback = (chatId: string) => void;
@@ -318,23 +282,11 @@ export type ChatExistsResolver = (chatId: string) => boolean;
 
 export interface ChatExecutionCoordinatorEvents {
   'execution-control-updated': Parameters<ExecutionControlUpdatedCallback>;
-  'session-stop-requested': Parameters<SessionStopRequestedCallback>;
   'session-stopped': Parameters<SessionStoppedCallback>;
   'chat-idle': Parameters<ChatIdleCallback>;
   'turn-failed': Parameters<TurnFailedCallback>;
   'turn-settled': Parameters<TurnSettledCallback>;
   'processing-invalidated': Parameters<ProcessingInvalidatedCallback>;
-}
-
-export interface SessionStopInFlight {
-  intent: ChatStopIntent;
-  stopId: string;
-  promise: Promise<ChatStopOutcome>;
-  resolve(outcome: ChatStopOutcome): void;
-  reject(error: unknown): void;
-  started: boolean;
-  phase: 'requesting' | 'settling';
-  outcome?: ChatStopOutcome;
 }
 
 export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
@@ -400,12 +352,11 @@ export interface ChatExecutionQueries {
 // queue operations that no external consumer needs through a facet.
 export interface ChatExecutionService
   extends ChatExecutionCommands, ChatExecutionLifecycle, ChatExecutionQueries {
-  registerPendingUserInput(
+  admitUserInput(
     chatId: string,
     command: string,
-    options: PendingUserInputRegistrationOptions,
+    options: UserInputAdmissionOptions,
   ): Promise<boolean>;
-  onAcceptedInputSettled(chatId: string, clientRequestId: string): void;
   reserveDirectTurn(chatId: string, turn?: TurnIdentity): DirectTurnReservation;
   assertDirectTurnReservationActive(reservation: DirectTurnReservation): void;
   releaseDirectTurn(reservation: DirectTurnReservation): Promise<void>;

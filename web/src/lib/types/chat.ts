@@ -83,7 +83,7 @@ export interface PendingPermissionRequest {
 	receivedAt?: Date;
 	control?: import('$shared/chat-transient-feed').ChatTransientControlAction;
 	transcript?: {
-		generationId: string;
-		afterSeq: number;
+		transcriptViewId: string;
+		afterOrdinal: number;
 	};
 }

@@ -38,7 +38,6 @@ import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import type { PathCache } from '../chats/path-cache.js';
-import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
@@ -74,16 +73,6 @@ export interface MetadataDep {
   getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
 
-export type PendingInputsDep = Pick<
-  PendingUserInputServiceContract,
-  | 'clearChat'
-  | 'hasInFlightForChat'
-  | 'markFailed'
-  | 'markUnconfirmed'
-  | 'reconcileNativeHistory'
-  | 'reconcileRetainedHistory'
->;
-
 export type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
   | 'hasAgent'
@@ -104,19 +93,19 @@ export type AgentRegistryDep = Pick<
   | 'requiresNativePathForProjectPathUpdate'
   | 'isAgentSessionRunning'
   | 'currentTranscriptViewId'
+  | 'publishSessionFact'
   | 'forkAgentSession'
   | 'discardForkedAgentSession'
   | 'compactSession'
   | 'resolveNativeSession'
   | 'prepareProjectPathUpdate'
-  | 'notifyProjectPathRelocated'
 >;
 
 export type ForkChatFileCopyDep = (args: {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
   targetChatId: string;
-  upToSequence?: number;
+  upToOrdinal?: number;
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
@@ -126,15 +115,10 @@ export type ForkChatFileCopyDep = (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
     targetChatId: string;
-    messageSequence?: number;
+    messageOrdinal?: number;
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
 }) => Promise<ForkChatFileCopyResult>;
-
-export interface ChatViewSeqDep {
-  getNativeHistoryLastSeq(chatId: string): number | null;
-  getCursor(chatId: string): { generationId: string; lastSeq: number } | null;
-}
 
 export interface FileMentionResolverDep {
   resolve(command: string, projectPath: string): Promise<string>;
@@ -143,23 +127,18 @@ export interface FileMentionResolverDep {
 export interface ChatCommandServiceDeps {
   chats: IChatRegistry;
   queue: ChatExecutionCommands;
-  chatViews: ChatViewSeqDep;
   ledger: CommandLedger;
   settings: SettingsDep;
   recentTitleIcons: RecentTitleIconSource;
   metadata: MetadataDep;
   agents: AgentRegistryDep;
-  pendingInputs: PendingInputsDep;
   fileMentions: FileMentionResolverDep;
   forkChatFileCopy: ForkChatFileCopyDep;
   transcripts: TranscriptLedgerService;
   chatIds: Pick<ChatIdAllocator, 'allocate'>;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
-  ownership: Pick<
-    AgentOwnershipJournal,
-    'delete' | 'abandonedTransferCleanups' | 'retryRetainedTransferCleanups'
-  >;
+  ownership: Pick<AgentOwnershipJournal, 'delete'>;
   handoffs: Pick<
     AgentHandoffService,
     | 'resolveTarget'

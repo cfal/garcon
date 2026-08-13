@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import {
   chatCompletionsText,
@@ -37,6 +36,7 @@ describe('scripted Pi steering', () => {
     const futurePrompt = marker('TOOL_FUTURE_PROMPT');
     const toolOutput = marker('TOOL_OUTPUT');
     const steerReply = marker('TOOL_STEER_REPLY');
+    const invalidSteer = `/review\n${marker('INVALID_SLASH')}`;
     const requestCursor = testEnvironment.model.markRequests();
     const held = testEnvironment.model.scriptHeldTurn([
       chatCompletionsToolUse('call_pi_steer', 'bash', { command: `printf %s ${toolOutput}` }),
@@ -63,7 +63,7 @@ describe('scripted Pi steering', () => {
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
-        content: `/review\n${marker('INVALID_SLASH')}`,
+        content: invalidSteer,
       })).rejects.toMatchObject({ status: 400 });
 
       const pendingCursor = fixture.client.markEvents();
@@ -79,15 +79,12 @@ describe('scripted Pi steering', () => {
       expect(duplicate).toMatchObject({ status: 'duplicate', turnId: first.turnId });
       expect(await fixture.client.getExecutionControl(chatId)).toEqual(controlBeforeSteer);
 
-      const pending = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === steerPrompt,
-        'Pi steering pending input',
+      const committedSteer = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        steerPrompt,
         { afterIndex: pendingCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
-      expect(pending.input.turnId).toBe(first.turnId);
+      expect(committedSteer.messages).toHaveLength(1);
 
       held.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
@@ -106,9 +103,9 @@ describe('scripted Pi steering', () => {
       });
 
       const transcript = await fixture.client.getMessages(chatId);
-      expect(userContents(transcript.messages)).toEqual([firstPrompt, steerPrompt]);
+      expect(userContents(transcript.messages)).toEqual([firstPrompt, invalidSteer, steerPrompt]);
       expect(assistantContents(transcript.messages).some((text) => text.includes(steerReply))).toBe(true);
-      expect(transcript.pendingUserInputs).toEqual([]);
+      expect(transcript.resendCandidates).toEqual([]);
       expect(await fixture.client.getExecutionControl(chatId)).toEqual(controlBeforeSteer);
 
       await expect(fixture.client.steer({
@@ -185,14 +182,16 @@ describe('scripted Pi steering', () => {
 
       const requests = testEnvironment.model.requestsSince(requestCursor);
       expect(requests).toHaveLength(2);
-      expect(requests[1].userTexts.slice(-2)).toEqual([firstSteer, secondSteer]);
       const transcript = await fixture.client.getMessages(chatId);
-      expect(userContents(transcript.messages)).toEqual([
+      const committedInputs = userContents(transcript.messages);
+      expect(committedInputs).toEqual([
         bootstrapPrompt,
         firstPrompt,
-        firstSteer,
-        secondSteer,
+        expect.stringMatching(new RegExp(`^(?:${firstSteer}|${secondSteer})$`)),
+        expect.stringMatching(new RegExp(`^(?:${firstSteer}|${secondSteer})$`)),
       ]);
+      expect(new Set(committedInputs.slice(-2))).toEqual(new Set([firstSteer, secondSteer]));
+      expect(requests[1].userTexts.slice(-2)).toEqual(committedInputs.slice(-2));
       const assistants = assistantContents(transcript.messages);
       expect(assistants.some((text) => text.includes(bootstrapReply))).toBe(true);
       expect(assistants.some((text) => text.includes(firstReply))).toBe(true);

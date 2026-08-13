@@ -15,21 +15,12 @@ import type { AgentModelOption } from '@garcon/common/agents';
 import type { ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
 import type { SlashCommand } from '@garcon/common/slash-commands';
-import type { AgentStartedSession } from './execution.js';
 import type {
-  AgentCompactRequestV4,
-  AgentExecutionContextV4,
-  AgentResumeRequestV4,
-  AgentTranscriptAdmissionIdentity,
-} from './execution-events-v4.js';
+  AgentExecutionHandle,
+  AgentResumeRequestV5,
+} from './execution-v5.js';
 import type { AgentMigrationStore } from './host.js';
 import type { AgentChatReference, AgentNativeSessionRef } from './transcript.js';
-import type {
-  AgentChatReferenceV4,
-  AgentForkPoint,
-  AgentNativeForkRef,
-  AgentNativeForkResolution,
-} from './transcript-stream-v4.js';
 
 export interface AgentCatalog {
   snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<{
@@ -67,9 +58,9 @@ export interface AgentCommands {
   discover(projectPath: string, signal: AbortSignal): Promise<readonly SlashCommand[]>;
 }
 
-export interface AgentSteeringV4 {
+export interface AgentSteering {
   captureTarget(request: AgentSteerTargetRequest): AgentSteerTarget | null;
-  steer(request: AgentSteerRequestV4): Promise<AgentSteerResult>;
+  steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
 }
 
 export type AgentSteerTarget = object;
@@ -80,7 +71,7 @@ export interface AgentSteerTargetRequest {
   readonly nativeSession: AgentNativeSessionRef | null;
 }
 
-export interface AgentSteerRequestV4 {
+export interface AgentSteerRequest {
   readonly chatId: string;
   readonly projectPath: string;
   readonly agentSessionId: string;
@@ -89,7 +80,6 @@ export interface AgentSteerRequestV4 {
   readonly input: string;
   readonly clientMessageId: string;
   readonly prepareDelivery: () => Promise<void>;
-  readonly operation: AgentTranscriptAdmissionIdentity;
 }
 
 export type AgentSteerRejectionReason =
@@ -112,11 +102,11 @@ export type AgentSteerResult =
       readonly message: string;
     };
 
-export interface AgentGoalsV4 {
-  submitControl(request: AgentGoalControlRequestV4): Promise<boolean>;
+export interface AgentGoals {
+  submitControl(request: AgentGoalControlRequest): Promise<boolean>;
 }
 
-export interface AgentGoalControlRequestV4 extends AgentResumeRequestV4 {
+export interface AgentGoalControlRequest extends AgentResumeRequestV5 {
   readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
 }
 
@@ -130,38 +120,9 @@ export interface AgentGoalControlHandoff {
 // cached reads, plan state, MCP connections, session permission grants. Absent
 // this facet the chat can still shed context through `/handoff`, which starts a
 // fresh session from a projected transcript instead.
-export interface AgentCompactionV4 {
-  compact(request: AgentCompactRequestV4): Promise<void>;
+export interface AgentCompaction {
+  compact(request: AgentResumeRequestV5): Promise<AgentExecutionHandle>;
 }
-
-export interface AgentForkingV4 {
-  readonly supportsAtMessage: boolean;
-  // Gates both whole-session and at-message forks: a running provider session must tolerate
-  // having its transcript read and copied while it is still appending to it.
-  readonly supportsWhileRunning: boolean;
-  resolvePoint(request: AgentForkPointResolutionRequestV4): Promise<AgentNativeForkResolution>;
-  fork(request: AgentForkRequestV4): Promise<AgentForkOutcome>;
-  discard(session: AgentStartedSession, signal: AbortSignal): Promise<void>;
-}
-
-export interface AgentForkPointResolutionRequestV4 {
-  readonly source: AgentChatReferenceV4;
-  readonly point: AgentForkPoint;
-  readonly signal: AbortSignal;
-}
-
-export interface AgentForkRequestV4 extends AgentExecutionContextV4 {
-  readonly source: AgentChatReferenceV4;
-  readonly point: {
-    readonly projection: AgentForkPoint;
-    readonly native: AgentNativeForkRef;
-  } | null;
-}
-
-// Distinguishes a copied provider session from a successful fork with no resumable provider state.
-export type AgentForkOutcome =
-  | { readonly kind: 'materialized'; readonly session: AgentStartedSession }
-  | { readonly kind: 'unmaterialized' };
 
 export interface AgentLifecycle {
   start(): Promise<void>;

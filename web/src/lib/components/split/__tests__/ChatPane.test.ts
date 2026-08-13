@@ -9,34 +9,35 @@ vi.mock('$lib/api/chats.js', () => ({
 		Promise.resolve({
 			historyState: { kind: 'complete' },
 			chatId: 'chat-1',
-			generationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			messages: [
 				{
-					seq: 1,
+					ordinal: 1,
 					message: new UserMessage(
 						'2026-05-01T00:00:00.000Z',
 						'Unfocused user question',
 					),
 				},
 					{
-						seq: 2,
+						ordinal: 2,
 						message: new AssistantMessage(
 							'2026-05-01T00:00:01.000Z',
 							'Unfocused assistant answer',
 						),
 					},
 					{
-						seq: 3,
+						ordinal: 3,
 						message: new BashToolUseMessage('2026-05-01T00:00:02.000Z', 'tool-1', 'pwd'),
 					},
 					{
-						seq: 4,
+						ordinal: 4,
 						message: new BashToolUseMessage('2026-05-01T00:00:03.000Z', 'tool-2', 'rg split'),
 					},
 				],
-				pendingUserInputs: [],
-				lastSeq: 4,
-				pageOldestSeq: 1,
+				resendCandidates: [],
+				lastOrdinal: 4,
+				pageOldestOrdinal: 1,
+				pageNewestOrdinal: 4,
 				hasMore: false,
 				limit: 50,
 		}),

@@ -9,17 +9,17 @@ import type {
   AcceptedSteerOutcome,
   AgentTurnRunnerPort,
   CapturedSteerTarget,
-  PendingUserInputRegistrationOptions,
+  UserInputAdmissionOptions,
 } from './types.ts';
 
 interface SteerInputDeliveryOptions {
   turnRunner: AgentTurnRunnerPort;
   ownership: ExecutionOwnership;
   isShuttingDown(): boolean;
-  registerPending(
+  admitInput(
     chatId: string,
     content: string,
-    options: PendingUserInputRegistrationOptions,
+    options: UserInputAdmissionOptions,
   ): Promise<boolean>;
 }
 
@@ -52,7 +52,7 @@ export class SteerInputDelivery {
     let result: AgentSteerResult;
     try {
       this.#assertTarget(chatId, target);
-      const inserted = await this.options.registerPending(chatId, content, {
+      const inserted = await this.options.admitInput(chatId, content, {
         clientRequestId: options.clientRequestId,
         clientMessageId: options.clientMessageId,
         transcriptViewId: options.transcriptViewId,

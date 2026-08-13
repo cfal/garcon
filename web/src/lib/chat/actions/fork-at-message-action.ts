@@ -79,8 +79,8 @@ export function remapForkAtMessage(
 function forkMessageKey(message: TranscriptMessage['message']): string {
 	const record = message as unknown as Record<string, unknown>;
 	const metadata = isRecord(record.metadata) ? record.metadata : null;
-	if (message.type === 'user-message' && typeof metadata?.clientRequestId === 'string') {
-		return `${message.type}:request:${metadata.clientRequestId}`;
+	if (message.type === 'user-message' && typeof metadata?.clientMessageId === 'string') {
+		return `${message.type}:message:${metadata.clientMessageId}`;
 	}
 	if (typeof record.toolId === 'string') {
 		return `${message.type}:tool:${record.toolId}`;

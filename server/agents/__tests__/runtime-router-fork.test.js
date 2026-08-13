@@ -46,40 +46,10 @@ function makeRouter(fork) {
     },
     settings: { parse: (value) => value },
     execution,
-    producerExecution: {
-      start: async (request) => {
-        await execution.start(request);
-        return { id: 'started-session' };
-      },
-      resume: async (request) => {
-        await execution.resume(request);
-        return { id: request.agentSessionId };
-      },
-      abort: async () => undefined,
-    },
-    transcript: { load: mock(async () => ({ messages, revision: 'unused' })) },
     forking: {
       fork,
       discard: mock(async () => undefined),
     },
-  };
-  const projection = {
-    open: mock(async () => ({
-      kind: 'ready',
-      value: {
-        checkpoint: {
-          projection: {
-            contentEpoch: 'content-1',
-            durableRevision: 'revision-1',
-          },
-        },
-        entries: messages.map((message, index) => ({
-          id: `entry-${index + 1}`,
-          lifetime: 'durable',
-          message,
-        })),
-      },
-    })),
   };
   const entries = new Map([['source-chat', entry]]);
   const registry = {
@@ -109,13 +79,11 @@ function makeRouter(fork) {
       resolveEndpointReference: mock(() => null),
     },
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
-    projection,
     getCarryOverRevision: () => 'carry-1',
-    loadCarriedContext: async () => null,
     ledger: transcript.ledger,
     adoption: transcript.adoption,
   });
-  return { router, entry, entries, execution, messages, integration, projection };
+  return { router, entry, entries, execution, messages, integration };
 }
 
 describe('AgentRuntimeRouter forks', () => {
@@ -133,7 +101,7 @@ describe('AgentRuntimeRouter forks', () => {
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      messageSequence: 1,
+      messageOrdinal: 1,
       providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
     });
 
@@ -172,6 +140,43 @@ describe('AgentRuntimeRouter forks', () => {
     expect(execution.resume).not.toHaveBeenCalled();
   });
 
+  it('falls back to carryover when native fidelity is unavailable', async () => {
+    const fork = mock(async () => {
+      throw new AgentIntegrationError(
+        'OPERATION_UNSUPPORTED',
+        'The native history cannot be forked',
+        false,
+      );
+    });
+    const { router, entry } = makeRouter(fork);
+
+    await expect(router.forkAgentSession({
+      sourceSession: entry,
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+    })).resolves.toBeNull();
+  });
+
+  it('falls back to carryover when the native transcript trails the ledger', async () => {
+    const fork = mock(async () => {
+      throw new AgentIntegrationError(
+        'TRANSCRIPT_UNAVAILABLE',
+        'The selected ledger row has no provider-native fork position',
+        true,
+        { nativeForkReason: 'not-settled' },
+      );
+    });
+    const { router, entry } = makeRouter(fork);
+
+    await expect(router.forkAgentSession({
+      sourceSession: entry,
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      messageOrdinal: 1,
+      providerMeta: { lineNumber: 1 },
+    })).resolves.toBeNull();
+  });
+
   it('maps a changed selected prefix to a retryable conflict', async () => {
     const fork = mock(async () => {
       throw new AgentIntegrationError(
@@ -186,7 +191,7 @@ describe('AgentRuntimeRouter forks', () => {
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      messageSequence: 1,
+      messageOrdinal: 1,
       providerMeta: { lineNumber: 1 },
     })).rejects.toMatchObject({
       code: 'SOURCE_REVISION_CHANGED',
@@ -195,7 +200,7 @@ describe('AgentRuntimeRouter forks', () => {
     });
   });
 
-  it('maps a missing ledger provider position to the established retry-later error', async () => {
+  it('uses carryover when the selected row has no native position', async () => {
     const fork = mock(async () => null);
     const { router, entry } = makeRouter(fork);
 
@@ -203,27 +208,9 @@ describe('AgentRuntimeRouter forks', () => {
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      messageSequence: 1,
-    })).rejects.toMatchObject({
-      code: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      status: 409,
-      retryable: true,
-    });
+      messageOrdinal: 1,
+    })).resolves.toBeNull();
     expect(fork).not.toHaveBeenCalled();
   });
 
-  it('does not read the V4 projection for a native point fork', async () => {
-    const fork = mock(async () => ({ kind: 'unmaterialized' }));
-    const { router, entry, projection } = makeRouter(fork);
-
-    await router.forkAgentSession({
-      sourceSession: entry,
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      messageSequence: 1,
-      providerMeta: { lineNumber: 1 },
-    });
-
-    expect(projection.open).not.toHaveBeenCalled();
-  });
 });

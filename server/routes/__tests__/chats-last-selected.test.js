@@ -51,11 +51,12 @@ function createFixture() {
     getChatMetadata: mock(() => null),
   };
   const chatViews = {
-    getOrCreatePage: mock(() => Promise.resolve({
+    page: mock(() => Promise.resolve({
+      transcriptViewId: 'view-1',
       messages: [],
-      generationId: 'generation-1',
-      lastSeq: 0,
-      pageOldestSeq: 0,
+      lastOrdinal: 0,
+      pageOldestOrdinal: 0,
+      pageNewestOrdinal: 0,
       hasMore: false,
     })),
   };
@@ -63,25 +64,17 @@ function createFixture() {
     startSession: mock(() => undefined),
     isAgentSessionRunning: mock(() => false),
   };
-  const pendingInputs = {
-    register: mock(() => Promise.resolve(undefined)),
-    reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
-    reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
-    listForChat: mock(() => []),
-    hasInFlightForChat: mock(() => false),
-    clearChat: mock(() => undefined),
-  };
   const lastSelectedChat = new InMemoryLastSelectedChatState();
   const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
   const routes = createChatRoutes({
     registry,
     settings,
     queue,
+    processing: { phase: mock(() => null) },
     pathCache,
     metadata,
     chatViews,
     agents,
-    pendingInputs,
     chatListProjector,
     commandService: {},
     lastSelectedChat,

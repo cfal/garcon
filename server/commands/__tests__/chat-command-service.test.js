@@ -22,10 +22,7 @@ import {
   ChatExecutionCoordinator,
 } from '../../chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../../chat-execution/chat-execution-control-repository.ts';
-import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { TransientControlActionError } from '../../chats/chat-transient-feed.ts';
-import { transcriptLoader } from '../../chats/__tests__/chat-transcript-test-helpers.js';
-import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import {
   COMMAND_CORRELATION_ID_MAX_BYTES,
@@ -179,7 +176,6 @@ class TestChatCommandService extends ChatCommandService {
 }
 
 function makeService(overrides = {}) {
-  const activeFallbacks = new Map();
   const session = {
     id: SOURCE_CHAT_ID,
     agentId: 'claude',
@@ -229,6 +225,7 @@ function makeService(overrides = {}) {
       return Promise.resolve(next);
     }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
+    flush: mock(async () => undefined),
     ...overrides.chats,
   };
   const executionTasks = new Set();
@@ -242,14 +239,10 @@ function makeService(overrides = {}) {
           throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
         }
         await input.preparation?.prepare();
-        await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+        await queue.admitUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
       } catch (error) {
         if (reservation) await queue.releaseDirectTurn(reservation);
-        pendingInputs.markFailed(
-          input.command.chatId,
-          input.options.clientRequestId,
-        );
         let failure = error;
         try {
           await input.preparation?.compensate();
@@ -277,7 +270,7 @@ function makeService(overrides = {}) {
       try {
         reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
         await input.preparation?.prepare();
-        await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+        await queue.admitUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
         scheduled = true;
         await input.dispatch?.(reservation.executionAdmission);
@@ -288,7 +281,6 @@ function makeService(overrides = {}) {
           await input.preparation?.compensate();
           if (reservation) await queue.failDirectTurn(reservation);
         } else {
-          pendingInputs.markFailed(input.command.chatId, input.options.clientRequestId);
           await input.preparation?.compensate();
           if (reservation) await queue.releaseDirectTurn(reservation);
           await input.settlement.markPreScheduleFailure(input.command, {
@@ -391,29 +383,14 @@ function makeService(overrides = {}) {
           input.content,
           {
             clientRequestId: input.command.clientRequestId,
-            clientMessageId: input.command.entryId,
+            clientMessageId: input.clientMessageId,
+            transcriptViewId: input.transcriptViewId,
             turnId: input.command.turnId,
           },
-          async () => {
-            activeFallbacks.set(input.command.key, {
-              ...queueEntry(input.command.entryId, input.content, 'sending'),
-              delivery: {
-                clientRequestId: input.command.clientRequestId,
-                clientMessageId: input.command.entryId,
-                turnId: input.command.turnId,
-              },
-            });
-            try {
-              await input.settlement.markScheduled(input.command, input.command.turnId);
-            } catch (error) {
-              activeFallbacks.delete(input.command.key);
-              throw error;
-            }
-          },
+          () => input.settlement.markScheduled(input.command, input.command.turnId),
         );
         if (delivered) {
           deliveryAccepted = true;
-          activeFallbacks.delete(input.command.key);
           await input.settlement.settleGoalControl(input.command);
           return { delivery: 'active', control: await queue.readChatExecutionControl(input.command.chatId) };
         }
@@ -421,37 +398,9 @@ function makeService(overrides = {}) {
         return { delivery: 'queued', entryId: result.entryId, control: result.control };
       } catch (error) {
         deliveryAccepted ||= error instanceof GoalControlDeliveryError && error.deliveryAccepted;
-        if (!deliveryAccepted) activeFallbacks.delete(input.command.key);
         await input.settlement.settleGoalControlFailure(input.command, error, deliveryAccepted);
         throw error;
       }
-    }),
-    recoverAcceptedGoalControl: mock(async (input) => {
-      const fallback = activeFallbacks.get(input.command.key);
-      if (!fallback) {
-        throw new DomainError(
-          'INTERNAL_ERROR',
-          'The previous goal-control delivery did not reach a recorded outcome',
-          409,
-          false,
-        );
-      }
-      fallback.status = 'queued';
-      const control = storedQueue([fallback], {
-        appliedCommands: [{
-          key: input.command.key,
-          operation: 'create',
-          entryId: input.command.entryId,
-          appliedAt: '2026-07-20T00:00:00.000Z',
-        }],
-      });
-      await input.settlement.settleQueueMutation(input.command, input.command.entryId);
-      await queue.triggerDrain(input.command.chatId);
-      return {
-        delivery: 'queued',
-        entryId: input.command.entryId,
-        control,
-      };
     }),
     captureSteerTarget: mock(() => null),
     deliverAcceptedSteer: mock(async (input) => {
@@ -468,7 +417,7 @@ function makeService(overrides = {}) {
       };
     }),
     recoverQueueEntrySteer: mock((chatId) => queue.readChatExecutionControl(chatId)),
-    registerPendingUserInput: mock(() => Promise.resolve(undefined)),
+    admitUserInput: mock(() => Promise.resolve(undefined)),
     reserveTranscriptSnapshot: mock((chatId) => {
       const source = sessions.get(chatId);
       if (
@@ -577,7 +526,7 @@ function makeService(overrides = {}) {
     compactSession: mock(() => Promise.resolve(undefined)),
     resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
-    notifyProjectPathRelocated: mock(() => undefined),
+    publishSessionFact: mock(() => undefined),
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
     getAgentCatalogEntries: mock(() => []),
@@ -587,18 +536,6 @@ function makeService(overrides = {}) {
     })),
     runSingleQuery: mock(() => Promise.resolve('')),
     ...overrides.agents,
-  };
-  const pendingInputs = overrides.pendingInputsService ?? {
-    register: mock(() => Promise.resolve(undefined)),
-    clearChat: mock(() => undefined),
-    reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
-    reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
-    markFailed: mock(() => false),
-    markUnconfirmed: mock(() => false),
-    settleCommitted: mock(() => false),
-    clear: mock(() => false),
-    hasInFlightForChat: mock(() => false),
-    ...overrides.pendingInputs,
   };
   const forkChatFileCopy = overrides.forkChatFileCopy ?? mock(() => Promise.resolve({
     sourceChatId: SOURCE_CHAT_ID,
@@ -690,7 +627,7 @@ function makeService(overrides = {}) {
   const handoffs = { ...defaultHandoffs, ...overrides.handoffs };
   const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
   const transcripts = overrides.transcripts ?? {
-    currentView: mock(() => null),
+    currentView: mock(() => ({ viewId: 'view-1', contentStartOrdinal: 1 })),
     highWatermark: mock(() => ({ viewId: 'view-1', ordinal: 0 })),
     rowsThrough: mock(() => []),
     initializeChat: mock(() => ({ viewId: 'view-2' })),
@@ -710,17 +647,12 @@ function makeService(overrides = {}) {
       }),
     ),
   };
-  const chatViews = overrides.chatViews ?? {
-    getNativeHistoryLastSeq: mock(() => null),
-    getCursor: mock(() => ({ generationId: 'generation-1', lastSeq: 0 })),
-  };
   const fileMentions = overrides.fileMentions ?? {
     resolve: mock(async (command) => command),
   };
   const service = new TestChatCommandService({
     chats,
     queue,
-    chatViews,
     ledger,
     settings,
     recentTitleIcons: {
@@ -728,7 +660,6 @@ function makeService(overrides = {}) {
     },
     metadata,
     agents,
-    pendingInputs,
     fileMentions,
     chatIds: overrides.chatIds ?? new ChatIdAllocator(chats),
     chatListProjector,
@@ -747,10 +678,8 @@ function makeService(overrides = {}) {
     service,
     chats,
     queue,
-    chatViews,
     settings,
     agents,
-    pendingInputs,
     fileMentions,
     forkChatFileCopy,
     ledger,
@@ -763,7 +692,15 @@ function makeService(overrides = {}) {
   };
 }
 
-function makeRealQueue(pendingInputsService, turnRunnerOverrides = {}) {
+function makeInputProjection(overrides = {}) {
+  return {
+    admitInput: mock(async () => ({ inserted: true })),
+    admitQueuedInput: mock(() => ({ inserted: true })),
+    ...overrides,
+  };
+}
+
+function makeRealQueue(inputProjection, turnRunnerOverrides = {}) {
   return new ChatExecutionCoordinator(
     workspaceDir,
     {
@@ -771,14 +708,9 @@ function makeRealQueue(pendingInputsService, turnRunnerOverrides = {}) {
       captureSteerTarget: mock(() => null),
       abortSession: mock(async () => false),
       isChatRunning: mock(() => false),
-      waitUntilTurnAbortable: mock(async () => false),
       ...turnRunnerOverrides,
     },
-    pendingInputsService,
-    {
-      admitInput: mock(async () => ({ inserted: true })),
-      admitQueuedInput: mock(() => ({ inserted: true })),
-    },
+    inputProjection,
     () => ({}),
     () => true,
     new InMemoryChatExecutionControlRepository('server-instance-test'),
@@ -1018,6 +950,30 @@ describe('ChatCommandService', () => {
     expect(record.payload.tags).toEqual(['qa', 'review-needed']);
   });
 
+  it('persists new chat registration before admitting its transcript input', async () => {
+    const events = [];
+    const { service, chats, queue } = makeService();
+    chats.flush.mockImplementation(async () => {
+      events.push('registry-flushed');
+    });
+    queue.admitUserInput.mockImplementation(async () => {
+      events.push('input-admitted');
+    });
+
+    await service.submitStart({
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'persist before dispatch',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-durable-registry',
+      clientMessageId: 'msg-start-durable-registry',
+    });
+
+    expect(events).toEqual(['registry-flushed', 'input-admitted']);
+  });
+
   it('keeps interactive and scheduled new-chat creation behavior conformant', async () => {
     const allocate = mock(() => SCHEDULED_CHAT_ID);
     const { service, chats, agents } = makeService({ chatIds: { allocate } });
@@ -1128,7 +1084,7 @@ describe('ChatCommandService', () => {
     const startSession = mock(async () => {
       throw new Error('provider startup failed');
     });
-    const { service, chats, queue, pendingInputs, settings } = makeService({
+    const { service, chats, queue, settings } = makeService({
       agents: { startSession },
     });
 
@@ -1143,7 +1099,6 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-start-failed',
     })).rejects.toThrow('provider startup failed');
 
-    expect(pendingInputs.clearChat).toHaveBeenCalledWith(TARGET_CHAT_ID, 'chat-removed');
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_CHAT_ID);
     expect(chats.removeChat.mock.invocationCallOrder[0])
       .toBeLessThan(queue.failDirectTurn.mock.invocationCallOrder[0]);
@@ -1443,18 +1398,18 @@ describe('ChatCommandService', () => {
   });
 
   it('records one acknowledged latch outcome for two unique Stop commands', async () => {
-    const pendingInputsService = new PendingUserInputService({
-      settledInputRequests: mock(async () => new Set()),
-      nativelyBoundInputRequests: mock(async () => new Set()),
-    });
+    const inputProjection = makeInputProjection();
     let running = true;
-    const abortSession = mock(async () => true);
-    const queueService = makeRealQueue(pendingInputsService, {
+    const abortSession = mock(async () => {
+      const acknowledged = running;
+      running = false;
+      return acknowledged;
+    });
+    const queueService = makeRealQueue(inputProjection, {
       abortSession,
       isChatRunning: mock(() => running),
     });
     const { service, ledger } = makeService({
-      pendingInputsService,
       queueService,
     });
 
@@ -1468,15 +1423,12 @@ describe('ChatCommandService', () => {
     });
 
     expect(first.outcome).toBe('interrupt-requested');
-    expect(second.outcome).toBe('interrupt-requested');
-    expect(abortSession).toHaveBeenCalledTimes(1);
+    expect(second.outcome).toBe('already-idle');
+    expect(abortSession).toHaveBeenCalledTimes(2);
     expect((await readLedgerRecord(ledger, 'agent-stop', 'req-stop-first')).stopOutcome)
       .toBe('interrupt-requested');
     expect((await readLedgerRecord(ledger, 'agent-stop', 'req-stop-second')).stopOutcome)
-      .toBe('interrupt-requested');
-
-    running = false;
-    await queueService.checkChatIdle(SOURCE_CHAT_ID);
+      .toBe('already-idle');
   });
 
   it('settles Send now through the command lock before launching its successor once', async () => {
@@ -1492,10 +1444,7 @@ describe('ChatCommandService', () => {
     let predecessorTurn;
     let successorLaunches = 0;
     let queueService;
-    const pendingInputsService = new PendingUserInputService({
-      settledInputRequests: mock(async () => new Set()),
-      nativelyBoundInputRequests: mock(async () => new Set()),
-    });
+    const inputProjection = makeInputProjection();
     const abortSession = mock(async () => {
       abortStarted.resolve();
       return true;
@@ -1522,11 +1471,10 @@ describe('ChatCommandService', () => {
         queueService.onAgentTurnTerminal(chatId, options);
       }
     });
-    queueService = makeRealQueue(pendingInputsService, {
+    queueService = makeRealQueue(inputProjection, {
       runAgentTurn,
       abortSession,
       isChatRunning: mock(() => runtimeRunning),
-      waitUntilTurnAbortable: mock(async () => true),
     });
     const enqueueAccepted = queueService.enqueueAccepted.bind(queueService);
     queueService.enqueueAccepted = mock(async (input) => {
@@ -1536,7 +1484,6 @@ describe('ChatCommandService', () => {
     });
     const { service, forkChatFileCopy } = makeService({
       queueService,
-      pendingInputsService,
     });
 
     await service.submitRun({
@@ -1587,7 +1534,8 @@ describe('ChatCommandService', () => {
       service.forkChat({
         sourceChatId: SOURCE_CHAT_ID,
         chatId: TARGET_CHAT_ID,
-        upToSeq: 1,
+        upToOrdinal: 1,
+        transcriptViewId: 'view-1',
       }),
     ]);
 
@@ -1715,7 +1663,7 @@ describe('ChatCommandService', () => {
 
     expect(first.status).toBe('accepted');
     expect(second.status).toBe('duplicate');
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
     expect(queue.runReservedTurn.mock.calls[0][2]).toMatchObject({
       clientRequestId: 'req-1',
@@ -1740,7 +1688,7 @@ describe('ChatCommandService', () => {
     const replay = await service.submitRun(input);
 
     expect(replay.status).toBe('duplicate');
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('replays a terminally failed run so callers can read its receipt', async () => {
@@ -1766,7 +1714,7 @@ describe('ChatCommandService', () => {
       chatId: SOURCE_CHAT_ID,
       turnId: first.turnId,
     });
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a private terminal run failure instead of returning an unreadable receipt', async () => {
@@ -1786,7 +1734,7 @@ describe('ChatCommandService', () => {
     );
 
     await expect(service.submitRun(input)).rejects.toThrow('run rollback failed');
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('asserts the resume agent and adds tags only after admission', async () => {
@@ -1800,7 +1748,7 @@ describe('ChatCommandService', () => {
       expectedAgentId: 'codex',
       tagsToAdd: ['cli'],
     })).rejects.toMatchObject({ code: 'EXPECTED_AGENT_MISMATCH', status: 409 });
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
     expect(chats.addTags).not.toHaveBeenCalled();
 
     const result = await service.submitRun({
@@ -1853,7 +1801,7 @@ describe('ChatCommandService', () => {
     expect(handoffs.resolveTarget).toHaveBeenCalledTimes(1);
     expect(handoffs.createPreparation).toHaveBeenCalledTimes(1);
     expect(handoffPreparations[0].prepare.mock.invocationCallOrder[0])
-      .toBeLessThan(queue.registerPendingUserInput.mock.invocationCallOrder[0]);
+      .toBeLessThan(queue.admitUserInput.mock.invocationCallOrder[0]);
     expect(queue.runReservedTurn).toHaveBeenCalledWith(
       expect.anything(),
       input.command,
@@ -1893,7 +1841,7 @@ describe('ChatCommandService', () => {
     expect(handoffs.resolveTarget).toHaveBeenCalledTimes(1);
     expect(handoffs.createPreparation).toHaveBeenCalledTimes(1);
     expect(handoffPreparations[0].prepare).toHaveBeenCalledTimes(1);
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a changed handoff retry from the submitted payload before target resolution', async () => {
@@ -1983,7 +1931,7 @@ describe('ChatCommandService', () => {
   it('does not recapture after a committed handoff fails before scheduling', async () => {
     const fixture = makeService();
     const input = handoffRunInput('req-handoff-committed-failure');
-    fixture.queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
+    fixture.queue.admitUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(fixture.service.submitRun(input)).rejects.toThrow('append failed');
     expect(fixture.sessions.get(SOURCE_CHAT_ID)).toMatchObject({
@@ -1997,7 +1945,7 @@ describe('ChatCommandService', () => {
     });
     expect(fixture.handoffs.createPreparation).toHaveBeenCalledTimes(1);
     expect(fixture.handoffPreparations[0].prepare).toHaveBeenCalledTimes(1);
-    expect(fixture.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(fixture.queue.admitUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('applies supported resume overrides to one turn without persisting them', async () => {
@@ -2035,7 +1983,7 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-inherited-bypass',
       permissionFallbackPolicy: 'require-explicit-bypass',
     })).rejects.toMatchObject({ code: 'EXPLICIT_BYPASS_REQUIRED', status: 422 });
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
     expect(await readLedgerRecord(ledger, 'agent-run', 'req-inherited-bypass')).toBeNull();
 
     await service.submitRun({
@@ -2046,7 +1994,7 @@ describe('ChatCommandService', () => {
       permissionMode: 'bypassPermissions',
       permissionFallbackPolicy: 'require-explicit-bypass',
     });
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('rejects unsupported explicit modes before creating a command receipt', async () => {
@@ -2067,11 +2015,11 @@ describe('ChatCommandService', () => {
       permissionMode: 'acceptEdits',
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
 
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
     expect(await readLedgerRecord(ledger, 'agent-run', 'req-unsupported-mode')).toBeNull();
   });
 
-  it('rejects a concurrent direct submission before pending input preparation', async () => {
+  it('rejects a concurrent direct submission before durable input admission', async () => {
     let activeReservation = null;
     let releaseExecution;
     let markExecutionFinished;
@@ -2100,13 +2048,13 @@ describe('ChatCommandService', () => {
       if (activeReservation?.reservationId === reservation.reservationId) activeReservation = null;
       markExecutionFinished();
     });
-    const registerPendingUserInput = mock(async () => undefined);
+    const admitUserInput = mock(async () => undefined);
     const { service } = makeService({
       queue: {
         reserveDirectTurn,
         releaseDirectTurn,
         runReservedTurn,
-        registerPendingUserInput,
+        admitUserInput,
       },
     });
 
@@ -2124,7 +2072,7 @@ describe('ChatCommandService', () => {
     });
     await expect(rejection).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409 });
 
-    expect(registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(admitUserInput).toHaveBeenCalledTimes(1);
     expect(runReservedTurn).toHaveBeenCalledTimes(1);
     expect(releaseDirectTurn).not.toHaveBeenCalled();
     releaseExecution();
@@ -2155,15 +2103,17 @@ describe('ChatCommandService', () => {
       retryable: true,
     });
 
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
     expect(queue.runReservedTurn).not.toHaveBeenCalled();
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a direct run while the queue head is dispatching', async () => {
+  it('rejects a direct run while a dequeued queue entry owns execution', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatExecutionControl: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1', 'first', 'sending')]))),
+        reserveDirectTurn: mock(() => {
+          throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
+        }),
       },
     });
 
@@ -2171,19 +2121,19 @@ describe('ChatCommandService', () => {
       service.submitRun({
         chatId: SOURCE_CHAT_ID,
         command: 'must stay second',
-        clientRequestId: 'req-fifo-sending',
-        clientMessageId: 'msg-fifo-sending',
+        clientRequestId: 'req-fifo-dispatched',
+        clientMessageId: 'msg-fifo-dispatched',
       }),
     ).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409 });
 
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
     expect(queue.runReservedTurn).not.toHaveBeenCalled();
-    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.releaseDirectTurn).not.toHaveBeenCalled();
   });
 
-  it('marks accepted HTTP commands failed when submit append fails', async () => {
-    const { service, queue, pendingInputs, ledger } = makeService();
-    queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
+  it('marks accepted HTTP commands failed when input admission fails', async () => {
+    const { service, queue, ledger } = makeService();
+    queue.admitUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(
       service.submitRun({
@@ -2203,12 +2153,11 @@ describe('ChatCommandService', () => {
       error: 'append failed',
       errorCode: 'PRE_SCHEDULE_FAILED',
     });
-    expect(pendingInputs.markFailed).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'req-fail-1');
     expect(queue.runReservedTurn).not.toHaveBeenCalled();
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps an already-appended pending row failed when ledger scheduling fails', async () => {
+  it('does not roll back an admitted input when command scheduling persistence fails', async () => {
     const record = {
       key: `agent-run:${SOURCE_CHAT_ID}:req-ledger-failed`,
       commandType: 'agent-run',
@@ -2227,7 +2176,7 @@ describe('ChatCommandService', () => {
         .mockRejectedValueOnce(new Error('ledger unavailable'))
         .mockResolvedValueOnce({ ...record, status: 'failed' }),
     };
-    const { service, queue, pendingInputs } = makeService({ ledger });
+    const { service, queue } = makeService({ ledger });
 
     await expect(service.submitRun({
       chatId: SOURCE_CHAT_ID,
@@ -2236,11 +2185,7 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-ledger-failed',
     })).rejects.toThrow('ledger unavailable');
 
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
-    expect(pendingInputs.markFailed).toHaveBeenCalledWith(
-      SOURCE_CHAT_ID,
-      'req-ledger-failed',
-    );
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -2252,13 +2197,13 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-retry-1',
       clientMessageId: 'msg-retry-1',
     };
-    queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed')).mockResolvedValueOnce(undefined);
+    queue.admitUserInput.mockRejectedValueOnce(new Error('append failed')).mockResolvedValueOnce(undefined);
 
     await expect(service.submitRun(input)).rejects.toThrow('append failed');
     const retry = await service.submitRun(input);
 
     expect(retry.status).toBe('accepted');
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(2);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -2284,7 +2229,7 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-fork-retry',
       clientMessageId: 'msg-fork-retry',
     };
-    queue.registerPendingUserInput
+    queue.admitUserInput
       .mockRejectedValueOnce(new Error('fork append failed'))
       .mockResolvedValueOnce(undefined);
 
@@ -2295,7 +2240,7 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).toHaveBeenCalledTimes(2);
     expect(rollbacks[0]).toHaveBeenCalledOnce();
     expect(rollbacks[1]).not.toHaveBeenCalled();
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(2);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -2345,7 +2290,7 @@ describe('ChatCommandService', () => {
       rollback,
     }));
     const { service, queue, ledger } = makeService({ forkChatFileCopy });
-    queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
+    queue.admitUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(service.submitForkRun({
       sourceChatId: SOURCE_CHAT_ID,
@@ -2402,7 +2347,7 @@ describe('ChatCommandService', () => {
     const retry = await service.submitRun(input);
 
     expect(retry.status).toBe('duplicate');
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(2);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
     expect(await readLedgerRecord(ledger, 'agent-run', input.clientRequestId)).toMatchObject({
@@ -2423,8 +2368,8 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
-  it('does not reconcile V4 pending-input settlement before a fork run', async () => {
-    const { service, pendingInputs, ledger, queue } = makeService();
+  it('admits a fork run without consulting provider-native settlement state', async () => {
+    const { service, ledger, queue } = makeService();
     const input = {
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
@@ -2432,8 +2377,6 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-unsettled-fork',
       clientMessageId: 'msg-unsettled-fork',
     };
-    pendingInputs.hasInFlightForChat.mockReturnValue(true);
-
     await expect(service.submitForkRun(input)).resolves.toMatchObject({ status: 'accepted' });
     expect(await readLedgerRecord(
       ledger,
@@ -2441,7 +2384,6 @@ describe('ChatCommandService', () => {
       input.clientRequestId,
       TARGET_CHAT_ID,
     )).toMatchObject({ status: 'scheduled' });
-    expect(pendingInputs.reconcileNativeHistory).not.toHaveBeenCalled();
     expect(queue.releaseTranscriptSnapshot).not.toHaveBeenCalled();
   });
 
@@ -2462,7 +2404,7 @@ describe('ChatCommandService', () => {
     queue.releaseTranscriptSnapshot.mockImplementation(async () => {
       order.push('source-released');
     });
-    queue.registerPendingUserInput.mockImplementation(async () => {
+    queue.admitUserInput.mockImplementation(async () => {
       order.push('target-admitted');
     });
 
@@ -2487,7 +2429,8 @@ describe('ChatCommandService', () => {
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 1,
+      upToOrdinal: 1,
+      transcriptViewId: 'view-1',
     });
     expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
@@ -2525,20 +2468,19 @@ describe('ChatCommandService', () => {
     });
     await Promise.resolve();
 
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
     releaseFork();
     await Promise.all([fork, submit]);
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
   });
 
   it('deletes chats through the mutation service cleanup path', async () => {
-    const { service, ownership, queue, settings, pendingInputs, sessions } = makeService();
+    const { service, ownership, queue, settings, sessions } = makeService();
 
     const result = await service.deleteChat({ chatId: SOURCE_CHAT_ID });
 
     expect(result).toEqual({ success: true, chatId: SOURCE_CHAT_ID });
     expect(queue.abortForChatDeletion).toHaveBeenCalledWith(SOURCE_CHAT_ID);
-    expect(pendingInputs.clearChat).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'chat-removed');
     expect(ownership.delete).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(queue.deleteChatQueueFile).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(SOURCE_CHAT_ID);
@@ -2572,7 +2514,7 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-delete-private-failure',
       tagsToAdd: ['cli'],
     };
-    queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
+    queue.admitUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(service.submitRun(input)).rejects.toThrow('append failed');
     await service.deleteChat({ chatId: SOURCE_CHAT_ID });
@@ -2592,7 +2534,7 @@ describe('ChatCommandService', () => {
     });
     expect(record.publicTerminalAt).toBeUndefined();
     expect(chats.addTags).not.toHaveBeenCalled();
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
     expect(queue.runReservedTurn).not.toHaveBeenCalled();
   });
 
@@ -2611,7 +2553,7 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-rollback-private-failure',
       tagsToAdd: ['cli'],
     };
-    queue.registerPendingUserInput
+    queue.admitUserInput
       .mockRejectedValueOnce(new Error('append failed'))
       .mockResolvedValueOnce(undefined);
 
@@ -2625,7 +2567,7 @@ describe('ChatCommandService', () => {
     expect(ownership.delete).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(chats.addTags).toHaveBeenCalledTimes(1);
     expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
-    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(2);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
     expect((await ledger.getRecord(
       commandLedgerKey('agent-run', SOURCE_CHAT_ID, input.clientRequestId),
@@ -2633,7 +2575,7 @@ describe('ChatCommandService', () => {
   });
 
   it('preserves chat ownership when the active runtime cannot be retired', async () => {
-    const { service, chats, queue, settings, pendingInputs, sessions } = makeService({
+    const { service, chats, queue, settings, sessions } = makeService({
       queue: { abortForChatDeletion: mock(() => Promise.resolve(false)) },
     });
 
@@ -2643,7 +2585,6 @@ describe('ChatCommandService', () => {
       retryable: true,
     });
 
-    expect(pendingInputs.clearChat).not.toHaveBeenCalled();
     expect(chats.removeChat).not.toHaveBeenCalled();
     expect(queue.deleteChatQueueFile).not.toHaveBeenCalled();
     expect(settings.removeFromAllOrderLists).not.toHaveBeenCalled();
@@ -2651,7 +2592,7 @@ describe('ChatCommandService', () => {
   });
 
   it('preserves chat ownership when runtime retirement throws', async () => {
-    const { service, chats, queue, pendingInputs, sessions } = makeService({
+    const { service, chats, queue, sessions } = makeService({
       queue: { abortForChatDeletion: mock(() => Promise.reject(new Error('abort failed'))) },
     });
 
@@ -2661,7 +2602,6 @@ describe('ChatCommandService', () => {
       retryable: true,
     });
 
-    expect(pendingInputs.clearChat).not.toHaveBeenCalled();
     expect(chats.removeChat).not.toHaveBeenCalled();
     expect(queue.deleteChatQueueFile).not.toHaveBeenCalled();
     expect(sessions.has(SOURCE_CHAT_ID)).toBe(true);
@@ -2727,36 +2667,37 @@ describe('ChatCommandService', () => {
       parseForkChatCommandRequest({
         sourceChatId: SOURCE_CHAT_ID,
         chatId: TARGET_CHAT_ID,
-        upToSeq: '2abc',
+        upToOrdinal: '2abc',
+        transcriptViewId: 'view-1',
       }),
-    ).toThrow('upToSeq must be a positive integer');
+    ).toThrow('upToOrdinal must be a positive integer');
 
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
-  it('parses a fork point generation and rejects an empty generation', () => {
+  it('parses a view-qualified fork point and rejects an empty view', () => {
     expect(parseForkChatCommandRequest({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 2,
-      generationId: 'generation-1',
+      upToOrdinal: 2,
+      transcriptViewId: 'view-1',
     })).toEqual({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 2,
-      generationId: 'generation-1',
+      upToOrdinal: 2,
+      transcriptViewId: 'view-1',
     });
     expect(() => parseForkChatCommandRequest({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 2,
-      generationId: ' ',
-    })).toThrow('generationId must not be empty');
+      upToOrdinal: 2,
+      transcriptViewId: ' ',
+    })).toThrow('transcriptViewId must not be empty');
     expect(() => parseForkChatCommandRequest({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      generationId: 'generation-1',
-    })).toThrow('generationId requires upToSeq');
+      transcriptViewId: 'view-1',
+    })).toThrow('transcriptViewId requires upToOrdinal');
   });
 
   it('rejects message-point forks when the agent does not support them', async () => {
@@ -2772,7 +2713,8 @@ describe('ChatCommandService', () => {
       service.forkChat({
         sourceChatId: SOURCE_CHAT_ID,
         chatId: TARGET_CHAT_ID,
-        upToSeq: 1,
+        upToOrdinal: 1,
+        transcriptViewId: 'view-1',
       }),
     ).rejects.toMatchObject({
       code: 'UNSUPPORTED_AGENT',
@@ -2824,47 +2766,48 @@ describe('ChatCommandService', () => {
   });
 
   it('forks a committed ledger point without consulting native coverage', async () => {
-    const { service, agents, chatViews, queue, forkChatFileCopy } = makeService();
+    const { service, agents, queue, forkChatFileCopy } = makeService();
     queue.ownsExecution.mockReturnValue(true);
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
-    chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 3,
+      upToOrdinal: 3,
+      transcriptViewId: 'view-1',
     });
 
-    expect(chatViews.getNativeHistoryLastSeq).not.toHaveBeenCalled();
     expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
-  it('resolves a fork point against the projection-backed view boundary', async () => {
-    const { service, chatViews, forkChatFileCopy } = makeService();
-    chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
+  it('resolves a fork point against the ledger view boundary', async () => {
+    const { service, forkChatFileCopy } = makeService();
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 2,
+      upToOrdinal: 2,
+      transcriptViewId: 'view-1',
     });
 
     expect(forkChatFileCopy).toHaveBeenCalledWith(
-      expect.objectContaining({ upToSequence: 2 }),
+      expect.objectContaining({ upToOrdinal: 2 }),
     );
   });
 
-  it('refuses a fork point bound to a stale view generation', async () => {
-    const { service, chatViews, forkChatFileCopy } = makeService();
-    chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
-    chatViews.getCursor.mockReturnValue({ generationId: 'generation-2', lastSeq: 2 });
+  it('refuses a fork point bound to a stale transcript view', async () => {
+    const { service, forkChatFileCopy } = makeService({
+      transcripts: {
+        currentView: mock(() => ({ viewId: 'view-2', contentStartOrdinal: 1 })),
+      },
+    });
 
     await expect(service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 2,
-      generationId: 'generation-1',
+      upToOrdinal: 2,
+      transcriptViewId: 'view-1',
     })).rejects.toMatchObject({
       code: 'STALE_TRANSCRIPT_VIEW',
       status: 409,
@@ -2874,13 +2817,13 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
-  it('rejects a generation binding without a message cutoff', async () => {
+  it('rejects a transcript-view binding without a message cutoff', async () => {
     const { service, forkChatFileCopy } = makeService();
 
     await expect(service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      generationId: 'generation-1',
+      transcriptViewId: 'view-1',
     })).rejects.toMatchObject({
       code: 'VALIDATION_FAILED',
       status: 400,
@@ -2890,36 +2833,32 @@ describe('ChatCommandService', () => {
   });
 
   it('allows an idle ledger point without native coverage', async () => {
-    const { service, chatViews, forkChatFileCopy } = makeService();
-    chatViews.getNativeHistoryLastSeq.mockReturnValue(1);
+    const { service, forkChatFileCopy } = makeService();
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 2,
+      upToOrdinal: 2,
+      transcriptViewId: 'view-1',
     });
 
-    expect(chatViews.getNativeHistoryLastSeq).not.toHaveBeenCalled();
     expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
   it('allows a fork point that native history already covers', async () => {
-    const { service, agents, chatViews, queue, forkChatFileCopy } = makeService();
+    const { service, agents, queue, forkChatFileCopy } = makeService();
     queue.ownsExecution.mockReturnValue(true);
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
-    chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
-
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 2,
-      generationId: 'generation-1',
+      upToOrdinal: 2,
+      transcriptViewId: 'view-1',
     });
 
-    expect(chatViews.getCursor).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).toHaveBeenCalledWith(
-      expect.objectContaining({ upToSequence: 2 }),
+      expect.objectContaining({ upToOrdinal: 2 }),
     );
   });
 
@@ -2929,14 +2868,15 @@ describe('ChatCommandService', () => {
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 2,
+      upToOrdinal: 2,
+      transcriptViewId: 'view-1',
     });
 
     expect(forkChatFileCopy).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceChatId: SOURCE_CHAT_ID,
         targetChatId: TARGET_CHAT_ID,
-        upToSequence: 2,
+        upToOrdinal: 2,
       }),
     );
   });
@@ -2949,14 +2889,15 @@ describe('ChatCommandService', () => {
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-      upToSeq: 1,
+      upToOrdinal: 1,
+      transcriptViewId: 'view-1',
     });
 
     expect(forkChatFileCopy).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceChatId: SOURCE_CHAT_ID,
         targetChatId: TARGET_CHAT_ID,
-        upToSequence: 1,
+        upToOrdinal: 1,
       }),
     );
   });
@@ -3755,7 +3696,7 @@ describe('ChatCommandService', () => {
     const recoverQueueEntrySteer = mock(async () => {
       throw new Error('control commit unavailable');
     });
-    const { service, queue, pendingInputs } = makeService({
+    const { service, queue } = makeService({
       ledger,
       queue: {
         captureSteerTarget: mock(() => ({ attempt: {}, identity: { turnId: 'turn-active' } })),
@@ -3775,7 +3716,6 @@ describe('ChatCommandService', () => {
       control: current,
     });
     expect(recoverQueueEntrySteer).toHaveBeenCalledTimes(1);
-    expect(pendingInputs.markUnconfirmed).toHaveBeenCalledTimes(1);
     expect(queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
   });
 
@@ -4425,7 +4365,7 @@ describe('ChatCommandService', () => {
 
     expect(outcome).toEqual({ type: 'sent', chatId: SOURCE_CHAT_ID });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(queue.registerPendingUserInput).toHaveBeenCalledWith(
+    expect(queue.admitUserInput).toHaveBeenCalledWith(
       SOURCE_CHAT_ID,
       'scheduled prompt',
       expect.objectContaining({
@@ -4464,7 +4404,7 @@ describe('ChatCommandService', () => {
         transcriptViewId: 'view-1',
       },
     );
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
   });
 
   it('queues scheduled input while a direct turn is still preparing', async () => {
@@ -4490,9 +4430,8 @@ describe('ChatCommandService', () => {
   it('queues scheduled input behind a dispatching queue head', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatExecutionControl: mock(() =>
-          Promise.resolve(storedQueue([queueEntry('entry-sending', 'in flight', 'sending')], { version: 2 })),
-        ),
+        ownsExecution: mock(() => true),
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
       },
     });
 
@@ -4500,8 +4439,8 @@ describe('ChatCommandService', () => {
       chatId: SOURCE_CHAT_ID,
       command: 'scheduled second',
       busyBehavior: 'queue',
-      clientRequestId: 'scheduled-after-sending',
-      clientMessageId: 'scheduled-message-after-sending',
+      clientRequestId: 'scheduled-after-dispatch',
+      clientMessageId: 'scheduled-message-after-dispatch',
     });
 
     expect(outcome.type).toBe('queued');
@@ -4510,11 +4449,11 @@ describe('ChatCommandService', () => {
       'scheduled second',
       expect.any(Object),
       {
-        clientMessageId: 'scheduled-message-after-sending',
+        clientMessageId: 'scheduled-message-after-dispatch',
         transcriptViewId: 'view-1',
       },
     );
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
   });
 
   it('skips scheduled input without queue side effects when configured', async () => {
@@ -4531,10 +4470,10 @@ describe('ChatCommandService', () => {
 
     expect(outcome).toEqual({ type: 'skipped-busy', chatId: SOURCE_CHAT_ID });
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
   });
 
-  it('requeues an ambiguous active delivery exactly once on retry', async () => {
+  it('never redelivers an ambiguous active goal-control command', async () => {
     const { service, queue, ledger } = makeService({
       queue: {
         readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
@@ -4570,36 +4509,27 @@ describe('ChatCommandService', () => {
     const recovered = await service.submitGoalControl(input);
     expect(recovered).toMatchObject({
       status: 'duplicate',
-      delivery: 'queued',
-      entryId: record.entryId,
-      control: {
-        queue: {
-          entries: [expect.objectContaining({ id: record.entryId, content: 'deliver once' })],
-        },
-      },
+      delivery: 'active',
+      control: { queue: { entries: [] } },
     });
     record = await readLedgerRecord(ledger, 'goal-control', input.clientRequestId);
-    expect(record).toMatchObject({ status: 'finished', entryId: recovered.entryId });
+    expect(record).toMatchObject({ status: 'accepted' });
     expect(queue.deliverGoalControlInput).toHaveBeenCalledTimes(1);
-    expect(queue.triggerDrain).toHaveBeenCalledTimes(1);
+    expect(queue.triggerDrain).not.toHaveBeenCalled();
   });
 
-  it('recovers an ambiguous active delivery through the real execution control transitions', async () => {
-    const pendingInputsService = new PendingUserInputService({
-      settledInputRequests: mock(async () => new Set()),
-      nativelyBoundInputRequests: mock(async () => new Set()),
-    });
+  it('keeps ambiguous active delivery out of the future-turn queue', async () => {
+    const inputProjection = makeInputProjection();
     const submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
       await beforeDelivery(runtimeHandoff());
       throw new Error('connection closed after provider acceptance');
     });
-    const queueService = makeRealQueue(pendingInputsService, {
+    const queueService = makeRealQueue(inputProjection, {
       isChatRunning: mock(() => true),
       submitGoalControl,
     });
     const { service, ledger } = makeService({
       queueService,
-      pendingInputsService,
     });
     const input = {
       chatId: SOURCE_CHAT_ID,
@@ -4612,51 +4542,29 @@ describe('ChatCommandService', () => {
       message: GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
     });
     const uncertain = await queueService.readChatExecutionControl(SOURCE_CHAT_ID);
-    expect(uncertain.entries).toHaveLength(1);
-    expect(uncertain.entries[0]).toMatchObject({
-      content: input.content,
-      status: 'sending',
-      delivery: {
-        clientRequestId: input.clientRequestId,
-        clientMessageId: input.clientRequestId,
-      },
-    });
-    expect(uncertain.appliedCommands).toContainEqual(expect.objectContaining({
-      operation: 'create',
-      entryId: uncertain.entries[0].id,
-    }));
+    expect(uncertain.entries).toEqual([]);
 
     const recovered = await service.submitGoalControl(input);
     expect(recovered).toMatchObject({
       status: 'duplicate',
-      delivery: 'queued',
-      entryId: uncertain.entries[0].id,
-      control: {
-        queue: {
-          entries: [expect.objectContaining({
-            id: uncertain.entries[0].id,
-            content: input.content,
-          })],
-        },
-      },
+      delivery: 'active',
+      control: { queue: { entries: [] } },
     });
     expect(submitGoalControl).toHaveBeenCalledTimes(1);
     expect(await readLedgerRecord(ledger, 'goal-control', input.clientRequestId)).toMatchObject({
-      status: 'finished',
-      entryId: uncertain.entries[0].id,
+      status: 'accepted',
     });
 
     const repeated = await service.submitGoalControl(input);
     expect(repeated).toMatchObject({
       status: 'duplicate',
-      delivery: 'queued',
-      entryId: uncertain.entries[0].id,
+      delivery: 'active',
     });
-    expect((await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).entries).toHaveLength(1);
+    expect((await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).entries).toEqual([]);
     expect(submitGoalControl).toHaveBeenCalledTimes(1);
   });
 
-  it('does not report an incomplete goal-control ledger record as delivered', async () => {
+  it('replays an accepted goal-control record without redelivery', async () => {
     const { service, queue, ledger } = makeService();
     await ledger.accept({
       commandType: 'goal-control',
@@ -4671,16 +4579,13 @@ describe('ChatCommandService', () => {
       entryId: 'prepared-fallback-id',
     });
 
-    await expect(
-      service.submitGoalControl({
-        chatId: SOURCE_CHAT_ID,
-        content: 'uncertain delivery',
-        clientRequestId: 'request-active-incomplete',
-      }),
-    ).rejects.toMatchObject({
-      code: 'INTERNAL_ERROR',
-      status: 409,
-      retryable: false,
+    await expect(service.submitGoalControl({
+      chatId: SOURCE_CHAT_ID,
+      content: 'uncertain delivery',
+      clientRequestId: 'request-active-incomplete',
+    })).resolves.toMatchObject({
+      status: 'duplicate',
+      delivery: 'active',
     });
 
     expect(queue.deliverGoalControlInput).not.toHaveBeenCalled();
@@ -4809,6 +4714,11 @@ describe('ChatCommandService', () => {
       expect.objectContaining({ nativeSession: relocated }),
       { flush: true },
     );
+    expect(fixture.agents.publishSessionFact).toHaveBeenCalledWith(SOURCE_CHAT_ID, {
+      agentSessionId: 'agent-1',
+      nativeSession: relocated,
+      nativeSeedReceipt: null,
+    });
     expect(commit).toHaveBeenCalledTimes(1);
     expect(rollback).not.toHaveBeenCalled();
   });
@@ -4957,22 +4867,12 @@ describe('ChatCommandService', () => {
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects project path updates while a queued turn is dispatching', async () => {
+  it('rejects project path updates while a dequeued turn owns execution', async () => {
     const { service, queue, agents } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
-    queue.readChatExecutionControl.mockResolvedValueOnce({
-      entries: [
-        {
-          id: 'sending-1',
-          content: 'continue',
-          status: 'sending',
-          createdAt: '2026-02-27T00:00:00.000Z',
-        },
-      ],
-      pause: null,
-      version: 2,
-    });
+    queue.ownsExecution.mockReturnValueOnce(true);
+    queue.readChatExecutionControl.mockResolvedValueOnce(storedQueue());
 
     await expect(
       service.updateProjectPath({
@@ -5020,88 +4920,14 @@ describe('ChatCommandService', () => {
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects project path updates with in-flight submitted input after reconcile', async () => {
-    const { service, agents } = makeService({
-      pendingInputs: {
-        hasInFlightForChat: mock(() => true),
-      },
-    });
-    const nextPath = path.join(projectBaseDir, 'repo-worktree');
-    await fs.mkdir(nextPath, { recursive: true });
-
-    await expect(
-      service.updateProjectPath({
-        chatId: SOURCE_CHAT_ID,
-        projectPath: nextPath,
-      }),
-    ).rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
-
-    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
-  });
-
-  it('keeps terminal delivery evidence without treating it as active work', async () => {
-    const settledInputRequests = mock(async () => new Set());
-    const pendingInputsService = new PendingUserInputService({
-      settledInputRequests,
-      nativelyBoundInputRequests: settledInputRequests,
-    });
-    await pendingInputsService.register(SOURCE_CHAT_ID, 'interrupted input', {
-      clientRequestId: 'req-unconfirmed',
-      turnId: 'turn-unconfirmed',
-      createdAt: '2026-06-01T00:00:00.000Z',
-    });
-    await pendingInputsService.register(SOURCE_CHAT_ID, 'failed input', {
-      clientRequestId: 'req-failed',
-      turnId: 'turn-failed',
-      createdAt: '2026-06-01T00:00:01.000Z',
-      deliveryStatus: 'failed',
-    });
-    await pendingInputsService.reconcileRetainedHistory(SOURCE_CHAT_ID);
-    expect(pendingInputsService.hasInFlightForChat(SOURCE_CHAT_ID)).toBe(true);
-    await pendingInputsService.settleNativeCohort(
-      pendingInputsService.captureCohort(SOURCE_CHAT_ID),
-    );
-
-    const { service, chats, agents } = makeService({
-      pendingInputsService,
-    });
-    const nextPath = path.join(projectBaseDir, 'repo-worktree');
-    await fs.mkdir(nextPath, { recursive: true });
-    const realNextPath = await fs.realpath(nextPath);
-
-    await expect(service.updateProjectPath({
-      chatId: SOURCE_CHAT_ID,
-      projectPath: nextPath,
-    })).resolves.toMatchObject({ projectPath: realNextPath });
-
-    expect(pendingInputsService.listForChat(SOURCE_CHAT_ID)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        clientRequestId: 'req-unconfirmed',
-        deliveryStatus: 'unconfirmed',
-      }),
-      expect.objectContaining({
-        clientRequestId: 'req-failed',
-        deliveryStatus: 'failed',
-      }),
-    ]));
-    expect(pendingInputsService.hasInFlightForChat(SOURCE_CHAT_ID)).toBe(false);
-    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
-    expect(chats.updateProjectPath).toHaveBeenCalledTimes(1);
-  });
-
   it('rejects project path updates during a real execution reservation', async () => {
-    const pendingInputsService = new PendingUserInputService({
-      settledInputRequests: mock(async () => new Set()),
-      nativelyBoundInputRequests: mock(async () => new Set()),
-    });
-    const queueService = makeRealQueue(pendingInputsService);
+    const queueService = makeRealQueue(makeInputProjection());
     const reservation = queueService.reserveDirectTurn(SOURCE_CHAT_ID, {
       clientRequestId: 'req-preparing',
       turnId: 'turn-preparing',
     });
     const { service, agents } = makeService({
       queueService,
-      pendingInputsService,
     });
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
@@ -5127,23 +4953,18 @@ describe('ChatCommandService', () => {
   });
 
   it('rejects project path updates while a real drain finalizes an empty queue', async () => {
-    const pendingInputsService = new PendingUserInputService({
-      settledInputRequests: mock(async () => new Set()),
-      nativelyBoundInputRequests: mock(async () => new Set()),
-    });
-    const queueService = makeRealQueue(pendingInputsService);
-    const entryRemoved = deferred();
-    const releaseFinalization = deferred();
-    const removeSentChat = queueService.removeSentChat.bind(queueService);
-    queueService.removeSentChat = mock(async (...args) => {
-      const queue = await removeSentChat(...args);
-      entryRemoved.resolve();
-      await releaseFinalization.promise;
-      return queue;
+    const turnStarted = deferred();
+    const releaseTurn = deferred();
+    let dispatchedTurn;
+    const queueService = makeRealQueue(makeInputProjection(), {
+      runAgentTurn: mock(async (_chatId, _content, options) => {
+        dispatchedTurn = options;
+        turnStarted.resolve();
+        await releaseTurn.promise;
+      }),
     });
     const { service, agents } = makeService({
       queueService,
-      pendingInputsService,
     });
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
@@ -5151,7 +4972,7 @@ describe('ChatCommandService', () => {
     const drain = queueService.triggerDrain(SOURCE_CHAT_ID);
 
     try {
-      await waitForCheckpoint(entryRemoved.promise, drain, 'queue drain');
+      await waitForCheckpoint(turnStarted.promise, drain, 'queue drain');
       expect((await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).entries).toEqual([]);
       expect(queueService.ownsExecution(SOURCE_CHAT_ID)).toBe(true);
 
@@ -5165,23 +4986,21 @@ describe('ChatCommandService', () => {
       });
       expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
     } finally {
-      releaseFinalization.resolve();
+      releaseTurn.resolve();
       await drain;
+      await queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, dispatchedTurn);
     }
   });
 
   it('rejects a path update crossing the reservation-to-runtime compaction handoff', async () => {
-    const pendingInputsService = new PendingUserInputService({
-      settledInputRequests: mock(async () => new Set()),
-      nativelyBoundInputRequests: mock(async () => new Set()),
-    });
+    const inputProjection = makeInputProjection();
     let runtimeRunning = false;
     let compactTurn;
     const compactStarted = deferred();
     const releaseCompact = deferred();
     const queueReadStarted = deferred();
     const releaseQueueRead = deferred();
-    const queueService = makeRealQueue(pendingInputsService, {
+    const queueService = makeRealQueue(inputProjection, {
       isChatRunning: mock(() => runtimeRunning),
     });
     const readChatExecutionControl = queueService.readChatExecutionControl.bind(queueService);
@@ -5197,7 +5016,6 @@ describe('ChatCommandService', () => {
     });
     const { service, agents } = makeService({
       queueService,
-      pendingInputsService,
       agents: {
         isAgentSessionRunning: mock(() => runtimeRunning),
         compactSession: mock(async (_chatId, options) => {

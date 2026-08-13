@@ -102,14 +102,6 @@ export function optionalNonEmptyString(
   return value;
 }
 
-export function optionalGenerationId(body: Record<string, unknown>): string | undefined {
-  const generationId = optionalString(body, 'generationId');
-  if (generationId !== undefined && generationId.length === 0) {
-    throw new CommandRequestValidationError('generationId must not be empty');
-  }
-  return generationId;
-}
-
 export function optionalNullableString(
   body: Record<string, unknown>,
   field: string,

@@ -36,6 +36,7 @@ export class AgentHandoffService {
     };
     readonly ownership: AgentOwnershipJournal;
     readonly ledger: TranscriptLedgerService;
+    readonly reopenProducer: (chatId: string) => void;
     readonly onCommitted?: (chatId: string) => void | Promise<void>;
   }) {}
 
@@ -193,6 +194,7 @@ export class AgentHandoffService {
       operation: 'agent-handoff',
       prepare: async (context) => {
         let decisionAttempted = false;
+        let producerClosed = false;
         try {
           this.#requireUnchangedSource(input.chatId, sourceFence);
           const existing = this.deps.ownership.findHandoff(
@@ -209,6 +211,7 @@ export class AgentHandoffService {
 
           context.assertAdmissionActive();
           this.deps.ledger.closeProducer(input.chatId);
+          producerClosed = true;
           const watermark = this.deps.ledger.highWatermark(input.chatId);
           const checkpoint = this.deps.ledger.checkpointForHandoff(input.chatId);
           if (checkpoint.viewId !== watermark.viewId || checkpoint.ordinal !== watermark.ordinal) {
@@ -242,6 +245,7 @@ export class AgentHandoffService {
             await this.#notifyCommitted(input.chatId);
             return;
           }
+          if (producerClosed) this.deps.reopenProducer(input.chatId);
           throw error;
         }
       },
@@ -270,6 +274,10 @@ export class AgentHandoffService {
     await retryHandoffStep(
       'registry recovery',
       () => this.deps.ownership.applyHandoffDecision(intent.operationId),
+    );
+    await retryHandoffStep(
+      'producer recovery',
+      () => this.deps.reopenProducer(intent.chatId),
     );
     await retryHandoffStep(
       'journal recovery',
@@ -310,7 +318,10 @@ function assertMatchingHandoff(intent: AgentHandoffIntent, submittedTargetHash: 
   );
 }
 
-async function retryHandoffStep<T>(label: string, operation: () => Promise<T>): Promise<T> {
+async function retryHandoffStep<T>(
+  label: string,
+  operation: () => T | Promise<T>,
+): Promise<T> {
   for (let attempts = 0; ; attempts += 1) {
     try {
       return await operation();

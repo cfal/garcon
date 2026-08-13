@@ -14,7 +14,7 @@ describe('TranscriptLedgerService', () => {
   it('commits producer events synchronously and notifies after publish returns', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
-      const lease = ledger.openProducer('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
       const notifications = [];
       ledger.subscribe((event) => notifications.push(event));
 
@@ -30,12 +30,95 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('rejects malformed producer rows before they reach SQLite', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+
+      expect(() => lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: { type: 'assistant-message', timestamp: '', content: 'invalid' } }],
+      })).toThrow('row timestamp must be a non-empty string');
+      expect(ledger.currentRows('chat-1')).toEqual([]);
+    });
+  });
+
+  it('repairs session execution state before publish returns', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      const sessions = [];
+      const notifications = [];
+      ledger.subscribeSessionCommitted((event) => sessions.push(event.row.detail.agentSessionId));
+      ledger.subscribe((event) => notifications.push(event));
+
+      lease.sink.publish({
+        type: 'session',
+        session: { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null },
+      });
+
+      expect(sessions).toEqual(['session-1']);
+      expect(notifications).toEqual([]);
+      await tick();
+      expect(notifications).toHaveLength(1);
+    });
+  });
+
+  it('rejects invalid session authority before committing it', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+
+      expect(() => lease.sink.publish({
+        type: 'session',
+        session: {
+          agentSessionId: 'session-1',
+          nativeSession: { ownerId: 'other', schemaVersion: 1, value: {} },
+          nativeSeedReceipt: null,
+        },
+      })).toThrow('Native session owner mismatch');
+      expect(() => lease.sink.publish({
+        type: 'session',
+        session: {
+          agentSessionId: 'session-1',
+          nativeSession: null,
+          nativeSeedReceipt: {
+            agentSessionId: 'session-2',
+            placement: 'user-prefix',
+            format: 'v3-xml',
+            codeUnitLength: 1,
+            sha256: 'a'.repeat(64),
+          },
+        },
+      })).toThrow('native seed receipt session mismatch');
+      expect(ledger.currentRows('chat-1')).toEqual([]);
+    });
+  });
+
+  it('reports a cache-listener failure without rejecting an accepted session', async () => {
+    const errors = [];
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      ledger.subscribeSessionCommitted(() => {
+        throw new Error('cache unavailable');
+      });
+
+      expect(() => lease.sink.publish({
+        type: 'session',
+        session: { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null },
+      })).not.toThrow();
+      expect(ledger.currentSession('chat-1')?.detail.agentSessionId).toBe('session-1');
+      expect(errors).toHaveLength(1);
+    }, { onListenerError: (error) => errors.push(error) });
+  });
+
   it('uses the sink object as the ownership fence', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
-      const old = ledger.openProducer('chat-1');
+      const old = ledger.openProducer('chat-1', 'test');
       old.close();
-      const current = ledger.openProducer('chat-1');
+      const current = ledger.openProducer('chat-1', 'test');
 
       expect(() => old.sink.publish({ type: 'rows', rows: [] }))
         .toThrow(TranscriptSinkClosedError);
@@ -51,7 +134,7 @@ describe('TranscriptLedgerService', () => {
   it('ignores stale terminals while retaining late content and session facts', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
-      const lease = ledger.openProducer('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
       ledger.beginRun('chat-1', 'run-1');
       expect(ledger.interruptRun('chat-1')?.outcome).toBe('interrupted');
       ledger.beginRun('chat-1', 'run-2');
@@ -79,7 +162,7 @@ describe('TranscriptLedgerService', () => {
   it('records a core failure once and ignores the later provider end', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
-      const lease = ledger.openProducer('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
       ledger.beginRun('chat-1', 'run-1');
 
       ledger.failRun('chat-1', 'run-1', { code: 'PROVIDER_FAILURE', message: 'launch failed' });
@@ -96,7 +179,7 @@ describe('TranscriptLedgerService', () => {
   it('keeps permission history durable while actionability follows the active run', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
-      const lease = ledger.openProducer('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
       ledger.beginRun('chat-1', 'run-1');
       lease.sink.publish({
         type: 'permission',
@@ -123,7 +206,7 @@ describe('TranscriptLedgerService', () => {
   it('commits late permission facts without making them actionable', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
-      const lease = ledger.openProducer('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
       ledger.beginRun('chat-1', 'run-1');
       ledger.interruptRun('chat-1');
 
@@ -145,7 +228,7 @@ describe('TranscriptLedgerService', () => {
   it('restores a claimed permission after a failed forward only while its run remains active', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
-      const lease = ledger.openProducer('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
       ledger.beginRun('chat-1', 'run-1');
       lease.sink.publish({
         type: 'permission',
@@ -174,7 +257,7 @@ describe('TranscriptLedgerService', () => {
         clientMessageId: 'message-1',
         steer: false,
       });
-      ledger.openProducer('chat-1');
+      ledger.openProducer('chat-1', 'test');
       ledger.beginRun('chat-1', 'run-1');
       ledger.interruptRun('chat-1');
       const second = ledger.appendInputAndCompose({
@@ -274,13 +357,7 @@ function permissionControl() {
   return {
     serverInstanceId: 'server-1',
     chatId: 'chat-1',
-    agentOwnershipEpoch: 'ownership-1',
-    turnOwner: {
-      agentOwnershipEpoch: 'ownership-1',
-      commandType: 'agent-run',
-      clientRequestId: 'run-1',
-      turnId: 'run-1',
-    },
+    runId: 'run-1',
     id: 'permission-1',
     incarnation: 'incarnation-1',
   };

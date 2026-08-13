@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import type { ChatStopOutcome } from '../../common/chat-types.js';
 import type { SteerDeliveryOutcome } from '../../common/chat-command-contracts.ts';
-import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -40,9 +39,6 @@ export interface CommandLedgerRecord {
     | 'available'
     | 'too-large'
     | 'retention-pressure'
-    | 'recovery'
-    | 'transcript-barrier'
-    | 'projection-reset'
     | 'expired';
   interruptionReason?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
@@ -235,14 +231,6 @@ export class CommandLedger {
       });
   }
 
-  async appendProjectionAssistantMessages(
-    chatId: string,
-    owner: AgentTurnReceiptOwner,
-    messages: readonly string[],
-  ): Promise<CommandLedgerRecord | null> {
-    return this.#appendAssistantMessages(this.#recordForOwner(chatId, owner), messages);
-  }
-
   async appendAssistantMessages(
     chatId: string,
     turnId: string,
@@ -284,41 +272,6 @@ export class CommandLedger {
         this.#resultMessages += appended.length;
       }
     }
-    record.updatedAt = new Date().toISOString();
-    return cloneRecord(record);
-  }
-
-  async finalizeProjectionOutput(
-    chatId: string,
-    owner: AgentTurnReceiptOwner,
-  ): Promise<CommandLedgerRecord | null> {
-    const record = this.#recordForOwner(chatId, owner);
-    return record ? cloneRecord(record) : null;
-  }
-
-  async markProjectionOutputUnavailable(
-    chatId: string,
-    owner: AgentTurnReceiptOwner,
-    reason: 'transcript-barrier' | 'projection-reset',
-  ): Promise<CommandLedgerRecord | null> {
-    return this.#markOutputUnavailable(this.#recordForOwner(chatId, owner), reason);
-  }
-
-  async markTurnOutputUnavailable(
-    chatId: string,
-    turnId: string,
-    reason: 'recovery',
-  ): Promise<CommandLedgerRecord | null> {
-    return this.#markOutputUnavailable(this.#recordForTurn(chatId, turnId), reason);
-  }
-
-  #markOutputUnavailable(
-    record: CommandLedgerRecord | undefined,
-    reason: 'recovery' | 'transcript-barrier' | 'projection-reset',
-  ): CommandLedgerRecord | null {
-    if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
-    this.#discardResult(record);
-    record.turnResultAvailability = reason;
     record.updatedAt = new Date().toISOString();
     return cloneRecord(record);
   }
@@ -627,16 +580,6 @@ export class CommandLedger {
   #recordForTurn(chatId: string, turnId: string): CommandLedgerRecord | undefined {
     const key = this.#turnOwnerIndex.get(turnIndexKey(chatId, turnId));
     return key ? this.#records.get(key) : undefined;
-  }
-
-  #recordForOwner(
-    chatId: string,
-    owner: AgentTurnReceiptOwner,
-  ): CommandLedgerRecord | undefined {
-    if (owner.agentOwnershipEpoch.length === 0) return undefined;
-    const key = commandLedgerKey(owner.commandType, chatId, owner.clientRequestId);
-    const record = this.#records.get(key);
-    return record?.turnId === owner.turnId ? record : undefined;
   }
 
   #indexTurn(record: CommandLedgerRecord): void {

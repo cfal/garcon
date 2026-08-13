@@ -32,10 +32,6 @@ export function expectStoppedTurnEventOrder(
   chatId: string,
   turnId: string,
 ): void {
-  const stopping = events.findIndex((event) =>
-    event.type === 'chat-processing-updated'
-    && event.chatId === chatId
-    && event.phase === 'stopping');
   const stopped = events.findIndex((event) =>
     event.type === 'chat-session-stopped'
     && event.chatId === chatId
@@ -46,8 +42,7 @@ export function expectStoppedTurnEventOrder(
     && event.chatId === chatId
     && event.phase === null);
 
-  expect(stopping).toBeGreaterThanOrEqual(0);
-  expect(stopped).toBeGreaterThan(stopping);
+  expect(stopped).toBeGreaterThanOrEqual(0);
   expect(idle).toBeGreaterThan(stopped);
   expect(events).not.toContainEqual(expect.objectContaining({
     type: 'agent-run-failed',
@@ -69,7 +64,6 @@ function expectVisibleResponseBeforeSettlement(input: {
   const assistantResponse = input.events.findIndex((event) =>
     event.type === 'chat-messages'
     && event.chatId === input.chatId
-    && event.turnId === input.turnId
     && event.messages.some((entry) =>
       entry.message.type === 'assistant-message'
       && (
@@ -143,7 +137,7 @@ export async function reloadUntilNativeAnswersAfter(
     await reloadFromNativeHistory(fixture, chatId);
     const page = await fixture.client.getMessages(chatId);
     const answered = page.messages.some((entry) =>
-      entry.seq > afterSeq && entry.message.type === 'assistant-message');
+      entry.ordinal > afterSeq && entry.message.type === 'assistant-message');
     if (answered) return page;
     if (Date.now() >= deadline) {
       throw new Error(`Native history for ${chatId} never answered past seq ${afterSeq}`);
@@ -167,7 +161,6 @@ export async function waitForVisibleResponse(input: {
   const assistantResponse = input.fixture.client.eventsSince(input.afterIndex).findIndex((event) =>
     event.type === 'chat-messages'
     && event.chatId === input.chatId
-    && event.turnId === input.turnId
     && event.messages.some((entry) =>
       entry.message.type === 'assistant-message'
       && (input.marker === undefined || entry.message.content.includes(input.marker))));

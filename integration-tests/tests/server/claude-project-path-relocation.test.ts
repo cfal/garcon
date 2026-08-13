@@ -15,6 +15,7 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 interface PersistedClaudeChat {
   projectPath: string;
@@ -64,7 +65,11 @@ describe('Claude project path relocation', () => {
           'agent-run-finished',
         );
 
-        const before = await readClaudeChat(fixture.dirs.workspace, chatId);
+        const before = await waitForPersistedNativeSession({
+          directories: fixture.dirs,
+          chatId,
+          agentId: 'claude',
+        }) as unknown as PersistedClaudeChat;
         const sourcePath = before.nativeSession.value.path;
         const sourceQueuePath = queuePath(sourcePath, before.agentSessionId);
         const sourceSupportPath = supportPath(sourcePath, before.agentSessionId);
@@ -126,7 +131,7 @@ describe('Claude project path relocation', () => {
         ]);
 
         await fixture.restartGarcon();
-        expect(await readClaudeChat(fixture.dirs.workspace, chatId)).toEqual(relocated);
+        expect(await readClaudeChat(fixture.dirs.workspace, chatId)).toMatchObject(relocated);
         const restored = await fixture.client.getMessages(chatId);
         expect(userContents(restored.messages)).toEqual(userContents(afterMove.messages));
         expect(assistantContents(restored.messages)).toEqual(assistantContents(afterMove.messages));

@@ -182,11 +182,6 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				deps.chatState.appendLocalNotice(noticeType, content),
 			appendServerNotice: (chatId, noticeType, content) =>
 				deps.chatState.appendServerNotice(chatId, noticeType, content),
-			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
-			clearPendingUserInput: (clientRequestId) =>
-				deps.chatState.clearPendingUserInput(clientRequestId),
-			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
-				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
 			removeChatTranscript: (chatId) => {
 				transcriptCache.remove(chatId);

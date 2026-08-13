@@ -74,8 +74,6 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
   if (snapshot.control.queue.pause !== null) {
     lines.push(`queue paused: ${snapshot.control.queue.pause.kind}`);
   }
-  lines.push(`pending inputs: ${snapshot.pendingUserInputs.length}`);
-
   if (snapshot.transcript.availability === 'unavailable') {
     lines.push(
       `transcript: unavailable (${snapshot.transcript.errorCode}, retryable: `

@@ -30,7 +30,6 @@ import type { ChatProcessingActivity } from '../chats/chat-processing-activity.j
 import type { TranscriptReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatExecutionQueries } from '../chat-execution/chat-execution-coordinator.js';
-import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
@@ -46,7 +45,6 @@ const logger = createLogger('ws:chat');
 type WS = import('bun').ServerWebSocket<unknown>;
 
 type QueueDep = Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
 type ChatViewsDep = {
   readReplay(
     chatId: string,
@@ -55,20 +53,19 @@ type ChatViewsDep = {
   ): Promise<TranscriptReplayResult>;
   resendCandidates(chatId: string): readonly import('../../common/chat-view.js').ResendCandidate[];
 };
-// Serves the manual reload as a fresh view over the authoritative projection.
-type ProjectionReload = (chatId: string) => Promise<import('../../common/chat-view.js').TranscriptPage>;
+// Serves the manual reload as a fresh view over the authoritative ledger.
+type TranscriptReload = (chatId: string) => Promise<import('../../common/chat-view.js').TranscriptPage>;
 
 type WsRequestHandler = (data: ClientWsMessage, writer: WebSocketWriter) => Promise<void> | void;
 type ChatIdRequest = { type: string; chatId?: string | null };
 
 interface ChatHandlerDeps {
   serverInstanceId: string;
-  processing: Pick<ChatProcessingActivity, 'snapshot'>;
+  processing: Pick<ChatProcessingActivity, 'phase' | 'snapshot'>;
   chatViews: ChatViewsDep;
-  projectionReload: ProjectionReload;
+  transcriptReload: TranscriptReload;
   queue: QueueDep;
-  pendingInputs: PendingInputsDep;
-  transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot' | 'rebaseGeneration'>;
+  transientFeeds: Pick<ChatTransientFeedStore, 'snapshot'>;
   registry: IChatRegistry;
 }
 
@@ -122,12 +119,11 @@ function reloadErrorCode(error: unknown): ClientRequestErrorCode {
 
 export class ChatHandler {
   #serverInstanceId: string;
-  #processing: Pick<ChatProcessingActivity, 'snapshot'>;
+  #processing: Pick<ChatProcessingActivity, 'phase' | 'snapshot'>;
   #chatViews: ChatViewsDep;
-  #projectionReload: ProjectionReload;
+  #transcriptReload: TranscriptReload;
   #queue: QueueDep;
-  #pendingInputs: PendingInputsDep;
-  #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot' | 'rebaseGeneration'>;
+  #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot'>;
   #registry: IChatRegistry;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
@@ -135,18 +131,16 @@ export class ChatHandler {
     serverInstanceId,
     processing,
     chatViews,
-    projectionReload,
+    transcriptReload,
     queue,
-    pendingInputs,
     transientFeeds,
     registry,
   }: ChatHandlerDeps) {
     this.#serverInstanceId = serverInstanceId;
     this.#processing = processing;
     this.#chatViews = chatViews;
-    this.#projectionReload = projectionReload;
+    this.#transcriptReload = transcriptReload;
     this.#queue = queue;
-    this.#pendingInputs = pendingInputs;
     this.#transientFeeds = transientFeeds;
     this.#registry = registry;
     this.#requestHandlers = this.#createRequestHandlers();
@@ -265,12 +259,12 @@ export class ChatHandler {
         replay.messages,
         replay.firstOrdinal,
         replay.lastOrdinal,
-        [...this.#chatViews.resendCandidates(chatId)],
-        this.#pendingInputs.listForTransport(chatId),
+        this.#processing.phase(chatId) === null
+          ? [...this.#chatViews.resendCandidates(chatId)]
+          : [],
         this.#transientFeeds.snapshot({
           chatId,
-          agentOwnershipEpoch: session.agentOwnershipEpoch,
-          generationId: replay.transcriptViewId,
+          transcriptViewId: replay.transcriptViewId,
         }),
       ));
     } catch (error: unknown) {
@@ -300,18 +294,7 @@ export class ChatHandler {
         });
         return;
       }
-      const previousFeed = this.#transientFeeds.currentSnapshot(chatId);
-      const reload = await this.#projectionReload(chatId);
-      // The reload replaced the browser generation; carry the transient rows
-      // into it so later subscribes see one matching snapshot.
-      if (previousFeed && previousFeed.generationId !== reload.transcriptViewId) {
-        this.#transientFeeds.rebaseGeneration({
-          chatId,
-          agentOwnershipEpoch: session.agentOwnershipEpoch,
-          previousGenerationId: previousFeed.generationId,
-          generationId: reload.transcriptViewId,
-        });
-      }
+      const reload = await this.#transcriptReload(chatId);
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,

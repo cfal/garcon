@@ -9,12 +9,10 @@ import {
 	type ExecutionControlInstanceDecision,
 } from './execution-control-instance-authority.js';
 import type {
-	ChatProjectionGenerationTransition,
 	ChatTransientFeedMutation,
 	ChatTransientFeedSnapshot,
 } from '$shared/chat-transient-feed';
 import {
-	applyProjectionGenerationTransition,
 	applyTransientFeedMutation,
 	applyTransientFeedSnapshot,
 	pendingPermissionsFromTransientFeed,
@@ -52,9 +50,6 @@ export interface ConversationUiPort {
 	getTransientFeed(chatId: string): ChatTransientFeedSnapshot | null;
 	setTransientFeedFromSnapshot(snapshot: ChatTransientFeedSnapshot): TransientFeedApplyResult;
 	applyTransientFeedMutation(mutation: ChatTransientFeedMutation): TransientFeedApplyResult;
-	applyProjectionGenerationTransition(
-		transition: ChatProjectionGenerationTransition,
-	): TransientFeedApplyResult;
 	removeTransientFeed(chatId: string): void;
 }
 
@@ -207,19 +202,6 @@ export class ConversationUiState implements ConversationUiPort {
 		return this.#installTransientResult(
 			mutation.chatId,
 			applyTransientFeedMutation(this.getTransientFeed(mutation.chatId), mutation),
-		);
-	}
-
-	applyProjectionGenerationTransition(
-		transition: ChatProjectionGenerationTransition,
-	): TransientFeedApplyResult {
-		if (!this.#acceptTransientInstance(transition.serverInstanceId)) return { kind: 'stale' };
-		return this.#installTransientResult(
-			transition.chatId,
-			applyProjectionGenerationTransition(
-				this.getTransientFeed(transition.chatId),
-				transition,
-			),
 		);
 	}
 

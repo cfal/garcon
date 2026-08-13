@@ -193,6 +193,9 @@ function parseSession(value: unknown): AgentEstablishedSession {
   if (session.nativeSeedReceipt !== null && !nativeSeedReceipt) {
     throw new TypeError('Stored native seed receipt is invalid');
   }
+  if (nativeSeedReceipt && nativeSeedReceipt.agentSessionId !== agentSessionId) {
+    throw new TypeError('Stored native seed receipt session mismatch');
+  }
   return { agentSessionId, nativeSession, nativeSeedReceipt };
 }
 

@@ -1,18 +1,19 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentCompactRequestV4,
   type AgentStartedSession,
-  type AgentExecutionContextV4,
-  type AgentGoalControlRequestV4,
+  type AgentGoalControlRequest,
   type AgentHost,
 } from '@garcon/server-agent-interface';
 import {
-  AgentProjectionProducerEventChannel,
-  projectionProducerMessages,
-  type AgentProjectionRuntimeExecution,
-} from '@garcon/server-agent-common/execution/projection-events';
-import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
+  AgentRuntimeEventChannel,
+  runtimeRows,
+  type AgentRuntimeExecution,
+  type AgentRuntimeExecutionContext,
+  type AgentRuntimeResumeRequest,
+  type AgentRuntimeStartRequest,
+} from '@garcon/server-agent-common/execution/runtime-events';
+import { AgentRunTracker } from '@garcon/server-agent-common/execution/run-tracker';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { CodexConfig } from '../../config.js';
@@ -33,9 +34,11 @@ interface CodexRuntimeConfiguration {
   readonly codexConfig?: CodexProviderConfig;
 }
 
-export class CodexExecution implements AgentProjectionRuntimeExecution {
-  readonly #events = new AgentProjectionProducerEventChannel();
-  readonly #operations = new AgentOperationTracker();
+type CodexGoalControlRuntimeRequest = Omit<AgentGoalControlRequest, 'sink'>;
+
+export class CodexExecution implements AgentRuntimeExecution {
+  readonly #events = new AgentRuntimeEventChannel();
+  readonly #runs = new AgentRunTracker();
 
   constructor(
     private readonly host: AgentHost,
@@ -44,39 +47,35 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
     private readonly config: CodexConfig,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({
+      this.#events.emit({
         type: 'messages',
         chatId,
-        messages: projectionProducerMessages('codex', messages),
-        operation,
+        rows: runtimeRows(messages),
+        runId: this.#runs.correlate(chatId, metadata),
       });
-    });
-    runtime.onProcessing((chatId, processing) => {
-      const operation = this.#operations.current(chatId);
-      if (operation) this.#events.emit({ type: 'processing', chatId, processing, operation });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({ type: 'finished', chatId, exitCode, operation });
-      this.#operations.finish(chatId, operation);
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
+      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
+      const runId = this.#runs.correlate(chatId, metadata);
+      if (!runId) return;
       this.#events.emit({
-        type: 'failed',
+        type: 'run-ended',
         chatId,
-        error: new AgentIntegrationError('PROVIDER_FAILURE', message, false),
-        operation,
+        runId,
+        outcome: 'failed',
+        error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#operations.finish(chatId, operation);
+      this.#runs.finish(chatId, runId);
     });
   }
 
-  async start(request: Parameters<AgentProjectionRuntimeExecution['start']>[0]) {
-    this.#operations.register(request.chatId, request.operation);
+  async start(request: AgentRuntimeStartRequest) {
+    this.#runs.register(request.chatId, request.runId);
     try {
       const configuration = await this.#runtimeConfiguration(request);
       const runtimeRequest = prepareStartRequest(request, configuration);
@@ -100,10 +99,9 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
           ),
         };
         this.#events.emit({
-          type: 'session-created',
+          type: 'session',
           chatId: request.chatId,
           session: holder.session,
-          operation: request.operation,
         });
         return holder.session;
       };
@@ -125,19 +123,19 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
           }
         : emitStarted(started);
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
 
-  async resume(request: Parameters<AgentProjectionRuntimeExecution['resume']>[0]): Promise<void> {
+  async resume(request: AgentRuntimeResumeRequest): Promise<void> {
     return this.#resume(request, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
   }
 
   async submitGoalControl(
-    request: AgentGoalControlRequestV4,
+    request: CodexGoalControlRuntimeRequest,
   ): Promise<boolean> {
-    const predecessor = this.#operations.current(request.chatId);
+    const predecessor = this.#runs.current(request.chatId);
     const runtimeRequest = prepareResumeRequest(
       request,
       await this.#runtimeConfiguration(request),
@@ -145,16 +143,16 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
     );
     return this.runtime.submitGoalControl(
       runtimeRequest,
-      (handoff) => request.beforeDelivery(this.#operations.handoff(
+      (handoff) => request.beforeDelivery(this.#runs.handoff(
         request.chatId,
         predecessor,
-        request.operation,
+        request.runId,
         handoff,
       )),
     );
   }
 
-  async compact(request: AgentCompactRequestV4): Promise<void> {
+  async compact(request: AgentRuntimeResumeRequest): Promise<void> {
     return this.#resume(request, (runtimeRequest) => this.runtime.compact(runtimeRequest));
   }
 
@@ -176,7 +174,7 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
 
   async applySessionConfiguration(
     agentSessionId: string,
-    configuration: Parameters<NonNullable<AgentProjectionRuntimeExecution['applySessionConfiguration']>>[1],
+    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
   ): Promise<void> {
     this.runtime.updateSessionSettings(agentSessionId, {
       permissionMode: configuration.permissionMode,
@@ -185,22 +183,22 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
 
   async respondToPermission(
     permissionRequestId: string,
-    decision: Parameters<NonNullable<AgentProjectionRuntimeExecution['respondToPermission']>>[1],
+    decision: Parameters<import('@garcon/server-agent-interface').AgentPermissionDecisions['respond']>[1],
   ): Promise<void> {
     await this.runtime.resolvePermission(permissionRequestId, decision);
   }
 
-  subscribeProjectionEvents(
-    listener: Parameters<AgentProjectionProducerEventChannel['subscribe']>[0],
+  subscribeRuntimeEvents(
+    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
   ): () => void {
     return this.#events.subscribe(listener);
   }
 
   async #resume(
-    request: Parameters<AgentProjectionRuntimeExecution['resume']>[0],
+    request: AgentRuntimeResumeRequest,
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,
   ): Promise<void> {
-    this.#operations.register(request.chatId, request.operation);
+    this.#runs.register(request.chatId, request.runId);
     try {
       await action(prepareResumeRequest(
         request,
@@ -208,13 +206,13 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
         this.nativeSessions,
       ));
     } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
+      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
 
   async #runtimeConfiguration(
-    request: AgentExecutionContextV4,
+    request: AgentRuntimeExecutionContext,
   ): Promise<CodexRuntimeConfiguration> {
     const endpoint = await resolveAgentEndpoint(
       this.host,
@@ -239,26 +237,26 @@ export class CodexExecution implements AgentProjectionRuntimeExecution {
   }
 }
 
-function executionFields(request: AgentExecutionContextV4) {
+function executionFields(
+  request: AgentRuntimeExecutionContext,
+) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
     model: request.model,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
-    clientRequestId: request.operation.clientRequestId ?? undefined,
-    clientMessageId: request.operation.clientMessageId ?? undefined,
-    turnId: request.operation.turnId,
+    clientRequestId: request.runId,
+    turnId: request.runId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
-    onAbortable: () => request.admission.markAbortable(),
   };
 }
 
 function prepareStartRequest(
-  request: Parameters<AgentProjectionRuntimeExecution['start']>[0],
+  request: AgentRuntimeStartRequest,
   configuration: CodexRuntimeConfiguration,
 ): CodexStartRequest {
   const goal = parseCodexGoalCommand(request.prompt);
@@ -281,7 +279,7 @@ function prepareStartRequest(
 }
 
 function prepareResumeRequest(
-  request: Parameters<AgentProjectionRuntimeExecution['resume']>[0],
+  request: AgentRuntimeResumeRequest,
   configuration: CodexRuntimeConfiguration,
   nativeSessions: PathNativeSessionCodec,
 ): CodexResumeRequest {

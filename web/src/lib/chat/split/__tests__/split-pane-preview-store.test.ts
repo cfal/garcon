@@ -32,7 +32,6 @@ function page(messages: TranscriptMessage[], transcriptViewId = 'generation-1') 
 		chatId: 'chat-1',
 		transcriptViewId,
 		messages,
-		pendingUserInputs: [],
 		resendCandidates: [],
 		lastOrdinal: messages.at(-1)?.ordinal ?? 0,
 		pageOldestOrdinal: messages[0]?.ordinal ?? 0,

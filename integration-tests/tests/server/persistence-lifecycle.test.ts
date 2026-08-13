@@ -51,7 +51,7 @@ describe('persistence lifecycle', () => {
       const restored = await fixture.client.getMessages(chatId);
       expect(userContents(restored.messages)).toEqual(userContents(before.messages));
       expect(assistantContents(restored.messages)).toEqual(assistantContents(before.messages));
-      expect(restored.messages.map((entry) => entry.seq)).toEqual(before.messages.map((entry) => entry.seq));
+      expect(restored.messages.map((entry) => entry.ordinal)).toEqual(before.messages.map((entry) => entry.ordinal));
       expect((await fixture.client.reconnectState([])).processing).toEqual({
         outcome: 'snapshot',
         chats: [],
@@ -79,7 +79,7 @@ describe('persistence lifecycle', () => {
     await withIntegrationFixture('ephemeral-queue-restart', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'ephemeral-active' });
-      const active = await fixture.client.startDirectChat({
+      await fixture.client.startDirectChat({
         chatId,
         content: 'ephemeral-active',
         projectPath: fixture.dirs.project,
@@ -105,15 +105,7 @@ describe('persistence lifecycle', () => {
       });
 
       const activeAborted = held.expectAbort();
-      await fixture.restartGarcon({
-        beforeStart: () => fixture.appendDirectOpenAiNativeMessage({
-          chatId,
-          role: 'assistant',
-          content: 'terminal persisted after disconnect',
-          clientRequestId: active.clientRequestId,
-          turnId: active.turnId,
-        }),
-      });
+      await fixture.restartGarcon();
       await activeAborted;
       held.releaseTruncatedStream();
 
@@ -153,12 +145,15 @@ describe('persistence lifecycle', () => {
         version: 0,
         updatedAt: null,
       });
-      const reloaded = await fixture.client.reloadChat(chatId);
-      expect(assistantContents(reloaded.messages)).toContain('terminal persisted after disconnect');
       const restored = await fixture.client.getMessages(chatId);
-      expect(restored.pendingUserInputs).toEqual([]);
+      expect(restored.resendCandidates).toEqual([
+        { ordinal: 1, content: 'ephemeral-active', attachmentNames: [] },
+      ]);
       expect(countUserContent(restored.messages, 'discard-on-restart')).toBe(0);
-      expect(assistantContents(restored.messages)).toContain('terminal persisted after disconnect');
+      expect(countUserContent(restored.messages, 'ephemeral-active')).toBe(1);
+      await expect(fixture.client.reloadChat(chatId)).rejects.toMatchObject({
+        response: { code: 'HISTORY_LOAD_FAILED' },
+      });
 
       const next = await fixture.client.runDirectChat({
         chatId,
@@ -166,7 +161,9 @@ describe('persistence lifecycle', () => {
         agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, next.turnId);
-      expect(fixture.fakeProviders.openAi.requests().at(-1)?.lastUserText).toBe('after-restart');
+      expect(fixture.fakeProviders.openAi.requests().at(-1)?.lastUserText).toBe(
+        'ephemeral-active\n\nafter-restart',
+      );
     });
   });
 
@@ -213,7 +210,7 @@ describe('persistence lifecycle', () => {
       const sourceBefore = await fixture.client.getMessages(sourceChatId);
       const firstAssistantSeq = sourceBefore.messages.find((entry) => (
         entry.message.type === 'assistant-message'
-      ))!.seq;
+      ))!.ordinal;
 
       const fullChatId = fixture.newChatId();
       const boundedChatId = fixture.newChatId();
@@ -221,7 +218,8 @@ describe('persistence lifecycle', () => {
       expect((await fixture.client.forkChat({
         sourceChatId,
         chatId: boundedChatId,
-        upToSeq: firstAssistantSeq,
+        transcriptViewId: sourceBefore.transcriptViewId,
+        upToOrdinal: firstAssistantSeq,
       })).chat.id).toBe(boundedChatId);
 
       const fullRun = await fixture.client.runDirectChat({
@@ -265,7 +263,7 @@ describe('persistence lifecycle', () => {
 
 function conversationOf(messages: readonly TranscriptMessage[]) {
   return messages.map((entry) => ({
-    seq: entry.seq,
+    seq: entry.ordinal,
     type: entry.message.type,
     content: 'content' in entry.message ? entry.message.content : null,
   }));

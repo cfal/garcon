@@ -4,11 +4,10 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
-import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('Codex history modes', () => {
-  test('rejects a paginated full fork without creating a JSONL fallback target', async () => {
+  test('falls back to a frozen point fork when paginated native history cannot fork', async () => {
     const sourceChatId = String(Date.now() * 1_000 + 1);
     const sourceAgentSessionId = randomUUID();
     let sourceNativePath = '';
@@ -37,50 +36,35 @@ describe('Codex history modes', () => {
       ]);
       const sourceBefore = await readFile(sourceNativePath, 'utf8');
       const targetChatId = fixture.newChatId();
-      let failure: unknown;
-      try {
-        await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });
-      } catch (error) {
-        failure = error;
-      }
-
-      expect(failure).toBeInstanceOf(GarconApiError);
-      expect(failure).toMatchObject({
-        status: 422,
-        body: {
-          success: false,
-          errorCode: 'OPERATION_UNSUPPORTED',
-          retryable: false,
-        },
-      });
+      const wholeFork = await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });
+      expect(wholeFork.chat.id).toBe(targetChatId);
+      expect((await fixture.client.getMessages(targetChatId)).messages.map((entry) => (
+        entry.message.type === 'user-message' || entry.message.type === 'assistant-message'
+          ? entry.message.content
+          : entry.message.type
+      ))).toEqual(['paginated prompt', 'paginated answer']);
 
       const pointTargetChatId = fixture.newChatId();
-      let pointFailure: unknown;
-      try {
-        await fixture.client.forkChat({
-          sourceChatId,
-          chatId: pointTargetChatId,
-          upToSeq: 1,
-        });
-      } catch (error) {
-        pointFailure = error;
-      }
-      expect(pointFailure).toMatchObject({
-        status: 422,
-        body: {
-          success: false,
-          errorCode: 'OPERATION_UNSUPPORTED',
-          retryable: false,
-        },
+      const pointFork = await fixture.client.forkChat({
+        sourceChatId,
+        chatId: pointTargetChatId,
+        transcriptViewId: messages.transcriptViewId,
+        upToOrdinal: messages.messages[0]!.ordinal,
       });
+      expect(pointFork.chat.id).toBe(pointTargetChatId);
+      expect((await fixture.client.getMessages(pointTargetChatId)).messages.map((entry) => (
+        entry.message.type === 'user-message' || entry.message.type === 'assistant-message'
+          ? entry.message.content
+          : entry.message.type
+      ))).toEqual(['paginated prompt']);
       expect(await readFile(sourceNativePath, 'utf8')).toBe(sourceBefore);
 
       const registry = JSON.parse(
         await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
       ) as { sessions: Record<string, { nextForkOrdinal?: number }> };
-      expect(registry.sessions[targetChatId]).toBeUndefined();
-      expect(registry.sessions[pointTargetChatId]).toBeUndefined();
-      expect(registry.sessions[sourceChatId]?.nextForkOrdinal).toBe(1);
+      expect(registry.sessions[targetChatId]).toBeDefined();
+      expect(registry.sessions[pointTargetChatId]).toBeDefined();
+      expect(registry.sessions[sourceChatId]?.nextForkOrdinal).toBe(3);
       const sessionDirectory = dirname(sourceNativePath);
       const sessionFiles = (await readdir(sessionDirectory)).filter((name) => name.endsWith('.jsonl'));
       expect(sessionFiles).toEqual([sourceNativePath.split('/').at(-1)!]);

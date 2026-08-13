@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { isAbortAcknowledged, type ChatStopOutcome } from '../../common/chat-types.ts';
 import type { RunAgentTurnOptions } from '../agents/session-types.ts';
 import type { StoredQueueEntry } from './control-state.ts';
 import { createLogger } from '../lib/log.ts';
@@ -19,8 +18,7 @@ export interface QueueDispatchCallbacks {
   registerQueued(chatId: string, content: string, options: RunAgentTurnOptions): boolean;
   publishIdle(chatId: string): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
-  settleAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
-  stopBarrier(chatId: string): Promise<ChatStopOutcome> | null;
+  retireAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
 }
 
 export interface QueueDispatchDeps {
@@ -58,7 +56,6 @@ export class QueueDrainer {
       || ownership.hasSuppression(chatId, 'deletion')
       || ownership.hasSuppression(chatId, 'manual-stop')
       || ownership.hasDirect(chatId)
-      || ownership.stop(chatId) !== undefined
       || turnRunner.isChatRunning(chatId);
   }
 
@@ -88,15 +85,12 @@ export class QueueDrainer {
 
       const turn = executionTurnIdentity(options)!;
       const attempt = new QueueExecutionAttempt(turn, result.entry.id);
-      attempt.markRegistered();
       ownership.installAttempt(chatId, attempt);
       ownership.beginFinalization(chatId, turn.turnId!).settle('committed');
       ownership.setActiveDrainEntry(chatId, result.entry.id);
 
       if (callbacks.isShuttingDown()) {
-        attempt.markRunSettled();
-        attempt.markTerminalObserved();
-        callbacks.settleAttempt(chatId, attempt);
+        callbacks.retireAttempt(chatId, attempt);
         return;
       }
 
@@ -112,61 +106,41 @@ export class QueueDrainer {
     options: RunAgentTurnOptions,
     attempt: QueueExecutionAttempt,
   ): Promise<boolean> {
-    try {
-      await this.#runProvider(chatId, entry, options, attempt);
-      return true;
-    } catch (error) {
-      if (attempt.isExpectedAbort) {
-        attempt.clearExpectedAbort();
-        const stop = this.deps.callbacks.stopBarrier(chatId);
-        const outcome = stop ? await stop.catch((): ChatStopOutcome => 'failed') : 'failed';
-        if (isAbortAcknowledged(outcome)) return true;
-      }
+    const result = await this.#runProvider(chatId, entry, options, attempt);
+    if (result.kind !== 'failed') return true;
 
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error('queue: queued turn failed:', { chatId, entryId: entry.id, message });
-      await this.deps.controls.pauseAfterDispatchFailure(chatId, entry.id);
-      this.deps.callbacks.publishTurnFailed(chatId, message, options);
-      return false;
-    } finally {
-      if (!attempt.isRunSettled) {
-        attempt.markRunSettled();
-        if (!this.deps.turnRunner.isChatRunning(chatId)) attempt.markTerminalObserved();
-        this.deps.callbacks.settleAttempt(chatId, attempt);
-      }
-    }
+    const message = result.error instanceof Error ? result.error.message : String(result.error);
+    logger.error('queue: queued turn failed:', { chatId, entryId: entry.id, message });
+    await this.deps.controls.pauseAfterDispatchFailure(chatId, entry.id);
+    this.deps.callbacks.publishTurnFailed(chatId, message, options);
+    if (!attempt.isSettled) this.deps.callbacks.retireAttempt(chatId, attempt);
+    return false;
   }
 
-  async #runProvider(
+  #runProvider(
     chatId: string,
     entry: StoredQueueEntry,
     options: RunAgentTurnOptions,
     attempt: QueueExecutionAttempt,
-  ): Promise<void> {
-    const abortableWaitController = new AbortController();
-    let completed = false;
-    const abortable = this.deps.turnRunner.waitUntilTurnAbortable(
-      chatId,
-      attempt.identity(),
-      abortableWaitController.signal,
-    ).then(
-      (isAbortable) => {
-        if (isAbortable) attempt.markAbortable();
-        return isAbortable;
-      },
-      () => false,
-    );
+  ): Promise<ProviderDispatchResult> {
+    let run: Promise<void>;
     try {
-      const run = this.deps.turnRunner.runAgentTurn(chatId, entry.content, options);
-      void Promise.race([abortable, run.then(() => false, () => false)])
-        .finally(() => abortableWaitController.abort());
-      await run;
-      completed = true;
-    } finally {
-      abortableWaitController.abort();
-      attempt.markRunSettled();
-      if (!completed) attempt.markTerminalObserved();
-      this.deps.callbacks.settleAttempt(chatId, attempt);
+      run = this.deps.turnRunner.runAgentTurn(chatId, entry.content, options);
+    } catch (error) {
+      return Promise.resolve({ kind: 'failed', error });
     }
+    const completion: Promise<ProviderDispatchResult> = run.then(
+      () => ({ kind: 'completed' }),
+      (error) => ({ kind: 'failed', error }),
+    );
+    return Promise.race([
+      completion,
+      attempt.waitUntilSettled().then((): ProviderDispatchResult => ({ kind: 'retired' })),
+    ]);
   }
 }
+
+type ProviderDispatchResult =
+  | { readonly kind: 'completed' }
+  | { readonly kind: 'retired' }
+  | { readonly kind: 'failed'; readonly error: unknown };

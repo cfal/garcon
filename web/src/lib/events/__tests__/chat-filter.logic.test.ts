@@ -131,44 +131,6 @@ describe('filterByChat', () => {
 		expect(result).toEqual({ action: 'process' });
 	});
 
-	it('processes pending input updates by nested input chat ID', () => {
-		const result = filterByChat(
-			'pending-user-input-updated',
-			{
-				type: 'pending-user-input-updated',
-				input: {
-					chatId: 'chat-a',
-					clientRequestId: 'req-1',
-					clientMessageId: 'message-1',
-					content: 'hello',
-					createdAt: '2026-06-14T00:00:00.000Z',
-					deliveryStatus: 'submitting',
-				},
-			} as never,
-			ctx,
-		);
-		expect(result).toEqual({ action: 'process' });
-	});
-
-	it('skips pending input updates for non-active nested input chat IDs', () => {
-		const result = filterByChat(
-			'pending-user-input-updated',
-			{
-				type: 'pending-user-input-updated',
-				input: {
-					chatId: 'chat-b',
-					clientRequestId: 'req-1',
-					clientMessageId: 'message-1',
-					content: 'hello',
-					createdAt: '2026-06-14T00:00:00.000Z',
-					deliveryStatus: 'submitting',
-				},
-			} as never,
-			ctx,
-		);
-		expect(result).toEqual({ action: 'skip' });
-	});
-
 	it('skips scoped events with no chatId and no pending view', () => {
 		const result = filterByChat('chat-messages', { type: 'chat-messages' } as never, ctx);
 		expect(result).toEqual({ action: 'skip' });

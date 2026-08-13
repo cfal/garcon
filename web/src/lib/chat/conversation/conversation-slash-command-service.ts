@@ -687,14 +687,14 @@ export class ConversationSlashCommandService {
 		}
 	}
 
-	async forkChat(sourceChatId: string, upToSeq?: number): Promise<void> {
+	async forkChat(sourceChatId: string, upToOrdinal?: number): Promise<void> {
 		const sourceChat = this.deps.sessions.byId[sourceChatId];
 		if (!sourceChat || sourceChat.status === 'draft') {
 			this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
 			return;
 		}
 		try {
-			await this.#performForkOnly(sourceChatId, upToSeq);
+			await this.#performForkOnly(sourceChatId, upToOrdinal);
 		} catch (error) {
 			this.deps.chatState.appendLocalNotice(
 				'error',
@@ -703,16 +703,16 @@ export class ConversationSlashCommandService {
 		}
 	}
 
-	async #performForkOnly(sourceChatId: string, upToSeq?: number): Promise<void> {
+	async #performForkOnly(sourceChatId: string, upToOrdinal?: number): Promise<void> {
 		const chatId = createClientChatId();
-		const selection = upToSeq === undefined
+		const selection = upToOrdinal === undefined
 			? null
 			: selectForkAtMessage(
 				this.deps.chatState.entries,
 				this.deps.chatState.getCursor().transcriptViewId,
-				upToSeq,
+				upToOrdinal,
 			);
-		if (upToSeq !== undefined && !selection) {
+		if (upToOrdinal !== undefined && !selection) {
 			throw new Error(m.chat_notice_fork_message_no_longer_available());
 		}
 		let result: Awaited<ReturnType<typeof forkChat>>;
@@ -782,11 +782,11 @@ export class ConversationSlashCommandService {
 }
 
 function forkPointParams(selection: ForkAtMessageSelection): {
-	upToSeq: number;
+	upToOrdinal: number;
 	transcriptViewId: string;
 } {
 	return {
-		upToSeq: selection.ordinal,
+		upToOrdinal: selection.ordinal,
 		transcriptViewId: selection.transcriptViewId,
 	};
 }

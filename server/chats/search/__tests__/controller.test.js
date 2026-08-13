@@ -79,6 +79,12 @@ async function settle() {
   await Bun.sleep(0);
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe('TranscriptSearchController', () => {
   it('indexes each current ledger view when enabled', async () => {
     const test = harness();
@@ -137,6 +143,39 @@ describe('TranscriptSearchController', () => {
       chatId: 'chat-1',
       transcriptViewId: 'view-2',
     }));
+  });
+
+  it('orders replacement after every already-queued old-view append', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    const append = deferred();
+    const order = [];
+    test.service.appendRows.mockImplementation(async () => {
+      order.push('append-start');
+      await append.promise;
+      order.push('append-end');
+    });
+    test.service.replaceChat.mockImplementation(async () => {
+      order.push('replace');
+    });
+    test.service.replaceChat.mockClear();
+    const oldRow = providerRow('view-1', 3, 'old tail');
+
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [oldRow] });
+    await settle();
+    test.views.set('chat-1', { viewId: 'view-2', contentStartOrdinal: 1 });
+    test.rows.set('chat-1', [userRow('view-2', 1, 'reloaded')]);
+    test.listener()({
+      type: 'view-replaced',
+      chatId: 'chat-1',
+      previousViewId: 'view-1',
+      view: test.views.get('chat-1'),
+    });
+
+    expect(order).toEqual(['append-start']);
+    append.resolve();
+    await settle();
+    expect(order).toEqual(['append-start', 'append-end', 'replace']);
   });
 
   it('qualifies searches by each current transcript view', async () => {

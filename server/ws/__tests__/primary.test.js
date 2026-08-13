@@ -29,6 +29,41 @@ function createFixture() {
   };
 }
 
+function chatHandlerDeps() {
+  return {
+    serverInstanceId: 'server-instance-test',
+    processing: { phase: () => null, snapshot: () => [] },
+    chatViews: {
+      readReplay: () => Promise.resolve({
+        transcriptViewId: 'view-1',
+        messages: [],
+        firstOrdinal: 1,
+        lastOrdinal: 0,
+      }),
+      resendCandidates: () => [],
+    },
+    transcriptReload: () => Promise.resolve({
+      transcriptViewId: 'view-1',
+      messages: [],
+      lastOrdinal: 0,
+      pageOldestOrdinal: 0,
+      pageNewestOrdinal: 0,
+      hasMore: false,
+    }),
+    queue: { readChatExecutionControl: async () => ({}) },
+    transientFeeds: {
+      snapshot: (chatId, transcriptViewId) => ({
+        serverInstanceId: 'server-instance-test',
+        chatId,
+        transcriptViewId,
+        transientRevision: 0,
+        rows: [],
+      }),
+    },
+    registry: { getChat: () => null },
+  };
+}
+
 describe('PrimaryWsHandler', () => {
   it('opens chat before terminal and drains terminal output', () => {
     const { calls, primary, socket } = createFixture();
@@ -111,15 +146,7 @@ describe('PrimaryWsHandler', () => {
       detachPeer: mock(() => undefined),
       detachTerminal: mock(() => undefined),
     };
-    const chat = new ChatHandler({
-      serverInstanceId: 'server-instance-test',
-      processing: { snapshot: () => [] },
-      chatViews: { readReplay: () => ({}) },
-      nativeReloader: { reloadFromNative: async () => ({}) },
-      queue: { readChatExecutionControl: async () => ({}) },
-      pendingInputs: { listForTransport: () => [] },
-      registry: { getChat: () => null },
-    });
+    const chat = new ChatHandler(chatHandlerDeps());
     const primary = new PrimaryWsHandler(
       chat,
       new TerminalStreamHandler(terminalManager, () => 1_000),
@@ -185,15 +212,7 @@ describe('PrimaryWsHandler', () => {
       detachPeer: mock(() => undefined),
       detachTerminal: mock(() => undefined),
     };
-    const chat = new ChatHandler({
-      serverInstanceId: 'server-instance-test',
-      processing: { snapshot: () => [] },
-      chatViews: { readReplay: () => ({}) },
-      nativeReloader: { reloadFromNative: async () => ({}) },
-      queue: { readChatExecutionControl: async () => ({}) },
-      pendingInputs: { listForTransport: () => [] },
-      registry: { getChat: () => null },
-    });
+    const chat = new ChatHandler(chatHandlerDeps());
     const primary = new PrimaryWsHandler(
       chat,
       new TerminalStreamHandler(terminalManager),

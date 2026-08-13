@@ -25,8 +25,6 @@ type MetadataSource = 'live' | 'agent-preview' | 'startup';
 export interface ChatMetadataIdentity {
   carryOverRevision: string;
   agentOwnershipEpoch: string;
-  contentEpoch: string | null;
-  durableRevision: string | null;
 }
 
 export interface ChatMetadata {
@@ -55,8 +53,6 @@ interface MetadataIndexOptions {
 interface MetadataAgentSource {
   getPreview(session: ChatRegistryEntry, chatId: string): Promise<{
     preview: unknown;
-    contentEpoch: string | null;
-    durableRevision: string | null;
   } | null>;
 }
 
@@ -146,13 +142,10 @@ export class MetadataIndex {
     this.#scheduleSave();
   }
 
-  // Recomputes the cached preview after a destructive projection reset. The
-  // reset snapshot is the full composite transcript, so preview text reflects
-  // exactly the surviving ledger rows under the new content identity.
-  rebuildFromProjectionReset(
+  // Recomputes the cached preview from the complete replacement view.
+  replaceFromTranscriptView(
     chatId: string,
     messages: readonly ChatMessage[],
-    identity: ChatMetadataIdentity,
   ): void {
     const key = String(chatId);
     const current = this.#metadataByChatId.get(key);
@@ -167,7 +160,7 @@ export class MetadataIndex {
       lastMessage,
       firstMessage,
       source: 'live',
-      identity,
+      ...(current?.identity ? { identity: current.identity } : {}),
     });
     this.#scheduleSave();
   }
@@ -222,9 +215,8 @@ export class MetadataIndex {
     }
   }
 
-  // Detects staleness using only identity already mirrored in the registry.
-  // The durable revision is not mirrored, so it is validated by live events
-  // rather than by opportunistically opening every projection at startup.
+  // Detects ownership and carryover changes without opening every ledger at startup.
+  // Live transcript events keep view and ordinal identity current.
   #isCheaplyStale(entry: ChatMetadata, session: ChatRegistryEntry): boolean {
     const identity = entry.identity;
     if (!identity) return false;
@@ -234,9 +226,7 @@ export class MetadataIndex {
       session.carryOverMigrationQuarantine,
     );
     if (identity.carryOverRevision !== carryOverRevision) return true;
-    return typeof session.transcriptContentEpoch === 'string'
-      && identity.contentEpoch !== null
-      && identity.contentEpoch !== session.transcriptContentEpoch;
+    return false;
   }
 
   async #buildMetadataFromPreviewWithTimeout(
@@ -287,8 +277,6 @@ export class MetadataIndex {
       identity: {
         carryOverRevision: this.#carryOver.revision(refs, session.carryOverMigrationQuarantine),
         agentOwnershipEpoch: session.agentOwnershipEpoch,
-        contentEpoch: result?.contentEpoch ?? null,
-        durableRevision: result?.durableRevision ?? null,
       },
     };
   }
@@ -358,8 +346,6 @@ function normalizePersistedIdentity(value: unknown): ChatMetadataIdentity | unde
   return {
     carryOverRevision: value.carryOverRevision,
     agentOwnershipEpoch: value.agentOwnershipEpoch,
-    contentEpoch: typeof value.contentEpoch === 'string' ? value.contentEpoch : null,
-    durableRevision: typeof value.durableRevision === 'string' ? value.durableRevision : null,
   };
 }
 

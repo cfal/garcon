@@ -7,18 +7,15 @@ import {
 	type TranscriptMessage,
 	type TranscriptPage,
 } from '$shared/chat-view';
-import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '$shared/chat-types';
-import type { PendingUserInput } from '$shared/pending-user-input';
+import type { ChatMessage } from '$shared/chat-types';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { TranscriptNoticeFeed } from './transcript-notice-feed.svelte.js';
-import { TranscriptPendingInputs } from './transcript-pending-inputs.svelte.js';
+import { TranscriptOptimisticInputs } from './transcript-optimistic-inputs.svelte.js';
+import type { OptimisticUserInput } from './optimistic-user-input.js';
 import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
-import {
-	responseMessageType,
-	type ConversationFeedMutationKind,
-} from './conversation-feed-mutations.js';
+import type { ConversationFeedMutationKind } from './conversation-feed-mutations.js';
 import type {
 	ActiveTranscriptPort,
 	ChatCursor,
@@ -38,10 +35,12 @@ import {
 } from './transcript-page-progress.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import {
-	applyPendingDeliveryStatuses,
-	mergeRowsWithPendingInputs,
-	normalizePendingInputs,
-	uniqueEntriesByClientRequestId,
+	echoedClientMessageIds,
+	messagesFromDisplayRows,
+	responseMessageTypesAfter,
+	transcriptDisplayRows,
+	visibleTranscriptRows,
+	type ChatDisplayRow,
 	type ChatTranscriptRow,
 } from './transcript-row-projection.js';
 export type {
@@ -50,7 +49,7 @@ export type {
 	ChatLoadMessagesOptions,
 	ChatRestoreResult,
 } from './active-transcript-port.js';
-export type { ChatTranscriptRow } from './transcript-row-projection.js';
+export type { ChatDisplayRow, ChatTranscriptRow } from './transcript-row-projection.js';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
@@ -65,8 +64,6 @@ export type MessageApplyResult = 'applied' | 'view-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
-
-export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
 
 export class ActiveTranscriptState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
@@ -95,7 +92,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#snapshotBuffer: SnapshotBatch[] | null = null;
 	#loadEpoch = 0;
 	#notices = new TranscriptNoticeFeed();
-	#pendingInputs = new TranscriptPendingInputs(() => {
+	#optimisticInputs = new TranscriptOptimisticInputs(() => {
 		this.#growExpandedVisibleWindow();
 		this.#recordFeedMutation('presentation-structure');
 	});
@@ -115,8 +112,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return this.#notices.rows;
 	}
 
-	get pendingUserInputs(): PendingUserInput[] {
-		return this.#pendingInputs.rows;
+	get optimisticUserInputs(): OptimisticUserInput[] {
+		return this.#optimisticInputs.rows;
 	}
 
 	get resendCandidates(): readonly ResendCandidate[] {
@@ -151,80 +148,29 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#excludedResendOrdinals = [];
 	}
 
-	#renderEntries = $derived.by(() =>
-		applyPendingDeliveryStatuses(
-			uniqueEntriesByClientRequestId(this.entries),
-			this.pendingUserInputs,
-		),
-	);
-
-	#echoedClientRequestIds = $derived.by(() => {
-		const ids = new Set<string>();
-		for (const entry of this.#renderEntries) {
-			const message = entry.message;
-			if (message instanceof UserMessage && message.metadata?.clientRequestId) {
-				ids.add(message.metadata.clientRequestId);
-			}
-		}
-		return ids;
-	});
+	#echoedClientMessageIds = $derived(echoedClientMessageIds(this.entries));
 
 	#displayLocalNotices = $derived(
 		displayLocalNotices(this.hasLaterMessages, this.historyState, this.localNotices),
 	);
 
-	#displayRows = $derived.by(() => {
-		const durableRows = this.#renderEntries.map((entry) => ({
-			kind: 'message' as const,
-			id: `${this.transcriptViewId}:${entry.ordinal}`,
-			ordinal: entry.ordinal,
-			message: entry.message,
-		}));
-		const merged =
-			this.visiblePendingInputs.length === 0
-				? durableRows
-				: mergeRowsWithPendingInputs(durableRows, this.visiblePendingInputs);
-		if (this.#displayLocalNotices.length === 0) return merged;
-		return [...merged, ...this.#displayLocalNotices];
-	});
+	#displayRows = $derived(transcriptDisplayRows({
+		entries: this.entries,
+		transcriptViewId: this.transcriptViewId,
+		optimisticInputs: this.visibleOptimisticInputs,
+		notices: this.#displayLocalNotices,
+	}));
 
-	#displayMessages = $derived.by(() =>
-		this.#displayRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
-	);
-
-	#displayMessageCount = $derived.by(
-		() =>
-			this.#renderEntries.length +
-			this.visiblePendingInputs.length +
-			this.#displayLocalNotices.length,
-	);
-
-	#visibleRows = $derived.by(() => {
-		const noticeCount = Math.min(this.#displayLocalNotices.length, this.visibleMessageCount);
-		const visibleNotices = this.#displayLocalNotices.slice(-noticeCount);
-		const messageLimit = this.visibleMessageCount - noticeCount;
-		if (messageLimit === 0) return visibleNotices;
-
-		const durableRows = this.#renderEntries.slice(-messageLimit).map((entry) => ({
-			kind: 'message' as const,
-			id: `${this.transcriptViewId}:${entry.ordinal}`,
-			ordinal: entry.ordinal,
-			message: entry.message,
-		}));
-		const pendingInputs = this.visiblePendingInputs;
-		const messageRows =
-			pendingInputs.length === 0
-				? durableRows
-				: mergeRowsWithPendingInputs(durableRows, pendingInputs).slice(-messageLimit);
-		return [...messageRows, ...visibleNotices];
-	});
-
-	#visibleMessages = $derived.by(() =>
-		this.#visibleRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
-	);
+	#visibleRows = $derived(visibleTranscriptRows({
+		entries: this.entries,
+		transcriptViewId: this.transcriptViewId,
+		optimisticInputs: this.visibleOptimisticInputs,
+		notices: this.#displayLocalNotices,
+		visibleCount: this.visibleMessageCount,
+	}));
 
 	get chatMessages(): ChatMessage[] {
-		return this.#renderEntries.map((entry) => entry.message);
+		return this.entries.map((entry) => entry.message);
 	}
 
 	get feedMutationClock() {
@@ -232,7 +178,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get displayMessages(): ChatMessage[] {
-		return this.#displayMessages;
+		return messagesFromDisplayRows(this.#displayRows);
 	}
 
 	get displayRows(): readonly ChatDisplayRow[] {
@@ -244,11 +190,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get displayMessageCount(): number {
-		return this.#displayMessageCount;
+		return this.entries.length + this.visibleOptimisticInputs.length + this.#displayLocalNotices.length;
 	}
 
 	get visibleMessages(): ChatMessage[] {
-		return this.#visibleMessages;
+		return messagesFromDisplayRows(this.#visibleRows);
 	}
 
 	get newestLoadedOrdinal(): number {
@@ -280,10 +226,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return this.hasLaterMessages;
 	}
 
-	get visiblePendingInputs(): PendingUserInput[] {
+	get visibleOptimisticInputs(): OptimisticUserInput[] {
 		if (this.hasLaterMessages) return [];
-		return this.pendingUserInputs.filter(
-			(input) => !this.#echoedClientRequestIds.has(input.clientRequestId),
+		return this.optimisticUserInputs.filter(
+			(input) => !this.#echoedClientMessageIds.has(input.clientMessageId),
 		);
 	}
 
@@ -305,6 +251,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'gap-detected';
 		}
 		const previousLastOrdinal = this.lastOrdinal;
+		this.#optimisticInputs.clearMany(echoedClientMessageIds(messages));
 		const append = { firstOrdinal, lastOrdinal, messages };
 		if (this.#snapshotBuffer) {
 			this.transcriptCache.applyMessages(chatId, transcriptViewId, append);
@@ -337,11 +284,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			);
 			return 'gap-detected';
 		}
-		const responseMessageTypes = messages.flatMap((entry) => {
-			if (entry.ordinal <= previousLastOrdinal) return [];
-			const type = responseMessageType(entry.message);
-			return type ? [type] : [];
-		});
+		const responseMessageTypes = responseMessageTypesAfter(messages, previousLastOrdinal);
 		const cursorAdvanced = result.lastOrdinal > previousLastOrdinal;
 		if (this.hasLaterMessages) {
 			this.transcriptViewId = transcriptViewId;
@@ -454,7 +397,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		messages: TranscriptMessage[],
 		options: Pick<TranscriptPage, 'lastOrdinal' | 'pageOldestOrdinal' | 'hasMore'> & {
 			pageNewestOrdinal?: number;
-			pendingUserInputs?: PendingUserInput[];
 			resendCandidates?: ResendCandidate[];
 		},
 	): void {
@@ -483,7 +425,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasEarlierMessages = options.hasMore || retainedMessages.length < messages.length;
 		this.hasLaterMessages = false;
 		this.totalMessages = retainedMessages.length;
-		this.#pendingInputs.replace(options.pendingUserInputs ?? []);
+		this.#optimisticInputs.clearAll();
 		this.setResendCandidates(options.resendCandidates ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.#notices.reset();
@@ -502,7 +444,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			pageOldestOrdinal: number;
 			pageNewestOrdinal: number;
 			hasMore: boolean;
-			pendingUserInputs: PendingUserInput[];
 			resendCandidates?: ResendCandidate[];
 		},
 		epoch: number,
@@ -537,9 +478,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasEarlierMessages = page.hasMore || retainedMessages.length < page.messages.length;
 		this.hasLaterMessages = false;
 		this.totalMessages = retainedMessages.length;
-		if (this.#pendingInputs.unchangedSinceLoadStart) {
-			this.#pendingInputs.replace(normalizePendingInputs(page.pendingUserInputs));
-		}
 		this.setResendCandidates(page.resendCandidates ?? []);
 		this.clearLocalNotices(this.#notices.revisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
@@ -816,24 +754,14 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#recordFeedMutation('presentation-structure');
 	}
 
-	setPendingUserInputs(inputs: PendingUserInput[]): void {
-		this.#pendingInputs.replace(inputs);
-	}
-
-	upsertPendingUserInput(input: PendingUserInput): void {
+	upsertOptimisticUserInput(input: OptimisticUserInput): void {
 		this.clearLocalNotices();
-		this.#pendingInputs.upsert(input);
+		if (this.#echoedClientMessageIds.has(input.clientMessageId)) return;
+		this.#optimisticInputs.upsert(input);
 	}
 
-	clearPendingUserInput(clientRequestId: string): void {
-		this.#pendingInputs.clear(clientRequestId);
-	}
-
-	updatePendingUserInputDeliveryStatus(
-		clientRequestId: string,
-		deliveryStatus: UserMessageDeliveryStatus,
-	): void {
-		this.#pendingInputs.setDeliveryStatus(clientRequestId, deliveryStatus);
+	clearOptimisticUserInput(clientMessageId: string): void {
+		this.#optimisticInputs.clear(clientMessageId);
 	}
 
 	clearMessages(): void {
@@ -853,7 +781,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.lastOrdinal = 0;
 		this.oldestOrdinal = 0;
 		this.loadedThroughOrdinal = 0;
-		this.#pendingInputs.replace([]);
+		this.#optimisticInputs.clearAll();
 		this.#resendCandidates = [];
 		this.#excludedResendOrdinals = [];
 		this.#notices.reset();
@@ -994,7 +922,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	#beginLoadEpoch(): number {
-		this.#pendingInputs.markLoadStart();
 		this.#notices.markLoadStart();
 		return ++this.#loadEpoch;
 	}
@@ -1054,8 +981,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	#rememberExpandedVisibleWindow(): void {
 		if (
-			this.#renderEntries.length > INITIAL_VISIBLE_MESSAGES &&
-			this.visibleMessageCount >= this.#renderEntries.length
+			this.entries.length > INITIAL_VISIBLE_MESSAGES &&
+			this.visibleMessageCount >= this.entries.length
 		) {
 			this.#preserveExpandedVisibleWindow = true;
 			this.#growExpandedVisibleWindow();

@@ -527,7 +527,6 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
         prompt,
         ...(promptConfig ? { config: promptConfig } : {}),
       });
-      request.onAbortable?.();
       const result = await promptRequest;
       if (typeof result.requestId === 'string' && result.requestId) {
         session.upstreamRequestId = result.requestId;

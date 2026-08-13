@@ -6,13 +6,13 @@ import type {
   AgentCatalog,
   AgentCommands,
   AgentEndpoints,
-  AgentCompactionV4,
-  AgentGoalsV4,
+  AgentCompaction,
+  AgentGoals,
   AgentLifecycle,
   AgentMigration,
   AgentSettings,
   AgentSingleQuery,
-  AgentSteeringV4,
+  AgentSteering,
 } from './services.js';
 import type { AgentNativeFork } from './native-fork.js';
 import type {
@@ -20,38 +20,29 @@ import type {
   AgentProjectPathUpdates,
   AgentSessionConfigurationUpdates,
 } from './execution.js';
-import type { AgentExecutionV4 } from './execution-events-v4.js';
 import type { AgentExecutionV5 } from './execution-v5.js';
 import type {
   AgentNativeActivityProbe,
   AgentNativeHistoryImport,
   AgentNativeSessionAccess,
 } from './native-history.js';
-import type {
-  AgentTranscriptStream,
-  AgentTransientControlCapabilityV4,
-} from './transcript-stream-v4.js';
 
-export interface AgentIntegrationV4 {
+export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
   readonly attachments: AgentAttachments | null;
-  readonly execution: AgentExecutionV4;
-  readonly transcript: AgentTranscriptStream;
+  readonly execution: AgentExecutionV5;
   readonly catalog: AgentCatalog;
   readonly settings: AgentSettings;
   readonly lifecycle: AgentLifecycle;
   readonly migration: AgentMigration;
   readonly auth: AgentAuth | null;
   readonly commands: AgentCommands | null;
-  readonly compaction: AgentCompactionV4 | null;
+  readonly compaction: AgentCompaction | null;
   readonly forking: AgentNativeFork | null;
-  readonly steering: AgentSteeringV4 | null;
-  readonly goals: AgentGoalsV4 | null;
+  readonly steering: AgentSteering | null;
+  readonly goals: AgentGoals | null;
   readonly endpoints: AgentEndpoints | null;
   readonly singleQuery: AgentSingleQuery | null;
-  readonly transientControls: AgentTransientControlCapabilityV4 | null;
-  // Transitional V5 facets remain inactive until core switches serving authority.
-  readonly producerExecution: AgentExecutionV5;
   readonly nativeHistoryImport: AgentNativeHistoryImport | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;
   readonly nativeSessions: AgentNativeSessionAccess | null;
@@ -60,8 +51,8 @@ export interface AgentIntegrationV4 {
   readonly projectPathUpdates: AgentProjectPathUpdates | null;
 }
 
-export interface AgentIntegrationClassV4 {
-  new (host: AgentHost): AgentIntegrationV4;
+export interface AgentIntegrationClass {
+  new (host: AgentHost): AgentIntegration;
   readonly integrationId: string;
-  readonly apiVersion: 4;
+  readonly apiVersion: 5;
 }

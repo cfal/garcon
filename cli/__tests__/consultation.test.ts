@@ -73,14 +73,10 @@ function snapshot(): ChatSnapshotResponse {
     transientFeed: {
       serverInstanceId: 'id',
       chatId: CHAT_ID,
-      agentOwnershipEpoch: 'epoch-1',
-      generationId: 'view-1',
-      resetTransactionId: null,
+      transcriptViewId: 'view-1',
       transientRevision: 0,
-      stateDigest: '',
       rows: [],
     },
-    pendingUserInputs: [],
     transcript: {
       availability: 'available',
       transcriptViewId: 'view-1',
@@ -383,17 +379,4 @@ describe('runConsultation', () => {
     })).rejects.toThrow('server retention pressure');
   });
 
-  test('reports native recovery without printing a false empty success', async () => {
-    const unavailable = {
-      ...receipt,
-      output: { availability: 'unavailable', reason: 'recovery' },
-    } as AgentTurnReceipt;
-
-    await expect(runConsultation({
-      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
-      prompt: 'Continue', readsPromptFromStdin: false,
-    }, 'Continue', client({ async getTurnReceipt() { return unavailable; } }), output(), undefined, {
-      createId: () => 'request',
-    })).rejects.toThrow('server recovery rebuilt the transcript');
-  });
 });

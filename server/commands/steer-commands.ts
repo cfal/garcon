@@ -427,7 +427,6 @@ export class SteerCommands {
       new Error('The previous steering attempt has no recorded terminal outcome'),
       'unknown',
     );
-    this.deps.pendingInputs.markUnconfirmed(record.chatId, record.clientRequestId);
     await this.support.settlement.settleSteerFailure({
       key: record.key,
       chatId: record.chatId,
@@ -463,7 +462,6 @@ export class SteerCommands {
       );
     }
 
-    this.deps.pendingInputs.markUnconfirmed(record.chatId, record.clientRequestId);
     let recovered = control;
     let recoveryFailure: unknown;
     if (chatExists && record.entryId) {

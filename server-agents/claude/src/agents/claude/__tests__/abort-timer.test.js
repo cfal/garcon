@@ -827,6 +827,36 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     expect(ctrl.writes.map((line) => JSON.parse(line).message?.content).filter(Boolean)).toEqual(['initial']);
   });
 
+  it('waits for an interrupted turn to settle before resuming the session', async () => {
+    const runtime = createRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+
+    const first = runtime.startClaudeCliSession(startOptions({ command: 'initial' }));
+    ctrl.push(INIT);
+    await flush();
+    ctrl.startLatestInput();
+
+    const abort = runtime.abortClaudeInternalSession('session-1');
+    await acknowledgeInterrupt(ctrl);
+    await expect(abort).resolves.toBe(true);
+
+    const resume = runtime.runClaudeTurn(startOptions({ command: 'resume' }));
+    await flush();
+    expect(ctrl.writes.map((line) => JSON.parse(line).message?.content).filter(Boolean))
+      .toEqual(['initial']);
+
+    settleTurn(ctrl);
+    await first;
+    await flush();
+    expect(ctrl.writes.map((line) => JSON.parse(line).message?.content).filter(Boolean))
+      .toEqual(['initial', 'resume']);
+
+    ctrl.startLatestInput();
+    settleTurn(ctrl);
+    await resume;
+  });
+
   it('rejects concurrent resumes instead of queueing inside the provider', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();

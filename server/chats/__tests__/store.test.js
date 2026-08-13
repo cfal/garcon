@@ -34,7 +34,6 @@ function persistedEntry(overrides = {}) {
     agentSessionId: 'native-1',
     nativeSession: nativeSession('test'),
     agentOwnershipEpoch: 'epoch-1',
-    transcriptContentEpoch: null,
     agentSettingsById: { test: envelope('test') },
     projectPath: '/repo',
     tags: [],

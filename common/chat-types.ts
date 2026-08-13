@@ -8,14 +8,8 @@ export interface ChatImage {
   mimeType?: string;
 }
 
-export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'unconfirmed' | 'failed';
-export type ChatStopIntent = 'stop' | 'interrupt-and-send' | 'chat-deletion';
-export const CHAT_STOP_OUTCOMES = [
-  'interrupt-requested',
-  'already-idle',
-  'failed',
-] as const;
-export type ChatStopOutcome = typeof CHAT_STOP_OUTCOMES[number];
+export { CHAT_STOP_OUTCOMES, isAbortAcknowledged, isStopSatisfied } from './chat-stop.js';
+export type { ChatStopIntent, ChatStopOutcome } from './chat-stop.js';
 export const CHAT_PROCESSING_PHASES = ['running', 'stopping'] as const;
 export type ChatProcessingPhase = typeof CHAT_PROCESSING_PHASES[number];
 
@@ -24,19 +18,11 @@ export interface ChatProcessingEntry {
   phase: ChatProcessingPhase;
 }
 
-export function isStopSatisfied(outcome: ChatStopOutcome): boolean {
-  return outcome !== 'failed';
-}
-
-export function isAbortAcknowledged(outcome: ChatStopOutcome): boolean {
-  return outcome === 'interrupt-requested';
-}
-
 export interface ChatMessageMetadata {
   clientRequestId?: string;
+  clientMessageId?: string;
   upstreamRequestId?: string;
   turnId?: string;
-  deliveryStatus?: UserMessageDeliveryStatus;
 }
 
 // Canonical shape for a single todo/plan item. All provider-specific
@@ -770,16 +756,9 @@ function parseChatMessageMetadata(v: unknown): ChatMessageMetadata | undefined {
   const raw = asRecord(v);
   const metadata: ChatMessageMetadata = {};
   if (typeof raw.clientRequestId === 'string') metadata.clientRequestId = raw.clientRequestId;
+  if (typeof raw.clientMessageId === 'string') metadata.clientMessageId = raw.clientMessageId;
   if (typeof raw.upstreamRequestId === 'string') metadata.upstreamRequestId = raw.upstreamRequestId;
   if (typeof raw.turnId === 'string') metadata.turnId = raw.turnId;
-  if (
-    raw.deliveryStatus === 'submitting' ||
-    raw.deliveryStatus === 'accepted' ||
-    raw.deliveryStatus === 'unconfirmed' ||
-    raw.deliveryStatus === 'failed'
-  ) {
-    metadata.deliveryStatus = raw.deliveryStatus;
-  }
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 

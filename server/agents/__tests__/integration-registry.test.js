@@ -22,16 +22,10 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       configuration: [{ key: `${id.toUpperCase()}_BIN`, source: 'environment', description: 'Binary' }],
     },
     execution: {
-      start: async () => ({ agentSessionId: 'session', nativeSession: null }),
-      resume: async () => {},
-      abort: async () => false,
-      isRunning: () => false,
-      runningSessions: () => [],
-    },
-    producerExecution: {
       start: async () => ({ id: 'execution' }),
       resume: async () => ({ id: 'execution' }),
-      abort: async () => {},
+      abort: async () => false,
+      runningSessions: () => [],
     },
     nativeHistoryImport: null,
     nativeActivity: null,
@@ -39,23 +33,6 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     sessionConfiguration: null,
     permissionDecisions: null,
     projectPathUpdates: null,
-    transcript: {
-      openSegment: async () => { throw new Error('not used'); },
-      subscribe: () => () => {},
-      replay: async () => { throw new Error('not used'); },
-      loadPage: async () => { throw new Error('not used'); },
-      commitOffset: async () => {},
-      prepareInput: async () => { throw new Error('not used'); },
-      resolveInputAdmission: async () => ({ kind: 'absent' }),
-      prepareHandoffLease: async () => { throw new Error('not used'); },
-      prepareOwnershipSegment: async () => { throw new Error('not used'); },
-      resolveNativeSession: async () => ({ kind: 'ready', value: null }),
-      preview: async () => ({ kind: 'ready', value: null }),
-      resolveIndexSource: async () => ({ kind: 'ready', value: null }),
-      refreshIndexSource: async () => ({ kind: 'ready', value: null }),
-      describeSource: async () => ({ kind: 'ready', value: null }),
-      release: async () => {},
-    },
     catalog: {
       snapshot: async () => ({
         models: [],
@@ -95,7 +72,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
 function integrationClass(id, options = {}) {
   return class TestIntegration {
     static integrationId = id;
-    static apiVersion = options.apiVersion ?? 4;
+    static apiVersion = options.apiVersion ?? 5;
     constructor(host) {
       options.onConstruct?.(host);
       Object.assign(this, createFacetIntegration(host, id, options.lifecycle));

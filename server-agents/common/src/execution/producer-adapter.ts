@@ -1,15 +1,12 @@
 import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
-  agentOwnershipEpoch,
   type AgentExecutionHandle,
+  type AgentEstablishedSession,
   type AgentExecutionV5,
   type AgentPermissionLifecycle,
   type AgentProducerSink,
   type AgentRunFailureDetail,
-  type AgentStartRequestV5,
-  type AgentResumeRequestV5,
-  type AgentTurnOwnerOperationIdentityV4,
 } from '@garcon/server-agent-interface';
 import {
   PermissionCancelledMessage,
@@ -17,10 +14,9 @@ import {
   PermissionResolvedMessage,
 } from '@garcon/common/chat-types';
 import type {
-  AgentProjectionProducerEvent,
-  AgentProjectionProducerMessage,
-  AgentProjectionRuntimeExecution,
-} from './projection-events.js';
+  AgentRuntimeEvent,
+  AgentRuntimeExecution,
+} from './runtime-events.js';
 
 interface RuntimeHandle extends AgentExecutionHandle {
   readonly agentSessionId: string;
@@ -29,35 +25,65 @@ interface RuntimeHandle extends AgentExecutionHandle {
 interface ProducerBinding {
   readonly sink: AgentProducerSink;
   readonly permissions: Map<string, string>;
+  publishedSession: AgentEstablishedSession | null;
 }
 
 export interface AgentProducerAdapter {
   readonly execution: AgentExecutionV5;
+  runExisting<T extends {
+    readonly chatId: string;
+    readonly agentSessionId: string;
+    readonly sink: AgentProducerSink;
+  }, R>(
+    request: T,
+    operation: (request: Omit<T, 'sink'>) => Promise<R>,
+  ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }>;
 }
 
-export function createAgentProducerAdapter(
-  runtime: AgentProjectionRuntimeExecution,
-): AgentProducerAdapter {
-  const bindings = new WeakMap<AgentTurnOwnerOperationIdentityV4, ProducerBinding>();
+export function createAgentProducerAdapter(runtime: AgentRuntimeExecution): AgentProducerAdapter {
+  const bindings = new Map<string, ProducerBinding>();
 
-  runtime.subscribeProjectionEvents((event) => {
-    const binding = bindings.get(event.operation);
-    if (!binding) return;
-    publishRuntimeEvent(binding, event);
+  runtime.subscribeRuntimeEvents((event) => {
+    const binding = bindings.get(event.chatId);
+    if (binding) publishRuntimeEvent(binding, event);
   });
 
   const execution: AgentExecutionV5 = {
     async start(request) {
-      const operation = operationFor(request, 'chat-start');
-      bindings.set(operation, { sink: request.sink, permissions: new Map() });
-      const session = await runtime.start(toStartRequest(request, operation));
+      const binding: ProducerBinding = {
+        sink: request.sink,
+        permissions: new Map<string, string>(),
+        publishedSession: null,
+      };
+      bindings.set(request.chatId, binding);
+      const session = await runtime.start(withoutSink(request));
+      if (!sameSession(binding.publishedSession, session)) {
+        binding.sink.publish({ type: 'session', session });
+        binding.publishedSession = session;
+      }
       return handle(session.agentSessionId);
     },
 
     async resume(request) {
-      const operation = operationFor(request, 'agent-run');
-      bindings.set(operation, { sink: request.sink, permissions: new Map() });
-      await runtime.resume(toResumeRequest(request, operation));
+      const binding: ProducerBinding = {
+        sink: request.sink,
+        permissions: new Map(),
+        publishedSession: null,
+      };
+      bindings.set(request.chatId, binding);
+      const execution = runtime.resume(withoutSink(request));
+      void execution.catch((error) => {
+        try {
+          binding.sink.publish({
+            type: 'run-ended',
+            runId: request.runId,
+            outcome: 'failed',
+            error: failureDetail(error),
+          });
+        } catch {
+          // A closed or fenced sink already made the failed run historical.
+        }
+      });
       return handle(request.agentSessionId);
     },
 
@@ -68,55 +94,62 @@ export function createAgentProducerAdapter(
     runningSessions: () => runtime.runningSessions(),
   };
 
-  return { execution };
+  async function runExisting<T extends {
+    readonly chatId: string;
+    readonly agentSessionId: string;
+    readonly sink: AgentProducerSink;
+  }, R>(
+    request: T,
+    operation: (request: Omit<T, 'sink'>) => Promise<R>,
+  ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }> {
+    bindings.set(request.chatId, {
+      sink: request.sink,
+      permissions: new Map(),
+      publishedSession: null,
+    });
+    const value = await operation(withoutSink(request));
+    return { handle: handle(request.agentSessionId), value };
+  }
+
+  return { execution, runExisting };
 }
 
-function publishRuntimeEvent(
-  binding: ProducerBinding,
-  event: AgentProjectionProducerEvent,
-): void {
-  switch (event.type) {
-    case 'messages':
-      publishMessages(binding, event.operation.turnId, event.messages);
-      return;
-    case 'session-created':
-      binding.sink.publish({ type: 'session', session: event.session });
-      return;
-    case 'finished':
-      binding.sink.publish({
-        type: 'run-ended',
-        runId: event.operation.turnId,
-        outcome: 'finished',
-      });
-      return;
-    case 'failed':
-      binding.sink.publish({
-        type: 'run-ended',
-        runId: event.operation.turnId,
-        outcome: 'failed',
-        error: failureDetail(event.error),
-      });
-      return;
-    case 'processing':
-      return;
+function publishRuntimeEvent(binding: ProducerBinding, event: AgentRuntimeEvent): void {
+  if (event.type === 'messages') {
+    publishMessages(binding, event.runId, event.rows);
+    return;
   }
+  if (event.type === 'session') {
+    binding.sink.publish({ type: 'session', session: event.session });
+    binding.publishedSession = event.session;
+    return;
+  }
+  binding.sink.publish({
+    type: 'run-ended',
+    runId: event.runId,
+    outcome: event.outcome,
+    ...(event.error ? { error: event.error } : {}),
+  });
+}
+
+function sameSession(
+  left: AgentEstablishedSession | null,
+  right: AgentEstablishedSession,
+): boolean {
+  return left?.agentSessionId === right.agentSessionId
+    && JSON.stringify(left.nativeSession) === JSON.stringify(right.nativeSession)
+    && JSON.stringify(left.nativeSeedReceipt) === JSON.stringify(right.nativeSeedReceipt);
 }
 
 function publishMessages(
   binding: ProducerBinding,
-  runId: string,
-  messages: readonly AgentProjectionProducerMessage[],
+  runId: string | null,
+  messages: Extract<AgentRuntimeEvent, { readonly type: 'messages' }>['rows'],
 ): void {
-  let rows: AgentProjectionProducerMessage[] = [];
+  let rows: typeof messages = [];
   const flush = () => {
     if (rows.length === 0) return;
-    binding.sink.publish({
-      type: 'rows',
-      rows: rows.map((row) => ({
-        message: row.message,
-        ...(row.nativeAlias ? { providerMeta: row.nativeAlias } : {}),
-      })),
-    });
+    binding.sink.publish({ type: 'rows', rows });
     rows = [];
   };
 
@@ -124,6 +157,10 @@ function publishMessages(
     const { message } = row;
     if (message instanceof PermissionRequestMessage) {
       flush();
+      if (!runId) {
+        binding.sink.publish({ type: 'rows', rows: [row] });
+        continue;
+      }
       const incarnation = crypto.randomUUID();
       binding.permissions.set(message.permissionRequestId, incarnation);
       binding.sink.publish({
@@ -141,6 +178,10 @@ function publishMessages(
     }
     if (message instanceof PermissionCancelledMessage) {
       flush();
+      if (!runId) {
+        binding.sink.publish({ type: 'rows', rows: [row] });
+        continue;
+      }
       binding.sink.publish({
         type: 'permission',
         runId,
@@ -153,7 +194,7 @@ function publishMessages(
       binding.permissions.delete(message.permissionRequestId);
       continue;
     }
-    rows.push(row);
+    rows = [...rows, row];
   }
   flush();
 }
@@ -172,68 +213,9 @@ function cancelledLifecycle(
   };
 }
 
-function operationFor(
-  request: AgentStartRequestV5 | AgentResumeRequestV5,
-  commandType: 'chat-start' | 'agent-run',
-): AgentTurnOwnerOperationIdentityV4 {
-  const ownership = agentOwnershipEpoch('v5-runtime-adapter');
-  const turnOwner = {
-    agentOwnershipEpoch: ownership,
-    commandType,
-    clientRequestId: request.runId,
-    turnId: request.runId,
-  } as const;
-  return {
-    agentOwnershipEpoch: ownership,
-    commandType,
-    clientRequestId: request.runId,
-    clientMessageId: null,
-    turnId: request.runId,
-    turnOwner,
-  };
-}
-
-function toStartRequest(
-  request: AgentStartRequestV5,
-  operation: AgentTurnOwnerOperationIdentityV4,
-): Parameters<AgentProjectionRuntimeExecution['start']>[0] {
-  return {
-    chatId: request.chatId,
-    projectPath: request.projectPath,
-    model: request.model,
-    permissionMode: request.permissionMode,
-    thinkingMode: request.thinkingMode,
-    settings: request.settings,
-    endpoint: request.endpoint,
-    operation,
-    admission: request.admission,
-    priorContext: request.priorContext,
-    prompt: request.prompt,
-    attachments: request.attachments,
-    carriedContext: request.carriedContext,
-  };
-}
-
-function toResumeRequest(
-  request: AgentResumeRequestV5,
-  operation: AgentTurnOwnerOperationIdentityV4,
-): Parameters<AgentProjectionRuntimeExecution['resume']>[0] {
-  return {
-    chatId: request.chatId,
-    projectPath: request.projectPath,
-    model: request.model,
-    permissionMode: request.permissionMode,
-    thinkingMode: request.thinkingMode,
-    settings: request.settings,
-    endpoint: request.endpoint,
-    operation,
-    admission: request.admission,
-    priorContext: request.priorContext,
-    agentSessionId: request.agentSessionId,
-    nativeSession: request.nativeSession,
-    prompt: request.prompt,
-    attachments: request.attachments,
-  };
+function withoutSink<T extends { readonly sink: AgentProducerSink }>(request: T): Omit<T, 'sink'> {
+  const { sink: _sink, ...runtimeRequest } = request;
+  return runtimeRequest;
 }
 
 function handle(agentSessionId: string): RuntimeHandle {
@@ -247,7 +229,7 @@ function runtimeHandle(value: AgentExecutionHandle): RuntimeHandle {
   return value as RuntimeHandle;
 }
 
-function failureDetail(error: unknown): AgentRunFailureDetail {
+export function failureDetail(error: unknown): AgentRunFailureDetail {
   if (error instanceof AgentIntegrationError) {
     return { code: error.code, ...(error.message ? { message: error.message } : {}) };
   }

@@ -16,10 +16,6 @@ import {
   parseChatTransientFeedSnapshot,
   type ChatTransientFeedSnapshot,
 } from './chat-transient-feed.js';
-import {
-  normalizePendingUserInput,
-  type PendingUserInput,
-} from './pending-user-input.js';
 import { normalizeTags } from './tags.js';
 
 export const CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT = 10;
@@ -82,7 +78,6 @@ export interface ChatSnapshotResponse {
   processingPhase: ChatProcessingPhase | null;
   control: ChatExecutionControlState;
   transientFeed: ChatTransientFeedSnapshot;
-  pendingUserInputs: PendingUserInput[];
   transcript: ChatSnapshotTranscript;
 }
 
@@ -107,23 +102,10 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
   if (!control) fail('control is invalid');
   const transientFeed = parseChatTransientFeedSnapshot(raw.transientFeed);
   if (!transientFeed) fail('transientFeed is invalid');
-  if (transientFeed.chatId !== chat.id
-      || transientFeed.agentOwnershipEpoch !== chat.agentOwnershipEpoch) {
-    fail('transientFeed belongs to another chat ownership epoch');
-  }
-  if (!Array.isArray(raw.pendingUserInputs)) {
-    fail('pendingUserInputs must be an array');
-  }
-  const pendingUserInputs = raw.pendingUserInputs.map(normalizePendingUserInput);
-  if (pendingUserInputs.some((input) => input === null)) {
-    fail('pendingUserInputs contains an invalid entry');
-  }
-  if (pendingUserInputs.some((input) => input?.chatId !== chat.id)) {
-    fail('pendingUserInputs contains another chat');
-  }
+  if (transientFeed.chatId !== chat.id) fail('transientFeed belongs to another chat');
   const transcript = parseTranscript(raw.transcript, messageLimit);
   if (transcript.availability === 'available'
-      && transcript.transcriptViewId !== transientFeed.generationId) {
+      && transcript.transcriptViewId !== transientFeed.transcriptViewId) {
     fail('transientFeed and transcript views differ');
   }
 
@@ -134,7 +116,6 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
     processingPhase,
     control,
     transientFeed,
-    pendingUserInputs: pendingUserInputs as PendingUserInput[],
     transcript,
   };
 }

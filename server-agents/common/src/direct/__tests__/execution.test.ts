@@ -1,10 +1,12 @@
 import { describe, expect, mock, test } from 'bun:test';
 import {
-  agentOwnershipEpoch,
-  type AgentExecutionContextV4,
   type AgentHost,
 } from '@garcon/server-agent-interface';
 import { UserMessage } from '@garcon/common/chat-types';
+import type {
+  AgentRuntimeResumeRequest,
+  AgentRuntimeStartRequest,
+} from '../../execution/runtime-events.js';
 import { DirectExecution } from '../execution.js';
 
 function endpoint(endpointId: string) {
@@ -36,13 +38,7 @@ function host(): AgentHost {
   };
 }
 
-function request(modelEndpointId: string): AgentExecutionContextV4 {
-  const turnOwner = {
-    agentOwnershipEpoch: agentOwnershipEpoch('ownership-1'),
-    commandType: 'agent-run' as const,
-    clientRequestId: 'request-1',
-    turnId: 'turn-1',
-  };
+function request(modelEndpointId: string): AgentRuntimeResumeRequest {
   return {
     chatId: 'chat-1',
     projectPath: '/tmp',
@@ -51,22 +47,48 @@ function request(modelEndpointId: string): AgentExecutionContextV4 {
     thinkingMode: 'none',
     settings: { ownerId: 'direct-test', schemaVersion: 1, values: {} },
     endpoint: endpoint(modelEndpointId),
-    operation: {
-      ...turnOwner,
-      clientMessageId: 'message-1',
-      turnOwner,
-    },
+    runId: 'run-1',
+    priorContext: [new UserMessage('2026-01-01T00:00:00.000Z', 'earlier')],
+    agentSessionId: 'session-1',
+    nativeSession: null,
     prompt: 'continue',
     attachments: [],
     admission: {
       signal: new AbortController().signal,
       async markStarted() {},
-      markAbortable() {},
     },
   };
 }
 
 describe('DirectExecution', () => {
+  test('sends frozen history as context and keeps the new prompt separate', async () => {
+    const startSession = mock(async () => ({
+      agentSessionId: 'session-1',
+      nativePath: '/tmp/session-1.json',
+    }));
+    const subscribe = () => {};
+    const runtime = {
+      startSession,
+      onMessages: subscribe,
+      onProcessing: subscribe,
+      onFinished: subscribe,
+      onFailed: subscribe,
+    };
+    const execution = new DirectExecution(host(), runtime as never);
+    const { agentSessionId: _agentSessionId, nativeSession: _nativeSession, ...base } = request('endpoint-a');
+    const start: AgentRuntimeStartRequest = {
+      ...base,
+      carriedContext: { prefix: '<carried>history</carried>\n\n' },
+    };
+
+    await execution.start(start);
+
+    expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
+      priorContext: start.priorContext,
+      command: 'continue',
+    }));
+  });
+
   test('forwards core-owned context when rebuilding a stateless request', async () => {
     const runTurn = mock(async () => {});
     const subscribe = () => {};
@@ -79,9 +101,6 @@ describe('DirectExecution', () => {
     };
     const execution = new DirectExecution(host(), runtime as never);
     const resume = request('endpoint-b');
-    resume.nativeSession = null;
-    resume.agentSessionId = 'session-1';
-    resume.priorContext = [new UserMessage('2026-01-01T00:00:00.000Z', 'earlier')];
 
     await expect(execution.resume(resume)).resolves.toBeUndefined();
     expect(runTurn).toHaveBeenCalledWith(expect.objectContaining({

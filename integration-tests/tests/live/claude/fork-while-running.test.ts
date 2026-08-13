@@ -52,7 +52,7 @@ describe('live Claude fork while running', () => {
       // its seqs resolvable while the next turn is in flight.
       await reloadUntilNativeContains(fixture, parentChatId, settledMarker);
       const settledHistory = await fixture.client.getMessages(parentChatId);
-      const settledLastSeq = settledHistory.messages.at(-1)?.seq;
+      const settledLastSeq = settledHistory.messages.at(-1)?.ordinal;
       if (settledLastSeq === undefined) throw new Error('Live Claude settled history is empty.');
 
       // A slow tool keeps the second turn in flight while the fork assertions run.
@@ -75,7 +75,8 @@ describe('live Claude fork while running', () => {
       await expectEventStreamForkRefusal(fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: fixture.newChatId(),
-        upToSeq: streamingSeq,
+        transcriptViewId: settledHistory.transcriptViewId,
+        upToOrdinal: streamingSeq,
       }));
 
       // Settled history stays forkable at a point while the agent works.
@@ -83,7 +84,8 @@ describe('live Claude fork while running', () => {
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: pointChatId,
-        upToSeq: settledLastSeq,
+        transcriptViewId: settledHistory.transcriptViewId,
+        upToOrdinal: settledLastSeq,
       });
       const pointForked = await fixture.client.getMessages(pointChatId);
       expect(userContents(pointForked.messages)).toEqual([settledPrompt]);
@@ -127,18 +129,19 @@ describe('live Claude fork while running', () => {
 
       // The message that was refused mid-turn is now native history, so it forks.
       const runningAssistant = parentAfterTurn.messages.findLast((entry) =>
-        entry.seq > settledLastSeq && entry.message.type === 'assistant-message');
+        entry.ordinal > settledLastSeq && entry.message.type === 'assistant-message');
       if (!runningAssistant) throw new Error('Live Claude running turn was not persisted.');
 
       const recoveredChatId = fixture.newChatId();
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: recoveredChatId,
-        upToSeq: runningAssistant.seq,
+        transcriptViewId: parentAfterTurn.transcriptViewId,
+        upToOrdinal: runningAssistant.ordinal,
       });
       const recovered = await fixture.client.getMessages(recoveredChatId);
       expect(userContents(recovered.messages)).toEqual([settledPrompt, runningPrompt]);
-      expectMatchingPrefixContents(recovered.messages, parentAfterTurn.messages, runningAssistant.seq);
+      expectMatchingPrefixContents(recovered.messages, parentAfterTurn.messages, runningAssistant.ordinal);
 
       // The recovered fork is a working session, not just a transcript copy.
       const resumedMarker = marker('CLAUDE_FORK_RECOVERED');
@@ -169,7 +172,7 @@ async function waitForSeqBeyond(
   const deadline = Date.now() + TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const page = await fixture.client.getMessages(chatId);
-    if (page.lastSeq > settledLastSeq) return page.lastSeq;
+    if (page.lastOrdinal > settledLastSeq) return page.lastOrdinal;
     await Bun.sleep(POLL_INTERVAL_MS);
   }
   throw new Error(`Live Claude chat ${chatId} never streamed past seq ${settledLastSeq}.`);
@@ -198,9 +201,9 @@ async function expectEventStreamForkRefusal(promise: Promise<unknown>): Promise<
 function expectMatchingPrefixContents(
   forked: readonly TranscriptMessage[],
   source: readonly TranscriptMessage[],
-  upToSeq: number,
+  upToOrdinal: number,
 ): void {
-  const prefix = source.filter((entry) => entry.seq <= upToSeq);
+  const prefix = source.filter((entry) => entry.ordinal <= upToOrdinal);
   expect(userContents(forked)).toEqual(userContents(prefix));
   expect(assistantContents(forked)).toEqual(assistantContents(prefix));
 }

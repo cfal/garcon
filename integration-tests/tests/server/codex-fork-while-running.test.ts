@@ -4,7 +4,6 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
-import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 const HISTORY_PROMPT = 'settled prompt';
@@ -12,7 +11,7 @@ const HISTORY_ANSWER = 'settled answer';
 const RUNNING_PROMPT = 'running prompt';
 
 describe('Codex fork while a turn is running', () => {
-  test('forks settled history, refuses event-stream points, and recovers after the turn', async () => {
+  test('forks ledger snapshots while native history trails and recovers after the turn', async () => {
     const sourceChatId = String(Date.now() * 1_000 + 1);
     const sourceAgentSessionId = randomUUID();
     let sourceNativePath = '';
@@ -51,54 +50,59 @@ describe('Codex fork while a turn is running', () => {
         agentSettings: codex.defaultSettings,
         model: codex.defaultModel,
       });
-      // The streamed rows land above the persisted history, so the view
-      // outruns the rollout's assistant tail.
-      const running = await waitForLastSeq(fixture, sourceChatId, 6);
-      expect(running.messages.map((entry) => [entry.seq, entry.message.type])).toEqual([
-        [1, 'user-message'],
-        [2, 'assistant-message'],
-        [3, 'user-message'],
-        [4, 'thinking'],
-        [5, 'assistant-message'],
-        [6, 'assistant-message'],
+      const running = await waitForMessages(fixture, sourceChatId, (messages) => (
+        messages.some((entry) => entry.message.type === 'assistant-message'
+          && entry.message.content === `codex-live2-${RUNNING_PROMPT}`)
+      ));
+      expect(running.messages.map((entry) => entry.message.type)).toEqual([
+        'user-message',
+        'assistant-message',
+        'user-message',
+        'thinking',
+        'assistant-message',
+        'assistant-message',
       ]);
 
-      // The streamed points have no bound native positions until the settled
-      // boundary proves them, even where the rollout has already grown into
-      // their range.
-      for (const upToSeq of [4, 5, 6]) {
-        await expectEventStreamForkRefusal(fixture.client.forkChat({
+      // Every streamed ledger point remains forkable through frozen carryover,
+      // regardless of whether the native rollout has reached it.
+      for (const sourcePoint of running.messages.slice(3)) {
+        const targetChatId = fixture.newChatId();
+        await fixture.client.forkChat({
           sourceChatId,
-          chatId: fixture.newChatId(),
-          upToSeq,
-        }));
+          chatId: targetChatId,
+          transcriptViewId: running.transcriptViewId,
+          upToOrdinal: sourcePoint.ordinal,
+        });
+        const forked = await fixture.client.getMessages(targetChatId);
+        expect(forked.messages.map(semantic)).toEqual(
+          running.messages.filter((entry) => entry.ordinal <= sourcePoint.ordinal).map(semantic),
+        );
       }
 
       // Settled history is still forkable at a point while the agent works.
       const pointChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: pointChatId, upToSeq: 1 });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: pointChatId,
+        transcriptViewId: settled.transcriptViewId,
+        upToOrdinal: settled.messages[0]!.ordinal,
+      });
       const pointForked = await fixture.client.getMessages(pointChatId);
       expect(pointForked.messages.map((entry) => entry.message))
         .toEqual(settled.messages.slice(0, 1).map((entry) => entry.message));
 
       // A whole-chat fork copies the transcript as it stands instead of refusing.
+      const sourceAtWholeFork = await fixture.client.getMessages(sourceChatId);
       const wholeChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: wholeChatId });
       const wholeForked = await fixture.client.getMessages(wholeChatId);
-      expect(wholeForked.messages.map((entry) => entry.message.type)).toEqual([
-        'user-message',
-        'assistant-message',
-        'user-message',
-        'thinking',
-      ]);
+      expect(wholeForked.messages.map(semantic)).toEqual(sourceAtWholeFork.messages.map(semantic));
 
       await writeFile(turnReleasePath, '');
       await fixture.client.waitForTurnTerminal(sourceChatId, run.turnId, { afterIndex: runCursor });
       await fixture.client.reloadChat(sourceChatId);
 
       // The same point is forkable once the rollout owns those messages.
-      const settledSeq = 5;
-
       const reloaded = await fixture.client.getMessages(sourceChatId);
       expect(reloaded.messages.map((entry) => entry.message.type)).toEqual([
         'user-message',
@@ -110,20 +114,16 @@ describe('Codex fork while a turn is running', () => {
       ]);
 
       const recoveredChatId = fixture.newChatId();
+      const selected = reloaded.messages[4]!;
       await fixture.client.forkChat({
         sourceChatId,
         chatId: recoveredChatId,
-        upToSeq: settledSeq,
+        transcriptViewId: reloaded.transcriptViewId,
+        upToOrdinal: selected.ordinal,
       });
       const recovered = await fixture.client.getMessages(recoveredChatId);
-      // The fork renders from the native cut, so live-only delivery metadata
-      // and timestamps regenerate; row types and contents must match.
-      const semantic = (entry: (typeof recovered.messages)[number]) => [
-        entry.message.type,
-        'content' in entry.message ? entry.message.content : null,
-      ];
       expect(recovered.messages.map(semantic))
-        .toEqual(reloaded.messages.slice(0, settledSeq).map(semantic));
+        .toEqual(reloaded.messages.filter((entry) => entry.ordinal <= selected.ordinal).map(semantic));
     }, {
       serverEnvironment,
       async prepareWorkspace(directories) {
@@ -217,37 +217,23 @@ describe('Codex fork while a turn is running', () => {
   }, 30_000);
 });
 
-async function waitForLastSeq(
+async function waitForMessages(
   fixture: Parameters<Parameters<typeof withIntegrationFixture>[1]>[0],
   chatId: string,
-  lastSeq: number,
+  predicate: (
+    messages: Awaited<ReturnType<typeof fixture.client.getMessages>>['messages'],
+  ) => boolean,
 ): Promise<Awaited<ReturnType<typeof fixture.client.getMessages>>> {
   const deadline = Date.now() + 10_000;
   let page = await fixture.client.getMessages(chatId);
-  while (page.lastSeq < lastSeq && Date.now() < deadline) {
-    await Bun.sleep(1_000);
+  while (!predicate(page.messages) && Date.now() < deadline) {
+    await Bun.sleep(100);
     page = await fixture.client.getMessages(chatId);
   }
-  if (page.lastSeq !== lastSeq) {
-    throw new Error(`Expected chat ${chatId} to reach seq ${lastSeq}, saw ${page.lastSeq}`);
-  }
+  if (!predicate(page.messages)) throw new Error(`Chat ${chatId} did not reach the expected rows.`);
   return page;
 }
 
-async function expectEventStreamForkRefusal(promise: Promise<unknown>): Promise<void> {
-  let failure: unknown;
-  try {
-    await promise;
-  } catch (error) {
-    failure = error;
-  }
-  expect(failure).toBeInstanceOf(GarconApiError);
-  expect(failure).toMatchObject({
-    status: 409,
-    body: {
-      success: false,
-      errorCode: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      retryable: true,
-    },
-  });
+function semantic(entry: { readonly message: { readonly type: string; readonly content?: unknown } }) {
+  return [entry.message.type, entry.message.content ?? null];
 }

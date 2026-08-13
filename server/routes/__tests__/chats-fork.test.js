@@ -20,7 +20,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
 import { DomainError } from '../../lib/domain-error.js';
 
 const SOURCE_CHAT_ID = '1783725900000300';
@@ -65,7 +65,14 @@ const metadata = {
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => undefined),
@@ -81,18 +88,17 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-fork');
-const pendingInputs = createRoutePendingInputs();
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
 
 const chatsRoutes = createChatRoutes({
   registry,
   settings,
   queue,
+  processing: { phase: mock(() => null) },
   pathCache,
   metadata,
   chatViews,
   agents,
-	pendingInputs,
 	chatListProjector,
   commandService: createRouteCommandService({
     registry,
@@ -101,7 +107,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pendingInputs,
 		pathCache,
 		chatListProjector,
   }),

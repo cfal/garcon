@@ -87,14 +87,4 @@ describe('agent turn receipt projection', () => {
     });
   });
 
-  it('does not claim complete output after native recovery', () => {
-    expect(projectAgentTurnReceipt(record({
-      status: 'finished',
-      publicTerminalAt: '2026-07-31T12:01:00.000Z',
-      turnResultAvailability: 'recovery',
-    }))).toMatchObject({
-      kind: 'found',
-      receipt: { output: { availability: 'unavailable', reason: 'recovery' } },
-    });
-  });
 });

@@ -1,6 +1,6 @@
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface OpenCodeExecutionAdmission {
   readonly signal: AbortSignal;
@@ -16,7 +16,6 @@ export interface OpenCodeExecutionRequest {
   readonly clientRequestId?: string;
   readonly turnId?: string;
   readonly executionAdmission?: OpenCodeExecutionAdmission;
-  readonly onAbortable?: () => void;
 }
 
 export interface OpenCodeStartRequest extends OpenCodeExecutionRequest {
@@ -51,7 +50,7 @@ export async function markOpenCodeExecutionStarted(
 
 export function openCodeEventMetadata(
   request: Pick<OpenCodeExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentTurnReceiptOwner['commandType'],
+  commandType?: RuntimeEventMetadata['commandType'],
 ) {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

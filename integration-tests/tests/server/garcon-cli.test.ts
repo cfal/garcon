@@ -3,7 +3,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   messagesOfType,
@@ -14,7 +13,6 @@ import {
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { GarconProcess } from '../../support/garcon-process.js';
-import { CARRIED_CONTEXT_VERSION } from '../../../common/transcript-seed.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WORKSPACE = 'cli-integration';
@@ -270,7 +268,11 @@ describe('garcon-cli', () => {
         'cli-target-turn',
       ]);
       const targetRequest = await targetHeld.received;
-      expect(occurrences(targetRequest.lastUserText, `<carried-context version="${CARRIED_CONTEXT_VERSION}">`)).toBe(1);
+      expect(targetRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+        'cli-source-turn',
+        'echo:cli-source-turn',
+        'cli-target-turn',
+      ]);
       expect(targetHeld.releaseText('cli-target-answer')).toBe(true);
       const handedOff = await handoffRun;
 
@@ -304,8 +306,13 @@ describe('garcon-cli', () => {
         'cli-return-turn',
       ]);
       const sourceRequest = await sourceHeld.received;
-      expect(occurrences(sourceRequest.lastUserText, `<carried-context version="${CARRIED_CONTEXT_VERSION}">`)).toBe(1);
-      expect(sourceRequest.lastUserText).toContain('cli-target-turn');
+      expect(sourceRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+        'cli-source-turn',
+        'echo:cli-source-turn',
+        'cli-target-turn',
+        'cli-target-answer',
+        'cli-return-turn',
+      ]);
       expect(sourceHeld.releaseText('cli-return-answer')).toBe(true);
       const returned = await returnRun;
 
@@ -334,13 +341,7 @@ describe('garcon-cli', () => {
         'cli-target-answer',
         'cli-return-answer',
       ]);
-      expect(messagesOfType(history.messages, 'agent-switch').map((message) => [
-        message.fromAgentId,
-        message.toAgentId,
-      ])).toEqual([
-        [source.agentId, target.agentId],
-        [target.agentId, source.agentId],
-      ]);
+      expect(messagesOfType(history.messages, 'agent-switch')).toEqual([]);
     }, { namedWorkspace: WORKSPACE });
   });
 
@@ -440,7 +441,6 @@ describe('garcon-cli', () => {
         },
         processingPhase: 'running',
         control: { serverInstanceId: expect.any(String) },
-        pendingUserInputs: expect.any(Array),
         transcript: { availability: 'available' },
       });
       expect(userContents(runningSnapshot.transcript.messages)).toContain('cli-wait');
@@ -535,7 +535,6 @@ describe('garcon-cli', () => {
       expect(JSON.parse(status.stdout)).toMatchObject({
         processingPhase: null,
         control: { queue: { entries: [] } },
-        pendingUserInputs: [],
         transcript: { availability: 'not-requested' },
       });
 
@@ -633,17 +632,13 @@ describe('garcon-cli', () => {
       expect(sent.stderr).toBe('');
       expect(sent.stdout).toMatch(/^chat id: \d{16}\ndelivery: new-turn\nturn id: [0-9a-f-]+\n$/);
       const turnId = sent.stdout.match(/turn id: ([0-9a-f-]+)\n/)?.[1];
-      expect(turnId).toBeString();
-      const pending = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === 'cli-async-message'
-          && typeof event.input.turnId === 'string',
-        'send-async accepted turn identity',
+      if (!turnId) throw new Error('send-async omitted the turn id.');
+      const committed = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        'cli-async-message',
         { afterIndex: cursor, timeoutMs: 30_000 },
       );
-      expect(pending.input.turnId).toBe(turnId);
+      expect(committed.messages).toHaveLength(1);
 
       const chatsAfter = await fixture.client.listChats();
       expect(chatsAfter.sessions.find((chat) => chat.id === chatId)?.tags).not.toContain('cli');
@@ -788,6 +783,12 @@ describe('garcon-cli', () => {
   });
 });
 
-function occurrences(value: string, needle: string): number {
-  return value.split(needle).length - 1;
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.flatMap((part) => (
+    part && typeof part === 'object' && 'text' in part && typeof part.text === 'string'
+      ? [part.text]
+      : []
+  )).join('');
 }

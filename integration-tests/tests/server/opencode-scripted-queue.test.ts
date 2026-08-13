@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import type { GarconTestClient } from '../../support/garcon-client.js';
@@ -70,17 +69,19 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
-      const secondInput = await waitForQueuedTurnIdentity(fixture.client, chatId, secondPrompt, queueCursor);
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, secondInput.input.turnId, {
-        afterIndex: queueCursor,
+      const secondInput = await waitForQueuedInputCommit(fixture.client, chatId, secondPrompt, queueCursor);
+      const secondTerminal = await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(secondInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
-      })).type);
-      const thirdInput = await waitForQueuedTurnIdentity(fixture.client, chatId, thirdPrompt, queueCursor);
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, thirdInput.input.turnId, {
-        afterIndex: queueCursor,
+      });
+      expectFinished(secondTerminal.type);
+      const thirdInput = await waitForQueuedInputCommit(fixture.client, chatId, thirdPrompt, queueCursor);
+      const thirdTerminal = await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(thirdInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
-      })).type);
-      expect(secondInput.input.turnId).not.toBe(thirdInput.input.turnId);
+      });
+      expectFinished(thirdTerminal.type);
+      expect(secondTerminal.turnId).not.toBe(thirdTerminal.turnId);
       await fixture.client.waitForProcessing(chatId, false, {
         afterIndex: queueCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -140,14 +141,14 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
 
       const resumeCursor = fixture.client.markEvents();
       await fixture.client.resumeQueue(chatId, paused.control.queue.pause!.id);
-      const queuedInput = await waitForQueuedTurnIdentity(
+      const queuedInput = await waitForQueuedInputCommit(
         fixture.client,
         chatId,
         queuedPrompt,
         resumeCursor,
       );
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, queuedInput.input.turnId, {
-        afterIndex: resumeCursor,
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(queuedInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
@@ -196,14 +197,14 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
-      const survivorInput = await waitForQueuedTurnIdentity(
+      const survivorInput = await waitForQueuedInputCommit(
         fixture.client,
         chatId,
         survivorPrompt,
         queueCursor,
       );
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, survivorInput.input.turnId, {
-        afterIndex: queueCursor,
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(survivorInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
@@ -238,14 +239,17 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
 
       const queueCursor = fixture.client.markEvents();
       const clientRequestId = crypto.randomUUID();
+      const clientMessageId = crypto.randomUUID();
       const queued = await fixture.client.enqueue({
         clientRequestId,
+        clientMessageId,
         chatId,
         content: queuedPrompt,
       });
       expect(queued.status).toBe('accepted');
       const duplicate = await fixture.client.enqueue({
         clientRequestId,
+        clientMessageId,
         chatId,
         content: queuedPrompt,
       });
@@ -258,14 +262,14 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
-      const queuedInput = await waitForQueuedTurnIdentity(
+      const queuedInput = await waitForQueuedInputCommit(
         fixture.client,
         chatId,
         queuedPrompt,
         queueCursor,
       );
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, queuedInput.input.turnId, {
-        afterIndex: queueCursor,
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(queuedInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
@@ -276,19 +280,19 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  test('pauses the queue on a non-retryable provider failure and resumes an edited retry', async () => {
+  test('removes a failed head and pauses the remaining queue', async () => {
     const testEnvironment = requireEnvironment();
     const firstReply = marker('FAIL_ACTIVE_REPLY');
     const failingPrompt = marker('FAIL_QUEUED_PROMPT');
-    const editedPrompt = marker('FAIL_EDITED_PROMPT');
-    const editedReply = marker('FAIL_EDITED_REPLY');
+    const survivorPrompt = marker('FAIL_SURVIVOR_PROMPT');
+    const survivorReply = marker('FAIL_SURVIVOR_REPLY');
     const firstHeld = testEnvironment.model.scriptHeldTurn([chatCompletionsText(firstReply)]);
     testEnvironment.model.scriptFault({
       kind: 'http-error',
       status: 401,
       message: marker('FAIL_QUEUED_FAULT'),
     });
-    testEnvironment.model.scriptTurn([chatCompletionsText(editedReply)]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(survivorReply)]);
 
     await withIntegrationFixture('opencode-scripted-queue-failure', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -303,7 +307,8 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
       await firstHeld.requested;
-      const failing = await fixture.client.enqueueNew(chatId, failingPrompt);
+      await fixture.client.enqueueNew(chatId, failingPrompt);
+      await fixture.client.enqueueNew(chatId, survivorPrompt);
 
       const queueCursor = fixture.client.markEvents();
       firstHeld.release();
@@ -311,63 +316,50 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
-      const failingInput = await waitForQueuedTurnIdentity(
+      const failingInput = await waitForQueuedInputCommit(
         fixture.client,
         chatId,
         failingPrompt,
         queueCursor,
       );
-      expect((await fixture.client.waitForTurnTerminal(chatId, failingInput.input.turnId, {
-        afterIndex: queueCursor,
+      expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(failingInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type).toBe('agent-run-failed');
 
       const paused = await fixture.client.getExecutionControl(chatId);
       expect(paused.queue.pause).toMatchObject({ kind: 'queued-turn-failed' });
-      const entry = paused.queue.entries.find((queuedEntry) => queuedEntry.id === failing.entryId);
-      if (!entry) throw new Error('Failed queue entry was not retained for retry.');
-      const replaced = await fixture.client.replaceQueued({
-        clientRequestId: crypto.randomUUID(),
-        chatId,
-        entryId: entry.id,
-        content: editedPrompt,
-        expectedRevision: entry.revision,
-      });
-      expect(replaced.control.queue.entries.map((queuedEntry) => queuedEntry.content))
-        .toEqual([editedPrompt]);
+      expect(paused.queue.entries.map((queuedEntry) => queuedEntry.content))
+        .toEqual([survivorPrompt]);
 
       const resumeCursor = fixture.client.markEvents();
       await fixture.client.resumeQueue(chatId, paused.queue.pause!.id);
-      const editedInput = await waitForQueuedTurnIdentity(
+      const survivorInput = await waitForQueuedInputCommit(
         fixture.client,
         chatId,
-        editedPrompt,
+        survivorPrompt,
         resumeCursor,
       );
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, editedInput.input.turnId, {
-        afterIndex: resumeCursor,
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(survivorInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
       expect(assistantContents((await fixture.client.getMessages(chatId)).messages)
-        .some((content) => content.includes(editedReply))).toBe(true);
+        .some((content) => content.includes(survivorReply))).toBe(true);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
 });
 
-function waitForQueuedTurnIdentity(
+function waitForQueuedInputCommit(
   client: GarconTestClient,
   chatId: string,
   content: string,
   afterIndex: number,
-): Promise<PendingUserInputUpdatedMessage> {
-  return client.waitForEvent(
-    (event): event is PendingUserInputUpdatedMessage =>
-      event.type === 'pending-user-input-updated'
-      && event.input.chatId === chatId
-      && event.input.content === content
-      && typeof event.input.turnId === 'string',
-    `opencode queued turn identity for ${content.slice(0, 48)}`,
+): ReturnType<GarconTestClient['waitForCommittedUserInput']> {
+  return client.waitForCommittedUserInput(
+    chatId,
+    content,
     { afterIndex, timeoutMs: LIVE_TURN_TIMEOUT_MS },
   );
 }

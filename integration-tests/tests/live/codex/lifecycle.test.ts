@@ -2,11 +2,6 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TranscriptMessage } from '../../../../common/chat-view.js';
-import type {
-  PendingUserInputClearedMessage,
-  PendingUserInputStatusUpdatedMessage,
-  PendingUserInputUpdatedMessage,
-} from '../../../../common/ws-events.js';
 import {
   assistantContents,
   countUserContent,
@@ -94,19 +89,18 @@ describe('live Codex lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
-      const secondInput = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === parentChatId
-          && event.input.content === secondPrompt
-          && typeof event.input.turnId === 'string',
-        'live Codex queued turn identity',
+      const secondInput = await fixture.client.waitForCommittedUserInput(
+        parentChatId,
+        secondPrompt,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(
         parentChatId,
-        secondInput.input.turnId,
-        { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        undefined,
+        {
+          afterIndex: fixture.client.events().lastIndexOf(secondInput) + 1,
+          timeoutMs: LIVE_TURN_TIMEOUT_MS,
+        },
       )).type);
 
       const child = await fixture.client.forkRunChat(childRequest);
@@ -147,7 +141,8 @@ describe('live Codex lifecycle', () => {
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: pointChatId,
-        upToSeq: firstAssistant.seq,
+        transcriptViewId: parentAfterQueue.transcriptViewId,
+        upToOrdinal: firstAssistant.ordinal,
       });
       const pointMarker = liveMarker('CODEX_POINT_FORK');
       const pointPrompt = exactReplyPrompt(pointMarker);
@@ -341,19 +336,18 @@ describe('live Codex lifecycle', () => {
         chatId,
       });
       expect(interrupted.outcome).toBe('interrupt-requested');
-      const successorInput = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === successorPrompt
-          && typeof event.input.turnId === 'string',
-        'live Codex interrupt successor identity',
+      const successorInput = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        successorPrompt,
         { afterIndex: interruptCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(
         chatId,
-        successorInput.input.turnId,
-        { afterIndex: interruptCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        undefined,
+        {
+          afterIndex: fixture.client.events().lastIndexOf(successorInput) + 1,
+          timeoutMs: LIVE_TURN_TIMEOUT_MS,
+        },
       )).type);
 
       const transcript = await fixture.client.getMessages(chatId);
@@ -409,29 +403,8 @@ describe('live Codex lifecycle', () => {
         afterIndex: stopCommandCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      const stoppedInputSettlement = await fixture.client.waitForEvent(
-        (
-          event,
-        ): event is PendingUserInputClearedMessage | PendingUserInputStatusUpdatedMessage =>
-          (
-            event.type === 'pending-user-input-cleared'
-            && event.chatId === chatId
-            && event.clientRequestId === stoppedTurn.clientRequestId
-            && event.reason === 'persisted'
-          )
-          || (
-            event.type === 'pending-user-input-status-updated'
-            && event.chatId === chatId
-            && event.clientRequestId === stoppedTurn.clientRequestId
-            && event.deliveryStatus === 'unconfirmed'
-          ),
-        'live Codex stopped input settlement',
-        { afterIndex: stopCommandCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-      );
-      expect(
-        stoppedInputSettlement.type === 'pending-user-input-cleared'
-        || stoppedInputSettlement.deliveryStatus === 'unconfirmed',
-      ).toBe(true);
+      expect(userContents((await fixture.client.getMessages(chatId)).messages))
+        .toContain(stoppedPrompt);
       const stopEvents = fixture.client.eventsSince(stopCommandCursor);
       expect(stopEvents.filter((event) =>
         event.type === 'chat-session-stopped'
@@ -531,9 +504,9 @@ function expectPersistedCommand(
   });
   if (!succeeded) throw new Error('No persisted execution of the command carried its output.');
   const bashSeq = transcript.messages.find((entry) =>
-    entry.message.type === 'bash-tool-use' && entry.message.toolId === succeeded.toolId)?.seq;
+    entry.message.type === 'bash-tool-use' && entry.message.toolId === succeeded.toolId)?.ordinal;
   const resultSeq = transcript.messages.find((entry) =>
-    entry.message.type === 'tool-result' && entry.message.toolId === succeeded.toolId)?.seq;
+    entry.message.type === 'tool-result' && entry.message.toolId === succeeded.toolId)?.ordinal;
   expect(resultSeq).toBeGreaterThan(bashSeq ?? Number.MAX_SAFE_INTEGER);
 }
 

@@ -82,7 +82,7 @@ export function forkAtMessageWhenPersisted(
   fixture: IntegrationFixture,
   sourceChatId: string,
   chatId: string,
-  upToSeq: number,
+  upToOrdinal: number,
 ): Promise<void> {
   return forkWithRetry(
     fixture,
@@ -93,7 +93,7 @@ export function forkAtMessageWhenPersisted(
       'MESSAGE_NOT_IN_NATIVE_HISTORY',
       'SOURCE_REVISION_CHANGED',
     ]),
-    upToSeq,
+    upToOrdinal,
   );
 }
 
@@ -102,15 +102,18 @@ async function forkWithRetry(
   sourceChatId: string,
   chatId: string,
   retryableErrorCodes: ReadonlySet<string>,
-  upToSeq?: number,
+  upToOrdinal?: number,
 ): Promise<void> {
+  const transcriptViewId = upToOrdinal === undefined
+    ? undefined
+    : (await fixture.client.getMessages(sourceChatId, { limit: 1 })).transcriptViewId;
   const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       await fixture.client.forkChat({
         sourceChatId,
         chatId,
-        ...(upToSeq === undefined ? {} : { upToSeq }),
+        ...(upToOrdinal === undefined ? {} : { transcriptViewId, upToOrdinal }),
       });
       return;
     } catch (error) {

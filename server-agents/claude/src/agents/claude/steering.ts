@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type {
   AgentLogger,
-  AgentSteerRequestV4,
+  AgentSteerRequest,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -270,7 +270,7 @@ export class ClaudeSteeringController {
     return target;
   }
 
-  async steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
+  async steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
     const captured = request.target ? this.#targets.get(request.target) : undefined;
     if (!captured) return rejectedClaudeSteer('no-active-turn', 'No active Claude turn');
     this.#targets.delete(request.target!);
@@ -380,7 +380,7 @@ export class ClaudeSteeringController {
   }
 
   #validateTarget(
-    request: AgentSteerRequestV4,
+    request: AgentSteerRequest,
     captured: CapturedClaudeSteerTarget,
   ): AgentSteerResult | null {
     const current = this.#options.session(request.agentSessionId);

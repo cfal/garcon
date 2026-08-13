@@ -24,8 +24,6 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] list <resource>
   garcon-cli [options] send-async <chat-id> [--allow-steer] <message>
   garcon-cli [options] stop <chat-id>
-  garcon-cli [connection options] repair-history accept-native <chat-id> --expected-revision <revision> --expected-epoch <epoch>
-  garcon-cli [connection options] repair-history retry-abandoned
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
 
@@ -62,15 +60,12 @@ Options:
   --allow-steer                With send-async, steer the active turn when busy; never queues
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
-  --expected-revision <value>  Expected carryover revision for history repair
-  --expected-epoch <epoch>     Expected ownership epoch for history repair
   --json                       Print list, status, or wait results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list, send-async, stop, repair-history, status, or wait.
-Use status <chat-id> to obtain the carryover revision and ownership epoch for history repair.
+Use -- before a positional prompt whose first word is list, send-async, stop, status, or wait.
 The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
@@ -163,27 +158,12 @@ export interface StatusCliCommand extends CliConnectionOptions {
   json: boolean;
 }
 
-export type RepairHistoryCliCommand = CliConnectionOptions & (
-  | {
-      kind: 'repair-history';
-      action: 'accept-native';
-      chatId: ChatId;
-      expectedCarryOverRevision: string;
-      expectedAgentOwnershipEpoch: string;
-    }
-  | {
-      kind: 'repair-history';
-      action: 'retry-abandoned';
-    }
-);
-
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
   | ListCliCommand
   | SendAsyncCliCommand
   | StopCliCommand
-  | RepairHistoryCliCommand
   | StatusCliCommand
   | WaitCliCommand
   | CliInvocation;
@@ -203,8 +183,6 @@ const SINGLE_STRING_OPTIONS = [
   'resume',
   'turn',
   'messages',
-  'expected-revision',
-  'expected-epoch',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -275,7 +253,7 @@ function startsReservedCommand(
   return terminator === undefined || positional.index < terminator.index;
 }
 
-type ControlCommandKind = 'send-async' | 'stop' | 'repair-history';
+type ControlCommandKind = 'send-async' | 'stop';
 
 const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['cwd', '--cwd'],
@@ -291,8 +269,6 @@ const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['json', '--json'],
   ['turn', '--turn'],
   ['messages', '--messages'],
-  ['expected-revision', '--expected-revision'],
-  ['expected-epoch', '--expected-epoch'],
 ] as const;
 
 function rejectControlForbiddenOptions(
@@ -373,58 +349,6 @@ const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = 
   ['allow-steer', '--allow-steer'],
 ] as const;
 
-function parseRepairHistory(
-  parsed: ReturnType<typeof parseArgs>,
-  values: Record<string, ParsedOptionValue>,
-  connection: CliConnectionOptions,
-): RepairHistoryCliCommand {
-  for (const [key, flag] of [
-    ...OBSERVATION_FORBIDDEN_OPTIONS,
-    ['json', '--json'],
-    ['turn', '--turn'],
-    ['messages', '--messages'],
-  ] as ReadonlyArray<readonly [string, string]>) {
-    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with repair-history`);
-  }
-  if (parsed.positionals[1] === 'retry-abandoned') {
-    if (parsed.positionals.length !== 2) {
-      throw argumentError('repair-history retry-abandoned takes no chat ID');
-    }
-    if (values['expected-revision'] !== undefined || values['expected-epoch'] !== undefined) {
-      throw argumentError(
-        '--expected-revision and --expected-epoch cannot be used with repair-history retry-abandoned',
-      );
-    }
-    return {
-      kind: 'repair-history',
-      action: 'retry-abandoned',
-      ...connection,
-    };
-  }
-  if (parsed.positionals.length !== 3 || parsed.positionals[1] !== 'accept-native') {
-    throw argumentError('repair-history requires: accept-native <chat-id> or retry-abandoned');
-  }
-  const expectedCarryOverRevision = nonEmptyOption(
-    values['expected-revision'] as string | undefined,
-    '--expected-revision',
-  );
-  const expectedAgentOwnershipEpoch = nonEmptyOption(
-    values['expected-epoch'] as string | undefined,
-    '--expected-epoch',
-  );
-  if (!expectedCarryOverRevision || !expectedAgentOwnershipEpoch) {
-    throw argumentError('repair-history requires --expected-revision and --expected-epoch');
-  }
-  return {
-    kind: 'repair-history',
-    action: 'accept-native',
-    ...connection,
-    chatId: parseControlChatId(parsed.positionals[2]!, 'repair-history'),
-    expectedCarryOverRevision,
-    expectedAgentOwnershipEpoch,
-  };
-}
-
 function rejectObservationMutationOptions(
   values: Record<string, ParsedOptionValue>,
   command: ObservationCommandKind,
@@ -440,9 +364,6 @@ function parseWait(
   connection: CliConnectionOptions,
 ): WaitCliCommand {
   rejectObservationMutationOptions(values, 'wait');
-  if (values['expected-revision'] !== undefined || values['expected-epoch'] !== undefined) {
-    throw argumentError('--expected-revision and --expected-epoch cannot be used with wait');
-  }
   if (values.messages !== undefined) {
     throw argumentError('--messages cannot be used with wait');
   }
@@ -496,9 +417,6 @@ function parseStatus(
   connection: CliConnectionOptions,
 ): StatusCliCommand {
   rejectObservationMutationOptions(values, 'status');
-  if (values['expected-revision'] !== undefined || values['expected-epoch'] !== undefined) {
-    throw argumentError('--expected-revision and --expected-epoch cannot be used with status');
-  }
   if (values.turn !== undefined) throw argumentError('--turn cannot be used with status');
   if (parsed.positionals.length !== 2) {
     throw argumentError('status requires exactly one chat ID');
@@ -545,8 +463,6 @@ export function parseCliArgs(
         resume: { type: 'string' },
         turn: { type: 'string' },
         messages: { type: 'string' },
-        'expected-revision': { type: 'string' },
-        'expected-epoch': { type: 'string' },
         'allow-steer': { type: 'boolean' },
         json: { type: 'boolean' },
         help: { type: 'boolean' },
@@ -612,9 +528,6 @@ export function parseCliArgs(
   if (startsReservedCommand(tokens, 'stop')) {
     return parseStop(parsed, values, connection);
   }
-  if (startsReservedCommand(tokens, 'repair-history')) {
-    return parseRepairHistory(parsed, values, connection);
-  }
   if (startsReservedCommand(tokens, 'wait')) {
     return parseWait(parsed, values, connection);
   }
@@ -637,8 +550,6 @@ export function parseCliArgs(
     rejectListOption(values['allow-steer'], '--allow-steer');
     rejectListOption(values.turn, '--turn');
     rejectListOption(values.messages, '--messages');
-    rejectListOption(values['expected-revision'], '--expected-revision');
-    rejectListOption(values['expected-epoch'], '--expected-epoch');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
@@ -679,9 +590,6 @@ export function parseCliArgs(
   }
   if (values.turn !== undefined) throw argumentError('--turn can only be used with wait');
   if (values.messages !== undefined) throw argumentError('--messages can only be used with status');
-  if (values['expected-revision'] !== undefined || values['expected-epoch'] !== undefined) {
-    throw argumentError('--expected-revision and --expected-epoch can only be used with repair-history');
-  }
   if (values['allow-steer'] !== undefined) {
     throw argumentError('--allow-steer can only be used with send-async');
   }

@@ -96,6 +96,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger,
+      reopenProducer: () => calls.push('reopen'),
       onCommitted: mock(async () => calls.push('notify')),
     });
     const admission = context();
@@ -116,6 +117,7 @@ describe('AgentHandoffService', () => {
       'close',
       'boundary',
       'registry',
+      'reopen',
       'complete',
       'notify',
     ]);
@@ -138,6 +140,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger,
+      reopenProducer: () => calls.push('reopen'),
     });
 
     await expect(service.createPreparation({
@@ -149,6 +152,7 @@ describe('AgentHandoffService', () => {
     }).prepare(context())).rejects.toThrow('checkpoint busy');
 
     expect(state.ownership.decideHandoff).not.toHaveBeenCalled();
+    expect(calls).toEqual(['close', 'watermark', 'reopen']);
     expect(current).toMatchObject({ agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch' });
   });
 
@@ -162,6 +166,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger,
+      reopenProducer: () => calls.push('reopen'),
     });
 
     await service.createPreparation({
@@ -172,7 +177,7 @@ describe('AgentHandoffService', () => {
       target: target(),
     }).prepare(context());
 
-    expect(calls).toEqual(['close', 'boundary', 'registry', 'complete']);
+    expect(calls).toEqual(['close', 'boundary', 'registry', 'reopen', 'complete']);
     expect(ledger.highWatermark).not.toHaveBeenCalled();
     expect(ledger.checkpointForHandoff).not.toHaveBeenCalled();
   });
@@ -186,11 +191,12 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger: ledgerState(calls),
+      reopenProducer: () => calls.push('reopen'),
     });
 
     await service.recoverPendingHandoffs();
 
-    expect(calls).toEqual(['close', 'boundary', 'registry', 'complete']);
+    expect(calls).toEqual(['close', 'boundary', 'registry', 'reopen', 'complete']);
     expect(current.agentId).toBe('target-agent');
   });
 
@@ -265,6 +271,7 @@ function createService(overrides = {}) {
     },
     endpointResolver: overrides.endpointResolver ?? {},
     catalog: overrides.catalog ?? {},
+    reopenProducer: overrides.reopenProducer ?? (() => {}),
     onCommitted: overrides.onCommitted,
   });
 }

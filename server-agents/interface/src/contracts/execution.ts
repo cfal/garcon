@@ -28,7 +28,6 @@ export interface AgentProjectPathUpdatePreparation {
 export interface AgentExecutionAdmission {
   readonly signal: AbortSignal;
   markStarted(): Promise<void>;
-  markAbortable(): void;
 }
 
 export interface AgentStartedSession {

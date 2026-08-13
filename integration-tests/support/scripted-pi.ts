@@ -5,7 +5,7 @@
 // ~/.pi untouched: both the spawned CLI and the in-server SDK discovery resolve ~/.pi/agent
 // inside the temp home.
 
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
@@ -15,6 +15,7 @@ import type {
 } from '../../common/chat-command-contracts.js';
 import { FakeChatCompletionsModel } from './fake-chat-completions-model.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
+import { waitForPersistedNativeSession } from './persisted-chat.js';
 
 export const PI_TEST_PROVIDER = 'garcon-fake';
 export const PI_TEST_MODEL_ID = 'fake-model';
@@ -140,17 +141,15 @@ export interface PiNativeSession {
   path: string;
 }
 
-// Reads the workspace chat registry the way the fixture's direct-agent helpers do.
 export async function piNativeSession(
   fixture: { readonly dirs: IntegrationDirectories },
   chatId: string,
 ): Promise<PiNativeSession> {
-  const registry = JSON.parse(
-    await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
-  ) as { sessions?: Record<string, Record<string, unknown>> };
-  const chat = registry.sessions?.[chatId];
-  if (!chat) throw new Error(`Chat ${chatId} was not persisted.`);
-  if (chat.agentId !== 'pi') throw new Error(`Chat ${chatId} is not a Pi chat.`);
+  const chat = await waitForPersistedNativeSession({
+    directories: fixture.dirs,
+    chatId,
+    agentId: 'pi',
+  });
   const agentSessionId = typeof chat.agentSessionId === 'string' ? chat.agentSessionId : '';
   const nativeSession = chat.nativeSession && typeof chat.nativeSession === 'object'
     ? chat.nativeSession as Record<string, unknown>

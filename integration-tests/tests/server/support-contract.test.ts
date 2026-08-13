@@ -870,15 +870,18 @@ describe('integration support contracts', () => {
     socket!.receive(JSON.stringify({
       type: 'chat-messages',
       chatId: 'private-chat',
-      generationId: 'private-generation',
+      transcriptViewId: 'private-generation',
       messages: [{
-        seq: 1,
+        ordinal: 1,
         message: {
           type: 'assistant-message',
           timestamp: '2026-07-26T00:00:00.000Z',
           content: privateContent,
         },
       }],
+      firstOrdinal: 1,
+      lastOrdinal: 1,
+      resendCandidates: [],
     }));
 
     const event = await received;

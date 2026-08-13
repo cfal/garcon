@@ -72,7 +72,7 @@ describe('TranscriptAdoptionService', () => {
   it('repairs stale registry session fields from an existing ledger on open', async () => {
     await withFixture(async ({ adoption, ledger, entry, updates }) => {
       await adoption.ensure('chat-1');
-      ledger.openProducer('chat-1').sink.publish({
+      ledger.openProducer('chat-1', 'test').sink.publish({
         type: 'session',
         session: {
           agentSessionId: 'session-2',
@@ -136,7 +136,12 @@ async function withFixture(run) {
       defaults: () => ({ ownerId: 'test', schemaVersion: 1, values: {} }),
       parse: (value) => value,
     },
-    nativeHistoryImport: null,
+    nativeHistoryImport: {
+      async *load() {
+        loadCounts.current += 1;
+        yield current.map((message) => ({ message }));
+      },
+    },
   };
   const adoption = new TranscriptAdoptionService({
     ledger,
@@ -156,10 +161,6 @@ async function withFixture(run) {
         new UserMessage(TS, 'prefix', undefined, { upstreamRequestId: 'prefix-message' }),
         new AssistantMessage(TS, 'prefix answer'),
       ];
-    },
-    async loadLegacyCurrent() {
-      loadCounts.current += 1;
-      return current;
     },
     now: () => TS,
   });

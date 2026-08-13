@@ -53,11 +53,8 @@ function transientFeed(chatId: string, transcriptViewId: string) {
 	return {
 		serverInstanceId: 'server-instance-test',
 		chatId,
-		agentOwnershipEpoch: 'ownership-1',
-		generationId: transcriptViewId,
-		resetTransactionId: null,
+		transcriptViewId,
 		transientRevision: 0,
-		stateDigest: 'empty-feed',
 		rows: [],
 	};
 }
@@ -88,7 +85,6 @@ function deltaResponse(
 	chatId: string,
 	transcriptViewId = `generation-${chatId}`,
 	messages: unknown[] = [],
-	pendingUserInputs: unknown[] = [],
 ) {
 	const first = messages[0] as { ordinal?: unknown } | undefined;
 	const last = messages.at(-1) as { ordinal?: unknown } | undefined;
@@ -101,7 +97,6 @@ function deltaResponse(
 		firstOrdinal: typeof first?.ordinal === 'number' ? first.ordinal : 1,
 		lastOrdinal: typeof last?.ordinal === 'number' ? last.ordinal : 0,
 		resendCandidates: [],
-		pendingUserInputs,
 		transientFeed: transientFeed(chatId, transcriptViewId),
 	};
 }
@@ -119,7 +114,6 @@ function snapshotRequiredResponse(
 		firstOrdinal: 1,
 		lastOrdinal: 0,
 		resendCandidates: [],
-		pendingUserInputs: [],
 		transientFeed: transientFeed(chatId, transcriptViewId ?? `pending:${chatId}`),
 	};
 }
@@ -188,7 +182,6 @@ function createReconnectDeps(
 				return 'applied' as const;
 			},
 		),
-		setPendingUserInputs: vi.fn(),
 		setResendCandidates: vi.fn(),
 		loadMessages: vi.fn(async () => []),
 		transcriptCache: {
@@ -234,7 +227,6 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.ws.sendRequest,
 		deps.chatState.getCursor,
 		deps.chatState.applyMessages,
-		deps.chatState.setPendingUserInputs,
 		deps.chatState.loadMessages,
 		deps.chatState.transcriptCache.markStale,
 		deps.chatState.transcriptCache.markValidated,
@@ -896,26 +888,6 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalled();
-	});
-
-	it('refreshes selected unconfirmed pending-input state from a delta subscription', async () => {
-		const unconfirmedInput = {
-			chatId: 'chat-1',
-			clientRequestId: 'req-unconfirmed',
-			content: 'missed status while disconnected',
-			createdAt: TS,
-			deliveryStatus: 'unconfirmed',
-		};
-		const deps = createReconnectDeps({
-			subscribeResponses: {
-				'chat-1': deltaResponse('chat-1', 'generation-selected', [], [unconfirmedInput]),
-			},
-		});
-
-		await reconnectAfterFirstConnection(deps);
-
-		expect(deps.chatState.setPendingUserInputs).toHaveBeenCalledWith([unconfirmedInput]);
-		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 	});
 
 	it('falls back to selected snapshot when subscribe response is malformed', async () => {

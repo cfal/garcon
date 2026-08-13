@@ -38,11 +38,9 @@ describe('carryover bootstrap migration', () => {
         expect(await readJson<{
           version: number;
           ownershipIntents: unknown[];
-          transferCleanup: unknown[];
         }>(fixture, 'agent-ownership-journal.json')).toEqual({
-          version: 4,
+          version: 5,
           ownershipIntents: [],
-          transferCleanup: [],
         });
         const firstMarker = await readJson<MigrationMarker>(
           fixture,
@@ -120,7 +118,7 @@ describe('carryover bootstrap migration', () => {
         // The rollback finished from its marker, then the boot re-migrated.
         expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 5 });
         expect(await readJson<{ version: number }>(fixture, 'agent-ownership-journal.json'))
-          .toMatchObject({ version: 4 });
+          .toMatchObject({ version: 5 });
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
           version: 5,
         });
@@ -232,19 +230,7 @@ async function expectMigratedHistory(
     'legacy-a-assistant',
     'legacy-b-assistant',
   ]);
-  expect(messagesOfType(history.messages, 'agent-switch').map((message) => [
-    message.fromAgentId,
-    message.toAgentId,
-  ])).toEqual([
-    [
-      DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-      DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-    ],
-    [
-      DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-      DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-    ],
-  ]);
+  expect(messagesOfType(history.messages, 'agent-switch')).toEqual([]);
 }
 
 async function migratedCarryOverFiles(

@@ -27,8 +27,8 @@ import {
 import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
-import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
+import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import type {
 	ChatQueueState,
 	PendingPermissionRequest,
@@ -208,7 +208,7 @@ function createDeps(chat = createRunningChat()) {
 		entries: [] as TranscriptMessage[],
 		chatMessages: [] as ChatMessage[],
 		localNotices: [] as LocalNoticeRow[],
-		pendingUserInputs: [] as PendingUserInput[],
+		optimisticUserInputs: [] as OptimisticUserInput[],
 		excludedResendOrdinals: [] as number[],
 		clearResendExclusions: vi.fn(() => {
 			chatState.excludedResendOrdinals = [];
@@ -222,15 +222,12 @@ function createDeps(chat = createRunningChat()) {
 		resetForNewChat: vi.fn(() => {
 			chatState.chatMessages = [];
 			chatState.localNotices = [];
-			chatState.pendingUserInputs = [];
+			chatState.optimisticUserInputs = [];
 		}),
 		activateChat: vi.fn<() => ChatRestoreResult | null>(() => null),
 		loadMessages: vi.fn<SessionControllerDeps['chatState']['loadMessages']>(
 			() => new Promise<ChatMessage[]>(() => {}),
 		),
-		setPendingUserInputs: vi.fn((inputs: PendingUserInput[]) => {
-			chatState.pendingUserInputs = inputs;
-		}),
 		appendLocalNotice: vi.fn((noticeType: LocalNoticeType, content: string) => {
 			chatState.localNotices = [
 				...chatState.localNotices,
@@ -244,31 +241,21 @@ function createDeps(chat = createRunningChat()) {
 			];
 		}),
 		clearLocalNotices: vi.fn(),
-		upsertPendingUserInput: vi.fn((input: PendingUserInput) => {
-			const index = chatState.pendingUserInputs.findIndex(
-				(existing) => existing.clientRequestId === input.clientRequestId,
+		upsertOptimisticUserInput: vi.fn((input: OptimisticUserInput) => {
+			const index = chatState.optimisticUserInputs.findIndex(
+				(existing) => existing.clientMessageId === input.clientMessageId,
 			);
 			if (index >= 0) {
-				chatState.pendingUserInputs[index] = input;
+				chatState.optimisticUserInputs[index] = input;
 				return;
 			}
-			chatState.pendingUserInputs = [...chatState.pendingUserInputs, input];
+			chatState.optimisticUserInputs = [...chatState.optimisticUserInputs, input];
 		}),
-		clearPendingUserInput: vi.fn((clientRequestId: string) => {
-			chatState.pendingUserInputs = chatState.pendingUserInputs.filter(
-				(input) => input.clientRequestId !== clientRequestId,
+		clearOptimisticUserInput: vi.fn((clientMessageId: string) => {
+			chatState.optimisticUserInputs = chatState.optimisticUserInputs.filter(
+				(input) => input.clientMessageId !== clientMessageId,
 			);
 		}),
-		updatePendingUserInputDeliveryStatus: vi.fn(
-			(
-				clientRequestId: string,
-				deliveryStatus: 'submitting' | 'accepted' | 'unconfirmed' | 'failed',
-			) => {
-				chatState.pendingUserInputs = chatState.pendingUserInputs.map((input) =>
-					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
-				);
-			},
-		),
 		transcriptCache: {
 			markValidated: vi.fn(),
 		},
@@ -1211,7 +1198,7 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
-	it('submits in-chat fork actions with the clicked message sequence', async () => {
+	it('submits in-chat fork actions with the clicked message ordinal', async () => {
 		const chat = createRunningChat({ id: '123' });
 		const { deps } = createDeps(chat);
 		deps.chatState.entries = [{
@@ -1229,13 +1216,13 @@ describe('ConversationSessionController', () => {
 		expect(mockForkChat).toHaveBeenCalledWith({
 			sourceChatId: '123',
 			chatId: expect.stringMatching(/^\d+$/),
-			upToSeq: 9,
+			upToOrdinal: 9,
 			transcriptViewId: 'generation-1',
 		});
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 	});
 
-	it('inserts a pending user message before REST acceptance and marks it accepted afterward', async () => {
+	it('keeps an optimistic user message until the committed ledger echo arrives', async () => {
 		const accepted = deferred<{
 			success: true;
 			commandType: string;
@@ -1254,17 +1241,15 @@ describe('ConversationSessionController', () => {
 		const submit = controller.submitForChat('chat-1');
 		await Promise.resolve();
 
-		expect(deps.chatState.pendingUserInputs).toHaveLength(1);
-		const pending = deps.chatState.pendingUserInputs[0];
-		expect(pending.content).toBe('hello over REST');
-		expect(pending.clientRequestId).toEqual(expect.any(String));
-		expect(pending.clientMessageId).toEqual(expect.any(String));
-		expect(pending.deliveryStatus).toBe('submitting');
+		expect(deps.chatState.optimisticUserInputs).toHaveLength(1);
+		const optimistic = deps.chatState.optimisticUserInputs[0];
+		expect(optimistic.content).toBe('hello over REST');
+		expect(optimistic.clientMessageId).toEqual(expect.any(String));
 		expect(deps.scrollToBottom).toHaveBeenCalledOnce();
 		expect(mockRunChat).toHaveBeenCalledWith(
 			expect.objectContaining({
-				clientRequestId: pending.clientRequestId,
-				clientMessageId: pending.clientMessageId,
+				clientRequestId: expect.any(String),
+				clientMessageId: optimistic.clientMessageId,
 				chatId: 'chat-1',
 				command: 'hello over REST',
 				model: 'opus',
@@ -1275,7 +1260,7 @@ describe('ConversationSessionController', () => {
 		accepted.resolve({
 			success: true,
 			commandType: 'agent-run',
-			clientRequestId: pending.clientRequestId,
+			clientRequestId: mockRunChat.mock.calls[0][0].clientRequestId,
 			chatId: 'chat-1',
 			turnId: 'turn-1',
 			status: 'accepted',
@@ -1283,8 +1268,7 @@ describe('ConversationSessionController', () => {
 		});
 		await expect(submit).resolves.toBe('accepted');
 
-		const acceptedInput = deps.chatState.pendingUserInputs[0];
-		expect(acceptedInput.deliveryStatus).toBe('accepted');
+		expect(deps.chatState.optimisticUserInputs).toEqual([optimistic]);
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 	});
 
@@ -1735,7 +1719,7 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
-	it('marks the pending user message failed and restores composer input on REST rejection', async () => {
+	it('clears the optimistic user message and restores composer input on REST rejection', async () => {
 		mockRunChat.mockRejectedValueOnce(new ApiError(400, 'request rejected', 'VALIDATION_FAILED'));
 		const { deps } = createDeps();
 		deps.agentState.model = 'opus';
@@ -1745,7 +1729,7 @@ describe('ConversationSessionController', () => {
 		const outcome = await controller.submitForChat('chat-1');
 
 		expect(outcome).toBe('rejected');
-		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
+		expect(deps.chatState.optimisticUserInputs).toEqual([]);
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
 			content: 'Failed to send message: request rejected',
@@ -1775,11 +1759,11 @@ describe('ConversationSessionController', () => {
 		expect(outcome).toBe('accepted');
 		expect(mockRunChat).toHaveBeenCalledTimes(2);
 		expect(mockRunChat.mock.calls[1][0]).toEqual(mockRunChat.mock.calls[0][0]);
-		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('accepted');
+		expect(deps.chatState.optimisticUserInputs).toHaveLength(1);
 		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
 
-	it('keeps an ambiguous direct outcome unconfirmed without restoring the composer', async () => {
+	it('keeps an ambiguous direct outcome optimistic without restoring the composer', async () => {
 		mockRunChat.mockRejectedValue(new TypeError('connection closed'));
 		const { deps } = createDeps();
 		deps.agentState.model = 'opus';
@@ -1792,7 +1776,7 @@ describe('ConversationSessionController', () => {
 
 		expect(mockRunChat).toHaveBeenCalledTimes(2);
 		expect(mockRunChat.mock.calls[1][0]).toEqual(mockRunChat.mock.calls[0][0]);
-		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('unconfirmed');
+		expect(deps.chatState.optimisticUserInputs).toHaveLength(1);
 		expect(deps.composerState.inputText).toBe('');
 		expect(deps.sessions.applyProcessingEvent).not.toHaveBeenCalledWith('chat-1', false);
 		expect(deps.chatState.localNotices[0]).toMatchObject({
@@ -1813,8 +1797,8 @@ describe('ConversationSessionController', () => {
 		const outcome = await new ConversationSessionController(deps).submitForChat('chat-1');
 
 		expect(outcome).toBe('rejected');
-		expect(deps.chatState.clearPendingUserInput).toHaveBeenCalledOnce();
-		expect(deps.chatState.pendingUserInputs).toEqual([]);
+		expect(deps.chatState.clearOptimisticUserInput).toHaveBeenCalledOnce();
+		expect(deps.chatState.optimisticUserInputs).toEqual([]);
 		expect(mockGetChatExecutionControl).toHaveBeenCalledTimes(1);
 		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
@@ -1862,8 +1846,11 @@ describe('ConversationSessionController', () => {
 
 		expect(mockCreateQueuedInput).toHaveBeenCalledWith({
 			clientRequestId: expect.any(String),
+			clientMessageId: expect.any(String),
 			chatId: 'chat-1',
+			transcriptViewId: 'generation-1',
 			content: 'queue this',
+			excludedResendOrdinals: [],
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
@@ -2112,8 +2099,11 @@ describe('ConversationSessionController', () => {
 
 		expect(mockCreateQueuedInput).toHaveBeenCalledWith({
 			clientRequestId: expect.any(String),
+			clientMessageId: expect.any(String),
 			chatId: 'chat-1',
+			transcriptViewId: 'generation-1',
 			content: 'second queued message',
+			excludedResendOrdinals: [],
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 	});
@@ -2529,7 +2519,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.inputText).toBe('draft stays here');
 		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
-		expect(deps.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+		expect(deps.chatState.upsertOptimisticUserInput).not.toHaveBeenCalled();
 	});
 
 	it('applies authoritative pause and resume snapshots using the rendered pause ID', async () => {
@@ -2644,14 +2634,13 @@ describe('ConversationSessionController', () => {
 			clientRequestId: expect.any(String),
 			clientMessageId: expect.any(String),
 			chatId: 'chat-1',
+			transcriptViewId: 'generation-1',
 			content: 'Focus on the failing contract test',
 		});
 		const steerRequest = mockSteerChat.mock.calls[0][0];
-		expect(deps.chatState.pendingUserInputs[0]).toMatchObject({
-			clientRequestId: steerRequest.clientRequestId,
+		expect(deps.chatState.optimisticUserInputs[0]).toMatchObject({
 			clientMessageId: steerRequest.clientMessageId,
 			content: 'Focus on the failing contract test',
-			deliveryStatus: 'accepted',
 		});
 		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
 		expect(deps.conversationUi.getExecutionControl).not.toHaveBeenCalled();
@@ -2674,7 +2663,7 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.composerState.inputText).toBe('/steer Keep the current turn');
 		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
-		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
+		expect(deps.chatState.optimisticUserInputs).toEqual([]);
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
 			content: 'The active turn changed before steering could be applied.',
@@ -2716,7 +2705,7 @@ describe('ConversationSessionController', () => {
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
 		expect(deps.composerState.inputText).toBe('/steer Keep the current turn');
-		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
+		expect(deps.chatState.optimisticUserInputs).toEqual([]);
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
 			content: 'Steering is temporarily unavailable until the server restarts.',
@@ -2815,7 +2804,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
 
-	it('keeps ambiguous steering unconfirmed without restoring the composer', async () => {
+	it('keeps ambiguous steering optimistic without restoring the composer', async () => {
 		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
 		deps.composerState.inputText = '/steer Keep the current turn';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
@@ -2832,7 +2821,7 @@ describe('ConversationSessionController', () => {
 		expect(mockSteerChat).toHaveBeenCalledTimes(2);
 		expect(deps.composerState.inputText).toBe('');
 		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
-		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('unconfirmed');
+		expect(deps.chatState.optimisticUserInputs).toHaveLength(1);
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
 			content: 'Steering could not be confirmed. Check the conversation before sending it again.',
@@ -2864,25 +2853,23 @@ describe('ConversationSessionController', () => {
 		expect(mockSteerChat).toHaveBeenCalledOnce();
 	});
 
-	it('keeps local pending command messages when a REST history load returns an older snapshot', async () => {
-		const pending: PendingUserInput = {
+	it('keeps local optimistic messages when a REST history load returns an older snapshot', async () => {
+		const optimistic: OptimisticUserInput = {
 			chatId: 'chat-1',
-			clientRequestId: 'req-1',
 			clientMessageId: 'msg-1',
-			content: 'pending',
+			content: 'optimistic',
 			createdAt: '2026-05-14T00:00:01.000Z',
-			deliveryStatus: 'submitting',
 		};
 		const loaded = [new AssistantMessage('2026-05-14T00:00:00.000Z', 'older server snapshot')];
 		const { deps } = createDeps();
-		deps.chatState.pendingUserInputs = [pending];
+		deps.chatState.optimisticUserInputs = [optimistic];
 		deps.chatState.activateChat = vi.fn(() => null);
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue(loaded);
 		const controller = new ConversationSessionController(deps);
 
 		await controller.loadChat('chat-1');
 
-		expect(deps.chatState.pendingUserInputs).toEqual([pending]);
+		expect(deps.chatState.optimisticUserInputs).toEqual([optimistic]);
 	});
 
 	describe('handleModelSelectionChange', () => {

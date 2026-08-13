@@ -42,12 +42,10 @@ import {
   type WebSocketMessagePublisher,
 } from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
-import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
-import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import { AgentRegistry } from './agents/index.js';
 import { renderCarriedContext } from '@garcon/common/transcript-seed';
 import { CarryOverCompactionService } from './chats/carryover-compaction.js';
@@ -94,7 +92,6 @@ import {
   resumeInterruptedCarryOverRollback,
   rollbackLegacyCarryOverMigration,
 } from './chats/chat-carryover-rollback.js';
-import { OrderedChatTranscriptReader } from './chats/ordered-chat-transcript-reader.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { SnippetStore } from './snippets/store.js';
 import {
@@ -313,9 +310,6 @@ export async function startServer(): Promise<void> {
           signal,
         });
       },
-      loadLegacyCurrent: (chatId, entry, signal) => (
-        agentRegistry.loadLegacyProjectionMessages(entry, chatId, signal)
-      ),
     });
     const nativeTranscriptActivity = new NativeTranscriptActivityService({
       ledger: transcriptLedger,
@@ -335,16 +329,8 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine ?? null,
       ),
-      async loadCarriedContext(chatId, entry, signal) {
-        if (entry.carryOverMigrationQuarantine) {
-          throw new CarryOverHistoryUnavailableError();
-        }
-        const refs = entry.carryOverSegments ?? [];
-        if (refs.length === 0) return null;
-        const messages = await carryOver.loadProjectionSource({
-          refs,
-          signal,
-        });
+      async createCarriedContext(chatId, entry, messages, signal) {
+        if (messages.length === 0) return null;
         if (!carryOverCompaction) return renderCarriedContext(messages);
         return carryOverCompaction.carriedContextFor({
           chatId,
@@ -374,16 +360,6 @@ export async function startServer(): Promise<void> {
     });
     await metadata.init();
 
-    // Bound once the coordinator exists. Until then nothing can own execution beyond a running
-    // provider session, so transcript retention and reload gating consult the same question the
-    // coordinator answers rather than assembling their own union of ownership state.
-    let executionCoordinator: ChatExecutionCoordinator | null = null;
-    const ownsExecution = (chatId: string): boolean => (
-      executionCoordinator === null
-        ? agentRegistry.isChatRunning(chatId)
-        : executionCoordinator.ownsExecution(chatId)
-    );
-    const chatViews = new ChatViewStore(ownsExecution);
     const transientFeeds = new ChatTransientFeedStore(runtimeState.identity.instanceId);
     carryOverWarnings = (chatId, message) => {
       eventWiring?.notifyOperationalNotice(chatId, 'warning', message);
@@ -393,15 +369,6 @@ export async function startServer(): Promise<void> {
       getUiSettings: () => settings.getUiSettings(),
       warn: (chatId, message) => carryOverWarnings?.(chatId, message),
     });
-    const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
-    chatViewPruneTimer.unref();
-    const transcripts = new OrderedChatTranscriptReader({
-      registry: chatRegistry,
-      agents: agentRegistry,
-      carryOver,
-    });
-    const loadChatSnapshot = (chatId: string) => transcripts.loadAll(chatId);
-    const loadChatMessages = async (chatId: string) => (await loadChatSnapshot(chatId)).messages;
     const transcriptSearchService = new TranscriptSearchService({
       workspaceDirectory: workspaceDir,
       logger,
@@ -438,20 +405,6 @@ export async function startServer(): Promise<void> {
         return transcriptReader.page(chatId, limit, beforeOrdinal);
       },
     };
-    const pendingInputs = new PendingUserInputService({
-      async settledInputRequests(chatId) {
-        return new Set(await agentRegistry.listSettledInputRequests(
-          chatRegistry.getChat(chatId) ?? null,
-          chatId,
-        ));
-      },
-      async nativelyBoundInputRequests(chatId) {
-        return new Set(await agentRegistry.listNativelyBoundInputRequests(
-          chatRegistry.getChat(chatId) ?? null,
-          chatId,
-        ));
-      },
-    });
     const handoffs = new AgentHandoffService({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -459,6 +412,7 @@ export async function startServer(): Promise<void> {
       catalog: agentRegistry,
       ownership: agentOwnership,
       ledger: transcriptLedger,
+      reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
       onCommitted(chatId) {
         eventWiring?.notifyAgentHandoff(chatId);
       },
@@ -474,20 +428,19 @@ export async function startServer(): Promise<void> {
     const queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
-      pendingInputs,
       agentRegistry,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
       (chatId) => Boolean(chatRegistry.getChat(chatId)),
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
-    executionCoordinator = queue;
     const transcriptReload = new TranscriptReloadService({
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
       registry: chatRegistry,
       integrations: integrationRegistry,
       execution: queue,
+      reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
       getCarryOverRevision: (entry) => carryOver.revision(
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine,
@@ -513,13 +466,11 @@ export async function startServer(): Promise<void> {
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,
       queue,
-      chatViews,
       ledger: commandLedger,
       settings,
       recentTitleIcons,
       metadata,
       agents: agentRegistry,
-      pendingInputs,
       fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
       transcripts: transcriptLedger,
@@ -584,30 +535,25 @@ export async function startServer(): Promise<void> {
         queue,
         processing: chatProcessingActivity,
         metadata,
-        chatViews,
+        currentTranscriptMessages: (chatId) => transcriptLedger.conversationMessages(chatId),
+        assistantMessagesForSubmission: (
+          chatId,
+          viewId,
+          clientMessageId,
+          throughOrdinal,
+        ) => transcriptLedger.assistantMessagesForSubmission(
+          chatId,
+          viewId,
+          clientMessageId,
+          throughOrdinal,
+        ),
         transientFeeds,
-        pendingInputs,
         commandLedger,
         shareStore,
         telegramNotifier,
         telegramSettings,
         scheduledPrompts,
         snippets,
-        loadChatSnapshot,
-        composeProjectionSnapshot: (chatId, messages, revision, projectionState) => (
-          transcripts.composeProjectionSnapshot(chatId, messages, revision, projectionState)
-        ),
-        getCarryOverMessageCount: async (chatId) => {
-          const entry = chatRegistry.getChat(chatId);
-          return entry ? carryOver.logicalMessageCount(entry.carryOverSegments) : 0;
-        },
-        getCarryOverRevision: (chatId) => {
-          const entry = chatRegistry.getChat(chatId);
-          return entry
-            ? carryOver.revision(entry.carryOverSegments, entry.carryOverMigrationQuarantine)
-            : 'carry-v1:0';
-        },
-        loadChatPage: (chatId, limit, offset) => transcripts.loadPage(chatId, limit, offset),
         searchIndex: chatSearch,
       }),
       startScheduledPrompts: () => scheduledPrompts.start(),
@@ -619,12 +565,12 @@ export async function startServer(): Promise<void> {
       settings,
       recentTitleIcons,
       queue,
+      processing: chatProcessingActivity,
       pathCache,
       metadata,
       chatViews: chatViewPages,
       shareSnapshots: transcriptReader,
       agents: agentRegistry,
-      pendingInputs,
       telegramNotifier,
       telegramSettings,
       shareStore,
@@ -655,12 +601,11 @@ export async function startServer(): Promise<void> {
           transcriptReader.replay(chatId, viewId, afterOrdinal),
         resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
       },
-      projectionReload: async (chatId) => {
+      transcriptReload: async (chatId) => {
         await transcriptReload.reload(chatId);
         return transcriptReader.page(chatId, 100);
       },
       queue,
-      pendingInputs,
       transientFeeds,
       registry: chatRegistry,
     });
@@ -816,7 +761,6 @@ export async function startServer(): Promise<void> {
       let cleanupFailed = false;
       try {
         await server.stop(true);
-        clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),

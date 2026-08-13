@@ -1,11 +1,7 @@
 // Owns chat lifecycle, submission, permission, queue, and mode transitions.
 // Delegates all viewport operations through the dependency interface.
 
-import {
-	sendPermissionDecision,
-	stopChat,
-	interruptAndSendChat,
-} from '$lib/api/chats.js';
+import { interruptAndSendChat, sendPermissionDecision, stopChat } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import {
 	isStopSatisfied,
@@ -76,11 +72,10 @@ type SessionTranscriptState = Pick<
 	| 'isUserScrolledUp'
 	| 'activateChat'
 	| 'appendLocalNotice'
-	| 'clearPendingUserInput'
+	| 'clearOptimisticUserInput'
 	| 'clearLocalNotices'
 	| 'loadMessages'
-	| 'updatePendingUserInputDeliveryStatus'
-	| 'upsertPendingUserInput'
+	| 'upsertOptimisticUserInput'
 	| 'excludedResendOrdinals'
 	| 'clearResendExclusions'
 > & {
@@ -736,8 +731,8 @@ export class ConversationSessionController {
 	// both the in-chat Fork button and the bare `/fork` command. For agents that
 	// support it the server snapshots the transcript up to the last completed
 	// turn, so this works while the source chat is still processing.
-	forkChat(sourceChatId: string, upToSeq?: number): Promise<void> {
-		return this.#slashCommands.forkChat(sourceChatId, upToSeq);
+	forkChat(sourceChatId: string, upToOrdinal?: number): Promise<void> {
+		return this.#slashCommands.forkChat(sourceChatId, upToOrdinal);
 	}
 
 	handleAbort(): Promise<void> {

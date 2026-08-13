@@ -5,7 +5,7 @@ import {
   AgentIntegrationError,
   type AgentChatReference,
   type AgentHost,
-  type AgentIntegrationV4,
+  type AgentIntegration,
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
@@ -18,7 +18,6 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createClaudeConfig } from './config.js';
@@ -64,35 +63,32 @@ const CLAUDE_DESCRIPTOR = {
   ],
 } as const;
 
-export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
+export default class ClaudeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'claude';
-  static readonly apiVersion = 4 as const;
+  static readonly apiVersion = 5 as const;
   readonly descriptor = CLAUDE_DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
-  readonly producerExecution;
-  readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
-  readonly sessionConfiguration: NonNullable<AgentIntegrationV4['sessionConfiguration']>;
-  readonly permissionDecisions: NonNullable<AgentIntegrationV4['permissionDecisions']>;
-  readonly projectPathUpdates: NonNullable<AgentIntegrationV4['projectPathUpdates']>;
+  readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
+  readonly permissionDecisions: NonNullable<AgentIntegration['permissionDecisions']>;
+  readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
-  readonly commands: NonNullable<AgentIntegrationV4['commands']>;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly commands: NonNullable<AgentIntegration['commands']>;
   readonly compaction = null;
   readonly forking;
-  readonly steering: NonNullable<AgentIntegrationV4['steering']>;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
-  readonly endpoints: NonNullable<AgentIntegrationV4['endpoints']>;
-  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
-  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
+  readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
     const config = createClaudeConfig(host.environment);
@@ -176,17 +172,9 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
       logger,
     });
     this.nativeSessions = nativeEvidence;
-    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createClaudeNativeActivityProbe(nativeSessions);
-    const projection = createAgentOwnedProjection({
-      ownerId: 'claude',
-      host,
-      execution: providerExecution,
-      nativeEvidence,
-    });
-    this.execution = projection.execution;
-    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CLAUDE_MODELS.DEFAULT,
@@ -226,11 +214,7 @@ export default class ClaudeAgentIntegration implements AgentIntegrationV4 {
     });
     this.steering = {
       captureTarget: request => runtime.captureSteerTarget(request.agentSessionId),
-      steer: request => projection.deliverSteer(
-        request.chatId,
-        request.operation,
-        () => runtime.steer(request),
-      ),
+      steer: request => runtime.steer(request),
     };
     this.endpoints = {
       async validate(selection) {

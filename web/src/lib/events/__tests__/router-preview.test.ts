@@ -42,7 +42,7 @@ describe('createChatMessagesAccumulator', () => {
 		let current: ChatMessage[] = [];
 		let writes = 0;
 		const accumulator = createChatMessagesAccumulator({
-			applyChatMessages: (_chatId, _generationId, messages) => {
+			applyChatMessages: (_chatId, _transcriptViewId, messages) => {
 				writes += 1;
 				current = [...current, ...messages.map((item) => item.message)];
 				return 'applied';

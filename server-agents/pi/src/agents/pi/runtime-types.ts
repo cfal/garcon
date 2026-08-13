@@ -1,6 +1,5 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentTurnReceiptOwner } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface PiExecutionAdmission {
@@ -20,7 +19,6 @@ export interface PiExecutionRequest {
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Readonly<Record<string, string>>;
-  readonly onAbortable?: () => void;
 }
 
 export type PiStartRequest = PiExecutionRequest;
@@ -50,7 +48,7 @@ export async function markPiExecutionStarted(
 
 export function piEventMetadata(
   request: Pick<PiExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentTurnReceiptOwner['commandType'],
+  commandType?: RuntimeEventMetadata['commandType'],
 ): RuntimeEventMetadata {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),

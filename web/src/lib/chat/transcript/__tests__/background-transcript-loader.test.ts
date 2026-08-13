@@ -27,7 +27,6 @@ function page(
 		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
 		pageNewestOrdinal: lastOrdinal,
 		hasMore: false,
-		pendingUserInputs: [],
 		resendCandidates: [],
 		limit: 50,
 	};

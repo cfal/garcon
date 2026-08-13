@@ -7,7 +7,7 @@ import type { SessionControllerDeps } from './conversation-session-controller.sv
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
 import type { ConversationQueueController } from './conversation-queue-controller.svelte.js';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
-import { errorDetail, pendingUserInput } from './conversation-submission-helpers.js';
+import { errorDetail, optimisticUserInput } from './conversation-submission-helpers.js';
 import { settleSubmissionFailure } from './submission-settlement.js';
 import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import { steerFailureNotice } from './steer-failure-notice.js';
@@ -134,12 +134,11 @@ export async function submitSteerRoute(
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		content: context.content,
 	});
-	deps.chatState.upsertPendingUserInput(
-		pendingUserInput(
+	deps.chatState.upsertOptimisticUserInput(
+		optimisticUserInput(
 			context.chatId,
 			context.content,
 			[],
-			submission.clientRequestId,
 			submission.clientMessageId,
 		),
 	);
@@ -147,15 +146,13 @@ export async function submitSteerRoute(
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
 	try {
 		await submission.submit();
-		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
 		return 'accepted';
 	} catch (error) {
 		const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
-		deps.chatState.updatePendingUserInputDeliveryStatus(
-			submission.clientRequestId,
-			outcomeUnknown ? 'unconfirmed' : 'failed',
-		);
-		if (!outcomeUnknown) restoreSteerComposer(deps, context, clearedComposerRevision);
+		if (!outcomeUnknown) {
+			deps.chatState.clearOptimisticUserInput(submission.clientMessageId);
+			restoreSteerComposer(deps, context, clearedComposerRevision);
+		}
 		if (deps.sessions.selectedChatId === context.chatId) {
 			deps.chatState.appendLocalNotice(
 				'error',
@@ -228,14 +225,12 @@ export async function submitDraftRoute(
 	const composerRevisionAfterClear = beginOptimisticInput(
 		deps,
 		context,
-		submission.clientRequestId,
 		submission.clientMessageId,
 	);
 	deps.startupCoordinator.beginLocalStartup(chatId);
 	try {
 		const response = await submission.submit();
 		deps.sessions.applyStartEntry(response.chat);
-		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
 		if (response.status === 'accepted') deps.lifecycle.beginTurn(chatId);
 		else deps.startupCoordinator.completeStartup(chatId);
 		return 'accepted';
@@ -243,7 +238,7 @@ export async function submitDraftRoute(
 		console.error('[SessionController] Failed to start chat:', error);
 		deps.startupCoordinator.completeStartup(chatId);
 		return settleSubmissionFailure(deps, context, error, {
-			clientRequestId: submission.clientRequestId,
+			clientMessageId: submission.clientMessageId,
 			composerRevisionAfterClear,
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
@@ -284,7 +279,6 @@ export async function submitRunRoute(
 	const composerRevisionAfterClear = beginOptimisticInput(
 		deps,
 		context,
-		submission.clientRequestId,
 		submission.clientMessageId,
 	);
 	try {
@@ -294,17 +288,16 @@ export async function submitRunRoute(
 			deps.sessions.upsertServerChat(response.chat);
 			onHandoffAccepted(response.chat);
 		}
-		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
 		deps.chatState.clearResendExclusions();
 		deps.lifecycle.beginTurn(context.chatId);
 		return 'accepted';
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {
-			clientRequestId: submission.clientRequestId,
+			clientMessageId: submission.clientMessageId,
 			composerRevisionAfterClear,
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_send_message({ detail: errorDetail(failure) }),
-			clearPendingOnAdmissionConflict: true,
+			refreshOnAdmissionConflict: true,
 			refreshControl: () => queue.settleControlRefresh(queue.startControlRefresh(context.chatId)),
 		});
 	} finally {
@@ -321,11 +314,10 @@ function requireTranscriptView(deps: RouteDeps, chatId: string): string {
 function beginOptimisticInput(
 	deps: RouteDeps,
 	context: SubmissionContext,
-	clientRequestId: string,
 	clientMessageId: string,
 ): number | null {
-	deps.chatState.upsertPendingUserInput(
-		pendingUserInput(context.chatId, context.text, context.images, clientRequestId, clientMessageId),
+	deps.chatState.upsertOptimisticUserInput(
+		optimisticUserInput(context.chatId, context.text, context.images, clientMessageId),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const composerRevisionAfterClear = clearOwnedComposer(deps, context);

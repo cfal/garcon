@@ -3,7 +3,7 @@ import { AMP_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
   type AgentChatReference,
-  type AgentIntegrationV4,
+  type AgentIntegration,
   type AgentHost,
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
@@ -15,7 +15,6 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createAmpConfig } from './config.js';
@@ -37,14 +36,12 @@ const AMP_DESCRIPTOR = {
   configuration: [{ key: 'AMP_BINARY', source: 'environment' as const, description: 'Amp CLI binary.' }],
 } as const;
 
-export default class AmpAgentIntegration implements AgentIntegrationV4 {
+export default class AmpAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'amp';
-  static readonly apiVersion = 4 as const;
+  static readonly apiVersion = 5 as const;
   readonly descriptor = AMP_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
-  readonly producerExecution;
-  readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
   readonly nativeSessions;
@@ -55,15 +52,14 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
-  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
     const config = createAmpConfig(host.environment);
@@ -89,16 +85,8 @@ export default class AmpAgentIntegration implements AgentIntegrationV4 {
     const providerExecution = new AmpExecution(runtime, nativeSessions);
     const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
     this.nativeSessions = nativeEvidence;
-    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
-    const projection = createAgentOwnedProjection({
-      ownerId: 'amp',
-      host,
-      execution: providerExecution,
-      nativeEvidence,
-    });
-    this.execution = projection.execution;
-    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: AMP_MODELS.DEFAULT,

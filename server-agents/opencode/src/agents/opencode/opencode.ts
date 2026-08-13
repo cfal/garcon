@@ -1081,7 +1081,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       permissionMode = 'default',
       projectPath,
       thinkingMode,
-      onAbortable,
       clientRequestId,
       turnId,
     } = request;
@@ -1164,7 +1163,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         ...promptBody,
       }, requestScope), { signal }),
     );
-    onAbortable?.();
     promptRequest.then((result) => {
       throwOpenCodeResultError(result, 'OpenCode prompt submit failed');
     }).catch((err: Error) => {
@@ -1203,7 +1201,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       permissionMode,
       projectPath,
       thinkingMode,
-      onAbortable,
       clientRequestId,
       turnId,
     } = request;
@@ -1273,7 +1270,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
           ...promptBody,
         }, requestScope), { signal }),
       );
-      onAbortable?.();
       const result = await promptRequest;
       throwOpenCodeResultError(result, 'OpenCode prompt submit failed');
     } catch (err: any) {
@@ -1359,8 +1355,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     session.status = 'aborted';
     session.lastActivityAt = Date.now();
     this.#cancelPendingPermissionsForSession(agentSessionId, 'aborted');
-    // The acknowledged stop is turn-terminal work: the terminal event drives
-    // the stop-settled sequence and releases the projection operation.
+    // The acknowledged stop is turn-terminal work: the terminal event settles
+    // the core run and releases queued execution.
     this.emitProcessing(session.chatId, false);
     this.emitFinished(session.chatId, 0, turn.eventMetadata);
     this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session aborted'));

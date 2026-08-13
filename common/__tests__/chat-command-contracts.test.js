@@ -331,23 +331,20 @@ describe('chat command request parsers', () => {
     expect(() => parseForkChatCommandRequest({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: CHAT_ID,
-      upToSeq: '2abc',
-    })).toThrow('upToSeq must be a positive integer');
+      upToOrdinal: '2abc',
+    })).toThrow('upToOrdinal must be a positive integer');
 
     expect(() => parseForkChatCommandRequest({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: CHAT_ID,
-      generationId: 'generation-1',
-    })).toThrow('generationId requires upToSeq');
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
+    })).toThrow('transcriptViewId requires upToOrdinal');
 
-    expect(() => parseForkRunCommandRequest({
-      clientRequestId: 'request-fork',
-      clientMessageId: 'message-fork',
+    expect(() => parseForkChatCommandRequest({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: CHAT_ID,
-      generationId: 'generation-1',
-      command: 'continue',
-    })).toThrow('generationId requires upToSeq');
+      upToOrdinal: 2,
+    })).toThrow('upToOrdinal requires transcriptViewId');
   });
 
   it('rejects malformed structured command fields', () => {
@@ -372,13 +369,7 @@ describe('chat command request parsers', () => {
     const control = {
       serverInstanceId: 'server-1',
       chatId: CHAT_ID,
-      agentOwnershipEpoch: 'owner-1',
-      turnOwner: {
-        agentOwnershipEpoch: 'owner-1',
-        commandType: 'agent-run',
-        clientRequestId: 'run-1',
-        turnId: 'turn-1',
-      },
+      runId: 'run-1',
       id: 'permission-1',
       incarnation: 'incarnation-1',
     };
@@ -398,7 +389,7 @@ describe('chat command request parsers', () => {
     })).toThrow('control does not match');
     expect(() => parsePermissionDecisionCommandRequest({
       ...request,
-      control: { ...control, agentOwnershipEpoch: 'owner-2' },
+      control: { ...control, runId: '' },
     })).toThrow('control is invalid');
   });
 

@@ -1,26 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  parseChatProjectionGenerationTransition,
   parseChatTransientControlAction,
   parseChatTransientFeedMutation,
   parseChatTransientFeedSnapshot,
 } from '../chat-transient-feed.ts';
 
 const CHAT_ID = '1785337200123456';
-const OWNER = {
-  agentOwnershipEpoch: 'owner-1',
-  commandType: 'agent-run',
-  clientRequestId: 'request-1',
-  turnId: 'turn-1',
-};
 
 function row(overrides = {}) {
   return {
     id: 'permission-1',
     incarnation: 'incarnation-1',
-    operationTurnId: 'turn-1',
-    turnOwner: OWNER,
-    transcript: { generationId: 'generation-1', afterSeq: 3 },
+    runId: 'run-1',
+    transcript: { transcriptViewId: 'view-1', afterOrdinal: 3 },
     displayOrder: 0,
     message: {
       type: 'permission-request',
@@ -41,39 +33,40 @@ function snapshot(overrides = {}) {
   return {
     serverInstanceId: 'server-1',
     chatId: CHAT_ID,
-    agentOwnershipEpoch: 'owner-1',
-    generationId: 'generation-1',
-    resetTransactionId: null,
+    transcriptViewId: 'view-1',
     transientRevision: 1,
-    stateDigest: 'transient-v1:digest',
     rows: [row()],
     ...overrides,
   };
 }
 
 describe('chat transient feed contracts', () => {
-  it('parses snapshots, mutations, transitions, and action fences', () => {
+  it('parses snapshots, mutations, and action fences', () => {
     expect(parseChatTransientFeedSnapshot(snapshot())).toMatchObject({
-      rows: [{ id: 'permission-1', operationTurnId: 'turn-1' }],
+      transcriptViewId: 'view-1',
+      rows: [{ id: 'permission-1', runId: 'run-1' }],
     });
     expect(parseChatTransientFeedMutation({
-      ...snapshot({ rows: undefined, resetTransactionId: undefined }),
+      ...snapshot({ rows: undefined }),
       mutation: { kind: 'upsert', row: row() },
     })).toMatchObject({ mutation: { kind: 'upsert', row: { id: 'permission-1' } } });
-    expect(parseChatProjectionGenerationTransition({
-      ...snapshot({ generationId: 'generation-2', resetTransactionId: undefined }),
-      resetTransactionId: 'reset-1',
-      previousGenerationId: 'generation-1',
-      rows: [row({ transcript: { generationId: 'generation-2', afterSeq: 3 } })],
-    })).toMatchObject({ resetTransactionId: 'reset-1', generationId: 'generation-2' });
+    expect(parseChatTransientFeedMutation({
+      ...snapshot({ rows: undefined }),
+      mutation: { kind: 'clear-run', runId: 'run-1' },
+    })).toMatchObject({ mutation: { kind: 'clear-run', runId: 'run-1' } });
     expect(parseChatTransientControlAction({
       serverInstanceId: 'server-1',
       chatId: CHAT_ID,
-      agentOwnershipEpoch: 'owner-1',
-      turnOwner: OWNER,
+      runId: 'run-1',
       id: 'permission-1',
       incarnation: 'incarnation-1',
-    })).toMatchObject({ id: 'permission-1', incarnation: 'incarnation-1' });
+    })).toEqual({
+      serverInstanceId: 'server-1',
+      chatId: CHAT_ID,
+      runId: 'run-1',
+      id: 'permission-1',
+      incarnation: 'incarnation-1',
+    });
   });
 
   it('rejects duplicate slots even when their incarnations differ', () => {
@@ -82,37 +75,23 @@ describe('chat transient feed contracts', () => {
     }))).toBeNull();
   });
 
-  it('rejects ownership, generation, and turn mismatches', () => {
-    expect(parseChatTransientFeedSnapshot(snapshot({
-      rows: [row({ turnOwner: { ...OWNER, agentOwnershipEpoch: 'owner-2' } })],
-    }))).toBeNull();
+  it('rejects view mismatches and incomplete action fences', () => {
     expect(parseChatTransientFeedMutation({
-      ...snapshot({ rows: undefined, resetTransactionId: undefined }),
+      ...snapshot({ rows: undefined }),
       mutation: {
         kind: 'upsert',
-        row: row({ transcript: { generationId: 'generation-2', afterSeq: 3 } }),
+        row: row({ transcript: { transcriptViewId: 'view-2', afterOrdinal: 3 } }),
       },
     })).toBeNull();
     expect(parseChatTransientFeedSnapshot(snapshot({
-      rows: [row({ operationTurnId: 'turn-2' })],
+      rows: [row({ runId: '' })],
     }))).toBeNull();
     expect(parseChatTransientControlAction({
       serverInstanceId: 'server-1',
       chatId: CHAT_ID,
-      agentOwnershipEpoch: 'owner-2',
-      turnOwner: OWNER,
+      runId: '',
       id: 'permission-1',
       incarnation: 'incarnation-1',
-    })).toBeNull();
-  });
-
-  it('rejects invalid reset identities instead of treating them as null', () => {
-    expect(parseChatTransientFeedSnapshot(snapshot({ resetTransactionId: '' }))).toBeNull();
-    expect(parseChatProjectionGenerationTransition({
-      ...snapshot({ generationId: 'generation-2' }),
-      resetTransactionId: 'reset-1',
-      previousGenerationId: 'generation-2',
-      rows: [],
     })).toBeNull();
   });
 });

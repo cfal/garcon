@@ -62,8 +62,7 @@ function queueSteerInput(overrides = {}) {
 }
 
 // Builds the handler over its injected collaborators while exposing every mock
-// flatly for assertions. Queue mutations map to the control operations, pending
-// bookkeeping to the pending-input store, and the rest to the coordinator port.
+// flatly for assertions.
 function scaffold(overrides = {}) {
   const reservation = {
     chatId: 'chat-1',
@@ -72,11 +71,6 @@ function scaffold(overrides = {}) {
   };
   const m = {
     create: mock(async () => ({ entryId: 'entry-1', control: control(), duplicate: false })),
-    stageGoalControlFallback: mock(async () => ({
-      entryId: 'entry-1',
-      control: control({ entries: [{ id: 'entry-1', status: 'sending' }] }),
-      duplicate: false,
-    })),
     replace: mock(async () => ({ entryId: 'entry-1', control: control(), duplicate: false })),
     delete: mock(async () => ({ entryId: 'entry-1', control: control(), duplicate: false })),
     move: mock(async () => ({
@@ -85,8 +79,6 @@ function scaffold(overrides = {}) {
       duplicate: false,
       rebased: false,
     })),
-    removeSent: mock(async () => control()),
-    returnUnsent: mock(async () => control({ entries: [{ id: 'entry-1', status: 'queued' }] })),
     reserveSteer: mock(async () => ({
       entry: {
         id: 'entry-1',
@@ -112,46 +104,39 @@ function scaffold(overrides = {}) {
       pause: { kind: 'completion-uncertain', entryId: 'entry-1' },
     })),
     read: mock(async () => control()),
-    markFailed: mock(() => false),
     requestDrain: mock(() => undefined),
     reserveDirect: mock(() => reservation),
     checkpoint: mock(() => undefined),
-    registerPending: mock(async () => true),
+    admitInput: mock(async () => true),
     releaseDirect: mock(async () => undefined),
     runDirect: mock(async () => undefined),
     trackDispatch: mock(() => undefined),
     deliverGoalControl: mock(async () => false),
     steer: mock(async () => ({ turnId: 'turn-1' })),
-    hasAppliedCreate: mock(async () => false),
     ...overrides,
   };
   const handler = new AcceptedInputHandler({
     controls: {
       create: m.create,
-      stageGoalControlFallback: m.stageGoalControlFallback,
       replace: m.replace,
       delete: m.delete,
       move: m.move,
-      removeSent: m.removeSent,
-      returnUnsent: m.returnUnsent,
       reserveSteer: m.reserveSteer,
       releaseSteer: m.releaseSteer,
       consumeSteer: m.consumeSteer,
       requeueAndPause: m.requeueAndPause,
       read: m.read,
     },
-    pendingInputs: { markFailed: m.markFailed },
     coordinator: {
       requestDrain: m.requestDrain,
       reserveDirect: m.reserveDirect,
       checkpoint: m.checkpoint,
-      registerPending: m.registerPending,
+      admitInput: m.admitInput,
       releaseDirect: m.releaseDirect,
       runDirect: m.runDirect,
       trackDispatch: m.trackDispatch,
       deliverGoalControl: m.deliverGoalControl,
       steer: m.steer,
-      hasAppliedCreate: m.hasAppliedCreate,
     },
   });
   return { m, handler };
@@ -221,7 +206,7 @@ describe('AcceptedInputHandler', () => {
       settlement: settle,
     })).rejects.toBe(busy);
 
-    expect(m.registerPending).not.toHaveBeenCalled();
+    expect(m.admitInput).not.toHaveBeenCalled();
     expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
       error: busy,
       retryable: true,
@@ -231,7 +216,7 @@ describe('AcceptedInputHandler', () => {
   test('settles a committed duplicate without dispatching it again', async () => {
     const settle = settlement();
     const { handler, m } = scaffold({
-      registerPending: mock(async () => false),
+      admitInput: mock(async () => false),
     });
 
     await handler.schedule({
@@ -254,8 +239,7 @@ describe('AcceptedInputHandler', () => {
       markPreScheduleFailure: mock(async () => { events.push('settled'); }),
     });
     const { handler } = scaffold({
-      registerPending: mock(async () => { throw registrationError; }),
-      markFailed: mock(() => true),
+      admitInput: mock(async () => { throw registrationError; }),
       releaseDirect: mock(async () => { events.push('released'); }),
     });
 
@@ -311,7 +295,7 @@ describe('AcceptedInputHandler', () => {
     expect(events).toEqual(['compensated', 'settled', 'released']);
   });
 
-  test('stages goal control before provider handoff and retains it when confirmation fails', async () => {
+  test('settles an accepted goal-control delivery failure without queueing a fallback', async () => {
     const providerError = new Error('connection lost');
     const settle = settlement();
     const { handler, m } = scaffold({
@@ -334,41 +318,21 @@ describe('AcceptedInputHandler', () => {
       expect.any(GoalControlDeliveryError),
       true,
     );
-    expect(m.stageGoalControlFallback).toHaveBeenCalledWith(
-      'chat-1',
-      'interrupt',
-      { key: 'command-1', entryId: 'entry-1' },
-      {
-        clientRequestId: 'request-1',
-        clientMessageId: 'message-goal',
-        transcriptViewId: 'view-1',
-        turnId: 'turn-1',
-      },
-    );
     expect(settle.markScheduled).toHaveBeenCalledWith(command(), 'turn-1');
-    expect(m.removeSent).not.toHaveBeenCalled();
     expect(m.create).not.toHaveBeenCalled();
   });
 
-  test('removes the staged fallback after confirmed active delivery', async () => {
+  test('settles confirmed active goal-control delivery without touching the queue', async () => {
     const events = [];
     const settle = settlement({
       markScheduled: mock(async () => { events.push('scheduled'); }),
       settleGoalControl: mock(async () => { events.push('settled'); }),
     });
     const { handler, m } = scaffold({
-      stageGoalControlFallback: mock(async () => {
-        events.push('staged');
-        return { entryId: 'entry-1', control: control(), duplicate: false };
-      }),
       deliverGoalControl: mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery();
         events.push('delivered');
         return true;
-      }),
-      removeSent: mock(async () => {
-        events.push('removed');
-        return control();
       }),
     });
 
@@ -380,8 +344,46 @@ describe('AcceptedInputHandler', () => {
       settlement: settle,
     })).resolves.toMatchObject({ delivery: 'active' });
 
-    expect(events).toEqual(['staged', 'scheduled', 'delivered', 'removed', 'settled']);
-    expect(m.removeSent).toHaveBeenCalledWith('chat-1', 'entry-1');
+    expect(events).toEqual(['scheduled', 'delivered', 'settled']);
+    expect(m.create).not.toHaveBeenCalled();
+  });
+
+  test('queues goal control when no active delivery target accepts it', async () => {
+    const events = [];
+    const settle = settlement({
+      settleQueueMutation: mock(async () => { events.push('settled'); }),
+    });
+    const queuedControl = control({
+      entries: [{ id: 'entry-1', content: 'interrupt', revision: 1, status: 'queued' }],
+    });
+    const { handler, m } = scaffold({
+      deliverGoalControl: mock(async () => false),
+      create: mock(async () => {
+        events.push('queued');
+        return { entryId: 'entry-1', control: queuedControl, duplicate: false };
+      }),
+      requestDrain: mock(() => { events.push('drain'); }),
+    });
+
+    await expect(handler.deliverGoalControl({
+      command: command(),
+      content: 'interrupt',
+      clientMessageId: 'message-goal',
+      transcriptViewId: 'view-1',
+      settlement: settle,
+    })).resolves.toEqual({
+      delivery: 'queued',
+      entryId: 'entry-1',
+      control: queuedControl,
+    });
+
+    expect(events).toEqual(['queued', 'settled', 'drain']);
+    expect(m.create).toHaveBeenCalledWith(
+      'chat-1',
+      'interrupt',
+      { key: 'command-1', entryId: 'entry-1' },
+      { clientMessageId: 'message-goal', transcriptViewId: 'view-1' },
+    );
   });
 
   test('settles strict steering without creating a goal-control fallback', async () => {
@@ -424,7 +426,6 @@ describe('AcceptedInputHandler', () => {
       expect.any(Object),
       expect.any(Function),
     );
-    expect(m.stageGoalControlFallback).not.toHaveBeenCalled();
     expect(m.create).not.toHaveBeenCalled();
   });
 
@@ -473,10 +474,9 @@ describe('AcceptedInputHandler', () => {
 
     expect(events).toEqual(['reserved', 'scheduled', 'delivered', 'consumed', 'drain', 'settled']);
     expect(m.releaseSteer).not.toHaveBeenCalled();
-    expect(m.markFailed).not.toHaveBeenCalled();
   });
 
-  test('releases the queue source and marks its transcript row failed after definite non-delivery', async () => {
+  test('releases the queue source after definite non-delivery', async () => {
     const deliveryError = new SteerDeliveryError(new Error('provider unavailable'), 'not-sent');
     const settle = settlement();
     const released = control({
@@ -497,7 +497,6 @@ describe('AcceptedInputHandler', () => {
       control: released,
     });
     expect(m.releaseSteer).toHaveBeenCalledWith('chat-1', 'entry-1');
-    expect(m.markFailed).toHaveBeenCalledWith('chat-1', 'request-1');
     expect(m.requestDrain).toHaveBeenCalledWith('chat-1', 'rejected queued steer released');
     expect(m.consumeSteer).not.toHaveBeenCalled();
     expect(settle.settleSteerFailure).toHaveBeenCalledWith(
@@ -576,7 +575,6 @@ describe('AcceptedInputHandler', () => {
       deliveryOutcome: 'not-sent',
       control: undefined,
     });
-    expect(m.markFailed).toHaveBeenCalledWith('chat-1', 'request-1');
     expect(settle.settleSteerFailure).toHaveBeenCalledWith(command(), rejection, 'not-sent');
   });
 
@@ -599,32 +597,22 @@ describe('AcceptedInputHandler', () => {
     expect(m.steer).not.toHaveBeenCalled();
   });
 
-  test('requeues a staged active fallback exactly once during accepted-command recovery', async () => {
-    const events = [];
+  test('requeues and pauses a recoverable queue steer', async () => {
     const queuedControl = control({ entries: [{ id: 'entry-1', status: 'queued' }] });
-    const settle = settlement({
-      settleQueueMutation: mock(async () => { events.push('settled'); }),
-    });
     const { handler, m } = scaffold({
-      hasAppliedCreate: mock(async () => true),
-      returnUnsent: mock(async () => {
-        events.push('requeued');
-        return queuedControl;
-      }),
-      requestDrain: mock(() => { events.push('drain'); }),
+      read: mock(async () => queuedControl),
+      requeueAndPause: mock(async () => control({
+        entries: [{ id: 'entry-1', status: 'queued' }],
+        pause: { kind: 'completion-uncertain', entryId: 'entry-1' },
+      })),
     });
 
-    await expect(handler.recoverGoalControl({
-      command: command(),
-      content: 'recover',
-      settlement: settle,
-    })).resolves.toEqual({
-      delivery: 'queued',
-      entryId: 'entry-1',
-      control: queuedControl,
-    });
+    await handler.recoverQueueEntrySteer('chat-1', 'entry-1');
 
-    expect(events).toEqual(['requeued', 'settled', 'drain']);
-    expect(m.deliverGoalControl).not.toHaveBeenCalled();
+    expect(m.requeueAndPause).toHaveBeenCalledWith(
+      'chat-1',
+      'entry-1',
+      'completion-uncertain',
+    );
   });
 });

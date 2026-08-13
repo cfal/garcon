@@ -17,10 +17,8 @@ import type { ChatListEntry } from './chat-list.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
 import type { ChatStopOutcome } from './chat-types.js';
-import type { RepairHistoryAcceptNativeRequest } from './chat-history-repair.js';
 import {
   CommandRequestValidationError,
-  optionalGenerationId,
   optionalNonEmptyString,
   optionalNullableString,
   optionalRecord,
@@ -33,10 +31,6 @@ import {
   requiredString,
 } from './command-request-validation.js';
 
-export type {
-  RepairHistoryAcceptNativeRequest,
-  RepairHistoryAcceptNativeResponse,
-} from './chat-history-repair.js';
 export {
   COMMAND_CORRELATION_ID_MAX_BYTES,
   QUEUE_ENTRY_ID_MAX_BYTES,
@@ -126,8 +120,8 @@ export interface ForkChatResponse {
 export interface ForkChatCommandRequest {
   sourceChatId: string;
   chatId: string;
-  upToSeq?: number;
-  generationId?: string;
+  upToOrdinal?: number;
+  transcriptViewId?: string;
 }
 
 export interface DeleteChatCommandRequest {
@@ -593,9 +587,6 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
   const images = optionalImages(body.images);
   const agentSettings = optionalAgentSettings(body.agentSettings, 'agentSettings');
   const model = optionalString(body, 'model');
-  if (optionalGenerationId(body) !== undefined) {
-    throw new CommandRequestValidationError('generationId requires upToSeq');
-  }
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
@@ -619,39 +610,30 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
 
 export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequest {
   const body = requestRecord(value);
-  const upToSeq = body.upToSeq;
-  const generationId = optionalGenerationId(body);
-  if (upToSeq !== undefined && (!Number.isSafeInteger(upToSeq) || Number(upToSeq) <= 0)) {
-    throw new CommandRequestValidationError('upToSeq must be a positive integer');
+  const upToOrdinal = body.upToOrdinal;
+  const transcriptViewId = optionalNonEmptyString(body, 'transcriptViewId');
+  if (
+    upToOrdinal !== undefined
+    && (!Number.isSafeInteger(upToOrdinal) || Number(upToOrdinal) <= 0)
+  ) {
+    throw new CommandRequestValidationError('upToOrdinal must be a positive integer');
   }
-  if (generationId !== undefined && upToSeq === undefined) {
-    throw new CommandRequestValidationError('generationId requires upToSeq');
+  if (transcriptViewId !== undefined && upToOrdinal === undefined) {
+    throw new CommandRequestValidationError('transcriptViewId requires upToOrdinal');
+  }
+  if (upToOrdinal !== undefined && transcriptViewId === undefined) {
+    throw new CommandRequestValidationError('upToOrdinal requires transcriptViewId');
   }
   return {
     sourceChatId: requiredChatId(body, 'sourceChatId'),
     chatId: requiredChatId(body, 'chatId'),
-    ...(upToSeq === undefined ? {} : { upToSeq: Number(upToSeq) }),
-    ...(generationId === undefined ? {} : { generationId }),
+    ...(upToOrdinal === undefined ? {} : { upToOrdinal: Number(upToOrdinal) }),
+    ...(transcriptViewId === undefined ? {} : { transcriptViewId }),
   };
 }
 
 export function parseDeleteChatCommandRequest(value: unknown): DeleteChatCommandRequest {
   return { chatId: requiredChatId(requestRecord(value), 'chatId') };
-}
-
-export function parseRepairHistoryAcceptNativeRequest(
-  value: unknown,
-): RepairHistoryAcceptNativeRequest {
-  const body = requestRecord(value);
-  if (body.action !== 'accept-native') {
-    throw new CommandRequestValidationError('action must be accept-native');
-  }
-  return {
-    action: 'accept-native',
-    chatId: requiredChatId(body, 'chatId'),
-    expectedCarryOverRevision: requiredString(body, 'expectedCarryOverRevision'),
-    expectedAgentOwnershipEpoch: requiredString(body, 'expectedAgentOwnershipEpoch'),
-  };
 }
 
 export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryCreateCommandRequest {

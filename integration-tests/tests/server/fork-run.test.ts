@@ -9,7 +9,7 @@ import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('fork-run lifecycle', () => {
-  test('retries a child fork-run after its parent turn settles', async () => {
+  test('captures a child fork-run while its parent turn is still running', async () => {
     await withIntegrationFixture('fork-run-settlement', async (fixture) => {
       const sourceChatId = fixture.newChatId();
       const source = await fixture.client.startDirectChat({
@@ -53,33 +53,23 @@ describe('fork-run lifecycle', () => {
         modelEndpointId: fixture.directAgents.openAi.provider.endpointId,
         modelProtocol: fixture.directAgents.openAi.provider.protocol,
       };
-      let busy: unknown;
-      try {
-        await fixture.client.forkRunChat(childRequest);
-      } catch (error) {
-        busy = error;
-      }
-      expect(busy).toBeInstanceOf(GarconApiError);
-      expect(busy).toMatchObject({
-        status: 409,
-        body: { errorCode: 'SESSION_BUSY', retryable: true },
-      });
-
-      heldParent.releaseEcho();
-      await fixture.client.waitForTurnTerminal(parentChatId, parent.turnId);
       const child = await fixture.client.forkRunChat(childRequest);
       await fixture.client.waitForTurnTerminal(childChatId, child.turnId);
 
+      const composedPrompt = 'fork-race-parent\n\nfork-race-child';
       const childProviderRequest = fixture.fakeProviders.openAi.requests().find(
-        (request) => request.lastUserText === 'fork-race-child',
+        (request) => request.lastUserText === composedPrompt,
       );
       expect(childProviderRequest?.body.messages).toEqual([
         { role: 'user', content: 'fork-race-source' },
         { role: 'assistant', content: 'echo:fork-race-source' },
-        { role: 'user', content: 'fork-race-parent' },
-        { role: 'assistant', content: 'echo:fork-race-parent' },
-        { role: 'user', content: 'fork-race-child' },
+        { role: 'user', content: composedPrompt },
       ]);
+
+      heldParent.releaseEcho();
+      await fixture.client.waitForTurnTerminal(parentChatId, parent.turnId);
+      expect(assistantContents((await fixture.client.getMessages(childChatId)).messages))
+        .not.toContain('echo:fork-race-parent');
     });
   });
 
@@ -167,27 +157,14 @@ describe('fork-run lifecycle', () => {
         clientRequestId,
       });
 
-      const pendingEvent = fixture.client.eventsSince(cursor).find((event) =>
-        event.type === 'pending-user-input-updated'
-        && event.input.chatId === targetChatId
-        && event.input.clientRequestId === clientRequestId);
-      expect(pendingEvent?.type === 'pending-user-input-updated' ? pendingEvent.input : null)
-        .toMatchObject({
-          clientRequestId,
-          clientMessageId,
-          turnId: accepted.turnId,
-          content: 'fork-target-new',
-        });
-
       const targetUserEvent = fixture.client.eventsSince(cursor).find(
         (event): event is ChatMessagesMessage =>
           event.type === 'chat-messages'
           && event.chatId === targetChatId
-          && event.clientRequestId === clientRequestId
-          && event.turnId === accepted.turnId
           && event.messages.some((entry) =>
             entry.message.type === 'user-message'
-            && entry.message.content === 'fork-target-new'),
+            && entry.message.content === 'fork-target-new'
+            && entry.message.metadata?.clientMessageId === clientMessageId),
       );
       expect(targetUserEvent).toBeDefined();
       const targetEventUser = targetUserEvent?.messages.find((entry) =>
@@ -196,16 +173,8 @@ describe('fork-run lifecycle', () => {
       expect(targetEventUser?.message.type === 'user-message'
         ? targetEventUser.message.metadata
         : null).toMatchObject({
-        clientRequestId,
-        turnId: accepted.turnId,
+        clientMessageId,
       });
-      expect(fixture.client.eventsSince(cursor)).toContainEqual(expect.objectContaining({
-        type: 'pending-user-input-cleared',
-        chatId: targetChatId,
-        clientRequestId,
-        reason: 'persisted',
-      }));
-
       const source = await fixture.client.getMessages(sourceChatId);
       const target = await fixture.client.getMessages(targetChatId);
       expect(userContents(source.messages)).toEqual(['fork-source-first', 'fork-source-second']);
@@ -230,10 +199,9 @@ describe('fork-run lifecycle', () => {
       expect(finalTargetUser?.message.type === 'user-message'
         ? finalTargetUser.message.metadata
         : null).toMatchObject({
-        clientRequestId,
-        turnId: accepted.turnId,
+        clientMessageId,
       });
-      expect(target.pendingUserInputs).toEqual([]);
+      expect(target.resendCandidates).toEqual([]);
       expect(fixture.fakeProviders.openAi.requests().filter((entry) =>
         entry.lastUserText === 'fork-target-new')).toHaveLength(1);
 

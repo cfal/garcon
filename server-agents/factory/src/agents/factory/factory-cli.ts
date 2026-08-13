@@ -681,7 +681,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       if (request.executionAdmission) await markFactoryExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: false }));
-      request.onAbortable?.();
       return await startedSession.promise;
     } catch (error) {
       this.#rollbackTurnLaunch(session, true);
@@ -736,7 +735,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       if (request.executionAdmission) await markFactoryExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: true }));
-      request.onAbortable?.();
       await this.#waitForTurnComplete(session);
     } catch (error) {
       this.#rollbackTurnLaunch(session, false);

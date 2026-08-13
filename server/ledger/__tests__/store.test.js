@@ -48,7 +48,7 @@ describe('TranscriptLedgerStore', () => {
     expect(store.highWatermark('chat-one')).toEqual({ viewId: view.viewId, ordinal: 2 });
   });
 
-  it('rolls back a failed multi-row commit and fences only that chat', () => {
+  it('rejects an invalid multi-row batch before committing without fencing the chat', () => {
     const broken = store.initializeCurrentView('broken-chat', {
       viewId: transcriptViewId('broken-view'),
       contentStartOrdinal: 1,
@@ -61,19 +61,15 @@ describe('TranscriptLedgerStore', () => {
     expect(() => store.append('broken-chat', broken.viewId, [
       userDraft('same-id', 'one'),
       userDraft('same-id', 'two'),
-    ])).toThrow(LedgerFencedError);
-    expect(() => store.currentRows('broken-chat')).toThrow(LedgerFencedError);
+    ])).toThrow('Transcript view contains duplicate client message IDs');
+    expect(store.currentRows('broken-chat')).toEqual([]);
+
+    store.append('broken-chat', broken.viewId, [provider('recovered')]);
+    expect(store.currentRows('broken-chat').map(renderedContent)).toEqual(['recovered']);
 
     store.append('healthy-chat', healthy.viewId, [provider('still works')]);
     expect(store.currentRows('healthy-chat').map(renderedContent)).toEqual(['still works']);
 
-    store.close();
-    const db = new Database(path.join(root, 'broken-chat', 'ledger.sqlite'), {
-      readonly: true,
-      create: false,
-    });
-    expect(db.query('SELECT count(*) AS count FROM transcript_rows').get().count).toBe(0);
-    db.close();
   });
 
   it('deduplicates a committed submission without redispatching it', () => {
@@ -115,6 +111,33 @@ describe('TranscriptLedgerStore', () => {
     })).toThrow(SubmissionConflictError);
 
     expect(store.append('chat-one', view.viewId, [provider('healthy')])).toHaveLength(1);
+  });
+
+  it('reads assistant receipt output between the submitted input and terminal row', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    store.append('chat-one', view.viewId, [provider('earlier')]);
+    store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'prompt'),
+    });
+    store.append('chat-one', view.viewId, [
+      provider('first answer'),
+      { kind: 'provider-row', at, message: new BashToolUseMessage(at, 'tool-one', 'pwd') },
+      provider('second answer'),
+      runEnded('finished'),
+      provider('late answer'),
+    ]);
+
+    expect(store.assistantMessagesForSubmission(
+      'chat-one',
+      view.viewId,
+      'message-one',
+      6,
+    )).toEqual(['first answer', 'second answer']);
   });
 
   it('composes unanswered inputs through interruptions and stops at provider engagement', () => {
@@ -307,6 +330,22 @@ describe('TranscriptLedgerStore', () => {
 
     expect(await fs.stat(path.join(root, 'chat-one')).catch(() => null)).toBeNull();
     expect(store.currentView('chat-two').viewId).toBe('view-two');
+  });
+
+  it('removes only unregistered target ledgers during startup cleanup', async () => {
+    store.initializeCurrentView('registered-chat', {
+      viewId: transcriptViewId('registered-view'),
+      contentStartOrdinal: 1,
+    });
+    store.initializeCurrentView('orphan-chat', {
+      viewId: transcriptViewId('orphan-view'),
+      contentStartOrdinal: 1,
+    });
+
+    expect(store.removeUnregisteredChatDirectories(new Set(['registered-chat'])))
+      .toEqual(['orphan-chat']);
+    expect(store.currentView('registered-chat')?.viewId).toBe('registered-view');
+    expect(await fs.stat(path.join(root, 'orphan-chat')).catch(() => null)).toBeNull();
   });
 });
 

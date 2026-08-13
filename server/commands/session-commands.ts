@@ -11,6 +11,7 @@ import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.j
 import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 import { runProjectPathUpdateTransaction } from '../agents/project-path-update-transaction.js';
+import type { StartedAgentSession } from '../agents/session-types.js';
 import {
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
@@ -321,8 +322,6 @@ export class SessionCommands {
         error instanceof Error ? error.message : String(error),
       );
     }
-    this.deps.pendingInputs.clearChat(chatId, 'chat-removed');
-
     await Promise.all([
       this.deps.queue.deleteChatQueueFile(chatId).catch(() => {
         // Queue file may not exist.
@@ -467,7 +466,7 @@ export class SessionCommands {
   }
 
   private async updateProjectPathLocked(input: UpdateProjectPathInput): Promise<ProjectPathPatchResponse> {
-    const chat = this.deps.chats.getChat(input.chatId);
+    let chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
@@ -494,6 +493,12 @@ export class SessionCommands {
     }
 
     await this.assertChatIdleForProjectPathUpdate(input.chatId, chat);
+    await this.deps.agents.currentTranscriptViewId(input.chatId);
+    const refreshedChat = this.deps.chats.getChat(input.chatId);
+    if (!refreshedChat) {
+      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+    }
+    chat = refreshedChat;
     const nativeSession = await this.nativeSessionForProjectPathUpdate(input.chatId, chat);
 
     const event = {
@@ -503,6 +508,7 @@ export class SessionCommands {
       previousProjectPath: chat.projectPath,
       previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
     };
+    let relocatedSession: StartedAgentSession | null = null;
     const updated = await runProjectPathUpdateTransaction({
       chatId: input.chatId,
       agentId: chat.agentId,
@@ -515,25 +521,34 @@ export class SessionCommands {
         nextProjectPath,
         nativeSession,
       }),
-      persist: (nextNativeSession) => this.deps.chats.updateProjectPath(
-        input.chatId,
-        {
-          ...event,
-          ...(nextNativeSession !== undefined
-            ? { nativeSession: nextNativeSession }
-            : {}),
-        },
-        { flush: true },
-      ),
+      persist: async (nextNativeSession) => {
+        const persisted = await this.deps.chats.updateProjectPath(
+          input.chatId,
+          {
+            ...event,
+            ...(nextNativeSession !== undefined
+              ? { nativeSession: nextNativeSession }
+              : {}),
+          },
+          { flush: true },
+        );
+        if (persisted?.agentSessionId && nextNativeSession !== undefined) {
+          relocatedSession = {
+            agentSessionId: persisted.agentSessionId,
+            nativeSession: nextNativeSession,
+            nativeSeedReceipt: persisted.nativeSeedReceipt ?? null,
+          };
+        }
+        return persisted;
+      },
       logger,
     });
     if (!updated) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
-    // The registry now holds the relocated native session; refresh the open
-    // projection segment so its settled boundary reads the new path.
-    this.deps.agents.notifyProjectPathRelocated(input.chatId);
-
+    if (relocatedSession) {
+      this.deps.agents.publishSessionFact(input.chatId, relocatedSession);
+    }
     return {
       success: true,
       chatId: input.chatId,
@@ -625,15 +640,6 @@ export class SessionCommands {
       );
     }
 
-    await this.deps.pendingInputs.reconcileRetainedHistory(chatId);
-    if (this.deps.pendingInputs.hasInFlightForChat(chatId)) {
-      throw new CommandValidationError(
-        'CHAT_NOT_IDLE',
-        'Cannot update project path while a submitted message is still pending',
-        409,
-        true,
-      );
-    }
   }
 
   private async nativeSessionForProjectPathUpdate(

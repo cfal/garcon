@@ -109,13 +109,13 @@ export function buildConversationVirtualFeedModel(
 	const detachedPermissions: PendingPermissionRequest[] = [];
 	for (const permission of input.pendingPermissions) {
 		const anchor = permission.transcript;
-		if (!anchor || anchor.generationId !== input.transcriptViewId) {
+		if (!anchor || anchor.transcriptViewId !== input.transcriptViewId) {
 			detachedPermissions.push(permission);
 			continue;
 		}
-		const anchored = permissionByAnchor.get(anchor.afterSeq) ?? [];
+		const anchored = permissionByAnchor.get(anchor.afterOrdinal) ?? [];
 		anchored.push(permission);
-		permissionByAnchor.set(anchor.afterSeq, anchored);
+		permissionByAnchor.set(anchor.afterOrdinal, anchored);
 	}
 
 	for (const [transcriptIndex, item] of input.transcriptItems.entries()) {

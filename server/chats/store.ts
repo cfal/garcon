@@ -40,7 +40,6 @@ const ALLOWED_PATCH_FIELDS = [
   'agentId',
   'nativeSession',
   'agentOwnershipEpoch',
-  'transcriptContentEpoch',
   'agentSettingsById',
   'tags',
   'agentSessionId',
@@ -81,7 +80,6 @@ export interface ChatRegistryEntry {
   agentId: AgentName;
   nativeSession: AgentNativeSessionRef | null;
   agentOwnershipEpoch: string;
-  transcriptContentEpoch: string | null;
   agentSettingsById: Record<string, AgentSettingsEnvelope>;
   projectPath: string;
   tags: string[];
@@ -111,7 +109,6 @@ export interface NewChatRegistryEntry {
   projectPath: string;
   nativeSession?: AgentNativeSessionRef | null;
   agentOwnershipEpoch?: string;
-  transcriptContentEpoch?: string | null;
   agentSettingsById?: Record<string, AgentSettingsEnvelope>;
   tags?: string[];
   agentSessionId?: string | null;
@@ -242,7 +239,6 @@ function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegi
     agentSessionId,
     nativeSession,
     agentOwnershipEpoch: normalizeOwnershipEpoch(rawEntry.agentOwnershipEpoch),
-    transcriptContentEpoch: normalizeNullableString(rawEntry.transcriptContentEpoch),
     agentSettingsById,
     projectPath: normalizeString(rawEntry.projectPath),
     tags: Array.isArray(rawEntry.tags) ? rawEntry.tags.filter((tag): tag is string => typeof tag === 'string') : [],
@@ -539,7 +535,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     projectPath,
     nativeSession = null,
     agentOwnershipEpoch = crypto.randomUUID(),
-    transcriptContentEpoch = null,
     agentSettingsById = {},
     tags = [],
     agentSessionId = null,
@@ -576,7 +571,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       agentId,
       nativeSession,
       agentOwnershipEpoch,
-      transcriptContentEpoch,
       agentSettingsById,
       projectPath,
       tags,

@@ -3,15 +3,12 @@ import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import { renderCarriedContext } from '@garcon/common/transcript-seed';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { AgentEventBus } from '../../../../../../server/agents/event-bus.ts';
-import { QueueExecutionAttempt } from '../../../../../../server/chat-execution/execution-attempt.ts';
 import { CodexExecution } from '../execution.ts';
 
 function createRuntime() {
   const runtime = new AgentEventEmitterRuntime();
   runtime.startSession = mock(async (request) => {
     request.executionAdmission?.markStarted();
-    request.onAbortable?.();
     return { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' };
   });
   runtime.runTurn = mock(async () => undefined);
@@ -51,16 +48,11 @@ function startRequest(overrides = {}) {
     thinkingMode: 'high',
     settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
     endpoint: null,
-    operation: {
-      commandType: 'chat-start',
-      clientRequestId: 'request-1',
-      clientMessageId: 'message-1',
-      turnId: 'turn-1',
-    },
+    runId: 'run-1',
+    priorContext: [],
     admission: {
       signal: new AbortController().signal,
       markStarted: mock(() => undefined),
-      markAbortable: mock(() => undefined),
     },
     prompt: 'hello',
     attachments: [],
@@ -74,7 +66,7 @@ async function commitHandoff(handoff) {
   handoff.commit();
 }
 
-function goalControlRequest(operation, beforeDelivery = commitHandoff) {
+function goalControlRequest(runId, beforeDelivery = commitHandoff) {
   return startRequest({
     agentSessionId: 'thread-1',
     nativeSession: {
@@ -82,24 +74,23 @@ function goalControlRequest(operation, beforeDelivery = commitHandoff) {
       schemaVersion: 1,
       value: { path: '/tmp/thread-1.jsonl', agentSessionId: 'thread-1' },
     },
-    operation,
+    runId,
     beforeDelivery,
     carriedContext: undefined,
   });
 }
 
 describe('CodexExecution', () => {
-  it('preserves admission, endpoint configuration, session identity, and event identity', async () => {
+  it('preserves admission, endpoint configuration, session identity, and run correlation', async () => {
     const runtime = createRuntime();
-    const host = createHost();
     const execution = new CodexExecution(
-      host,
+      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
     );
     const events = [];
-    execution.subscribeProjectionEvents((event) => events.push(event));
+    execution.subscribeRuntimeEvents((event) => events.push(event));
     const request = startRequest({
       endpoint: {
         apiProviderId: 'provider-1',
@@ -133,11 +124,9 @@ describe('CodexExecution', () => {
       nativeSeedReceipt: null,
     });
     expect(request.admission.markStarted).toHaveBeenCalledTimes(1);
-    expect(request.admission.markAbortable).toHaveBeenCalledTimes(1);
     expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
-      clientRequestId: 'request-1',
-      clientMessageId: 'message-1',
-      turnId: 'turn-1',
+      clientRequestId: 'run-1',
+      turnId: 'run-1',
       envOverrides: { CODEX_HOME: '/tmp/codex-home' },
       codexConfig: expect.objectContaining({
         env: { GARCON_CODEX_PROVIDER_API_KEY_ENDPOINT_1: 'secret' },
@@ -146,16 +135,16 @@ describe('CodexExecution', () => {
 
     runtime.emitMessages('chat-1', [
       new AssistantMessage('2026-07-19T00:00:00.000Z', 'done'),
-    ], { clientRequestId: 'request-1', turnId: 'turn-1' });
+    ], { clientRequestId: 'run-1', turnId: 'run-1' });
     expect(events).toContainEqual(expect.objectContaining({
       type: 'messages',
       chatId: 'chat-1',
-      operation: request.operation,
+      runId: 'run-1',
     }));
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'session-created',
+      type: 'session',
       chatId: 'chat-1',
-      operation: request.operation,
+      session: expect.objectContaining({ agentSessionId: 'thread-1' }),
     }));
   });
 
@@ -171,10 +160,10 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     const events = [];
-    execution.subscribeProjectionEvents((event) => events.push(event));
+    execution.subscribeRuntimeEvents((event) => events.push(event));
 
     await expect(execution.start(startRequest())).rejects.toThrow('did not materialize');
-    expect(events.some((event) => event.type === 'session-created')).toBe(false);
+    expect(events.some((event) => event.type === 'session')).toBe(false);
   });
 
   it('keeps carried context separate when starting a Codex goal', async () => {
@@ -220,7 +209,7 @@ describe('CodexExecution', () => {
   });
 
   for (const outcome of ['decline', 'failure']) {
-    it(`keeps the predecessor operation visible when goal control has a pre-boundary ${outcome}`, async () => {
+    it(`keeps the predecessor run active when goal control has a pre-boundary ${outcome}`, async () => {
       const runtime = createRuntime();
       const execution = new CodexExecution(
         createHost(),
@@ -228,35 +217,33 @@ describe('CodexExecution', () => {
         createPathNativeSessionCodec('codex'),
         createConfig(),
       );
-      const predecessor = startRequest().operation;
-      const successor = { ...predecessor, clientRequestId: 'request-2', turnId: 'turn-2' };
-      const next = { ...predecessor, clientRequestId: 'request-3', turnId: 'turn-3' };
       const events = [];
-      execution.subscribeProjectionEvents((event) => events.push(event));
+      execution.subscribeRuntimeEvents((event) => events.push(event));
       await execution.start(startRequest());
       runtime.submitGoalControl.mockImplementation(async () => {
         runtime.emitFinished('chat-1', 0, {
-          clientRequestId: predecessor.clientRequestId,
-          turnId: predecessor.turnId,
+          clientRequestId: 'run-1',
+          turnId: 'run-1',
         });
         if (outcome === 'failure') throw new Error('failed before delivery boundary');
         return false;
       });
 
-      const activeInput = execution.submitGoalControl(goalControlRequest(successor));
+      const activeInput = execution.submitGoalControl(goalControlRequest('run-2'));
       if (outcome === 'failure') await expect(activeInput).rejects.toThrow('failed before delivery boundary');
       else await expect(activeInput).resolves.toBe(false);
       expect(events).toContainEqual(expect.objectContaining({
-        type: 'finished',
-        operation: predecessor,
+        type: 'run-ended',
+        runId: 'run-1',
+        outcome: 'finished',
       }));
 
-      await execution.resume(goalControlRequest(next));
+      await execution.resume(goalControlRequest('run-3'));
       expect(runtime.runTurn).toHaveBeenCalledOnce();
     });
   }
 
-  it('retains successor ownership after a post-boundary delivery failure', async () => {
+  it('retains successor correlation after a post-boundary delivery failure', async () => {
     const runtime = createRuntime();
     const execution = new CodexExecution(
       createHost(),
@@ -264,10 +251,8 @@ describe('CodexExecution', () => {
       createPathNativeSessionCodec('codex'),
       createConfig(),
     );
-    const predecessor = startRequest().operation;
-    const successor = { ...predecessor, clientRequestId: 'request-2', turnId: 'turn-2' };
     const events = [];
-    execution.subscribeProjectionEvents((event) => events.push(event));
+    execution.subscribeRuntimeEvents((event) => events.push(event));
     await execution.start(startRequest());
     runtime.submitGoalControl.mockImplementation(async (_request, beforeDelivery) => {
       await beforeDelivery({
@@ -277,20 +262,21 @@ describe('CodexExecution', () => {
       throw new Error('delivery outcome unknown');
     });
 
-    await expect(execution.submitGoalControl(goalControlRequest(successor)))
+    await expect(execution.submitGoalControl(goalControlRequest('run-2')))
       .rejects.toThrow('delivery outcome unknown');
     runtime.emitFailed('chat-1', 'delivery failed', {
-      clientRequestId: successor.clientRequestId,
-      turnId: successor.turnId,
+      clientRequestId: 'run-2',
+      turnId: 'run-2',
     });
 
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'failed',
-      operation: successor,
+      type: 'run-ended',
+      runId: 'run-2',
+      outcome: 'failed',
     }));
   });
 
-  it('commits retained, routed, tracked, and runtime ownership at one persistence boundary', async () => {
+  it('changes runtime event correlation only when the goal handoff commits', async () => {
     const runtime = createRuntime();
     const execution = new CodexExecution(
       createHost(),
@@ -298,143 +284,52 @@ describe('CodexExecution', () => {
       createPathNativeSessionCodec('codex'),
       createConfig(),
     );
-    let applyProjection;
-    let projectionOffset = 0;
-    const bus = new AgentEventBus({
-      onApply(listener) { applyProjection = listener; },
-      onFailure() {},
+    const messages = [];
+    execution.subscribeRuntimeEvents((event) => {
+      if (event.type !== 'messages') return;
+      messages.push({ content: event.rows[0].message.content, runId: event.runId });
     });
-    const predecessor = startRequest().operation;
-    const rejected = { ...predecessor, clientRequestId: 'request-rejected', turnId: 'turn-rejected' };
-    const successor = { ...predecessor, clientRequestId: 'request-b', turnId: 'turn-b' };
-    const attempt = new QueueExecutionAttempt(predecessor);
-    const successorAbortable = mock(() => undefined);
-    let runtimeMetadata = {
-      clientRequestId: predecessor.clientRequestId,
-      turnId: predecessor.turnId,
-    };
-    const trackedMessages = [];
-    const routedMessages = [];
-    execution.subscribeProjectionEvents((event) => {
-      if (event.type === 'messages') {
-        trackedMessages.push({ content: event.messages[0].message.content, turnId: event.operation.turnId });
-        projectionOffset += 1;
-        const turnOwner = {
-          agentOwnershipEpoch: 'ownership-1',
-          commandType: event.operation.commandType,
-          clientRequestId: event.operation.clientRequestId,
-          turnId: event.operation.turnId,
-        };
-        void applyProjection({
-          event: {
-            kind: 'commit',
-            chatId: event.chatId,
-            agentOwnershipEpoch: turnOwner.agentOwnershipEpoch,
-            previous: {},
-            checkpoint: { offset: String(projectionOffset) },
-            digest: `digest-${projectionOffset}`,
-            promoted: [],
-            appended: event.messages.map((record, index) => ({
-              id: `entry-${projectionOffset}-${index}`,
-              lifetime: 'durable',
-              source: {
-                namespace: 'codex-test',
-                itemId: String(projectionOffset),
-                subrowId: String(index),
-              },
-              provenance: {
-                ...event.operation,
-                agentOwnershipEpoch: turnOwner.agentOwnershipEpoch,
-                turnOwner,
-                upstreamRequestId: null,
-              },
-              message: record.message,
-            })),
-          },
-          previous: { entries: [] },
-          current: { entries: [] },
-        });
-      }
-    });
-    bus.onProjectionApplied((applied) => {
-      if (applied.event.kind !== 'commit') return;
-      for (const entry of applied.event.appended) {
-        routedMessages.push({
-          content: entry.message.content,
-          turnId: entry.provenance?.turnOwner.turnId,
-        });
-      }
-    });
-    const emitOutput = async (content) => {
-      runtime.emitMessages(
-        'chat-1',
-        [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
-        runtimeMetadata,
-      );
-      await Promise.resolve();
-      await Promise.resolve();
-    };
-    const assertOwner = (turnId, content) => {
-      expect(runtimeMetadata.turnId).toBe(turnId);
-      expect(attempt.identity().turnId).toBe(turnId);
-      expect(bus.getActiveTurn('chat-1').turnId).toBe(turnId);
-      expect(trackedMessages.at(-1)).toEqual({ content, turnId });
-      expect(routedMessages.at(-1)).toEqual({ content, turnId });
-    };
-    const composeHandoff = (operationHandoff, next) => attempt.handoffTurn(
-      predecessor,
-      next,
-      bus.handoffTurn('chat-1', predecessor, next, operationHandoff),
-    );
-
-    bus.trackTurn('chat-1', predecessor);
-    bus.markTurnAbortable('chat-1', predecessor);
-    attempt.markAbortable();
     await execution.start(startRequest());
+    const emitOutput = (content) => runtime.emitMessages(
+      'chat-1',
+      [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
+    );
     runtime.submitGoalControl.mockImplementation(async (request, beforeDelivery) => {
+      emitOutput('before delivery');
       await beforeDelivery({
         validate: () => undefined,
-        commit: () => {
-          runtimeMetadata = {
-            clientRequestId: request.clientRequestId,
-            turnId: request.turnId,
-          };
-          request.onAbortable?.();
-        },
+        commit: () => undefined,
       });
+      emitOutput('after delivery');
       return true;
     });
 
-    await expect(execution.submitGoalControl(goalControlRequest(rejected, async (operationHandoff) => {
-      const handoff = composeHandoff(operationHandoff, rejected);
+    await expect(execution.submitGoalControl(goalControlRequest('run-rejected', async (handoff) => {
       handoff.validate();
-      await Promise.resolve();
-      await emitOutput('A while persistence fails');
-      assertOwner('turn-1', 'A while persistence fails');
+      emitOutput('while rejected handoff validates');
       throw new Error('persistence failed');
     }))).rejects.toThrow('persistence failed');
-    await emitOutput('A after persistence failed');
-    assertOwner('turn-1', 'A after persistence failed');
+    emitOutput('after rejected handoff');
 
     await expect(execution.submitGoalControl({
-      ...goalControlRequest(successor, async (operationHandoff) => {
-        const handoff = composeHandoff(operationHandoff, successor);
+      ...goalControlRequest('run-2', async (handoff) => {
         handoff.validate();
-        await Promise.resolve();
-        await emitOutput('A before persistence commits');
-        assertOwner('turn-1', 'A before persistence commits');
-        handoff.validate();
+        emitOutput('while accepted handoff validates');
         handoff.commit();
-        await emitOutput('B after the atomic commit');
-        assertOwner('turn-b', 'B after the atomic commit');
       }),
       admission: {
         signal: new AbortController().signal,
         markStarted: mock(() => undefined),
-        markAbortable: successorAbortable,
       },
     })).resolves.toBe(true);
-    expect(successorAbortable).toHaveBeenCalledTimes(1);
-    await expect(bus.waitUntilTurnAbortable('chat-1', successor)).resolves.toBe(true);
+
+    expect(messages).toEqual([
+      { content: 'before delivery', runId: 'run-1' },
+      { content: 'while rejected handoff validates', runId: 'run-1' },
+      { content: 'after rejected handoff', runId: 'run-1' },
+      { content: 'before delivery', runId: 'run-1' },
+      { content: 'while accepted handoff validates', runId: 'run-1' },
+      { content: 'after delivery', runId: 'run-2' },
+    ]);
   });
 });

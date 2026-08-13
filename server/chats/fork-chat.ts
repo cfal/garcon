@@ -31,7 +31,7 @@ interface ForkChatInput {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
   targetChatId: string;
-  upToSequence?: number;
+  upToOrdinal?: number;
   registry: IChatRegistry;
   settings: ForkChatSettings;
   metadata: ForkChatMetadata;
@@ -44,7 +44,7 @@ interface ForkChatInput {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
     targetChatId: string;
-    messageSequence?: number;
+    messageOrdinal?: number;
     providerMeta?: JsonObject | null;
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
@@ -93,7 +93,7 @@ export async function forkChatFileCopy({
   sourceSession,
   sourceChatId,
   targetChatId,
-  upToSequence,
+  upToOrdinal,
   registry,
   settings,
   metadata,
@@ -110,7 +110,7 @@ export async function forkChatFileCopy({
     throw new DomainError('TRANSCRIPT_UNAVAILABLE', 'Source transcript is unavailable', 422);
   }
   const sourceWatermark = ledger.highWatermark(sourceChatId);
-  const selectedOrdinal = upToSequence ?? sourceWatermark.ordinal;
+  const selectedOrdinal = upToOrdinal ?? sourceWatermark.ordinal;
   if (!Number.isSafeInteger(selectedOrdinal)
       || selectedOrdinal < 0
       || selectedOrdinal > sourceWatermark.ordinal) {
@@ -123,22 +123,22 @@ export async function forkChatFileCopy({
   const selectedWatermark = { viewId: sourceWatermark.viewId, ordinal: selectedOrdinal };
   const sourceRows = ledger.rowsThrough(sourceChatId, selectedWatermark);
   const frozenRows = frozenConversationDrafts(sourceRows);
-  const selectedProviderMeta = upToSequence === undefined
+  const selectedProviderMeta = upToOrdinal === undefined
     ? null
     : sourceRows.at(-1)?.providerMeta ?? null;
   const needsNativeFork = Boolean(sourceAgentSessionId)
     && selectedOrdinal >= sourceView.contentStartOrdinal
-    && (upToSequence === undefined || selectedProviderMeta !== null);
+    && (upToOrdinal === undefined || selectedProviderMeta !== null);
   let forkOutcome: ForkedAgentSessionOutcome | null = null;
   if (needsNativeFork) {
     forkOutcome = await forkAgentSession({
       sourceSession,
       sourceChatId,
       targetChatId,
-      ...(upToSequence === undefined
+      ...(upToOrdinal === undefined
         ? {}
         : {
-            messageSequence: upToSequence,
+            messageOrdinal: upToOrdinal,
             providerMeta: selectedProviderMeta,
           }),
     });
@@ -292,7 +292,7 @@ export async function forkChatFileCopy({
     targetChatId,
     agentId: sourceSession.agentId,
     kind: nativeFork ? 'native' : 'lazy',
-    point: upToSequence ?? null,
+    point: upToOrdinal ?? null,
     copiedRows: frozenRows.length,
     durationMs: Date.now() - startedAt,
   });

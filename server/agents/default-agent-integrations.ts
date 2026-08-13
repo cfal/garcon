@@ -8,7 +8,7 @@ import PiAgentIntegration from '@garcon/server-agent-pi';
 import DirectOpenAiCompatibleIntegration from '@garcon/server-agent-direct-openai-compatible';
 import DirectOpenAiResponsesCompatibleIntegration from '@garcon/server-agent-direct-openai-responses-compatible';
 import DirectAnthropicCompatibleIntegration from '@garcon/server-agent-direct-anthropic-compatible';
-import type { AgentIntegrationClassV4 } from '@garcon/server-agent-interface';
+import type { AgentIntegrationClass } from '@garcon/server-agent-interface';
 
 export const defaultAgentIntegrations = [
   ClaudeAgentIntegration,
@@ -21,4 +21,4 @@ export const defaultAgentIntegrations = [
   CursorAgentIntegration,
   FactoryAgentIntegration,
   PiAgentIntegration,
-] satisfies readonly AgentIntegrationClassV4[];
+] satisfies readonly AgentIntegrationClass[];

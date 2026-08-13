@@ -44,17 +44,13 @@ function snapshot(overrides = {}) {
     transientFeed: {
       serverInstanceId: 'instance-1',
       chatId: CHAT_ID,
-      agentOwnershipEpoch: 'epoch-1',
-      generationId: 'generation-1',
-      resetTransactionId: null,
+      transcriptViewId: 'view-1',
       transientRevision: 0,
-      stateDigest: 'transient-v1:empty',
       rows: [],
     },
-    pendingUserInputs: [],
     transcript: {
       availability: 'available',
-      transcriptViewId: 'generation-1',
+      transcriptViewId: 'view-1',
       messages: [{
         ordinal: 4,
         message: { type: 'assistant-message', timestamp: TIMESTAMP, content: 'Working' },
@@ -111,7 +107,7 @@ describe('chat snapshot contract', () => {
     expect(parseChatSnapshotResponse(snapshot({
       transcript: {
         availability: 'available',
-		transcriptViewId: 'generation-2',
+		transcriptViewId: 'view-2',
 		messages: [],
 		lastOrdinal: 42,
 		pageOldestOrdinal: 17,
@@ -120,7 +116,7 @@ describe('chat snapshot contract', () => {
       },
       transientFeed: {
         ...snapshot().transientFeed,
-        generationId: 'generation-2',
+        transcriptViewId: 'view-2',
       },
 	})).transcript).toMatchObject({ lastOrdinal: 42, pageOldestOrdinal: 17, hasMore: true });
   });
@@ -129,7 +125,7 @@ describe('chat snapshot contract', () => {
     expect(() => parseChatSnapshotResponse(snapshot({
       transientFeed: {
         ...snapshot().transientFeed,
-        generationId: 'generation-2',
+        transcriptViewId: 'view-2',
       },
     }))).toThrow('views differ');
   });
@@ -149,16 +145,6 @@ describe('chat snapshot contract', () => {
     ['message cursor', (value) => ({
       ...value,
         transcript: { ...value.transcript, lastOrdinal: 4 },
-    })],
-    ['pending input chat', (value) => ({
-      ...value,
-      pendingUserInputs: [{
-        chatId: '1785337200123457',
-        clientRequestId: 'request-1',
-        content: 'Continue',
-        createdAt: TIMESTAMP,
-        deliveryStatus: 'accepted',
-      }],
     })],
     ['tags', (value) => ({ ...value, chat: { ...value.chat, tags: ['review', 'cli'] } })],
     ['protocol', (value) => ({

@@ -561,13 +561,7 @@ describe('chats API contract', () => {
 			control: {
 				serverInstanceId: 'server-instance-test',
 				chatId: 'c-1',
-				agentOwnershipEpoch: 'ownership-1',
-				turnOwner: {
-					agentOwnershipEpoch: 'ownership-1',
-					commandType: 'agent-run',
-					clientRequestId: 'turn-request-1',
-					turnId: 'turn-1',
-				},
+				runId: 'turn-1',
 				id: 'perm-1',
 				incarnation: 'incarnation-1',
 			},
@@ -584,13 +578,7 @@ describe('chats API contract', () => {
 			control: {
 				serverInstanceId: 'server-instance-test',
 				chatId: 'c-1',
-				agentOwnershipEpoch: 'ownership-1',
-				turnOwner: {
-					agentOwnershipEpoch: 'ownership-1',
-					commandType: 'agent-run',
-					clientRequestId: 'turn-request-1',
-					turnId: 'turn-1',
-				},
+				runId: 'turn-1',
 				id: 'perm-1',
 				incarnation: 'incarnation-1',
 			},
@@ -929,7 +917,7 @@ describe('chats API contract', () => {
 								lastOrdinal: 0,
 								pageOldestOrdinal: 0,
 								pageNewestOrdinal: 0,
-								pendingUserInputs: [],
+								resendCandidates: [],
 								hasMore: false,
 								limit: 50,
 							}
@@ -987,7 +975,7 @@ describe('chats API contract', () => {
 			lastOrdinal: 0,
 			pageOldestOrdinal: 0,
 			pageNewestOrdinal: 0,
-			pendingUserInputs: [],
+			resendCandidates: [],
 			hasMore: false,
 			limit: 20,
 		};
@@ -998,7 +986,7 @@ describe('chats API contract', () => {
 			['lastOrdinal', { lastOrdinal: '0' }],
 			['pageOldestOrdinal', { pageOldestOrdinal: -1 }],
 			['pageNewestOrdinal', { pageNewestOrdinal: -1 }],
-			['pendingUserInputs', { pendingUserInputs: [{ clientRequestId: 'req-1' }] }],
+			['resendCandidates', { resendCandidates: [{ ordinal: 1 }] }],
 			['hasMore', { hasMore: 'false' }],
 			['limit', { limit: 0 }],
 		];
@@ -1216,7 +1204,7 @@ describe('chats API contract', () => {
 		await forkChat({
 			sourceChatId: '1',
 			chatId: '2',
-			upToSeq: 7,
+			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
 		});
 
@@ -1224,7 +1212,7 @@ describe('chats API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({
 			sourceChatId: '1',
 			chatId: '2',
-			upToSeq: 7,
+			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
 		});
 	});

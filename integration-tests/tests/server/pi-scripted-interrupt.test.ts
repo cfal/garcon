@@ -127,7 +127,6 @@ function withScriptedPi(): {
   };
 }
 
-// Pi drops processing to idle before the coordinator publishes chat-session-stopped.
 function expectPiStoppedTurnEventOrder(
   events: readonly ServerWsMessage[],
   chatId: string,
@@ -146,10 +145,15 @@ function expectPiStoppedTurnEventOrder(
     && event.chatId === chatId
     && event.intent === 'stop'
     && event.outcome === 'interrupt-requested');
+  const interruption = events.findIndex((event) =>
+    event.type === 'chat-messages'
+    && event.chatId === chatId
+    && event.turnId === turnId);
 
-  expect(stopping).toBeGreaterThanOrEqual(0);
-  expect(idle).toBeGreaterThan(stopping);
-  expect(stopped).toBeGreaterThan(idle);
+  expect(interruption).toBeGreaterThanOrEqual(0);
+  expect(stopped).toBeGreaterThan(interruption);
+  expect(idle).toBeGreaterThan(stopped);
+  if (stopping >= 0) expect(idle).toBeGreaterThan(stopping);
   expect(events).not.toContainEqual(expect.objectContaining({
     type: 'agent-run-failed',
     chatId,

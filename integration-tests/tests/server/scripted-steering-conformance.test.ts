@@ -1,12 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type {
-  AgentRunCommandRequest,
-  StartChatCommandRequest,
-} from '../../../common/chat-command-contracts.js';
-import type {
-  ChatSessionStoppedMessage,
-  PendingUserInputUpdatedMessage,
-} from '../../../common/ws-events.js';
+import type { AgentRunCommandRequest, StartChatCommandRequest } from '../../../common/chat-command-contracts.js';
+import type { ChatSessionStoppedMessage } from '../../../common/ws-events.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { claudeText } from '../../support/fake-claude-model.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
@@ -59,7 +53,7 @@ interface SteeringContractDriver {
     projectPath: string;
     command: string;
   }): StartChatCommandRequest;
-  runRequest(input: { chatId: string; command: string }): AgentRunCommandRequest;
+  runRequest(input: { chatId: string; command: string }): Omit<AgentRunCommandRequest, 'transcriptViewId'>;
   holdReply(reply: string): HeldModelTurn;
   scriptReply(reply: string): void;
   markRequests(): number;
@@ -159,21 +153,21 @@ function defineSteeringConformance(
 
           const futureCursor = fixture.client.markEvents();
           await fixture.client.resumeQueue(chatId, stillPaused.queue.pause!.id);
-          const futureInput = await fixture.client.waitForEvent(
-            (event): event is PendingUserInputUpdatedMessage =>
-              event.type === 'pending-user-input-updated'
-              && event.input.chatId === chatId
-              && event.input.content === futurePrompt
-              && typeof event.input.turnId === 'string',
-            `${providerName} future queued turn identity`,
+          const futureInput = await fixture.client.waitForCommittedUserInput(
+            chatId,
+            futurePrompt,
             { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
           );
-          expect(futureInput.input.turnId).not.toBe(active.turnId);
-          expectFinished((await fixture.client.waitForTurnTerminal(
+          const futureTerminal = await fixture.client.waitForTurnTerminal(
             chatId,
-            futureInput.input.turnId,
-            { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-          )).type);
+            undefined,
+            {
+              afterIndex: fixture.client.events().lastIndexOf(futureInput) + 1,
+              timeoutMs: LIVE_TURN_TIMEOUT_MS,
+            },
+          );
+          expect(futureTerminal.turnId).not.toBe(active.turnId);
+          expectFinished(futureTerminal.type);
 
           const transcript = await fixture.client.getMessages(chatId);
           expect(userContents(transcript.messages)).toEqual([
@@ -198,7 +192,7 @@ function defineSteeringConformance(
       }
     }, 120_000);
 
-    test('does not execute accepted guidance after stop', async () => {
+    test('keeps accepted guidance durable across best-effort stop', async () => {
       if (!environment) throw new Error(`${providerName} environment was not initialized.`);
       const { driver } = environment;
       const firstPrompt = marker(driver.id, 'STOP_FIRST_PROMPT');
@@ -273,9 +267,10 @@ function defineSteeringConformance(
           });
 
           const sampledUserText = driver.userTextsSince(requestCursor).join('\n');
-          expect(sampledUserText).not.toContain(steerPrompt);
+          expect(sampledUserText).toContain(steerPrompt);
+          expect(sampledUserText).toContain(recoveryPrompt);
           expect(assistantContents((await fixture.client.getMessages(chatId)).messages).join('\n'))
-            .not.toContain(cancelledReply);
+            .toContain(recoveryReply);
           driver.assertSettled();
         }, {
           serverEnvironment: driver.serverEnvironment,

@@ -1,6 +1,6 @@
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
-  AgentSteerRequestV4,
+  AgentSteerRequest,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -9,7 +9,6 @@ import type {
   PiStartedSession,
   PiStartRequest,
 } from './runtime-types.js';
-import type { PiTurnSettlementProof } from './pi-turn-settlement.js';
 
 export interface PiRuntime {
   startSession(request: PiStartRequest): Promise<PiStartedSession>;
@@ -18,8 +17,7 @@ export interface PiRuntime {
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null;
-  verifyTurnSettlement(chatId: string): Promise<PiTurnSettlementProof>;
-  steer(request: AgentSteerRequestV4): Promise<AgentSteerResult>;
+  steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
   startPurgeTimer(): void;
   shutdown(): Promise<void>;
   onMessages(callback: Parameters<AgentEventEmitterRuntime['onMessages']>[0]): void;
@@ -75,13 +73,7 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
     return this.#runtime?.captureSteerTarget(agentSessionId) ?? null;
   }
 
-  async verifyTurnSettlement(chatId: string): Promise<PiTurnSettlementProof> {
-    return this.#runtime
-      ? this.#runtime.verifyTurnSettlement(chatId)
-      : { verdict: 'unresolved' };
-  }
-
-  steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
+  steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
     return this.#runAfterLoad(request.agentSessionId, (runtime) => runtime.steer(request));
   }
 

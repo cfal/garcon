@@ -239,21 +239,24 @@ describe('forkJsonlTranscript', () => {
         if (record.type === 'session') {
           return { ...record, sessionId: context.targetAgentSessionId };
         }
-        return context.retainedMessageCount === 0 ? {} : entry;
+        return entry;
       },
     });
 
     const lines = (await readFile(result.nativePath, 'utf8')).split('\n');
     expect(lines).toHaveLength(5);
     expect(lines[1]).toBe('');
-    expect(JSON.parse(lines[2]!)).toEqual({});
+    expect(JSON.parse(lines[2]!)).toEqual({
+      type: 'message',
+      content: 'later physical entry',
+    });
     expect(JSON.parse(lines[3]!)).toEqual({
       type: 'message',
       content: 'selected entry',
     });
     expect(seen).toEqual([
-      { type: 'session', retainedMessageCount: 0 },
-      { type: 'message', retainedMessageCount: 0 },
+      { type: 'session', retainedMessageCount: undefined },
+      { type: 'message', retainedMessageCount: undefined },
       { type: 'message', retainedMessageCount: 1 },
     ]);
   });

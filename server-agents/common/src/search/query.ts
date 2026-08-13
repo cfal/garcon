@@ -278,7 +278,7 @@ function searchIndexStatusForPreparedAllowed(
       FROM json_each(?)
     )
     SELECT
-      COALESCE(SUM(CASE WHEN state.status = 'sealed' THEN 1 ELSE 0 END), 0) AS indexed,
+      COALESCE(SUM(CASE WHEN state.status = 'indexed' THEN 1 ELSE 0 END), 0) AS indexed,
       COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
       COALESCE(SUM(CASE WHEN state.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported
     FROM allowed

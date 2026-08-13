@@ -55,7 +55,7 @@ function makeRouter(overrides = {}) {
     events: {},
     projection: {},
     getCarryOverRevision: () => 'carry-1',
-    loadCarriedContext: async () => null,
+createCarriedContext: async () => null,
     getCarryOverMessageCount: async () => 0,
     ledger: transcript.ledger,
     adoption: transcript.adoption,

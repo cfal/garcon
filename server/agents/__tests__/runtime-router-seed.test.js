@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { UserMessage } from '../../../common/chat-types.js';
+import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
@@ -32,7 +32,11 @@ function makeRouter(overrides = {}) {
   const priorContext = overrides.priorContext ?? [
     new UserMessage('2026-08-12T00:00:00.000Z', 'prior context'),
   ];
-  const transcript = createRuntimeTranscriptFixture({ priorContext });
+  const transcript = createRuntimeTranscriptFixture({
+    priorContext,
+    composition: overrides.composition,
+    conversationMessages: overrides.conversationMessages,
+  });
   const start = overrides.start ?? mock(async (request) => {
     request.sink.publish({
       type: 'session',
@@ -59,8 +63,7 @@ function makeRouter(overrides = {}) {
       supportedPermissionModes: ['default'],
       supportedThinkingModes: ['none'],
     },
-    execution: {},
-    producerExecution: {
+    execution: {
       start,
       resume,
       abort: mock(async () => undefined),
@@ -89,7 +92,6 @@ function makeRouter(overrides = {}) {
     })),
     clearTurn: mock(() => { activeTurn = undefined; }),
     getActiveTurn: mock(() => activeTurn),
-    markTurnAbortable: mock(() => undefined),
   };
   const endpointResolver = {
     resolveSelection: mock((request) => ({
@@ -110,10 +112,8 @@ function makeRouter(overrides = {}) {
     },
     endpointResolver,
     events,
-    projection: {},
     getCarryOverRevision: () => 'carry-1',
-    loadCarriedContext: async () => null,
-    getCarryOverMessageCount: async () => 0,
+    createCarriedContext: overrides.createCarriedContext,
     ledger: transcript.ledger,
     adoption: transcript.adoption,
     nativeActivity: overrides.nativeActivity,
@@ -160,6 +160,53 @@ describe('AgentRuntimeRouter producer boundary', () => {
       }),
       runId: 'turn-1',
       sink: expect.objectContaining({ publish: expect.any(Function) }),
+    }));
+  });
+
+  it('excludes every composed prompt row from direct-provider context', async () => {
+    const context = [new AssistantMessage('2026-08-12T00:00:00.000Z', 'earlier answer')];
+    const conversationMessages = mock((_chatId, excluded) => {
+      expect([...excluded]).toEqual([2, 3]);
+      return context;
+    });
+    const composition = {
+      inserted: true,
+      input: inputRow(3, 'current'),
+      prompt: [inputRow(2, 'unanswered'), inputRow(3, 'current')],
+    };
+    const { router, start } = makeRouter({ composition, conversationMessages });
+
+    await router.runAgentTurn('chat-1', 'fallback', {
+      clientMessageId: 'message-3',
+      turnId: 'turn-1',
+    });
+
+    expect(conversationMessages).toHaveBeenCalledWith('chat-1', expect.any(Set));
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'unanswered\n\ncurrent',
+      priorContext: context,
+    }));
+  });
+
+  it('derives a new session seed from the authoritative ledger context', async () => {
+    const createCarriedContext = mock(async (_chatId, _entry, messages) => ({
+      prefix: `compacted:${messages.map((message) => message.content).join('|')}`,
+    }));
+    const { router, start, priorContext } = makeRouter({ createCarriedContext });
+
+    await router.runAgentTurn('chat-1', 'continue', {
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    });
+
+    expect(createCarriedContext).toHaveBeenCalledWith(
+      'chat-1',
+      expect.objectContaining({ agentId: 'test' }),
+      priorContext,
+      undefined,
+    );
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      carriedContext: { prefix: 'compacted:prior context' },
     }));
   });
 
@@ -241,7 +288,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const { router, start } = makeRouter();
 
     await expect(router.startSession('chat-1', 'do not start', {
-      executionAdmission: { signal: admission.signal, markStarted: mock(), markAbortable: mock() },
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
     })).rejects.toThrow('server is shutting down');
     expect(start).not.toHaveBeenCalled();
   });
@@ -283,4 +330,38 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(events.handoffTurn).not.toHaveBeenCalled();
     expect(events.getActiveTurn()).toEqual(activeTurn);
   });
+
+  it('replaces the producer capability before the next run', async () => {
+    const sinks = [];
+    const start = mock(async (request) => {
+      sinks.push(request.sink);
+      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      return { id: `handle-${sinks.length}` };
+    });
+    const { router } = makeRouter({ start });
+
+    await router.runAgentTurn('chat-1', 'first', { turnId: 'turn-1' });
+    router.reopenProducer('chat-1');
+
+    expect(() => sinks[0].publish({ type: 'rows', rows: [] })).toThrow('sink closed');
+    await router.runAgentTurn('chat-1', 'second', { turnId: 'turn-2' });
+    expect(sinks[1]).not.toBe(sinks[0]);
+  });
 });
+
+function inputRow(ordinal, content) {
+  const message = new UserMessage('2026-08-12T00:00:00.000Z', content);
+  return {
+    kind: 'user-input',
+    viewId: 'view-1',
+    ordinal,
+    at: message.timestamp,
+    detail: {
+      clientMessageId: `message-${ordinal}`,
+      message,
+      attachments: [],
+      steer: false,
+    },
+    providerMeta: null,
+  };
+}

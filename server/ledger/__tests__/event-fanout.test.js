@@ -16,6 +16,7 @@ describe('transcript event fanout', () => {
       schedule: (_chatId, task) => tasks.push(task),
       broadcast,
       updateMetadata,
+      replaceMetadata: mock(() => undefined),
       markSearchDirty,
       resendCandidates: () => [{ ordinal: 1, content: 'prompt', attachmentNames: [] }],
     });
@@ -59,6 +60,7 @@ describe('transcript event fanout', () => {
       schedule: (_chatId, task) => task(),
       broadcast,
       updateMetadata,
+      replaceMetadata: mock(() => undefined),
       markSearchDirty,
       resendCandidates: () => [],
     });

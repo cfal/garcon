@@ -11,7 +11,6 @@ import type { ChatExecutionQueries } from '../chat-execution/types.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
-import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import { transcriptUnavailableMessage } from '../lib/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
@@ -25,10 +24,6 @@ interface ChatSnapshotRouteDeps {
   execution: Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
   chatViews: Pick<TranscriptPageReader, 'page'>;
   transientFeeds: Pick<ChatTransientFeedStore, 'snapshot' | 'currentSnapshot'>;
-  pendingInputs: Pick<
-    PendingUserInputServiceContract,
-    'reconcileRetainedHistory' | 'listForTransport'
-  >;
   logger?: Pick<Logger, 'error'>;
   now?: () => Date;
 }
@@ -57,16 +52,14 @@ export function createChatSnapshotRoutes(deps: ChatSnapshotRouteDeps): RouteMap 
             await deps.execution.readChatExecutionControl(chatId),
           );
           const transcript = await readTranscript(deps, chatId, messageLimit);
-          const generationId = transcript.availability === 'available'
+          const transcriptViewId = transcript.availability === 'available'
             ? transcript.transcriptViewId
-            : deps.transientFeeds.currentSnapshot(chatId)?.generationId
+            : deps.transientFeeds.currentSnapshot(chatId)?.transcriptViewId
               ?? `pending:${summary.chat.agentOwnershipEpoch}`;
           const transientFeed = deps.transientFeeds.snapshot({
             chatId,
-            agentOwnershipEpoch: summary.chat.agentOwnershipEpoch,
-            generationId,
+            transcriptViewId,
           });
-          await deps.pendingInputs.reconcileRetainedHistory(chatId);
           const response = {
             observedAt,
             messageLimit,
@@ -74,7 +67,6 @@ export function createChatSnapshotRoutes(deps: ChatSnapshotRouteDeps): RouteMap 
             processingPhase: summary.processingPhase,
             control,
             transientFeed,
-            pendingUserInputs: deps.pendingInputs.listForTransport(chatId),
             transcript,
           } satisfies ChatSnapshotResponse;
           return noStore(Response.json(response));

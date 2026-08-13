@@ -10,10 +10,9 @@ import { isArtificialNativePath } from '@garcon/server-agent-common/chats/artifi
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type {
   AgentLogger,
-  AgentSteerRequestV4,
+  AgentSteerRequest,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -58,14 +57,7 @@ import type {
   PiRetireOptions,
   PiRpcSession,
   PiSteerSubmission,
-  PiTurnSettlementRecord,
 } from './pi-rpc-session-state.js';
-import {
-  addExpectedNativeMessage,
-  snapshotPiSettlementBaseline,
-  verifyPiTurnSettlement,
-  type PiTurnSettlementProof,
-} from './pi-turn-settlement.js';
 
 export interface PiModelReader {
   getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
@@ -75,11 +67,6 @@ const READY_TIMEOUT_MS = 60_000;
 const STEER_RESPONSE_TIMEOUT_MS = 15_000;
 
 export class PiRpcRuntime extends AgentEventEmitterRuntime {
-  // Settlement evidence for the most recently finished turn per chat. A turn
-  // finishes only on agent_settled, and success additionally requires the
-  // native session file to contain every finalized row the turn journalled.
-  readonly #turnSettlements = new Map<string, PiTurnSettlementRecord>();
-
   readonly #config: PiConfig;
   readonly #logger: AgentLogger;
   readonly #models: PiModelReader;
@@ -89,13 +76,11 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
   readonly #steerTargets = new WeakMap<AgentSteerTarget, CapturedPiSteerTarget>();
   #shuttingDown = false;
   readonly #idlePurger: IdleSessionPurger<PiRpcSession>;
-  readonly #settlementWaitMs: number;
 
   constructor(options: {
     readonly config: PiConfig;
     readonly logger: AgentLogger;
     readonly models: PiModelReader;
-    readonly settlementWaitMs?: number;
     readonly idlePurgeTiming?: {
       readonly intervalMs?: number;
       readonly maxIdleMs?: number;
@@ -105,7 +90,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     this.#config = options.config;
     this.#logger = options.logger;
     this.#models = options.models;
-    this.#settlementWaitMs = options.settlementWaitMs ?? 1_500;
     this.#idlePurger = new IdleSessionPurger<PiRpcSession>(
       {
         sessions: () => this.#sessions.entries(),
@@ -266,7 +250,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     return target;
   }
 
-  async steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
+  async steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
     // Rejects command syntax because Pi expands slash-prefixed steering before enqueue.
     if (request.input.trimStart().startsWith('/')) {
       return rejectedPiSteer(
@@ -371,7 +355,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
   }
 
   #validateSteerTarget(
-    request: AgentSteerRequestV4,
+    request: AgentSteerRequest,
     captured: CapturedPiSteerTarget,
   ): AgentSteerResult | null {
     const { session, turn } = captured;
@@ -594,7 +578,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     const settle = new Promise<void>((resolve) => {
       resolveSettle = resolve;
     });
-    this.#turnSettlements.delete(session.chatId);
     const turn: PiActiveTurn = {
       turnId: request.turnId,
       stopRequested: false,
@@ -603,13 +586,8 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       failureMessage: null,
       steerSubmissions: new Set(),
       steeringQueue: [],
-      settlementBaseline: await snapshotPiSettlementBaseline(session.nativePath),
-      expectedNative: [],
       settle: resolveSettle,
     };
-    if (typeof prompt.message === 'string' && prompt.message.length > 0) {
-      addExpectedNativeMessage(turn.expectedNative, 'user');
-    }
     assertPiExecutionOpen(request);
     if (request.executionAdmission) await markPiExecutionStarted(request);
     session.turn = turn;
@@ -624,7 +602,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       message: prompt.message,
       ...(prompt.images.length > 0 ? { images: prompt.images } : {}),
     });
-    request.onAbortable?.();
     return {
       accepted: this.#awaitPromptAcceptance(session, turn, response),
       settle,
@@ -687,35 +664,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
         this.#observeSteeringPersistence(session, message);
         return;
       }
-      // Every finalized non-user message persists one session entry, whether
-      // or not it renders: tool-only assistant and toolResult occurrences
-      // count by role, never by content. The pre-append ordinal is the rows'
-      // durable integration identity and equals the settlement walk's
-      // expected-role index, so verifyPiTurnSettlement binds it to the proven
-      // native entry id and live rows reconcile to their restart identities.
-      // Pi 0.83.0 delivers each occurrence's message_end exactly once: the SDK
-      // emits it once per finalized message (agent-session.js _handleAgentEvent)
-      // and rpc-mode streams each subscribed event to stdout once as it occurs
-      // with no replay (modes/rpc/rpc-mode.js session.subscribe), so the ordinal
-      // never advances twice for one occurrence. A distinct equal-content
-      // occurrence is a separate message_end and correctly takes the next
-      // ordinal; content never participates in identity.
-      const occurrenceOrdinal = session.turn?.expectedNative.length ?? null;
-      if (session.turn && typeof role === 'string') {
-        addExpectedNativeMessage(session.turn.expectedNative, role);
-      }
-      // Rendering the full occurrence here, tools included, keeps live rows
-      // identical to the evidence conversion of the same session entry, so
-      // the audit matches by identity without per-event reassembly.
       const messages = convertPiMessage(message, { includeUser: false });
-      if (occurrenceOrdinal !== null && session.turn?.turnId) {
-        messages.forEach((rendered, withinSourceOrdinal) => {
-          attachNativeMessageSource(rendered, {
-            entryId: `turn:${session.turn!.turnId}:end:${occurrenceOrdinal}`,
-            withinSourceOrdinal,
-          });
-        });
-      }
       if (messages.length > 0) this.emitMessages(session.chatId, messages, session.eventMetadata);
 
       const stopReason = message && typeof message === 'object'
@@ -768,7 +717,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     );
     if (persisted) {
       persisted.persisted = true;
-      addExpectedNativeMessage(turn.expectedNative, 'user');
     }
   }
 
@@ -787,46 +735,19 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
   #finishSettle(session: PiRpcSession): void {
     const turn = session.turn;
     if (!turn) return;
-    const steeringUnresolved = this.#recordSettlement(session, turn);
+    const steeringUnresolved = this.#hasUnresolvedSteering(turn);
     this.#completeTurn(session, turn, 'finished');
     if (steeringUnresolved) {
       this.#retireInBackground(session, 'steering remained uncertain at settle');
     }
   }
 
-  // Captures the turn's persistence proof: the ordered occurrences finalized
-  // so far, the pre-prompt baseline, and whether accepted steering ever left
-  // an unpersisted or queued remainder. A stopped turn records the same
-  // proof so its persisted prefix is provable at the settled boundary.
-  #recordSettlement(session: PiRpcSession, turn: PiActiveTurn): boolean {
+  #hasUnresolvedSteering(turn: PiActiveTurn): boolean {
     const hasUnpersistedSteer = Array.from(turn.steerSubmissions).some(
       (submission) => submission.accepted && !submission.persisted,
     );
     const hasQueuedSteering = turn.steeringQueue.length > 0;
-    this.#turnSettlements.set(session.chatId, {
-      steeringUnresolved: hasUnpersistedSteer || hasQueuedSteering,
-      baseline: turn.settlementBaseline,
-      expected: [...turn.expectedNative],
-      nativePath: session.nativePath,
-      turnId: turn.turnId ?? null,
-    });
     return hasUnpersistedSteer || hasQueuedSteering;
-  }
-
-  // Verifies the last finished turn's native persistence evidence with a
-  // bounded wait: Pi appends the session entry after message_end, so the
-  // proof polls briefly for occurrence-safe persistence instead of failing a
-  // write that is still flushing. Unresolved steering never resolves by
-  // waiting, and failure withholds terminal success.
-  async verifyTurnSettlement(chatId: string): Promise<PiTurnSettlementProof> {
-    const record = this.#turnSettlements.get(chatId);
-    if (!record || record.steeringUnresolved) return verifyPiTurnSettlement(record);
-    const deadline = Date.now() + this.#settlementWaitMs;
-    for (;;) {
-      const proof = await verifyPiTurnSettlement(record);
-      if (proof.verdict === 'confirmed' || Date.now() >= deadline) return proof;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
   }
 
   #handleExit(session: PiRpcSession, generation: number, code: number): void {
@@ -868,10 +789,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
         this.emitFinished(session.chatId, 0, session.eventMetadata);
       });
     } else if (outcome === 'stopped') {
-      // A stop is turn-terminal work like any other: the terminal event is
-      // what releases the projection operation and drives the stop-settled
-      // sequence, with success still gated on the recorded persistence proof.
-      this.#recordSettlement(session, turn);
       this.#emitLifecycle(session, 'turn-stopped', () => {
         this.emitFinished(session.chatId, 0, session.eventMetadata);
       });

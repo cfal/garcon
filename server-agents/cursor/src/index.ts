@@ -4,7 +4,7 @@ import {
   AgentIntegrationError,
   type AgentChatReference,
   type AgentHost,
-  type AgentIntegrationV4,
+  type AgentIntegration,
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
@@ -14,7 +14,6 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createCursorConfig } from './config.js';
@@ -63,33 +62,30 @@ const CURSOR_DESCRIPTOR = {
   ],
 } as const;
 
-export default class CursorAgentIntegration implements AgentIntegrationV4 {
+export default class CursorAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'cursor';
-  static readonly apiVersion = 4 as const;
+  static readonly apiVersion = 5 as const;
   readonly descriptor = CURSOR_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
-  readonly producerExecution;
-  readonly transcript;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
   readonly nativeSessions;
-  readonly sessionConfiguration: NonNullable<AgentIntegrationV4['sessionConfiguration']>;
-  readonly permissionDecisions: NonNullable<AgentIntegrationV4['permissionDecisions']>;
-  readonly projectPathUpdates: NonNullable<AgentIntegrationV4['projectPathUpdates']>;
+  readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
+  readonly permissionDecisions: NonNullable<AgentIntegration['permissionDecisions']>;
+  readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
   readonly goals = null;
   readonly endpoints = null;
-  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
-  readonly transientControls = { protocol: 'ordered-stream-v1' as const };
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
     const config = createCursorConfig(host.environment);
@@ -123,16 +119,8 @@ export default class CursorAgentIntegration implements AgentIntegrationV4 {
     };
     const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions);
     this.nativeSessions = nativeEvidence;
-    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
-    const projection = createAgentOwnedProjection({
-      ownerId: 'cursor',
-      host,
-      execution: providerExecution,
-      nativeEvidence,
-    });
-    this.execution = projection.execution;
-    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',

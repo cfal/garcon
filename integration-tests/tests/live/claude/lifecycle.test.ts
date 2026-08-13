@@ -3,7 +3,6 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   ChatMessagesMessage,
-  PendingUserInputUpdatedMessage,
 } from '../../../../common/ws-events.js';
 import {
   assistantContents,
@@ -92,19 +91,18 @@ describe('live Claude lifecycle', () => {
         timeoutMs: TURN_TIMEOUT_MS,
       })).type);
 
-      const successor = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === successorPrompt
-          && typeof event.input.turnId === 'string',
-        'live Claude post-background successor identity',
+      const successor = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        successorPrompt,
         { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(
         chatId,
-        successor.input.turnId,
-        { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
+        undefined,
+        {
+          afterIndex: fixture.client.events().lastIndexOf(successor) + 1,
+          timeoutMs: TURN_TIMEOUT_MS,
+        },
       )).type);
 
       const transcript = await fixture.client.getMessages(chatId);
@@ -165,19 +163,18 @@ describe('live Claude lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: TURN_TIMEOUT_MS,
       })).type);
-      const secondInput = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === parentChatId
-          && event.input.content === secondPrompt
-          && typeof event.input.turnId === 'string',
-        'live Claude queued turn identity',
+      const secondInput = await fixture.client.waitForCommittedUserInput(
+        parentChatId,
+        secondPrompt,
         { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(
         parentChatId,
-        secondInput.input.turnId,
-        { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
+        undefined,
+        {
+          afterIndex: fixture.client.events().lastIndexOf(secondInput) + 1,
+          timeoutMs: TURN_TIMEOUT_MS,
+        },
       )).type);
 
       const parentAfterQueue = await fixture.client.getMessages(parentChatId);
@@ -217,7 +214,8 @@ describe('live Claude lifecycle', () => {
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: pointChatId,
-        upToSeq: firstAssistant.seq,
+        transcriptViewId: parentAfterQueue.transcriptViewId,
+        upToOrdinal: firstAssistant.ordinal,
       });
       const pointMarker = marker('POINT_FORK');
       const pointPrompt = exactReplyPrompt(pointMarker);
@@ -378,12 +376,12 @@ describe('live Claude lifecycle', () => {
       expect(result?.isError).toBe(false);
       expect(JSON.stringify(result?.content)).toContain(toolMarker);
       const bashSeq = beforeRestart.messages.find((entry) =>
-        entry.message.type === 'bash-tool-use' && entry.message.toolId === bash.toolId)?.seq;
+        entry.message.type === 'bash-tool-use' && entry.message.toolId === bash.toolId)?.ordinal;
       const resultSeq = beforeRestart.messages.find((entry) =>
-        entry.message.type === 'tool-result' && entry.message.toolId === bash.toolId)?.seq;
+        entry.message.type === 'tool-result' && entry.message.toolId === bash.toolId)?.ordinal;
       const responseSeq = beforeRestart.messages.find((entry) =>
         entry.message.type === 'assistant-message'
-        && entry.message.content.includes(toolMarker))?.seq;
+        && entry.message.content.includes(toolMarker))?.ordinal;
       expect(resultSeq).toBeGreaterThan(bashSeq ?? Number.MAX_SAFE_INTEGER);
       expect(responseSeq).toBeGreaterThan(resultSeq ?? Number.MAX_SAFE_INTEGER);
       expect(countUserContent(beforeRestart.messages, prompt)).toBe(1);
@@ -623,19 +621,18 @@ describe('live Claude lifecycle', () => {
         cancelledCount: 0,
         stillQueuedCount: 0,
       });
-      const successorInput = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === successorPrompt
-          && typeof event.input.turnId === 'string',
-        'live Claude interrupt successor identity',
+      const successorInput = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        successorPrompt,
         { afterIndex: interruptCursor, timeoutMs: TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(
         chatId,
-        successorInput.input.turnId,
-        { afterIndex: interruptCursor, timeoutMs: TURN_TIMEOUT_MS },
+        undefined,
+        {
+          afterIndex: fixture.client.events().lastIndexOf(successorInput) + 1,
+          timeoutMs: TURN_TIMEOUT_MS,
+        },
       )).type);
 
       const transcript = await fixture.client.getMessages(chatId);

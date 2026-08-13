@@ -356,11 +356,7 @@ describe('Cursor ACP runtime', () => {
 
   it('configures the selected Cursor model through ACP config options before prompting', async () => {
     const { acp, runtime } = createRuntimeHarness();
-    let methodsAtAbortable = [];
-    const onAbortable = mock(() => {
-      methodsAtAbortable = acp.writes.map((message) => message.method);
-    });
-    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high', onAbortable }));
+    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high' }));
 
     const prompt = await acp.waitForClientMethod('session/prompt');
     const setConfigCalls = acp.writes.filter((message) => message.method === 'session/set_config_option');
@@ -375,8 +371,6 @@ describe('Cursor ACP runtime', () => {
     const methods = acp.writes.map((message) => message.method);
     expect(methods.indexOf('session/set_config_option')).toBeLessThan(methods.indexOf('session/prompt'));
     expect(prompt.params.config).toBeUndefined();
-    expect(onAbortable).toHaveBeenCalledTimes(1);
-    expect(methodsAtAbortable.at(-1)).toBe('session/prompt');
 
     acp.finishPrompt();
     runtime.shutdown();
@@ -386,14 +380,12 @@ describe('Cursor ACP runtime', () => {
     const { acp, runtime, waitForMessage } = createRuntimeHarness({
       configMismatch: { configId: 'reasoning', currentValue: 'medium' },
     });
-    const onAbortable = mock(() => undefined);
-    await expect(runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high', onAbortable })))
+    await expect(runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high' })))
       .rejects.toThrow('Cursor did not apply requested model gpt-5.5-extra-high');
 
     const error = await waitForMessage((message) => message instanceof ErrorMessage);
     expect(error.content).toContain('Cursor did not apply requested model gpt-5.5-extra-high');
     expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
-    expect(onAbortable).not.toHaveBeenCalled();
 
     runtime.shutdown();
   });

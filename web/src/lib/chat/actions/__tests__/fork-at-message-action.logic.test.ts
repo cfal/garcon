@@ -123,20 +123,18 @@ describe('fork-at-message view recovery', () => {
 		});
 	});
 
-	it('uses user delivery identity when presentation fields change', () => {
+	it('uses user message identity when presentation fields change', () => {
 		const selection = selectForkAtMessage([{
 			ordinal: 3,
 			message: new UserMessage('2026-07-29T00:00:00.000Z', 'before', undefined, {
-				clientRequestId: 'request-1',
-				deliveryStatus: 'accepted',
+				clientMessageId: 'message-1',
 			}),
 		}], 'view-1', 3);
 
 		expect(remapForkAtMessage([{
 			ordinal: 7,
 			message: new UserMessage('2026-07-29T01:00:00.000Z', 'after', undefined, {
-				clientRequestId: 'request-1',
-				deliveryStatus: 'unconfirmed',
+				clientMessageId: 'message-1',
 			}),
 		}], 'view-2', selection!)).toMatchObject({
 			ordinal: 7,

@@ -67,8 +67,12 @@ import {
   parseChatExecutionControlState,
 	type ChatExecutionControlState,
 } from '../../common/chat-execution-control.js';
-import { parseTranscriptMessages, type TranscriptMessage } from '../../common/chat-view.js';
-import { normalizePendingUserInput, type PendingUserInput } from '../../common/pending-user-input.js';
+import {
+  parseResendCandidates,
+  parseTranscriptMessages,
+  type ResendCandidate,
+  type TranscriptMessage,
+} from '../../common/chat-view.js';
 import type {
   RemoteSettingsSnapshot,
   UpdateRemoteSettingsInput,
@@ -78,6 +82,7 @@ import {
   parseServerWsMessage,
   type AgentRunFailedMessage,
   type AgentRunFinishedMessage,
+  type ChatMessagesMessage,
   type ChatReloadedMessage,
   type ChatProcessingUpdatedMessage,
   type ChatSubscribedMessage,
@@ -152,7 +157,7 @@ export interface ChatMessagesPage {
   lastOrdinal: number;
   pageOldestOrdinal: number;
   pageNewestOrdinal: number;
-  pendingUserInputs: PendingUserInput[];
+  resendCandidates: ResendCandidate[];
   hasMore: boolean;
   limit: number;
 }
@@ -185,6 +190,8 @@ export interface GarconTestClientOptions {
   createWebSocket?: (url: string) => GarconWebSocket;
   redactSensitiveDiagnostics?: boolean;
 }
+
+export type CommittedUserInputMessage = ChatMessagesMessage;
 
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSED = 3;
@@ -652,8 +659,7 @@ export class GarconTestClient {
     return {
       serverInstanceId: snapshot.transientFeed.serverInstanceId,
       chatId,
-      agentOwnershipEpoch: snapshot.transientFeed.agentOwnershipEpoch,
-      turnOwner: row.turnOwner,
+      runId: row.runId,
       id: row.id,
       incarnation: row.incarnation,
     };
@@ -779,14 +785,15 @@ export class GarconTestClient {
 
   async getMessages(
     chatId: string,
-    options: { limit?: number; beforeOrdinal?: number; beforeSeq?: number } = {},
+    options: { limit?: number; beforeOrdinal?: number } = {},
   ): Promise<ChatMessagesPage> {
     const query = new URLSearchParams({
       chatId,
       limit: String(options.limit ?? 100),
     });
-    const beforeOrdinal = options.beforeOrdinal ?? options.beforeSeq;
-    if (beforeOrdinal !== undefined) query.set('beforeOrdinal', String(beforeOrdinal));
+    if (options.beforeOrdinal !== undefined) {
+      query.set('beforeOrdinal', String(options.beforeOrdinal));
+    }
     const response = await this.get<Record<string, unknown>>(`/api/v1/chats/messages?${query}`);
     const historyState = response.historyState as { kind?: unknown } | undefined;
     if (historyState && historyState.kind !== 'complete') {
@@ -797,12 +804,9 @@ export class GarconTestClient {
     }
     const messages = parseTranscriptMessages(response.messages);
     if (!messages) throw new Error(`Invalid messages response: ${JSON.stringify(response)}`);
-    if (!Array.isArray(response.pendingUserInputs)) {
-      throw new Error(`Invalid pendingUserInputs response: ${JSON.stringify(response)}`);
-    }
-    const pendingUserInputs = response.pendingUserInputs.map(normalizePendingUserInput);
-    if (pendingUserInputs.some((input) => input === null)) {
-      throw new Error(`Invalid pending user input: ${JSON.stringify(response.pendingUserInputs)}`);
+    const resendCandidates = parseResendCandidates(response.resendCandidates);
+    if (!resendCandidates) {
+      throw new Error(`Invalid resend candidates response: ${JSON.stringify(response)}`);
     }
     if (typeof response.hasMore !== 'boolean') throw new Error('Invalid messages response: hasMore');
     return {
@@ -812,7 +816,7 @@ export class GarconTestClient {
       lastOrdinal: nonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
       pageOldestOrdinal: nonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
       pageNewestOrdinal: nonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
-      pendingUserInputs: pendingUserInputs as PendingUserInput[],
+      resendCandidates,
       hasMore: response.hasMore,
       limit: positiveInteger(response.limit, 'limit'),
     };
@@ -845,18 +849,30 @@ export class GarconTestClient {
 
   async subscribe(
     chatId: string,
-    generationId: string,
-    afterSeq: number,
+    transcriptViewId: string,
+    afterOrdinal: number,
   ): Promise<ChatSubscribedMessage> {
     const clientRequestId = crypto.randomUUID();
     const afterIndex = this.markEvents();
-    this.sendWs(new ChatSubscribeRequest(clientRequestId, chatId, generationId, afterSeq));
-    return await this.waitForEvent(
-      (message): message is ChatSubscribedMessage =>
-        message.type === 'chat-subscribed' && message.clientRequestId === clientRequestId,
+    this.sendWs(new ChatSubscribeRequest(
+      clientRequestId,
+      chatId,
+      transcriptViewId,
+      afterOrdinal,
+    ));
+    const outcome = await this.waitForEvent(
+      (message): message is ChatSubscribedMessage | ClientRequestErrorMessage =>
+        (message.type === 'chat-subscribed' && message.clientRequestId === clientRequestId)
+        || (
+          message.type === 'client-request-error'
+          && message.clientRequestId === clientRequestId
+          && message.requestType === 'chat-subscribe'
+        ),
       `chat-subscribed ${clientRequestId}`,
       { afterIndex },
     );
+    if (outcome.type === 'client-request-error') throw new GarconWsRequestError(outcome);
+    return outcome;
   }
 
   async reloadChat(chatId: string): Promise<ChatReloadedMessage> {
@@ -889,6 +905,22 @@ export class GarconTestClient {
         && message.chatId === chatId
         && (message.phase !== null) === isProcessing,
       `${chatId} processing=${isProcessing}`,
+      options,
+    );
+  }
+
+  async waitForCommittedUserInput(
+    chatId: string,
+    content: string,
+    options: { afterIndex?: number; timeoutMs?: number } = {},
+  ): Promise<CommittedUserInputMessage> {
+    return await this.waitForEvent(
+      (message): message is CommittedUserInputMessage =>
+        message.type === 'chat-messages'
+        && message.chatId === chatId
+        && message.messages.some((entry) =>
+          entry.message.type === 'user-message' && entry.message.content === content),
+      `committed user input ${content}`,
       options,
     );
   }

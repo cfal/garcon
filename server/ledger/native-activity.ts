@@ -1,4 +1,4 @@
-import type { AgentIntegrationV4 } from '@garcon/server-agent-interface';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
 import type { TranscriptLedgerService } from './service.js';
@@ -7,7 +7,7 @@ export const NATIVE_TRANSCRIPT_DRIFT_NOTICE =
   'The transcript may have changed outside Garcon. Consider reloading from native history.';
 
 interface NativeActivityIntegrationDirectory {
-  get(agentId: string): AgentIntegrationV4 | null;
+  get(agentId: string): AgentIntegration | null;
 }
 
 export interface NativeTranscriptActivityServiceOptions {

@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import {
   claudeText,
@@ -117,18 +116,13 @@ describe('scripted Claude strict steering', () => {
 
       const futureCursor = fixture.client.markEvents();
       await fixture.client.resumeQueue(chatId, stillPaused.queue.pause!.id);
-      const futureInput = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === futurePrompt
-          && typeof event.input.turnId === 'string',
-        'scripted Claude future queued turn identity',
+      const futureInput = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        futurePrompt,
         { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
-      expect(futureInput.input.turnId).not.toBe(firstTurnId);
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, futureInput.input.turnId, {
-        afterIndex: futureCursor,
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(futureInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
@@ -144,7 +138,7 @@ describe('scripted Claude strict steering', () => {
     });
   }, 120_000);
 
-  test('delivers two FIFO steers despite a reused Garcon message identity', async () => {
+  test('delivers two FIFO steers with distinct message identities', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const firstPrompt = marker('BATCH_FIRST_PROMPT');
@@ -168,21 +162,18 @@ describe('scripted Claude strict steering', () => {
       if (!first.turnId) throw new Error('Scripted Claude start did not return a turn identity.');
       await held.requested;
 
-      const sharedMessageId = crypto.randomUUID();
-      const [firstResult, secondResult] = await Promise.all([
-        fixture.client.steer({
-          clientRequestId: crypto.randomUUID(),
-          clientMessageId: sharedMessageId,
-          chatId,
-          content: firstSteer,
-        }),
-        fixture.client.steer({
-          clientRequestId: crypto.randomUUID(),
-          clientMessageId: sharedMessageId,
-          chatId,
-          content: secondSteer,
-        }),
-      ]);
+      const firstResult = await fixture.client.steer({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        content: firstSteer,
+      });
+      const secondResult = await fixture.client.steer({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        content: secondSteer,
+      });
       expect(firstResult).toMatchObject({ status: 'accepted', turnId: first.turnId });
       expect(secondResult).toMatchObject({ status: 'accepted', turnId: first.turnId });
       expect((await fixture.client.listChats()).sessions.find(

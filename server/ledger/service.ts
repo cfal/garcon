@@ -75,6 +75,8 @@ export type TranscriptCommitEvent =
       readonly view: TranscriptView;
     };
 
+export type TranscriptSessionCommitEvent = Extract<TranscriptCommitEvent, { readonly type: 'session' }>;
+
 export interface TranscriptLedgerServiceOptions {
   readonly now?: () => string;
   readonly createRunId?: () => string;
@@ -104,6 +106,7 @@ export class TranscriptLedgerService {
   readonly #serverInstanceId: string;
   readonly #onListenerError: (error: unknown) => void;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
+  readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
   readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
@@ -123,6 +126,11 @@ export class TranscriptLedgerService {
     return () => this.#listeners.delete(listener);
   }
 
+  subscribeSessionCommitted(listener: (event: TranscriptSessionCommitEvent) => void): () => void {
+    this.#sessionCommitListeners.add(listener);
+    return () => this.#sessionCommitListeners.delete(listener);
+  }
+
   initializeChat(
     chatId: string,
     rows: readonly LedgerRowDraft[] = [],
@@ -135,7 +143,8 @@ export class TranscriptLedgerService {
     return this.#store.currentView(chatId);
   }
 
-  openProducer(chatId: string): TranscriptProducerLease {
+  openProducer(chatId: string, ownerAgentId: string): TranscriptProducerLease {
+    if (!ownerAgentId) throw new TypeError('Producer owner agent ID is required');
     const view = this.#store.currentView(chatId);
     if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
     const current = this.#leases.get(chatId);
@@ -144,7 +153,7 @@ export class TranscriptLedgerService {
     }
     const lease = new ProducerLease(chatId, view.viewId, (event) => {
       if (this.#leases.get(chatId) !== lease) throw new TranscriptSinkClosedError();
-      this.#publish(chatId, view.viewId, event);
+      this.#publish(chatId, view.viewId, ownerAgentId, event);
     }, () => {
       if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
       this.#activeRuns.delete(chatId);
@@ -168,6 +177,15 @@ export class TranscriptLedgerService {
     this.#activePermissions.delete(chatId);
     this.#activeRuns.set(chatId, runId);
     return runId;
+  }
+
+  handoffRun(chatId: string, expectedRunId: string, nextRunId: string): void {
+    if (!nextRunId) throw new TypeError('Run ID is required');
+    if (this.#activeRuns.get(chatId) !== expectedRunId) {
+      throw new TypeError(`Transcript run changed before handoff for ${chatId}`);
+    }
+    this.#activePermissions.delete(chatId);
+    this.#activeRuns.set(chatId, nextRunId);
   }
 
   activeRunId(chatId: string): string | null {
@@ -248,7 +266,7 @@ export class TranscriptLedgerService {
 
   claimPermissionResolution(action: ChatTransientControlAction): PermissionResolutionClaim {
     if (action.serverInstanceId !== this.#serverInstanceId) throw new PermissionNotActionableError();
-    const runId = action.turnOwner.turnId;
+    const runId = action.runId;
     const permission = this.#activePermissions.get(action.chatId)?.get(action.id);
     if (
       !permission
@@ -366,6 +384,20 @@ export class TranscriptLedgerService {
     return this.#store.rowsThrough(chatId, watermark);
   }
 
+  assistantMessagesForSubmission(
+    chatId: string,
+    viewId: TranscriptViewId,
+    clientMessageId: string,
+    throughOrdinal: number,
+  ): readonly string[] {
+    return this.#store.assistantMessagesForSubmission(
+      chatId,
+      viewId,
+      clientMessageId,
+      throughOrdinal,
+    );
+  }
+
   conversationRows(chatId: string): readonly (LedgerUserInputRow | Extract<LedgerRow, { kind: 'provider-row' }>)[] {
     return this.#store.currentRows(chatId).filter(isConversationRow);
   }
@@ -466,6 +498,7 @@ export class TranscriptLedgerService {
     this.#activePermissions.clear();
     this.#permissionClaims.clear();
     this.#preparedInputs.clear();
+    this.#sessionCommitListeners.clear();
     this.#store.close();
   }
 
@@ -476,7 +509,12 @@ export class TranscriptLedgerService {
     }
   }
 
-  #publish(chatId: string, viewId: TranscriptViewId, event: AgentProducerEvent): void {
+  #publish(
+    chatId: string,
+    viewId: TranscriptViewId,
+    ownerAgentId: string,
+    event: AgentProducerEvent,
+  ): void {
     switch (event.type) {
       case 'rows': {
         if (event.rows.length === 0) return;
@@ -490,13 +528,25 @@ export class TranscriptLedgerService {
         return;
       }
       case 'session': {
+        if (event.session.nativeSession?.ownerId !== undefined
+            && event.session.nativeSession.ownerId !== ownerAgentId) {
+          throw new TypeError(`Native session owner mismatch for ${chatId}`);
+        }
         const [row] = this.#store.append(chatId, viewId, [{
           kind: 'session',
           at: this.#now(),
           detail: event.session,
           providerMeta: null,
         }]);
-        this.#notify({ type: 'session', chatId, viewId, row: row as LedgerSessionRow });
+        const committed = { type: 'session', chatId, viewId, row: row as LedgerSessionRow } as const;
+        for (const listener of this.#sessionCommitListeners) {
+          try {
+            listener(committed);
+          } catch (error) {
+            this.#onListenerError(error);
+          }
+        }
+        this.#notify(committed);
         return;
       }
       case 'permission': {

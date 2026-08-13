@@ -577,7 +577,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
   async startSession(request: AmpStartRequest): Promise<AmpStartedSession> {
     assertAmpExecutionOpen(request);
-    const { command, chatId, projectPath, model, onAbortable, clientRequestId, turnId } = request;
+    const { command, chatId, projectPath, model, clientRequestId, turnId } = request;
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
     const threadId = await createThread({ cwd: projectPath }, this.#config);
     assertAmpExecutionOpen(request);
@@ -596,7 +596,6 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
       this.emitProcessing(chatId, true);
       this.#spawnAmp(session, projectPath, args, command);
-      onAbortable?.();
     } catch (err) {
       this.#rollbackTurnLaunch(session, true);
       if (!request.executionAdmission?.signal.aborted) {
@@ -613,7 +612,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
   async runTurn(request: AmpResumeRequest): Promise<void> {
     assertAmpExecutionOpen(request);
-    const { command, agentSessionId: threadId, chatId, projectPath, model, onAbortable, clientRequestId, turnId } = request;
+    const { command, agentSessionId: threadId, chatId, projectPath, model, clientRequestId, turnId } = request;
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
 
@@ -647,7 +646,6 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
       this.emitProcessing(chatId, true);
       this.#spawnAmp(session, projectPath, args, command);
-      onAbortable?.();
     } catch (err) {
       this.#rollbackTurnLaunch(session, false);
       if (!request.executionAdmission?.signal.aborted) {

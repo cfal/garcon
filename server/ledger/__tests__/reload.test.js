@@ -12,7 +12,7 @@ const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptReloadService', () => {
   it('atomically replaces the current binding while preserving only the frozen conversation', async () => {
-    await withReload(async ({ ledger, reload, oldViewId }) => {
+    await withReload(async ({ ledger, reload, lease, replacementLease, oldViewId }) => {
       const replacement = await reload.reload('chat-1');
       const rows = ledger.currentRows('chat-1');
 
@@ -36,6 +36,8 @@ describe('TranscriptReloadService', () => {
       ).toEqual(['frozen-1', null]);
       expect(() => ledger.rowsAfter('chat-1', oldViewId, 0)).toThrow();
       expect(ledger.currentSession('chat-1')?.detail.agentSessionId).toBe('session-1');
+      expect(lease.closed).toBe(true);
+      expect(replacementLease.current?.closed).toBe(false);
     });
   });
 
@@ -50,14 +52,15 @@ describe('TranscriptReloadService', () => {
   });
 
   it('leaves the old view current when native import fails', async () => {
-    await withReload(async ({ ledger, reload, integration }) => {
+    await withReload(async ({ ledger, reload, lease, replacementLease, integration }) => {
       integration.nativeHistoryImport.load = async function* load() {
         throw new Error('native read failed');
       };
 
       await expect(reload.reload('chat-1')).rejects.toThrow('native read failed');
       expect(ledger.currentView('chat-1')?.viewId).toBe('view-1');
-      expect(() => ledger.openProducer('chat-1')).not.toThrow();
+      expect(lease.closed).toBe(true);
+      expect(replacementLease.current?.closed).toBe(false);
     });
   });
 });
@@ -86,7 +89,7 @@ async function withReload(run) {
     providerDraft('old current answer'),
     { kind: 'run-ended', at: TS, outcome: 'finished', origin: 'provider', providerMeta: null },
   ], 3);
-  const lease = ledger.openProducer('chat-1');
+  const lease = ledger.openProducer('chat-1', 'test');
   const entry = {
     agentId: 'test',
     agentOwnershipEpoch: 'ownership-1',
@@ -142,17 +145,29 @@ async function withReload(run) {
     loadFrozenPrefix: async () => [],
     loadLegacyCurrent: async () => [],
   });
+  const replacementLease = { current: null };
   const reload = new TranscriptReloadService({
     ledger,
     adoption,
     registry,
     integrations,
     execution,
+    reopenProducer: () => {
+      replacementLease.current = ledger.openProducer('chat-1', 'test');
+    },
     getCarryOverRevision: () => 'carry-v1:0',
     now: () => TS,
   });
   try {
-    await run({ ledger, reload, lease, execution, integration, oldViewId: old.viewId });
+    await run({
+      ledger,
+      reload,
+      lease,
+      replacementLease,
+      execution,
+      integration,
+      oldViewId: old.viewId,
+    });
   } finally {
     ledger.close();
     await rm(root, { recursive: true, force: true });

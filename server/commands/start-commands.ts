@@ -163,10 +163,11 @@ export class StartCommands {
             agentSettingsById: { [input.agentId]: input.agentSettings },
           });
           await this.deps.settings.ensureInNormal(input.chatId);
+          await this.deps.chats.flush();
         },
         compensate: async () => {
-          this.deps.pendingInputs.clearChat(input.chatId, 'chat-removed');
           this.deps.chats.removeChat(input.chatId, 'start-compensation');
+          await this.deps.chats.flush();
           try {
             await this.deps.settings.removeFromAllOrderLists(input.chatId);
           } catch (cleanupError: unknown) {

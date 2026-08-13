@@ -3,7 +3,6 @@ import {
 	AgentRunFailedMessage,
 	AgentRunFinishedMessage,
 	ChatTranscriptReplacedMessage,
-	ChatProjectionGenerationTransitionMessage,
 	ChatListRefreshRequestedMessage,
 	ChatMessagesMessage,
 	ChatProcessingUpdatedMessage,
@@ -16,8 +15,6 @@ import {
 	ChatSubscribedMessage,
 	ChatTransientFeedMutationMessage,
 	ClientRequestErrorMessage,
-	PendingUserInputClearedMessage,
-	PendingUserInputStatusUpdatedMessage,
 	ReconnectStateMessage,
 	ChatExecutionControlUpdatedMessage,
 	ScheduledPromptsInvalidatedMessage,
@@ -42,15 +39,12 @@ const chatViewMessage = {
 	message: { type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' },
 };
 
-function transientFeed(generationId = 'generation-1') {
+function transientFeed(transcriptViewId = 'generation-1') {
 	return {
 		serverInstanceId: 'server-instance-test',
 		chatId: 'c-1',
-		agentOwnershipEpoch: 'owner-1',
-		generationId,
-		resetTransactionId: null,
+		transcriptViewId,
 		transientRevision: 0,
-		stateDigest: 'transient-v1:empty',
 		rows: [],
 	};
 }
@@ -113,6 +107,7 @@ describe('parseServerWsMessage', () => {
 			messages: [chatViewMessage],
 			firstOrdinal: 1,
 			lastOrdinal: 1,
+			resendCandidates: [],
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
 			upstreamRequestId: 'cursor-req-1',
@@ -169,6 +164,7 @@ describe('parseServerWsMessage', () => {
 					message: { type: 'future-message', timestamp: '2025-01-01T00:00:00Z', payload: {} },
 				},
 			],
+			resendCandidates: [],
 		});
 
 		expect(msg).toBeInstanceOf(ChatMessagesMessage);
@@ -184,24 +180,13 @@ describe('parseServerWsMessage', () => {
 			messages: [chatViewMessage],
 			firstOrdinal: 1,
 			lastOrdinal: 1,
+			resendCandidates: [],
 			transientFeed: transientFeed(),
-			pendingUserInputs: [
-				{
-					chatId: 'c-1',
-					clientRequestId: 'req-pending',
-					content: '',
-					createdAt: '2025-01-01T00:00:00Z',
-					deliveryStatus: 'unconfirmed',
-					attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
-				},
-			],
 		});
 
 		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
 		expect((msg as ChatSubscribedMessage).transcriptViewId).toBe('generation-1');
-		expect((msg as ChatSubscribedMessage).pendingUserInputs[0].attachments).toEqual([
-			{ name: 'context.pdf', mimeType: 'application/pdf' },
-		]);
+		expect((msg as ChatSubscribedMessage).messages).toEqual([chatViewMessage]);
 	});
 
 	it('rejects chat-subscribe transient state for another chat or transcript view', () => {
@@ -213,7 +198,7 @@ describe('parseServerWsMessage', () => {
 			messages: [],
 			firstOrdinal: 1,
 			lastOrdinal: 0,
-			pendingUserInputs: [],
+			resendCandidates: [],
 		};
 		expect(parseServerWsMessage({
 			...response,
@@ -225,28 +210,17 @@ describe('parseServerWsMessage', () => {
 		})).toBeNull();
 	});
 
-	it('parses ordered transient mutations and compound generation transitions', () => {
+	it('parses ordered transient mutations', () => {
 		const mutation = parseServerWsMessage({
 			type: 'chat-transient-feed-mutation',
 			...transientFeed(),
 			transientRevision: 1,
-			stateDigest: 'digest-1',
 			mutation: { kind: 'remove', id: 'permission-1', incarnation: 'one' },
 		});
 		expect(mutation).toBeInstanceOf(ChatTransientFeedMutationMessage);
-
-		const transition = parseServerWsMessage({
-			type: 'chat-projection-generation-transition',
-			...transientFeed('generation-2'),
-			resetTransactionId: 'reset-1',
-			previousGenerationId: 'generation-1',
-			transientRevision: 2,
-			stateDigest: 'digest-2',
-		});
-		expect(transition).toBeInstanceOf(ChatProjectionGenerationTransitionMessage);
 	});
 
-	it('rejects chat-subscribe responses without a valid pending-input snapshot', () => {
+	it('rejects chat-subscribe responses without a transient-feed snapshot', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'chat-subscribed',
@@ -256,39 +230,7 @@ describe('parseServerWsMessage', () => {
 				messages: [],
 				firstOrdinal: 1,
 				lastOrdinal: 0,
-			}),
-		).toBeNull();
-		expect(
-			parseServerWsMessage({
-				type: 'chat-subscribed',
-				clientRequestId: 'req-subscribe',
-				chatId: 'c-1',
-				transcriptViewId: 'generation-1',
-				messages: [],
-				firstOrdinal: 1,
-				lastOrdinal: 0,
-				pendingUserInputs: [{ clientRequestId: 'missing-fields' }],
-			}),
-		).toBeNull();
-		expect(
-			parseServerWsMessage({
-				type: 'chat-subscribed',
-				clientRequestId: 'req-subscribe',
-				chatId: 'c-1',
-				transcriptViewId: 'generation-1',
-				messages: [],
-				firstOrdinal: 1,
-				lastOrdinal: 0,
-				pendingUserInputs: [
-					{
-						chatId: 'c-1',
-						clientRequestId: 'req-pending',
-						content: '',
-						createdAt: '2025-01-01T00:00:00Z',
-						deliveryStatus: 'failed',
-						attachments: [{ name: 42 }],
-					},
-				],
+				resendCandidates: [],
 			}),
 		).toBeNull();
 	});
@@ -312,7 +254,6 @@ describe('parseServerWsMessage', () => {
 				messages: [],
 				firstOrdinal: 1,
 				lastOrdinal: 0,
-				pendingUserInputs: [],
 				transientFeed: transientFeed(),
 			}),
 		).toBeNull();
@@ -326,7 +267,6 @@ describe('parseServerWsMessage', () => {
 				messages: [],
 				firstOrdinal: 1,
 				lastOrdinal: 0,
-				pendingUserInputs: [],
 				transientFeed: transientFeed(),
 			}),
 		).toBeNull();
@@ -474,38 +414,6 @@ describe('parseServerWsMessage', () => {
 				control: emptyExecutionControl(),
 			}),
 		).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
-		expect(
-			parseServerWsMessage({
-				type: 'pending-user-input-cleared',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				reason: 'chat-removed',
-			}),
-		).toBeInstanceOf(PendingUserInputClearedMessage);
-		expect(
-			parseServerWsMessage({
-				type: 'pending-user-input-cleared',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				reason: 'persisted',
-			}),
-		).toBeInstanceOf(PendingUserInputClearedMessage);
-		expect(
-			parseServerWsMessage({
-				type: 'pending-user-input-status-updated',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				deliveryStatus: 'unconfirmed',
-			}),
-		).toBeInstanceOf(PendingUserInputStatusUpdatedMessage);
-		expect(
-			parseServerWsMessage({
-				type: 'pending-user-input-status-updated',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				deliveryStatus: 'unknown',
-			}),
-		).toBeNull();
 		expect(parseServerWsMessage({ type: 'chat-session-deleted', chatId: 'c-1' })).toBeInstanceOf(
 			ChatSessionDeletedWsMessage,
 		);

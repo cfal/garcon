@@ -7,13 +7,15 @@ mock.module('../utils.js', () => ({
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 import { ChatRunningError } from '../../chats/errors.js';
+import { StaleTranscriptViewError } from '../../ledger/errors.js';
 
 const chatViewMessage = {
-  seq: 1,
+  ordinal: 1,
   message: { type: 'user-message', content: 'hello', timestamp: '2024-01-01T00:00:00Z' },
 };
 
 const mockProcessing = {
+  phase: mock(() => null),
   snapshot: mock(() => [{ chatId: 'chat-running', phase: 'running' }]),
 };
 
@@ -27,42 +29,36 @@ const mockRegistry = {
 };
 
 const mockTransientFeeds = {
-  currentSnapshot: mock(() => null),
-  snapshot: mock(({ chatId, agentOwnershipEpoch, generationId }) => ({
+  snapshot: mock(({ chatId, transcriptViewId }) => ({
     serverInstanceId: 'server-instance-test',
     chatId,
-    agentOwnershipEpoch,
-    generationId,
-    resetTransactionId: null,
+    transcriptViewId,
     transientRevision: 0,
-    stateDigest: 'transient-v1:empty',
     rows: [],
   })),
 };
 
 const mockChatViews = {
   readReplay: mock(() => ({
-    generationId: 'generation-1',
-    mode: 'delta',
+    transcriptViewId: 'view-1',
     messages: [chatViewMessage],
-    lastSeq: 1,
+    firstOrdinal: 2,
+    lastOrdinal: 2,
   })),
+  resendCandidates: mock(() => []),
 };
 
-const mockProjectionReload = mock(() => Promise.resolve({
-  generationId: 'generation-2',
+const mockTranscriptReload = mock(() => Promise.resolve({
+  transcriptViewId: 'view-2',
   messages: [chatViewMessage],
-  lastSeq: 1,
-  pageOldestSeq: 1,
+  lastOrdinal: 1,
+  pageOldestOrdinal: 1,
+  pageNewestOrdinal: 1,
   hasMore: false,
 }));
 
 const mockQueue = {
   readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
-};
-
-const mockPendingInputs = {
-  listForTransport: mock(() => []),
 };
 
 function storedQueue() {
@@ -79,13 +75,13 @@ function storedQueue() {
 }
 
 const injectedMocks = [
+  mockProcessing.phase,
   mockProcessing.snapshot,
   mockRegistry.getChat,
   mockChatViews.readReplay,
-  mockProjectionReload,
+  mockChatViews.resendCandidates,
+  mockTranscriptReload,
   mockQueue.readChatExecutionControl,
-  mockPendingInputs.listForTransport,
-  mockTransientFeeds.currentSnapshot,
   mockTransientFeeds.snapshot,
 ];
 
@@ -96,9 +92,8 @@ function createHandler() {
     serverInstanceId: 'server-instance-test',
     processing: mockProcessing,
     chatViews: mockChatViews,
-    projectionReload: mockProjectionReload,
+    transcriptReload: mockTranscriptReload,
     queue: mockQueue,
-    pendingInputs: mockPendingInputs,
     transientFeeds: mockTransientFeeds,
     registry: mockRegistry,
   });
@@ -117,11 +112,6 @@ function lastSentPayload() {
   return calls.length > 0 ? calls[calls.length - 1][1] : null;
 }
 
-function lastPublishedPayload(ws) {
-  const calls = ws.publish.mock.calls;
-  return calls.length > 0 ? JSON.parse(calls[calls.length - 1][1]) : null;
-}
-
 function deferred() {
   let resolve;
   const promise = new Promise((resolvePromise) => {
@@ -138,6 +128,7 @@ describe('chat WebSocket handler', () => {
     injectedMocks.forEach((fn) => fn.mockClear());
     moduleMocks.forEach((fn) => fn.mockClear());
     mockProcessing.snapshot.mockReturnValue([{ chatId: 'chat-running', phase: 'running' }]);
+    mockProcessing.phase.mockReturnValue(null);
     mockRegistry.getChat.mockReturnValue({
       agentId: 'claude',
       nativePath: '/tmp/session.jsonl',
@@ -146,18 +137,19 @@ describe('chat WebSocket handler', () => {
     });
     mockQueue.readChatExecutionControl.mockResolvedValue(storedQueue());
     mockChatViews.readReplay.mockReturnValue({
-      generationId: 'generation-1',
-      mode: 'delta',
+      transcriptViewId: 'view-1',
       messages: [chatViewMessage],
-      lastSeq: 1,
+      firstOrdinal: 2,
+      lastOrdinal: 2,
     });
-    mockProjectionReload.mockResolvedValue({
-      generationId: 'generation-2',
+    mockChatViews.resendCandidates.mockReturnValue([]);
+    mockTranscriptReload.mockResolvedValue({
+      transcriptViewId: 'view-2',
       messages: [chatViewMessage],
-      lastSeq: 1,
-      pageOldestSeq: 1,
+      lastOrdinal: 1,
+      pageOldestOrdinal: 1,
+      pageNewestOrdinal: 1,
       hasMore: false,
-      mode: 'manual-reload',
     });
     ws = createMockWs();
     chatHandler = createHandler();
@@ -408,117 +400,99 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload().error).toContain('Missing chatId');
   });
 
-  it('replays same-generation deltas for a subscribe cursor', async () => {
-    const pendingInput = {
-      chatId: '123',
-      clientRequestId: 'req-unconfirmed',
-      content: 'unconfirmed while disconnected',
-      createdAt: '2024-01-01T00:00:00.000Z',
-      deliveryStatus: 'unconfirmed',
-    };
-    mockPendingInputs.listForTransport.mockReturnValueOnce([pendingInput]);
+  it('replays view-qualified deltas for a subscribe cursor', async () => {
+    mockChatViews.resendCandidates.mockReturnValueOnce([
+      { ordinal: 1, content: 'hello', attachmentNames: [] },
+    ]);
     await chatHandler.message(ws, {
       type: 'chat-subscribe',
       chatId: '123',
       clientRequestId: 'req-sub-1',
-      generationId: 'generation-1',
-      afterSeq: 1,
+      transcriptViewId: 'view-1',
+      afterOrdinal: 1,
     });
 
-    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'generation-1', 1);
+    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 1);
     expect(lastSentPayload()).toMatchObject({
       type: 'chat-subscribed',
       clientRequestId: 'req-sub-1',
       chatId: '123',
-      generationId: 'generation-1',
-      mode: 'delta',
+      transcriptViewId: 'view-1',
       messages: [chatViewMessage],
-      lastSeq: 1,
-      pendingUserInputs: [pendingInput],
+      firstOrdinal: 2,
+      lastOrdinal: 2,
+      resendCandidates: [{ ordinal: 1, content: 'hello', attachmentNames: [] }],
+      transientFeed: { transcriptViewId: 'view-1', rows: [] },
     });
-    expect(mockPendingInputs.listForTransport).toHaveBeenCalledWith('123');
   });
 
-  it('returns snapshot-required with null generationId when no view is loaded', async () => {
-    mockChatViews.readReplay.mockReturnValueOnce(null);
+  it('suppresses resend candidates while the chat is processing', async () => {
+    mockProcessing.phase.mockReturnValueOnce('running');
+    mockChatViews.resendCandidates.mockReturnValueOnce([
+      { ordinal: 1, content: 'hello', attachmentNames: [] },
+    ]);
 
     await chatHandler.message(ws, {
       type: 'chat-subscribe',
       chatId: '123',
-      clientRequestId: 'req-sub-unloaded',
-      generationId: 'generation-1',
-      afterSeq: 1,
+      clientRequestId: 'req-sub-running',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 1,
     });
 
     expect(lastSentPayload()).toMatchObject({
       type: 'chat-subscribed',
-      clientRequestId: 'req-sub-unloaded',
-      chatId: '123',
-      generationId: null,
-      mode: 'snapshot-required',
-      pendingUserInputs: [],
-      messages: [],
-      lastSeq: 0,
+      resendCandidates: [],
     });
+    expect(mockChatViews.resendCandidates).not.toHaveBeenCalled();
   });
 
-  it('forwards snapshot-required replay results', async () => {
-    mockChatViews.readReplay.mockReturnValueOnce({
-      generationId: 'generation-2',
-      mode: 'snapshot-required',
-      messages: [],
-      lastSeq: 3,
-    });
+  it('returns a typed stale-view error when replay addresses a replaced view', async () => {
+    mockChatViews.readReplay.mockRejectedValueOnce(
+      new StaleTranscriptViewError('123', 'view-1', 'view-2'),
+    );
 
     await chatHandler.message(ws, {
       type: 'chat-subscribe',
       chatId: '123',
-      clientRequestId: 'req-sub-ahead',
-      generationId: 'generation-1',
-      afterSeq: 99,
+      clientRequestId: 'req-sub-stale',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 99,
     });
 
     expect(lastSentPayload()).toMatchObject({
-      type: 'chat-subscribed',
-      clientRequestId: 'req-sub-ahead',
-      generationId: 'generation-2',
-      mode: 'snapshot-required',
-      messages: [],
-      lastSeq: 3,
+      type: 'client-request-error',
+      clientRequestId: 'req-sub-stale',
+      chatId: '123',
+      code: 'STALE_TRANSCRIPT_VIEW',
+      retryable: false,
     });
   });
 
-  it('reloads from the projection and broadcasts a lightweight generation reset', async () => {
+  it('returns the replacement transcript after a manual native reload', async () => {
     await chatHandler.message(ws, {
       type: 'chat-reload',
       chatId: '123',
       clientRequestId: 'req-reload-1',
     });
 
-    expect(mockProjectionReload).toHaveBeenCalledWith('123');
+    expect(mockTranscriptReload).toHaveBeenCalledWith('123');
     expect(lastSentPayload()).toMatchObject({
       type: 'chat-reloaded',
       clientRequestId: 'req-reload-1',
       chatId: '123',
-      generationId: 'generation-2',
+      transcriptViewId: 'view-2',
       messages: [chatViewMessage],
-      lastSeq: 1,
-      pageOldestSeq: 1,
+      lastOrdinal: 1,
+      pageOldestOrdinal: 1,
+      pageNewestOrdinal: 1,
       hasMore: false,
     });
-    expect(lastPublishedPayload(ws)).toMatchObject({
-      type: 'chat-generation-reset',
-      chatId: '123',
-      generationId: 'generation-2',
-      reason: 'manual-reload',
-      lastSeq: 1,
-    });
-    expect(ws.publish.mock.calls[0][0]).toBe('chat');
-    expect(ws.publish.mock.calls[0][2]).toBe(true);
+    expect(ws.publish).not.toHaveBeenCalled();
   });
 
   it('returns retryable CHAT_RUNNING for running-chat reload failures', async () => {
-    mockProjectionReload.mockRejectedValueOnce(
+    mockTranscriptReload.mockRejectedValueOnce(
       new ChatRunningError('123'),
     );
 

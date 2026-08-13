@@ -3,14 +3,11 @@
 // actually reaching a provider — the surface where the Claude argv limit hides,
 // and which no unit test can see.
 import { describe, expect, test } from 'bun:test';
-import { CARRIED_CONTEXT_VERSION } from '../../../common/transcript-seed.js';
 import type { ConfiguredDirectTestAgent } from '../../support/garcon-client.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
-
-const ENVELOPE = `<carried-context version="${CARRIED_CONTEXT_VERSION}">`;
 
 describe('agent switch compaction', () => {
   test('summarizes older history and keeps the recent turns verbatim', async () => {
@@ -42,12 +39,11 @@ describe('agent switch compaction', () => {
       expect(compactionPrompt).not.toContain('turn-4');
       expect(compactionCall.releaseText('<summary>objective: ship the fix</summary>')).toBeTrue();
 
-      const injected = (await targetCall.received).lastUserText;
-      // One envelope containing the summary, then the spine, then the prompt.
-      expect(occurrences(injected, ENVELOPE)).toBe(1);
-      expect(injected).toContain('<summary>objective: ship the fix</summary>');
-      expect(injected).toContain('turn-4');
-      expect(injected.endsWith('carry on')).toBeTrue();
+      const targetRequest = await targetCall.received;
+      // Direct providers receive the canonical ledger context as normal messages.
+      expect(requestConversation(targetRequest.body.messages)).toEqual(expectedConversation());
+      expect(JSON.stringify(targetRequest.body)).not.toContain('<carried-context');
+      expect(JSON.stringify(targetRequest.body)).not.toContain('<summary>');
       expect(targetCall.releaseText('echo:carry on')).toBeTrue();
       await handoff;
     });
@@ -76,12 +72,10 @@ describe('agent switch compaction', () => {
       // No <summary> element at all: the documented malformed-model response.
       expect(compactionCall.releaseText('here is a summary, roughly')).toBeTrue();
 
-      const injected = (await targetCall.received).lastUserText;
-      // The handoff still succeeds, carrying the deterministic ladder projection.
-      expect(occurrences(injected, ENVELOPE)).toBe(1);
-      expect(injected).not.toContain('<summary>');
-      expect(injected).toContain('turn-0');
-      expect(injected).toContain('turn-4');
+      const targetRequest = await targetCall.received;
+      expect(requestConversation(targetRequest.body.messages)).toEqual(expectedConversation());
+      expect(JSON.stringify(targetRequest.body)).not.toContain('<carried-context');
+      expect(JSON.stringify(targetRequest.body)).not.toContain('<summary>');
       expect(targetCall.releaseText('echo:carry on')).toBeTrue();
       await handoff;
     });
@@ -104,9 +98,9 @@ describe('agent switch compaction', () => {
         agent: target,
       });
 
-      const injected = (await targetCall.received).lastUserText;
-      expect(injected).not.toContain('<summary>');
-      expect(injected).toContain('turn-0');
+      const targetRequest = await targetCall.received;
+      expect(requestConversation(targetRequest.body.messages)).toEqual(expectedConversation());
+      expect(JSON.stringify(targetRequest.body)).not.toContain('<summary>');
       expect(targetCall.releaseText('echo:carry on')).toBeTrue();
       await handoff;
     });
@@ -156,6 +150,30 @@ function enableCompaction(
   });
 }
 
-function occurrences(haystack: string, needle: string): number {
-  return haystack.split(needle).length - 1;
+function expectedConversation(): string[] {
+  return [
+    'turn-0',
+    'echo:turn-0',
+    'turn-1',
+    'echo:turn-1',
+    'turn-2',
+    'echo:turn-2',
+    'turn-3',
+    'echo:turn-3',
+    'turn-4',
+    'echo:turn-4',
+    'carry on',
+  ];
+}
+
+function requestConversation(messages: readonly { content: unknown }[]): string[] {
+  return messages.map((message) => {
+    if (typeof message.content === 'string') return message.content;
+    if (!Array.isArray(message.content)) return '';
+    return message.content.flatMap((part) => (
+      part && typeof part === 'object' && 'text' in part && typeof part.text === 'string'
+        ? [part.text]
+        : []
+    )).join('');
+  });
 }

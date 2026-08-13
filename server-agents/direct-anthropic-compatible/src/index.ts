@@ -10,7 +10,7 @@ import {
 import {
   AgentIntegrationError,
   type AgentHost,
-  type AgentIntegrationV4,
+  type AgentIntegration,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { classifyDirectIntegrationError } from '@garcon/server-agent-common/direct/errors';
@@ -26,7 +26,6 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
-import { createAgentOwnedProjection } from '@garcon/server-agent-common/transcript-projection/owned-projection';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 
 const SESSIONS_LABEL = 'anthropic-compatible-sessions';
@@ -44,9 +43,9 @@ const DESCRIPTOR = {
   configuration: [],
 } as const;
 
-export default class DirectAnthropicCompatibleIntegration implements AgentIntegrationV4 {
+export default class DirectAnthropicCompatibleIntegration implements AgentIntegration {
   static readonly integrationId = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
-  static readonly apiVersion = 4 as const;
+  static readonly apiVersion = 5 as const;
   readonly descriptor = DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: [
@@ -55,27 +54,24 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
     ],
   } as const;
   readonly execution;
-  readonly producerExecution;
-  readonly transcript;
   readonly nativeHistoryImport = null;
   readonly nativeActivity = null;
   readonly nativeSessions = null;
   readonly sessionConfiguration = null;
   readonly permissionDecisions = null;
-  readonly projectPathUpdates: NonNullable<AgentIntegrationV4['projectPathUpdates']>;
+  readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
-  readonly auth: NonNullable<AgentIntegrationV4['auth']>;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
   readonly goals = null;
-  readonly endpoints: NonNullable<AgentIntegrationV4['endpoints']>;
-  readonly singleQuery: NonNullable<AgentIntegrationV4['singleQuery']>;
-  readonly transientControls = null;
+  readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
     const nativeSessions = createPathNativeSessionCodec(
@@ -108,19 +104,11 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
     this.projectPathUpdates = {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };
-    this.producerExecution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution).execution;
     const nativeEvidence = createDirectNativeEvidence({
       reader,
       nativeSessions,
     });
-    const projection = createAgentOwnedProjection({
-      ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-      host,
-      execution: providerExecution,
-      nativeEvidence,
-    });
-    this.execution = projection.execution;
-    this.transcript = projection.transcript;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',

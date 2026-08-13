@@ -55,10 +55,10 @@ describe('InMemoryChatExecutionControlRepository', () => {
     );
   });
 
-  it('rejects controls owned by another repository instance', async () => {
+  it('rejects controls owned by another repository instance', () => {
     const repository = new InMemoryChatExecutionControlRepository('server-a');
-    await expect(
-      repository.save('chat-1', emptyStoredChatExecutionControl('server-b')),
-    ).rejects.toThrow('another server instance');
+    expect(() => (
+      repository.save('chat-1', emptyStoredChatExecutionControl('server-b'))
+    )).toThrow('another server instance');
   });
 });

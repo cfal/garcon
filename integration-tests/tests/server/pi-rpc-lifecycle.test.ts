@@ -66,11 +66,8 @@ describe('Pi RPC lifecycle', () => {
       expect(persisted).toEqual(native);
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toContain(missingFilePrompt);
-      // The failed input remains visible as a failed optimistic message but never reaches Pi.
-      expect(transcript.pendingUserInputs).toContainEqual(expect.objectContaining({
-        content: missingFilePrompt,
-        deliveryStatus: 'failed',
-      }));
+      // A visible failed run is a resend boundary; the user decides whether to retry it.
+      expect(transcript.resendCandidates).toEqual([]);
       expect(assistantContents(transcript.messages).some((text) => text.includes(firstReply))).toBe(true);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());

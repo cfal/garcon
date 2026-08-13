@@ -9,9 +9,7 @@ export function requireCompletedTurnReceipt(
     if (receipt.output.availability === 'unavailable') {
       const reason = receipt.output.reason === 'too-large'
         ? 'its result is too large for the CLI receipt'
-        : receipt.output.reason === 'retention-pressure'
-          ? 'server retention pressure prevented the CLI from retaining its result'
-          : 'server recovery rebuilt the transcript outside this turn receipt';
+        : 'server retention pressure prevented the CLI from retaining its result';
       throw new CliError(
         'receipt polling',
         `the turn completed, but ${reason}; view the complete transcript in Garcon`,

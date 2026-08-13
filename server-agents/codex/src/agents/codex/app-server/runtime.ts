@@ -4,7 +4,7 @@ import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/ev
 import type {
   AgentGoalControlHandoff,
   AgentLogger,
-  AgentSteerRequestV4,
+  AgentSteerRequest,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -126,8 +126,6 @@ interface RunningCodexSession {
   capacityRetryCount: number;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
-  onAbortable?: () => void;
-  abortableNotified: boolean;
   eventMetadata: RuntimeEventMetadata;
 }
 
@@ -219,7 +217,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         });
       }
       await this.#handleGoalCommand(client, session, request.codexGoalCommand, request, { keepSession: false });
-      this.#notifyAbortable(session);
       return;
     }
 
@@ -241,7 +238,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }));
     if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
     session.activeTurnId = turn.turn.id;
-    this.#notifyAbortable(session);
   }
 
   async #handleGoalCommand(
@@ -415,7 +411,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     return target;
   }
 
-  async steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
+  async steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
     const session = this.#sessions.get(request.agentSessionId);
     if (!session || isTerminalSessionStatus(session.status) || hasTerminalPendingFinish(session)) {
       return rejectedCodexSteer('no-active-turn', 'No active Codex turn');
@@ -474,9 +470,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           validate,
           commit: () => {
             session.eventMetadata = codexEventMetadata(request);
-            session.onAbortable = request.onAbortable;
             committed = true;
-            if (session.abortableNotified) session.onAbortable?.();
           },
         });
         if (!committed) throw new Error('Codex goal control handoff was not committed');
@@ -543,7 +537,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           const turn = await session.client.startTurn(startParams);
           if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
           session.activeTurnId = turn.turn.id;
-          this.#notifyAbortable(session);
           return;
         } catch (error) {
           const isTurnTransition = isActiveTurnConflictError(error) || isActiveTurnNotSteerableError(error);
@@ -649,7 +642,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         eventMetadata: codexEventMetadata(request, 'chat-start'),
       });
       activeSession = session;
-      session.onAbortable = request.onAbortable;
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
       this.emitSessionCreated(request.chatId);
@@ -701,7 +693,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       });
       activeSession = session;
       await session.turnItems.seedHistory(session.nativePath);
-      session.onAbortable = request.onAbortable;
       session.activeDeliveryReservations += 1;
       try {
         if (this.#sessions.get(session.threadId) !== session) {
@@ -731,9 +722,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
                 goalSynchronized: true,
               },
             );
-            this.#notifyAbortable(session);
           }
-          this.#notifyAbortable(session);
           if (session.activeTurnId && !hasTerminalPendingFinish(session)) {
             session.pendingFinish = null;
           }
@@ -793,7 +782,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeSession = session;
       await session.turnItems.seedHistory(session.nativePath);
       session.turnItems.markManualCompaction();
-      session.onAbortable = request.onAbortable;
       this.#releaseBufferedClientEvents(client);
       if (request.executionAdmission) await markCodexExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
@@ -1113,17 +1101,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
-      abortableNotified: false,
       eventMetadata: args.eventMetadata,
     };
     this.#sessions.set(args.threadId, session);
     return session;
-  }
-
-  #notifyAbortable(session: RunningCodexSession): void {
-    if (session.abortableNotified || !session.activeTurnId) return;
-    session.abortableNotified = true;
-    session.onAbortable?.();
   }
 
   #wireClient(client: CodexAppServerClient): void {
@@ -1211,7 +1192,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     if (!session) return;
     session.activeTurnId = params.turn.id;
     if (session.status !== 'interrupting') session.status = 'running';
-    this.#notifyAbortable(session);
     for (const waiter of session.turnStartWaiters) waiter.resolve(params.turn.id);
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentIntegrationV4 } from '../../index.js';
+import type { AgentIntegration } from '../../index.js';
 import { validateAgentIntegration } from '../conformance.js';
 
 const settings = { ownerId: 'other', schemaVersion: 1, values: {} } as const;
@@ -17,16 +17,10 @@ const integration = {
     configuration: [],
   },
   execution: {
-    start: async () => ({ agentSessionId: 'session', nativeSession: null, nativeSeedReceipt: null }),
-    resume: async () => {},
-    abort: async () => false,
-    isRunning: () => false,
-    runningSessions: () => [],
-  },
-  producerExecution: {
     start: async () => ({ id: 'execution' }),
     resume: async () => ({ id: 'execution' }),
-    abort: async () => {},
+    abort: async () => false,
+    runningSessions: () => [],
   },
   nativeHistoryImport: null,
   nativeActivity: null,
@@ -34,23 +28,6 @@ const integration = {
   sessionConfiguration: null,
   permissionDecisions: null,
   projectPathUpdates: null,
-  transcript: {
-    openSegment: async () => { throw new Error('not used'); },
-    subscribe: () => () => {},
-    replay: async () => { throw new Error('not used'); },
-    loadPage: async () => { throw new Error('not used'); },
-    commitOffset: async () => {},
-    prepareInput: async () => { throw new Error('not used'); },
-    resolveInputAdmission: async () => ({ kind: 'absent' as const }),
-    prepareHandoffLease: async () => { throw new Error('not used'); },
-    prepareOwnershipSegment: async () => { throw new Error('not used'); },
-    resolveNativeSession: async () => ({ kind: 'ready' as const, value: null }),
-    preview: async () => ({ kind: 'ready' as const, value: null }),
-    resolveIndexSource: async () => ({ kind: 'ready' as const, value: null }),
-    refreshIndexSource: async () => ({ kind: 'ready' as const, value: null }),
-    describeSource: async () => ({ kind: 'ready' as const, value: null }),
-    release: async () => {},
-  },
   catalog: {
     snapshot: async () => ({
       models: [],
@@ -73,18 +50,18 @@ const integration = {
   },
   auth: null,
   commands: null,
+  compaction: null,
   forking: null,
   steering: null,
   goals: null,
-  transientControls: null,
   endpoints: null,
   singleQuery: null,
-} satisfies AgentIntegrationV4;
+} satisfies AgentIntegration;
 
 describe('validateAgentIntegration', () => {
   test('rejects a descriptor and class ID mismatch', () => {
     const integrationClass = {
-      integrationId: 'fake', apiVersion: 4 as const,
+      integrationId: 'fake', apiVersion: 5 as const,
     };
     expect(() => validateAgentIntegration({
       integrationClass,
@@ -94,7 +71,7 @@ describe('validateAgentIntegration', () => {
 
   test('rejects duplicate descriptor values', () => {
     const integrationClass = {
-      integrationId: 'other', apiVersion: 4 as const,
+      integrationId: 'other', apiVersion: 5 as const,
     };
     expect(() => validateAgentIntegration({
       integrationClass,
@@ -110,7 +87,7 @@ describe('validateAgentIntegration', () => {
 
   test('rejects a steering facet without admission-time target capture', () => {
     const integrationClass = {
-      integrationId: 'other', apiVersion: 4 as const,
+      integrationId: 'other', apiVersion: 5 as const,
     };
 
     expect(() => validateAgentIntegration({
@@ -118,7 +95,7 @@ describe('validateAgentIntegration', () => {
       integration: {
         ...integration,
         steering: { steer: async () => ({ kind: 'accepted' as const }) },
-      } as AgentIntegrationV4,
+      } as AgentIntegration,
     })).toThrow('invalid steering facet');
   });
 });

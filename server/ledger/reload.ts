@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
-import type { AgentIntegrationV4 } from '@garcon/server-agent-interface';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
@@ -25,6 +25,7 @@ export interface TranscriptReloadServiceOptions {
   readonly registry: IChatRegistry;
   readonly integrations: IntegrationRegistry;
   readonly execution: ReloadExecutionPort;
+  readonly reopenProducer: (chatId: string) => void;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly now?: () => string;
 }
@@ -88,42 +89,50 @@ export class TranscriptReloadService {
     }
 
     this.options.ledger.closeProducer(chatId);
-    const prefix = frozenConversationDrafts(
-      this.options.ledger.currentRows(chatId)
-        .filter((row) => row.ordinal < current.contentStartOrdinal),
-    );
-    const sessionDraft: LedgerRowDraft = {
-      kind: 'session',
-      at: session.at,
-      detail: session.detail,
-      providerMeta: null,
-    };
-    const imported = await this.#importCurrent(
-      chatId,
-      entry,
-      integration,
-      session.detail,
-      signal,
-    );
-    const contentStartOrdinal = prefix.length + 1;
     let staging: TranscriptView | null = null;
+    let replacement: TranscriptView;
     try {
+      const prefix = frozenConversationDrafts(
+        this.options.ledger.currentRows(chatId)
+          .filter((row) => row.ordinal < current.contentStartOrdinal),
+      );
+      const sessionDraft: LedgerRowDraft = {
+        kind: 'session',
+        at: session.at,
+        detail: session.detail,
+        providerMeta: null,
+      };
+      const imported = await this.#importCurrent(
+        chatId,
+        entry,
+        integration,
+        session.detail,
+        signal,
+      );
+      const contentStartOrdinal = prefix.length + 1;
       staging = this.options.ledger.stageView(
         chatId,
         [...prefix, sessionDraft, ...imported],
         contentStartOrdinal,
       );
-      return this.options.ledger.replaceCurrentView(chatId, current.viewId, staging.viewId);
+      replacement = this.options.ledger.replaceCurrentView(
+        chatId,
+        current.viewId,
+        staging.viewId,
+      );
     } catch (error) {
       if (staging) this.options.ledger.discardStagingView(chatId, staging.viewId);
+      this.options.reopenProducer(chatId);
       throw error;
     }
+    this.options.reopenProducer(chatId);
+    return replacement;
   }
 
   async #importCurrent(
     chatId: string,
     entry: AgentChatEntry,
-    integration: AgentIntegrationV4,
+    integration: AgentIntegration,
     session: Extract<LedgerRow, { readonly kind: 'session' }>['detail'],
     signal: AbortSignal,
   ): Promise<LedgerRowDraft[]> {

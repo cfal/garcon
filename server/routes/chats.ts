@@ -58,7 +58,6 @@ import {
 } from '../chat-execution/chat-execution-coordinator.js';
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
-import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
@@ -83,7 +82,6 @@ import type {
   CommandAcceptedResponse,
   QueueCommandErrorResponse,
   QueueEntrySteerErrorResponse,
-  RepairHistoryAcceptNativeResponse,
   RunningChatsResponse,
 } from '../../common/chat-command-contracts.ts';
 import {
@@ -101,10 +99,6 @@ import {
 } from '../../common/chat-command-contracts.js';
 import { parseSelfHandoffRunCommandRequest } from '../../common/self-handoff-contracts.js';
 import {
-  parseRepairHistoryRequest,
-  type RepairHistoryRetryAbandonedResponse,
-} from '../../common/chat-history-repair.js';
-import {
   parsePermissionDecisionCommandRequest,
   parseProjectPathPatchRequest,
   parseQueueEntryCreateCommandRequest,
@@ -120,6 +114,7 @@ import type {
   GenerateChatTitleResponse,
 } from '../../common/chat-title-contracts.js';
 import type { ChatDetailsResponse } from '../../common/chat-details.js';
+import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
 import { createChatSearchRoutes, type ChatSearchDep } from './chat-search-routes.js';
 import {
   generateChatTitleFromMessage,
@@ -169,7 +164,6 @@ interface MetadataDep {
 type QueueDep = ChatExecutionService;
 type ChatViewsDep = TranscriptPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
-type PendingInputsDep = PendingUserInputServiceContract;
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
   try {
@@ -228,11 +222,11 @@ function optionalNonNegativeIntegerField(body: Record<string, unknown>, field: s
   throw new ValidationDomainError(`${field} must be a non-negative integer`);
 }
 
-function parseBeforeSeq(value: string | null): number | Response | undefined {
+function parseBeforeOrdinal(value: string | null): number | Response | undefined {
   if (value === null || value.trim() === '') return undefined;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    return jsonError('beforeSeq must be a positive integer', 400, 'VALIDATION_FAILED');
+    return jsonError('beforeOrdinal must be a positive integer', 400, 'VALIDATION_FAILED');
   }
   return parsed;
 }
@@ -311,11 +305,11 @@ interface ChatRouteDeps {
   settings: SettingsDep;
   recentTitleIcons: RecentTitleIconSource;
   queue: QueueDep;
+  processing: Pick<ChatProcessingActivity, 'phase'>;
   pathCache: PathCacheDep;
   metadata: MetadataDep;
   chatViews: ChatViewsDep;
   agents: AgentRegistryDep;
-  pendingInputs: PendingInputsDep;
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   searchIndex?: ChatSearchDep;
@@ -328,11 +322,11 @@ export default function createChatRoutes({
   settings,
   recentTitleIcons,
   queue,
+  processing,
   pathCache,
   metadata,
   chatViews,
   agents,
-  pendingInputs,
   commandService,
   chatListProjector,
   searchIndex,
@@ -465,67 +459,6 @@ export default function createChatRoutes({
     }
   }
 
-  async function postRepairHistory(body: unknown): Promise<Response> {
-    try {
-      const input = parseCommandRequest(parseRepairHistoryRequest, body);
-      if (input.action === 'retry-abandoned-release') {
-        const outcome = await commands.retryRetainedTransferCleanups();
-        const record = (cleanup: { chatId: string; source: { agentId: string }; lastErrorCode: string | null }) => ({
-          chatId: cleanup.chatId,
-          agentId: cleanup.source.agentId,
-          lastErrorCode: cleanup.lastErrorCode,
-        });
-        return Response.json({
-          success: true,
-          action: 'retry-abandoned-release',
-          retried: outcome.retried.map(record),
-          unresolved: outcome.unresolved.map(record),
-        } satisfies RepairHistoryRetryAbandonedResponse);
-      }
-      const current = registry.getChat(input.chatId);
-      if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
-      if (
-        current.agentOwnershipEpoch !== input.expectedAgentOwnershipEpoch
-        || carryOverRevision(
-          current.carryOverSegments,
-          current.carryOverMigrationQuarantine,
-        ) !== input.expectedCarryOverRevision
-      ) {
-        throw new DomainError(
-          'STALE_CHAT_OWNERSHIP',
-          'Chat history ownership changed before repair.',
-          409,
-          true,
-        );
-      }
-      const receiptCleared = current.nativeSeedReceipt !== null;
-      if (receiptCleared) {
-        const updated = await registry.updateChat(
-          input.chatId,
-          { nativeSeedReceipt: null },
-          { flush: true },
-        );
-        if (!updated) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
-        searchIndex?.catalogMayHaveChanged(input.chatId);
-        notifyHistoryChanged?.(input.chatId);
-      }
-      logger.warn('history repair accepted the current native transcript', {
-        chatId: input.chatId,
-        agentId: current.agentId,
-        action: input.action,
-        receiptCleared,
-      });
-      return Response.json({
-        success: true,
-        action: 'accept-native',
-        chatId: input.chatId,
-        receiptCleared,
-      } satisfies RepairHistoryAcceptNativeResponse);
-    } catch (error: unknown) {
-      return jsonErrorFromUnknown(error);
-    }
-  }
-
   async function putLastSelectedChat(body: SetLastSelectedChatRequest | unknown): Promise<Response> {
     const input = bodyRecord(body);
     const rawChatId = input.chatId;
@@ -566,11 +499,10 @@ export default function createChatRoutes({
         maxLimit: CHAT_MESSAGES_MAX_LIMIT,
       });
       const beforeOrdinalRaw = url.searchParams.get('beforeOrdinal');
-      const beforeOrdinal = parseBeforeSeq(beforeOrdinalRaw);
+      const beforeOrdinal = parseBeforeOrdinal(beforeOrdinalRaw);
       if (beforeOrdinal instanceof Response) return beforeOrdinal;
 
       const page = await chatViews.page(chatId, limit, beforeOrdinal);
-      await pendingInputs.reconcileRetainedHistory(chatId);
       return Response.json({
         historyState: { kind: 'complete' },
         chatId,
@@ -580,9 +512,10 @@ export default function createChatRoutes({
         pageOldestOrdinal: page.pageOldestOrdinal,
         pageNewestOrdinal: page.pageNewestOrdinal,
         hasMore: page.hasMore,
-        resendCandidates: [...agents.resendCandidates(chatId)],
+        resendCandidates: processing.phase(chatId) === null
+          ? [...agents.resendCandidates(chatId)]
+          : [],
         limit,
-        pendingUserInputs: pendingInputs.listForTransport(chatId),
       } satisfies CompleteChatHistoryResponse);
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
@@ -597,7 +530,7 @@ export default function createChatRoutes({
           messages: [],
         } satisfies UnavailableChatHistoryResponse);
       }
-      // A non-ready projection read is a typed history state, not exhaustion:
+      // A non-ready transcript read is a typed history state, not exhaustion:
       // deferred retries once on the execution-to-idle transition and degraded
       // carries the store's own failure code.
       if (error instanceof TranscriptHistoryUnavailableError) {
@@ -1184,7 +1117,6 @@ export default function createChatRoutes({
     '/api/v1/chats/handoff-run': { POST: withJsonBody(postSelfHandoffRunChat) },
     '/api/v1/chats/compact': { POST: withJsonBody(postCompactChat) },
     '/api/v1/chats/messages': { GET: getMessages },
-    '/api/v1/chats/repair-history': { POST: withJsonBody(postRepairHistory) },
     '/api/v1/chats/search': { POST: withJsonBody(searchRoutes.postSearchChats) },
     '/api/v1/chats/search/navigate': { POST: withJsonBody(searchRoutes.postSearchNavigate) },
     '/api/v1/chats/running': { GET: getRunningChats },

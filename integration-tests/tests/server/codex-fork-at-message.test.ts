@@ -27,23 +27,24 @@ describe('Codex fork at message', () => {
 
     await withIntegrationFixture('codex-fork-at-message', async (fixture) => {
       const source = await fixture.client.getMessages(sourceChatId);
-      expect(source.messages.map((entry) => [entry.seq, entry.message.type])).toEqual([
-        [1, 'user-message'],
-        [2, 'exec-tool-use'],
-        [3, 'bash-tool-use'],
-        [4, 'tool-result'],
+      expect(source.messages.map((entry) => [entry.ordinal, entry.message.type])).toEqual([
+        [2, 'user-message'],
+        [3, 'exec-tool-use'],
+        [4, 'bash-tool-use'],
         [5, 'tool-result'],
-        [6, 'bash-tool-use'],
+        [6, 'tool-result'],
         [7, 'bash-tool-use'],
-        [8, 'tool-result'],
-        [9, 'assistant-message'],
+        [8, 'bash-tool-use'],
+        [9, 'tool-result'],
+        [10, 'assistant-message'],
       ]);
 
       const targetChatId = fixture.newChatId();
       const fork = await fixture.client.forkChat({
         sourceChatId,
         chatId: targetChatId,
-        upToSeq: 9,
+        transcriptViewId: source.transcriptViewId,
+        upToOrdinal: source.messages.at(-1)!.ordinal,
       });
       expect(fork.chat.id).toBe(targetChatId);
 
@@ -81,7 +82,11 @@ describe('Codex fork at message', () => {
       });
       expect(forkParams[0]?.path).not.toBe(sourceNativePath);
       const targetLines = (await readFile(targetNativePath, 'utf8')).trimEnd().split('\n');
-      expect(JSON.parse(targetLines[1]!)).toEqual({ type: 'garcon_fork_filtered' });
+      expect(targetLines.some((line) => line.includes('garcon_fork_filtered'))).toBe(false);
+      expect(JSON.parse(targetLines[1]!)).toMatchObject({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user' },
+      });
       expect(targetLines.some((line) => line.includes('"name":"exec"'))).toBe(true);
       expect(targetLines.some((line) => line.includes('"name":"wait"'))).toBe(true);
       expect(targetNativePath).not.toBe(sourceNativePath);
@@ -122,7 +127,8 @@ describe('Codex fork at message', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: partialChatId,
-        upToSeq: 6,
+        transcriptViewId: source.transcriptViewId,
+        upToOrdinal: source.messages[5]!.ordinal,
       });
       const partial = await fixture.client.getMessages(partialChatId);
       expect(partial.messages.map((entry) => entry.message))
@@ -154,7 +160,8 @@ describe('Codex fork at message', () => {
       await fixture.client.forkChat({
         sourceChatId: partialChatId,
         chatId: reforkChatId,
-        upToSeq: 6,
+        transcriptViewId: partial.transcriptViewId,
+        upToOrdinal: partial.messages.at(-1)!.ordinal,
       });
       const reforked = await fixture.client.getMessages(reforkChatId);
       expect(reforked.messages.map((entry) => entry.message))

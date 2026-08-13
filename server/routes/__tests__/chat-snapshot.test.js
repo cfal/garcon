@@ -93,27 +93,13 @@ function fixture(overrides = {}) {
       };
     }),
   };
-  const pendingInputs = overrides.pendingInputs ?? {
-    reconcileRetainedHistory: mock(async () => { calls.push('reconcile'); }),
-    listForTransport: mock(() => [{
-      chatId: CHAT_ID,
-      clientRequestId: 'request-1',
-      content: 'Working',
-      createdAt: TIMESTAMP,
-      deliveryStatus: 'accepted',
-      attachments: [{ name: 'image.png', mimeType: 'image/png' }],
-    }]),
-  };
   const transientFeeds = overrides.transientFeeds ?? {
     currentSnapshot: mock(() => null),
-    snapshot: mock(({ chatId, agentOwnershipEpoch, generationId }) => ({
+    snapshot: mock(({ chatId, transcriptViewId }) => ({
       serverInstanceId: 'instance-1',
       chatId,
-      agentOwnershipEpoch,
-      generationId,
-      resetTransactionId: null,
+      transcriptViewId,
       transientRevision: 0,
-      stateDigest: 'transient-v1:empty',
       rows: [],
     })),
   };
@@ -122,11 +108,10 @@ function fixture(overrides = {}) {
     execution,
     chatViews,
     transientFeeds,
-    pendingInputs,
     logger: routeLogger,
     now: () => new Date(TIMESTAMP),
   });
-  return { calls, summaries, execution, chatViews, transientFeeds, pendingInputs, routes };
+  return { calls, summaries, execution, chatViews, transientFeeds, routes };
 }
 
 async function getSnapshot(testFixture, query) {
@@ -155,20 +140,19 @@ describe('GET /api/v1/chats/snapshot', () => {
         queue: { entries: [{ id: 'queued-1', content: 'Queued work' }] },
       },
       transientFeed: {
-        generationId: 'generation-1',
+        transcriptViewId: 'generation-1',
         rows: [],
       },
-      pendingUserInputs: [{ attachments: [{ name: 'image.png' }] }],
       transcript: { availability: 'available', transcriptViewId: 'generation-1' },
     });
     expect(JSON.stringify(body)).not.toContain('private-request');
     expect(JSON.stringify(body)).not.toContain('private-command');
     expect(parseChatSnapshotResponse(body)).toMatchObject({ chat: { id: CHAT_ID } });
     expect(testFixture.chatViews.page).toHaveBeenCalledWith(CHAT_ID, 10);
-    expect(testFixture.calls).toEqual(['summary', 'control', 'messages', 'reconcile']);
+    expect(testFixture.calls).toEqual(['summary', 'control', 'messages']);
   });
 
-  test('skips transcript loading at zero while reconciling pending inputs', async () => {
+  test('skips transcript loading at zero', async () => {
     const testFixture = fixture();
     const { body } = await getSnapshot(testFixture, `chatId=${CHAT_ID}&limit=0`);
 
@@ -177,7 +161,6 @@ describe('GET /api/v1/chats/snapshot', () => {
       transcript: { availability: 'not-requested' },
     });
     expect(testFixture.chatViews.page).not.toHaveBeenCalled();
-    expect(testFixture.pendingInputs.reconcileRetainedHistory).toHaveBeenCalledWith(CHAT_ID);
   });
 
   test('accepts the maximum transcript limit', async () => {
@@ -239,7 +222,6 @@ describe('GET /api/v1/chats/snapshot', () => {
       retryable: true,
       message: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
     });
-    expect(testFixture.pendingInputs.reconcileRetainedHistory).toHaveBeenCalled();
   });
 
   test('names a typed ledger failure in the transcript section', async () => {

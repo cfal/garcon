@@ -35,7 +35,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000900';
 const CHAT_ID_2 = '1783725900000901';
@@ -101,7 +101,14 @@ const metadata = {
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => undefined),
@@ -109,7 +116,6 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-title');
-const pendingInputs = createRoutePendingInputs();
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
 const recentTitleIcons = {
   getRecentIcons: () => [],
@@ -120,11 +126,11 @@ const chatsRoutes = createChatRoutes({
   settings,
   recentTitleIcons,
   queue,
+  processing: { phase: mock(() => null) },
   pathCache,
   metadata,
   chatViews,
   agents,
-	pendingInputs,
 	chatListProjector,
   commandService: createRouteCommandService({
     registry,
@@ -133,7 +139,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pendingInputs,
 		pathCache,
 		chatListProjector,
   }),

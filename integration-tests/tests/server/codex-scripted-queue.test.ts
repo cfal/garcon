@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import {
   codexAssistantMessage,
@@ -62,17 +61,13 @@ describe('scripted Codex queue lifecycle', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
-      const secondInput = await fixture.client.waitForEvent(
-        (event): event is PendingUserInputUpdatedMessage =>
-          event.type === 'pending-user-input-updated'
-          && event.input.chatId === chatId
-          && event.input.content === secondPrompt
-          && typeof event.input.turnId === 'string',
-        'scripted Codex queued turn identity',
+      const secondInput = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        secondPrompt,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, secondInput.input.turnId, {
-        afterIndex: queueCursor,
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(secondInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
       await fixture.client.waitForProcessing(chatId, false, {

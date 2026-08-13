@@ -148,7 +148,7 @@ describe('forkChatFileCopy', () => {
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      upToSequence: 2,
+      upToOrdinal: 2,
       ...deps,
     });
 
@@ -172,7 +172,7 @@ describe('forkChatFileCopy', () => {
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      upToSequence: 2,
+      upToOrdinal: 2,
       ...deps,
     });
 
@@ -187,7 +187,7 @@ describe('forkChatFileCopy', () => {
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      upToSequence: 3,
+      upToOrdinal: 3,
       ...deps,
     });
 
@@ -202,13 +202,13 @@ describe('forkChatFileCopy', () => {
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      upToSequence: 2,
+      upToOrdinal: 2,
       ...deps,
     });
 
     expect(result.agentSessionId).toBe('target-native');
     expect(deps.forkAgentSession).toHaveBeenCalledWith(expect.objectContaining({
-      messageSequence: 2,
+      messageOrdinal: 2,
       providerMeta: { native: true },
     }));
     expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
@@ -226,7 +226,7 @@ describe('forkChatFileCopy', () => {
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
-      upToSequence: 4,
+      upToOrdinal: 4,
       ...deps,
     })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', status: 422 });
 

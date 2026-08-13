@@ -3,65 +3,91 @@ import { EventEmitter } from 'events';
 import { AttentionTracker } from '../../notifications/attention-tracker.js';
 import { PermissionRequestMessage, AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
 
-function commitApplied(chatId, messages) {
-  return {
-    event: {
-      kind: 'commit',
-      chatId,
-      agentOwnershipEpoch: 'ownership-1',
-      promoted: [],
-      appended: messages.map((message, index) => ({
-        id: `entry-${index}`,
-        lifetime: 'durable',
-        source: null,
-        provenance: null,
-        message,
-      })),
-    },
-  };
-}
-
-function controlApplied(chatId, mutation) {
-  return {
-    event: {
-      kind: 'control',
-      chatId,
-      agentOwnershipEpoch: 'ownership-1',
-      mutation,
-    },
-  };
-}
-
 function createMockAgentRegistry() {
   const emitter = new EventEmitter();
   return {
-    onProjectionApplied: (cb) => emitter.on('projection', cb),
-    onProcessing: (cb) => emitter.on('processing', cb),
-    onFinished: (cb) => emitter.on('finished', cb),
-    onFailed: (cb) => emitter.on('failed', cb),
-    emitAssistant: (chatId, msgs) => emitter.emit('projection', commitApplied(chatId, msgs)),
-    emitPermissionRequest: (chatId, message) => emitter.emit('projection', controlApplied(chatId, {
-      kind: 'upsert',
-      row: {
-        id: message.permissionRequestId,
-        incarnation: 'incarnation-1',
-        anchorEntryId: null,
-        displayOrder: 0,
+    onTranscriptCommitted: (cb) => emitter.on('transcript', cb),
+    emitAssistant: (chatId, messages) => emitter.emit('transcript', {
+      type: 'rows',
+      chatId,
+      viewId: 'view-1',
+      rows: messages.map((message, index) => ({
+        kind: 'provider-row',
+        ordinal: index + 1,
+        at: message.timestamp,
+        providerMeta: null,
         message,
+      })),
+    }),
+    emitPermissionRequest: (chatId, message) => emitter.emit('transcript', {
+      type: 'permission',
+      chatId,
+      viewId: 'view-1',
+      runId: 'run-1',
+      row: {
+        kind: 'permission-requested',
+        ordinal: 1,
+        at: message.timestamp,
+        providerMeta: null,
+        lifecycle: {
+          kind: 'requested',
+          requestId: message.permissionRequestId,
+          incarnation: 'incarnation-1',
+          requestedTool: message.requestedTool,
+          options: [],
+        },
       },
-    })),
-    emitPermissionRemoved: (chatId, permissionRequestId) => emitter.emit('projection', controlApplied(chatId, {
-      kind: 'remove',
-      id: permissionRequestId,
-      incarnation: 'incarnation-1',
-    })),
-    emitPermissionCleared: (chatId) => emitter.emit('projection', controlApplied(chatId, {
-      kind: 'clear',
-    })),
-    emitProcessing: (chatId, processing) => emitter.emit('processing', chatId, processing),
-    emitFinished: (chatId, exitCode) => emitter.emit('finished', chatId, exitCode),
-    emitFailed: (chatId, msg) => emitter.emit('failed', chatId, msg),
+    }),
+    emitPermissionRemoved: (chatId, permissionRequestId) => emitter.emit('transcript', {
+      type: 'permission',
+      chatId,
+      viewId: 'view-1',
+      runId: 'run-1',
+      row: {
+        kind: 'permission-cancelled',
+        ordinal: 2,
+        at: '2024-01-01T00:00:02Z',
+        providerMeta: null,
+        lifecycle: {
+          kind: 'cancelled',
+          requestId: permissionRequestId,
+          incarnation: 'incarnation-1',
+          reason: null,
+        },
+      },
+    }),
+    emitPermissionCleared: (chatId) => emitRunEnded(emitter, chatId, 'finished'),
+    emitFinished: (chatId, exitCode) => emitRunEnded(
+      emitter,
+      chatId,
+      exitCode === 0 ? 'finished' : 'failed',
+      exitCode === 0 ? undefined : { code: 'PROVIDER_EXIT', message: `exit code ${exitCode}` },
+    ),
+    emitFailed: (chatId, message) => emitRunEnded(
+      emitter,
+      chatId,
+      'failed',
+      { code: 'PROVIDER_FAILURE', message },
+    ),
   };
+}
+
+function emitRunEnded(emitter, chatId, outcome, error) {
+  emitter.emit('transcript', {
+    type: 'run-ended',
+    chatId,
+    viewId: 'view-1',
+    runId: 'run-1',
+    row: {
+      kind: 'run-ended',
+      ordinal: 3,
+      at: '2024-01-01T00:00:03Z',
+      providerMeta: null,
+      origin: 'provider',
+      outcome,
+      ...(error ? { error } : {}),
+    },
+  });
 }
 
 function createMockQueue() {
@@ -132,8 +158,7 @@ describe('AttentionTracker', () => {
     return new AttentionTracker(agents, queue, settings, registry, history, telegram, telegramSettings);
   }
 
-  // Simulates a conversation round: adds messages to history and applies
-  // the assistant row through a projection commit (as the real ingress does).
+  // Simulates a conversation round and its durable assistant commit.
   function simulateConversation(chatId, userText, assistantText) {
     historyMessages.push({ type: 'user-message', content: userText });
     historyMessages.push({ type: 'assistant-message', content: assistantText });

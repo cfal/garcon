@@ -1,12 +1,8 @@
-import {
-  PermissionRequestMessage,
-} from '$shared/chat-types';
+import { PermissionRequestMessage } from '$shared/chat-types';
 import type {
-  ChatProjectionGenerationTransition,
   ChatTransientControlAction,
   ChatTransientFeedMutation,
   ChatTransientFeedSnapshot,
-  ChatTurnReceiptOwner,
   TransientFeedRow,
 } from '$shared/chat-transient-feed';
 import type { PendingPermissionRequest } from '$lib/types/chat';
@@ -22,11 +18,13 @@ export function applyTransientFeedSnapshot(
   current: ChatTransientFeedSnapshot | null,
   incoming: ChatTransientFeedSnapshot,
 ): TransientFeedApplyResult {
-  if (!current) return { kind: 'applied', snapshot: cloneSnapshot(incoming) };
-  if (current.serverInstanceId !== incoming.serverInstanceId) {
+  if (!current || current.serverInstanceId !== incoming.serverInstanceId) {
     return { kind: 'applied', snapshot: cloneSnapshot(incoming) };
   }
   if (current.chatId !== incoming.chatId) return { kind: 'stale' };
+  if (current.transcriptViewId !== incoming.transcriptViewId) {
+    return { kind: 'applied', snapshot: cloneSnapshot(incoming) };
+  }
   if (incoming.transientRevision < current.transientRevision) return { kind: 'stale' };
   if (incoming.transientRevision === current.transientRevision) {
     return sameStateIdentity(current, incoming) ? { kind: 'duplicate' } : { kind: 'corrupt' };
@@ -42,16 +40,9 @@ export function applyTransientFeedMutation(
   if (current.serverInstanceId !== incoming.serverInstanceId
       || current.chatId !== incoming.chatId) return { kind: 'stale' };
   if (incoming.transientRevision < current.transientRevision) return { kind: 'stale' };
-  if (incoming.transientRevision === current.transientRevision) {
-    return current.agentOwnershipEpoch === incoming.agentOwnershipEpoch
-      && current.generationId === incoming.generationId
-      && current.stateDigest === incoming.stateDigest
-      ? { kind: 'duplicate' }
-      : { kind: 'corrupt' };
-  }
+  if (incoming.transientRevision === current.transientRevision) return { kind: 'duplicate' };
   if (incoming.transientRevision !== current.transientRevision + 1
-      || incoming.agentOwnershipEpoch !== current.agentOwnershipEpoch
-      || incoming.generationId !== current.generationId) {
+      || incoming.transcriptViewId !== current.transcriptViewId) {
     return { kind: 'snapshot-required' };
   }
   const rows = new Map(current.rows.map((row) => [row.id, row]));
@@ -64,7 +55,7 @@ export function applyTransientFeedMutation(
     rows.delete(mutation.id);
   } else {
     for (const [id, row] of rows) {
-      if (sameTurnOwner(row.turnOwner, mutation.turnOwner)) rows.delete(id);
+      if (row.runId === mutation.runId) rows.delete(id);
     }
   }
   return {
@@ -72,48 +63,9 @@ export function applyTransientFeedMutation(
     snapshot: {
       serverInstanceId: incoming.serverInstanceId,
       chatId: incoming.chatId,
-      agentOwnershipEpoch: incoming.agentOwnershipEpoch,
-      generationId: incoming.generationId,
-      resetTransactionId: null,
+      transcriptViewId: incoming.transcriptViewId,
       transientRevision: incoming.transientRevision,
-      stateDigest: incoming.stateDigest,
       rows: sortedRows(rows.values()),
-    },
-  };
-}
-
-export function applyProjectionGenerationTransition(
-  current: ChatTransientFeedSnapshot | null,
-  incoming: ChatProjectionGenerationTransition,
-): TransientFeedApplyResult {
-  if (current) {
-    if (current.serverInstanceId !== incoming.serverInstanceId
-        || current.chatId !== incoming.chatId) return { kind: 'stale' };
-    if (incoming.transientRevision < current.transientRevision) return { kind: 'stale' };
-    if (incoming.transientRevision === current.transientRevision) {
-      return current.stateDigest === incoming.stateDigest
-        && current.agentOwnershipEpoch === incoming.agentOwnershipEpoch
-        && current.generationId === incoming.generationId
-        && current.resetTransactionId === incoming.resetTransactionId
-        ? { kind: 'duplicate' }
-        : { kind: 'corrupt' };
-    }
-    if (incoming.transientRevision !== current.transientRevision + 1
-        || incoming.previousGenerationId !== current.generationId) {
-      return { kind: 'snapshot-required' };
-    }
-  }
-  return {
-    kind: 'applied',
-    snapshot: {
-      serverInstanceId: incoming.serverInstanceId,
-      chatId: incoming.chatId,
-      agentOwnershipEpoch: incoming.agentOwnershipEpoch,
-      generationId: incoming.generationId,
-      resetTransactionId: incoming.resetTransactionId,
-      transientRevision: incoming.transientRevision,
-      stateDigest: incoming.stateDigest,
-      rows: incoming.rows.map(cloneRow),
     },
   };
 }
@@ -127,19 +79,18 @@ export function pendingPermissionsFromTransientFeed(
     const control: ChatTransientControlAction = {
       serverInstanceId: snapshot.serverInstanceId,
       chatId: snapshot.chatId,
-      agentOwnershipEpoch: snapshot.agentOwnershipEpoch,
-      turnOwner: row.turnOwner,
+      runId: row.runId,
       id: row.id,
       incarnation: row.incarnation,
     };
     return [{
       permissionRequestId: row.message.permissionRequestId,
       requestedTool: row.message.requestedTool,
-		chatId: snapshot.chatId,
-		receivedAt: new Date(row.message.timestamp),
-		control,
-		transcript: { ...row.transcript },
-	}];
+      chatId: snapshot.chatId,
+      receivedAt: new Date(row.message.timestamp),
+      control,
+      transcript: { ...row.transcript },
+    }];
   });
 }
 
@@ -148,17 +99,8 @@ function sameStateIdentity(
   right: ChatTransientFeedSnapshot,
 ): boolean {
   return left.chatId === right.chatId
-    && left.agentOwnershipEpoch === right.agentOwnershipEpoch
-    && left.generationId === right.generationId
-    && left.resetTransactionId === right.resetTransactionId
-    && left.stateDigest === right.stateDigest;
-}
-
-function sameTurnOwner(left: ChatTurnReceiptOwner, right: ChatTurnReceiptOwner): boolean {
-  return left.agentOwnershipEpoch === right.agentOwnershipEpoch
-    && left.commandType === right.commandType
-    && left.clientRequestId === right.clientRequestId
-    && left.turnId === right.turnId;
+    && left.transcriptViewId === right.transcriptViewId
+    && JSON.stringify(left.rows) === JSON.stringify(right.rows);
 }
 
 function cloneSnapshot(snapshot: ChatTransientFeedSnapshot): ChatTransientFeedSnapshot {
@@ -166,7 +108,7 @@ function cloneSnapshot(snapshot: ChatTransientFeedSnapshot): ChatTransientFeedSn
 }
 
 function cloneRow(row: TransientFeedRow): TransientFeedRow {
-  return { ...row, transcript: { ...row.transcript }, turnOwner: { ...row.turnOwner } };
+  return { ...row, transcript: { ...row.transcript } };
 }
 
 function sortedRows(rows: Iterable<TransientFeedRow>): TransientFeedRow[] {

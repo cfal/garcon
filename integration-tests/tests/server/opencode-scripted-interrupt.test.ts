@@ -337,7 +337,6 @@ function marker(label: string): string {
   return `SCRIPTED_OPENCODE_INTERRUPT_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
-// OpenCode drops processing to idle before the coordinator publishes chat-session-stopped.
 function expectOpenCodeStoppedTurnEventOrder(
   events: readonly ServerWsMessage[],
   chatId: string,
@@ -356,10 +355,16 @@ function expectOpenCodeStoppedTurnEventOrder(
     && event.chatId === chatId
     && event.intent === 'stop'
     && event.outcome === 'interrupt-requested');
+  const interruption = events.findIndex((event) =>
+    event.type === 'chat-messages'
+    && event.chatId === chatId
+    && event.turnId === turnId);
 
-  expect(stopping).toBeGreaterThanOrEqual(0);
-  expect(idle).toBeGreaterThan(stopping);
-  expect(stopped).toBeGreaterThan(idle);
+  expect(interruption).toBeGreaterThanOrEqual(0);
+  expect(stopped).toBeGreaterThan(interruption);
+  expect(idle).toBeGreaterThanOrEqual(0);
+  if (stopping >= 0) expect(idle).toBeGreaterThan(stopping);
+  expect(idle).toBeGreaterThan(stopped);
   expect(events).not.toContainEqual(expect.objectContaining({
     type: 'agent-run-failed',
     chatId,

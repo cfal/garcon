@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { CARRIED_CONTEXT_VERSION } from '../../../common/transcript-seed.js';
 
 describe('cross-provider fork lifecycle', () => {
   test('shares direct handoff history across repeated whole-chat forks', async () => {
@@ -23,8 +22,12 @@ describe('cross-provider fork lifecycle', () => {
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, handoff.turnId);
       const handoffRequest = fixture.fakeProviders.anthropic.requests()[0];
-      expect(handoffRequest.lastUserText).toContain('anthropic-handoff-turn');
-      expect(occurrences(handoffRequest.lastUserText, `<carried-context version="${CARRIED_CONTEXT_VERSION}">`)).toBe(1);
+      expect(handoffRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+        'openai-source-turn',
+        'echo:openai-source-turn',
+        'anthropic-handoff-turn',
+      ]);
+      expect(JSON.stringify(handoffRequest.body)).not.toContain('<carried-context');
 
       const targetChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });
@@ -64,6 +67,12 @@ describe('cross-provider fork lifecycle', () => {
   });
 });
 
-function occurrences(value: string, needle: string): number {
-  return value.split(needle).length - 1;
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.flatMap((part) => (
+    part && typeof part === 'object' && 'text' in part && typeof part.text === 'string'
+      ? [part.text]
+      : []
+  )).join('');
 }

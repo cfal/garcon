@@ -161,7 +161,6 @@ describe('Codex against a scripted model', () => {
           (event): event is ChatMessagesMessage => (
             event.type === 'chat-messages'
             && event.chatId === chatId
-            && event.turnId === continued.turnId
             && messagesOfType(event.messages, 'tool-result')
               .some((message) => message.toolId === commandCallId)
           ),
@@ -180,7 +179,6 @@ describe('Codex against a scripted model', () => {
           .flatMap((event) => (
             event.type === 'chat-messages'
             && event.chatId === chatId
-            && event.turnId === continued.turnId
               ? event.messages
               : []
           ));

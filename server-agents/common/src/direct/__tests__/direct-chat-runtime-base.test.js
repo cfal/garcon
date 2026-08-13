@@ -22,6 +22,7 @@ function waitForMessages(runtime) {
 
 class CapturingDirectRuntime extends DirectChatRuntimeBase {
   captured = [];
+  responses = [];
 
   constructor(dir) {
     super({
@@ -57,8 +58,16 @@ class CapturingDirectRuntime extends DirectChatRuntimeBase {
       thinkingMode: session.thinkingMode,
       messages: structuredClone(session.messages),
     });
-    return 'OK';
+    return this.responses.shift() ?? 'OK';
   }
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
 }
 
 function startRequest(overrides = {}) {
@@ -180,5 +189,24 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     await messages;
 
     expect(runtime.captured[0].thinkingMode).toBe('none');
+  });
+
+  it('admits a successor immediately after best-effort abort and preserves late output', async () => {
+    const runtime = new CapturingDirectRuntime(await tempDir());
+    const firstResponse = deferred();
+    runtime.responses.push(firstResponse.promise, 'second response');
+    const emitted = [];
+    runtime.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    const started = await runtime.startSession(startRequest());
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    await runtime.runTurn(resumeRequest(started.agentSessionId, { command: 'second message' }));
+    firstResponse.resolve('late first response');
+    await Bun.sleep(0);
+
+    expect(emitted.map((message) => message.content)).toEqual([
+      'second response',
+      'late first response',
+    ]);
   });
 });

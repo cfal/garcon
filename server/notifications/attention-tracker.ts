@@ -9,11 +9,10 @@
 import {
   AssistantMessage,
   isAbortAcknowledged,
-  PermissionRequestMessage,
   type ChatMessage,
   type ChatStopOutcome,
 } from '../../common/chat-types.js';
-import type { AppliedProjectionEvent } from '../agents/projection-ingress.js';
+import type { TranscriptCommitEvent } from '../ledger/service.js';
 import type { TelegramNotifier } from './telegram.js';
 import { createLogger } from '../lib/log.js';
 
@@ -51,10 +50,7 @@ function userMessageContent(message: ChatMessage): string | null {
 // classes and keeps the module unit-testable with plain mocks.
 
 interface AgentRegistryDep {
-  onProjectionApplied(cb: (applied: AppliedProjectionEvent) => void): void;
-  onProcessing(cb: (chatId: string, processing: boolean) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number) => void): void;
-  onFailed(cb: (chatId: string, errorMessage: string) => void): void;
+  onTranscriptCommitted(cb: (event: TranscriptCommitEvent) => void): void;
 }
 
 interface QueueManagerDep {
@@ -134,12 +130,7 @@ export class AttentionTracker {
   }
 
   #wire(): void {
-    this.#agents.onProjectionApplied((applied) => this.#handleProjection(applied));
-    this.#agents.onProcessing((chatId, processing) => {
-      if (processing) this.#idleNotified.delete(chatId);
-    });
-    this.#agents.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
-    this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
+    this.#agents.onTranscriptCommitted((event) => this.#handleTranscriptCommit(event));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
     this.#queue.onSessionStopped((chatId, outcome) => {
       if (isAbortAcknowledged(outcome)) this.#handleSessionStopped(chatId);
@@ -150,37 +141,44 @@ export class AttentionTracker {
     });
   }
 
-  // Transcript commits carry assistant output; permission lifecycles are
-  // transient control rows keyed by their permission request ID.
-  #handleProjection(applied: AppliedProjectionEvent): void {
-    const event = applied.event;
-    if (event.kind === 'commit') {
-      this.#idleNotified.delete(event.chatId);
-      for (const entry of event.appended) {
-        if (entry.message instanceof AssistantMessage) {
-          this.#lastAssistantMessage.set(event.chatId, entry.message.content);
+  #handleTranscriptCommit(event: TranscriptCommitEvent): void {
+    this.#idleNotified.delete(event.chatId);
+    if (event.type === 'rows') {
+      for (const row of event.rows) {
+        const message = row.kind === 'user-input'
+          ? row.detail.message
+          : row.kind === 'provider-row'
+            ? row.message
+            : null;
+        if (message instanceof AssistantMessage) {
+          this.#lastAssistantMessage.set(event.chatId, message.content);
         }
       }
       return;
     }
-    if (event.kind !== 'control') return;
-    const mutation = event.mutation;
-    if (mutation.kind === 'upsert') {
-      const message = mutation.row.message;
-      if (message instanceof PermissionRequestMessage) {
-        this.#trackPermission(
-          event.chatId,
-          mutation.row.id,
-          toolDisplayName(message.requestedTool),
-        );
+    if (event.type === 'run-ended') {
+      this.#pendingPermissions.delete(event.chatId);
+      if (event.row.outcome === 'finished') {
+        this.#lastTurnResult.set(event.chatId, { reason: 'completed' });
+      } else if (event.row.outcome === 'failed') {
+        this.#lastTurnResult.set(event.chatId, {
+          reason: 'failed',
+          detail: event.row.error?.message ?? event.row.error?.code,
+        });
       }
       return;
     }
-    if (mutation.kind === 'remove') {
-      this.#clearPermission(event.chatId, mutation.id);
+    if (event.type !== 'permission') return;
+    const lifecycle = event.row.lifecycle;
+    if (lifecycle.kind === 'requested') {
+      this.#trackPermission(
+        event.chatId,
+        lifecycle.requestId,
+        toolDisplayName(lifecycle.requestedTool),
+      );
       return;
     }
-    this.#pendingPermissions.delete(event.chatId);
+    this.#clearPermission(event.chatId, lifecycle.requestId);
   }
 
   // Reads the last user message from the history cache. This covers both
@@ -216,20 +214,6 @@ export class AttentionTracker {
     if (!ids) return;
     ids.delete(permissionRequestId);
     if (ids.size === 0) this.#pendingPermissions.delete(chatId);
-  }
-
-  #handleFinished(chatId: string, exitCode: number): void {
-    this.#lastTurnResult.set(chatId, {
-      reason: exitCode === 0 ? 'completed' : 'failed',
-      detail: exitCode !== 0 ? `exit code ${exitCode}` : undefined,
-    });
-  }
-
-  #handleFailed(chatId: string, errorMessage: string): void {
-    this.#lastTurnResult.set(chatId, {
-      reason: 'failed',
-      detail: errorMessage,
-    });
   }
 
   #handleChatIdle(chatId: string): void {

@@ -12,7 +12,7 @@ import {
 } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
   AgentLogger,
-  AgentSteerRequestV4,
+  AgentSteerRequest,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -821,7 +821,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     return this.#steering.captureTarget(agentSessionId);
   }
 
-  steer(request: AgentSteerRequestV4): Promise<AgentSteerResult> {
+  steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
     return this.#steering.steer(request);
   }
 
@@ -1038,7 +1038,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       thinkingMode,
       claudeThinkingMode,
       envOverrides,
-      onAbortable,
       clientRequestId,
       turnId,
       executionAdmission,
@@ -1118,7 +1117,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       if (executionAdmission) await executionAdmission.markStarted();
       await this.#sendUserMessage(session, activeTurn, prepared.command, images);
       this.emitProcessing(chatId, true);
-      onAbortable?.();
       this.#completeSessionInitialization(session);
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
@@ -1147,7 +1145,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       thinkingMode,
       claudeThinkingMode,
       envOverrides,
-      onAbortable,
       clientRequestId,
       turnId,
       executionAdmission,
@@ -1207,6 +1204,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       this.#runningSessions.set(agentSessionId, session);
     }
     if (this.#shuttingDown) throw new Error('Claude runtime is shutting down');
+    if (session.activeTurn?.protocol.abortRequested) {
+      await this.#waitForTurnComplete(session.activeTurn);
+      assertClaudeExecutionOpen(requestAdmission);
+    }
     if (session.activeTurn) {
       throw new Error(`Claude session ${agentSessionId} already has an active turn`);
     }
@@ -1289,7 +1290,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       if (executionAdmission) await executionAdmission.markStarted();
       await this.#sendUserMessage(session, activeTurn, prepared.command, images);
       this.emitProcessing(chatId, true);
-      onAbortable?.();
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
       if (ownedTurn && session.activeTurn === ownedTurn) {
