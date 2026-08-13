@@ -90,10 +90,8 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
     if (!request.rewriteEntry) return entry.value;
     return request.rewriteEntry(entry.value, {
       ...context,
-      ...(request.retainedMessageCounts?.has(entry.lineNumber)
-        ? {
-            retainedMessageCount: request.retainedMessageCounts.get(entry.lineNumber),
-          }
+      ...(request.retainedMessageCounts
+        ? { retainedMessageCount: request.retainedMessageCounts.get(entry.lineNumber) ?? 0 }
         : {}),
     });
   });
