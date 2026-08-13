@@ -34,9 +34,11 @@ async function createHistoryFixture(projectPath: string): Promise<void> {
 }
 
 function largeFileContents(file: string, revision: string): string {
+  const stem = file.replace(/\W/g, '_');
   return Array.from(
     { length: 180 },
-    (_, index) => `${file} ${revision} line ${String(index + 1).padStart(3, '0')}`,
+    (_, index) =>
+      `export const ${stem}_${revision}_${String(index + 1).padStart(3, '0')} = ${index + 1};`,
   ).join('\n') + '\n';
 }
 
@@ -44,16 +46,16 @@ async function createPinnedHeaderFixture(projectPath: string): Promise<void> {
   await runGit(projectPath, ['init', '-b', 'main']);
   await runGit(projectPath, ['config', 'user.email', 'test@example.com']);
   await runGit(projectPath, ['config', 'user.name', 'E2E Test']);
-  for (const file of ['alpha.txt', 'beta.txt']) {
+  for (const file of ['alpha.ts', 'beta.ts']) {
     await writeFile(join(projectPath, file), largeFileContents(file, 'baseline'), 'utf8');
   }
-  await runGit(projectPath, ['add', 'alpha.txt', 'beta.txt']);
+  await runGit(projectPath, ['add', 'alpha.ts', 'beta.ts']);
   await runGit(projectPath, ['commit', '-m', 'baseline revision']);
-  for (const file of ['alpha.txt', 'beta.txt']) {
+  for (const file of ['alpha.ts', 'beta.ts']) {
     await writeFile(join(projectPath, file), largeFileContents(file, 'committed'), 'utf8');
   }
   await runGit(projectPath, ['commit', '-am', 'large revision']);
-  for (const file of ['alpha.txt', 'beta.txt']) {
+  for (const file of ['alpha.ts', 'beta.ts']) {
     await writeFile(join(projectPath, file), largeFileContents(file, 'working'), 'utf8');
   }
 }
@@ -232,7 +234,8 @@ describe('Lightpanda standalone Git views', () => {
       const initialWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
       expect(initialWorkbench.path).toBeNull();
       await scrollDiffTo(fixture.page, workbenchPanel, 60);
-      await waitForPinnedPath(fixture.page, workbenchPanel, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, workbenchPanel, 'alpha.ts');
+      await fixture.page.waitForSelector(`${workbenchPanel} .cm-code-keyword`);
       const pinnedWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
       expect(pinnedWorkbench.scrollTop).toBe(60);
       expect(pinnedWorkbench.scrollHeight).toBe(initialWorkbench.scrollHeight);
@@ -266,17 +269,18 @@ describe('Lightpanda standalone Git views', () => {
         button.click();
       });
       await fixture.page.waitForSelector(
-        `${workbenchPanel} [data-git-file-header][data-file-path="alpha.txt"]`,
+        `${workbenchPanel} [data-git-file-header][data-file-path="alpha.ts"]`,
       );
       await fixture.page.waitForSelector(`${workbenchPanel} [data-git-diff-content-row]`);
       await scrollDiffTo(fixture.page, workbenchPanel, 60);
-      await waitForPinnedPath(fixture.page, workbenchPanel, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, workbenchPanel, 'alpha.ts');
       const retainedWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
 
       await app.selectMainWorkspaceSurface('Open Git Compare');
       await fixture.page.waitForSelector(`${comparePanel} [data-git-file-header]`);
       await scrollDiffTo(fixture.page, comparePanel, 60);
-      await waitForPinnedPath(fixture.page, comparePanel, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, comparePanel, 'alpha.ts');
+      await fixture.page.waitForSelector(`${comparePanel} .cm-code-keyword`);
       const compareSnapshot = await pinnedHeaderSnapshot(fixture.page, comparePanel);
       expect(compareSnapshot.scrollTop).toBe(60);
 
@@ -299,7 +303,8 @@ describe('Lightpanda standalone Git views', () => {
       );
       await fixture.page.waitForSelector(`${historyPanel} [data-git-file-header]`);
       await scrollDiffTo(fixture.page, historyPanel, 60);
-      await waitForPinnedPath(fixture.page, historyPanel, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, historyPanel, 'alpha.ts');
+      await fixture.page.waitForSelector(`${historyPanel} .cm-code-keyword`);
 
       await app.setViewport(390, 844);
       await app.clickButton('Chat');
@@ -328,7 +333,7 @@ describe('Lightpanda standalone Git views', () => {
         button?.click();
       });
       await scrollDiffTo(fixture.page, historyPanel, 60);
-      await waitForPinnedPath(fixture.page, historyPanel, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, historyPanel, 'alpha.ts');
       expect(await fixture.page.$eval(
         `${historyPanel} [data-git-pinned-file-header]`,
         (header) =>

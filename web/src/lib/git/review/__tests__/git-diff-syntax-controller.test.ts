@@ -397,6 +397,22 @@ describe('GitDiffSyntaxController cache lifecycle', () => {
 		expect(controller.results['b.ts']).toBeDefined();
 	});
 
+	it('does not republish an active cached result for repeated demand', async () => {
+		const highlighter = vi.fn(async (value: GitDiffSyntaxFileInput) => highlighted(value));
+		const fileValue = file('a.ts');
+		const controller = new GitDiffSyntaxController(dependencies(highlighter));
+		controller.open({ documentId: 'doc', files: [fileValue] }, { 'a.ts': body('a.ts') });
+		controller.handleDemand(demand('doc', ['a.ts']));
+		await flushPromises();
+		const publishedResults = controller.results;
+
+		controller.handleDemand(demand('doc', ['a.ts']));
+		await flushPromises();
+
+		expect(controller.results).toBe(publishedResults);
+		expect(highlighter).toHaveBeenCalledOnce();
+	});
+
 	it('contains a thrown highlighter and continues the queue', async () => {
 		const highlighter = vi.fn(async (value: GitDiffSyntaxFileInput) => {
 			if (value.file.path === 'a.ts') throw new Error('parser failed');

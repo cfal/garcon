@@ -26,10 +26,12 @@ async function runGit(projectPath: string, args: string[]): Promise<void> {
 }
 
 function largeFileContents(file: string, revision: string): string {
+  const stem = file.replace(/\W/g, '_');
   return (
     Array.from(
       { length: 180 },
-      (_, index) => `${file} ${revision} line ${String(index + 1).padStart(3, '0')}`,
+      (_, index) =>
+        `export const ${stem}_${revision}_${String(index + 1).padStart(3, '0')} = ${index + 1};`,
     ).join('\n') + '\n'
   );
 }
@@ -38,16 +40,16 @@ async function createGitFixture(projectPath: string): Promise<void> {
   await runGit(projectPath, ['init', '-b', 'main']);
   await runGit(projectPath, ['config', 'user.email', 'test@example.com']);
   await runGit(projectPath, ['config', 'user.name', 'Chromium Test']);
-  for (const file of ['alpha.txt', 'beta.txt']) {
+  for (const file of ['alpha.ts', 'beta.ts']) {
     await writeFile(join(projectPath, file), largeFileContents(file, 'baseline'), 'utf8');
   }
-  await runGit(projectPath, ['add', 'alpha.txt', 'beta.txt']);
+  await runGit(projectPath, ['add', 'alpha.ts', 'beta.ts']);
   await runGit(projectPath, ['commit', '-m', 'baseline revision']);
-  for (const file of ['alpha.txt', 'beta.txt']) {
+  for (const file of ['alpha.ts', 'beta.ts']) {
     await writeFile(join(projectPath, file), largeFileContents(file, 'committed'), 'utf8');
   }
   await runGit(projectPath, ['commit', '-am', 'large revision']);
-  for (const file of ['alpha.txt', 'beta.txt']) {
+  for (const file of ['alpha.ts', 'beta.ts']) {
     await writeFile(join(projectPath, file), largeFileContents(file, 'working'), 'utf8');
   }
 }
@@ -97,6 +99,7 @@ async function openWorkspaceSurface(page: Page, label: string): Promise<void> {
 async function waitForDiff(page: Page, panelSelector: string): Promise<void> {
   await page.locator(`${panelSelector} [data-git-file-header]`).first().waitFor();
   await page.locator(`${panelSelector} [data-git-diff-content-row]`).first().waitFor();
+  await page.locator(`${panelSelector} .cm-code-keyword`).first().waitFor();
   await page.evaluate(
     () =>
       new Promise<void>((resolve) =>
@@ -262,13 +265,13 @@ describe('Chromium pinned Git file headers', () => {
       });
       const originalStage = fixture.page.locator(
         `${WORKBENCH_PANEL} [data-git-virtual-row]` +
-          ' [data-git-file-header][data-file-path="alpha.txt"]' +
+          ' [data-git-file-header][data-file-path="alpha.ts"]' +
           ' button[title="Stage file"]',
       );
       await originalStage.focus();
       markPhase('pinning the unified Workbench header');
       await scrollDiffTo(fixture.page, WORKBENCH_PANEL, 60);
-      await waitForPinnedPath(fixture.page, WORKBENCH_PANEL, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, WORKBENCH_PANEL, 'alpha.ts');
       expect(await originalStage.evaluate((element) => document.activeElement === element)).toBe(
         true,
       );
@@ -287,7 +290,7 @@ describe('Chromium pinned Git file headers', () => {
           document
             .querySelector(
               `${selector} [data-git-virtual-row]:has(` +
-                '[data-git-file-header][data-file-path="alpha.txt"])',
+                '[data-git-file-header][data-file-path="alpha.ts"])',
             )
             ?.hasAttribute('inert') === true,
         WORKBENCH_PANEL,
@@ -303,7 +306,7 @@ describe('Chromium pinned Git file headers', () => {
       await setSplitMode(fixture.page);
       await waitForDiff(fixture.page, WORKBENCH_PANEL);
       await scrollDiffTo(fixture.page, WORKBENCH_PANEL, 60);
-      await waitForPinnedPath(fixture.page, WORKBENCH_PANEL, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, WORKBENCH_PANEL, 'alpha.ts');
       expectPinnedGeometry(await diffGeometry(fixture.page, WORKBENCH_PANEL), 60);
 
       markPhase('checking mobile containment');
@@ -314,7 +317,7 @@ describe('Chromium pinned Git file headers', () => {
       });
       if (await diffTab.count()) await diffTab.first().click();
       await scrollDiffTo(fixture.page, WORKBENCH_PANEL, 60);
-      await waitForPinnedPath(fixture.page, WORKBENCH_PANEL, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, WORKBENCH_PANEL, 'alpha.ts');
       const mobileGeometry = await diffGeometry(fixture.page, WORKBENCH_PANEL);
       expectPinnedGeometry(mobileGeometry, 60);
       expect(mobileGeometry.intersectsClose).toBe(false);
@@ -326,14 +329,14 @@ describe('Chromium pinned Git file headers', () => {
       await fixture.page.locator(COMPARE_PANEL).waitFor();
       await waitForDiff(fixture.page, COMPARE_PANEL);
       await scrollDiffTo(fixture.page, COMPARE_PANEL, 60);
-      await waitForPinnedPath(fixture.page, COMPARE_PANEL, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, COMPARE_PANEL, 'alpha.ts');
       const compareGeometry = await diffGeometry(fixture.page, COMPARE_PANEL);
       expect(Math.abs(compareGeometry.topDelta)).toBeLessThanOrEqual(1);
       expect(compareGeometry.rightOverflow).toBeLessThanOrEqual(1);
       expect(
         await fixture.page
           .locator(`${COMPARE_PANEL} [data-git-pinned-file-header]`)
-          .getByText('alpha.txt', { exact: true })
+          .getByText('alpha.ts', { exact: true })
           .count(),
       ).toBe(1);
 
@@ -347,7 +350,7 @@ describe('Chromium pinned Git file headers', () => {
         .click();
       await waitForDiff(fixture.page, HISTORY_PANEL);
       await scrollDiffTo(fixture.page, HISTORY_PANEL, 60);
-      await waitForPinnedPath(fixture.page, HISTORY_PANEL, 'alpha.txt');
+      await waitForPinnedPath(fixture.page, HISTORY_PANEL, 'alpha.ts');
       const historyGeometry = await diffGeometry(fixture.page, HISTORY_PANEL);
       expect(Math.abs(historyGeometry.topDelta)).toBeLessThanOrEqual(1);
       expect(historyGeometry.rightOverflow).toBeLessThanOrEqual(1);

@@ -349,6 +349,7 @@ export class GitDiffSyntaxController {
 
 	private publish(filePath: string, result: GitDiffFileSyntaxResult): void {
 		if (!this.cache.has(result.cacheKey)) return;
+		if (this.results[filePath]?.cacheKey === result.cacheKey) return;
 		this.results = { ...this.results, [filePath]: result };
 	}
 
