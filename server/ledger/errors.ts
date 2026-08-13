@@ -49,3 +49,11 @@ export class IncompleteLedgerCheckpointError extends LedgerError {
     super('Transcript ledger checkpoint did not complete');
   }
 }
+
+export class PermissionNotActionableError extends LedgerError {
+  override readonly name = 'PermissionNotActionableError';
+
+  constructor() {
+    super('This permission request is no longer actionable');
+  }
+}

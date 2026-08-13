@@ -30,6 +30,7 @@ import {
 } from './command-support.js';
 import type { CommandLedgerRecord } from './command-ledger.js';
 import { TransientControlActionError } from '../chats/chat-transient-feed.js';
+import { PermissionNotActionableError } from '../ledger/errors.js';
 
 const logger = createLogger('commands:session');
 
@@ -195,6 +196,14 @@ export class SessionCommands {
   }
 
   async submitPermissionDecision(input: PermissionDecisionInput): Promise<CommandAcceptedResponse> {
+    return this.support.withChatMutationLock(input.chatId, () => (
+      this.submitPermissionDecisionLocked(input)
+    ));
+  }
+
+  private async submitPermissionDecisionLocked(
+    input: PermissionDecisionInput,
+  ): Promise<CommandAcceptedResponse> {
     this.support.requireChat(input.chatId);
     const ledger = await this.deps.ledger.accept({
       commandType: 'permission-decision',
@@ -217,13 +226,16 @@ export class SessionCommands {
           allow: input.allow,
           alwaysAllow: input.alwaysAllow,
           response: input.response,
-        });
+        }, input.control);
         await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
       } catch (error) {
         await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
           error: error instanceof Error ? error.message : String(error),
         });
-        if (error instanceof TransientControlActionError) {
+        if (
+          error instanceof TransientControlActionError
+          || error instanceof PermissionNotActionableError
+        ) {
           throw new CommandValidationError(
             'VALIDATION_FAILED',
             'This permission request is no longer actionable',

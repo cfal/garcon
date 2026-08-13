@@ -18,6 +18,7 @@ import {
   type CarriedContext,
 } from '@garcon/common/transcript-seed';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
+import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import {
   normalizePermissionMode,
   normalizeThinkingMode,
@@ -489,32 +490,24 @@ export class AgentRuntimeRouter {
     chatId: string,
     permissionRequestId: string,
     decision: PermissionDecisionPayload,
+    control: ChatTransientControlAction,
   ): Promise<void> {
     const entry = this.#registry.getChat(chatId);
     const execution = entry ? this.#directory.get(entry.agentId)?.execution : null;
     if (!execution?.respondToPermission || !permissionRequestId) {
       throw new Error('The active integration cannot resolve this permission request');
     }
-    await execution.respondToPermission(permissionRequestId, decision);
-    const view = this.#ledger.currentView(chatId);
-    if (!view) throw new Error('Transcript view is unavailable');
-    const request = this.#ledger.currentRows(chatId).findLast((row) => (
-      row.kind === 'permission-requested'
-      && row.lifecycle.requestId === permissionRequestId
-    ));
-    if (!request || request.kind !== 'permission-requested') {
-      throw new Error('Permission request is not part of the current transcript');
+    if (control.chatId !== chatId || control.id !== permissionRequestId) {
+      throw new Error('Permission control does not match the request');
     }
-    this.#ledger.appendPermissionResolution({
-      chatId,
-      viewId: view.viewId,
-      lifecycle: {
-        kind: 'resolved',
-        requestId: permissionRequestId,
-        incarnation: request.lifecycle.incarnation,
-        decision,
-      },
-    });
+    const claim = this.#ledger.claimPermissionResolution(control);
+    try {
+      await execution.respondToPermission(permissionRequestId, decision);
+    } catch (error) {
+      this.#ledger.abandonPermissionResolution(claim);
+      throw error;
+    }
+    this.#ledger.completePermissionResolution(claim, decision);
   }
 
   async forkAgentSession(args: {

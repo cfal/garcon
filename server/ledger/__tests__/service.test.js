@@ -2,8 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, UserMessage } from '../../../common/chat-types.ts';
+import { AssistantMessage, BashToolUseMessage, UserMessage } from '../../../common/chat-types.ts';
 import { transcriptViewId } from '../contracts.ts';
+import { PermissionNotActionableError } from '../errors.ts';
 import { TranscriptLedgerService, TranscriptSinkClosedError } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 
@@ -92,6 +93,76 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('keeps permission history durable while actionability follows the active run', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1');
+      ledger.beginRun('chat-1', 'run-1');
+      lease.sink.publish({
+        type: 'permission',
+        runId: 'run-1',
+        lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+      });
+
+      const claim = ledger.claimPermissionResolution(permissionControl());
+      const resolved = ledger.completePermissionResolution(claim, { allow: true });
+
+      expect(resolved).toMatchObject({
+        kind: 'permission-resolved',
+        lifecycle: {
+          requestId: 'permission-1',
+          incarnation: 'incarnation-1',
+          decision: { allow: true },
+        },
+      });
+      expect(() => ledger.claimPermissionResolution(permissionControl()))
+        .toThrow(PermissionNotActionableError);
+    }, { serverInstanceId: 'server-1' });
+  });
+
+  it('commits late permission facts without making them actionable', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1');
+      ledger.beginRun('chat-1', 'run-1');
+      ledger.interruptRun('chat-1');
+
+      lease.sink.publish({
+        type: 'permission',
+        runId: 'run-1',
+        lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+      });
+
+      expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
+        'run-ended',
+        'permission-requested',
+      ]);
+      expect(() => ledger.claimPermissionResolution(permissionControl()))
+        .toThrow(PermissionNotActionableError);
+    }, { serverInstanceId: 'server-1' });
+  });
+
+  it('restores a claimed permission after a failed forward only while its run remains active', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1');
+      ledger.beginRun('chat-1', 'run-1');
+      lease.sink.publish({
+        type: 'permission',
+        runId: 'run-1',
+        lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+      });
+
+      const claim = ledger.claimPermissionResolution(permissionControl());
+      ledger.abandonPermissionResolution(claim);
+
+      expect(ledger.claimPermissionResolution(permissionControl())).toMatchObject({
+        requestId: 'permission-1',
+        runId: 'run-1',
+      });
+    }, { serverInstanceId: 'server-1' });
+  });
+
   it('commits an input and its resend composition as one synchronous operation', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');
@@ -174,19 +245,45 @@ describe('TranscriptLedgerService', () => {
   });
 });
 
-async function withService(run) {
+async function withService(run, serviceOptions = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-ledger-service-'));
   const store = new TranscriptLedgerStore(root, {
     createViewId: () => transcriptViewId('view-1'),
     now: () => TS,
   });
-  const ledger = new TranscriptLedgerService(store, { now: () => TS });
+  const ledger = new TranscriptLedgerService(store, { now: () => TS, ...serviceOptions });
   try {
     await run({ ledger, store });
   } finally {
     ledger.close();
     await rm(root, { recursive: true, force: true });
   }
+}
+
+function permissionRequest(requestId, incarnation) {
+  return {
+    kind: 'requested',
+    requestId,
+    incarnation,
+    requestedTool: new BashToolUseMessage(TS, 'tool-1', 'pwd'),
+    options: [],
+  };
+}
+
+function permissionControl() {
+  return {
+    serverInstanceId: 'server-1',
+    chatId: 'chat-1',
+    agentOwnershipEpoch: 'ownership-1',
+    turnOwner: {
+      agentOwnershipEpoch: 'ownership-1',
+      commandType: 'agent-run',
+      clientRequestId: 'run-1',
+      turnId: 'run-1',
+    },
+    id: 'permission-1',
+    incarnation: 'incarnation-1',
+  };
 }
 
 function tick() {

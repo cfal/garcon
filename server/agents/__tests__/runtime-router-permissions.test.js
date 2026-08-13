@@ -48,8 +48,52 @@ describe('AgentRuntimeRouter permission replies', () => {
     const router = makeRouter(execution);
     const decision = { allow: true };
 
-    await router.resolvePermission('chat-1', 'permission-1', decision);
+    await router.resolvePermission('chat-1', 'permission-1', decision, permissionControl());
 
     expect(resolvePermission).toHaveBeenCalledWith('permission-1', decision);
   });
+
+  it('releases the actionability claim when the provider rejects the decision', async () => {
+    const respondToPermission = mock(async () => {
+      throw new Error('provider rejected permission');
+    });
+    const abandoned = mock(() => undefined);
+    const transcript = createRuntimeTranscriptFixture({ onPermissionAbandoned: abandoned });
+    const router = new AgentRuntimeRouter({
+      registry: { getChat: mock(() => ({ agentId: 'test' })) },
+      directory: { get: mock(() => ({ descriptor: { id: 'test' }, execution: { respondToPermission } })) },
+      endpointResolver: {},
+      events: {},
+      projection: {},
+      getCarryOverRevision: () => 'carry-1',
+      loadCarriedContext: async () => null,
+      getCarryOverMessageCount: async () => 0,
+      ledger: transcript.ledger,
+      adoption: transcript.adoption,
+    });
+
+    await expect(router.resolvePermission(
+      'chat-1',
+      'permission-1',
+      { allow: false },
+      permissionControl(),
+    )).rejects.toThrow('provider rejected permission');
+    expect(abandoned).toHaveBeenCalledTimes(1);
+  });
 });
+
+function permissionControl() {
+  return {
+    serverInstanceId: 'server-1',
+    chatId: 'chat-1',
+    agentOwnershipEpoch: 'ownership-1',
+    turnOwner: {
+      agentOwnershipEpoch: 'ownership-1',
+      commandType: 'agent-run',
+      clientRequestId: 'run-1',
+      turnId: 'run-1',
+    },
+    id: 'permission-1',
+    incarnation: 'incarnation-1',
+  };
+}

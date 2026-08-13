@@ -7,6 +7,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
 import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
+import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { ResendCandidate } from '../../common/chat-view.js';
 import type {
   InputComposition,
@@ -23,6 +24,7 @@ import type {
   TranscriptWatermark,
 } from './contracts.js';
 import { TranscriptLedgerStore } from './store.js';
+import { PermissionNotActionableError } from './errors.js';
 
 export class TranscriptSinkClosedError extends Error {
   constructor() {
@@ -74,23 +76,43 @@ export type TranscriptCommitEvent =
 export interface TranscriptLedgerServiceOptions {
   readonly now?: () => string;
   readonly createRunId?: () => string;
+  readonly serverInstanceId?: string;
   readonly onListenerError?: (error: unknown) => void;
+}
+
+export interface PermissionResolutionClaim {
+  readonly chatId: string;
+  readonly viewId: TranscriptViewId;
+  readonly runId: string;
+  readonly requestId: string;
+  readonly incarnation: string;
+  readonly claimId: string;
+}
+
+interface ActivePermission {
+  readonly runId: string;
+  readonly incarnation: string;
+  readonly claimId: string | null;
 }
 
 export class TranscriptLedgerService {
   readonly #store: TranscriptLedgerStore;
   readonly #now: () => string;
   readonly #createRunId: () => string;
+  readonly #serverInstanceId: string;
   readonly #onListenerError: (error: unknown) => void;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
+  readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
+  readonly #permissionClaims = new Map<string, PermissionResolutionClaim>();
   readonly #preparedInputs = new Map<string, InputComposition>();
 
   constructor(store: TranscriptLedgerStore, options: TranscriptLedgerServiceOptions = {}) {
     this.#store = store;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#createRunId = options.createRunId ?? (() => crypto.randomUUID());
+    this.#serverInstanceId = options.serverInstanceId ?? crypto.randomUUID();
     this.#onListenerError = options.onListenerError ?? (() => undefined);
   }
 
@@ -124,6 +146,8 @@ export class TranscriptLedgerService {
     }, () => {
       if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
       this.#activeRuns.delete(chatId);
+      this.#activePermissions.delete(chatId);
+      this.#deletePermissionClaims(chatId);
     });
     this.#leases.set(chatId, lease);
     return lease;
@@ -139,6 +163,7 @@ export class TranscriptLedgerService {
     if (this.#activeRuns.has(chatId)) {
       throw new TypeError(`Transcript run is already active for ${chatId}`);
     }
+    this.#activePermissions.delete(chatId);
     this.#activeRuns.set(chatId, runId);
     return runId;
   }
@@ -219,26 +244,82 @@ export class TranscriptLedgerService {
     if (clientMessageId) this.#preparedInputs.delete(inputKey(chatId, clientMessageId));
   }
 
-  appendPermissionResolution(input: {
-    readonly chatId: string;
-    readonly viewId: TranscriptViewId;
-    readonly lifecycle: Extract<AgentPermissionLifecycle, { readonly kind: 'resolved' }>;
-  }): LedgerPermissionRow {
-    const [row] = this.#store.append(input.chatId, input.viewId, [{
+  claimPermissionResolution(action: ChatTransientControlAction): PermissionResolutionClaim {
+    if (action.serverInstanceId !== this.#serverInstanceId) throw new PermissionNotActionableError();
+    const runId = action.turnOwner.turnId;
+    const permission = this.#activePermissions.get(action.chatId)?.get(action.id);
+    if (
+      !permission
+      || permission.runId !== runId
+      || permission.incarnation !== action.incarnation
+      || permission.claimId !== null
+      || this.#activeRuns.get(action.chatId) !== runId
+    ) {
+      throw new PermissionNotActionableError();
+    }
+    const view = this.#store.currentView(action.chatId);
+    if (!view) throw new PermissionNotActionableError();
+    const claim = Object.freeze({
+      chatId: action.chatId,
+      viewId: view.viewId,
+      runId,
+      requestId: action.id,
+      incarnation: action.incarnation,
+      claimId: crypto.randomUUID(),
+    });
+    this.#activePermissions.get(action.chatId)!.set(action.id, {
+      ...permission,
+      claimId: claim.claimId,
+    });
+    this.#permissionClaims.set(claim.claimId, claim);
+    return claim;
+  }
+
+  completePermissionResolution(
+    claim: PermissionResolutionClaim,
+    decision: Extract<AgentPermissionLifecycle, { readonly kind: 'resolved' }>['decision'],
+  ): LedgerPermissionRow {
+    if (this.#permissionClaims.get(claim.claimId) !== claim) {
+      throw new PermissionNotActionableError();
+    }
+    this.#permissionClaims.delete(claim.claimId);
+    const [row] = this.#store.append(claim.chatId, claim.viewId, [{
       kind: 'permission-resolved',
       at: this.#now(),
-      lifecycle: input.lifecycle,
+      lifecycle: {
+        kind: 'resolved',
+        requestId: claim.requestId,
+        incarnation: claim.incarnation,
+        decision,
+      },
       providerMeta: null,
     }]);
     const permission = row as LedgerPermissionRow;
+    const active = this.#activePermissions.get(claim.chatId)?.get(claim.requestId);
+    if (active?.claimId === claim.claimId) {
+      this.#activePermissions.get(claim.chatId)?.delete(claim.requestId);
+    }
     this.#notify({
       type: 'permission',
-      chatId: input.chatId,
-      viewId: input.viewId,
+      chatId: claim.chatId,
+      viewId: claim.viewId,
       runId: null,
       row: permission,
     });
     return permission;
+  }
+
+  abandonPermissionResolution(claim: PermissionResolutionClaim): void {
+    if (this.#permissionClaims.get(claim.claimId) !== claim) return;
+    this.#permissionClaims.delete(claim.claimId);
+    const permissions = this.#activePermissions.get(claim.chatId);
+    const active = permissions?.get(claim.requestId);
+    if (
+      active?.claimId === claim.claimId
+      && this.#activeRuns.get(claim.chatId) === claim.runId
+    ) {
+      permissions!.set(claim.requestId, { ...active, claimId: null });
+    }
   }
 
   appendNotice(input: {
@@ -327,6 +408,8 @@ export class TranscriptLedgerService {
   closeChat(chatId: string): void {
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
+    this.#activePermissions.delete(chatId);
+    this.#deletePermissionClaims(chatId);
     this.#deletePreparedInputs(chatId);
     this.#store.closeChat(chatId);
   }
@@ -334,6 +417,8 @@ export class TranscriptLedgerService {
   deleteChat(chatId: string): void {
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
+    this.#activePermissions.delete(chatId);
+    this.#deletePermissionClaims(chatId);
     this.#deletePreparedInputs(chatId);
     this.#store.deleteChat(chatId);
   }
@@ -342,6 +427,8 @@ export class TranscriptLedgerService {
     for (const lease of this.#leases.values()) lease.close();
     this.#leases.clear();
     this.#activeRuns.clear();
+    this.#activePermissions.clear();
+    this.#permissionClaims.clear();
     this.#preparedInputs.clear();
     this.#store.close();
   }
@@ -390,6 +477,7 @@ export class TranscriptLedgerService {
           runId: event.runId,
           row: row as LedgerPermissionRow,
         });
+        this.#applyPermissionLifecycle(chatId, event.runId, event.lifecycle);
         return;
       }
       case 'run-ended': {
@@ -424,8 +512,50 @@ export class TranscriptLedgerService {
       providerMeta: null,
     }]);
     const ended = row as LedgerRunEndedRow;
+    this.#clearRunPermissions(chatId, runId);
     this.#notify({ type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended });
     return ended;
+  }
+
+  #applyPermissionLifecycle(
+    chatId: string,
+    runId: string,
+    lifecycle: Exclude<AgentPermissionLifecycle, { readonly kind: 'resolved' }>,
+  ): void {
+    if (lifecycle.kind === 'requested') {
+      if (this.#activeRuns.get(chatId) !== runId) return;
+      let permissions = this.#activePermissions.get(chatId);
+      if (!permissions) {
+        permissions = new Map();
+        this.#activePermissions.set(chatId, permissions);
+      }
+      permissions.set(lifecycle.requestId, {
+        runId,
+        incarnation: lifecycle.incarnation,
+        claimId: null,
+      });
+      return;
+    }
+    const permissions = this.#activePermissions.get(chatId);
+    const active = permissions?.get(lifecycle.requestId);
+    if (active?.runId === runId && active.incarnation === lifecycle.incarnation) {
+      permissions!.delete(lifecycle.requestId);
+    }
+  }
+
+  #clearRunPermissions(chatId: string, runId: string): void {
+    const permissions = this.#activePermissions.get(chatId);
+    if (!permissions) return;
+    for (const [requestId, permission] of permissions) {
+      if (permission.runId === runId) permissions.delete(requestId);
+    }
+    if (permissions.size === 0) this.#activePermissions.delete(chatId);
+  }
+
+  #deletePermissionClaims(chatId: string): void {
+    for (const [claimId, claim] of this.#permissionClaims) {
+      if (claim.chatId === chatId) this.#permissionClaims.delete(claimId);
+    }
   }
 
   #notify(event: TranscriptCommitEvent): void {

@@ -12,6 +12,7 @@ import type {
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
+import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../common/agents.js';
@@ -119,6 +120,7 @@ export interface AgentRegistryServiceContract {
     chatId: string,
     permissionRequestId: string,
     decision: PermissionDecisionPayload,
+    control: ChatTransientControlAction,
   ): Promise<void>;
   prepareProjectPathUpdate(
     agentId: string,
@@ -297,8 +299,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     chatId: string,
     permissionRequestId: string,
     decision: PermissionDecisionPayload,
+    control: ChatTransientControlAction,
   ): Promise<void> {
-    return this.#runtime.resolvePermission(chatId, permissionRequestId, decision);
+    return this.#runtime.resolvePermission(chatId, permissionRequestId, decision, control);
   }
   prepareProjectPathUpdate(
     agentId: string,

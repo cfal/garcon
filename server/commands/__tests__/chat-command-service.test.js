@@ -2976,6 +2976,19 @@ describe('ChatCommandService', () => {
   it('forwards structured permission decision responses to agents', async () => {
     const { service, agents, ledger } = makeService();
     const response = { outcome: { outcome: 'accepted' } };
+    const control = {
+      serverInstanceId: 'server-instance-test',
+      chatId: SOURCE_CHAT_ID,
+      agentOwnershipEpoch: 'epoch-1',
+      turnOwner: {
+        agentOwnershipEpoch: 'epoch-1',
+        commandType: 'agent-run',
+        clientRequestId: 'req-run-1',
+        turnId: 'turn-1',
+      },
+      id: 'perm-1',
+      incarnation: 'incarnation-1',
+    };
 
     await service.submitPermissionDecision({
       chatId: SOURCE_CHAT_ID,
@@ -2984,26 +2997,14 @@ describe('ChatCommandService', () => {
       alwaysAllow: false,
       response,
       clientRequestId: 'req-perm-1',
-      control: {
-        serverInstanceId: 'server-instance-test',
-        chatId: SOURCE_CHAT_ID,
-        agentOwnershipEpoch: 'epoch-1',
-        turnOwner: {
-          agentOwnershipEpoch: 'epoch-1',
-          commandType: 'agent-run',
-          clientRequestId: 'req-run-1',
-          turnId: 'turn-1',
-        },
-        id: 'perm-1',
-        incarnation: 'incarnation-1',
-      },
+      control,
     });
 
     expect(agents.resolvePermission).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'perm-1', {
       allow: true,
       alwaysAllow: false,
       response,
-    });
+    }, control);
 
     const record = await readLedgerRecord(ledger, 'permission-decision', 'req-perm-1');
     expect(record).toMatchObject({ status: 'finished', payload: {} });

@@ -292,6 +292,7 @@ export async function startServer(): Promise<void> {
       new Set(Object.keys(chatRegistry.listAllChats())),
     );
     const transcriptLedger = new TranscriptLedgerService(transcriptStore, {
+      serverInstanceId: runtimeState.identity.instanceId,
       onListenerError(error) {
         logger.warn('Transcript commit listener failed:', errorMessage(error));
       },

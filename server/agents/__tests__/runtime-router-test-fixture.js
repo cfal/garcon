@@ -9,6 +9,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
   let activeRunId = null;
   let activeChatId = 'chat-1';
   let session = options.session ?? null;
+  let permissionClaim = null;
   let closed = false;
 
   const emit = (event) => {
@@ -85,7 +86,26 @@ export function createRuntimeTranscriptFixture(options = {}) {
     },
     takePreparedInput: () => options.composition ?? null,
     conversationMessages: () => options.priorContext ?? [],
-    appendPermissionResolution: (input) => input.lifecycle,
+    claimPermissionResolution: (control) => {
+      permissionClaim = {
+        chatId: control.chatId,
+        viewId: view.viewId,
+        runId: control.turnOwner.turnId,
+        requestId: control.id,
+        incarnation: control.incarnation,
+        claimId: 'claim-1',
+      };
+      options.onPermissionClaim?.(permissionClaim);
+      return permissionClaim;
+    },
+    completePermissionResolution: (claim, decision) => {
+      options.onPermissionResolved?.(claim, decision);
+      permissionClaim = null;
+    },
+    abandonPermissionResolution: (claim) => {
+      options.onPermissionAbandoned?.(claim);
+      permissionClaim = null;
+    },
   };
   return {
     ledger,
