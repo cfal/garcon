@@ -4,8 +4,10 @@ import { projectSearchMessage } from '@garcon/server-agent-common/search/message
 import type { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import type {
   LedgerRow,
+  TranscriptView,
   TranscriptViewId,
 } from '../../ledger/contracts.js';
+import { LedgerFencedError } from '../../ledger/errors.js';
 import type {
   TranscriptCommitEvent,
   TranscriptLedgerService,
@@ -30,6 +32,7 @@ export class TranscriptSearchController {
   readonly #deps: TranscriptSearchControllerDeps;
   readonly #lifecycleAbort = new AbortController();
   readonly #chatTails = new Map<string, Promise<void>>();
+  readonly #fencedChatIds = new Set<string>();
   readonly #unsubscribe: () => void;
   #enabled = false;
   #admissionFailed = false;
@@ -79,6 +82,7 @@ export class TranscriptSearchController {
   }
 
   deleteChat(chatId: string): void {
+    this.#fencedChatIds.delete(chatId);
     if (!this.#enabled || this.#closed) return;
     void this.#enqueue(chatId, () => this.#deps.service.deleteChat(chatId));
   }
@@ -112,7 +116,14 @@ export class TranscriptSearchController {
     try {
       const allowedViews = new Map<string, TranscriptViewId>();
       for (const chatId of options.allowedChatIds) {
-        const view = this.#deps.ledger.currentView(chatId);
+        let view: TranscriptView | null;
+        try {
+          view = this.#deps.ledger.currentView(chatId);
+        } catch (error) {
+          if (!(error instanceof LedgerFencedError)) throw error;
+          this.#fencedChatIds.add(chatId);
+          continue;
+        }
         if (view) allowedViews.set(chatId, view.viewId);
       }
       const response = await this.#deps.service.search({
@@ -124,11 +135,16 @@ export class TranscriptSearchController {
         limit: clampLimit(options.limit),
         signal: abort.signal,
       });
+      const failedLedgerCount = [...new Set(options.allowedChatIds)]
+        .filter((chatId) => this.#fencedChatIds.has(chatId)).length;
       return {
         results: response.results.filter(
           (result) => allowedViews.get(result.chatId) === result.transcriptViewId,
         ),
-        index: response.index,
+        index: {
+          ...response.index,
+          failedChatCount: response.index.failedChatCount + failedLedgerCount,
+        },
       };
     } catch {
       throw new TranscriptSearchUnavailableError(
@@ -142,14 +158,20 @@ export class TranscriptSearchController {
   }
 
   validateResultView(chatId: string, transcriptViewId: string): boolean {
-    return this.#enabled
-      && !this.#closed
-      && this.#deps.ledger.currentView(chatId)?.viewId === transcriptViewId;
+    if (!this.#enabled || this.#closed) return false;
+    try {
+      return this.#deps.ledger.currentView(chatId)?.viewId === transcriptViewId;
+    } catch (error) {
+      if (!(error instanceof LedgerFencedError)) throw error;
+      this.#fencedChatIds.add(chatId);
+      return false;
+    }
   }
 
   async disableAndDelete(): Promise<void> {
     this.#enabled = false;
     this.#admissionFailed = false;
+    this.#fencedChatIds.clear();
     await Promise.allSettled(this.#chatTails.values());
     this.#chatTails.clear();
     await this.#deps.service.disableAndDelete(new AbortController().signal);
@@ -159,6 +181,7 @@ export class TranscriptSearchController {
     if (this.#closed) return;
     this.#closed = true;
     this.#enabled = false;
+    this.#fencedChatIds.clear();
     this.#lifecycleAbort.abort();
     this.#unsubscribe();
     await Promise.allSettled(this.#chatTails.values());
@@ -169,6 +192,10 @@ export class TranscriptSearchController {
   async #syncAll(): Promise<void> {
     if (!this.#enabled || this.#closed) return;
     const chatIds = [...new Set(this.#deps.listChatIds())];
+    const registered = new Set(chatIds);
+    for (const chatId of this.#fencedChatIds) {
+      if (!registered.has(chatId)) this.#fencedChatIds.delete(chatId);
+    }
     await Promise.all(chatIds.map((chatId) => this.#enqueue(chatId, () => this.#syncChat(chatId))));
     await this.#deps.service.pruneChats(chatIds);
   }
@@ -176,18 +203,29 @@ export class TranscriptSearchController {
   async #syncChat(chatId: string): Promise<void> {
     if (!this.#enabled || this.#closed) return;
     if (!this.#deps.listChatIds().includes(chatId)) {
+      this.#fencedChatIds.delete(chatId);
       await this.#deps.service.deleteChat(chatId);
       return;
     }
-    const view = this.#deps.ledger.currentView(chatId);
+    let view: TranscriptView | null;
+    let rows: readonly LedgerRow[];
+    try {
+      view = this.#deps.ledger.currentView(chatId);
+      rows = view ? this.#deps.ledger.currentRows(chatId) : [];
+    } catch (error) {
+      if (!(error instanceof LedgerFencedError)) throw error;
+      this.#fencedChatIds.add(chatId);
+      await this.#deps.service.deleteChat(chatId);
+      return;
+    }
     if (!view) return;
-    const rows = this.#deps.ledger.currentRows(chatId);
     await this.#deps.service.replaceChat({
       chatId,
       transcriptViewId: view.viewId,
       throughOrdinal: rows.at(-1)?.ordinal ?? 0,
       rows: searchableRows(rows),
     });
+    this.#fencedChatIds.delete(chatId);
   }
 
   #onCommit(event: TranscriptCommitEvent): void {

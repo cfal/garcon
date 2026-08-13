@@ -22,6 +22,15 @@ describe('transcript corruption isolation', () => {
         });
         await fixture.client.waitForTurnTerminal(chatId, turn.turnId);
       }
+      const searchSettings = await fixture.client.updateSettings({
+        features: { transcriptSearch: { enabled: true } },
+      });
+      expect(searchSettings.settings.features.transcriptSearch.enabled).toBe(true);
+      await fixture.client.waitForChatSearch(
+        { query: 'healthy-ledger-chat', chatIds: [corruptChatId, healthyChatId] },
+        (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === 2,
+      );
 
       await fixture.restartGarcon({
         beforeStart: () => writeFile(
@@ -54,6 +63,18 @@ describe('transcript corruption isolation', () => {
       expect(userContents((await fixture.client.getMessages(healthyChatId)).messages)).toEqual([
         'healthy-ledger-chat',
       ]);
+      const search = await fixture.client.waitForChatSearch(
+        { query: 'healthy-ledger-chat', chatIds: [corruptChatId, healthyChatId] },
+        (response) => response.index.pendingChatCount === 0
+          && response.index.failedChatCount === 1,
+      );
+      expect(search.results.map((result) => result.chatId)).toEqual([healthyChatId]);
+      expect(search.index).toEqual({
+        indexedChatCount: 1,
+        pendingChatCount: 0,
+        failedChatCount: 1,
+        unsupportedChatCount: 0,
+      });
       const healthyTurn = await fixture.client.runDirectChat({
         chatId: healthyChatId,
         content: 'healthy-after-corruption',

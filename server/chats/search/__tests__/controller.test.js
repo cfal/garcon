@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage, AssistantMessage } from '../../../../common/chat-types.js';
+import { LedgerFencedError } from '../../../ledger/errors.js';
 import { TranscriptSearchController } from '../controller.js';
 
 function userRow(viewId, ordinal, content) {
@@ -193,5 +194,38 @@ describe('TranscriptSearchController', () => {
     expect(result.results).toEqual([
       expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'view-1' }),
     ]);
+  });
+
+  it('keeps healthy chats searchable when another ledger is fenced', async () => {
+    const test = harness();
+    test.views.set('chat-fenced', { viewId: 'view-fenced', contentStartOrdinal: 1 });
+    test.rows.set('chat-fenced', [userRow('view-fenced', 1, 'unavailable')]);
+    test.ledger.currentView.mockImplementation((chatId) => {
+      if (chatId === 'chat-fenced') throw new LedgerFencedError(chatId);
+      return test.views.get(chatId) ?? null;
+    });
+
+    await test.controller.initialize(true);
+    const result = await test.controller.search({
+      query: 'hello',
+      allowedChatIds: ['chat-1', 'chat-fenced'],
+    });
+
+    expect(test.service.replaceChat).toHaveBeenCalledTimes(1);
+    expect(test.service.deleteChat).toHaveBeenCalledWith('chat-fenced');
+    expect(test.service.pruneChats).toHaveBeenCalledWith(['chat-1', 'chat-fenced']);
+    expect(test.service.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1' }],
+    }));
+    expect(result.results).toEqual([
+      expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'view-1' }),
+    ]);
+    expect(result.index).toEqual({
+      indexedChatCount: 1,
+      pendingChatCount: 0,
+      failedChatCount: 1,
+      unsupportedChatCount: 0,
+    });
+    expect(test.controller.validateResultView('chat-fenced', 'view-fenced')).toBe(false);
   });
 });
