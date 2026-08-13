@@ -251,7 +251,7 @@ export class GitDiffDocumentController {
 		});
 		this.demandReconciler.markReadinessChanged();
 		const [priority, ...prefetch] = snapshot.firstBodyCandidates;
-		if (priority) this.requestBodies([priority], 'visible');
+		if (priority) this.requestNavigationBodies([priority]);
 		this.requestBodies(prefetch, 'prefetch');
 	}
 
@@ -263,7 +263,7 @@ export class GitDiffDocumentController {
 	focusFile(filePath: string): void {
 		this.focusedFilePath = filePath;
 		this.discardErrorBody(filePath);
-		this.requestBodies([filePath], 'visible');
+		this.requestNavigationBodies([filePath]);
 		this.scrollToken += 1;
 		this.scrollRequest = { filePath, token: this.scrollToken };
 	}
@@ -392,6 +392,18 @@ export class GitDiffDocumentController {
 		});
 	}
 
+	private requestNavigationBodies(filePaths: readonly string[]): GitReviewDemandOutcome {
+		const snapshot = this.snapshot;
+		if (snapshot) {
+			this.syntax.handleDemand({
+				kind: 'navigation',
+				documentId: snapshot.documentId,
+				filePaths,
+			});
+		}
+		return this.requestBodies(filePaths, 'visible');
+	}
+
 	private requestBodies(
 		filePaths: readonly string[],
 		purpose: GitReviewBodyPurpose,
@@ -401,13 +413,6 @@ export class GitDiffDocumentController {
 		if (this.aggregateLimit) return 'limited';
 		if (purpose === 'prefetch' && this.prefetchStopped) return 'already-satisfied';
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
-		if (purpose === 'visible' && uniquePaths.length > 0) {
-			this.syntax.handleDemand({
-				kind: 'navigation',
-				documentId: snapshot.documentId,
-				filePaths: uniquePaths,
-			});
-		}
 		this.seedCachedBodies(uniquePaths, purpose);
 		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));

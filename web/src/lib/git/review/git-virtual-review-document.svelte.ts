@@ -274,7 +274,7 @@ export class GitVirtualReviewDocumentController {
 
 	focusFile(projectPath: string, filePath: string): void {
 		this.discardErrorBody(filePath);
-		this.requestBodies(projectPath, [filePath], 'visible');
+		this.requestNavigationBodies(projectPath, [filePath]);
 		this.requestScrollToFile(filePath);
 	}
 
@@ -285,7 +285,7 @@ export class GitVirtualReviewDocumentController {
 
 	requestInitialBodies(projectPath: string, filePaths: string[]): void {
 		const [priority, ...prefetch] = unique(filePaths);
-		if (priority) this.requestBodies(projectPath, [priority], 'visible');
+		if (priority) this.requestNavigationBodies(projectPath, [priority]);
 		this.requestBodies(projectPath, prefetch, 'prefetch');
 	}
 
@@ -301,13 +301,6 @@ export class GitVirtualReviewDocumentController {
 		this.ensureBodyScheduler(projectPath, guard);
 		if (!this.bodyScheduler) return 'not-ready';
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
-		if (purpose === 'visible' && uniquePaths.length > 0) {
-			this.syntax.handleDemand({
-				kind: 'navigation',
-				documentId: this.summary.documentId,
-				filePaths: uniquePaths,
-			});
-		}
 		this.seedCachedBodies(uniquePaths, purpose, guard);
 		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath, guard));
@@ -406,6 +399,21 @@ export class GitVirtualReviewDocumentController {
 	private requestDemandPaths(filePaths: readonly string[]): GitReviewDemandOutcome {
 		const projectPath = this.deps.targetProjectPath();
 		if (!projectPath) return 'not-ready';
+		return this.requestBodies(projectPath, filePaths, 'visible');
+	}
+
+	private requestNavigationBodies(
+		projectPath: string,
+		filePaths: readonly string[],
+	): GitReviewDemandOutcome {
+		const summary = this.summary;
+		if (summary) {
+			this.syntax.handleDemand({
+				kind: 'navigation',
+				documentId: summary.documentId,
+				filePaths,
+			});
+		}
 		return this.requestBodies(projectPath, filePaths, 'visible');
 	}
 

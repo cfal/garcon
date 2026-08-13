@@ -153,6 +153,54 @@ describe('GitDiffDocumentController', () => {
 		await vi.waitFor(() => expect(addedSyntaxSegments(controller)).toBeDefined());
 	});
 
+	it('does not retain viewport paths as navigation syntax demand', async () => {
+		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
+		const syntax = new GitDiffSyntaxController({
+			waitForWorkSlot: async () => {},
+			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
+		});
+		const controller = new GitDiffDocumentController(syntax);
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
+			bodyResponse(
+				'doc',
+				requested.map(({ path }) => path),
+			),
+		);
+		controller.open(
+			{
+				project: '/project',
+				documentId: 'doc',
+				files: [file('a.ts'), file('b.ts')],
+				limits: { ...limits, maxLoadedRows: 20 },
+				firstBodyCandidates: [],
+			},
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
+		);
+
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: 'doc',
+			filePaths: ['a.ts'],
+		});
+		await vi.waitFor(() => expect(syntax.results['a.ts']).toBeDefined());
+
+		syntax.replaceBodies({});
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: 'doc',
+			filePaths: ['b.ts'],
+		});
+		await vi.waitFor(() => expect(syntax.results['b.ts']).toBeDefined());
+
+		expect(syntax.results['a.ts']).toBeUndefined();
+	});
+
 	it('replays early demand into syntax and honors document cache clearing', async () => {
 		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
 		const syntax = new GitDiffSyntaxController({

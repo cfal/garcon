@@ -303,6 +303,40 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		expect(syntax.results['b.ts']).toBeUndefined();
 	});
 
+	it('does not retain viewport paths as navigation syntax demand', async () => {
+		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
+		const syntax = new GitDiffSyntaxController({
+			waitForWorkSlot: async () => {},
+			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
+		});
+		const deps = documentDeps(() => ['a.ts', 'b.ts']);
+		deps.targetProjectPath = () => '/project';
+		const controller = new GitVirtualReviewDocumentController(deps, syntax);
+		const summary = makeSummary([makeFile('a.ts'), makeFile('b.ts')]);
+		const bodies = { 'a.ts': makeBody('a.ts'), 'b.ts': makeBody('b.ts') };
+		controller.fileBodies = bodies;
+		controller.applySummary(summary);
+
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: summary.documentId,
+			filePaths: ['a.ts'],
+		});
+		await vi.waitFor(() => expect(syntax.results['a.ts']).toBeDefined());
+
+		syntax.replaceBodies({ 'b.ts': bodies['b.ts'] });
+		controller.handleBodyDemand({
+			kind: 'viewport',
+			documentId: summary.documentId,
+			filePaths: ['b.ts'],
+		});
+		await vi.waitFor(() => expect(syntax.results['b.ts']).toBeDefined());
+
+		syntax.replaceBodies(bodies);
+
+		expect(syntax.results['a.ts']).toBeUndefined();
+	});
+
 	it('activates demanded retained bodies and follows workbench cache policy', async () => {
 		let visiblePaths = ['a.ts'];
 		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
