@@ -13,23 +13,19 @@ export interface ChatTranscriptRow {
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
 
-function optimisticInputToMessage(input: OptimisticUserInput): UserMessage {
-	return new UserMessage(input.createdAt, input.content, input.images, {
-		clientMessageId: input.clientMessageId,
-	});
-}
-
 function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
 	return {
 		kind: 'message',
 		id: `optimistic:${input.clientMessageId}`,
-		message: optimisticInputToMessage(input),
+		message: new UserMessage(input.createdAt, input.content, input.images, {
+			clientMessageId: input.clientMessageId,
+		}),
 	};
 }
 
 export function mergeRowsWithOptimisticInputs(
-	rows: ChatTranscriptRow[],
-	optimisticInputs: OptimisticUserInput[],
+	rows: readonly ChatTranscriptRow[],
+	optimisticInputs: readonly OptimisticUserInput[],
 ): ChatTranscriptRow[] {
 	if (rows.length === 0) return optimisticInputs.map(optimisticInputToRow);
 
