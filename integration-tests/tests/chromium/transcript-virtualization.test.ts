@@ -1,5 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser, Page } from 'playwright';
+import type { ChatViewMessage } from '../../../common/chat-view.js';
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+  CompactionMessage,
+  ToolResultMessage,
+  UserMessage,
+} from '../../../common/chat-types.js';
 import type { ChatGenerationResetMessage, ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
@@ -28,6 +36,57 @@ interface ReadingAnchorFrameSample {
   frame: number;
   offset: number | null;
   scrollTop: number;
+}
+
+interface FollowingRowFrameSample {
+  frame: number;
+  connected: boolean;
+  sameNode: boolean;
+  rowId: string | null;
+  scrollTop: number;
+}
+
+interface FollowingRowSamplerTarget {
+  key: string;
+  rowId: string;
+  initialScrollTop: number;
+}
+
+interface RenderedTranscriptFrame {
+  dataRevision: number;
+  frame: number;
+  feedBottom: number;
+  feedTop: number;
+  modelCount: number;
+  scrollTop: number;
+  rows: Array<{
+    id: string;
+    virtualKey: string;
+    nodeToken: number;
+    wrapperNodeToken: number;
+    text: string;
+    top: number;
+    bottom: number;
+    type: string;
+  }>;
+}
+
+interface TranscriptThumbDrag {
+  x: number;
+  trackTop: number;
+  travel: number;
+  initialPosition: number;
+  initialScrollTop: number;
+}
+
+interface ExpectedRenderedTranscriptRow {
+  id: string;
+  index: number;
+  normalizeWhitespace?: boolean;
+  pendingId?: string;
+  seq: number;
+  text: string;
+  type: string;
 }
 
 interface SelectionSnapshot {
@@ -120,6 +179,88 @@ async function seedTranscript(
   return chatId;
 }
 
+function codexTailOrderingTranscript(): ChatViewMessage[] {
+  const timestamp = (seq: number) => new Date(Date.UTC(2026, 7, 12, 5, 0, seq)).toISOString();
+  const messages: ChatViewMessage[] = [];
+  for (let seq = 1; seq <= 210; seq += 1) {
+    const turn = Math.ceil(seq / 2);
+    messages.push({
+      seq,
+      message:
+        seq % 2 === 1
+          ? new UserMessage(timestamp(seq), `codex-tail-user-${turn}`)
+          : new AssistantMessage(timestamp(seq), `codex-tail-assistant-${turn}`),
+    });
+  }
+  messages.push({
+    seq: 211,
+    message: new CompactionMessage(timestamp(211), 'auto', '', 124_000, 31_000),
+  });
+  for (let commandIndex = 0; commandIndex < 14; commandIndex += 1) {
+    const seq = 212 + commandIndex * 2;
+    const toolId = `codex-tail-bash-${commandIndex}`;
+    messages.push({
+      seq,
+      message: new BashToolUseMessage(
+        timestamp(seq),
+        toolId,
+        commandIndex === 13
+          ? 'rtk git diff --stat origin/master...HEAD && rtk git diff --name-status origin/master...HEAD'
+          : `printf 'codex-tail-command-${commandIndex}'`,
+      ),
+    });
+    messages.push({
+      seq: seq + 1,
+      message: new ToolResultMessage(
+        timestamp(seq + 1),
+        toolId,
+        { raw: `codex-tail-result-${commandIndex}` },
+        false,
+      ),
+    });
+  }
+  messages.push({
+    seq: 240,
+    message: new AssistantMessage(
+      timestamp(240),
+      'codex-tail-final-assistant-response-after-every-tool',
+    ),
+  });
+  return messages;
+}
+
+async function loadCompleteTranscript(
+  integration: IntegrationFixture,
+  chatId: string,
+): Promise<{
+  generationId: string;
+  lastSeq: number;
+  messages: ChatViewMessage[];
+}> {
+  const newest = await integration.client.getMessages(chatId, { limit: 200 });
+  let page = newest;
+  let messages: ChatViewMessage[] = [...newest.messages];
+  while (page.hasMore) {
+    const earlier = await integration.client.getMessages(chatId, {
+      limit: 200,
+      beforeSeq: page.pageOldestSeq,
+    });
+    expect(earlier.generationId).toBe(newest.generationId);
+    expect(earlier.lastSeq).toBe(newest.lastSeq);
+    expect(earlier.messages.at(-1)?.seq ?? 0).toBeLessThan(page.pageOldestSeq);
+    messages = [...earlier.messages, ...messages];
+    page = earlier;
+  }
+  expect(messages.map((entry) => entry.seq)).toEqual(
+    Array.from({ length: newest.lastSeq }, (_, index) => index + 1),
+  );
+  return {
+    generationId: newest.generationId,
+    lastSeq: newest.lastSeq,
+    messages,
+  };
+}
+
 async function selectSidebarChat(page: Page, chatId: string, marker: string): Promise<void> {
   await page.evaluate((expected) => {
     const summary = [
@@ -165,6 +306,18 @@ async function waitForStableModelCount(page: Page, minimum: number): Promise<num
   }, minimum);
 }
 
+async function waitForTranscriptEntryCount(page: Page, minimum: number): Promise<number> {
+  await page.waitForFunction(
+    ({ selector, minimumCount }) => {
+      const sizer = document.querySelector<HTMLElement>(selector);
+      return Number(sizer?.dataset.chatTranscriptEntryCount ?? 0) >= minimumCount;
+    },
+    { selector: SIZER_SELECTOR, minimumCount: minimum },
+    { timeout: 20_000 },
+  );
+  return transcriptEntryCount(page);
+}
+
 async function transcriptEntryCount(page: Page): Promise<number> {
   return page
     .locator(SIZER_SELECTOR)
@@ -200,26 +353,27 @@ async function waitForDistanceFromEnd(page: Page, maximum: number): Promise<void
   );
 }
 
-async function waitForStablePinnedTranscriptLayout(page: Page, scenario = 'unnamed'): Promise<void> {
+async function waitForStablePinnedTranscriptLayout(
+  page: Page,
+  scenario = 'unnamed',
+): Promise<void> {
   await withDiagnosticTimeout(
     `the pinned transcript geometry to settle (${scenario})`,
     page.locator(FEED_SELECTOR).evaluate(
       async (feedElement, input) => {
         const feed = feedElement as HTMLElement;
         const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        let previous:
-          | {
-              dataRevision: number;
-              distanceFromEnd: number;
-              itemCount: number;
-              lastBottom: number;
-              lastHeight: number;
-              lastKey: string;
-              modelCount: number;
-              scrollHeight: number;
-              scrollTop: number;
-            }
-          | null = null;
+        let previous: {
+          dataRevision: number;
+          distanceFromEnd: number;
+          itemCount: number;
+          lastBottom: number;
+          lastHeight: number;
+          lastKey: string;
+          modelCount: number;
+          scrollHeight: number;
+          scrollTop: number;
+        } | null = null;
         let stableFrames = 0;
         let diagnostic: unknown = null;
 
@@ -234,17 +388,33 @@ async function waitForStablePinnedTranscriptLayout(page: Page, scenario = 'unnam
             }))
             .filter((item) => Number.isFinite(item.index))
             .sort((left, right) => left.index - right.index);
-          const overlaps: Array<{ previous: string; next: string; amount: number }> = [];
-          const discontinuities: Array<{ previous: string; next: string; delta: number }> = [];
+          const overlaps: Array<{
+            previous: string;
+            next: string;
+            amount: number;
+          }> = [];
+          const discontinuities: Array<{
+            previous: string;
+            next: string;
+            delta: number;
+          }> = [];
           for (let index = 1; index < items.length; index += 1) {
             const prior = items[index - 1];
             const current = items[index];
             if (!prior || !current || current.index !== prior.index + 1) continue;
             const delta = current.rect.top - prior.rect.bottom;
             if (delta < -1) {
-              overlaps.push({ previous: prior.key, next: current.key, amount: -delta });
+              overlaps.push({
+                previous: prior.key,
+                next: current.key,
+                amount: -delta,
+              });
             } else if (delta > 1) {
-              discontinuities.push({ previous: prior.key, next: current.key, delta });
+              discontinuities.push({
+                previous: prior.key,
+                next: current.key,
+                delta,
+              });
             }
           }
           const last = items.at(-1);
@@ -280,7 +450,13 @@ async function waitForStablePinnedTranscriptLayout(page: Page, scenario = 'unnam
             Math.abs(current.scrollHeight - previous.scrollHeight) <= 0.5 &&
             Math.abs(current.scrollTop - previous.scrollTop) <= 0.5;
           stableFrames = ready && unchanged ? stableFrames + 1 : 0;
-          diagnostic = { current, discontinuities, overlaps, ready, stableFrames };
+          diagnostic = {
+            current,
+            discontinuities,
+            overlaps,
+            ready,
+            stableFrames,
+          };
           previous = current;
           if (stableFrames >= 7) return;
         }
@@ -313,26 +489,6 @@ async function surfaceIdentity(page: Page): Promise<string> {
     });
 }
 
-async function waitForSurfaceIdentityChange(page: Page, previous: string): Promise<void> {
-  await page.waitForFunction(
-    ({ selector, priorIdentity }) =>
-      [...document.querySelectorAll<HTMLElement>(selector)].some((item) => {
-        const value = item.dataset.chatVirtualItem;
-        if (!value) return false;
-        try {
-          const parsed = JSON.parse(value);
-          return (
-            Array.isArray(parsed) && typeof parsed[0] === 'string' && parsed[0] !== priorIdentity
-          );
-        } catch {
-          return false;
-        }
-      }),
-    { selector: ITEM_SELECTOR, priorIdentity: previous },
-    { timeout: 20_000 },
-  );
-}
-
 async function waitForSurfaceIdentity(page: Page, expected: string): Promise<void> {
   await page.waitForFunction(
     ({ selector, expectedIdentity }) => {
@@ -358,11 +514,26 @@ async function synchronizeNativeTranscriptGeneration(
   chatId: string,
 ): Promise<void> {
   // Forces native reconciliation before geometry samples a generation-scoped row key.
-  const liveTranscript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const liveTranscript = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
   expect(liveTranscript.hasMore).toBe(false);
   const finalTranscript = await fixture.integration.client.reloadChat(chatId);
   expect(finalTranscript.hasMore).toBe(false);
   expect(finalTranscript.lastSeq).toBe(liveTranscript.lastSeq);
+  expect(
+    expectedRenderedTranscriptRows(finalTranscript).map(({ seq, text, type }) => ({
+      seq,
+      text,
+      type,
+    })),
+  ).toEqual(
+    expectedRenderedTranscriptRows(liveTranscript).map(({ seq, text, type }) => ({
+      seq,
+      text,
+      type,
+    })),
+  );
   await waitForSurfaceIdentity(fixture.page, `${chatId}:${finalTranscript.generationId}`);
   await waitForTranscriptReady(fixture.page);
 }
@@ -653,6 +824,538 @@ async function finishReadingAnchorFrameSampler(page: Page): Promise<ReadingAncho
   });
 }
 
+async function startFollowingRowFrameSampler(page: Page): Promise<FollowingRowSamplerTarget> {
+  return page.locator(FEED_SELECTOR).evaluate(async (feedElement, itemSelector) => {
+    const feed = feedElement as HTMLElement;
+    const viewport = feed.getBoundingClientRect();
+    const mounted = [...feed.querySelectorAll<HTMLElement>(itemSelector)]
+      .filter((item) => item.querySelector('[data-chat-row-id]'))
+      .map((item) => ({ item, rect: item.getBoundingClientRect() }))
+      .sort((left, right) => left.rect.top - right.rect.top);
+    const lastVisibleIndex = mounted.findLastIndex(
+      ({ rect }) => rect.bottom > viewport.top + 1 && rect.top < viewport.bottom - 1,
+    );
+    const following = mounted[lastVisibleIndex + 1];
+    const key = following?.item.dataset.chatVirtualItem;
+    const rowId =
+      following?.item.querySelector<HTMLElement>('[data-chat-row-id]')?.dataset.chatRowId;
+    if (!following || !key || !rowId) {
+      throw new Error('No mounted transcript row followed the visible range.');
+    }
+
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatFollowingRowSampler?: {
+        active: boolean;
+        frame: number;
+        key: string;
+        node: HTMLElement;
+        samples: FollowingRowFrameSample[];
+      };
+    };
+    const sampler = {
+      active: true,
+      frame: 0,
+      key,
+      node: following.item,
+      samples: [] as FollowingRowFrameSample[],
+    };
+    browserGlobal.__chatFollowingRowSampler = sampler;
+    const sample = () => {
+      if (!sampler.active) return;
+      const current = [...feed.querySelectorAll<HTMLElement>(itemSelector)].find(
+        (candidate) => candidate.dataset.chatVirtualItem === sampler.key,
+      );
+      sampler.samples.push({
+        frame: sampler.frame,
+        connected: sampler.node.isConnected,
+        sameNode: current === sampler.node,
+        rowId: current?.querySelector<HTMLElement>('[data-chat-row-id]')?.dataset.chatRowId ?? null,
+        scrollTop: feed.scrollTop,
+      });
+      sampler.frame += 1;
+      requestAnimationFrame(sample);
+    };
+    sample();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    return { key, rowId, initialScrollTop: feed.scrollTop };
+  }, ITEM_SELECTOR);
+}
+
+async function finishFollowingRowFrameSampler(page: Page): Promise<FollowingRowFrameSample[]> {
+  return page.evaluate(async () => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatFollowingRowSampler?: {
+        active: boolean;
+        samples: FollowingRowFrameSample[];
+      };
+    };
+    const sampler = browserGlobal.__chatFollowingRowSampler;
+    if (!sampler) throw new Error('The following-row frame sampler is missing.');
+    for (let frame = 0; frame < 4; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    sampler.active = false;
+    delete browserGlobal.__chatFollowingRowSampler;
+    return sampler.samples;
+  });
+}
+
+async function startRenderedTranscriptFrameSampler(page: Page): Promise<void> {
+  await page.locator(FEED_SELECTOR).evaluate((feedElement, sizerSelector) => {
+    const feed = feedElement as HTMLElement;
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatRenderedTranscriptSampler?: {
+        active: boolean;
+        frame: number;
+        samples: RenderedTranscriptFrame[];
+      };
+    };
+    const sampler = {
+      active: true,
+      frame: 0,
+      samples: [] as RenderedTranscriptFrame[],
+      nodeTokens: new WeakMap<HTMLElement, number>(),
+      wrapperNodeTokens: new WeakMap<HTMLElement, number>(),
+      nextNodeToken: 1,
+    };
+    browserGlobal.__chatRenderedTranscriptSampler = sampler;
+    const sample = () => {
+      if (!sampler.active) return;
+      const feedRect = feed.getBoundingClientRect();
+      const sizer = feed.querySelector<HTMLElement>(sizerSelector);
+      sampler.samples.push({
+        dataRevision: Number(sizer?.dataset.chatVirtualDataRevision ?? 0),
+        frame: sampler.frame,
+        feedBottom: feedRect.bottom,
+        feedTop: feedRect.top,
+        modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
+        scrollTop: feed.scrollTop,
+        rows: [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')].map((row) => {
+          let nodeToken = sampler.nodeTokens.get(row);
+          if (nodeToken === undefined) {
+            nodeToken = sampler.nextNodeToken;
+            sampler.nextNodeToken += 1;
+            sampler.nodeTokens.set(row, nodeToken);
+          }
+          const wrapper = row.closest<HTMLElement>('[data-chat-virtual-item]');
+          let wrapperNodeToken = wrapper ? sampler.wrapperNodeTokens.get(wrapper) : undefined;
+          if (wrapper && wrapperNodeToken === undefined) {
+            wrapperNodeToken = sampler.nextNodeToken;
+            sampler.nextNodeToken += 1;
+            sampler.wrapperNodeTokens.set(wrapper, wrapperNodeToken);
+          }
+          const rect = row.getBoundingClientRect();
+          return {
+            id: row.dataset.chatRowId ?? '',
+            virtualKey: wrapper?.dataset.chatVirtualItem ?? '',
+            nodeToken,
+            wrapperNodeToken: wrapperNodeToken ?? 0,
+            text: row.textContent?.trim() ?? '',
+            top: rect.top,
+            bottom: rect.bottom,
+            type: row.dataset.chatMessageType ?? '',
+          };
+        }),
+      });
+      sampler.frame += 1;
+      requestAnimationFrame(sample);
+    };
+    sample();
+  }, SIZER_SELECTOR);
+}
+
+async function finishRenderedTranscriptFrameSampler(
+  page: Page,
+): Promise<RenderedTranscriptFrame[]> {
+  return page.evaluate(async () => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatRenderedTranscriptSampler?: {
+        active: boolean;
+        samples: RenderedTranscriptFrame[];
+      };
+    };
+    const sampler = browserGlobal.__chatRenderedTranscriptSampler;
+    if (!sampler) throw new Error('The rendered-transcript frame sampler is missing.');
+    for (let frame = 0; frame < 4; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    sampler.active = false;
+    delete browserGlobal.__chatRenderedTranscriptSampler;
+    return sampler.samples;
+  });
+}
+
+async function wheelTranscriptEarlier(page: Page, steps: number): Promise<void> {
+  const feed = page.locator(FEED_SELECTOR);
+  const box = await feed.boundingBox();
+  if (!box) throw new Error('The transcript viewport has no wheel target.');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let step = 0; step < steps; step += 1) {
+    await page.mouse.wheel(0, -48);
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+  }
+}
+
+async function beginTranscriptThumbDrag(page: Page): Promise<TranscriptThumbDrag> {
+  const scrollbar = page.locator('[data-chat-feed-scrollbar]').first();
+  await scrollbar.waitFor({ state: 'visible' });
+  await scrollbar.hover();
+  const thumb = scrollbar.locator('[data-slot="scroll-area-thumb"]');
+  await thumb.waitFor({ state: 'visible' });
+  const [trackBox, thumbBox, initialScrollTop] = await Promise.all([
+    scrollbar.boundingBox(),
+    thumb.boundingBox(),
+    page.locator(FEED_SELECTOR).evaluate((feedElement) => (feedElement as HTMLElement).scrollTop),
+  ]);
+  if (!trackBox || !thumbBox) throw new Error('The transcript scrollbar has no drag geometry.');
+  const travel = trackBox.height - thumbBox.height;
+  if (travel <= 4) throw new Error('The transcript scrollbar thumb has no usable travel.');
+  const x = thumbBox.x + thumbBox.width / 2;
+  const initialPosition = Math.max(0, Math.min(1, (thumbBox.y - trackBox.y) / travel));
+  await page.mouse.move(x, thumbBox.y + thumbBox.height / 2);
+  await page.mouse.down();
+  return {
+    x,
+    trackTop: trackBox.y + thumbBox.height / 2,
+    travel,
+    initialPosition,
+    initialScrollTop,
+  };
+}
+
+async function moveTranscriptThumb(
+  page: Page,
+  drag: TranscriptThumbDrag,
+  position: number,
+): Promise<number> {
+  const boundedPosition = Math.max(0, Math.min(1, position));
+  await page.mouse.move(drag.x, drag.trackTop + drag.travel * boundedPosition, {
+    steps: 6,
+  });
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  return page
+    .locator(FEED_SELECTOR)
+    .evaluate((feedElement) => (feedElement as HTMLElement).scrollTop);
+}
+
+async function finishTranscriptThumbDrag(page: Page): Promise<void> {
+  await page.mouse.up();
+  await page.evaluate(async () => {
+    for (let frame = 0; frame < 4; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  });
+}
+
+function expectedRenderedTranscriptRows(transcript: {
+  generationId: string;
+  messages: ReadonlyArray<{ seq: number; message: unknown }>;
+}): ExpectedRenderedTranscriptRow[] {
+  const rows: ExpectedRenderedTranscriptRow[] = [];
+  for (const entry of transcript.messages) {
+    if (typeof entry.message !== 'object' || entry.message === null) {
+      throw new Error(`Transcript seq ${entry.seq} has no renderable message object.`);
+    }
+    const message = entry.message as {
+      type?: unknown;
+      command?: unknown;
+      content?: unknown;
+      metadata?: unknown;
+      postTokens?: unknown;
+      preTokens?: unknown;
+      summary?: unknown;
+      trigger?: unknown;
+    };
+    let text: string;
+    let normalizeWhitespace = false;
+    if (
+      (message.type === 'user-message' ||
+        message.type === 'assistant-message' ||
+        message.type === 'thinking' ||
+        message.type === 'error') &&
+      typeof message.content === 'string'
+    ) {
+      text = message.content;
+    } else if (message.type === 'bash-tool-use' && typeof message.command === 'string') {
+      text = `$ ${message.command}`;
+    } else if (message.type === 'compaction') {
+      const tokenLabel =
+        typeof message.preTokens === 'number' && typeof message.postTokens === 'number'
+          ? ` ${message.preTokens.toLocaleString()} → ${message.postTokens.toLocaleString()} tokens`
+          : '';
+      const summaryLabel =
+        typeof message.summary === 'string' && message.summary.trim() ? ' Show summary' : '';
+      text = `Context compacted (${message.trigger === 'auto' ? 'auto' : 'manual'})${tokenLabel}${summaryLabel}`;
+      normalizeWhitespace = true;
+    } else if (message.type === 'tool-result') {
+      text = '';
+    } else if (message.type === 'permission-resolved' || message.type === 'permission-cancelled') {
+      text = '';
+    } else {
+      throw new Error(`Missing rendered transcript expectation for ${String(message.type)}.`);
+    }
+    rows.push({
+      id: `${transcript.generationId}:${entry.seq}`,
+      index: rows.length,
+      normalizeWhitespace,
+      pendingId:
+        message.type === 'user-message' &&
+        typeof message.metadata === 'object' &&
+        message.metadata !== null &&
+        'clientRequestId' in message.metadata &&
+        typeof message.metadata.clientRequestId === 'string'
+          ? `pending:${message.metadata.clientRequestId}`
+          : undefined,
+      seq: entry.seq,
+      text,
+      type: String(message.type),
+    });
+  }
+  return rows;
+}
+
+function renderedTranscriptText(text: string, expected: ExpectedRenderedTranscriptRow): string {
+  return expected.normalizeWhitespace ? text.replace(/\s+/g, ' ').trim() : text;
+}
+
+function assertRenderedTranscriptFrameIntegrity(
+  frames: RenderedTranscriptFrame[],
+  expectedRows: ExpectedRenderedTranscriptRow[],
+  staticThroughSeq: number,
+): void {
+  const expectedById = new Map(expectedRows.map((row) => [row.id, row] as const));
+  for (const row of expectedRows) {
+    if (row.pendingId) expectedById.set(row.pendingId, row);
+  }
+  const previousById = new Map<
+    string,
+    {
+      frame: number;
+      nodeToken: number;
+      wrapperNodeToken: number;
+      top: number;
+      bottom: number;
+    }
+  >();
+  const violations: Array<Record<string, unknown>> = [];
+  for (const frame of frames) {
+    const ids = frame.rows.map((row) => row.id);
+    const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
+    const geometryFailures = frame.rows.flatMap((row, index) => {
+      const next = frame.rows[index + 1];
+      return next && (row.top > next.top || row.bottom > next.top + 1)
+        ? [
+            {
+              id: row.id,
+              nextId: next.id,
+              top: row.top,
+              bottom: row.bottom,
+              nextTop: next.top,
+            },
+          ]
+        : [];
+    });
+    const canonicalRows = frame.rows.flatMap((row) => {
+      const expected = expectedById.get(row.id);
+      return expected ? [{ row, expected }] : [];
+    });
+    const unknownRows = frame.rows.filter((row) => !expectedById.has(row.id));
+    const orderFailures = canonicalRows.flatMap(({ row, expected }, index) => {
+      const next = canonicalRows[index + 1];
+      return next && expected.index >= next.expected.index
+        ? [
+            {
+              id: row.id,
+              index: expected.index,
+              nextId: next.row.id,
+              nextIndex: next.expected.index,
+            },
+          ]
+        : [];
+    });
+    const contentFailures = canonicalRows.flatMap(({ row, expected }) =>
+      expected.seq <= staticThroughSeq &&
+      (renderedTranscriptText(row.text, expected) !== expected.text || row.type !== expected.type)
+        ? [{ id: row.id, expected, actual: { text: row.text, type: row.type } }]
+        : [],
+    );
+    const visibleCanonicalRows = canonicalRows.filter(
+      ({ row }) => row.bottom > frame.feedTop + 0.5 && row.top < frame.feedBottom - 0.5,
+    );
+    const visibleSequenceFailures = visibleCanonicalRows.flatMap(({ row, expected }, index) => {
+      const next = visibleCanonicalRows[index + 1];
+      return next && next.expected.index !== expected.index + 1
+        ? [
+            {
+              id: row.id,
+              index: expected.index,
+              nextId: next.row.id,
+              nextIndex: next.expected.index,
+            },
+          ]
+        : [];
+    });
+    const keyFailures = canonicalRows.flatMap(({ row }) => {
+      try {
+        const parsed = JSON.parse(row.virtualKey);
+        return Array.isArray(parsed) && parsed[1] === `transcript:${row.id}`
+          ? []
+          : [{ id: row.id, virtualKey: row.virtualKey }];
+      } catch {
+        return [{ id: row.id, virtualKey: row.virtualKey }];
+      }
+    });
+    const remountFailures = canonicalRows.flatMap(({ row }) => {
+      const previous = previousById.get(row.id);
+      previousById.set(row.id, {
+        frame: frame.frame,
+        nodeToken: row.nodeToken,
+        wrapperNodeToken: row.wrapperNodeToken,
+        top: row.top,
+        bottom: row.bottom,
+      });
+      return previous && previous.frame === frame.frame - 1 && previous.nodeToken !== row.nodeToken
+        ? [
+            {
+              id: row.id,
+              previousNode: previous.nodeToken,
+              nextNode: row.nodeToken,
+              previousWrapper: previous.wrapperNodeToken,
+              nextWrapper: row.wrapperNodeToken,
+              previousTop: previous.top,
+              previousBottom: previous.bottom,
+              nextTop: row.top,
+              nextBottom: row.bottom,
+              visible: row.bottom > frame.feedTop + 0.5 && row.top < frame.feedBottom - 0.5,
+            },
+          ]
+        : [];
+    });
+    if (
+      duplicateIds.length > 0 ||
+      unknownRows.length > 0 ||
+      geometryFailures.length > 0 ||
+      orderFailures.length > 0 ||
+      contentFailures.length > 0 ||
+      visibleSequenceFailures.length > 0 ||
+      keyFailures.length > 0 ||
+      remountFailures.length > 0
+    ) {
+      violations.push({
+        dataRevision: frame.dataRevision,
+        frame: frame.frame,
+        modelCount: frame.modelCount,
+        scrollTop: frame.scrollTop,
+        duplicateIds,
+        unknownRows,
+        geometryFailures,
+        orderFailures,
+        contentFailures,
+        visibleSequenceFailures,
+        keyFailures,
+        remountFailures,
+      });
+    }
+  }
+  expect(frames.length).toBeGreaterThan(3);
+  expect(violations, JSON.stringify(violations.slice(0, 12), null, 2)).toEqual([]);
+}
+
+async function assertMountedTranscriptMatches(
+  page: Page,
+  expectedRows: ExpectedRenderedTranscriptRow[],
+): Promise<void> {
+  const mounted = await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
+    const feed = feedElement as HTMLElement;
+    return [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')].map((row) => ({
+      id: row.dataset.chatRowId ?? '',
+      type: row.dataset.chatMessageType ?? '',
+      text: row.textContent?.trim() ?? '',
+      top: row.getBoundingClientRect().top,
+      virtualKey:
+        row.closest<HTMLElement>('[data-chat-virtual-item]')?.dataset.chatVirtualItem ?? '',
+    }));
+  });
+  const expectedById = new Map(expectedRows.map((row) => [row.id, row] as const));
+  const matched = mounted.map((row) => ({
+    row,
+    expected: expectedById.get(row.id) ?? null,
+  }));
+  expect(new Set(mounted.map((row) => row.id)).size).toBe(mounted.length);
+  expect(
+    matched.every(({ expected }) => expected !== null),
+    JSON.stringify(matched, null, 2),
+  ).toBe(true);
+  expect(
+    matched.every(({ row, expected }) =>
+      Boolean(
+        expected &&
+        renderedTranscriptText(row.text, expected) === expected.text &&
+        row.type === expected.type,
+      ),
+    ),
+    JSON.stringify(matched, null, 2),
+  ).toBe(true);
+  expect(
+    matched.every(({ row }, index) => {
+      const next = matched[index + 1];
+      return !next || (expectedById.get(row.id)?.index ?? -1) < (next.expected?.index ?? -1);
+    }),
+    JSON.stringify(matched, null, 2),
+  ).toBe(true);
+  expect(
+    matched.every(({ row }) => {
+      try {
+        const parsed = JSON.parse(row.virtualKey);
+        return Array.isArray(parsed) && parsed[1] === `transcript:${row.id}`;
+      } catch {
+        return false;
+      }
+    }),
+    JSON.stringify(matched, null, 2),
+  ).toBe(true);
+}
+
+async function assertCodexTailAssistantIsLast(
+  page: Page,
+  expectedRows: ExpectedRenderedTranscriptRow[],
+  finalRowId: string,
+  lastBashRowId: string,
+): Promise<void> {
+  await scrollToPosition(page, 'end');
+  await page.locator(`[data-chat-row-id="${finalRowId}"]`).waitFor({ state: 'visible' });
+  await assertMountedTranscriptMatches(page, expectedRows);
+  const tail = await page.locator(FEED_SELECTOR).evaluate(
+    (feedElement, expected) => {
+      const feed = feedElement as HTMLElement;
+      const rows = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')];
+      const finalRows = rows.filter((row) => row.dataset.chatRowId === expected.finalRowId);
+      const finalRow = finalRows[0];
+      const lastBashRow = rows.find((row) => row.dataset.chatRowId === expected.lastBashRowId);
+      return {
+        finalCount: finalRows.length,
+        finalText: finalRow?.textContent?.trim() ?? null,
+        finalTop: finalRow?.getBoundingClientRect().top ?? null,
+        lastBashText: lastBashRow?.textContent?.trim() ?? null,
+        lastBashTop: lastBashRow?.getBoundingClientRect().top ?? null,
+        lastMountedRowId: rows.at(-1)?.dataset.chatRowId ?? null,
+      };
+    },
+    { finalRowId, lastBashRowId },
+  );
+  expect(tail.finalCount, JSON.stringify(tail, null, 2)).toBe(1);
+  expect(tail.lastMountedRowId, JSON.stringify(tail, null, 2)).toBe(finalRowId);
+  expect(tail.finalText).toBe('codex-tail-final-assistant-response-after-every-tool');
+  expect(tail.lastBashText).toBe(
+    '$ rtk git diff --stat origin/master...HEAD && rtk git diff --name-status origin/master...HEAD',
+  );
+  expect(tail.finalTop).not.toBeNull();
+  expect(tail.lastBashTop).not.toBeNull();
+  expect(tail.finalTop!).toBeGreaterThan(tail.lastBashTop!);
+}
+
 async function anchorByKey(
   page: Page,
   key: string,
@@ -678,37 +1381,40 @@ async function anchorByKey(
     })();
     const current = await page
       .locator(FEED_SELECTOR)
-      .evaluate((feedElement, input) => {
-        const feed = feedElement as HTMLElement;
-        const mountedKeys = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].flatMap(
-          (item) => item.dataset.chatVirtualItem ?? [],
-        );
-        const mountedIdentities = [
-          ...new Set(
-            mountedKeys.flatMap((mountedKey) => {
-              try {
-                const parsed = JSON.parse(mountedKey);
-                return Array.isArray(parsed) && typeof parsed[0] === 'string' ? [parsed[0]] : [];
-              } catch {
-                return [];
-              }
-            }),
-          ),
-        ];
-        const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
-        return {
-          mountedIdentities,
-          mountedKeys,
-          scrollTop: feed.scrollTop,
-          maximumScrollTop: Math.max(0, feed.scrollHeight - feed.clientHeight),
-          distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
-          pinned: feed.dataset.chatPinnedToBottom === 'true',
-          userScrolledUp: feed.dataset.chatUserScrolledUp === 'true',
-          modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
-          dataRevision: Number(sizer?.dataset.chatVirtualDataRevision ?? 0),
-          scale: sizer?.dataset.chatTranscriptScale,
-        };
-      }, { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR })
+      .evaluate(
+        (feedElement, input) => {
+          const feed = feedElement as HTMLElement;
+          const mountedKeys = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].flatMap(
+            (item) => item.dataset.chatVirtualItem ?? [],
+          );
+          const mountedIdentities = [
+            ...new Set(
+              mountedKeys.flatMap((mountedKey) => {
+                try {
+                  const parsed = JSON.parse(mountedKey);
+                  return Array.isArray(parsed) && typeof parsed[0] === 'string' ? [parsed[0]] : [];
+                } catch {
+                  return [];
+                }
+              }),
+            ),
+          ];
+          const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
+          return {
+            mountedIdentities,
+            mountedKeys,
+            scrollTop: feed.scrollTop,
+            maximumScrollTop: Math.max(0, feed.scrollHeight - feed.clientHeight),
+            distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
+            pinned: feed.dataset.chatPinnedToBottom === 'true',
+            userScrolledUp: feed.dataset.chatUserScrolledUp === 'true',
+            modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
+            dataRevision: Number(sizer?.dataset.chatVirtualDataRevision ?? 0),
+            scale: sizer?.dataset.chatTranscriptScale,
+          };
+        },
+        { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR },
+      )
       .catch(() => null);
     throw new Error(
       `Timed out waiting for the strict reading anchor:\n${JSON.stringify(
@@ -1382,7 +2088,11 @@ async function mountedConversationDiscontinuities(
       }))
       .filter((item) => Number.isFinite(item.index))
       .sort((left, right) => left.index - right.index);
-    const discontinuities: Array<{ previous: string; next: string; delta: number }> = [];
+    const discontinuities: Array<{
+      previous: string;
+      next: string;
+      delta: number;
+    }> = [];
     for (let index = 1; index < items.length; index += 1) {
       const previous = items[index - 1];
       const next = items[index];
@@ -1417,14 +2127,12 @@ async function createTranscript(fixture: ChromiumFixture): Promise<string> {
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
 
   await waitForTranscriptReady(fixture.page);
-  const initialSurfaceIdentity = await surfaceIdentity(fixture.page);
   await appendTurn(fixture.integration, chatId, 'chromium-generation-prime');
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-generation-prime', { exact: true })
     .waitFor();
-  await waitForSurfaceIdentityChange(fixture.page, initialSurfaceIdentity);
-  await waitForTranscriptReady(fixture.page);
+  await synchronizeNativeTranscriptGeneration(fixture, chatId);
   return chatId;
 }
 
@@ -1432,7 +2140,9 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
   const chatId = await seedTranscript(fixture.integration, 90, 'chromium-processing-prefetch');
   await prepareTranscript(fixture, chatId);
   const prompt = 'chromium-processing-prefetch-held';
-  const heldCompletion = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: prompt });
+  const heldCompletion = fixture.integration.fakeProviders.openAi.holdNext({
+    lastUserText: prompt,
+  });
   let releaseFirstPage!: () => void;
   const firstPageGate = new Promise<void>((resolve) => (releaseFirstPage = resolve));
   let resolveFirstPageRequest!: () => void;
@@ -1464,7 +2174,9 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     });
     turnId = accepted.turnId ?? null;
     await withDiagnosticTimeout('the held processing turn', heldCompletion.received);
-    await fixture.page.locator('[data-slot="chat-processing-status"]').waitFor({ state: 'visible' });
+    await fixture.page
+      .locator('[data-slot="chat-processing-status"]')
+      .waitFor({ state: 'visible' });
     const modelCountBeforePrefetch = await waitForStableModelCount(fixture.page, 50);
 
     const loadAheadDistance = await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) => {
@@ -1490,15 +2202,13 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     await withDiagnosticTimeout('the first held earlier-page request', firstPageRequest);
     expect(loadAheadDistance).toBeGreaterThan(0);
     expect(await transcriptBoundaryIntersectsViewport(fixture.page, 'earlier')).toBe(false);
-    const earlierLoadingIndicator = fixture.page.locator(
-      '[data-chat-earlier-loading-indicator]',
-    );
+    const earlierLoadingIndicator = fixture.page.locator('[data-chat-earlier-loading-indicator]');
     await earlierLoadingIndicator.waitFor({ state: 'visible' });
 
-    expect(
-      await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
-    ).toBe(0);
-    const boundarySweep = await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    expect(await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count()).toBe(0);
+    const boundarySweep = await fixture.page
+      .locator(FEED_SELECTOR)
+      .evaluate(async (feedElement) => {
         const feed = feedElement as HTMLElement;
         const offsets: number[] = [];
         const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -1512,11 +2222,10 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
         return { offsets, scrollTop: feed.scrollTop };
       });
     expect(boundarySweep.scrollTop, JSON.stringify(boundarySweep, null, 2)).toBe(0);
-    expect(
-      await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
-    ).toBe(0);
+    expect(await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count()).toBe(0);
     const prependAnchor = await readingAnchor(fixture.page);
     await startReadingAnchorFrameSampler(fixture.page, prependAnchor);
+    const followingTarget = await startFollowingRowFrameSampler(fixture.page);
     await fixture.page.locator(FEED_SELECTOR).evaluate(
       (feedElement, input) => {
         const feed = feedElement as HTMLElement;
@@ -1539,9 +2248,7 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
           feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -80 }));
           pumpState.frames += 1;
           const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
-          pumpState.observedModelCount = Number(
-            sizer?.dataset.chatVirtualModelCount ?? Number.NaN,
-          );
+          pumpState.observedModelCount = Number(sizer?.dataset.chatVirtualModelCount ?? Number.NaN);
           if (pumpState.observedModelCount > input.initialModelCount) {
             pumpState.growthFrame = pumpState.frames;
             pumpState.complete = true;
@@ -1553,7 +2260,10 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
         };
         requestAnimationFrame(pump);
       },
-      { initialModelCount: modelCountBeforePrefetch, sizerSelector: SIZER_SELECTOR },
+      {
+        initialModelCount: modelCountBeforePrefetch,
+        sizerSelector: SIZER_SELECTOR,
+      },
     );
 
     releaseFirstPage();
@@ -1588,6 +2298,7 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     );
     await earlierLoadingIndicator.waitFor({ state: 'detached' });
     const prependFrames = await finishReadingAnchorFrameSampler(fixture.page);
+    const followingFrames = await finishFollowingRowFrameSampler(fixture.page);
     expect(
       Math.max(
         ...prependFrames.map((sample) =>
@@ -1598,6 +2309,12 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
       ),
       JSON.stringify({ prependAnchor, prependFrames }, null, 2),
     ).toBeLessThanOrEqual(1);
+    expect(
+      followingFrames.filter(
+        (sample) => !sample.connected || !sample.sameNode || sample.rowId !== followingTarget.rowId,
+      ),
+      JSON.stringify({ followingTarget, followingFrames }, null, 2),
+    ).toEqual([]);
     expect(earlierRequestCount).toBe(1);
     expect(modelCountAfterFirstPage).toBe(modelCountBeforePrefetch + 50);
 
@@ -1667,7 +2384,11 @@ async function revealEarlierTranscript(
       const prefetchPosition = await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
         const feed = feedElement as HTMLElement;
         const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const attempts: Array<{ maximum: number; target: number; scrollTop: number }> = [];
+        const attempts: Array<{
+          maximum: number;
+          target: number;
+          scrollTop: number;
+        }> = [];
         for (let attempt = 0; attempt < 8; attempt += 1) {
           const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
           const target = Math.min(maximum, Math.max(101, feed.clientHeight * 0.75));
@@ -1678,10 +2399,16 @@ async function revealEarlierTranscript(
           attempts.push({ maximum, target, scrollTop: feed.scrollTop });
           // First measurements may correct the offset; the anchor sampler starts after they settle.
           if (feed.scrollTop > 100 && feed.scrollTop <= feed.clientHeight) {
-            return { attempts, scrollTop: feed.scrollTop, viewportHeight: feed.clientHeight };
+            return {
+              attempts,
+              scrollTop: feed.scrollTop,
+              viewportHeight: feed.clientHeight,
+            };
           }
         }
-        throw new Error(`The earlier prefetch position did not settle: ${JSON.stringify(attempts)}`);
+        throw new Error(
+          `The earlier prefetch position did not settle: ${JSON.stringify(attempts)}`,
+        );
       });
       expect(prefetchPosition.scrollTop, JSON.stringify(prefetchPosition)).toBeGreaterThan(100);
       expect(prefetchPosition.scrollTop).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
@@ -2108,18 +2835,32 @@ async function expectNoSwitchPaintFlicker(
           settledGeometry = currentGeometry;
         }
       } else if (settledGeometry) {
-        recordViolation({ attempt, kind: 'settled-feed-became-unsettled', busy, contentVisible });
+        recordViolation({
+          attempt,
+          kind: 'settled-feed-became-unsettled',
+          busy,
+          contentVisible,
+        });
       }
       settledFrames = settled ? settledFrames + 1 : 0;
     }
     delete browserGlobal.__chatSwitchPaintSamplerReady;
-    return { settledFrames, switchObserved, transition, violationCount, violations };
+    return {
+      settledFrames,
+      switchObserved,
+      transition,
+      violationCount,
+      violations,
+    };
   });
   await fixture.page.waitForFunction(
     () =>
       Boolean(
-        (globalThis as typeof globalThis & { __chatSwitchPaintSamplerReady?: boolean })
-          .__chatSwitchPaintSamplerReady,
+        (
+          globalThis as typeof globalThis & {
+            __chatSwitchPaintSamplerReady?: boolean;
+          }
+        ).__chatSwitchPaintSamplerReady,
       ),
     undefined,
     { timeout: 5_000 },
@@ -2189,7 +2930,7 @@ async function verifyChatSwitchBottomRestore(
   fixture: ChromiumFixture,
   primaryChatId: string,
   environment: ScriptedClaudeTestEnvironment,
-): Promise<void> {
+): Promise<string> {
   const secondaryMarker = 'chromium-heterogeneous-switch-0';
   const secondaryChatId = await seedHeterogeneousTranscript(fixture, environment);
   // The scripted start can select its newly created chat. Re-establishes the primary
@@ -2202,9 +2943,11 @@ async function verifyChatSwitchBottomRestore(
     selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker),
   );
   await waitForStablePinnedTranscriptLayout(fixture.page, 'switch-to-secondary');
-  const visibleHeights = await fixture.page.locator(ITEM_SELECTOR).evaluateAll((items) =>
-    items.map((item) => Math.round((item as HTMLElement).getBoundingClientRect().height)),
-  );
+  const visibleHeights = await fixture.page
+    .locator(ITEM_SELECTOR)
+    .evaluateAll((items) =>
+      items.map((item) => Math.round((item as HTMLElement).getBoundingClientRect().height)),
+    );
   expect(new Set(visibleHeights).size, JSON.stringify(visibleHeights)).toBeGreaterThanOrEqual(3);
 
   await expectNoSwitchPaintFlicker(fixture, () =>
@@ -2215,6 +2958,225 @@ async function verifyChatSwitchBottomRestore(
     pinned: true,
     userScrolledUp: false,
   });
+  fixture.assertNoBrowserErrors();
+  return secondaryChatId;
+}
+
+async function verifyStreamedRowOrderAndFollowingBuffer(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+  chatId: string,
+): Promise<void> {
+  const prompt = 'chromium-streamed-row-order';
+  const beforeTool =
+    'I am inspecting the transcript before running the command. This response is deliberately long enough to wrap across several visual lines while preserving one exact assistant row identity.';
+  const command = "printf '%s\\n' 'ordered-tool-output'";
+  const afterTool =
+    'The command completed before this final response. This second long response verifies that the Bash row remains ahead of the assistant row after every staged live publication.';
+
+  await selectSidebarChat(fixture.page, chatId, 'chromium-heterogeneous-switch-0');
+  await scrollToPosition(fixture.page, 'end');
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'streamed-row-order-baseline');
+  const baseline = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
+  const baselineModelCount = await fixture.page
+    .locator(SIZER_SELECTOR)
+    .evaluate((sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0));
+  await startRenderedTranscriptFrameSampler(fixture.page);
+
+  environment.model.scriptTurn([
+    claudeText(beforeTool),
+    claudeToolUse('toolu_chromium_streamed_order', 'Bash', { command }),
+  ]);
+  const heldFinal = environment.model.scriptHeldTurn([claudeText(afterTool)]);
+  const accepted = await fixture.integration.client.runChat(
+    liveClaudeRunRequest({
+      chatId,
+      command: prompt,
+      permissionMode: 'bypassPermissions',
+    }),
+  );
+  await withDiagnosticTimeout('the streamed Bash result to reach Claude', heldFinal.requested);
+  await waitForModelCount(fixture.page, baselineModelCount + 3);
+  heldFinal.release();
+  expect((await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId)).type).toBe(
+    'agent-run-finished',
+  );
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'streamed-row-order');
+  const renderedFrames = await finishRenderedTranscriptFrameSampler(fixture.page);
+
+  const transcript = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
+  const appended = transcript.messages.filter((entry) => entry.seq > baseline.lastSeq);
+  expect(appended.map((entry) => entry.message.type)).toEqual([
+    'user-message',
+    'assistant-message',
+    'bash-tool-use',
+    'tool-result',
+    'assistant-message',
+  ]);
+  const expectedRowIds = appended.map((entry) => `${transcript.generationId}:${entry.seq}`);
+  const expectedTexts = [prompt, beforeTool, `$ ${command}`, '', afterTool];
+  const expectedIndexById = new Map(expectedRowIds.map((id, index) => [id, index] as const));
+  const firstFrameById = new Map<string, number>();
+  const frameViolations = renderedFrames.flatMap((frame) => {
+    const ids = frame.rows.map((row) => row.id);
+    const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
+    const expectedRows = frame.rows.filter((row) => expectedIndexById.has(row.id));
+    for (const row of expectedRows) {
+      if (!firstFrameById.has(row.id)) firstFrameById.set(row.id, frame.frame);
+    }
+    const wrongText = expectedRows.filter(
+      (row) => row.text !== expectedTexts[expectedIndexById.get(row.id)!],
+    );
+    const wrongOrder = expectedRows.some((row, index) => {
+      const next = expectedRows[index + 1];
+      return (
+        Boolean(next) &&
+		(expectedIndexById.get(row.id)! >= expectedIndexById.get(next!.id)! || row.top > next!.top)
+      );
+    });
+    return duplicateIds.length > 0 || wrongText.length > 0 || wrongOrder
+      ? [
+          {
+            frame: frame.frame,
+            duplicateIds,
+            expectedRows,
+            wrongText,
+            wrongOrder,
+          },
+        ]
+      : [];
+  });
+  expect(renderedFrames.length).toBeGreaterThan(3);
+  expect(frameViolations, JSON.stringify(frameViolations, null, 2)).toEqual([]);
+  const observedExpectedIds = expectedRowIds.filter((id) => firstFrameById.has(id));
+  expect(observedExpectedIds).toContain(expectedRowIds[1]);
+  expect(observedExpectedIds).toContain(expectedRowIds[2]);
+  expect(observedExpectedIds).toContain(expectedRowIds[3]);
+  expect(observedExpectedIds).toContain(expectedRowIds[4]);
+  expect(firstFrameById.get(expectedRowIds[2])!).toBeLessThanOrEqual(
+    firstFrameById.get(expectedRowIds[3])!,
+  );
+  expect(firstFrameById.get(expectedRowIds[3])!).toBeLessThanOrEqual(
+    firstFrameById.get(expectedRowIds[4])!,
+  );
+
+  await scrollToPosition(fixture.page, 'end');
+  const rendered = await fixture.page
+    .locator(FEED_SELECTOR)
+    .evaluate((feedElement, expectedIds) => {
+      const feed = feedElement as HTMLElement;
+      const allRows = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')].map((row) => {
+        const wrapper = row.closest<HTMLElement>('[data-chat-virtual-item]');
+        return {
+          id: row.dataset.chatRowId ?? '',
+          type: row.dataset.chatMessageType ?? '',
+          text: row.textContent?.trim() ?? '',
+          top: row.getBoundingClientRect().top,
+          virtualKey: wrapper?.dataset.chatVirtualItem ?? '',
+        };
+      });
+      const rows = expectedIds.map((id) => {
+        const matches = allRows.filter((row) => row.id === id);
+        return { id, count: matches.length, row: matches[0] ?? null };
+      });
+      const bashRow = rows.find((entry) => entry.row?.type === 'bash-tool-use');
+      const bashCode = bashRow
+        ? [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')]
+            .find((row) => row.dataset.chatRowId === bashRow.id)
+            ?.querySelector<HTMLElement>('[data-chat-bash-command]')
+        : null;
+      return {
+        rows,
+        allRowIds: allRows.map((row) => row.id),
+        bash: {
+          text: bashCode?.textContent?.trim() ?? null,
+          childDivCount: bashCode?.querySelectorAll('div').length ?? null,
+          buttonCount: bashCode?.querySelectorAll('button').length ?? null,
+        },
+      };
+    }, expectedRowIds);
+  expect(rendered.rows.map((entry) => entry.count)).toEqual([1, 1, 1, 1, 1]);
+  expect(rendered.rows.map((entry) => entry.row?.text)).toEqual(expectedTexts);
+  expect(rendered.rows.map((entry) => entry.row?.type)).toEqual([
+    'user-message',
+    'assistant-message',
+    'bash-tool-use',
+    'tool-result',
+    'assistant-message',
+  ]);
+  expect(
+		rendered.rows.every((entry, index) => {
+			const next = rendered.rows[index + 1];
+			return !next || (entry.row?.top ?? Number.POSITIVE_INFINITY) <= (next.row?.top ?? 0);
+		}),
+    JSON.stringify(rendered.rows, null, 2),
+  ).toBe(true);
+  expect(
+    rendered.rows.map((entry) => {
+      const parsed = JSON.parse(entry.row?.virtualKey ?? 'null');
+      return Array.isArray(parsed) ? parsed[1] : null;
+    }),
+  ).toEqual(expectedRowIds.map((id) => `transcript:${id}`));
+  expect(new Set(rendered.allRowIds).size).toBe(rendered.allRowIds.length);
+  expect(rendered.allRowIds.filter((id) => expectedRowIds.includes(id))).toHaveLength(5);
+  expect(rendered.bash).toEqual({
+    text: `$ ${command}`,
+    childDivCount: 0,
+    buttonCount: 0,
+  });
+
+  await scrollToPosition(fixture.page, 'middle');
+  const followingTarget = await startFollowingRowFrameSampler(fixture.page);
+  const scrollingPrompt = 'chromium-streamed-while-scrolling';
+  const scrollingResponse =
+    'Live output continues while the reader scrolls upward, without remounting the following transcript row.';
+  const heldScrollingResponse = environment.model.scriptHeldTurn([claudeText(scrollingResponse)]);
+  const scrollingTurn = await fixture.integration.client.runChat(
+    liveClaudeRunRequest({
+      chatId,
+      command: scrollingPrompt,
+      permissionMode: 'bypassPermissions',
+    }),
+  );
+  await withDiagnosticTimeout(
+    'the scrolling turn to reach Claude',
+    heldScrollingResponse.requested,
+  );
+  await wheelTranscriptEarlier(fixture.page, 3);
+  heldScrollingResponse.release();
+  const scrollingTerminal = fixture.integration.client.waitForTurnTerminal(
+    chatId,
+    scrollingTurn.turnId,
+  );
+  await wheelTranscriptEarlier(fixture.page, 5);
+  expect((await scrollingTerminal).type).toBe('agent-run-finished');
+  const followingSamples = await finishFollowingRowFrameSampler(fixture.page);
+  const followingViolations = followingSamples.filter(
+    (sample) => !sample.connected || !sample.sameNode || sample.rowId !== followingTarget.rowId,
+  );
+  const reverseMovement = followingSamples.flatMap((sample, index) => {
+    const previous = followingSamples[index - 1];
+    return previous && sample.scrollTop > previous.scrollTop + 1
+      ? [
+          {
+            previous: previous.scrollTop,
+            current: sample.scrollTop,
+            frame: sample.frame,
+          },
+        ]
+      : [];
+  });
+  expect(followingSamples.length).toBeGreaterThan(3);
+  expect(followingViolations, JSON.stringify(followingSamples, null, 2)).toEqual([]);
+  expect(reverseMovement, JSON.stringify(followingSamples, null, 2)).toEqual([]);
+  expect(followingSamples.at(-1)?.scrollTop ?? followingTarget.initialScrollTop).toBeLessThan(
+    followingTarget.initialScrollTop - 40,
+  );
+  environment.model.assertSettled();
   fixture.assertNoBrowserErrors();
 }
 
@@ -2365,8 +3327,9 @@ async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: strin
 }
 
 async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: string): Promise<void> {
+  await prepareTranscript(fixture, chatId);
   await synchronizeNativeTranscriptGeneration(fixture, chatId);
-  const { initialModelCount } = await prepareTranscript(fixture, chatId);
+  const initialModelCount = await waitForStableModelCount(fixture.page, 50);
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await scrollToPosition(fixture.page, 'middle');
   await seedTranscript(fixture.integration, 1);
@@ -2481,45 +3444,536 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyBoundedWindowLaterPage(fixture: ChromiumFixture): Promise<void> {
+async function verifyCodexTailOrderingAcrossPaging(fixture: ChromiumFixture): Promise<void> {
+  const chatId = await seedTranscript(fixture.integration, 1, 'chromium-codex-tail-ordering');
+  const nativePage = await fixture.integration.client.getMessages(chatId, {
+    limit: 50,
+  });
+  const messages = codexTailOrderingTranscript();
+  const completeTranscript = {
+    generationId: nativePage.generationId,
+    lastSeq: messages.length,
+    messages,
+  };
+  const expectedRows = expectedRenderedTranscriptRows(completeTranscript);
+  const finalRowId = `${nativePage.generationId}:240`;
+  const lastBashRowId = `${nativePage.generationId}:238`;
+  const requestedBeforeSeqs: number[] = [];
+
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('chatId') !== chatId) {
+      await route.continue();
+      return;
+    }
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    const beforeSeqValue = url.searchParams.get('beforeSeq');
+    const beforeSeq = beforeSeqValue === null ? messages.length + 1 : Number(beforeSeqValue);
+    if (beforeSeqValue !== null) requestedBeforeSeqs.push(beforeSeq);
+    const end = Math.max(0, Math.min(messages.length, beforeSeq - 1));
+    const start = Math.max(0, end - limit);
+    const pageMessages = messages.slice(start, end);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        historyState: { kind: 'complete' },
+        chatId,
+        generationId: nativePage.generationId,
+        messages: pageMessages,
+        lastSeq: messages.length,
+        pageOldestSeq: pageMessages[0]?.seq ?? 0,
+        hasMore: (pageMessages[0]?.seq ?? 1) > 1,
+        pendingUserInputs: [],
+        limit,
+      }),
+    });
+  });
+
+  try {
+    await prepareTranscript(fixture, chatId, 35);
+    await waitForTranscriptEntryCount(fixture.page, 50);
+    await startRenderedTranscriptFrameSampler(fixture.page);
+    let entryCount = await transcriptEntryCount(fixture.page);
+    const counts = [entryCount];
+    await assertCodexTailAssistantIsLast(fixture.page, expectedRows, finalRowId, lastBashRowId);
+
+    for (let pageIndex = 0; pageIndex < 4 && entryCount < messages.length; pageIndex += 1) {
+      const previousRevision = await virtualDataRevision(fixture.page);
+      await scrollToPosition(fixture.page, 'start');
+      await waitForVirtualDataRevisionAfter(fixture.page, previousRevision);
+      entryCount = await transcriptEntryCount(fixture.page);
+      counts.push(entryCount);
+      await assertMountedTranscriptMatches(fixture.page, expectedRows);
+      await scrollToPosition(fixture.page, 'middle');
+      await assertMountedTranscriptMatches(fixture.page, expectedRows);
+      await assertCodexTailAssistantIsLast(fixture.page, expectedRows, finalRowId, lastBashRowId);
+    }
+
+    await scrollToPosition(fixture.page, 'start');
+    const firstRows = await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) =>
+      [...(feedElement as HTMLElement).querySelectorAll<HTMLElement>('[data-chat-row-id]')]
+        .slice(0, 10)
+        .map((row) => ({
+          id: row.dataset.chatRowId,
+          text: row.textContent?.trim(),
+          type: row.dataset.chatMessageType,
+        })),
+    );
+    expect(firstRows).toEqual(
+      Array.from({ length: 10 }, (_, index) => {
+        const seq = index + 1;
+        const turn = Math.ceil(seq / 2);
+        return {
+          id: `${nativePage.generationId}:${seq}`,
+          text: `codex-tail-${seq % 2 === 1 ? 'user' : 'assistant'}-${turn}`,
+          type: seq % 2 === 1 ? 'user-message' : 'assistant-message',
+        };
+      }),
+    );
+
+    const frames = await finishRenderedTranscriptFrameSampler(fixture.page);
+    assertRenderedTranscriptFrameIntegrity(frames, expectedRows, messages.length);
+    expect(counts, JSON.stringify({ counts, requestedBeforeSeqs }, null, 2)).toEqual([
+      50, 100, 150, 200, 240,
+    ]);
+    expect(requestedBeforeSeqs).toEqual([191, 141, 91, 41]);
+    expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
+    fixture.assertNoBrowserErrors();
+  } finally {
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
+async function verifyContinuousHistoryPaging(fixture: ChromiumFixture): Promise<void> {
+  const switchTargetChatId = await seedTranscript(
+    fixture.integration,
+    1,
+    'chromium-continuity-switch-target',
+  );
   const chatId = await seedTranscript(fixture.integration, 110, 'chromium-bounded-window');
+  const completeTranscript = await loadCompleteTranscript(fixture.integration, chatId);
+  const completeRows = expectedRenderedTranscriptRows(completeTranscript);
+  expect(completeRows).toHaveLength(220);
   await prepareTranscript(fixture, chatId);
-  let entryCount = await transcriptEntryCount(fixture.page);
-  for (let pageIndex = 0; pageIndex < 4 && entryCount < 200; pageIndex += 1) {
+  const initialPage = await fixture.integration.client.getMessages(chatId, {
+    limit: 50,
+  });
+  const newestEntry = initialPage.messages.at(-1);
+  if (!newestEntry) throw new Error('The continuous history fixture has no newest row.');
+  const newestRowId = `${initialPage.generationId}:${newestEntry.seq}`;
+  const newestText = 'echo:chromium-bounded-window-109';
+  const requestedBeforeSeqs: number[] = [];
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeSeq')) {
+      requestedBeforeSeqs.push(Number(url.searchParams.get('beforeSeq')));
+    }
+    await route.continue();
+  });
+
+  try {
+    await startRenderedTranscriptFrameSampler(fixture.page);
+    let entryCount = await transcriptEntryCount(fixture.page);
+    const counts = [entryCount];
+    await assertMountedTranscriptMatches(fixture.page, completeRows);
+    for (let pageIndex = 0; pageIndex < 4 && entryCount < initialPage.lastSeq; pageIndex += 1) {
+      const previousRevision = await virtualDataRevision(fixture.page);
+      await scrollToPosition(fixture.page, 'start');
+      await waitForVirtualDataRevisionAfter(fixture.page, previousRevision);
+      entryCount = await transcriptEntryCount(fixture.page);
+      counts.push(entryCount);
+      await assertMountedTranscriptMatches(fixture.page, completeRows);
+      await scrollToPosition(fixture.page, 'middle');
+      await assertMountedTranscriptMatches(fixture.page, completeRows);
+    }
+    const pagingFrames = await finishRenderedTranscriptFrameSampler(fixture.page);
+    assertRenderedTranscriptFrameIntegrity(pagingFrames, completeRows, completeTranscript.lastSeq);
+
+    expect(counts, JSON.stringify({ counts, requestedBeforeSeqs }, null, 2)).toEqual([
+      50, 100, 150, 200, 220,
+    ]);
+    expect(requestedBeforeSeqs).toEqual([171, 121, 71, 21]);
+    expect(requestedBeforeSeqs).not.toContain(initialPage.lastSeq + 1);
+    const requestCountAfterEarlierPages = requestedBeforeSeqs.length;
+
+    await scrollToPosition(fixture.page, 'end');
+    await fixture.page.locator(`[data-chat-row-id="${newestRowId}"]`).waitFor({ state: 'visible' });
+    expect(
+      await fixture.page.locator(`[data-chat-row-id="${newestRowId}"]`).textContent(),
+    ).toContain(newestText);
+    expect(requestedBeforeSeqs).toHaveLength(requestCountAfterEarlierPages);
+    await assertMountedTranscriptMatches(fixture.page, completeRows);
+
+    await selectSidebarChat(
+      fixture.page,
+      switchTargetChatId,
+      'chromium-continuity-switch-target-0',
+    );
+    await selectSidebarChat(fixture.page, chatId, 'chromium-bounded-window-109');
+    const restoredEntryCounts = await fixture.page
+      .locator(SIZER_SELECTOR)
+      .evaluate(async (sizer) => {
+        const counts: number[] = [];
+        for (let frame = 0; frame < 24; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          counts.push(Number((sizer as HTMLElement).dataset.chatTranscriptEntryCount ?? 0));
+        }
+        return counts;
+      });
+    expect(new Set(restoredEntryCounts), JSON.stringify(restoredEntryCounts)).toEqual(
+      new Set([completeTranscript.lastSeq]),
+    );
+    await assertMountedTranscriptMatches(fixture.page, completeRows);
+
+    const continuousGeometry = await transcriptGeometry(fixture.page);
+    expect(continuousGeometry.itemCount).toBeGreaterThan(2);
+    expect(continuousGeometry.transcriptItemCount).toBeGreaterThan(1);
+    expect(continuousGeometry.modelCount).toBe(initialPage.lastSeq + 3);
+    expect(continuousGeometry.overlaps).toEqual([]);
+    expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
+    fixture.assertNoBrowserErrors();
+  } finally {
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
+async function verifyTranscriptDragLifecycle(
+  fixture: ChromiumFixture,
+  viewport: { width: number; height: number; label: string },
+): Promise<void> {
+  await fixture.page.setViewportSize({
+    width: viewport.width,
+    height: viewport.height,
+  });
+  const promptPrefix = `chromium-drag-${viewport.label}`;
+  const chatId = await seedTranscript(fixture.integration, 180, promptPrefix);
+  await prepareTranscript(fixture, chatId);
+  const initialPage = await fixture.integration.client.getMessages(chatId, {
+    limit: 50,
+  });
+  expect(initialPage.messages).toHaveLength(50);
+  expect(initialPage.hasMore).toBe(true);
+
+  const completeInitialTranscript = await loadCompleteTranscript(fixture.integration, chatId);
+  const completeInitialRows = expectedRenderedTranscriptRows(completeInitialTranscript);
+  expect(completeInitialRows).toHaveLength(360);
+  for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
+    const previousCount = await transcriptEntryCount(fixture.page);
     const previousRevision = await virtualDataRevision(fixture.page);
     await scrollToPosition(fixture.page, 'start');
     await waitForVirtualDataRevisionAfter(fixture.page, previousRevision);
-    entryCount = await transcriptEntryCount(fixture.page);
-    expect(entryCount).toBeLessThanOrEqual(200);
+    expect(await transcriptEntryCount(fixture.page)).toBe(previousCount + 50);
   }
-  expect(entryCount).toBe(200);
+  const loadedEntryCount = await transcriptEntryCount(fixture.page);
+  expect(loadedEntryCount).toBe(250);
+  const loadedOldestSeq = initialPage.lastSeq - loadedEntryCount + 1;
 
-  const earlierRevision = await virtualDataRevision(fixture.page);
-  await scrollToPosition(fixture.page, 'start');
-  await waitForVirtualDataRevisionAfter(fixture.page, earlierRevision);
-  expect(await transcriptEntryCount(fixture.page)).toBe(200);
+  const requestedBeforeSeqs: number[] = [];
+  let holdNextEarlierRequest = false;
+  let resolveEarlierRequest!: () => void;
+  const earlierRequestReceived = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
+  let releaseEarlierPage!: () => void;
+  const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
+  let liveHold: ReturnType<typeof fixture.integration.fakeProviders.openAi.holdNext> | null = null;
+  let interruptedHold: ReturnType<typeof fixture.integration.fakeProviders.openAi.holdNext> | null =
+    null;
 
-  const prefetchPosition = await positionNearLaterPageBoundary(fixture.page);
-  expect(prefetchPosition.distanceFromEnd).toBeGreaterThan(50);
-  expect(prefetchPosition.distanceFromEnd).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
-  const anchor = await readingAnchor(fixture.page);
-  const laterRevision = await virtualDataRevision(fixture.page);
-  await signalScrollIntent(fixture.page, 'later');
-  await fixture.page.locator(FEED_SELECTOR).dispatchEvent('scroll');
-  await waitForVirtualDataRevisionAfter(fixture.page, laterRevision);
-  expect(await transcriptEntryCount(fixture.page)).toBe(200);
-  const restored = await anchorByKey(fixture.page, anchor.key);
-  expect(
-    Math.abs(restored.offset - anchor.offset),
-    JSON.stringify({ anchor, restored }),
-  ).toBeLessThanOrEqual(1);
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeSeq')) {
+      requestedBeforeSeqs.push(Number(url.searchParams.get('beforeSeq')));
+      if (holdNextEarlierRequest) {
+        holdNextEarlierRequest = false;
+        resolveEarlierRequest();
+        await earlierPageGate;
+      }
+    }
+    await route.continue();
+  });
 
-  const boundedGeometry = await transcriptGeometry(fixture.page);
-  expect(boundedGeometry.itemCount).toBeGreaterThan(2);
-  expect(boundedGeometry.transcriptItemCount).toBeGreaterThan(1);
-  expect(boundedGeometry.overlaps).toEqual([]);
-  expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
-  fixture.assertNoBrowserErrors();
+  try {
+    await scrollToPosition(fixture.page, 'end');
+    await waitForStablePinnedTranscriptLayout(fixture.page, `${viewport.label}-completed-drag`);
+    await startRenderedTranscriptFrameSampler(fixture.page);
+    const completedDrag = await beginTranscriptThumbDrag(fixture.page);
+    const completedFirstScrollTop = await moveTranscriptThumb(
+      fixture.page,
+      completedDrag,
+      completedDrag.initialPosition - 0.04,
+    );
+    const completedScrollTop = await moveTranscriptThumb(
+      fixture.page,
+      completedDrag,
+      completedDrag.initialPosition - 0.08,
+    );
+    await finishTranscriptThumbDrag(fixture.page);
+    const completedFrames = await finishRenderedTranscriptFrameSampler(fixture.page);
+    assertRenderedTranscriptFrameIntegrity(
+      completedFrames,
+      completeInitialRows,
+      initialPage.lastSeq,
+    );
+    expect(completedDrag.initialPosition).toBeGreaterThan(0.8);
+    expect(completedFirstScrollTop).toBeLessThan(completedDrag.initialScrollTop - 20);
+    expect(completedScrollTop).toBeLessThan(completedFirstScrollTop - 20);
+    expect(requestedBeforeSeqs).toEqual([]);
+
+    await scrollToPosition(fixture.page, 'end');
+    await waitForStablePinnedTranscriptLayout(fixture.page, `${viewport.label}-held-drag`);
+    const liveTurns = Array.from({ length: 5 }, (_, segment) => ({
+      prompt: `${promptPrefix}-${segment === 0 ? 'held-live' : `expanding-${segment + 1}`}`,
+      response: `Live response ${segment + 1} expands while the ${viewport.label} transcript thumb remains held and keeps every identity, line of text, and vertical position ordered.`,
+    }));
+    const firstLiveTurn = liveTurns[0];
+    if (!firstLiveTurn) throw new Error('The expanding transcript fixture has no first turn.');
+    liveHold = fixture.integration.fakeProviders.openAi.holdNext({
+      lastUserText: firstLiveTurn.prompt,
+    });
+    await startRenderedTranscriptFrameSampler(fixture.page);
+    const acceptedFirstLiveTurn = await fixture.integration.client.runDirectChat({
+      chatId,
+      content: firstLiveTurn.prompt,
+      agent: fixture.integration.directAgents.openAi,
+    });
+    await withDiagnosticTimeout('the held live drag turn', liveHold.received);
+    await fixture.page
+      .locator('[data-slot="chat-processing-status"]')
+      .waitFor({ state: 'visible' });
+    await waitForTranscriptEntryCount(fixture.page, 51);
+    const liveDrag = await beginTranscriptThumbDrag(fixture.page);
+    for (const index of [0, 1]) {
+      await moveTranscriptThumb(
+        fixture.page,
+        liveDrag,
+        liveDrag.initialPosition - (index + 1) * 0.0025,
+      );
+    }
+    const heldScrollTop = await fixture.page
+      .locator(FEED_SELECTOR)
+      .evaluate((feedElement) => (feedElement as HTMLElement).scrollTop);
+    await fixture.page.locator(FEED_SELECTOR).evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          let frames = 0;
+          const sample = () => {
+            frames += 1;
+            if (frames >= 4) resolve();
+            else requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        }),
+    );
+    const pausedHeldScrollTop = await fixture.page
+      .locator(FEED_SELECTOR)
+      .evaluate((feedElement) => (feedElement as HTMLElement).scrollTop);
+    expect(Math.abs(pausedHeldScrollTop - heldScrollTop)).toBeLessThanOrEqual(1);
+    expect(liveHold.releaseText(firstLiveTurn.response)).toBe(true);
+    expect(
+      (
+        await fixture.integration.client.waitForTurnTerminal(
+          chatId,
+          acceptedFirstLiveTurn.turnId,
+        )
+      ).type,
+    ).toBe('agent-run-finished');
+
+    for (const [index, liveTurn] of liveTurns.slice(1).entries()) {
+      liveHold = fixture.integration.fakeProviders.openAi.holdNext({
+        lastUserText: liveTurn.prompt,
+      });
+      const acceptedLiveTurn = await fixture.integration.client.runDirectChat({
+        chatId,
+        content: liveTurn.prompt,
+        agent: fixture.integration.directAgents.openAi,
+      });
+      await withDiagnosticTimeout(`the expanding live drag turn ${index + 2}`, liveHold.received);
+      await moveTranscriptThumb(
+        fixture.page,
+        liveDrag,
+        liveDrag.initialPosition - (index * 2 + 3) * 0.0025,
+      );
+      expect(liveHold.releaseText(liveTurn.response)).toBe(true);
+      await moveTranscriptThumb(
+        fixture.page,
+        liveDrag,
+        liveDrag.initialPosition - (index * 2 + 4) * 0.0025,
+      );
+      expect(
+        (
+          await fixture.integration.client.waitForTurnTerminal(chatId, acceptedLiveTurn.turnId)
+        ).type,
+      ).toBe('agent-run-finished');
+    }
+    await finishTranscriptThumbDrag(fixture.page);
+    const liveFrames = await finishRenderedTranscriptFrameSampler(fixture.page);
+
+    const afterLive = await loadCompleteTranscript(fixture.integration, chatId);
+    const liveEntries = afterLive.messages.filter((entry) => entry.seq > initialPage.lastSeq);
+    expect(liveEntries.map((entry) => entry.message.type)).toEqual(
+      liveTurns.flatMap(() => ['user-message', 'assistant-message']),
+    );
+    expect(
+      liveEntries.map((entry) =>
+        'content' in entry.message && typeof entry.message.content === 'string'
+          ? entry.message.content
+          : null,
+      ),
+    ).toEqual(liveTurns.flatMap((turn) => [turn.prompt, turn.response]));
+    const afterLiveRows = expectedRenderedTranscriptRows(afterLive);
+    assertRenderedTranscriptFrameIntegrity(liveFrames, afterLiveRows, afterLive.lastSeq);
+    const expandedRows = afterLiveRows.filter((row) => row.seq > initialPage.lastSeq);
+    expect(new Set(liveFrames.map((frame) => frame.modelCount)).size).toBeGreaterThan(2);
+    for (const expectedRow of expandedRows) {
+      const rowFrames = liveFrames.flatMap((frame) =>
+        frame.rows.filter((row) => row.id === expectedRow.id),
+      );
+      expect(rowFrames.length, expectedRow.id).toBeGreaterThan(0);
+      expect(new Set(rowFrames.map((row) => row.text))).toEqual(new Set([expectedRow.text]));
+      expect(new Set(rowFrames.map((row) => row.nodeToken)).size, expectedRow.id).toBe(1);
+    }
+    expect(requestedBeforeSeqs).toEqual([]);
+
+    await scrollToPosition(fixture.page, 'end');
+    await fixture.page
+      .locator(FEED_SELECTOR)
+      .getByText(liveTurns.at(-1)?.response ?? '', { exact: true })
+      .waitFor();
+    await waitForStablePinnedTranscriptLayout(fixture.page, `${viewport.label}-prepend-drag`);
+    await assertMountedTranscriptMatches(fixture.page, afterLiveRows);
+    const countBeforeEarlierPage = await transcriptEntryCount(fixture.page);
+    holdNextEarlierRequest = true;
+    await startRenderedTranscriptFrameSampler(fixture.page);
+    const prependDrag = await beginTranscriptThumbDrag(fixture.page);
+    await moveTranscriptThumb(fixture.page, prependDrag, prependDrag.initialPosition * 0.35);
+    const clampedScrollTop = await moveTranscriptThumb(fixture.page, prependDrag, 0);
+    expect(clampedScrollTop).toBeLessThanOrEqual(1);
+    await withDiagnosticTimeout('the thumb-drag earlier-page request', earlierRequestReceived);
+    const prependAnchor = await readingAnchor(fixture.page);
+    await startReadingAnchorFrameSampler(fixture.page, prependAnchor);
+    const followingTarget = await startFollowingRowFrameSampler(fixture.page);
+    releaseEarlierPage();
+    for (let movement = 0; movement < 8; movement += 1) {
+      await moveTranscriptThumb(fixture.page, prependDrag, 0);
+    }
+    await waitForTranscriptEntryCount(fixture.page, countBeforeEarlierPage + 50);
+    const settledPrependAnchor = await anchorByKey(fixture.page, prependAnchor.key);
+    await finishTranscriptThumbDrag(fixture.page);
+    const prependRenderedFrames = await finishRenderedTranscriptFrameSampler(fixture.page);
+    const prependFrames = await finishReadingAnchorFrameSampler(fixture.page);
+    const followingFrames = await finishFollowingRowFrameSampler(fixture.page);
+    expect(
+      Math.max(
+        ...prependFrames.map((sample) =>
+          sample.offset === null
+            ? Number.POSITIVE_INFINITY
+            : Math.abs(sample.offset - prependAnchor.offset),
+        ),
+      ),
+      JSON.stringify({ prependAnchor, prependFrames }, null, 2),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(settledPrependAnchor.offset - prependAnchor.offset),
+      JSON.stringify({ prependAnchor, settledPrependAnchor }, null, 2),
+    ).toBeLessThanOrEqual(1);
+    const followingViolations = followingFrames.filter(
+      (sample) => !sample.connected || !sample.sameNode || sample.rowId !== followingTarget.rowId,
+    );
+    expect(
+      followingViolations,
+      JSON.stringify({ followingTarget, followingFrames }, null, 2),
+    ).toEqual([]);
+    assertRenderedTranscriptFrameIntegrity(
+      prependRenderedFrames,
+      afterLiveRows,
+      afterLive.lastSeq,
+    );
+    expect(requestedBeforeSeqs[0]).toBe(loadedOldestSeq);
+    expect(new Set(requestedBeforeSeqs).size).toBe(requestedBeforeSeqs.length);
+    expect(
+      requestedBeforeSeqs.every(
+        (cursor, index) => index === 0 || cursor < requestedBeforeSeqs[index - 1],
+      ),
+      JSON.stringify(requestedBeforeSeqs),
+    ).toBe(true);
+
+    await scrollToPosition(fixture.page, 'end');
+    await waitForStablePinnedTranscriptLayout(fixture.page, `${viewport.label}-interrupted-drag`);
+    await assertMountedTranscriptMatches(fixture.page, afterLiveRows);
+
+    const interruptedPrompt = `${promptPrefix}-interrupted`;
+    interruptedHold = fixture.integration.fakeProviders.openAi.holdNext({
+      lastUserText: interruptedPrompt,
+    });
+    await startRenderedTranscriptFrameSampler(fixture.page);
+    const interruptedTurn = await fixture.integration.client.runDirectChat({
+      chatId,
+      content: interruptedPrompt,
+      agent: fixture.integration.directAgents.openAi,
+    });
+    await withDiagnosticTimeout('the interruptible drag turn', interruptedHold.received);
+    await fixture.page
+      .locator('[data-slot="chat-processing-status"]')
+      .waitFor({ state: 'visible' });
+    const interruptedDrag = await beginTranscriptThumbDrag(fixture.page);
+    const preInterruptScrollTop = await moveTranscriptThumb(
+      fixture.page,
+      interruptedDrag,
+      interruptedDrag.initialPosition - 0.05,
+    );
+    const stopCursor = fixture.integration.client.markEvents();
+    const terminal = fixture.integration.client.waitForTurnTerminal(chatId, interruptedTurn.turnId);
+    const providerAbort = interruptedHold.expectAbort();
+    const stop = await fixture.integration.client.stopChat({
+      chatId,
+      clientRequestId: crypto.randomUUID(),
+    });
+    expect(stop.outcome).toBe('interrupt-requested');
+    await providerAbort;
+    await fixture.integration.client.waitForProcessing(chatId, false, {
+      afterIndex: stopCursor,
+      timeoutMs: 20_000,
+    });
+    expect((await terminal).type).toBe('agent-run-finished');
+    const interruptedScrollTop = await moveTranscriptThumb(
+      fixture.page,
+      interruptedDrag,
+      interruptedDrag.initialPosition - 0.1,
+    );
+    await finishTranscriptThumbDrag(fixture.page);
+    const interruptedFrames = await finishRenderedTranscriptFrameSampler(fixture.page);
+    expect(preInterruptScrollTop).toBeLessThan(interruptedDrag.initialScrollTop - 20);
+    expect(interruptedScrollTop).toBeLessThan(preInterruptScrollTop - 20);
+
+    const finalTranscript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+    const interruptedEntries = finalTranscript.messages.filter(
+      (entry) => entry.seq > afterLive.lastSeq,
+    );
+    expect(interruptedEntries.map((entry) => entry.message.type)).toEqual(['user-message']);
+    expect(
+      interruptedEntries.map((entry) =>
+        'content' in entry.message && typeof entry.message.content === 'string'
+          ? entry.message.content
+          : null,
+      ),
+    ).toEqual([interruptedPrompt]);
+    const finalRows = expectedRenderedTranscriptRows(finalTranscript);
+    assertRenderedTranscriptFrameIntegrity(interruptedFrames, finalRows, afterLive.lastSeq);
+    await scrollToPosition(fixture.page, 'end');
+    await assertMountedTranscriptMatches(fixture.page, finalRows);
+    expect(await fixture.page.locator('[data-slot="chat-processing-status"]').count()).toBe(0);
+    const geometry = await transcriptGeometry(fixture.page);
+    expect(geometry.overlaps).toEqual([]);
+    expect(geometry.horizontalOverflow).toEqual([]);
+    expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
+    fixture.assertNoBrowserErrors();
+  } finally {
+    releaseEarlierPage();
+    liveHold?.releaseEcho();
+    interruptedHold?.releaseEcho();
+    await fixture.page.mouse.up().catch(() => undefined);
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
 }
 
 async function seedPermissionTranscript(
@@ -2664,7 +4118,13 @@ describe('Chromium transcript virtualization', () => {
         markPhase('verifying detached, hidden, and pinned append geometry');
         await verifyAppendGeometry(fixture, chatId);
         markPhase('verifying chat-switch end restoration');
-        await verifyChatSwitchBottomRestore(fixture, chatId, testEnvironment);
+        const streamedChatId = await verifyChatSwitchBottomRestore(
+          fixture,
+          chatId,
+          testEnvironment,
+        );
+        markPhase('verifying streamed row order and the following-row buffer');
+        await verifyStreamedRowOrderAndFollowingBuffer(fixture, testEnvironment, streamedChatId);
         markPhase('verifying detached and pinned text-scale transitions');
         await verifyTextScaleTransitions(fixture, chatId);
       },
@@ -2746,17 +4206,52 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 120_000);
 
-  test('bounds the retained transcript while preserving later-page geometry', async () => {
+  test('keeps loaded history continuous across automatic earlier paging', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
-      'transcript-bounded-window-later-page',
+      'transcript-continuous-history-paging',
       async (fixture, markPhase) => {
-        markPhase('paging across the bounded transcript window');
-        await verifyBoundedWindowLaterPage(fixture);
+        markPhase('paging earlier without evicting the loaded tail');
+        await verifyContinuousHistoryPaging(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
       browser,
     );
   }, 180_000);
+
+  test('keeps the final Codex assistant response after every preceding tool across paging', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-codex-tail-ordering',
+      async (fixture, markPhase) => {
+        markPhase('paging a Codex-style compaction and Bash-heavy tail without reordering');
+        await verifyCodexTailOrderingAcrossPaging(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  for (const viewport of [
+    { label: 'compact', width: 390, height: 700 },
+    { label: 'desktop', width: 1440, height: 900 },
+  ]) {
+    test(`keeps ${viewport.label} transcript drag scrolling stable across live and interrupted turns`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      await withChromiumFixture(
+        `transcript-drag-${viewport.label}`,
+        async (fixture, markPhase) => {
+          markPhase(
+            `dragging completed, held, expanding, and interrupted ${viewport.label} history`,
+          );
+          await verifyTranscriptDragLifecycle(fixture, viewport);
+        },
+        diagnostics,
+        { serverEnvironment: environment.serverEnvironment },
+        browser,
+      );
+    }, 180_000);
+  }
 });
