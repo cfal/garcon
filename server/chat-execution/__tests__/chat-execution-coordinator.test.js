@@ -20,6 +20,13 @@ async function waitFor(predicate) {
   throw new Error('Timed out waiting for coordinator state');
 }
 
+function rejectWhenExecutionAdmissionAborts(_chatId, _content, options) {
+  return new Promise((_resolve, reject) => {
+    const { signal } = options.executionAdmission;
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  });
+}
+
 function createFixture(overrides = {}) {
   const events = [];
   const queuedAdmission = overrides.queuedAdmission ?? (() => ({ inserted: true }));
@@ -278,13 +285,7 @@ describe('ChatExecutionCoordinator', () => {
   it('stops a reserved turn before the provider run starts', async () => {
     const fixture = createFixture({
       turnRunner: {
-        runAgentTurn: mock((_chatId, _content, options) => new Promise((_resolve, reject) => {
-          options.executionAdmission.signal.addEventListener(
-            'abort',
-            () => reject(options.executionAdmission.signal.reason),
-            { once: true },
-          );
-        })),
+        runAgentTurn: mock(rejectWhenExecutionAdmissionAborts),
       },
     });
     coordinator = fixture.coordinator;
@@ -304,13 +305,7 @@ describe('ChatExecutionCoordinator', () => {
     const failures = [];
     const fixture = createFixture({
       turnRunner: {
-        runAgentTurn: mock((_chatId, _content, options) => new Promise((_resolve, reject) => {
-          options.executionAdmission.signal.addEventListener(
-            'abort',
-            () => reject(options.executionAdmission.signal.reason),
-            { once: true },
-          );
-        })),
+        runAgentTurn: mock(rejectWhenExecutionAdmissionAborts),
       },
     });
     coordinator = fixture.coordinator;

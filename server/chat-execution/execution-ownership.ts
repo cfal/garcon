@@ -31,7 +31,7 @@ interface ChatExecutionState {
   owner: ChatOwner;
   // Outlives the owner that created it: a finished turn keeps the chat owned until its terminal
   // event retires it, so its admission handle is released with the attempt, not the reservation.
-  turn: { attempt: QueueExecutionAttempt; admission: AbortController | null } | null;
+  turn: { attempt: QueueExecutionAttempt; admissionController: AbortController } | null;
   // Intent recorded while something else owns the chat.
   pending: { drainRequested: boolean; suppressions: Set<DrainSuppressionReason> };
   repairSnapshot: TranscriptSnapshotReservation | null;
@@ -58,14 +58,14 @@ function emptyChatExecutionState(): ChatExecutionState {
 }
 
 function createExecutionAdmission(): {
-  readonly controller: AbortController;
-  readonly admission: AgentExecutionAdmission;
+  readonly admissionController: AbortController;
+  readonly executionAdmission: AgentExecutionAdmission;
 } {
-  const controller = new AbortController();
+  const admissionController = new AbortController();
   return {
-    controller,
-    admission: Object.freeze({
-      signal: controller.signal,
+    admissionController,
+    executionAdmission: Object.freeze({
+      signal: admissionController.signal,
       markStarted: async () => {},
     }),
   };
@@ -94,7 +94,7 @@ export class ExecutionOwnership {
   // Shutdown aborts whichever admissions are live. Provider abort is handled separately and
   // never delays ownership retirement.
   #abortAdmissions(state: ChatExecutionState, reason: Error): void {
-    state.turn?.admission?.abort(reason);
+    state.turn?.admissionController.abort(reason);
   }
 
   // Drain handles only exist while a drain owns the chat. The drainer sets them between
@@ -221,15 +221,15 @@ export class ExecutionOwnership {
     if (ownsExecution(state)) {
       throw new Error('Cannot reserve a direct turn while another operation owns execution');
     }
-    const { controller, admission } = createExecutionAdmission();
+    const { admissionController, executionAdmission } = createExecutionAdmission();
     const reservation = Object.freeze({
       chatId,
       reservationId: crypto.randomUUID(),
-      executionAdmission: admission,
+      executionAdmission,
     });
     const identity = executionTurnIdentity(turn) ?? { turnId: crypto.randomUUID() };
     state.owner = { kind: 'direct', reservationId: reservation.reservationId };
-    state.turn = { attempt: new QueueExecutionAttempt(identity), admission: controller };
+    state.turn = { attempt: new QueueExecutionAttempt(identity), admissionController };
     return reservation;
   }
 
@@ -294,9 +294,9 @@ export class ExecutionOwnership {
     if (state.turn !== null) {
       throw new Error('Another chat turn already owns execution');
     }
-    const { controller, admission } = createExecutionAdmission();
-    state.turn = { attempt, admission: controller };
-    return admission;
+    const { admissionController, executionAdmission } = createExecutionAdmission();
+    state.turn = { attempt, admissionController };
+    return executionAdmission;
   }
 
   isCurrentAttempt(chatId: string, attempt: QueueExecutionAttempt): boolean {
@@ -320,7 +320,7 @@ export class ExecutionOwnership {
   retireAttempt(chatId: string, attempt: QueueExecutionAttempt, reason?: Error): boolean {
     const state = this.#chats.get(chatId);
     if (!state || state.turn?.attempt !== attempt) return false;
-    if (reason) state.turn.admission?.abort(reason);
+    if (reason) state.turn.admissionController.abort(reason);
     attempt.markSettled();
     state.turn = null;
     if (state.owner.kind === 'direct') {

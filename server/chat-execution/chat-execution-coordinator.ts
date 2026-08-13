@@ -764,14 +764,15 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const attempt = this.#ownership.attempt(chatId);
     try {
       const acknowledged = await this.#turnRunner.abortSession(chatId);
-      const current = attempt && this.#ownership.isCurrentAttempt(chatId, attempt)
-        ? attempt
-        : undefined;
-      if (!acknowledged && !current) return 'already-idle';
-      if (current) {
+      let currentAttempt: QueueExecutionAttempt | undefined;
+      if (attempt && this.#ownership.isCurrentAttempt(chatId, attempt)) {
+        currentAttempt = attempt;
+      }
+      if (!acknowledged && !currentAttempt) return 'already-idle';
+      if (currentAttempt) {
         this.#retireAttempt(
           chatId,
-          current,
+          currentAttempt,
           new Error('Turn interrupted by the user'),
         );
       }
