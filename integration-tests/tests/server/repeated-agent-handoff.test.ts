@@ -29,6 +29,66 @@ interface HoldableProvider {
 }
 
 describe('repeated agent handoff lifecycle', () => {
+  test('preserves a paused queue when it blocks an in-place handoff', async () => {
+    await withIntegrationFixture('queued-agent-handoff-guard', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const held = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const source = await fixture.client.startDirectChat({
+        chatId,
+        content: 'handoff-queue-source',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await held.received;
+      await fixture.client.enqueueNew(chatId, 'queued-before-handoff');
+      const paused = await fixture.client.pauseQueue(chatId);
+      held.releaseText('handoff-queue-source-answer');
+      await fixture.client.waitForTurnTerminal(chatId, source.turnId);
+
+      const before = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId);
+      if (!before) throw new Error('Source chat disappeared before the handoff attempt.');
+      const transcript = await fixture.client.getMessages(chatId);
+      const anthropicRequestCount = fixture.fakeProviders.anthropic.requests().length;
+
+      await expect(fixture.client.handoffDirectChat({
+        chatId,
+        content: 'blocked-handoff-input',
+        agent: fixture.directAgents.anthropic,
+        expectedAgentOwnershipEpoch: before.agentOwnershipEpoch,
+      })).rejects.toMatchObject({
+        status: 409,
+        body: { errorCode: 'AGENT_HANDOFF_REQUIRES_IDLE' },
+      });
+
+      const after = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId);
+      expect(after).toMatchObject({
+        agentId: before.agentId,
+        agentOwnershipEpoch: before.agentOwnershipEpoch,
+      });
+      const control = await fixture.client.getExecutionControl(chatId);
+      expect(control.queue.entries.map((entry) => entry.content)).toEqual([
+        'queued-before-handoff',
+      ]);
+      expect(control.queue.pause).toEqual(paused.control.queue.pause);
+      expect((await fixture.client.getMessages(chatId)).messages).toEqual(transcript.messages);
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(anthropicRequestCount);
+
+      await fixture.client.clearQueue(chatId);
+      await handoffWithAnswer({
+        fixture,
+        provider: fixture.fakeProviders.anthropic,
+        chatId,
+        agent: fixture.directAgents.anthropic,
+        prompt: 'handoff-after-clear',
+        answer: 'handoff-after-clear-answer',
+      });
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId))
+        .toMatchObject({ agentId: fixture.directAgents.anthropic.agentId });
+    });
+  });
+
   test('preserves direct-provider ledger history through handoffs, restart, and a point fork', async () => {
     await withIntegrationFixture('repeated-agent-handoff', async (fixture) => {
       const sourceChatId = fixture.newChatId();
