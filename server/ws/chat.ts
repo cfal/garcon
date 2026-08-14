@@ -70,6 +70,7 @@ interface ChatHandlerDeps {
 }
 
 const RECONNECT_CONTROL_READ_CONCURRENCY = 8;
+const SLOW_REPLAY_WARNING_MS = 2_000;
 
 function readProcessingSnapshot(
   processing: Pick<ChatProcessingActivity, 'snapshot'>,
@@ -158,6 +159,24 @@ export class ChatHandler {
     };
   }
 
+  // A subscribe answers from the ledger, so it settles in milliseconds. One that does not is
+  // holding a client on a request that looks answered to nobody, and the silence is the whole
+  // symptom; saying so is what separates a stuck read from a request that never arrived.
+  async #watchSlowReplay<T>(chatId: string, replay: Promise<T>): Promise<T> {
+    const timer = setTimeout(
+      () => logger.warn('ws: chat-subscribe replay is still pending', {
+        chatId,
+        afterMs: SLOW_REPLAY_WARNING_MS,
+      }),
+      SLOW_REPLAY_WARNING_MS,
+    );
+    try {
+      return await replay;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   #sendRequestError(writer: WebSocketWriter, params: RequestErrorParams): void {
     writer.send(new ClientRequestErrorMessage(
       params.clientRequestId, params.requestType, params.code,
@@ -234,7 +253,12 @@ export class ChatHandler {
 
   async #handleChatSubscribe(data: ChatSubscribeRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
     const clientRequestId = data.clientRequestId;
-    if (!clientRequestId) return;
+    if (!clientRequestId) {
+      // The client is waiting on a correlated answer it can never receive otherwise.
+      logger.warn('ws: chat-subscribe arrived without a client request id', { chatId });
+      writer.send(new WsFaultMessage('chat-subscribe requires a clientRequestId'));
+      return;
+    }
     const requestType = 'chat-subscribe';
     try {
       const session = this.#registry.getChat(chatId);
@@ -247,11 +271,11 @@ export class ChatHandler {
         });
         return;
       }
-      const replay = await this.#chatViews.readReplay(
+      const replay = await this.#watchSlowReplay(chatId, this.#chatViews.readReplay(
         chatId,
         transcriptViewId(data.transcriptViewId),
         data.afterOrdinal,
-      );
+      ));
       writer.send(new ChatSubscribedMessage(
         clientRequestId,
         chatId,
