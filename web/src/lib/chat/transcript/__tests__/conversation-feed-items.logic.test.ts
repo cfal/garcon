@@ -366,6 +366,50 @@ describe('buildConversationFeedRenderItems', () => {
 
 		expect(model.items.map((item) => item.id)).toEqual(['row-0', 'row-1', 'row-2']);
 	});
+
+	it('suppresses only the answered question result represented by the matching wrapper occurrence', () => {
+		const firstWrapper = new PermissionRequestMessage(
+			TS,
+			'permission-1',
+			questionTool('reused-question'),
+		);
+		const firstResult = new ToolResultMessage(
+			TS,
+			'reused-question',
+			{ toolUseResult: { answers: { 'Which mode?': 'Careful' } } },
+			false,
+		);
+		const secondResult = new ToolResultMessage(
+			TS,
+			'reused-question',
+			{ toolUseResult: { answers: { 'Which mode?': 'Fast' } } },
+			false,
+		);
+		const model = buildConversationFeedRenderModel(
+			rows([
+				firstWrapper,
+				questionTool('reused-question'),
+				firstResult,
+				questionTool('reused-question'),
+				secondResult,
+			]),
+		);
+
+		expect(model.items.map((item) => item.id)).toEqual([
+			'row-0',
+			'row-1',
+			'row-2',
+			'row-3',
+			'row-4',
+		]);
+		expect(model.items.map(conversationFeedItemLayout)).toEqual([
+			'permission',
+			'hidden',
+			'hidden',
+			'hidden',
+			'permission',
+		]);
+	});
 });
 
 describe('visiblePendingPermissionRequests', () => {

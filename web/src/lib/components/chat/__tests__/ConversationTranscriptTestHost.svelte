@@ -51,6 +51,8 @@
 	localSettings.autoExpandTools = false;
 	setLocalSettings(localSettings);
 	onDestroy(() => localSettings.destroy());
+
+	function ignorePermissionDecision(): void {}
 </script>
 
-<ConversationTranscript {rows} agentId="claude" />
+<ConversationTranscript {rows} agentId="claude" onPermissionDecision={ignorePermissionDecision} />

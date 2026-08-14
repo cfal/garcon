@@ -27,6 +27,7 @@ export interface ConversationFeedMessageRenderItem {
 	index: number;
 	seq?: number;
 	pairedToolUse?: ToolUseChatMessage;
+	permissionWrapperRowId?: string;
 }
 
 export type ConversationFeedRenderItem =
@@ -76,7 +77,9 @@ export function conversationFeedItemLayout(
 	if (message instanceof ToolResultMessage) {
 		const tool = item.pairedToolUse;
 		if (!tool) return 'hidden';
-		if (tool instanceof AskUserQuestionToolUseMessage) return 'permission';
+		if (tool instanceof AskUserQuestionToolUseMessage) {
+			return item.permissionWrapperRowId ? 'hidden' : 'permission';
+		}
 		const rule = resolveDisplayRule(TOOL_DISPLAY_REGISTRY, tool.type);
 		return shouldRenderToolResult(rule, {
 			content: message.content,
@@ -92,23 +95,60 @@ export function conversationFeedItemLayout(
 	return rule.input.mode === 'hidden' ? 'hidden' : 'standard';
 }
 
+interface PendingToolUse {
+	rowId: string;
+	message: ToolUseChatMessage;
+	permissionWrapperRowId?: string;
+}
+
 interface ConversationToolPairs {
 	toolResultByUseRowId: Map<string, ToolResultMessage>;
 	toolResultRowIdByUseRowId: Map<string, string>;
 	toolUseByResultRowId: Map<string, ToolUseChatMessage>;
+	permissionWrapperRowIdByResultRowId: Map<string, string>;
 }
 
 function pairToolResults(rows: ChatDisplayRow[]): ConversationToolPairs {
-	const pendingByToolId = new Map<string, Array<{ rowId: string; message: ToolUseChatMessage }>>();
+	const pendingByToolId = new Map<string, PendingToolUse[]>();
+	const pendingPermissionWrappersByToolId = new Map<string, string[]>();
 	const toolResultByUseRowId = new Map<string, ToolResultMessage>();
 	const toolResultRowIdByUseRowId = new Map<string, string>();
 	const toolUseByResultRowId = new Map<string, ToolUseChatMessage>();
+	const permissionWrapperRowIdByResultRowId = new Map<string, string>();
 	for (const row of rows) {
 		if (row.kind !== 'message') continue;
 		const message = row.message;
+		if (
+			message instanceof PermissionRequestMessage &&
+			message.requestedTool instanceof AskUserQuestionToolUseMessage
+		) {
+			const toolId = message.requestedTool.toolId;
+			const pendingUse = pendingByToolId
+				.get(toolId)
+				?.find(
+					(candidate) =>
+						candidate.message instanceof AskUserQuestionToolUseMessage &&
+						!candidate.permissionWrapperRowId,
+				);
+			if (pendingUse) {
+				pendingUse.permissionWrapperRowId = row.id;
+			} else {
+				const wrappers = pendingPermissionWrappersByToolId.get(toolId) ?? [];
+				wrappers.push(row.id);
+				pendingPermissionWrappersByToolId.set(toolId, wrappers);
+			}
+			continue;
+		}
 		if (isToolUseMessage(message)) {
 			const pending = pendingByToolId.get(message.toolId) ?? [];
-			pending.push({ rowId: row.id, message });
+			const pendingUse: PendingToolUse = { rowId: row.id, message };
+			if (message instanceof AskUserQuestionToolUseMessage) {
+				const wrappers = pendingPermissionWrappersByToolId.get(message.toolId);
+				const permissionWrapperRowId = wrappers?.shift();
+				if (permissionWrapperRowId) pendingUse.permissionWrapperRowId = permissionWrapperRowId;
+				if (wrappers?.length === 0) pendingPermissionWrappersByToolId.delete(message.toolId);
+			}
+			pending.push(pendingUse);
 			pendingByToolId.set(message.toolId, pending);
 			continue;
 		}
@@ -121,8 +161,16 @@ function pairToolResults(rows: ChatDisplayRow[]): ConversationToolPairs {
 		toolResultByUseRowId.set(toolUse.rowId, message);
 		toolResultRowIdByUseRowId.set(toolUse.rowId, row.id);
 		toolUseByResultRowId.set(row.id, toolUse.message);
+		if (toolUse.permissionWrapperRowId) {
+			permissionWrapperRowIdByResultRowId.set(row.id, toolUse.permissionWrapperRowId);
+		}
 	}
-	return { toolResultByUseRowId, toolResultRowIdByUseRowId, toolUseByResultRowId };
+	return {
+		toolResultByUseRowId,
+		toolResultRowIdByUseRowId,
+		toolUseByResultRowId,
+		permissionWrapperRowIdByResultRowId,
+	};
 }
 
 export function buildConversationFeedRenderModel(
@@ -164,7 +212,10 @@ export function buildConversationFeedRenderModel(
 			index,
 			seq: row.seq,
 			...(message instanceof ToolResultMessage
-				? { pairedToolUse: toolPairs.toolUseByResultRowId.get(row.id) }
+				? {
+						pairedToolUse: toolPairs.toolUseByResultRowId.get(row.id),
+						permissionWrapperRowId: toolPairs.permissionWrapperRowIdByResultRowId.get(row.id),
+					}
 				: {}),
 		});
 	}

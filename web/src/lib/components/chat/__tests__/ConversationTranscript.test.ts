@@ -4,6 +4,7 @@ import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-stat
 import {
 	AskUserQuestionToolUseMessage,
 	ExitPlanModeToolUseMessage,
+	PermissionRequestMessage,
 	ToolResultMessage,
 	UserMessage,
 } from '$shared/chat-types';
@@ -88,6 +89,47 @@ describe('ConversationTranscript', () => {
 		expect(getByText('Question answered')).toBeTruthy();
 		expect((getByRole('radio', { name: /Careful/ }) as HTMLInputElement).checked).toBe(true);
 		expect(container.querySelector('[data-chat-row-id="generation-1:2"]')).toBeTruthy();
+	});
+
+	it('renders one answered question when a permission wrapper represents its tool occurrence', () => {
+		const timestamp = '2026-07-22T00:00:00.000Z';
+		const question = () =>
+			new AskUserQuestionToolUseMessage(timestamp, 'question-1', undefined, [
+				{
+					id: 'mode',
+					prompt: 'Which mode?',
+					header: 'Mode',
+					allowMultiple: false,
+					options: [
+						{ id: 'fast', label: 'Fast', description: 'Quick path.' },
+						{ id: 'careful', label: 'Careful', description: 'Detailed path.' },
+					],
+				},
+			]);
+		const rows: ChatDisplayRow[] = [
+			{ kind: 'message', id: 'generation-1:1', seq: 1, message: question() },
+			{
+				kind: 'message',
+				id: 'generation-1:2',
+				seq: 2,
+				message: new PermissionRequestMessage(timestamp, 'permission-1', question()),
+			},
+			{
+				kind: 'message',
+				id: 'generation-1:3',
+				seq: 3,
+				message: new ToolResultMessage(
+					timestamp,
+					'question-1',
+					{ toolUseResult: { answers: { mode: 'Careful' } } },
+					false,
+				),
+			},
+		];
+
+		const { getAllByText } = render(ConversationTranscriptTestHost, { rows });
+
+		expect(getAllByText('Which mode?')).toHaveLength(1);
 	});
 
 	it('renders a completed exit plan from its canonical tool row', () => {
