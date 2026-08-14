@@ -812,6 +812,23 @@ export class SpaDriver {
     );
   }
 
+  // Counts user rows rather than any leaf, so a reply quoting the prompt back cannot be
+  // mistaken for a second delivery.
+  async waitForExactUserMessageCount(text: string, count: number, timeout = 20_000): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected, expectedCount) => {
+        const log = document.querySelector('[data-chat-scroll-viewport]');
+        if (!log) return expectedCount === 0;
+        const actual = [...log.querySelectorAll('[data-chat-message-type="user-message"]')]
+          .filter((row) => row.textContent?.trim() === expected).length;
+        return actual === expectedCount;
+      },
+      { timeout },
+      text,
+      count,
+    );
+  }
+
   async waitForExactTextCount(text: string, count: number, timeout = 20_000): Promise<void> {
     await this.#page.waitForFunction(
       (expected, expectedCount) => {
