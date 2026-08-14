@@ -168,20 +168,18 @@ function publishMessages(
     pendingRows = [];
   }
 
-  // Permission facts stay typed even when no run correlates them. A fresh correlation ID
-  // can never match the chat's active run, so core commits the fact as durable history that
-  // is never actionable, instead of leaking a permission message into conversational rows.
-  const correlation = () => runId ?? crypto.randomUUID();
-
   for (const row of messages) {
     const { message } = row;
+    // Permission facts stay typed even when no run correlates them. A fresh ID can never
+    // match the chat's active run, so core commits the fact as durable history that is
+    // never actionable, instead of leaking a permission message into conversational rows.
     if (message instanceof PermissionRequestMessage) {
       flush();
       const incarnation = crypto.randomUUID();
       binding.permissions.set(message.permissionRequestId, incarnation);
       binding.sink.publish({
         type: 'permission',
-        runId: correlation(),
+        runId: runId ?? crypto.randomUUID(),
         lifecycle: {
           kind: 'requested',
           requestId: message.permissionRequestId,
@@ -196,7 +194,7 @@ function publishMessages(
       flush();
       binding.sink.publish({
         type: 'permission',
-        runId: correlation(),
+        runId: runId ?? crypto.randomUUID(),
         lifecycle: cancelledLifecycle(binding, message),
       });
       continue;

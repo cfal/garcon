@@ -5,7 +5,7 @@ const ROLE_ORDINAL = {
   assistant: 1,
 } as const;
 
-export interface DirectMessageIdentity {
+interface DirectMessageIdentity {
   readonly role: keyof typeof ROLE_ORDINAL;
   readonly turnId?: string;
 }

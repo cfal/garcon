@@ -30,6 +30,7 @@ import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
 import type { TurnReceiptOwner } from '../lib/turn-identity.js';
 import { DomainError, transcriptUnavailableMessage } from '../lib/domain-error.js';
+import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
 import type {
@@ -779,17 +780,7 @@ export class AgentRuntimeRouter {
   #producer(chatId: string): TranscriptProducerLease {
     const existing = this.#producerLeases.get(chatId);
     if (existing && !existing.closed) return existing;
-    // A decided but incompletely rolled-forward ownership transfer accepts no new
-    // publications: the successor's content boundary is not installed yet, so rows
-    // published now would land inside the successor's range under the old owner.
-    if (this.#hasPendingOwnershipTransfer(chatId)) {
-      throw new DomainError(
-        'OWNERSHIP_TRANSFER_PENDING',
-        'This chat is completing an agent handoff. Try again shortly.',
-        409,
-        true,
-      );
-    }
+    if (this.#hasPendingOwnershipTransfer(chatId)) throw ownershipTransferPendingError();
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     const lease = this.#ledger.openProducer(chatId, entry.agentId);
     this.#producerLeases.set(chatId, lease);

@@ -50,6 +50,7 @@ import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/s
 import { ledgerRowsToMessages } from '../ledger/presentation.js';
 import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
 import { DomainError } from '../lib/domain-error.js';
+import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 
 const logger = createLogger('agents:registry');
 
@@ -532,14 +533,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     session: AgentChatEntry,
     options: UserInputAdmissionOptions & { readonly clientRequestId: string },
   ): void {
-    if (this.#hasPendingOwnershipTransfer(chatId)) {
-      throw new DomainError(
-        'OWNERSHIP_TRANSFER_PENDING',
-        'This chat is completing an agent handoff. Try again shortly.',
-        409,
-        true,
-      );
-    }
+    if (this.#hasPendingOwnershipTransfer(chatId)) throw ownershipTransferPendingError();
     const commandType = options.commandType
       ?? (session.agentSessionId ? 'agent-run' : 'chat-start');
     if (commandType === 'agent-compact') {
