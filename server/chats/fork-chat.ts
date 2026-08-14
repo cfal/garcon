@@ -9,16 +9,26 @@ import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
+import type { LedgerRow, LedgerRowDraft } from '../ledger/contracts.js';
 import { frozenConversationDrafts } from '../ledger/projection.js';
-import type { LedgerRowDraft } from '../ledger/contracts.js';
 import type { JsonObject } from '../../common/json.js';
 
 const logger = createLogger('chats:fork');
 
-function lastProviderPosition(rows: readonly { providerMeta: JsonObject | null }[]): JsonObject | null {
+// The nearest provider row at or before the point owns the native position. Core-authored rows
+// carry no provider identity by construction and resolve back to it, but a provider row resolves
+// to itself even when the provider has not correlated it yet: handing the facet that row's empty
+// identity is what lets the integration refuse, and skipping past it would silently fork from
+// somewhere the user did not choose. Rows below the content start belong to an earlier binding
+// and anchor nothing.
+function nativeForkAnchor(
+  rows: readonly LedgerRow[],
+  contentStartOrdinal: number,
+): LedgerRow | null {
   for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const meta = rows[index]?.providerMeta;
-    if (meta) return meta;
+    const row = rows[index]!;
+    if (row.ordinal < contentStartOrdinal) return null;
+    if (row.kind === 'provider-row') return row;
   }
   return null;
 }
@@ -149,23 +159,15 @@ export async function forkChatFileCopy({
   }
   const selectedWatermark = { viewId: sourceWatermark.viewId, ordinal: selectedOrdinal };
   const sourceRows = ledger.rowsThrough(sourceChatId, selectedWatermark);
-  const frozenRows = frozenConversationDrafts(sourceRows);
-  // A core-authored row carries no provider identity, so the point resolves to the last
-  // provider row before it - which is what branching from your own message means anyway.
-  const selectedProviderMeta = upToOrdinal === undefined
-    ? null
-    : lastProviderPosition(sourceRows);
-  // Whether the selected row is forkable is the integration's call, so the request is
-  // delegated even when the row carries no providerMeta. Only the owning integration knows
-  // what its metadata means and whether the provider has persisted far enough to honour it.
-  // Forking the whole chat continues from the session tip, which is always a native position.
-  // Forking at a point needs one at or before it; with no provider row from the current
-  // binding there is nothing native to branch from, so the handoff fork is taken without
-  // asking.
+  const anchor = nativeForkAnchor(sourceRows, sourceView.contentStartOrdinal);
+  // Whether the anchor is forkable is the integration's call, so the request is delegated with
+  // whatever identity that row carries, including none. Only the owning integration knows what
+  // its metadata means and whether the provider has persisted far enough to honour it. Forking
+  // the whole chat continues from the session tip, which is always a native position; forking at
+  // a point needs an anchor, and with none there is nothing native to branch from, so the
+  // handoff fork is taken without asking.
   const needsNativeFork = Boolean(sourceAgentSessionId)
-    && (upToOrdinal === undefined
-      || sourceRows.some((row) => row.ordinal >= sourceView.contentStartOrdinal
-        && row.kind === 'provider-row'));
+    && (upToOrdinal === undefined || anchor !== null);
   let forkOutcome: ForkedAgentSessionOutcome | null = null;
   if (needsNativeFork) {
     try {
@@ -177,7 +179,7 @@ export async function forkChatFileCopy({
           ? {}
           : {
               messageOrdinal: upToOrdinal,
-              providerMeta: selectedProviderMeta,
+              providerMeta: anchor?.providerMeta ?? null,
             }),
       });
     } catch (error) {
@@ -238,17 +240,16 @@ export async function forkChatFileCopy({
       providerMeta: null,
     }]
     : [];
-  // Only the current binding is the session's to describe. Everything below the source's
-  // content start is frozen history from earlier agents, which no provider ever held, and it
-  // survives the fork the same way it survives a reload.
-  const frozenPrefix = nativeSeed
-    ? frozenConversationDrafts(
-      sourceRows.filter((row) => row.ordinal < sourceView.contentStartOrdinal),
-    )
-    : frozenRows;
-  const seedRows = nativeSeed
-    ? [...frozenPrefix, ...sessionRow, ...nativeSeed]
-    : [...frozenPrefix, ...sessionRow];
+  // A native seed describes the current binding itself, so only what sits below the source's
+  // content start is frozen ahead of it: history from earlier agents that no provider ever
+  // held, carried across the fork the same way a reload preserves it. Without a seed the whole
+  // selection freezes.
+  const frozenPrefix = frozenConversationDrafts(
+    nativeSeed
+      ? sourceRows.filter((row) => row.ordinal < sourceView.contentStartOrdinal)
+      : sourceRows,
+  );
+  const seedRows = [...frozenPrefix, ...sessionRow, ...(nativeSeed ?? [])];
   const contentStartOrdinal = frozenPrefix.length + 1;
   try {
     ledger.initializeChat(targetChatId, seedRows, contentStartOrdinal);
@@ -368,7 +369,7 @@ export async function forkChatFileCopy({
     agentId: sourceSession.agentId,
     kind: nativeFork ? 'native' : 'lazy',
     point: upToOrdinal ?? null,
-    copiedRows: frozenRows.length,
+    copiedRows: frozenPrefix.length,
     durationMs: Date.now() - startedAt,
   });
 

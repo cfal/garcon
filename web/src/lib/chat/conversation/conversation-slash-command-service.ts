@@ -706,9 +706,9 @@ export class ConversationSlashCommandService {
 		}
 	}
 
-	// Resolves false when the user declines a handoff fork, so callers stay silent instead of
+	// Resolves null when the user declines a handoff fork, so callers stay silent instead of
 	// reporting a failure.
-	async #performForkOnly(sourceChatId: string, upToOrdinal?: number): Promise<boolean> {
+	async #performForkOnly(sourceChatId: string, upToOrdinal?: number): Promise<ChatListEntry | null> {
 		const chatId = createClientChatId();
 		const selection = upToOrdinal === undefined
 			? null
@@ -748,12 +748,12 @@ export class ConversationSlashCommandService {
 				...forkPointParams(remapped),
 			});
 		}
-		if (!result) return false;
+		if (!result) return null;
 		this.deps.sessions.upsertServerChat(result.chat);
 		this.deps.lifecycle.setCurrentChatId(result.chat.id);
 		this.deps.sessions.setSelectedChatId(result.chat.id);
 		this.deps.navigation.navigateToChat?.(result.chat.id);
-		return true;
+		return result.chat;
 	}
 
 	// The server refuses a point it cannot branch natively rather than silently downgrading, so
@@ -776,7 +776,7 @@ export class ConversationSlashCommandService {
 		restoreComposer: boolean,
 	): Promise<ConversationSubmissionOutcome> {
 		try {
-			if (!await this.#performForkOnly(sourceChatId)) {
+			if (!(await this.#performForkOnly(sourceChatId))) {
 				this.#restoreComposer(sourceChatId, previousText, previousImages, restoreComposer);
 				return 'rejected';
 			}

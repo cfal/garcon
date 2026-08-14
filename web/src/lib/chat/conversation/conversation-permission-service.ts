@@ -12,7 +12,10 @@ import type { ConversationQueueController } from './conversation-queue-controlle
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
 
 export interface ConversationPermissionServiceOptions {
-	readonly deps: SessionControllerDeps;
+	readonly deps: Pick<
+		SessionControllerDeps,
+		'sessions' | 'chatState' | 'agentState' | 'lifecycle' | 'conversationUi' | 'appShell'
+	>;
 	readonly acceptedInputs: AcceptedInputSubmissionService;
 	readonly queue: ConversationQueueController;
 	executionModelSelection(): {

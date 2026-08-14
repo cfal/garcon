@@ -482,6 +482,7 @@ export async function startServer(): Promise<void> {
           chatId: targetChatId,
           entry: sourceSession,
           integration,
+          nativeHistoryImport: integration.nativeHistoryImport,
           session: fork,
           // The fork target starts with no carryover of its own; its history is the
           // session it resumes from.

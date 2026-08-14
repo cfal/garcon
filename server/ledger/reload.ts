@@ -103,6 +103,7 @@ export class TranscriptReloadService {
         chatId,
         entry,
         integration,
+        nativeHistoryImport: integration.nativeHistoryImport,
         session: session.detail,
         carryOverRevision: this.options.getCarryOverRevision(entry),
         signal,

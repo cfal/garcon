@@ -15,6 +15,7 @@ import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
+import { frozenDrafts, importedDrafts, type ImportedRow } from './imported-drafts.js';
 import { TranscriptLedgerService } from './service.js';
 
 export interface TranscriptAdoptionOptions {
@@ -72,12 +73,12 @@ export class TranscriptAdoptionService {
         throw new TypeError(`Chat ownership changed while adopting ${chatId}`);
       }
 
-      const prefixRows = frozenRows(prefix, this.#now);
+      const prefixRows = frozenDrafts(prefix, this.#now);
       const contentStartOrdinal = prefixRows.length + 1;
       const session = sessionDraft(entry, this.#now());
       const view = this.options.ledger.initializeChat(
         chatId,
-        [...prefixRows, ...(session ? [session] : []), ...adoptedRows(nativeRows, this.#now)],
+        [...prefixRows, ...(session ? [session] : []), ...importedDrafts(nativeRows, this.#now)],
         contentStartOrdinal,
       );
       this.#repairSessionCache(chatId);
@@ -107,10 +108,10 @@ export class TranscriptAdoptionService {
     entry: AgentChatEntry,
     integration: AgentIntegration,
     signal: AbortSignal,
-  ): Promise<readonly AdoptionRow[]> {
+  ): Promise<readonly ImportedRow[]> {
     if (!integration.nativeHistoryImport) return [];
     try {
-      const rows: AdoptionRow[] = [];
+      const rows: ImportedRow[] = [];
       const chat = toAgentChatReference(
         integration,
         chatId,
@@ -129,58 +130,6 @@ export class TranscriptAdoptionService {
   }
 }
 
-export function frozenRows(
-  messages: readonly ChatMessage[],
-  now: () => string = () => new Date().toISOString(),
-): readonly LedgerRowDraft[] {
-  return adoptedRows(
-    messages.map((message) => ({ message, providerMeta: null })),
-    now,
-    true,
-  );
-}
-
-interface AdoptionRow {
-  readonly message: ChatMessage;
-  readonly providerMeta: JsonObject | null;
-}
-
-function adoptedRows(
-  rows: readonly AdoptionRow[],
-  now: () => string,
-  preserveClientMessageId = false,
-): readonly LedgerRowDraft[] {
-  return rows.flatMap(({ message, providerMeta }): LedgerRowDraft[] => {
-    if (message instanceof PermissionRequestMessage
-        || message instanceof PermissionResolvedMessage
-        || message instanceof PermissionCancelledMessage) {
-      return [];
-    }
-    const at = message.timestamp || now();
-    if (message instanceof UserMessage) {
-      return [{
-        kind: 'user-input',
-        at,
-        detail: {
-          clientMessageId: preserveClientMessageId
-            ? message.metadata?.upstreamRequestId ?? null
-            : null,
-          message,
-          attachments: (message.images ?? []).map((image) => ({
-            kind: 'image',
-            data: image.data,
-            name: image.name || null,
-            mimeType: image.mimeType ?? 'application/octet-stream',
-          })),
-          steer: false,
-        },
-        providerMeta,
-      }];
-    }
-    return [{ kind: 'provider-row', at, message, providerMeta }];
-  });
-}
-
 function sessionDraft(entry: AgentChatEntry, at: string): LedgerRowDraft | null {
   if (!entry.agentSessionId) return null;
   return {
@@ -196,9 +145,9 @@ function sessionDraft(entry: AgentChatEntry, at: string): LedgerRowDraft | null 
 }
 
 function sanitizeCurrent(
-  rows: readonly AdoptionRow[],
+  rows: readonly ImportedRow[],
   entry: AgentChatEntry,
-): readonly AdoptionRow[] {
+): readonly ImportedRow[] {
   const sanitized = sanitizeRecordedCarriedContext({
     messages: rows.map((row) => row.message),
     receipt: entry.nativeSeedReceipt ?? null,

@@ -1,10 +1,11 @@
-import type { AgentIntegration } from '@garcon/server-agent-interface';
+import type { AgentIntegration, AgentNativeHistoryImport } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { LedgerRow, LedgerRowDraft } from './contracts.js';
+import { importedDrafts, type ImportedRow } from './imported-drafts.js';
 
 export type LedgerSessionDetail = Extract<LedgerRow, { readonly kind: 'session' }>['detail'];
 
@@ -12,6 +13,8 @@ export interface NativeHistorySeedInput {
   readonly chatId: string;
   readonly entry: AgentChatEntry;
   readonly integration: AgentIntegration;
+  // Taken separately so the caller's capability check, not an assertion here, proves it exists.
+  readonly nativeHistoryImport: AgentNativeHistoryImport;
   readonly session: LedgerSessionDetail;
   readonly carryOverRevision: string;
   readonly signal: AbortSignal;
@@ -25,15 +28,13 @@ export async function importNativeHistoryDrafts({
   chatId,
   entry,
   integration,
+  nativeHistoryImport,
   session,
   carryOverRevision,
   signal,
   now,
 }: NativeHistorySeedInput): Promise<LedgerRowDraft[]> {
-  const imported: Array<{
-    readonly message: ChatMessage;
-    readonly providerMeta: LedgerRowDraft['providerMeta'];
-  }> = [];
+  const imported: ImportedRow[] = [];
   const chat = toAgentChatReference(
     integration,
     chatId,
@@ -45,7 +46,7 @@ export async function importNativeHistoryDrafts({
     },
     carryOverRevision,
   );
-  for await (const batch of integration.nativeHistoryImport!.load({ chat, signal })) {
+  for await (const batch of nativeHistoryImport.load({ chat, signal })) {
     signal.throwIfAborted();
     for (const row of batch) {
       imported.push({ message: row.message, providerMeta: row.providerMeta ?? null });
@@ -64,40 +65,13 @@ export async function importNativeHistoryDrafts({
       false,
     );
   }
-  return sanitized.messages.flatMap((message, index) => importedDraft(
-    message,
-    imported[index]!.providerMeta,
+  // Sanitizing rewrites a seed prompt in place and never changes the count, so each message
+  // keeps the provider identity it arrived with.
+  return importedDrafts(
+    sanitized.messages.map((message, index) => ({
+      message,
+      providerMeta: imported[index]!.providerMeta,
+    })),
     now,
-  ));
-}
-
-function importedDraft(
-  message: ChatMessage,
-  providerMeta: LedgerRowDraft['providerMeta'],
-  now: () => string,
-): readonly LedgerRowDraft[] {
-  if (message.type === 'permission-request'
-      || message.type === 'permission-resolved'
-      || message.type === 'permission-cancelled'
-      || message.type === 'permission-expired') return [];
-  const at = message.timestamp || now();
-  if (message.type === 'user-message') {
-    return [{
-      kind: 'user-input',
-      at,
-      detail: {
-        clientMessageId: null,
-        message,
-        attachments: (message.images ?? []).map((image) => ({
-          kind: 'image',
-          data: image.data,
-          name: image.name || null,
-          mimeType: image.mimeType ?? 'application/octet-stream',
-        })),
-        steer: false,
-      },
-      providerMeta,
-    }];
-  }
-  return [{ kind: 'provider-row', at, message, providerMeta }];
+  );
 }

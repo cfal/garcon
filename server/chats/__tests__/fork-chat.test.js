@@ -47,7 +47,7 @@ function makeDeps(overrides = {}) {
     flush: mock(async () => undefined),
   };
   const targetViews = new Set();
-  const rows = [
+  const rows = overrides.rows ?? [
     userRow(1, 'first'),
     providerRow(2, 'answer'),
     userRow(3, 'second'),
@@ -227,6 +227,26 @@ describe('forkChatFileCopy', () => {
       expect.objectContaining({ kind: 'session' }),
     ]);
     expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(3);
+  });
+
+  it('hands the facet an uncorrelated provider row rather than an older settled one', async () => {
+    const streamed = { ...providerRow(3, 'streaming'), providerMeta: null };
+    const deps = makeDeps({ rows: [userRow(1, 'first'), providerRow(2, 'answer'), streamed] });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 3,
+      ...deps,
+    });
+
+    // Resolving back to row 2 would fork from a point the user did not choose; the empty
+    // identity has to reach the integration so it can refuse.
+    expect(deps.forkAgentSession.mock.calls[0][0]).toMatchObject({
+      messageOrdinal: 3,
+      providerMeta: null,
+    });
   });
 
   it('seeds a native fork from the forked session instead of the source rows', async () => {
