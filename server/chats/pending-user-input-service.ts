@@ -30,6 +30,36 @@ function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }):
   return left.createdAt.localeCompare(right.createdAt);
 }
 
+function positionAfterOmittedFailedPredecessors(
+  record: PendingUserInputRecord,
+  precedingRecords: readonly PendingUserInputRecord[],
+  exactRequestIds: ReadonlySet<string>,
+): PendingNativeUserPosition | null {
+  const position = record.nativeUserPosition;
+  if (
+    !position
+    || record.deliveryStatus === 'failed'
+    || exactRequestIds.has(record.clientRequestId)
+  ) {
+    return null;
+  }
+
+  let userOffset = position.userOffset;
+  for (const predecessor of precedingRecords) {
+    if (
+      predecessor.deliveryStatus !== 'failed'
+      || exactRequestIds.has(predecessor.clientRequestId)
+      || predecessor.nativeUserPosition?.previousNativeUserSourceKey
+        !== position.previousNativeUserSourceKey
+      || predecessor.nativeUserPosition.userOffset >= position.userOffset
+    ) {
+      continue;
+    }
+    userOffset -= 1;
+  }
+  return { ...position, userOffset };
+}
+
 export interface RegisterPendingUserInputOptions {
   clientRequestId?: string;
   clientMessageId?: string;
@@ -309,12 +339,18 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     messages: UserMessage[],
     includesNativeStart: boolean,
   ): void {
-    for (const record of records) {
-      if (!record.nativeUserPosition) continue;
+    const exactRequestIds = matchingRequestIds(records, messages);
+    for (const [recordIndex, record] of records.entries()) {
+      const position = positionAfterOmittedFailedPredecessors(
+        record,
+        records.slice(0, recordIndex),
+        exactRequestIds,
+      );
+      if (!position) continue;
       this.#nativeUserIdentities.bindPosition({
         chatId,
         messages,
-        position: record.nativeUserPosition,
+        position,
         includesNativeStart,
         identity: {
           clientRequestId: record.clientRequestId,

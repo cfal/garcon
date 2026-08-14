@@ -30,12 +30,15 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function sourcedUser(entryId, content, metadata) {
+  return attachNativeMessageSource(
+    new UserMessage('2026-06-01T00:00:00.000Z', content, undefined, metadata),
+    { entryId, withinSourceOrdinal: 0 },
+  );
+}
+
 describe('PendingUserInputService', () => {
   it('settles repeated identical prompts by structural native position', async () => {
-    const sourcedUser = (entryId, content) => attachNativeMessageSource(
-      new UserMessage('2026-06-01T00:00:00.000Z', content),
-      { entryId, withinSourceOrdinal: 0 },
-    );
     const nativeMessages = [
       sourcedUser('native-user-1', 'previous'),
       sourcedUser('native-user-2', 'repeat'),
@@ -83,6 +86,101 @@ describe('PendingUserInputService', () => {
       { source: 'native-user-2', clientRequestId: 'request-1', upstreamRequestId: 'message-1' },
       { source: 'native-user-3', clientRequestId: 'request-2', upstreamRequestId: 'message-2' },
     ]);
+  });
+
+  it('does not let a failed structural position claim the next delivered user row', async () => {
+    const nativeMessages = [
+      sourcedUser('native-user-1', 'previous'),
+      sourcedUser('native-user-2', 'delivered second'),
+    ];
+    const identities = new NativeUserIdentityRegistry();
+    const service = new PendingUserInputService({
+      loadNativeMessages: async () => nativeMessages,
+      getRetainedHistoryMessages: () => [],
+    }, identities);
+    const previousNativeUserSourceKey = JSON.stringify([
+      'native-entry',
+      'native-user-1',
+      0,
+    ]);
+    await service.register('chat-1', 'failed first', {
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
+      createdAt: '2026-06-01T00:00:01.000Z',
+    });
+    service.bindNativeUserPosition('chat-1', 'request-1', {
+      previousNativeUserSourceKey,
+      userOffset: 1,
+    });
+    service.markFailed('chat-1', 'request-1');
+    await service.register('chat-1', 'delivered second', {
+      clientRequestId: 'request-2',
+      clientMessageId: 'message-2',
+      createdAt: '2026-06-01T00:00:02.000Z',
+    });
+    service.bindNativeUserPosition('chat-1', 'request-2', {
+      previousNativeUserSourceKey,
+      userOffset: 2,
+    });
+
+    await service.reconcileNativeHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toMatchObject([
+      { clientRequestId: 'request-1', deliveryStatus: 'failed' },
+    ]);
+    expect(identities.apply('chat-1', nativeMessages).map((message) => ({
+      source: getNativeMessageRevisionSource(message)?.entryId,
+      clientRequestId: message.metadata?.clientRequestId,
+      upstreamRequestId: message.metadata?.upstreamRequestId,
+    }))).toEqual([
+      { source: 'native-user-1', clientRequestId: undefined, upstreamRequestId: undefined },
+      { source: 'native-user-2', clientRequestId: 'request-2', upstreamRequestId: 'message-2' },
+    ]);
+  });
+
+  it('retains a failed predecessor offset when exact native identity proves it persisted', async () => {
+    const nativeMessages = [
+      sourcedUser('native-user-1', 'previous'),
+      sourcedUser('native-user-2', 'failed but persisted', { upstreamRequestId: 'message-1' }),
+      sourcedUser('native-user-3', 'delivered second'),
+    ];
+    const identities = new NativeUserIdentityRegistry();
+    const service = new PendingUserInputService({
+      loadNativeMessages: async () => nativeMessages,
+      getRetainedHistoryMessages: () => [],
+    }, identities);
+    const previousNativeUserSourceKey = JSON.stringify([
+      'native-entry',
+      'native-user-1',
+      0,
+    ]);
+    await service.register('chat-1', 'failed but persisted', {
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
+      createdAt: '2026-06-01T00:00:01.000Z',
+    });
+    service.bindNativeUserPosition('chat-1', 'request-1', {
+      previousNativeUserSourceKey,
+      userOffset: 1,
+    });
+    service.markFailed('chat-1', 'request-1');
+    await service.register('chat-1', 'delivered second', {
+      clientRequestId: 'request-2',
+      clientMessageId: 'message-2',
+      createdAt: '2026-06-01T00:00:02.000Z',
+    });
+    service.bindNativeUserPosition('chat-1', 'request-2', {
+      previousNativeUserSourceKey,
+      userOffset: 2,
+    });
+
+    await service.reconcileNativeHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+    expect(identities.apply('chat-1', nativeMessages)[2].metadata).toMatchObject({
+      clientRequestId: 'request-2',
+      upstreamRequestId: 'message-2',
+    });
   });
 
   it('does not resolve a first-user position from an incomplete native tail', async () => {
