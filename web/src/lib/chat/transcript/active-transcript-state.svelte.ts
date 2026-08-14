@@ -798,14 +798,13 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	revealEarlierLoadedRows(): boolean {
 		const previousCount = this.visibleMessageCount;
-		this.visibleMessageCount = Math.min(this.displayMessageCount, previousCount + 100);
-		const changed = this.visibleMessageCount > previousCount;
-		if (changed) {
-			this.pageStates.earlier = idlePageState();
-			this.#rememberExpandedVisibleWindow();
-			this.#recordFeedMutation('history-earlier');
-		}
-		return changed;
+		const nextCount = Math.min(this.displayMessageCount, previousCount + 100);
+		if (nextCount <= previousCount) return false;
+		this.visibleMessageCount = nextCount;
+		this.pageStates.earlier = idlePageState();
+		this.#rememberExpandedVisibleWindow();
+		this.#recordFeedMutation('history-earlier');
+		return true;
 	}
 
 	revealAllLoadedMessages(): void {

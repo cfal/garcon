@@ -1153,6 +1153,26 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows).toHaveLength(60);
 	});
 
+	it('does not narrow a partial window while checking for loaded earlier rows', () => {
+		const chat = new ActiveTranscriptState();
+		const messages = Array.from({ length: 51 }, (_, index) =>
+			entry(index + 50, assistant(`message-${index + 50}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastOrdinal: 100,
+			pageOldestOrdinal: 50,
+			hasMore: true,
+		});
+
+		expect(chat.revealEarlierLoadedRows()).toBe(false);
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
+
+		applyMessages(chat, 'chat-1', 'generation-1', [entry(101, assistant('live'))]);
+
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:50', ordinal: 50 });
+		expect(chat.visibleRows).toHaveLength(52);
+	});
+
 	it('keeps every explicitly revealed row visible as live messages append', () => {
 		const chat = new ActiveTranscriptState();
 		const messages = Array.from({ length: 175 }, (_, index) =>

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { Browser, Page } from 'playwright';
+import type { Browser, CDPSession, Page } from 'playwright';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
   closeChromiumBrowser,
@@ -21,12 +21,36 @@ const ITEM_SELECTOR = '[data-chat-virtual-item]';
 interface ReadingAnchor {
   key: string;
   offset: number;
+  rowId?: string;
+  text?: string;
 }
 
 interface ReadingAnchorFrameSample {
+  busy: boolean;
+  connected: boolean;
   frame: number;
+  mountedKeys: string[];
   offset: number | null;
+  pinned: boolean;
+  rowId: string | null;
+  sameNode: boolean;
   scrollTop: number;
+  text: string | null;
+}
+
+interface TranscriptTouchDrag {
+  session: CDPSession;
+  identifier: number;
+  maximumY: number;
+  x: number;
+  y: number;
+}
+
+interface TouchPrependScenario {
+  clampBeforeRelease: boolean;
+  label: string;
+  liveBehavior: 'completed' | 'expanding' | 'interrupted';
+  viewport: { height: number; width: number };
 }
 
 interface SelectionSnapshot {
@@ -168,6 +192,17 @@ async function transcriptEntryCount(page: Page): Promise<number> {
   return page
     .locator(SIZER_SELECTOR)
     .evaluate((sizer) => Number((sizer as HTMLElement).dataset.chatTranscriptEntryCount ?? 0));
+}
+
+async function waitForTranscriptEntryCount(page: Page, minimum: number): Promise<number> {
+  await page.waitForFunction(
+    ({ selector, minimumCount }) => {
+      const sizer = document.querySelector<HTMLElement>(selector);
+      return Number(sizer?.dataset.chatTranscriptEntryCount ?? 0) >= minimumCount;
+    },
+    { selector: SIZER_SELECTOR, minimumCount: minimum },
+  );
+  return transcriptEntryCount(page);
 }
 
 async function virtualDataRevision(page: Page): Promise<number> {
@@ -565,8 +600,17 @@ async function readingAnchor(page: Page): Promise<ReadingAnchor> {
       .sort((left, right) => left.rect.top - right.rect.top);
     const anchor = candidates[0];
     const key = anchor?.item.dataset.chatVirtualItem;
-    if (!anchor || !key) throw new Error('No visible transcript item is available as an anchor.');
-    return { key, offset: anchor.rect.top - viewport.top };
+    const row = anchor?.item.querySelector<HTMLElement>('[data-chat-row-id]');
+    const rowId = row?.dataset.chatRowId;
+    if (!anchor || !key || !row || !rowId) {
+      throw new Error('No visible transcript item is available as an anchor.');
+    }
+    return {
+      key,
+      offset: anchor.rect.top - viewport.top,
+      rowId,
+      text: row.textContent?.trim() ?? '',
+    };
   }, ITEM_SELECTOR);
 }
 
@@ -579,13 +623,19 @@ async function startReadingAnchorFrameSampler(page: Page, anchor: ReadingAnchor)
           active: boolean;
           frame: number;
           key: string;
+          node: HTMLElement;
           samples: ReadingAnchorFrameSample[];
         };
       };
+      const node = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].find(
+        (candidate) => candidate.dataset.chatVirtualItem === input.key,
+      );
+      if (!node) throw new Error('The reading-anchor wrapper is missing.');
       const sampler = {
         active: true,
         frame: 0,
         key: input.key,
+        node,
         samples: [] as ReadingAnchorFrameSample[],
       };
       browserGlobal.__chatReadingAnchorSampler = sampler;
@@ -595,10 +645,20 @@ async function startReadingAnchorFrameSampler(page: Page, anchor: ReadingAnchor)
         const item = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].find(
           (candidate) => candidate.dataset.chatVirtualItem === sampler.key,
         );
+        const row = item?.querySelector<HTMLElement>('[data-chat-row-id]');
         sampler.samples.push({
+          busy: feed.getAttribute('aria-busy') === 'true',
+          connected: sampler.node.isConnected,
           frame: sampler.frame,
+          mountedKeys: [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].map(
+            (candidate) => candidate.dataset.chatVirtualItem ?? '',
+          ),
           offset: item ? item.getBoundingClientRect().top - viewport.top : null,
+          pinned: feed.dataset.chatPinnedToBottom === 'true',
+          rowId: row?.dataset.chatRowId ?? null,
+          sameNode: item === sampler.node,
           scrollTop: feed.scrollTop,
+          text: row?.textContent?.trim() ?? null,
         });
         sampler.frame += 1;
         requestAnimationFrame(sample);
@@ -608,6 +668,76 @@ async function startReadingAnchorFrameSampler(page: Page, anchor: ReadingAnchor)
     },
     { itemSelector: ITEM_SELECTOR, key: anchor.key },
   );
+}
+
+async function beginTranscriptTouchDrag(page: Page): Promise<TranscriptTouchDrag> {
+  const box = await page.locator(FEED_SELECTOR).boundingBox();
+  if (!box) throw new Error('The transcript viewport has no touch target.');
+  const session = await page.context().newCDPSession(page);
+  await session.send('Emulation.setTouchEmulationEnabled', {
+    enabled: true,
+    maxTouchPoints: 1,
+  });
+  const drag = {
+    session,
+    identifier: 1,
+    maximumY: box.y + box.height - 20,
+    x: box.x + box.width / 2,
+    y: box.y + Math.min(120, box.height / 4),
+  };
+  await session.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [
+      {
+        id: drag.identifier,
+        x: drag.x,
+        y: drag.y,
+        radiusX: 1,
+        radiusY: 1,
+        force: 1,
+      },
+    ],
+  });
+  return drag;
+}
+
+async function moveTranscriptTouch(
+  page: Page,
+  drag: TranscriptTouchDrag,
+  deltaY: number,
+): Promise<number> {
+  drag.y = Math.min(drag.maximumY, drag.y + deltaY);
+  await drag.session.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [
+      {
+        id: drag.identifier,
+        x: drag.x,
+        y: drag.y,
+        radiusX: 1,
+        radiusY: 1,
+        force: 1,
+      },
+    ],
+  });
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  return page
+    .locator(FEED_SELECTOR)
+    .evaluate((feedElement) => (feedElement as HTMLElement).scrollTop);
+}
+
+async function finishTranscriptTouchDrag(drag: TranscriptTouchDrag): Promise<void> {
+  try {
+    await drag.session.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await drag.session.send('Emulation.setTouchEmulationEnabled', {
+      enabled: false,
+    });
+  } finally {
+    await drag.session.detach();
+  }
 }
 
 async function finishReadingAnchorFrameSampler(page: Page): Promise<ReadingAnchorFrameSample[]> {
@@ -1604,6 +1734,168 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
   fixture.assertNoBrowserErrors();
 }
 
+async function verifyTouchDragPrepend(
+  fixture: ChromiumFixture,
+  scenario: TouchPrependScenario,
+): Promise<void> {
+  await fixture.page.setViewportSize(scenario.viewport);
+  const chatId = await seedTranscript(
+    fixture.integration,
+    90,
+    `chromium-touch-${scenario.label}`,
+  );
+  let releaseEarlierPage!: () => void;
+  const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
+  let resolveEarlierRequest!: () => void;
+  const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
+  let earlierRequestCount = 0;
+  let drag: TranscriptTouchDrag | null = null;
+  let liveHold: ReturnType<typeof fixture.integration.fakeProviders.openAi.holdNext> | null = null;
+  let liveTurnId: string | null = null;
+  let liveAbort: Promise<unknown> | null = null;
+  let stopLiveTurn: ReturnType<typeof fixture.integration.client.stopChat> | null = null;
+
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
+      earlierRequestCount += 1;
+      if (earlierRequestCount === 1) {
+        resolveEarlierRequest();
+        await earlierPageGate;
+      }
+    }
+    await route.continue();
+  });
+
+  try {
+    await prepareTranscript(fixture, chatId);
+    let initialEntryCount = await transcriptEntryCount(fixture.page);
+    expect(initialEntryCount).toBe(50);
+    if (scenario.liveBehavior !== 'completed') {
+      const prompt = `chromium-touch-live-${scenario.label}`;
+      liveHold = fixture.integration.fakeProviders.openAi.holdNext({
+        lastUserText: prompt,
+      });
+      const accepted = await fixture.integration.client.runDirectChat({
+        chatId,
+        content: prompt,
+        agent: fixture.integration.directAgents.openAi,
+      });
+      if (!accepted.turnId) throw new Error('The held mobile touch turn has no turn ID.');
+      liveTurnId = accepted.turnId;
+      await withDiagnosticTimeout('the held touch-drag turn', liveHold.received);
+      initialEntryCount = await waitForTranscriptEntryCount(fixture.page, initialEntryCount + 1);
+      await waitForStablePinnedTranscriptLayout(fixture.page, `${scenario.label}-held-live`);
+      await scrollToPosition(fixture.page, 'middle');
+    }
+    await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement, clampBeforeRelease) => {
+      const feed = feedElement as HTMLElement;
+      const requested = clampBeforeRelease ? 260 : feed.clientHeight * 2.5;
+      feed.scrollTop = Math.min(requested, Math.max(0, feed.scrollHeight - feed.clientHeight));
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }, scenario.clampBeforeRelease);
+
+    drag = await beginTranscriptTouchDrag(fixture.page);
+    for (let step = 0; step < 24 && earlierRequestCount === 0; step += 1) {
+      await moveTranscriptTouch(fixture.page, drag, scenario.clampBeforeRelease ? 80 : 24);
+    }
+    await withDiagnosticTimeout('the held touch-drag earlier-page request', earlierRequest);
+    if (scenario.clampBeforeRelease) {
+      for (let step = 0; step < 20; step += 1) {
+        if ((await moveTranscriptTouch(fixture.page, drag, 24)) <= 1) break;
+      }
+      expect(
+        await fixture.page
+          .locator(FEED_SELECTOR)
+          .evaluate((feedElement) => (feedElement as HTMLElement).scrollTop),
+      ).toBeLessThanOrEqual(1);
+    }
+
+    const anchor = await readingAnchor(fixture.page);
+    if (!anchor.rowId || anchor.text === undefined) {
+      throw new Error('The touch-drag reading anchor has no rendered row identity.');
+    }
+    await startReadingAnchorFrameSampler(fixture.page, anchor);
+    let expectedEntryCount = initialEntryCount + 50;
+    if (scenario.liveBehavior === 'expanding' && liveHold) {
+      expect(
+        liveHold.releaseText(`Live response expands during the ${scenario.label} prepend.`),
+      ).toBe(true);
+      expect(await waitForTranscriptEntryCount(fixture.page, initialEntryCount + 1)).toBe(
+        initialEntryCount + 1,
+      );
+      expectedEntryCount += 1;
+    } else if (scenario.liveBehavior === 'interrupted' && liveHold) {
+      liveAbort = liveHold.expectAbort();
+      stopLiveTurn = fixture.integration.client.stopChat({
+        agentId: fixture.integration.directAgents.openAi.agentId,
+        chatId,
+        clientRequestId: crypto.randomUUID(),
+      });
+    }
+    releaseEarlierPage();
+
+    let growthFrame: number | null = null;
+    for (let frame = 0; frame < 40; frame += 1) {
+      if (drag.y < drag.maximumY) await moveTranscriptTouch(fixture.page, drag, 6);
+      if ((await transcriptEntryCount(fixture.page)) >= expectedEntryCount) {
+        growthFrame ??= frame;
+        if (frame >= growthFrame + 6) break;
+      }
+    }
+    expect(growthFrame).not.toBeNull();
+    await waitForStableModelCount(fixture.page, expectedEntryCount);
+    await finishTranscriptTouchDrag(drag);
+    drag = null;
+    if (stopLiveTurn) {
+      expect((await stopLiveTurn).outcome).toBe('interrupt-requested');
+      await liveAbort;
+    }
+    if (liveTurnId) {
+      expect((await fixture.integration.client.waitForTurnTerminal(chatId, liveTurnId)).type).toBe(
+        'agent-run-finished',
+      );
+    }
+
+    const frames = await finishReadingAnchorFrameSampler(fixture.page);
+    const identityFailures = frames.filter(
+      (frame) =>
+        !frame.connected ||
+        !frame.sameNode ||
+        frame.offset === null ||
+        frame.rowId !== anchor.rowId ||
+        frame.text !== anchor.text,
+    );
+    const reverseMovement = frames.flatMap((frame, index) => {
+      const previous = frames[index - 1];
+      return previous &&
+        previous.offset !== null &&
+        frame.offset !== null &&
+        frame.offset < previous.offset - 1
+        ? [{ previous, frame }]
+        : [];
+    });
+    expect(identityFailures, JSON.stringify({ anchor, frames }, null, 2)).toEqual([]);
+    expect(reverseMovement, JSON.stringify({ anchor, frames }, null, 2)).toEqual([]);
+    const firstOffset = frames.find((frame) => frame.offset !== null)?.offset;
+    const finalOffset = frames.findLast((frame) => frame.offset !== null)?.offset;
+    expect(
+      firstOffset != null && finalOffset != null ? finalOffset - firstOffset : 0,
+      JSON.stringify({ anchor, frames }, null, 2),
+    ).toBeGreaterThan(12);
+    expect(earlierRequestCount).toBe(1);
+    fixture.assertNoBrowserErrors();
+  } finally {
+    releaseEarlierPage();
+    if (drag) await finishTranscriptTouchDrag(drag);
+    if (stopLiveTurn) await stopLiveTurn.catch(() => undefined);
+    if (liveAbort) await liveAbort.catch(() => undefined);
+    liveHold?.releaseEcho();
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
 async function prepareTranscript(
   fixture: ChromiumFixture,
   chatId: string,
@@ -2593,6 +2885,47 @@ describe('Chromium transcript virtualization', () => {
       browser,
     );
   }, 180_000);
+
+  for (const scenario of [
+    {
+      clampBeforeRelease: false,
+      label: 'compact-completed',
+      liveBehavior: 'completed',
+      viewport: { height: 700, width: 390 },
+    },
+    {
+      clampBeforeRelease: true,
+      label: 'compact-live-expanding',
+      liveBehavior: 'expanding',
+      viewport: { height: 700, width: 390 },
+    },
+    {
+      clampBeforeRelease: false,
+      label: 'wide-completed',
+      liveBehavior: 'completed',
+      viewport: { height: 900, width: 1280 },
+    },
+    {
+      clampBeforeRelease: false,
+      label: 'wide-paused-interrupted',
+      liveBehavior: 'interrupted',
+      viewport: { height: 900, width: 1280 },
+    },
+  ] satisfies TouchPrependScenario[]) {
+    test(`keeps touch scrolling stable through a ${scenario.label} earlier-page prepend`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      await withChromiumFixture(
+        `transcript-touch-prepend-${scenario.label}`,
+        async (fixture, markPhase) => {
+          markPhase(`continuing a touch drag through the ${scenario.label} prepend`);
+          await verifyTouchDragPrepend(fixture, scenario);
+        },
+        diagnostics,
+        { serverEnvironment: environment.serverEnvironment },
+        browser,
+      );
+    }, 180_000);
+  }
 
   test('navigates unmounted transcript rows and respects user cancellation', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
