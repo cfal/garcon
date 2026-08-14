@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { TranscriptMessage } from '../../../../common/chat-view.js';
 import { assistantContents, userContents } from '../../../support/chat-assertions.js';
 import { GarconApiError } from '../../../support/garcon-client.js';
@@ -69,12 +71,16 @@ describe('live Claude fork while running', () => {
         permissionMode: 'bypassPermissions',
       }));
       await fixture.client.waitForProcessing(parentChatId, true, { afterIndex: runningCursor });
-      const streamingSeq = await waitForSeqBeyond(fixture, parentChatId, settledLastSeq);
+      const streamingSeq = await waitForStreamedProviderSeq(fixture, parentChatId, settledLastSeq);
 
-      // The streamed tail is not in the transcript, so it is refused with an actionable code.
-      await expectEventStreamForkRefusal(fixture.client.forkChat({
+      // Whether Claude has appended the streamed row to its transcript by now is its own
+      // timing, and both answers are correct: a native fork, or a typed refusal the client can
+      // turn into a question. What must never happen is a quiet session-less fork standing in
+      // for one. The refusal path itself is pinned deterministically by the scripted matrix.
+      const streamedForkChatId = fixture.newChatId();
+      await expectNativeForkOrTypedRefusal(fixture, streamedForkChatId, fixture.client.forkChat({
         sourceChatId: parentChatId,
-        chatId: fixture.newChatId(),
+        chatId: streamedForkChatId,
         transcriptViewId: settledHistory.transcriptViewId,
         upToOrdinal: streamingSeq,
       }));
@@ -164,7 +170,10 @@ describe('live Claude fork while running', () => {
   }, 240_000);
 });
 
-async function waitForSeqBeyond(
+// The running turn commits its own prompt and core-authored notices first, and both resolve
+// back to the settled answer before them. Only a row the agent itself streamed can be a point
+// the provider has not written yet, so the refusal is probed against its tool call.
+async function waitForStreamedProviderSeq(
   fixture: IntegrationFixture,
   chatId: string,
   settledLastSeq: number,
@@ -172,28 +181,42 @@ async function waitForSeqBeyond(
   const deadline = Date.now() + TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const page = await fixture.client.getMessages(chatId);
-    if (page.lastOrdinal > settledLastSeq) return page.lastOrdinal;
+    const streamed = page.messages
+      .filter((entry) => entry.ordinal > settledLastSeq && entry.message.type === 'bash-tool-use')
+      .at(-1);
+    if (streamed) return streamed.ordinal;
     await Bun.sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(`Live Claude chat ${chatId} never streamed past seq ${settledLastSeq}.`);
+  throw new Error(`Live Claude chat ${chatId} never streamed a provider row past seq ${settledLastSeq}.`);
 }
 
-async function expectEventStreamForkRefusal(promise: Promise<unknown>): Promise<void> {
+async function expectNativeForkOrTypedRefusal(
+  fixture: IntegrationFixture,
+  targetChatId: string,
+  promise: Promise<unknown>,
+): Promise<void> {
   let failure: unknown;
   try {
     await promise;
   } catch (error) {
     failure = error;
   }
-  expect(failure).toBeInstanceOf(GarconApiError);
-  expect(failure).toMatchObject({
-    status: 409,
-    body: {
-      success: false,
-      errorCode: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      retryable: true,
-    },
-  });
+  if (failure) {
+    expect(failure).toBeInstanceOf(GarconApiError);
+    expect(failure).toMatchObject({
+      status: 409,
+      body: {
+        success: false,
+        errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED',
+        retryable: true,
+      },
+    });
+    return;
+  }
+  const registry = JSON.parse(
+    await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
+  ) as { sessions?: Record<string, { agentSessionId?: string | null }> };
+  expect(registry.sessions?.[targetChatId]?.agentSessionId).toBeTruthy();
 }
 
 // Claude rewrites transcript entries when it forks, so the prefix is compared by rendered

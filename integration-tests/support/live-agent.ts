@@ -19,12 +19,26 @@ export function exactReplyPrompt(value: string): string {
   return `Reply with exactly ${value}. Do not use tools.`;
 }
 
+// A prompt that may still be unanswered when the next one is dispatched gets folded into it, so
+// it must not forbid what that successor asks for. Otherwise the merged instruction contradicts
+// itself and the answer depends on which half the model picks.
+export function foldableReplyPrompt(value: string): string {
+  return `Reply with exactly ${value}.`;
+}
+
 export function expectFinished(type: string): void {
   expect(type).toBe('agent-run-finished');
 }
 
 export function expectAssistantMarker(contents: readonly string[], value: string): void {
   expect(contents.some((content) => content.includes(value))).toBe(true);
+}
+
+// An interrupted turn proves it never completed by never delivering its completion reply. The
+// prompt asks for that reply verbatim, so the reply is the whole message; a model that narrates
+// the instruction it was given quotes the sentinel without having answered with it.
+export function expectNoCompletionReply(contents: readonly string[], value: string): void {
+  expect(contents.map((content) => content.trim())).not.toContain(value);
 }
 
 export function expectStoppedTurnEventOrder(

@@ -18,6 +18,8 @@ import {
   exactReplyPrompt,
   expectAssistantMarker,
   expectFinished,
+  expectNoCompletionReply,
+  foldableReplyPrompt,
   liveMarker as marker,
   LIVE_TURN_TIMEOUT_MS as TURN_TIMEOUT_MS,
   waitForVisibleResponse as waitForVisibleClaudeResponse,
@@ -131,7 +133,7 @@ describe('live Claude lifecycle', () => {
         `After it succeeds, reply with exactly ${firstMarker}.`,
         'Do not run any other command.',
       ].join(' ');
-      const secondPrompt = exactReplyPrompt(secondMarker);
+      const secondPrompt = foldableReplyPrompt(secondMarker);
       const firstCursor = fixture.client.markEvents();
       const first = await fixture.client.startChat(liveClaudeStartRequest({
         chatId: parentChatId,
@@ -280,12 +282,15 @@ describe('live Claude lifecycle', () => {
         parentContinuationPrompt,
       ]);
       expect(userContents(pointTranscript.messages)).toEqual([firstPrompt, pointPrompt]);
-      expect(userContents(childTranscript.messages)).toEqual([
+      expectPromptsInOrder(userContents(childTranscript.messages), [
         firstPrompt,
         secondPrompt,
         childPrompt,
       ]);
-      expect(userContents(grandchildTranscript.messages)).toEqual([
+      // These are native forks, so their feeds are Claude's own record of the sessions they
+      // resume from. A fork-run dispatched while an earlier prompt is unanswered is sent as one
+      // folded prompt, so a single row can carry two of these; the order is what must hold.
+      expectPromptsInOrder(userContents(grandchildTranscript.messages), [
         firstPrompt,
         secondPrompt,
         childPrompt,
@@ -371,7 +376,7 @@ describe('live Claude lifecycle', () => {
       const result = messagesOfType(beforeRestart.messages, 'tool-result').find(
         (message) => message.toolId === bash.toolId,
       );
-      expect(permission).toBeUndefined();
+      expect(permission?.permissionRequestId).toBe(permissionRequestId);
       expect(resolution?.allowed).toBe(true);
       expect(result?.isError).toBe(false);
       expect(JSON.stringify(result?.content)).toContain(toolMarker);
@@ -531,8 +536,10 @@ describe('live Claude lifecycle', () => {
         && event.chatId === chatId
         && event.outcome === 'interrupt-requested'
         && event.intent === 'stop');
-      expect(stoppingIndex).toBeGreaterThanOrEqual(0);
-      expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
+      expect(outcomeIndex).toBeGreaterThanOrEqual(0);
+      // Stopping is sampled from stop-in-flight state rather than emitted per stop, so a stop
+      // that settles between samples never reports it. Its ordering only binds when observed.
+      if (stoppingIndex >= 0) expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
       expect(stopEvents).not.toContainEqual(expect.objectContaining({
         type: 'agent-run-failed',
         chatId,
@@ -638,7 +645,7 @@ describe('live Claude lifecycle', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(countUserContent(transcript.messages, successorPrompt)).toBe(1);
       expectAssistantMarker(assistantContents(transcript.messages), successorMarker);
-      expect(assistantContents(transcript.messages).join('\n')).not.toContain('SHOULD_NOT_COMPLETE');
+      expectNoCompletionReply(assistantContents(transcript.messages), 'SHOULD_NOT_COMPLETE');
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
 
       const stoppedStarted = join(fixture.dirs.project, '.claude-stop-started');
@@ -721,9 +728,12 @@ describe('live Claude lifecycle', () => {
         event.type === 'chat-processing-updated'
         && event.chatId === chatId
         && event.phase === null);
-      expect(stoppingIndex).toBeGreaterThanOrEqual(0);
-      expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
-      expect(idleIndex).toBeGreaterThan(stoppingIndex);
+      expect(outcomeIndex).toBeGreaterThanOrEqual(0);
+      expect(idleIndex).toBeGreaterThan(outcomeIndex);
+      if (stoppingIndex >= 0) {
+        expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
+        expect(idleIndex).toBeGreaterThan(stoppingIndex);
+      }
       expect(stopEvents).not.toContainEqual(expect.objectContaining({
         type: 'agent-run-failed',
         chatId,
@@ -735,8 +745,10 @@ describe('live Claude lifecycle', () => {
       });
 
       const stoppedTranscript = await fixture.client.getMessages(chatId);
-      expect(assistantContents(stoppedTranscript.messages).join('\n'))
-        .not.toContain('STOPPED_TURN_SHOULD_NOT_COMPLETE');
+      expectNoCompletionReply(
+        assistantContents(stoppedTranscript.messages),
+        'STOPPED_TURN_SHOULD_NOT_COMPLETE',
+      );
       const stoppedBash = messagesOfType(stoppedTranscript.messages, 'bash-tool-use')
         .findLast((message) => message.command.includes(stoppedCommand));
       if (!stoppedBash) throw new Error('Live Claude stopped Bash tool use was not rendered.');
@@ -777,6 +789,17 @@ async function waitForFile(path: string): Promise<void> {
     await Bun.sleep(25);
   }
   throw new Error('Timed out waiting for the live Claude command marker.');
+}
+
+// A row may carry more than one prompt when a fork-run folds an unanswered one into its own,
+// so the cursor stays on a matching row rather than advancing past it.
+function expectPromptsInOrder(rows: readonly string[], prompts: readonly string[]): void {
+  let cursor = 0;
+  for (const prompt of prompts) {
+    const index = rows.findIndex((row, position) => position >= cursor && row.includes(prompt));
+    expect(index).toBeGreaterThanOrEqual(0);
+    cursor = index;
+  }
 }
 
 interface PersistedClaudeChat {

@@ -15,6 +15,7 @@ import {
 import {
   exactReplyPrompt,
   expectAssistantMarker,
+  expectNoCompletionReply,
   expectFinished,
   liveMarker,
   LIVE_TURN_TIMEOUT_MS,
@@ -353,8 +354,7 @@ describe('live Codex lifecycle', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(countUserContent(transcript.messages, successorPrompt)).toBe(1);
       expectAssistantMarker(assistantContents(transcript.messages), successorMarker);
-      expect(assistantContents(transcript.messages).join('\n'))
-        .not.toContain('CODEX_SHOULD_NOT_COMPLETE');
+      expectNoCompletionReply(assistantContents(transcript.messages), 'CODEX_SHOULD_NOT_COMPLETE');
       expect(fixture.client.eventsSince(interruptCursor)).not.toContainEqual(
         expect.objectContaining({
           type: 'agent-run-failed',
@@ -424,9 +424,14 @@ describe('live Codex lifecycle', () => {
         event.type === 'chat-processing-updated'
         && event.chatId === chatId
         && event.phase === null);
-      expect(stoppingIndex).toBeGreaterThanOrEqual(0);
-      expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
-      expect(idleIndex).toBeGreaterThan(stoppingIndex);
+      expect(outcomeIndex).toBeGreaterThanOrEqual(0);
+      expect(idleIndex).toBeGreaterThan(outcomeIndex);
+      // Stopping is sampled from stop-in-flight state rather than emitted per stop, so a stop
+      // that settles between samples never reports it. Its ordering only binds when observed.
+      if (stoppingIndex >= 0) {
+        expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
+        expect(idleIndex).toBeGreaterThan(stoppingIndex);
+      }
       expect(stopEvents).not.toContainEqual(expect.objectContaining({
         type: 'agent-run-failed',
         chatId,
@@ -438,14 +443,15 @@ describe('live Codex lifecycle', () => {
       });
 
       const stoppedTranscript = await fixture.client.getMessages(chatId);
-      expect(assistantContents(stoppedTranscript.messages).join('\n'))
-        .not.toContain('CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE');
+      expectNoCompletionReply(
+        assistantContents(stoppedTranscript.messages),
+        'CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE',
+      );
+      // A tool result that lands after the run is already terminal carries no run correlation,
+      // so the stopped turn's rows arrive untagged. Parity is against everything the chat
+      // broadcast since the turn began, not against what kept its turn id.
       const liveStoppedMessages = fixture.client.eventsSince(stoppedCursor).flatMap((event) =>
-        event.type === 'chat-messages'
-        && event.chatId === chatId
-        && event.turnId === stoppedTurn.turnId
-          ? event.messages
-          : []);
+        event.type === 'chat-messages' && event.chatId === chatId ? event.messages : []);
       // Codex may omit an interrupted command item entirely, so only cross-source parity is stable.
       const liveStoppedExecutions = toolExecutionProjections(liveStoppedMessages);
       expect(toolExecutionProjections(stoppedTranscript.messages, priorBashToolIds))
