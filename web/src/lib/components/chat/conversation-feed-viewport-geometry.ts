@@ -2,6 +2,7 @@ import { defaultRangeExtractor, type Range, type Rect } from '@tanstack/svelte-v
 import type { ConversationVirtualGeometrySnapshot } from './ConversationFeedProjectionState.svelte.js';
 
 export const CHAT_GEOMETRY_END_THRESHOLD_PX = 1;
+export const CHAT_VIRTUAL_FOLLOWING_BUFFER_ROWS = 12;
 
 export type ConversationVirtualStructureChange =
 	'none' | 'identity' | 'edge-qualified' | 'interior-only';
@@ -130,8 +131,13 @@ export function retainedConversationRange(
 	range: Range,
 	retainedIndexes: readonly number[],
 	trailingStartIndex?: number,
+	followingRowCount = 0,
 ): number[] {
 	const indexes = new Set(defaultRangeExtractor(range));
+	const followingEndIndex = Math.min(range.count - 1, range.endIndex + followingRowCount);
+	for (let index = range.endIndex + 1; index <= followingEndIndex; index += 1) {
+		indexes.add(index);
+	}
 	for (const index of retainedIndexes) {
 		if (index >= 0 && index < range.count) indexes.add(index);
 	}
@@ -146,8 +152,10 @@ export function retainedConversationRange(
 export function createRetainedConversationRangeExtractor(
 	retainedIndexes: readonly number[],
 	trailingStartIndex?: number,
+	followingRowCount = CHAT_VIRTUAL_FOLLOWING_BUFFER_ROWS,
 ): (range: Range) => number[] {
-	return (range) => retainedConversationRange(range, retainedIndexes, trailingStartIndex);
+	return (range) =>
+		retainedConversationRange(range, retainedIndexes, trailingStartIndex, followingRowCount);
 }
 
 export function classifyMeasuredConversationViewportFill(input: {

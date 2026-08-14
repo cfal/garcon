@@ -63,11 +63,8 @@
 						item: {
 							kind: 'message',
 							id: `row-${index}`,
-							rowIds: [`row-${index}`],
-							virtualKey: `row-${index}`,
 							message: new UserMessage('2026-08-03T00:00:00.000Z', `prompt ${index}`),
 							index,
-							prevMessage: null,
 						},
 						spacingAfter: 'none',
 					}

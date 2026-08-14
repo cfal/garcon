@@ -9,13 +9,21 @@
 		PermissionRequestMessage,
 		CompactionMessage,
 		AgentSwitchMessage,
+		ToolResultMessage,
+		AskUserQuestionToolUseMessage,
 	} from '$shared/chat-types';
-	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
+	import type {
+		ChatMessage,
+		ToolUseChatMessage,
+		UserMessageDeliveryStatus,
+	} from '$shared/chat-types';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import FileText from '@lucide/svelte/icons/file-text';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import { getChatSessions, getFileSessions, getAppShell, getLocalSettings } from '$lib/context';
 	import Markdown from './Markdown.svelte';
@@ -37,11 +45,8 @@
 	import { cn } from '$lib/utils/cn';
 	import MessageActionMenu from './MessageActionMenu.svelte';
 	import MessageTextSelectionDialog from './MessageTextSelectionDialog.svelte';
-	import {
-		askUserQuestionPermissionId,
-		askUserQuestionTerminalFromResult,
-		type PermissionTerminalState,
-	} from '$lib/chat/transcript/conversation-feed-items.js';
+	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { historicalAskUserQuestion } from '$lib/chat/transcript/ask-user-question-history.js';
 	import type {
 		ConversationDisclosureStatePort,
 		PermissionQuestionDraft,
@@ -57,8 +62,9 @@
 		anchorId?: string;
 		index: number;
 		forkUpToSeq?: number;
-		prevMessage: ChatMessage | null;
 		toolResult?: ToolResultMessage;
+		toolResultRowId?: string;
+		pairedToolUse?: ToolUseChatMessage;
 		permissionTerminal?: PermissionTerminalState;
 		onPermissionDecision?: (
 			permissionRequestId: string,
@@ -84,8 +90,9 @@
 		anchorId,
 		index,
 		forkUpToSeq,
-		prevMessage,
 		toolResult,
+		toolResultRowId,
+		pairedToolUse,
 		permissionTerminal,
 		onPermissionDecision,
 		onExitPlanMode,
@@ -115,18 +122,8 @@
 	});
 	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
 
-	// Groups consecutive messages of the same visual category.
-	function isGroupedWith(prev: ChatMessage | null, current: ChatMessage): boolean {
-		if (!prev) return false;
-		const prevCategory = prev instanceof AssistantMessage ? 'assistant' : prev.type;
-		const curCategory = current instanceof AssistantMessage ? 'assistant' : current.type;
-		return prevCategory === curCategory;
-	}
-
-	const isGrouped = $derived(isGroupedWith(prevMessage, message));
 	const shouldHideThinking = $derived(message instanceof ThinkingMessage && !showThinking);
 
-	// Maps message type to a simplified CSS class name.
 	function getCssType(msg: ChatMessage): string {
 		if (isToolUseMessage(msg)) return 'tool';
 		switch (msg.type) {
@@ -141,11 +138,11 @@
 
 	const cssType = $derived(getCssType(message));
 
-	// Type narrowing helpers for the template.
 	const asUser = $derived(message instanceof UserMessage ? message : null);
 	const asAssistant = $derived(message instanceof AssistantMessage ? message : null);
 	const asThinking = $derived(message instanceof ThinkingMessage ? message : null);
 	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
+	const asToolResult = $derived(message instanceof ToolResultMessage ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
 	const asCompaction = $derived(message instanceof CompactionMessage ? message : null);
 	const asAgentSwitch = $derived(message instanceof AgentSwitchMessage ? message : null);
@@ -157,23 +154,31 @@
 			? new PermissionRequestMessage(message.timestamp, `plan-exit-${asToolUse.toolId}`, asToolUse)
 			: null,
 	);
-	const askUserQuestionPermissionRequest = $derived(
-		asToolUse?.type === 'ask-user-question-tool-use' && toolResult
-			? new PermissionRequestMessage(
-					message.timestamp,
-					askUserQuestionPermissionId(asToolUse.toolId),
-					asToolUse,
-				)
-			: null,
-	);
-	const askUserQuestionTerminal = $derived(
-		asToolUse?.type === 'ask-user-question-tool-use'
-			? askUserQuestionTerminalFromResult(asToolUse, toolResult)
-			: undefined,
-	);
-	const showNonAssistantHeader = $derived(!isGrouped && message instanceof ErrorMessage);
+	const historicalQuestion = $derived.by(() => {
+		if (!(asToolResult && pairedToolUse instanceof AskUserQuestionToolUseMessage)) return null;
+		return historicalAskUserQuestion(pairedToolUse, asToolResult);
+	});
+	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
 
-	/** Formats assistant or error content for display. */
+	function ignorePermissionDecision(): void {}
+
+	function deliveryTitle(status: UserMessageDeliveryStatus | null): string {
+		switch (status) {
+			case 'submitting':
+				return m.chat_message_delivery_sending();
+			case 'unconfirmed':
+				return m.chat_message_delivery_unconfirmed();
+			case 'failed':
+				return m.chat_message_delivery_failed();
+			default:
+				return '';
+		}
+	}
+
+	const userDeliveryTitle = $derived(deliveryTitle(userDeliveryStatus));
+
+	const showNonAssistantHeader = $derived(message instanceof ErrorMessage);
+
 	function getFormattedContent(): string {
 		if (message instanceof AssistantMessage || message instanceof ErrorMessage) {
 			return String(message.content || '');
@@ -186,8 +191,7 @@
 		cn(
 			'chat-message',
 			cssType,
-			isGrouped && 'grouped',
-			message instanceof UserMessage && 'flex justify-start min-w-0',
+			message instanceof UserMessage ? 'flex justify-start min-w-0' : 'flow-root',
 		),
 	);
 
@@ -461,7 +465,12 @@
 {/snippet}
 
 {#if !shouldHideThinking}
-	<div class={messageClass} data-chat-row-id={rowId} data-chat-anchor-id={anchorId}>
+	<div
+		class={messageClass}
+		data-chat-row-id={rowId}
+		data-chat-anchor-id={anchorId}
+		data-chat-message-type={message.type}
+	>
 		{#if asUser}
 			<div
 				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
@@ -528,6 +537,23 @@
 					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
 				>
 					{@render floatingMessageMenuButton('bottom-0 right-0')}
+					{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'unconfirmed' || userDeliveryStatus === 'failed'}
+						<span
+							class={cn(
+								'user-message-delivery-indicator absolute left-1/2 top-1/2 inline-flex size-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center',
+								userDeliveryStatus === 'failed' && 'text-status-error-foreground',
+								userDeliveryStatus === 'unconfirmed' && 'text-status-warning-muted-foreground',
+							)}
+							title={userDeliveryTitle}
+							aria-label={userDeliveryTitle}
+						>
+							{#if userDeliveryStatus === 'submitting'}
+								<LoaderCircle class="size-3.5 animate-spin" />
+							{:else}
+								<CircleAlert class="size-3" />
+							{/if}
+						</span>
+					{/if}
 				</div>
 			</div>
 		{:else}
@@ -558,7 +584,7 @@
 						<PermissionRequestRow
 							request={exitPlanPermissionRequest}
 							terminal={permissionTerminal}
-							onDecision={onPermissionDecision ?? (() => {})}
+							onDecision={onPermissionDecision ?? ignorePermissionDecision}
 							{onExitPlanMode}
 							{chatContext}
 							draft={permissionDraft?.(exitPlanPermissionRequest.permissionRequestId)}
@@ -568,21 +594,13 @@
 										onPermissionDraftChange(exitPlanPermissionRequest.permissionRequestId, draft)
 								: undefined}
 						/>
-					{:else if askUserQuestionPermissionRequest}
+					{:else if historicalQuestion}
 						<PermissionRequestRow
-							request={askUserQuestionPermissionRequest}
-							terminal={askUserQuestionTerminal}
-							onDecision={onPermissionDecision ?? (() => {})}
+							request={historicalQuestion.request}
+							terminal={historicalQuestion.terminal}
+							onDecision={ignorePermissionDecision}
 							{chatContext}
-							draft={permissionDraft?.(askUserQuestionPermissionRequest.permissionRequestId)}
 							{acquireTransientActivity}
-							onDraftChange={onPermissionDraftChange
-								? (draft) =>
-										onPermissionDraftChange(
-											askUserQuestionPermissionRequest.permissionRequestId,
-											draft,
-										)
-								: undefined}
 						/>
 					{:else if asToolUse}
 						<ChatToolEventRenderer
@@ -591,6 +609,20 @@
 								? { content: toolResult.content, isError: toolResult.isError }
 								: undefined}
 							mode="input"
+							resultAnchorId={toolResultRowId ? `tool-result-${toolResultRowId}` : undefined}
+							autoExpandTools={localSettings.autoExpandTools}
+							onFileOpen={handleToolFileOpen}
+							{projectBasePath}
+							{chatProjectPath}
+							{disclosureState}
+							{acquireTransientActivity}
+						/>
+					{:else if asToolResult && pairedToolUse}
+						<ChatToolEventRenderer
+							toolMessage={pairedToolUse}
+							toolResult={{ content: asToolResult.content, isError: asToolResult.isError }}
+							mode="result"
+							resultAnchorId={rowId ? `tool-result-${rowId}` : undefined}
 							autoExpandTools={localSettings.autoExpandTools}
 							onFileOpen={handleToolFileOpen}
 							{projectBasePath}
