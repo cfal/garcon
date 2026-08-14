@@ -12,6 +12,16 @@ export class TranscriptOptimisticInputs {
 		this.onChanged();
 	}
 
+	markDelivered(clientMessageId: string): void {
+		const index = this.rows.findIndex((input) => input.clientMessageId === clientMessageId);
+		const input = this.rows[index];
+		if (!input || input.delivery === 'delivered') return;
+		const next = [...this.rows];
+		next[index] = { ...input, delivery: 'delivered' };
+		this.rows = next;
+		this.onChanged();
+	}
+
 	clear(clientMessageId: string): void {
 		const next = this.rows.filter((input) => input.clientMessageId !== clientMessageId);
 		if (next.length === this.rows.length) return;

@@ -146,6 +146,7 @@ export async function submitSteerRoute(
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
 	try {
 		await submission.submit();
+		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		return 'accepted';
 	} catch (error) {
 		const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
@@ -230,6 +231,7 @@ export async function submitDraftRoute(
 	deps.startupCoordinator.beginLocalStartup(chatId);
 	try {
 		const response = await submission.submit();
+		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		deps.sessions.applyStartEntry(response.chat);
 		if (response.status === 'accepted') deps.lifecycle.beginTurn(chatId);
 		else deps.startupCoordinator.completeStartup(chatId);
@@ -283,6 +285,7 @@ export async function submitRunRoute(
 	);
 	try {
 		const response = await submission.submit();
+		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		if (handoff) {
 			if (!response.chat) throw new Error('Accepted handoff response omitted its chat projection');
 			deps.sessions.upsertServerChat(response.chat);

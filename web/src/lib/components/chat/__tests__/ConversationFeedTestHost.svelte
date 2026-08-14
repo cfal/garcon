@@ -67,6 +67,7 @@
 			clientMessageId: 'message-1',
 			content: 'Pending user message',
 			createdAt: '2026-07-01T00:00:01.000Z',
+			delivery: 'pending',
 		});
 	} else if (initialTranscriptScenario !== 'empty') {
 		const messageCount =

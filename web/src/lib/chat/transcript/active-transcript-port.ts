@@ -46,6 +46,7 @@ export interface ActiveTranscriptPort {
 	discardServerNotices(chatId: string): void;
 	clearLocalNotices(): void;
 	upsertOptimisticUserInput(input: OptimisticUserInput): void;
+	markOptimisticUserInputDelivered(clientMessageId: string): void;
 	clearOptimisticUserInput(clientMessageId: string): void;
 	activateChat(chatId: string | null): ChatRestoreResult | null;
 }

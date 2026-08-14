@@ -57,6 +57,8 @@
 
 	interface Props {
 		message: ChatMessage;
+		/** Marks a submitted message whose request has not come back yet. */
+		awaitingDelivery?: boolean;
 		rowId?: string;
 		anchorId?: string;
 		index: number;
@@ -85,6 +87,7 @@
 
 	let {
 		message,
+		awaitingDelivery = false,
 		rowId,
 		anchorId,
 		index,
@@ -518,7 +521,14 @@
 				<div
 					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
 				>
-					{@render floatingMessageMenuButton('bottom-0 right-0')}
+					{#if awaitingDelivery}
+						<LoaderCircle
+							class="absolute bottom-0 right-0 size-3.5 animate-spin text-muted-foreground"
+							aria-label={m.chat_message_delivery_sending()}
+						/>
+					{:else}
+						{@render floatingMessageMenuButton('bottom-0 right-0')}
+					{/if}
 				</div>
 			</div>
 		{:else}

@@ -99,6 +99,7 @@
 		<ConversationMessage
 			{message}
 			rowId={item.id}
+			awaitingDelivery={item.awaitingDelivery}
 			anchorId={item.ordinal === undefined ? undefined : item.id}
 			index={item.index}
 			forkUpToSeq={item.ordinal}

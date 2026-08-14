@@ -9,6 +9,7 @@ export interface ChatTranscriptRow {
 	id: string;
 	message: ChatMessage;
 	ordinal?: number;
+	awaitingDelivery?: boolean;
 }
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
@@ -20,6 +21,7 @@ function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
 		message: new UserMessage(input.createdAt, input.content, input.images, {
 			clientMessageId: input.clientMessageId,
 		}),
+		...(input.delivery === 'pending' ? { awaitingDelivery: true } : {}),
 	};
 }
 

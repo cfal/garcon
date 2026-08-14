@@ -26,6 +26,7 @@ export interface ConversationFeedMessageRenderItem {
 	message: ChatMessage;
 	index: number;
 	ordinal?: number;
+	awaitingDelivery?: boolean;
 	pairedToolUse?: ToolUseChatMessage;
 	permissionWrapperRowId?: string;
 }
@@ -211,6 +212,7 @@ export function buildConversationFeedRenderModel(
 			message,
 			index,
 			ordinal: row.ordinal,
+			...(row.awaitingDelivery ? { awaitingDelivery: true } : {}),
 			...(message instanceof ToolResultMessage
 				? {
 						pairedToolUse: toolPairs.toolUseByResultRowId.get(row.id),

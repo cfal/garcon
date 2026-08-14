@@ -6,4 +6,8 @@ export interface OptimisticUserInput {
 	readonly content: string;
 	readonly createdAt: string;
 	readonly images?: ChatImage[];
+	// Whether the submitting request has come back. A row stays pending while the HTTP call is
+	// in flight, which is the only window where the user cannot tell delivery from lost
+	// connectivity.
+	readonly delivery: 'pending' | 'delivered';
 }

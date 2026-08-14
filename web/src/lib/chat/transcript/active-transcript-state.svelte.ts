@@ -13,6 +13,7 @@ import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { TranscriptNoticeFeed } from './transcript-notice-feed.svelte.js';
 import { TranscriptOptimisticInputs } from './transcript-optimistic-inputs.svelte.js';
+import { TranscriptResendCandidates } from './transcript-resend-candidates.svelte.js';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
 import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
 import type { ConversationFeedMutationKind } from './conversation-feed-mutations.js';
@@ -69,8 +70,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
 	activeChatId = $state<string | null>(null);
 	entries = $state<TranscriptMessage[]>([]);
-	#resendCandidates = $state<ResendCandidate[]>([]);
-	#excludedResendOrdinals = $state<number[]>([]);
+	#resend = new TranscriptResendCandidates();
 	transcriptViewId = $state('');
 	windowRevision = $state(0);
 	lastOrdinal = $state(0);
@@ -117,35 +117,23 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get resendCandidates(): readonly ResendCandidate[] {
-		const excluded = new Set(this.#excludedResendOrdinals);
-		return this.#resendCandidates.filter((candidate) => !excluded.has(candidate.ordinal));
+		return this.#resend.included;
 	}
 
 	get excludedResendOrdinals(): readonly number[] {
-		return this.#excludedResendOrdinals;
+		return this.#resend.excludedOrdinals;
 	}
 
 	setResendCandidates(candidates: readonly ResendCandidate[]): void {
-		this.#resendCandidates = candidates.map((candidate) => ({
-			...candidate,
-			attachmentNames: [...candidate.attachmentNames],
-		}));
-		const available = new Set(candidates.map((candidate) => candidate.ordinal));
-		this.#excludedResendOrdinals = this.#excludedResendOrdinals.filter((ordinal) =>
-			available.has(ordinal),
-		);
+		this.#resend.replace(candidates);
 	}
 
 	excludeResendCandidate(ordinal: number): void {
-		if (!this.#resendCandidates.some((candidate) => candidate.ordinal === ordinal)) return;
-		if (this.#excludedResendOrdinals.includes(ordinal)) return;
-		this.#excludedResendOrdinals = [...this.#excludedResendOrdinals, ordinal].sort(
-			(left, right) => left - right,
-		);
+		this.#resend.exclude(ordinal);
 	}
 
 	clearResendExclusions(): void {
-		this.#excludedResendOrdinals = [];
+		this.#resend.clearExclusions();
 	}
 
 	#echoedClientMessageIds = $derived(echoedClientMessageIds(this.entries));
@@ -243,7 +231,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		messages: TranscriptMessage[],
 		firstOrdinal: number,
 		lastOrdinal: number,
-		resendCandidates: ResendCandidate[] = [...this.#resendCandidates],
+		resendCandidates: ResendCandidate[] = [...this.#resend.all],
 		noticeRevision = this.#notices.revision,
 	): MessageApplyResult {
 		if (this.historyState.kind !== 'complete') {
@@ -760,6 +748,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#optimisticInputs.upsert(input);
 	}
 
+	markOptimisticUserInputDelivered(clientMessageId: string): void {
+		this.#optimisticInputs.markDelivered(clientMessageId);
+	}
+
 	clearOptimisticUserInput(clientMessageId: string): void {
 		this.#optimisticInputs.clear(clientMessageId);
 	}
@@ -782,8 +774,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.oldestOrdinal = 0;
 		this.loadedThroughOrdinal = 0;
 		this.#optimisticInputs.clearAll();
-		this.#resendCandidates = [];
-		this.#excludedResendOrdinals = [];
+		this.#resend.clear();
 		this.#notices.reset();
 		this.hasEarlierMessages = false;
 		this.hasLaterMessages = false;

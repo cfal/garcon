@@ -50,6 +50,7 @@ export function optimisticUserInput(
 		clientMessageId,
 		content,
 		createdAt: new Date().toISOString(),
+		delivery: 'pending',
 		...(images.length > 0 ? { images } : {}),
 	};
 }

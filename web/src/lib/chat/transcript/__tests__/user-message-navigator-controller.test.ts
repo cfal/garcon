@@ -129,6 +129,7 @@ describe('UserMessageNavigatorController', () => {
 			clientMessageId: 'message-1',
 			content: '',
 			createdAt: '2026-07-22T00:00:02.000Z',
+			delivery: 'pending',
 			images: [{ name: 'context.pdf', mimeType: 'application/pdf', data: '' }],
 		});
 		controller.openForActiveChat();
@@ -262,6 +263,7 @@ describe('UserMessageNavigatorController', () => {
 			clientMessageId: 'message-1',
 			content: 'First message',
 			createdAt: TS,
+			delivery: 'pending',
 		});
 		const jumpToRow = vi.fn(async () => 'completed' as const);
 		const controller = new UserMessageNavigatorController({

@@ -85,6 +85,7 @@ function optimisticInput(overrides: Partial<OptimisticUserInput> = {}): Optimist
 		clientMessageId: 'msg-1',
 		content: 'optimistic',
 		createdAt: TS,
+		delivery: 'pending',
 		...overrides,
 	};
 }
@@ -605,12 +606,26 @@ describe('ActiveTranscriptState', () => {
 			clientMessageId: 'msg-1',
 			content: 'continue',
 			createdAt: '2026-06-01T00:00:01.000Z',
+			delivery: 'pending',
 		});
 
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'continue']);
 		expect(chat.displayMessageCount).toBe(2);
 		expect(chat.visibleRows.at(-1)?.id).toBe('optimistic:msg-1');
 		expect(chat.visibleRows.at(-1)?.id).not.toBe(noticeBottomRowId);
+	});
+
+	it('marks an optimistic row awaiting delivery until the request comes back', () => {
+		const chat = new ActiveTranscriptState();
+		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, user('server'))]);
+		chat.upsertOptimisticUserInput(optimisticInput());
+
+		const pendingRow = () => chat.visibleRows.find((row) => row.id === 'optimistic:msg-1');
+		expect(pendingRow()).toMatchObject({ awaitingDelivery: true });
+
+		chat.markOptimisticUserInputDelivered('msg-1');
+
+		expect(pendingRow()).not.toHaveProperty('awaitingDelivery');
 	});
 
 	it('keeps transient local messages when replay only overlaps existing server messages', () => {
@@ -673,6 +688,7 @@ describe('ActiveTranscriptState', () => {
 			clientMessageId: 'message-1',
 			content: 'optimistic',
 			createdAt: '2026-06-01T00:00:01.000Z',
+			delivery: 'pending',
 		});
 
 		expect(chat.displayRows).toMatchObject([
