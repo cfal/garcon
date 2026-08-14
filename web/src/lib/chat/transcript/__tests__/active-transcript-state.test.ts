@@ -224,7 +224,7 @@ describe('ActiveTranscriptState', () => {
 		const chat = new ActiveTranscriptState();
 		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 51;
 
-		applyMessages(chat, 
+		applyMessages(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: messageCount }, (_, index) =>
@@ -295,7 +295,7 @@ describe('ActiveTranscriptState', () => {
 		chat.visibleMessageCount = INITIAL_VISIBLE_MESSAGES + 50;
 		chat.isUserScrolledUp = false;
 
-		applyMessages(chat, 
+		applyMessages(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -326,7 +326,7 @@ describe('ActiveTranscriptState', () => {
 		});
 		chat.isUserScrolledUp = true;
 
-		applyMessages(chat, 
+		applyMessages(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -1142,7 +1142,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows).toHaveLength(30);
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
 
-		applyMessages(chat, 
+		applyMessages(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 30 }, (_, index) =>
@@ -1244,7 +1244,7 @@ describe('ActiveTranscriptState', () => {
 			}),
 		});
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
-		applyMessages(chat, 
+		applyMessages(chat,
 			'chat-1',
 			'generation-2',
 			Array.from({ length: 126 }, (_, index) =>
@@ -1310,7 +1310,7 @@ describe('ActiveTranscriptState', () => {
 
 			expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
 
-			applyMessages(chat, 
+			applyMessages(chat,
 				'chat-1',
 				'generation-1',
 				Array.from({ length: 40 - messageCount }, (_, index) =>
