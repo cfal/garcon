@@ -544,6 +544,9 @@ export interface ForkChatParams {
 	chatId: string;
 	upToOrdinal?: number;
 	transcriptViewId?: string;
+	// Set only after the user confirms a handoff fork, so an unconfirmed request still
+	// surfaces the refusal the confirmation is asked about.
+	allowHandoffFork?: boolean;
 }
 
 /** Forks (clones) an existing chat session into a new chat. */

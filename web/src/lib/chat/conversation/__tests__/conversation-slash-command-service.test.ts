@@ -182,6 +182,7 @@ function createDeps(chat = createChat()) {
 		},
 		navigation: { navigateToChat: vi.fn() },
 		refetchTranscript: vi.fn().mockResolvedValue(undefined),
+		confirmHandoffFork: vi.fn().mockResolvedValue(true),
 		scrollToBottom: vi.fn(),
 	} satisfies ConversationSlashCommandDeps;
 	return { deps, composerState, appendLocalNotice, cursor };
@@ -1060,6 +1061,51 @@ describe('ConversationSlashCommandService', () => {
 			'error',
 			'Failed to fork chat: The original stale view',
 		);
+	});
+
+	it('asks before forking a point the provider has not persisted, then repeats it with consent', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkChat
+			.mockRejectedValueOnce(new ApiError(
+				409,
+				'The transcript is not written yet',
+				'TRANSCRIPT_NOT_YET_PERSISTED',
+				undefined,
+				true,
+			))
+			.mockResolvedValueOnce({ success: true, chat: forked });
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(deps.confirmHandoffFork).toHaveBeenCalledTimes(1);
+		expect(mockForkChat).toHaveBeenCalledTimes(2);
+		expect(mockForkChat.mock.calls[0]?.[0]).not.toHaveProperty('allowHandoffFork');
+		expect(mockForkChat.mock.calls[1]?.[0]).toMatchObject({
+			chatId: mockForkChat.mock.calls[0]?.[0].chatId,
+			upToOrdinal: 9,
+			allowHandoffFork: true,
+		});
+		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('leaves the chat untouched when the handoff fork is declined', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		deps.confirmHandoffFork.mockResolvedValueOnce(false);
+		mockForkChat.mockRejectedValueOnce(new ApiError(
+			409,
+			'The transcript is not written yet',
+			'TRANSCRIPT_NOT_YET_PERSISTED',
+			undefined,
+			true,
+		));
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(mockForkChat).toHaveBeenCalledTimes(1);
+		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
 	});
 
 	it('shows the native-history notice without attempting recovery', async () => {

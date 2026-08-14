@@ -9,6 +9,7 @@
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
+	import HandoffForkDialog from './HandoffForkDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
 	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
@@ -878,5 +879,10 @@
 		busy={reloadInProgress}
 		onCancel={cancelReload}
 		onConfirm={() => void confirmReload()}
+	/>
+	<HandoffForkDialog
+		open={controller.handoffForkConfirmation.isOpen}
+		onCancel={() => controller.handoffForkConfirmation.cancel()}
+		onConfirm={() => controller.handoffForkConfirmation.confirm()}
 	/>
 </div>

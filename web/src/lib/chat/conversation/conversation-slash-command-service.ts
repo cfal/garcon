@@ -1,4 +1,4 @@
-import { compactChat, forkChat } from '$lib/api/chats.js';
+import { compactChat, forkChat, type ForkChatParams } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
@@ -112,6 +112,9 @@ export interface ConversationSlashCommandDeps {
 	modelCatalog: SlashCommandModelCatalog;
 	navigation: { navigateToChat?(chatId: string): void };
 	refetchTranscript?: (chatId: string) => Promise<void>;
+	// Asks the user whether to fork a point the provider has not persisted natively yet.
+	// Without it the refusal reads as a plain failure.
+	confirmHandoffFork?: () => Promise<boolean>;
 	scrollToBottom(): void;
 }
 
@@ -703,7 +706,9 @@ export class ConversationSlashCommandService {
 		}
 	}
 
-	async #performForkOnly(sourceChatId: string, upToOrdinal?: number): Promise<void> {
+	// Resolves false when the user declines a handoff fork, so callers stay silent instead of
+	// reporting a failure.
+	async #performForkOnly(sourceChatId: string, upToOrdinal?: number): Promise<boolean> {
 		const chatId = createClientChatId();
 		const selection = upToOrdinal === undefined
 			? null
@@ -715,9 +720,9 @@ export class ConversationSlashCommandService {
 		if (upToOrdinal !== undefined && !selection) {
 			throw new Error(m.chat_notice_fork_message_no_longer_available());
 		}
-		let result: Awaited<ReturnType<typeof forkChat>>;
+		let result: Awaited<ReturnType<typeof forkChat>> | null;
 		try {
-			result = await forkChat({
+			result = await this.#requestFork({
 				sourceChatId,
 				chatId,
 				...(selection ? forkPointParams(selection) : {}),
@@ -737,16 +742,31 @@ export class ConversationSlashCommandService {
 				selection,
 			);
 			if (!remapped) throw error;
-			result = await forkChat({
+			result = await this.#requestFork({
 				sourceChatId,
 				chatId,
 				...forkPointParams(remapped),
 			});
 		}
+		if (!result) return false;
 		this.deps.sessions.upsertServerChat(result.chat);
 		this.deps.lifecycle.setCurrentChatId(result.chat.id);
 		this.deps.sessions.setSelectedChatId(result.chat.id);
 		this.deps.navigation.navigateToChat?.(result.chat.id);
+		return true;
+	}
+
+	// The server refuses a point it cannot branch natively rather than silently downgrading, so
+	// the refusal doubles as the probe: the user decides, and consent repeats the same request.
+	// Returns null when the user declines, which is an answer rather than a failure.
+	async #requestFork(params: ForkChatParams): Promise<Awaited<ReturnType<typeof forkChat>> | null> {
+		try {
+			return await forkChat(params);
+		} catch (error) {
+			if (!isUnsettledForkPointError(error) || !this.deps.confirmHandoffFork) throw error;
+			if (!(await this.deps.confirmHandoffFork())) return null;
+			return forkChat({ ...params, allowHandoffFork: true });
+		}
 	}
 
 	async #submitForkOnlyCommand(
@@ -756,7 +776,10 @@ export class ConversationSlashCommandService {
 		restoreComposer: boolean,
 	): Promise<ConversationSubmissionOutcome> {
 		try {
-			await this.#performForkOnly(sourceChatId);
+			if (!await this.#performForkOnly(sourceChatId)) {
+				this.#restoreComposer(sourceChatId, previousText, previousImages, restoreComposer);
+				return 'rejected';
+			}
 			return 'accepted';
 		} catch (error) {
 			this.#restoreComposer(sourceChatId, previousText, previousImages, restoreComposer);
@@ -794,6 +817,11 @@ function forkPointParams(selection: ForkAtMessageSelection): {
 function isStaleForkPointError(error: unknown): error is ApiError {
 	return error instanceof ApiError
 		&& error.errorCode === 'STALE_TRANSCRIPT_VIEW';
+}
+
+function isUnsettledForkPointError(error: unknown): error is ApiError {
+	return error instanceof ApiError
+		&& error.errorCode === 'TRANSCRIPT_NOT_YET_PERSISTED';
 }
 
 // A fork point the server could not resolve against native history is a recoverable state the

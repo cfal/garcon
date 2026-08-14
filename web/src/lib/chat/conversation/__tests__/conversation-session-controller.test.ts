@@ -251,6 +251,13 @@ function createDeps(chat = createRunningChat()) {
 			}
 			chatState.optimisticUserInputs = [...chatState.optimisticUserInputs, input];
 		}),
+		markOptimisticUserInputDelivered: vi.fn((clientMessageId: string) => {
+			chatState.optimisticUserInputs = chatState.optimisticUserInputs.map((input) => (
+				input.clientMessageId === clientMessageId
+					? { ...input, delivery: 'delivered' as const }
+					: input
+			));
+		}),
 		clearOptimisticUserInput: vi.fn((clientMessageId: string) => {
 			chatState.optimisticUserInputs = chatState.optimisticUserInputs.filter(
 				(input) => input.clientMessageId !== clientMessageId,
@@ -1268,7 +1275,11 @@ describe('ConversationSessionController', () => {
 		});
 		await expect(submit).resolves.toBe('accepted');
 
-		expect(deps.chatState.optimisticUserInputs).toEqual([optimistic]);
+		// The row survives until the ledger echo; the accepted request only settles its
+		// delivery state.
+		expect(deps.chatState.optimisticUserInputs).toEqual([
+			{ ...optimistic, delivery: 'delivered' },
+		]);
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 	});
 
@@ -2859,6 +2870,7 @@ describe('ConversationSessionController', () => {
 			clientMessageId: 'msg-1',
 			content: 'optimistic',
 			createdAt: '2026-05-14T00:00:01.000Z',
+			delivery: 'delivered',
 		};
 		const loaded = [new AssistantMessage('2026-05-14T00:00:00.000Z', 'older server snapshot')];
 		const { deps } = createDeps();

@@ -1218,6 +1218,29 @@ describe('chats API contract', () => {
 		});
 	});
 
+	it('forkChat sends handoff-fork consent only when the user has given it', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'codex' }),
+		);
+
+		await forkChat({
+			sourceChatId: '1',
+			chatId: '2',
+			upToOrdinal: 7,
+			transcriptViewId: 'view-1',
+			allowHandoffFork: true,
+		});
+
+		const [, opts] = fetchMock.mock.calls[0];
+		expect(JSON.parse(opts.body)).toEqual({
+			sourceChatId: '1',
+			chatId: '2',
+			upToOrdinal: 7,
+			transcriptViewId: 'view-1',
+			allowHandoffFork: true,
+		});
+	});
+
 	it('validateStart calls GET /api/v1/chats/validate-start', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ valid: true, isGitRepo: true }));
 		const controller = new AbortController();
