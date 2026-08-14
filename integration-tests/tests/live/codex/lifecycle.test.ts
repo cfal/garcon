@@ -19,6 +19,7 @@ import {
   expectFinished,
   liveMarker,
   LIVE_TURN_TIMEOUT_MS,
+  POLL_INTERVAL_MS,
   waitForVisibleResponse,
 } from '../../../support/live-agent.js';
 import {
@@ -442,7 +443,10 @@ describe('live Codex lifecycle', () => {
         chats: [],
       });
 
-      const stoppedTranscript = await fixture.client.getMessages(chatId);
+      // Codex can append the interrupted command to its rollout after the abort lands, so the
+      // chat is settled before either side is sampled. Reading the ledger and the event log at
+      // different instants is what makes this comparison race.
+      const stoppedTranscript = await settledTranscript(fixture, chatId);
       expectNoCompletionReply(
         assistantContents(stoppedTranscript.messages),
         'CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE',
@@ -459,9 +463,10 @@ describe('live Codex lifecycle', () => {
       expect(countUserContent(stoppedTranscript.messages, stoppedPrompt)).toBe(1);
 
       await fixture.restartGarcon();
+      // Restart reopens the ledger and replays nothing, so the transcript is what it was.
       const restoredTranscript = await fixture.client.getMessages(chatId);
       expect(toolExecutionProjections(restoredTranscript.messages, priorBashToolIds))
-        .toEqual(liveStoppedExecutions);
+        .toEqual(toolExecutionProjections(stoppedTranscript.messages, priorBashToolIds));
       expect(countUserContent(restoredTranscript.messages, stoppedPrompt)).toBe(1);
 
       const recoveryMarker = liveMarker('CODEX_POST_INTERRUPT');
@@ -514,6 +519,24 @@ function expectPersistedCommand(
   const resultSeq = transcript.messages.find((entry) =>
     entry.message.type === 'tool-result' && entry.message.toolId === succeeded.toolId)?.ordinal;
   expect(resultSeq).toBeGreaterThan(bashSeq ?? Number.MAX_SAFE_INTEGER);
+}
+
+// A provider that keeps writing after a turn ends leaves the transcript briefly in motion, so
+// callers that compare it against another source wait for two identical reads first.
+async function settledTranscript(
+  fixture: IntegrationFixture,
+  chatId: string,
+): Promise<Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>> {
+  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
+  let previous = await fixture.client.getMessages(chatId);
+  while (Date.now() < deadline) {
+    await Bun.sleep(POLL_INTERVAL_MS);
+    const next = await fixture.client.getMessages(chatId);
+    if (next.lastOrdinal === previous.lastOrdinal
+      && next.messages.length === previous.messages.length) return next;
+    previous = next;
+  }
+  throw new Error(`Live Codex chat ${chatId} never settled.`);
 }
 
 function toolExecutionProjections(
