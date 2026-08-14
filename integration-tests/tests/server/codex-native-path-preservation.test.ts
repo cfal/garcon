@@ -60,9 +60,12 @@ describe('Codex native transcript path preservation', () => {
         );
         await reloadUntilNativeContains(fixture, sourceChatId, codexMarker);
         const source = await fixture.client.getMessages(sourceChatId);
+        // The handoff boundary closes the outgoing owner's history, so it sits between the
+        // cursor exchange and the first Codex row.
         expect(messageLabels(source.messages.map((entry) => entry.message))).toEqual([
           cursorMarker,
           `echo:${cursorMarker}`,
+          'agent-switch',
           codexMarker,
           `codex-answer-${codexMarker}`,
         ]);

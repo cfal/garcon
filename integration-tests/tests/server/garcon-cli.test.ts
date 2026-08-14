@@ -341,7 +341,16 @@ describe('garcon-cli', () => {
         'cli-target-answer',
         'cli-return-answer',
       ]);
-      expect(messagesOfType(history.messages, 'agent-switch')).toEqual([]);
+      // Each handoff leaves a durable boundary, so the round trip records both directions.
+      expect(
+        messagesOfType(history.messages, 'agent-switch').map(({ fromAgentId, toAgentId }) => ({
+          fromAgentId,
+          toAgentId,
+        })),
+      ).toEqual([
+        { fromAgentId: source.agentId, toAgentId: target.agentId },
+        { fromAgentId: target.agentId, toAgentId: source.agentId },
+      ]);
     }, { namedWorkspace: WORKSPACE });
   });
 
