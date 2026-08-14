@@ -172,7 +172,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       logger,
     });
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createClaudeNativeActivityProbe(nativeSessions);
     this.catalog = createModelCatalog({

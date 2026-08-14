@@ -7,6 +7,7 @@ import {
   PermissionResolvedMessage,
 } from '@garcon/common/chat-types';
 import type {
+  AgentLogger,
   AgentProducerEvent,
   AgentProducerSink,
   AgentStartRequestV5,
@@ -82,6 +83,59 @@ describe('createAgentProducerAdapter', () => {
       runId: 'run-1',
       lifecycle: { kind: 'cancelled', requestId: 'permission-1', reason: 'aborted' },
     });
+  });
+
+  it('keeps uncorrelated permission facts typed instead of leaking them into rows', async () => {
+    const fixture = createFixture(({ channel }) => {
+      channel.emit({
+        type: 'messages',
+        chatId: 'chat-1',
+        runId: null,
+        rows: runtimeRows([
+          new PermissionRequestMessage(TS, 'permission-1', new BashToolUseMessage(TS, 'tool-1', 'pwd')),
+          new PermissionCancelledMessage(TS, 'permission-1', 'aborted'),
+        ]),
+      });
+    });
+
+    await fixture.adapter.execution.start(fixture.request);
+
+    const permissions = fixture.events.filter((event) => event.type === 'permission');
+    expect(fixture.events.map((event) => event.type)).toEqual(['session', 'permission', 'permission']);
+    expect(permissions[0]).toMatchObject({
+      lifecycle: { kind: 'requested', requestId: 'permission-1' },
+    });
+    expect(permissions[1]).toMatchObject({
+      lifecycle: { kind: 'cancelled', requestId: 'permission-1' },
+    });
+    const correlations = permissions.map((event) => (
+      event.type === 'permission' ? event.runId : null
+    ));
+    expect(correlations.every((runId) => typeof runId === 'string' && runId !== 'run-1')).toBeTrue();
+  });
+
+  it('drops provider events for an unavailable sink without failing its event stream', async () => {
+    const fixture = createFixture(({ channel }) => {
+      fixture.closeSink();
+      channel.emit({
+        type: 'messages',
+        chatId: 'chat-1',
+        runId: 'run-1',
+        rows: runtimeRows([new AssistantMessage(TS, 'after close')]),
+      });
+      channel.emit({
+        type: 'run-ended',
+        chatId: 'chat-1',
+        runId: 'run-1',
+        outcome: 'finished',
+        exitCode: 0,
+      });
+    });
+
+    await fixture.adapter.execution.start(fixture.request);
+
+    expect(fixture.events.map((event) => event.type)).toEqual(['session']);
+    expect(fixture.warnings).toHaveLength(2);
   });
 
   it('leaves dispatch failures for core to record', async () => {
@@ -175,8 +229,21 @@ function createFixture(
     runningSessions() { return []; },
     subscribeRuntimeEvents: listener => channel.subscribe(listener),
   };
-  const sink: AgentProducerSink = { publish: event => events.push(event) };
-  const adapter = createAgentProducerAdapter(runtime);
+  let sinkClosed = false;
+  const sink: AgentProducerSink = {
+    publish: (event) => {
+      if (sinkClosed) throw new Error('Transcript producer sink is closed');
+      events.push(event);
+    },
+  };
+  const warnings: string[] = [];
+  const logger = {
+    debug() {},
+    info() {},
+    warn: (message: string) => { warnings.push(message); },
+    error() {},
+  } satisfies AgentLogger;
+  const adapter = createAgentProducerAdapter(runtime, logger);
   const request = {
     chatId: 'chat-1',
     projectPath: '/tmp/project',
@@ -196,5 +263,12 @@ function createFixture(
     attachments: [],
     carriedContext: null,
   } satisfies AgentStartRequestV5;
-  return { adapter, events, request, runtime };
+  return {
+    adapter,
+    events,
+    request,
+    runtime,
+    warnings,
+    closeSink: () => { sinkClosed = true; },
+  };
 }

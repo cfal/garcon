@@ -104,7 +104,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
     this.projectPathUpdates = {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };
-    this.execution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution, host.logger).execution;
     const nativeEvidence = createDirectNativeEvidence({
       reader,
       nativeSessions,

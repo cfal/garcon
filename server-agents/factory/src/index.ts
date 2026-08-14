@@ -83,7 +83,7 @@ export default class FactoryAgentIntegration implements AgentIntegration {
     const providerExecution = new FactoryExecution(runtime, nativeSessions);
     const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createFactoryNativeActivityProbe(nativeSessions);
     this.catalog = createModelCatalog({

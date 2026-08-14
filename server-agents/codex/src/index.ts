@@ -136,7 +136,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
     };
     const nativeEvidence = createCodexNativeEvidence(runtime, nativeSessions, logger);
     this.nativeSessions = nativeEvidence;
-    const producer = createAgentProducerAdapter(execution);
+    const producer = createAgentProducerAdapter(execution, logger);
     this.execution = producer.execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createCodexNativeActivityProbe(nativeSessions);

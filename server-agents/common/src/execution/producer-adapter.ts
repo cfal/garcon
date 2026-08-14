@@ -4,6 +4,7 @@ import {
   type AgentExecutionHandle,
   type AgentEstablishedSession,
   type AgentExecutionV5,
+  type AgentLogger,
   type AgentPermissionLifecycle,
   type AgentProducedRow,
   type AgentProducerSink,
@@ -41,7 +42,10 @@ export interface AgentProducerAdapter {
   ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }>;
 }
 
-export function createAgentProducerAdapter(runtime: AgentRuntimeExecution): AgentProducerAdapter {
+export function createAgentProducerAdapter(
+  runtime: AgentRuntimeExecution,
+  logger: AgentLogger,
+): AgentProducerAdapter {
   const bindings = new Map<string, ProducerBinding>();
 
   function bindProducer(chatId: string, sink: AgentProducerSink): ProducerBinding {
@@ -56,7 +60,20 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution): Agen
 
   runtime.subscribeRuntimeEvents((event) => {
     const binding = bindings.get(event.chatId);
-    if (binding) publishRuntimeEvent(binding, event);
+    if (!binding) return;
+    try {
+      publishRuntimeEvent(binding, event);
+    } catch (error) {
+      // A closed or fenced sink rejects synchronously, and this listener runs inside the
+      // provider's own event dispatch - which several runtimes share across every chat.
+      // Letting the rejection escape would tear that stream down for unrelated chats, so
+      // the event is dropped here under the accepted at-most-once loss.
+      logger.warn('Dropped a provider event for an unavailable transcript sink', {
+        chatId: event.chatId,
+        eventType: event.type,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   const execution: AgentExecutionV5 = {
@@ -151,19 +168,20 @@ function publishMessages(
     pendingRows = [];
   }
 
+  // Permission facts stay typed even when no run correlates them. A fresh correlation ID
+  // can never match the chat's active run, so core commits the fact as durable history that
+  // is never actionable, instead of leaking a permission message into conversational rows.
+  const correlation = () => runId ?? crypto.randomUUID();
+
   for (const row of messages) {
     const { message } = row;
     if (message instanceof PermissionRequestMessage) {
       flush();
-      if (!runId) {
-        binding.sink.publish({ type: 'rows', rows: [row] });
-        continue;
-      }
       const incarnation = crypto.randomUUID();
       binding.permissions.set(message.permissionRequestId, incarnation);
       binding.sink.publish({
         type: 'permission',
-        runId,
+        runId: correlation(),
         lifecycle: {
           kind: 'requested',
           requestId: message.permissionRequestId,
@@ -176,13 +194,9 @@ function publishMessages(
     }
     if (message instanceof PermissionCancelledMessage) {
       flush();
-      if (!runId) {
-        binding.sink.publish({ type: 'rows', rows: [row] });
-        continue;
-      }
       binding.sink.publish({
         type: 'permission',
-        runId,
+        runId: correlation(),
         lifecycle: cancelledLifecycle(binding, message),
       });
       continue;

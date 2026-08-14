@@ -95,7 +95,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
     };
     const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId, logger);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createOpenCodeNativeActivityProbe({
       nativeSessions,

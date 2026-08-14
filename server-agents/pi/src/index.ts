@@ -98,7 +98,7 @@ export default class PiAgentIntegration implements AgentIntegration {
     };
     const nativeEvidence = createPiNativeEvidence(config, nativeSessions);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createPiNativeActivityProbe(nativeSessions);
     this.catalog = createModelCatalog({

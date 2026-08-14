@@ -85,7 +85,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
     const providerExecution = new AmpExecution(runtime, nativeSessions);
     const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution).execution;
+    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.catalog = createModelCatalog({
       logger: host.logger,
