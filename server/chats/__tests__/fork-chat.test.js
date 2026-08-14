@@ -84,6 +84,10 @@ function makeDeps(overrides = {}) {
   }));
   const discardForkedAgentSession = overrides.discardForkedAgentSession
     ?? mock(async () => undefined);
+  const nativeUserIdentities = {
+    copyChat: mock(() => undefined),
+    clearChat: mock(() => undefined),
+  };
   return {
     registry,
     settings,
@@ -93,6 +97,7 @@ function makeDeps(overrides = {}) {
     getViewCursor,
     forkAgentSession,
     discardForkedAgentSession,
+    nativeUserIdentities,
     sessions,
   };
 }
@@ -118,6 +123,7 @@ describe('forkChatFileCopy', () => {
 
     expect(result.agentSessionId).toBeNull();
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
+    expect(deps.nativeUserIdentities.copyChat).not.toHaveBeenCalled();
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentSessionId: null,
       nativeSession: null,
@@ -248,6 +254,10 @@ describe('forkChatFileCopy', () => {
       targetChatId: 'target-chat',
       messageSequence: 3,
     });
+    expect(deps.nativeUserIdentities.copyChat).toHaveBeenCalledWith(
+      'source-chat',
+      'target-chat',
+    );
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentId: 'test',
       agentSessionId: 'target-native',
@@ -390,6 +400,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.ownership.delete).toHaveBeenCalledOnce();
     expect(deps.settings.removeFromAllOrderLists).toHaveBeenCalledOnce();
     expect(deps.settings.removeSessionName).toHaveBeenCalledOnce();
+    expect(deps.nativeUserIdentities.clearChat).toHaveBeenCalledOnce();
   });
 });
 

@@ -574,7 +574,10 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
       pendingInputs,
       fileMentions: { resolve: resolveFileMentionsInCommand },
-      forkChatFileCopy,
+      forkChatFileCopy: (input) => forkChatFileCopy({
+        ...input,
+        nativeUserIdentities,
+      }),
       carryOver,
       chatIds,
       chatListProjector,

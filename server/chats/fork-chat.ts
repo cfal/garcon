@@ -12,6 +12,7 @@ import type {
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
+import type { NativeUserIdentityRegistry } from './native-user-identity-registry.js';
 
 const logger = createLogger('chats:fork');
 
@@ -51,6 +52,7 @@ interface ForkChatInput {
     messageSequence?: number;
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
+  nativeUserIdentities: Pick<NativeUserIdentityRegistry, 'copyChat' | 'clearChat'>;
 }
 
 export interface ForkChatFileCopyResult {
@@ -105,6 +107,7 @@ export async function forkChatFileCopy({
   getViewCursor,
   forkAgentSession,
   discardForkedAgentSession,
+  nativeUserIdentities,
 }: ForkChatInput): Promise<ForkChatFileCopyResult> {
   const startedAt = Date.now();
   const sourceAgentSessionId = sourceSession.agentSessionId;
@@ -223,6 +226,7 @@ export async function forkChatFileCopy({
   let rolledBack = false;
   const rollback = async () => {
     if (rolledBack) return;
+    nativeUserIdentities.clearChat(targetChatId);
     const cleanupErrors: unknown[] = [];
     try {
       await rollbackForkTarget({
@@ -253,6 +257,7 @@ export async function forkChatFileCopy({
   };
 
   try {
+    if (nativeFork) nativeUserIdentities.copyChat(sourceChatId, targetChatId);
     await registry.flush();
     await registry.updateChat(sourceChatId, {
       nextForkOrdinal: nextForkOrdinal + 1,

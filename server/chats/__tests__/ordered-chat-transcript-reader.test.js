@@ -121,6 +121,52 @@ describe('OrderedChatTranscriptReader', () => {
     }
   });
 
+  it('rebinds forked user identities only from a window reaching native start', async () => {
+    const sourceMessages = [
+      attachNativeMessageSource(user('previous'), { lineNumber: 4, withinSourceOrdinal: 0 }),
+      attachNativeMessageSource(user('repeat'), { lineNumber: 8, withinSourceOrdinal: 0 }),
+    ];
+    const targetMessages = [
+      attachNativeMessageSource(user('previous'), { lineNumber: 2, withinSourceOrdinal: 0 }),
+      attachNativeMessageSource(user('repeat'), { lineNumber: 3, withinSourceOrdinal: 0 }),
+    ];
+    const nativeUserIdentities = new NativeUserIdentityRegistry();
+    nativeUserIdentities.bind('source-chat', sourceMessages[1], {
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    });
+    nativeUserIdentities.applyFromNativeStart('source-chat', sourceMessages);
+    nativeUserIdentities.copyChat('source-chat', 'chat-1');
+    const { reader } = fixture({ native: targetMessages, nativeUserIdentities });
+
+    const unresolvedTail = await reader.loadNativeWindow({
+      chatId: 'chat-1',
+      limit: 1,
+      signal: new AbortController().signal,
+    });
+    expect(unresolvedTail.messages[0].metadata).toBeUndefined();
+
+    const fromStart = await reader.loadNativeWindow({
+      chatId: 'chat-1',
+      limit: 2,
+      signal: new AbortController().signal,
+    });
+    expect(fromStart.messages[1].metadata).toMatchObject({
+      clientRequestId: 'request-1',
+      upstreamRequestId: 'message-1',
+      turnId: 'turn-1',
+      deliveryStatus: 'accepted',
+    });
+
+    const reboundTail = await reader.loadNativeWindow({
+      chatId: 'chat-1',
+      limit: 1,
+      signal: new AbortController().signal,
+    });
+    expect(reboundTail.messages[0].metadata).toEqual(fromStart.messages[1].metadata);
+  });
+
   it('keeps native paging enabled while translating composite offsets', async () => {
     const { reader, loadArchivedPage, loadNativePage, loadNativeSnapshot } = fixture();
 

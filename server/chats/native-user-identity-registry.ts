@@ -43,6 +43,7 @@ export function nativeMessageSourceKey(message: ChatMessage): string | null {
 
 export class NativeUserIdentityRegistry {
   readonly #identityByChatAndSource = new Map<string, Map<string, NativeUserIdentity>>();
+  readonly #identityByChatAndUserOrdinal = new Map<string, Map<number, NativeUserIdentity>>();
 
   bind(chatId: string, message: UserMessage, identity: NativeUserIdentity): boolean {
     const sourceKey = nativeMessageSourceKey(message);
@@ -73,8 +74,13 @@ export class NativeUserIdentityRegistry {
       if (previousIndex < 0) return false;
     }
 
-    const message = input.messages[previousIndex + input.position.userOffset];
-    return message ? this.bind(input.chatId, message, input.identity) : false;
+    const userOrdinal = previousIndex + input.position.userOffset;
+    const message = input.messages[userOrdinal];
+    if (!message || !this.bind(input.chatId, message, input.identity)) return false;
+    if (input.includesNativeStart) {
+      this.#setUserOrdinalIdentity(input.chatId, userOrdinal, input.identity);
+    }
+    return true;
   }
 
   apply(chatId: string, messages: readonly UserMessage[]): UserMessage[];
@@ -85,25 +91,82 @@ export class NativeUserIdentityRegistry {
 
     return messages.map((message) => {
       if (!(message instanceof UserMessage)) return message;
-      const source = getNativeMessageRevisionSource(message);
       const sourceKey = nativeMessageSourceKey(message);
       const identity = sourceKey ? identities.get(sourceKey) : undefined;
-      if (!identity) return message;
-      const metadata: ChatMessageMetadata = {
-        ...message.metadata,
-        clientRequestId: identity.clientRequestId,
-        ...(identity.clientMessageId ? { upstreamRequestId: identity.clientMessageId } : {}),
-        ...(identity.turnId ? { turnId: identity.turnId } : {}),
-        deliveryStatus: 'accepted',
-      };
-      return attachNativeMessageSource(
-        new UserMessage(message.timestamp, message.content, message.images, metadata),
-        source,
-      );
+      return identity ? applyNativeUserIdentity(message, identity) : message;
     });
+  }
+
+  applyFromNativeStart(chatId: string, messages: readonly UserMessage[]): UserMessage[];
+  applyFromNativeStart(chatId: string, messages: readonly ChatMessage[]): ChatMessage[];
+  applyFromNativeStart(chatId: string, messages: readonly ChatMessage[]): ChatMessage[] {
+    const sourceIdentities = this.#identityByChatAndSource.get(chatId);
+    const ordinalIdentities = this.#identityByChatAndUserOrdinal.get(chatId);
+    if ((!sourceIdentities || sourceIdentities.size === 0)
+        && (!ordinalIdentities || ordinalIdentities.size === 0)) {
+      return [...messages];
+    }
+
+    let userOrdinal = 0;
+    return messages.map((message) => {
+      if (!(message instanceof UserMessage)) return message;
+      const sourceKey = nativeMessageSourceKey(message);
+      const sourceIdentity = sourceKey ? sourceIdentities?.get(sourceKey) : undefined;
+      const identity = sourceIdentity ?? ordinalIdentities?.get(userOrdinal);
+      if (sourceIdentity) {
+        this.#setUserOrdinalIdentity(chatId, userOrdinal, sourceIdentity);
+      } else if (identity && sourceKey) {
+        this.bind(chatId, message, identity);
+      }
+      userOrdinal += 1;
+      return identity ? applyNativeUserIdentity(message, identity) : message;
+    });
+  }
+
+  copyChat(sourceChatId: string, targetChatId: string): void {
+    const sourceIdentities = this.#identityByChatAndSource.get(sourceChatId);
+    if (sourceIdentities) {
+      this.#identityByChatAndSource.set(targetChatId, new Map(sourceIdentities));
+    } else {
+      this.#identityByChatAndSource.delete(targetChatId);
+    }
+    const ordinalIdentities = this.#identityByChatAndUserOrdinal.get(sourceChatId);
+    if (ordinalIdentities) {
+      this.#identityByChatAndUserOrdinal.set(targetChatId, new Map(ordinalIdentities));
+    } else {
+      this.#identityByChatAndUserOrdinal.delete(targetChatId);
+    }
   }
 
   clearChat(chatId: string): void {
     this.#identityByChatAndSource.delete(chatId);
+    this.#identityByChatAndUserOrdinal.delete(chatId);
   }
+
+  #setUserOrdinalIdentity(
+    chatId: string,
+    userOrdinal: number,
+    identity: NativeUserIdentity,
+  ): void {
+    const identities = this.#identityByChatAndUserOrdinal.get(chatId) ?? new Map();
+    identities.set(userOrdinal, identity);
+    this.#identityByChatAndUserOrdinal.set(chatId, identities);
+  }
+}
+
+function applyNativeUserIdentity(
+  message: UserMessage,
+  identity: NativeUserIdentity,
+): UserMessage {
+  const metadata: ChatMessageMetadata = {
+    ...message.metadata,
+    clientRequestId: identity.clientRequestId,
+    ...(identity.clientMessageId ? { upstreamRequestId: identity.clientMessageId } : {}),
+    ...(identity.turnId ? { turnId: identity.turnId } : {}),
+    deliveryStatus: 'accepted',
+  };
+  return attachNativeMessageSource(
+    new UserMessage(message.timestamp, message.content, message.images, metadata),
+    getNativeMessageRevisionSource(message),
+  );
 }

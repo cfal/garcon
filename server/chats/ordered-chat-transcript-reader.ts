@@ -38,7 +38,10 @@ export class OrderedChatTranscriptReader {
       } | null>;
     };
     readonly carryOver: CarryOverTranscriptStore;
-    readonly nativeUserIdentities?: Pick<NativeUserIdentityRegistry, 'apply'>;
+    readonly nativeUserIdentities?: Pick<
+      NativeUserIdentityRegistry,
+      'apply' | 'applyFromNativeStart'
+    >;
   }) {}
 
   async loadCurrentNativeMessages(chatId: string): Promise<ChatMessage[]> {
@@ -182,7 +185,7 @@ export class OrderedChatTranscriptReader {
         false,
       );
     }
-    return this.#applyNativeUserIdentities(chatId, sanitized.messages);
+    return this.#applyNativeUserIdentitiesFromStart(chatId, sanitized.messages);
   }
 
   #applyNativeUserIdentities(
@@ -190,6 +193,14 @@ export class OrderedChatTranscriptReader {
     messages: readonly ChatMessage[],
   ): ChatMessage[] {
     return this.deps.nativeUserIdentities?.apply(chatId, messages) ?? [...messages];
+  }
+
+  #applyNativeUserIdentitiesFromStart(
+    chatId: string,
+    messages: readonly ChatMessage[],
+  ): ChatMessage[] {
+    return this.deps.nativeUserIdentities?.applyFromNativeStart(chatId, messages)
+      ?? [...messages];
   }
 
   async loadAll(chatId: string): Promise<ChatTranscriptSnapshot> {
