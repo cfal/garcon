@@ -115,6 +115,7 @@ describe('AgentHandoffService', () => {
       'checkpoint',
       'decision',
       'close',
+      'marker',
       'boundary',
       'registry',
       'complete',
@@ -177,7 +178,7 @@ describe('AgentHandoffService', () => {
       target: target(),
     }).prepare(context());
 
-    expect(calls).toEqual(['close', 'boundary', 'registry', 'complete', 'reopen']);
+    expect(calls).toEqual(['close', 'marker', 'boundary', 'registry', 'complete', 'reopen']);
     expect(ledger.highWatermark).not.toHaveBeenCalled();
     expect(ledger.checkpointForHandoff).not.toHaveBeenCalled();
   });
@@ -196,7 +197,7 @@ describe('AgentHandoffService', () => {
 
     await service.recoverPendingHandoffs();
 
-    expect(calls).toEqual(['close', 'boundary', 'registry', 'complete', 'reopen']);
+    expect(calls).toEqual(['close', 'marker', 'boundary', 'registry', 'complete', 'reopen']);
     expect(current.agentId).toBe('target-agent');
   });
 
@@ -339,6 +340,11 @@ function ledgerState(calls) {
     checkpointForHandoff: mock(() => {
       calls.push('checkpoint');
       return { viewId: 'view-1', ordinal: 7 };
+    }),
+    rowsAfter: mock(() => []),
+    appendAgentSwitch: mock(() => {
+      calls.push('marker');
+      return { kind: 'agent-switch', ordinal: 8 };
     }),
     advanceContentStart: mock(() => {
       calls.push('boundary');

@@ -11,6 +11,7 @@ import type { ChatTransientControlAction } from '../../common/chat-transient-fee
 import type { ResendCandidate } from '../../common/chat-view.js';
 import type {
   InputComposition,
+  LedgerAgentSwitchRow,
   LedgerNoticeRow,
   LedgerPermissionRow,
   LedgerRow,
@@ -358,6 +359,25 @@ export class TranscriptLedgerService {
       rows: [row!],
     });
     return row as LedgerNoticeRow;
+  }
+
+  // Records the ownership boundary as durable history. Handoff advances the content-start
+  // ordinal past this row, so the marker stays with the outgoing owner's history and is
+  // preserved by the frozen projection instead of being re-derived on every read.
+  appendAgentSwitch(
+    chatId: string,
+    viewId: TranscriptViewId,
+    detail: LedgerAgentSwitchRow['detail'],
+  ): LedgerAgentSwitchRow {
+    const [row] = this.#store.append(chatId, viewId, [{
+      kind: 'agent-switch',
+      at: this.#now(),
+      detail,
+      providerMeta: null,
+    }]);
+    const switched = row as LedgerAgentSwitchRow;
+    this.#notify({ type: 'rows', chatId, viewId, rows: [switched] });
+    return switched;
   }
 
   page(chatId: string, viewId: TranscriptViewId, limit: number, before?: number): TranscriptPage {

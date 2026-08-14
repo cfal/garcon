@@ -265,10 +265,30 @@ export class AgentHandoffService {
   async #rollForwardPersistedHandoff(intent: AgentHandoffIntent): Promise<void> {
     this.deps.ledger.closeProducer(intent.chatId);
     await retryHandoffStep('ledger boundary recovery', async () => {
+      // The boundary marker is written past the captured watermark and the content start is
+      // advanced past the marker, so it closes the outgoing owner's history rather than
+      // opening the successor's. Roll-forward reruns after a crash, so an existing marker
+      // is adopted instead of appended twice.
+      const existing = this.deps.ledger.rowsAfter(
+        intent.chatId,
+        intent.watermark.viewId,
+        intent.watermark.ordinal,
+      )[0];
+      const marker = existing?.kind === 'agent-switch'
+        ? existing
+        : this.deps.ledger.appendAgentSwitch(intent.chatId, intent.watermark.viewId, {
+          fromAgentId: intent.source.agentId,
+          toAgentId: intent.target.execution.agentId,
+          // The decision record carries no source model, and the registry still holds the
+          // source here because ownership flips further down. A recovery run that already
+          // flipped it also already wrote the marker, so it adopts rather than re-reads.
+          fromModel: this.deps.registry.getChat(intent.chatId)?.model ?? null,
+          toModel: intent.target.execution.model ?? null,
+        });
       this.deps.ledger.advanceContentStart(
         intent.chatId,
         intent.watermark.viewId,
-        intent.watermark.ordinal + 1,
+        marker.ordinal + 1,
       );
     });
     await retryHandoffStep(

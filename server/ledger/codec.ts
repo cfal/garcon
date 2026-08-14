@@ -14,6 +14,7 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type {
+  LedgerAgentSwitchDetail,
   LedgerPermissionRow,
   LedgerRow,
   LedgerRowDraft,
@@ -80,6 +81,8 @@ export function decodeLedgerRow(row: StoredLedgerRow): LedgerRow {
         detail: jsonObject(value.detail, 'notice detail'),
       };
     }
+    case 'agent-switch':
+      return { ...base, kind: 'agent-switch', detail: parseAgentSwitch(payload.value) };
     case 'session':
       return { ...base, kind: 'session', detail: parseSession(payload.value) };
     case 'run-ended': {
@@ -128,6 +131,7 @@ function draftValue(draft: LedgerRowDraft): unknown {
       return draft.message;
     case 'notice':
       return { message: draft.message, detail: draft.detail };
+    case 'agent-switch':
     case 'session':
       return draft.detail;
     case 'run-ended':
@@ -179,6 +183,16 @@ function parseUserInput(value: unknown): LedgerUserInputDetail {
   });
   if (typeof detail.steer !== 'boolean') throw new TypeError('Stored steer flag is invalid');
   return { clientMessageId, message, attachments, steer: detail.steer };
+}
+
+function parseAgentSwitch(value: unknown): LedgerAgentSwitchDetail {
+  const detail = record(value, 'agent switch payload');
+  return {
+    fromAgentId: nonEmptyString(detail.fromAgentId, 'agent switch source'),
+    toAgentId: nonEmptyString(detail.toAgentId, 'agent switch target'),
+    fromModel: detail.fromModel === null ? null : nonEmptyString(detail.fromModel, 'source model'),
+    toModel: detail.toModel === null ? null : nonEmptyString(detail.toModel, 'target model'),
+  };
 }
 
 function parseSession(value: unknown): AgentEstablishedSession {

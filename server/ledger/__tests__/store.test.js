@@ -12,6 +12,7 @@ import {
   TranscriptLedgerStore,
   transcriptViewId,
 } from '../index.ts';
+import { frozenConversationDrafts } from '../projection.ts';
 
 const at = '2026-08-12T00:00:00.000Z';
 let root;
@@ -387,6 +388,41 @@ describe('TranscriptLedgerStore', () => {
       .toEqual(['orphan-chat']);
     expect(store.currentView('registered-chat')?.viewId).toBe('registered-view');
     expect(await fs.stat(path.join(root, 'orphan-chat')).catch(() => null)).toBeNull();
+  });
+
+  it('carries the agent switch boundary through a reload', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      contentStartOrdinal: 1,
+      rows: [
+        provider('before handoff'),
+        {
+          kind: 'agent-switch',
+          at,
+          detail: {
+            fromAgentId: 'claude',
+            toAgentId: 'codex',
+            fromModel: 'sonnet',
+            toModel: 'gpt',
+          },
+          providerMeta: null,
+        },
+      ],
+    });
+
+    const carried = frozenConversationDrafts(store.currentRows('chat-one'));
+    const staged = store.stageView('chat-one', {
+      viewId: transcriptViewId('reloaded-view'),
+      contentStartOrdinal: carried.length + 1,
+      rows: carried,
+    });
+    store.replaceCurrentView('chat-one', view.viewId, staged.viewId);
+
+    expect(store.currentRows('chat-one').map((row) => row.kind))
+      .toEqual(['provider-row', 'agent-switch']);
+    expect(store.currentRows('chat-one').at(-1)).toMatchObject({
+      kind: 'agent-switch',
+      detail: { fromAgentId: 'claude', toAgentId: 'codex' },
+    });
   });
 });
 

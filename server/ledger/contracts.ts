@@ -55,6 +55,18 @@ export interface LedgerNoticeRow extends LedgerRowBase {
   readonly detail: JsonObject;
 }
 
+export interface LedgerAgentSwitchDetail {
+  readonly fromAgentId: string;
+  readonly toAgentId: string;
+  readonly fromModel: string | null;
+  readonly toModel: string | null;
+}
+
+export interface LedgerAgentSwitchRow extends LedgerRowBase {
+  readonly kind: 'agent-switch';
+  readonly detail: LedgerAgentSwitchDetail;
+}
+
 export interface LedgerSessionRow extends LedgerRowBase {
   readonly kind: 'session';
   readonly detail: AgentEstablishedSession;
@@ -80,6 +92,7 @@ export type LedgerRow =
   | LedgerUserInputRow
   | LedgerProviderRow
   | LedgerNoticeRow
+  | LedgerAgentSwitchRow
   | LedgerSessionRow
   | LedgerRunEndedRow
   | LedgerPermissionRow;
@@ -93,6 +106,7 @@ export type LedgerRowDraft =
   | (DraftBase & { readonly kind: 'user-input'; readonly detail: LedgerUserInputDetail })
   | (DraftBase & { readonly kind: 'provider-row'; readonly message: ChatMessage })
   | (DraftBase & { readonly kind: 'notice'; readonly message: string; readonly detail: JsonObject })
+  | (DraftBase & { readonly kind: 'agent-switch'; readonly detail: LedgerAgentSwitchDetail })
   | (DraftBase & { readonly kind: 'session'; readonly detail: AgentEstablishedSession })
   | (DraftBase & {
       readonly kind: 'run-ended';

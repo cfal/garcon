@@ -1,4 +1,5 @@
 import {
+  AgentSwitchMessage,
   PermissionCancelledMessage,
   PermissionExpiredMessage,
   PermissionRequestMessage,
@@ -45,6 +46,14 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
         row.at,
         row.message,
         row.detail.action === 'reload-native-history' ? 'reload-native-history' : undefined,
+      );
+    case 'agent-switch':
+      return new AgentSwitchMessage(
+        row.at,
+        row.detail.fromAgentId,
+        row.detail.toAgentId,
+        row.detail.fromModel ?? undefined,
+        row.detail.toModel ?? undefined,
       );
     case 'permission-requested':
       return row.lifecycle.kind === 'requested'
