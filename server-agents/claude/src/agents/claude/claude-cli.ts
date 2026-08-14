@@ -162,12 +162,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #beginTurn(
     session: ClaudeRunningSession,
     eventMetadata: ReturnType<typeof claudeEventMetadata>,
-    clientMessageId?: string,
   ): ClaudeActiveTurn {
     if (session.activeTurn) {
       throw new Error(`Claude session ${session.id} already has an active turn`);
     }
-    const activeTurn = new ClaudeActiveTurn(eventMetadata, session.backgroundTaskCount, clientMessageId);
+    const activeTurn = new ClaudeActiveTurn(eventMetadata, session.backgroundTaskCount);
     session.unownedProviderActivity = false;
     session.activeTurn = activeTurn;
     session.lastActivityAt = activeTurn.startedAt;
@@ -1036,7 +1035,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       envOverrides,
       onAbortable,
       clientRequestId,
-      clientMessageId,
       turnId,
       executionAdmission,
     } = request;
@@ -1083,7 +1081,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const activeTurn = this.#beginTurn(
       session,
       claudeEventMetadata({ clientRequestId, turnId }, 'chat-start'),
-      clientMessageId,
     );
 
     const previous = this.#runningSessions.get(agentSessionId);
@@ -1147,7 +1144,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       envOverrides,
       onAbortable,
       clientRequestId,
-      clientMessageId,
       turnId,
       executionAdmission,
     } = request;
@@ -1281,7 +1277,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       const activeTurn = this.#beginTurn(
         session,
         claudeEventMetadata({ clientRequestId, turnId }),
-        clientMessageId,
       );
       ownedTurn = activeTurn;
       const prepared = await materializeClaudeVideoAttachments(command, images);

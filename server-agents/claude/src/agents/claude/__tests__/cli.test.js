@@ -13,7 +13,6 @@ import {
   buildClaudeInitialUserContent,
   buildClaudeSteeringUserContent,
   buildClaudeUserInputFrame,
-  claudeNativeInputUuid,
   claudeSteeringInputsFromNativeContent,
 } from '../user-input.js';
 import { ClaudeTurnSteeringState } from '../steering.js';
@@ -31,12 +30,6 @@ describe('Claude SDK user input', () => {
       session_id: 'session-1',
       uuid: 'input-1',
     });
-  });
-
-  it('uses an exact UUID-shaped client message identity for native correlation', () => {
-    const clientMessageId = '019ff704-7b0c-70a1-b062-875461e5b578';
-    expect(claudeNativeInputUuid(clientMessageId)).toBe(clientMessageId);
-    expect(claudeNativeInputUuid('opaque-client-message')).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('keeps image, document, and text attachment content in canonical order', () => {
