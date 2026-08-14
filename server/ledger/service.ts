@@ -260,10 +260,6 @@ export class TranscriptLedgerService {
     return composition;
   }
 
-  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void {
-    if (clientMessageId) this.#preparedInputs.delete(inputKey(chatId, clientMessageId));
-  }
-
   claimPermissionResolution(action: ChatTransientControlAction): PermissionResolutionClaim {
     if (action.serverInstanceId !== this.#serverInstanceId) throw new PermissionNotActionableError();
     const runId = action.runId;

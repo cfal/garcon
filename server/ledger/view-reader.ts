@@ -8,8 +8,7 @@ import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import type { TranscriptViewId } from './contracts.js';
 import { LedgerFencedError } from './errors.js';
-import { ledgerRowsToTranscriptMessages } from './presentation.js';
-import { ledgerRowsToMessages } from './presentation.js';
+import { ledgerRowsToMessages, ledgerRowsToTranscriptMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
 import type { NativeTranscriptActivityService } from './native-activity.js';
 
