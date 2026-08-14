@@ -17,7 +17,6 @@ import { convertOpenCodeToolUse } from './tool-use-converter.js';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import {

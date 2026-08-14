@@ -588,14 +588,3 @@ export function wireServerEvents({
     waitForIdle,
   };
 }
-
-function normalizeAgentMessages(messages: ChatMessage[]): ChatMessage[] {
-  const parsed = parseChatMessages(messages);
-  if (parsed.length !== messages.length) {
-    throw new Error('Agent emitted an invalid chat message');
-  }
-  return parsed.map((message, index) => attachNativeMessageSource(
-    message,
-    getNativeMessageRevisionSource(messages[index]),
-  ));
-}

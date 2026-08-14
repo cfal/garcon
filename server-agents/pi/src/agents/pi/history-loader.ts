@@ -13,7 +13,6 @@ import {
 } from '@garcon/common/chat-types';
 import { findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { convertPiMessage } from './message-converter.js';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { PiConfig } from '../../config.js';
 
 export interface PiPreview {
