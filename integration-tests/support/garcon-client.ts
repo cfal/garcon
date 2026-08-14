@@ -52,6 +52,10 @@ import type {
   GenerateChatTitleRequest,
   GenerateChatTitleResponse,
 } from '../../common/chat-title-contracts.js';
+import type {
+  RefinePromptRequest,
+  RefinePromptResponse,
+} from '../../common/prompt-refinement.js';
 import {
   normalizeScheduledPromptsSnapshot,
   type CreateScheduledPromptRequest,
@@ -472,6 +476,10 @@ export class GarconTestClient {
 
   generateChatTitle(request: GenerateChatTitleRequest): Promise<GenerateChatTitleResponse> {
     return this.post<GenerateChatTitleResponse>('/api/v1/chats/title/generate', request);
+  }
+
+  refinePrompt(request: RefinePromptRequest): Promise<RefinePromptResponse> {
+    return this.post<RefinePromptResponse>('/api/v1/prompts/refine', request);
   }
 
   updateSessionName(chatId: string, title: string): Promise<{ success: boolean }> {
