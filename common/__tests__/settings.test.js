@@ -2,8 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import {
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
+  normalizePromptRefinementUiSettings,
   normalizeRemoteSettingsSnapshot,
 } from '../settings.js';
+import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from '../generation-prompts.js';
 
 describe('generation settings contracts', () => {
   it('keeps title settings limited to title generation fields', () => {
@@ -37,6 +39,28 @@ describe('generation settings contracts', () => {
     });
   });
 
+  it('keeps refinement prompt fields while dropping unrelated target fields', () => {
+    expect(normalizePromptRefinementUiSettings({
+      enabled: false,
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      customPrompt: 'Refine {{USER_PROMPT}}',
+      useCommonDirPrefix: true,
+    })).toEqual({
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      customPrompt: 'Refine {{USER_PROMPT}}',
+    });
+  });
+
+  it('drops oversized prompt templates without losing valid selection fields', () => {
+    const oversized = 'x'.repeat(GENERATION_PROMPT_TEMPLATE_MAX_LENGTH + 1);
+    expect(normalizeCommitMessageUiSettings({ agentId: 'codex', customPrompt: oversized }))
+      .toEqual({ agentId: 'codex' });
+    expect(normalizePromptRefinementUiSettings({ agentId: 'codex', customPrompt: oversized }))
+      .toEqual({ agentId: 'codex' });
+  });
+
   it('strips commit-only fields from persisted and effective title snapshots', () => {
     const snapshot = normalizeRemoteSettingsSnapshot({
       version: 1,
@@ -57,6 +81,14 @@ describe('generation settings contracts', () => {
           customPrompt: 'Summarize the diff',
           useCommonDirPrefix: true,
         },
+        promptRefinement: {
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          thinkingMode: 'medium',
+          customPrompt: 'Refine {{USER_PROMPT}}',
+          enabled: false,
+          useCommonDirPrefix: true,
+        },
       },
       uiEffective: {
         chatTitle: {
@@ -72,6 +104,14 @@ describe('generation settings contracts', () => {
           model: 'gpt-5.5',
           thinkingMode: 'medium',
           customPrompt: 'Summarize the diff',
+          useCommonDirPrefix: true,
+        },
+        promptRefinement: {
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          thinkingMode: 'medium',
+          customPrompt: 'Refine {{USER_PROMPT}}',
+          enabled: false,
           useCommonDirPrefix: true,
         },
       },
@@ -114,6 +154,18 @@ describe('generation settings contracts', () => {
     expect(snapshot?.uiEffective.commitMessage).toMatchObject({
       customPrompt: 'Summarize the diff',
       useCommonDirPrefix: true,
+    });
+    expect(snapshot?.ui.promptRefinement).toEqual({
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      thinkingMode: 'medium',
+      customPrompt: 'Refine {{USER_PROMPT}}',
+    });
+    expect(snapshot?.uiEffective.promptRefinement).toEqual({
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      thinkingMode: 'medium',
+      customPrompt: 'Refine {{USER_PROMPT}}',
     });
   });
 });

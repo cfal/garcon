@@ -4,6 +4,7 @@ export const GENERATION_TEST_TARGETS = [
   'chatTitle',
   'agentSwitchCompaction',
   'commitMessage',
+  'promptRefinement',
 ] as const;
 
 export type GenerationTestTarget = typeof GENERATION_TEST_TARGETS[number];

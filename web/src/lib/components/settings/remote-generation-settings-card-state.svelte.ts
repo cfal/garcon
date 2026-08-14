@@ -4,7 +4,7 @@ import type {
 	ModelSelectorChange,
 	ModelSelectorValue,
 } from '$lib/components/model-selector/model-selector-types';
-import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '$lib/git/commit/commit-message-default-prompt.js';
+import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '$shared/generation-prompts';
 import * as m from '$lib/paraglide/messages.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';

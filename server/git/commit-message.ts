@@ -4,31 +4,13 @@ import type { CommitMessageOptions, RunSingleQueryOptions } from './types.js';
 import { createLogger } from '../lib/log.js';
 import { GENERATION_PROVIDER_TIMEOUT_MS } from '../settings/generation-limits.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import {
+  COMMIT_MESSAGE_DIFF_TOKEN,
+  COMMIT_MESSAGE_FILES_TOKEN,
+  DEFAULT_COMMIT_MESSAGE_PROMPT,
+} from '../../common/generation-prompts.js';
 
 const logger = createLogger('git:commit-message');
-
-const DEFAULT_COMMIT_PROMPT = `Write a high-quality Conventional Commit message based on the staged changes.
-
-Strict output rules:
-- Return plain text only. Do not include markdown, code fences, labels, or commentary.
-- First line must follow: type(scope): subject
-- Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore
-- Subject must be imperative, specific, and 50 characters or fewer
-- Add a body only when it improves clarity; wrap body lines to 72 characters or fewer
-
-Content guidance:
-- Prioritize user-visible behavior changes
-- Include critical technical context when behavior changes depend on it
-- Reflect both additions and removals when relevant
-- Avoid vague subjects such as "update files" or "misc changes"
-
-Changed files:
-{{files}}
-
-Diff excerpt:
-{{diff}}
-
-Return only the commit message now.`;
 
 export const COMMIT_MESSAGE_ERROR_MAP = Object.freeze({
   COMMIT_MESSAGE_NO_STAGED_FILES: { status: 400, errorCode: 'commit_message_no_staged_files' },
@@ -82,16 +64,10 @@ export async function generateCommitMessage(
     customPrompt,
   } = options;
 
-  let prompt;
-  if (customPrompt && customPrompt.trim()) {
-    prompt = customPrompt
-      .replace(/\{\{files\}\}/g, filesList)
-      .replace(/\{\{diff\}\}/g, diffExcerpt);
-  } else {
-    prompt = DEFAULT_COMMIT_PROMPT
-      .replace(/\{\{files\}\}/g, filesList)
-      .replace(/\{\{diff\}\}/g, diffExcerpt);
-  }
+  const template = customPrompt?.trim() ? customPrompt : DEFAULT_COMMIT_MESSAGE_PROMPT;
+  const prompt = template
+    .replaceAll(COMMIT_MESSAGE_FILES_TOKEN, () => filesList)
+    .replaceAll(COMMIT_MESSAGE_DIFF_TOKEN, () => diffExcerpt);
 
   try {
     const opts: RunSingleQueryOptions = {

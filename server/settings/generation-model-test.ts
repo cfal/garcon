@@ -17,6 +17,7 @@ import { resolveEffectiveGenerationConfig } from './generation-effective.js';
 import {
   createGenerationRequestSignal,
   GENERATION_PROVIDER_TIMEOUT_MS,
+  isGenerationTimeoutError,
 } from './generation-limits.js';
 
 const GENERATION_TEST_PROMPT = 'Reply with exactly OK. Do not use tools.';
@@ -26,6 +27,7 @@ type GenerationModelTestErrorCode =
   | 'GENERATION_TEST_UNAVAILABLE'
   | 'GENERATION_TEST_CONFIGURATION_CHANGED'
   | 'GENERATION_TEST_UNSUPPORTED_EFFORT'
+  | 'GENERATION_TEST_UNSAFE_AGENT'
   | 'GENERATION_TEST_EMPTY_RESPONSE'
   | 'GENERATION_TEST_TIMEOUT'
   | 'GENERATION_TEST_FAILED';
@@ -41,28 +43,6 @@ export class GenerationModelTestError extends DomainError {
     super(code, message, status, retryable, options);
     this.name = 'GenerationModelTestError';
   }
-}
-
-function isTimeoutError(error: unknown): boolean {
-  const timeoutCodes = new Set([
-    'ETIMEDOUT',
-    'UND_ERR_CONNECT_TIMEOUT',
-    'UND_ERR_HEADERS_TIMEOUT',
-    'UND_ERR_BODY_TIMEOUT',
-  ]);
-  let current = error;
-  for (let depth = 0; depth < 5 && current; depth += 1) {
-    if (current instanceof Error) {
-      const name = current.name.toLowerCase();
-      if (name === 'aborterror' || name === 'timeouterror') return true;
-      const code = (current as Error & { code?: unknown }).code;
-      if (typeof code === 'string' && timeoutCodes.has(code.toUpperCase())) return true;
-      current = current.cause;
-      continue;
-    }
-    return false;
-  }
-  return false;
 }
 
 export async function testGenerationModel(input: {
@@ -114,6 +94,16 @@ export async function testGenerationModel(input: {
         409,
       );
     }
+    if (
+      input.target === 'promptRefinement'
+      && input.agents.singleQueryRunsToolsWithoutPermission(config.agentId)
+    ) {
+      throw new GenerationModelTestError(
+        'GENERATION_TEST_UNSAFE_AGENT',
+        'This agent cannot safely refine untrusted prompt text.',
+        422,
+      );
+    }
 
     generationSignal.throwIfAborted();
     const testDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-generation-model-test-'));
@@ -161,7 +151,7 @@ export async function testGenerationModel(input: {
       ? error.code.toLowerCase().replace('generation_test_', '').replaceAll('_', '-')
       : isUnsupportedSingleQueryThinkingMode(error)
         ? 'unsupported-effort'
-        : isTimeoutError(error)
+        : isGenerationTimeoutError(error)
           ? 'timeout'
           : 'failed';
     logger.warn('generation model test failed', {
@@ -184,7 +174,7 @@ export async function testGenerationModel(input: {
         { cause: error },
       );
     }
-    if (isTimeoutError(error)) {
+    if (isGenerationTimeoutError(error)) {
       throw new GenerationModelTestError(
         'GENERATION_TEST_TIMEOUT',
         'The model test timed out.',
