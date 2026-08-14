@@ -158,7 +158,7 @@ describe('AgentRuntimeRouter forks', () => {
     })).resolves.toBeNull();
   });
 
-  it('falls back to carryover when the native transcript trails the ledger', async () => {
+  it('reports a retryable refusal when the native transcript trails the ledger', async () => {
     const fork = mock(async () => {
       throw new AgentIntegrationError(
         'TRANSCRIPT_UNAVAILABLE',
@@ -175,7 +175,11 @@ describe('AgentRuntimeRouter forks', () => {
       targetChatId: 'target-chat',
       messageOrdinal: 1,
       providerMeta: { lineNumber: 1 },
-    })).resolves.toBeNull();
+    })).rejects.toMatchObject({
+      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      status: 409,
+      retryable: true,
+    });
   });
 
   it('maps a changed selected prefix to a retryable conflict', async () => {
@@ -201,17 +205,19 @@ describe('AgentRuntimeRouter forks', () => {
     });
   });
 
-  it('uses carryover when the selected row has no native position', async () => {
-    const fork = mock(async () => null);
+  it('delegates a row with no native position instead of deciding for the integration', async () => {
+    const fork = mock(async () => ({ kind: 'unmaterialized' }));
     const { router, entry } = makeRouter(fork);
 
-    await expect(router.forkAgentSession({
+    await router.forkAgentSession({
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
       messageOrdinal: 1,
-    })).resolves.toBeNull();
-    expect(fork).not.toHaveBeenCalled();
+    });
+
+    expect(fork).toHaveBeenCalledTimes(1);
+    expect(fork.mock.calls[0][0]).toMatchObject({ providerMeta: null });
   });
 
 });

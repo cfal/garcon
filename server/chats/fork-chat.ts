@@ -126,9 +126,11 @@ export async function forkChatFileCopy({
   const selectedProviderMeta = upToOrdinal === undefined
     ? null
     : sourceRows.at(-1)?.providerMeta ?? null;
+  // Whether the selected row is forkable is the integration's call, so the request is
+  // delegated even when the row carries no providerMeta. Only the owning integration knows
+  // what its metadata means and whether the provider has persisted far enough to honour it.
   const needsNativeFork = Boolean(sourceAgentSessionId)
-    && selectedOrdinal >= sourceView.contentStartOrdinal
-    && (upToOrdinal === undefined || selectedProviderMeta !== null);
+    && selectedOrdinal >= sourceView.contentStartOrdinal;
   let forkOutcome: ForkedAgentSessionOutcome | null = null;
   if (needsNativeFork) {
     forkOutcome = await forkAgentSession({

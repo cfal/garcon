@@ -180,7 +180,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
   });
 
-  it('uses carryover when a current-binding row has no native fork position', async () => {
+  it('delegates a current-binding row with no native fork position', async () => {
     const deps = makeDeps();
 
     await forkChatFileCopy({
@@ -191,8 +191,16 @@ describe('forkChatFileCopy', () => {
       ...deps,
     });
 
-    expect(deps.forkAgentSession).not.toHaveBeenCalled();
-    expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(3);
+    // Core does not read providerMeta to decide forkability; the integration does.
+    expect(deps.forkAgentSession).toHaveBeenCalledTimes(1);
+    expect(deps.forkAgentSession.mock.calls[0][0]).toMatchObject({
+      messageOrdinal: 3,
+      providerMeta: null,
+    });
+    // Three frozen conversational rows plus the session the integration handed back.
+    const drafts = deps.ledger.initializeChat.mock.calls[0][1];
+    expect(drafts).toHaveLength(4);
+    expect(drafts.at(-1)).toMatchObject({ kind: "session" });
   });
 
   it('materializes a native session while retaining the ledger prefix', async () => {

@@ -548,14 +548,6 @@ export class AgentRuntimeRouter {
         source,
         this.#getCarryOverRevision(source),
       );
-      if (args.messageOrdinal !== undefined && !args.providerMeta) {
-        throw new AgentIntegrationError(
-          'TRANSCRIPT_UNAVAILABLE',
-          'The selected ledger row has no provider-native fork position',
-          true,
-          { nativeForkReason: 'not-settled' },
-        );
-      }
       const context = this.#executionContextV5(
         args.targetChatId,
         source,
@@ -592,9 +584,16 @@ export class AgentRuntimeRouter {
         throw new DomainError('SOURCE_REVISION_CHANGED', error.message, 409, error.retryable);
       }
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-        const reason = error.details?.nativeForkReason;
-        if (reason === 'not-settled' || reason === 'projection-ahead-of-provider') {
-          return null;
+        // A refusal means the row exists in the ledger but the provider has not written it
+        // to native history yet. Reporting it lets the caller retry once it settles;
+        // returning null here would silently hand back a fork with no native session.
+        if (error.details?.nativeForkReason === 'not-settled') {
+          throw new DomainError(
+            'TRANSCRIPT_NOT_YET_PERSISTED',
+            'The selected message is not in the agent\'s native history yet. Try again shortly.',
+            409,
+            true,
+          );
         }
         throw new DomainError(
           'TRANSCRIPT_UNAVAILABLE',
