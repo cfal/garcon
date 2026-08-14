@@ -9,6 +9,23 @@ import {
   type DeleteIntentV2,
 } from './agent-ownership-journal.js';
 
+// Accepts a journal written by an earlier format only when it recorded no decisions. The
+// file is rewritten on mutation, not on version bumps, so a workspace that never handed off
+// or deleted a chat still holds whatever version it was created with; refusing to read it
+// would brick that workspace permanently. An empty journal holds nothing a format change
+// could have reshaped, while anything still carrying a decision falls through to the
+// fail-closed path below, because an unreadable decision must not be guessed at.
+export function isEmptyEarlierJournal(value: unknown): boolean {
+  if (!isObject(value) || !Number.isSafeInteger(value.version)) return false;
+  if (Number(value.version) >= AGENT_OWNERSHIP_JOURNAL_VERSION) return false;
+  return isEmptyArray(value.ownershipIntents)
+    && (value.transferCleanup === undefined || isEmptyArray(value.transferCleanup));
+}
+
+function isEmptyArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 0;
+}
+
 // Rejects the whole journal when any durable decision is malformed.
 export function isJournalV5(value: unknown): value is AgentOwnershipJournalFileV5 {
   if (!isObject(value) || value.version !== AGENT_OWNERSHIP_JOURNAL_VERSION) return false;

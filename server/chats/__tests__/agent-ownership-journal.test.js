@@ -224,6 +224,40 @@ describe('AgentOwnershipJournal', () => {
     await expect(journal.initialize()).rejects.toThrow('Invalid agent ownership journal');
   });
 
+  it('adopts an empty journal left at an earlier format version', async () => {
+    await writeJournal(workspaceDir, {
+      version: 3,
+      ownershipIntents: [],
+      transferCleanup: [],
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry: createRegistry({}),
+      integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+
+    await journal.initialize();
+
+    expect(journal.pendingHandoffs()).toEqual([]);
+    expect(journal.hasPending('chat')).toBeFalse();
+  });
+
+  it('rejects an earlier journal that still records a decision', async () => {
+    await writeJournal(workspaceDir, {
+      version: 3,
+      ownershipIntents: [{ kind: 'handoff', chatId: 'chat', operationId: 'legacy' }],
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry: createRegistry({}),
+      integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+
+    await expect(journal.initialize()).rejects.toThrow('Invalid agent ownership journal');
+  });
+
   it('retains delete cleanup when provider release fails', async () => {
     const reference = referenceFor('source-agent');
     await writeJournal(workspaceDir, {

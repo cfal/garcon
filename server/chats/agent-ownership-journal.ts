@@ -6,7 +6,7 @@ import type { TranscriptWatermark } from '../ledger/contracts.js';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
-import { isJournalV5 } from './agent-ownership-journal-format.js';
+import { isEmptyEarlierJournal, isJournalV5 } from './agent-ownership-journal-format.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
 import { DomainError } from '../lib/domain-error.js';
@@ -401,8 +401,9 @@ export class AgentOwnershipJournal {
   async #load(): Promise<AgentOwnershipJournalFileV5> {
     try {
       const value: unknown = JSON.parse(await fs.readFile(this.#filePath, 'utf8'));
-      if (!isJournalV5(value)) throw new Error('Invalid agent ownership journal');
-      return value;
+      if (isJournalV5(value)) return value;
+      if (isEmptyEarlierJournal(value)) return emptyOwnershipJournalV5();
+      throw new Error('Invalid agent ownership journal');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyOwnershipJournalV5();
       throw error;
