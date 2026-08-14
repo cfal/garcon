@@ -160,6 +160,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
+  readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
   readonly #transcriptListeners = new Set<(
     event: TranscriptCommitEvent,
   ) => void | Promise<void>>();
@@ -184,6 +185,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
     nativeActivity?: NativeTranscriptActivityService;
+    hasPendingOwnershipTransfer(chatId: string): boolean;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
@@ -205,7 +207,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       ledger: this.#ledger,
       adoption: this.#adoption,
       nativeActivity: args.nativeActivity,
+      hasPendingOwnershipTransfer: args.hasPendingOwnershipTransfer,
     });
+    this.#hasPendingOwnershipTransfer = args.hasPendingOwnershipTransfer;
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,
       directory: this.#directory,
@@ -528,6 +532,14 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     session: AgentChatEntry,
     options: UserInputAdmissionOptions & { readonly clientRequestId: string },
   ): void {
+    if (this.#hasPendingOwnershipTransfer(chatId)) {
+      throw new DomainError(
+        'OWNERSHIP_TRANSFER_PENDING',
+        'This chat is completing an agent handoff. Try again shortly.',
+        409,
+        true,
+      );
+    }
     const commandType = options.commandType
       ?? (session.agentSessionId ? 'agent-run' : 'chat-start');
     if (commandType === 'agent-compact') {

@@ -117,8 +117,8 @@ describe('AgentHandoffService', () => {
       'close',
       'boundary',
       'registry',
-      'reopen',
       'complete',
+      'reopen',
       'notify',
     ]);
     expect(admission.assertAdmissionActive).toHaveBeenCalledTimes(2);
@@ -177,7 +177,7 @@ describe('AgentHandoffService', () => {
       target: target(),
     }).prepare(context());
 
-    expect(calls).toEqual(['close', 'boundary', 'registry', 'reopen', 'complete']);
+    expect(calls).toEqual(['close', 'boundary', 'registry', 'complete', 'reopen']);
     expect(ledger.highWatermark).not.toHaveBeenCalled();
     expect(ledger.checkpointForHandoff).not.toHaveBeenCalled();
   });
@@ -196,7 +196,7 @@ describe('AgentHandoffService', () => {
 
     await service.recoverPendingHandoffs();
 
-    expect(calls).toEqual(['close', 'boundary', 'registry', 'reopen', 'complete']);
+    expect(calls).toEqual(['close', 'boundary', 'registry', 'complete', 'reopen']);
     expect(current.agentId).toBe('target-agent');
   });
 

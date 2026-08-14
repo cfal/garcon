@@ -115,6 +115,7 @@ function makeRouter(overrides = {}) {
     getCarryOverRevision: () => 'carry-1',
     createCarriedContext: overrides.createCarriedContext,
     ledger: transcript.ledger,
+    hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
     nativeActivity: overrides.nativeActivity,
   });

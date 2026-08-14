@@ -76,6 +76,7 @@ export interface AgentRuntimeRouterOptions {
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
   nativeActivity?: NativeTranscriptActivityService;
+  hasPendingOwnershipTransfer(chatId: string): boolean;
 }
 
 export interface RunSingleQueryOptions {
@@ -101,6 +102,7 @@ export class AgentRuntimeRouter {
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
   readonly #nativeActivity: NativeTranscriptActivityService | null;
+  readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
   readonly #producerLeases = new Map<string, TranscriptProducerLease>();
   readonly #executionHandles = new Map<string, {
     readonly agentId: string;
@@ -120,6 +122,7 @@ export class AgentRuntimeRouter {
     this.#ledger = options.ledger;
     this.#adoption = options.adoption;
     this.#nativeActivity = options.nativeActivity ?? null;
+    this.#hasPendingOwnershipTransfer = options.hasPendingOwnershipTransfer;
     this.#ledger.subscribe((event) => {
       if (event.type !== 'run-ended') return;
       if (this.#executionHandles.get(event.chatId)?.runId === event.runId) {
@@ -776,6 +779,17 @@ export class AgentRuntimeRouter {
   #producer(chatId: string): TranscriptProducerLease {
     const existing = this.#producerLeases.get(chatId);
     if (existing && !existing.closed) return existing;
+    // A decided but incompletely rolled-forward ownership transfer accepts no new
+    // publications: the successor's content boundary is not installed yet, so rows
+    // published now would land inside the successor's range under the old owner.
+    if (this.#hasPendingOwnershipTransfer(chatId)) {
+      throw new DomainError(
+        'OWNERSHIP_TRANSFER_PENDING',
+        'This chat is completing an agent handoff. Try again shortly.',
+        409,
+        true,
+      );
+    }
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     const lease = this.#ledger.openProducer(chatId, entry.agentId);
     this.#producerLeases.set(chatId, lease);

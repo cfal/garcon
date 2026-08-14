@@ -56,6 +56,7 @@ describe('AgentRegistry session cache', () => {
       getCarryOverRevision: () => 'carry-1',
       ledger,
       adoption,
+      hasPendingOwnershipTransfer: () => false,
     });
     expect(registry).toBeDefined();
 

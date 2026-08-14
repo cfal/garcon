@@ -275,13 +275,15 @@ export class AgentHandoffService {
       'registry recovery',
       () => this.deps.ownership.applyHandoffDecision(intent.operationId),
     );
-    await retryHandoffStep(
-      'producer recovery',
-      () => this.deps.reopenProducer(intent.chatId),
-    );
+    // The journal entry is the pending-ownership fence, and reopening the producer is a
+    // publication. Discharging the intent first keeps roll-forward from fencing itself.
     await retryHandoffStep(
       'journal recovery',
       () => this.deps.ownership.completeHandoff(intent.operationId),
+    );
+    await retryHandoffStep(
+      'producer recovery',
+      () => this.deps.reopenProducer(intent.chatId),
     );
   }
 

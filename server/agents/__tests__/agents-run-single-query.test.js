@@ -46,6 +46,7 @@ function makeRouter(overrides = {}) {
     getCarryOverRevision: () => 'carry-1',
     getCarryOverMessageCount: async () => 0,
     ledger: transcript.ledger,
+    hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
   });
   return { router, integration, endpointResolver, run };

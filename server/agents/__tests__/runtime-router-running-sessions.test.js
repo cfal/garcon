@@ -64,6 +64,7 @@ function makeRouter(execution) {
     },
     getCarryOverRevision: () => 'carry-1',
     ledger: transcript.ledger,
+    hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
   });
   return { router, transcript };

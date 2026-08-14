@@ -2,7 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
-function makeRouter(compaction) {
+function makeRouter(hasPendingOwnershipTransfer) {
   const transcript = createRuntimeTranscriptFixture();
   const execution = {
     start: mock(async () => ({ agentSessionId: 'session-a', nativeSession: null })),
@@ -26,8 +26,6 @@ function makeRouter(compaction) {
     },
     settings: { parse: (value) => value ?? {}, defaults: () => ({}) },
     execution,
-    transcript: { load: mock(async () => ({ messages: [], revision: 'r' })) },
-    compaction,
     forking: null,
   };
   const router = new AgentRuntimeRouter({
@@ -50,43 +48,44 @@ function makeRouter(compaction) {
       resolveEndpointReference: mock(() => null),
     },
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
-    projection: { open: mock(async () => ({ kind: 'ready', value: {} })) },
     getCarryOverRevision: () => 'carry-1',
-createCarriedContext: async () => null,
-    getCarryOverMessageCount: async () => 0,
+    createCarriedContext: async () => null,
     ledger: transcript.ledger,
-    hasPendingOwnershipTransfer: () => false,
+    hasPendingOwnershipTransfer,
     adoption: transcript.adoption,
   });
   return { router, execution };
 }
 
-describe('AgentRuntimeRouter compaction', () => {
-  it('calls the compaction facet when the integration provides one', async () => {
-    const compact = mock(async () => undefined);
-    const { router, execution } = makeRouter({ compact });
+describe('AgentRuntimeRouter ownership fence', () => {
+  it('refuses to publish while a decided handoff has not rolled forward', async () => {
+    const { router, execution } = makeRouter(() => true);
 
-    await router.compactSession('chat-1', { instructions: 'focus on auth' });
-
-    expect(compact).toHaveBeenCalledTimes(1);
-    expect(compact.mock.calls[0][0]).toMatchObject({ prompt: '/compact focus on auth' });
+    await expect(router.runAgentTurn('chat-1', 'hello', {
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    })).rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING' });
     expect(execution.resume).not.toHaveBeenCalled();
   });
 
-  it('refuses instead of sending a literal /compact prompt without the facet', async () => {
-    const { router, execution } = makeRouter(null);
+  it('resumes publishing once roll-forward discharges the decision', async () => {
+    let pending = true;
+    const { router, execution } = makeRouter(() => pending);
 
-    await expect(router.compactSession('chat-1')).rejects.toMatchObject({
-      code: 'VALIDATION_FAILED',
+    await expect(router.runAgentTurn('chat-1', 'hello', {
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    })).rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING' });
+
+    pending = false;
+    await router.runAgentTurn('chat-1', 'hello', {
+      clientRequestId: 'request-2',
+      clientMessageId: 'message-2',
+      turnId: 'turn-2',
     });
-    // Regression: this used to resume the session with the text `/compact`, which
-    // left the context untouched and a stray message in the transcript.
-    expect(execution.resume).not.toHaveBeenCalled();
-  });
 
-  it('points at the provider-agnostic alternative', async () => {
-    const { router } = makeRouter(null);
-
-    await expect(router.compactSession('chat-1')).rejects.toThrow('/handoff');
+    expect(execution.resume).toHaveBeenCalledTimes(1);
   });
 });

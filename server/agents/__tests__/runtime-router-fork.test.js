@@ -81,6 +81,7 @@ function makeRouter(fork) {
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
     getCarryOverRevision: () => 'carry-1',
     ledger: transcript.ledger,
+    hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
   });
   return { router, entry, entries, execution, messages, integration };

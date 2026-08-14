@@ -343,6 +343,7 @@ export async function startServer(): Promise<void> {
       onCarryOverChanged(chatId) {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },
+      hasPendingOwnershipTransfer: (chatId) => agentOwnership.hasPending(chatId),
       chatMutationLock,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
