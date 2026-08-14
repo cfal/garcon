@@ -1,5 +1,6 @@
 export type ConversationViewportTarget =
 	{ kind: 'row'; id: string } | { kind: 'dom-anchor'; id: string };
+export type ConversationViewportIntentSource = 'viewport' | 'scrollbar-drag';
 
 export type HiddenReadingRestoreResult = 'restored' | 'missing-anchor' | 'not-ready';
 export type ConversationLayoutWaitResult = 'settled' | 'superseded' | 'not-ready';
@@ -19,7 +20,10 @@ export interface ConversationViewportPort {
 	measureViewportFill(): Promise<ConversationViewportFillResult>;
 	restoreHiddenReadingPosition(): Promise<HiddenReadingRestoreResult>;
 	cancelPendingLayoutMutation(): void;
-	cancelForUserIntent(direction: 'earlier' | 'later' | null): void;
+	cancelForUserIntent(
+		direction: 'earlier' | 'later' | null,
+		source?: ConversationViewportIntentSource,
+	): boolean;
 	scrollToTarget(
 		target: ConversationViewportTarget,
 		options?: { align?: 'center' | 'start' | 'end' },

@@ -57,7 +57,9 @@ describe('ChatPane', () => {
 		expect(await screen.findByText('Unfocused user question')).toBeTruthy();
 		expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
 		expect(screen.getByRole('log').dataset.workspaceScrollRegion).toBe('contextual');
-		expect(await screen.findByText('2 commands')).toBeTruthy();
+		// Bash rows render individually now, so each command keeps its own stable row.
+		expect(await screen.findByText('pwd')).toBeTruthy();
+		expect(await screen.findByText('rg split')).toBeTruthy();
 		expect(await screen.findByText('pwd')).toBeTruthy();
 		expect(await screen.findByText('rg split')).toBeTruthy();
 		expect(screen.getByRole('textbox', { name: 'Focus chat composer for Pane Test Chat' })).toBeTruthy();

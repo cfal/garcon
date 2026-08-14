@@ -801,7 +801,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasEarlierMessages = true;
 		this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		this.#preserveExpandedVisibleWindow = false;
-		this.#recordFeedMutation('presentation-structure');
+		this.#recordFeedMutation('history-pruned');
 		return true;
 	}
 

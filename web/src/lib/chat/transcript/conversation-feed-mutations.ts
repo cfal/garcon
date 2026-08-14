@@ -12,6 +12,7 @@ export type ConversationFeedMutationKind =
 	| 'live-append'
 	| 'history-earlier'
 	| 'history-later'
+	| 'history-pruned'
 	| 'replacement'
 	| 'presentation-structure';
 
@@ -31,6 +32,7 @@ export const EMPTY_CONVERSATION_FEED_MUTATION_REVISIONS: Readonly<
 	'live-append': 0,
 	'history-earlier': 0,
 	'history-later': 0,
+	'history-pruned': 0,
 	replacement: 0,
 	'presentation-structure': 0,
 };
@@ -51,7 +53,10 @@ export function conversationFeedEndBehavior(
 	isLiveWindow: boolean,
 ): ConversationFeedEndBehavior {
 	if (kinds.has('initial') || kinds.has('replacement')) return 'explicit-navigation';
-	if (isLiveWindow && (kinds.has('live-append') || kinds.has('presentation-structure'))) {
+	if (
+		isLiveWindow &&
+		(kinds.has('live-append') || kinds.has('history-pruned') || kinds.has('presentation-structure'))
+	) {
 		return 'restore-if-pinned';
 	}
 	return 'preserve-reading-position';

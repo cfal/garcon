@@ -1,17 +1,17 @@
 import {
 	AskUserQuestionToolUseMessage,
-	BashToolUseMessage,
 	PermissionCancelledMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
-	ReadToolUseMessage,
 	ToolResultMessage,
+	isToolUseMessage,
 } from '$shared/chat-types';
-import type { ChatMessage } from '$shared/chat-types';
+import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
 import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
-import { isRecord } from '$shared/json';
+import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
+import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 
 export interface PermissionTerminalState {
 	state: 'resolved' | 'cancelled';
@@ -20,52 +20,33 @@ export interface PermissionTerminalState {
 	selectedQuestionOptions?: Record<string, string[]>;
 }
 
-export interface GroupedTranscriptRow<TMessage extends ChatMessage> {
+export interface ConversationFeedMessageRenderItem {
+	kind: 'message';
 	id: string;
-	message: TMessage;
+	message: ChatMessage;
+	index: number;
 	ordinal?: number;
+	pairedToolUse?: ToolUseChatMessage;
+	permissionWrapperRowId?: string;
 }
 
 export type ConversationFeedRenderItem =
-	| {
-			kind: 'message';
-			id: string;
-			rowIds: readonly [string];
-			message: ChatMessage;
-			index: number;
-			ordinal?: number;
-			prevMessage: ChatMessage | null;
-	  }
-	| {
-			kind: 'bash-group';
-			id: string;
-			rowIds: readonly string[];
-			rows: GroupedTranscriptRow<BashToolUseMessage>[];
-			index: number;
-			prevMessage: ChatMessage | null;
-	  }
-	| {
-			kind: 'read-group';
-			id: string;
-			rowIds: readonly string[];
-			rows: GroupedTranscriptRow<ReadToolUseMessage>[];
-			index: number;
-			prevMessage: ChatMessage | null;
-	  }
+	| ConversationFeedMessageRenderItem
 	| {
 			kind: 'local-notice';
 			id: string;
-			rowIds: readonly [string];
 			notice: LocalNoticeRow;
 			index: number;
-			prevMessage: ChatMessage | null;
 	  };
 
 export interface ConversationFeedRenderModel {
 	items: ConversationFeedRenderItem[];
-	toolResultIndex: Map<string, ToolResultMessage>;
+	toolResultByUseRowId: Map<string, ToolResultMessage>;
+	toolResultRowIdByUseRowId: Map<string, string>;
 	permissionTerminalById: Map<string, PermissionTerminalState>;
 }
+
+export type ConversationFeedItemLayout = 'hidden' | 'standard' | 'permission';
 
 export function filterHiddenToolRenderItems<T extends ConversationFeedRenderItem>(
 	items: T[],
@@ -74,196 +55,145 @@ export function filterHiddenToolRenderItems<T extends ConversationFeedRenderItem
 	if (hiddenToolTypes.length === 0) return items;
 	const hidden = new Set(hiddenToolTypes);
 	return items.filter((item) => {
-		if (item.kind === 'bash-group') return !hidden.has('bash-tool-use');
-		if (item.kind === 'read-group') return !hidden.has('read-tool-use');
-		return item.kind !== 'message' || !hidden.has(item.message.type);
+		if (item.kind !== 'message') return true;
+		const toolType =
+			item.message instanceof ToolResultMessage ? item.pairedToolUse?.type : item.message.type;
+		return !toolType || !hidden.has(toolType);
 	});
 }
 
-function rawToolResultText(content: Record<string, unknown>): string {
-	const raw = content.raw ?? content.content;
-	return typeof raw === 'string' ? raw : '';
-}
-
-function askUserQuestionAnswerMap(result: ToolResultMessage): Record<string, unknown> | null {
-	const toolUseResult = isRecord(result.content.toolUseResult)
-		? result.content.toolUseResult
-		: null;
-	const answers = toolUseResult && isRecord(toolUseResult.answers) ? toolUseResult.answers : null;
-	return answers;
-}
-
-function rawAnswerValues(
-	answer: unknown,
-	optionLabels: Set<string>,
-	optionIds: Set<string>,
-): string[] {
-	if (Array.isArray(answer)) {
-		return answer.flatMap((entry) => rawAnswerValues(entry, optionLabels, optionIds));
+export function conversationFeedItemLayout(
+	item: ConversationFeedRenderItem,
+): ConversationFeedItemLayout {
+	if (item.kind === 'local-notice') return 'standard';
+	const message = item.message;
+	if (
+		message instanceof PermissionResolvedMessage ||
+		message instanceof PermissionCancelledMessage
+	) {
+		return 'hidden';
 	}
-	if (typeof answer !== 'string') return [];
-	const trimmed = answer.trim();
-	if (!trimmed) return [];
-	if (optionLabels.has(trimmed) || optionIds.has(trimmed)) return [trimmed];
-	return trimmed
-		.split(',')
-		.map((entry) => entry.trim())
-		.filter(Boolean);
-}
-
-function selectedOptionIdsForAnswer(
-	question: AskUserQuestionToolUseMessage['questions'][number],
-	answer: unknown,
-): string[] {
-	const optionByLabel = new Map(question.options.map((option) => [option.label, option.id]));
-	const optionById = new Map(question.options.map((option) => [option.id, option.id]));
-	const values = rawAnswerValues(answer, new Set(optionByLabel.keys()), new Set(optionById.keys()));
-	const selected = values
-		.map((value) => optionById.get(value) ?? optionByLabel.get(value))
-		.filter((value): value is string => Boolean(value));
-	return Array.from(new Set(selected));
-}
-
-function selectedQuestionOptionsFromAnswers(
-	tool: AskUserQuestionToolUseMessage,
-	answers: Record<string, unknown>,
-): Record<string, string[]> {
-	const selectedQuestionOptions: Record<string, string[]> = {};
-	for (const question of tool.questions) {
-		const answer = answers[question.id] ?? answers[question.prompt];
-		if (answer === undefined) continue;
-		const selected = selectedOptionIdsForAnswer(question, answer);
-		if (selected.length > 0) selectedQuestionOptions[question.id] = selected;
-	}
-	return selectedQuestionOptions;
-}
-
-function parseAnsweredText(
-	tool: AskUserQuestionToolUseMessage,
-	text: string,
-): Record<string, unknown> {
-	const answers: Record<string, unknown> = {};
-	for (const question of tool.questions) {
-		const questionIndex = text.indexOf(`"${question.prompt}"="`);
-		if (questionIndex === -1) continue;
-		const valueStart = questionIndex + question.prompt.length + 4;
-		const valueEnd = text.indexOf('"', valueStart);
-		if (valueEnd === -1) continue;
-		answers[question.id] = text.slice(valueStart, valueEnd);
-	}
-	return answers;
-}
-
-export function askUserQuestionPermissionId(toolId: string): string {
-	return `ask-user-question-${toolId || 'unknown'}`;
-}
-
-export function askUserQuestionTerminalFromResult(
-	tool: AskUserQuestionToolUseMessage,
-	result: ToolResultMessage | undefined,
-): PermissionTerminalState | undefined {
-	if (!result) return undefined;
-	const answers = askUserQuestionAnswerMap(result);
-	const rawText = rawToolResultText(result.content);
-
-	if (answers) {
-		if (Object.keys(answers).length === 0) {
-			return { state: 'resolved', allowed: false, reason: rawText || 'User skipped question' };
+	if (message instanceof PermissionRequestMessage) return 'permission';
+	if (message instanceof ToolResultMessage) {
+		const tool = item.pairedToolUse;
+		if (!tool) return 'hidden';
+		if (tool instanceof AskUserQuestionToolUseMessage) {
+			return item.permissionWrapperRowId ? 'hidden' : 'permission';
 		}
-		return {
-			state: 'resolved',
-			allowed: true,
-			selectedQuestionOptions: selectedQuestionOptionsFromAnswers(tool, answers),
-		};
+		const rule = resolveDisplayRule(TOOL_DISPLAY_REGISTRY, tool.type);
+		return shouldRenderToolResult(rule, {
+			content: message.content,
+			isError: message.isError,
+		})
+			? 'standard'
+			: 'hidden';
 	}
-
-	if (/did not answer|declined to answer|skipped question|skipped the question/i.test(rawText)) {
-		return { state: 'resolved', allowed: false, reason: rawText || 'User skipped question' };
-	}
-
-	const parsedAnswers = parseAnsweredText(tool, rawText);
-	if (Object.keys(parsedAnswers).length > 0) {
-		return {
-			state: 'resolved',
-			allowed: true,
-			selectedQuestionOptions: selectedQuestionOptionsFromAnswers(tool, parsedAnswers),
-		};
-	}
-
-	return {
-		state: 'resolved',
-		allowed: !result.isError,
-		reason: result.isError ? rawText : undefined,
-	};
+	if (!isToolUseMessage(message)) return 'standard';
+	if (message.type === 'exit-plan-mode-tool-use') return 'permission';
+	if (message.type === 'enter-plan-mode-tool-use') return 'standard';
+	const rule = resolveDisplayRule(TOOL_DISPLAY_REGISTRY, message.type);
+	return rule.input.mode === 'hidden' ? 'hidden' : 'standard';
 }
 
-function explicitPermissionToolIds(rows: ChatDisplayRow[]): Set<string> {
-	const toolIds = new Set<string>();
+interface PendingToolUse {
+	rowId: string;
+	message: ToolUseChatMessage;
+	permissionWrapperRowId?: string;
+}
+
+interface ConversationToolPairs {
+	toolResultByUseRowId: Map<string, ToolResultMessage>;
+	toolResultRowIdByUseRowId: Map<string, string>;
+	toolUseByResultRowId: Map<string, ToolUseChatMessage>;
+	permissionWrapperRowIdByResultRowId: Map<string, string>;
+}
+
+function pairToolResults(rows: ChatDisplayRow[]): ConversationToolPairs {
+	const pendingByToolId = new Map<string, PendingToolUse[]>();
+	const pendingPermissionWrappersByToolId = new Map<string, string[]>();
+	const toolResultByUseRowId = new Map<string, ToolResultMessage>();
+	const toolResultRowIdByUseRowId = new Map<string, string>();
+	const toolUseByResultRowId = new Map<string, ToolUseChatMessage>();
+	const permissionWrapperRowIdByResultRowId = new Map<string, string>();
 	for (const row of rows) {
 		if (row.kind !== 'message') continue;
 		const message = row.message;
-		if (!(message instanceof PermissionRequestMessage)) continue;
-		const toolId = message.requestedTool.toolId;
-		if (toolId) toolIds.add(toolId);
+		if (
+			message instanceof PermissionRequestMessage &&
+			message.requestedTool instanceof AskUserQuestionToolUseMessage
+		) {
+			const toolId = message.requestedTool.toolId;
+			const pendingUse = pendingByToolId
+				.get(toolId)
+				?.find(
+					(candidate) =>
+						candidate.message instanceof AskUserQuestionToolUseMessage &&
+						!candidate.permissionWrapperRowId,
+				);
+			if (pendingUse) {
+				pendingUse.permissionWrapperRowId = row.id;
+			} else {
+				const wrappers = pendingPermissionWrappersByToolId.get(toolId) ?? [];
+				wrappers.push(row.id);
+				pendingPermissionWrappersByToolId.set(toolId, wrappers);
+			}
+			continue;
+		}
+		if (isToolUseMessage(message)) {
+			const pending = pendingByToolId.get(message.toolId) ?? [];
+			const pendingUse: PendingToolUse = { rowId: row.id, message };
+			if (message instanceof AskUserQuestionToolUseMessage) {
+				const wrappers = pendingPermissionWrappersByToolId.get(message.toolId);
+				const permissionWrapperRowId = wrappers?.shift();
+				if (permissionWrapperRowId) pendingUse.permissionWrapperRowId = permissionWrapperRowId;
+				if (wrappers?.length === 0) pendingPermissionWrappersByToolId.delete(message.toolId);
+			}
+			pending.push(pendingUse);
+			pendingByToolId.set(message.toolId, pending);
+			continue;
+		}
+		if (!(message instanceof ToolResultMessage)) continue;
+		const pending = pendingByToolId.get(message.toolId);
+		if (!pending) continue;
+		const toolUse = pending.shift();
+		if (!toolUse) continue;
+		if (pending.length === 0) pendingByToolId.delete(message.toolId);
+		toolResultByUseRowId.set(toolUse.rowId, message);
+		toolResultRowIdByUseRowId.set(toolUse.rowId, row.id);
+		toolUseByResultRowId.set(row.id, toolUse.message);
+		if (toolUse.permissionWrapperRowId) {
+			permissionWrapperRowIdByResultRowId.set(row.id, toolUse.permissionWrapperRowId);
+		}
 	}
-	return toolIds;
-}
-
-function shouldSkipStandaloneMessage(
-	message: ChatMessage,
-	permissionToolIds: Set<string>,
-): boolean {
-	return (
-		message instanceof ToolResultMessage ||
-		message instanceof PermissionResolvedMessage ||
-		message instanceof PermissionCancelledMessage ||
-		(message instanceof PermissionRequestMessage &&
-			message.requestedTool.type === 'exit-plan-mode-tool-use') ||
-		(message instanceof AskUserQuestionToolUseMessage &&
-			Boolean(message.toolId) &&
-			permissionToolIds.has(message.toolId))
-	);
-}
-
-function bashGroupId(rows: Array<{ id: string }>): string {
-	return `bash-group-${rows[0]?.id ?? 'empty'}`;
-}
-
-function readGroupId(rows: Array<{ id: string }>): string {
-	return `read-group-${rows[0]?.id ?? 'empty'}`;
+	return {
+		toolResultByUseRowId,
+		toolResultRowIdByUseRowId,
+		toolUseByResultRowId,
+		permissionWrapperRowIdByResultRowId,
+	};
 }
 
 export function buildConversationFeedRenderModel(
 	rows: ChatDisplayRow[],
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
-	const toolResultIndex = new Map<string, ToolResultMessage>();
+	const toolPairs = pairToolResults(rows);
 	const permissionTerminalById = new Map<string, PermissionTerminalState>();
-	const permissionToolIds = explicitPermissionToolIds(rows);
-	let previousRenderable: ChatMessage | null = null;
-	let index = 0;
 
-	while (index < rows.length) {
-		const row = rows[index];
+	for (const [index, row] of rows.entries()) {
 		if (row.kind === 'local-notice') {
 			items.push({
 				kind: 'local-notice',
 				id: row.id,
-				rowIds: [row.id],
 				notice: row,
 				index,
-				prevMessage: previousRenderable,
 			});
-			previousRenderable = null;
-			index += 1;
 			continue;
 		}
 
 		const message = row.message;
 
-		if (message instanceof ToolResultMessage) {
-			toolResultIndex.set(message.toolId, message);
-		} else if (message instanceof PermissionResolvedMessage) {
+		if (message instanceof PermissionResolvedMessage) {
 			permissionTerminalById.set(message.permissionRequestId, {
 				state: 'resolved',
 				allowed: message.allowed,
@@ -275,111 +205,27 @@ export function buildConversationFeedRenderModel(
 			});
 		}
 
-		if (shouldSkipStandaloneMessage(message, permissionToolIds)) {
-			index += 1;
-			continue;
-		}
-
-		if (message instanceof BashToolUseMessage) {
-			const groupRows: GroupedTranscriptRow<BashToolUseMessage>[] = [];
-			const prevMessage = previousRenderable;
-			const firstIndex = index;
-
-			while (index < rows.length) {
-				const candidateRow = rows[index];
-				if (candidateRow.kind === 'local-notice') break;
-				const candidate = candidateRow.message;
-				if (candidate instanceof ToolResultMessage) {
-					toolResultIndex.set(candidate.toolId, candidate);
-					index += 1;
-					continue;
-				}
-				if (!(candidate instanceof BashToolUseMessage)) break;
-				groupRows.push({ id: candidateRow.id, message: candidate, ordinal: candidateRow.ordinal });
-				previousRenderable = candidate;
-				index += 1;
-			}
-
-			if (groupRows.length > 1) {
-				items.push({
-					kind: 'bash-group',
-					id: bashGroupId(groupRows),
-					rowIds: groupRows.map((groupRow) => groupRow.id),
-					rows: groupRows,
-					index: firstIndex,
-					prevMessage,
-				});
-			} else {
-				items.push({
-					kind: 'message',
-					id: groupRows[0].id,
-					rowIds: [groupRows[0].id],
-					message: groupRows[0].message,
-					index: firstIndex,
-					ordinal: groupRows[0].ordinal,
-					prevMessage,
-				});
-			}
-			continue;
-		}
-
-		if (message instanceof ReadToolUseMessage) {
-			const groupRows: GroupedTranscriptRow<ReadToolUseMessage>[] = [];
-			const prevMessage = previousRenderable;
-			const firstIndex = index;
-
-			while (index < rows.length) {
-				const candidateRow = rows[index];
-				if (candidateRow.kind === 'local-notice') break;
-				const candidate = candidateRow.message;
-				if (candidate instanceof ToolResultMessage) {
-					toolResultIndex.set(candidate.toolId, candidate);
-					index += 1;
-					continue;
-				}
-				if (!(candidate instanceof ReadToolUseMessage)) break;
-				groupRows.push({ id: candidateRow.id, message: candidate, ordinal: candidateRow.ordinal });
-				previousRenderable = candidate;
-				index += 1;
-			}
-
-			if (groupRows.length > 1) {
-				items.push({
-					kind: 'read-group',
-					id: readGroupId(groupRows),
-					rowIds: groupRows.map((groupRow) => groupRow.id),
-					rows: groupRows,
-					index: firstIndex,
-					prevMessage,
-				});
-			} else {
-				items.push({
-					kind: 'message',
-					id: groupRows[0].id,
-					rowIds: [groupRows[0].id],
-					message: groupRows[0].message,
-					index: firstIndex,
-					ordinal: groupRows[0].ordinal,
-					prevMessage,
-				});
-			}
-			continue;
-		}
-
 		items.push({
 			kind: 'message',
 			id: row.id,
-			rowIds: [row.id],
 			message,
 			index,
 			ordinal: row.ordinal,
-			prevMessage: previousRenderable,
+			...(message instanceof ToolResultMessage
+				? {
+						pairedToolUse: toolPairs.toolUseByResultRowId.get(row.id),
+						permissionWrapperRowId: toolPairs.permissionWrapperRowIdByResultRowId.get(row.id),
+					}
+				: {}),
 		});
-		previousRenderable = message;
-		index += 1;
 	}
 
-	return { items, toolResultIndex, permissionTerminalById };
+	return {
+		items,
+		toolResultByUseRowId: toolPairs.toolResultByUseRowId,
+		toolResultRowIdByUseRowId: toolPairs.toolResultRowIdByUseRowId,
+		permissionTerminalById,
+	};
 }
 
 export function buildConversationFeedRenderItems(
@@ -399,6 +245,9 @@ export function visiblePendingPermissionRequests(
 		if (row.kind !== 'message') continue;
 		if (row.message instanceof PermissionRequestMessage) {
 			renderedPermissionIds.add(row.message.permissionRequestId);
+		}
+		if (row.message.type === 'exit-plan-mode-tool-use') {
+			renderedPermissionIds.add(`plan-exit-${row.message.toolId}`);
 		}
 		if (
 			row.message instanceof PermissionResolvedMessage ||

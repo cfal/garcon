@@ -28,6 +28,7 @@ function clock(
 		lastRevisionByKind: {
 			initial: 0,
 			'live-append': 0,
+		'history-pruned': 0,
 			'history-earlier': 0,
 			'history-later': 0,
 			replacement: 0,

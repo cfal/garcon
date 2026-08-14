@@ -1,10 +1,13 @@
 <script lang="ts">
 	import ConversationMessage from './ConversationMessage.svelte';
-	import ChatBashToolGroup from './tools/ChatBashToolGroup.svelte';
-	import ChatReadToolGroup from './tools/ChatReadToolGroup.svelte';
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import LocalNoticeRow from './rows/LocalNoticeRow.svelte';
-	import { isToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
+	import {
+		isToolUseMessage,
+		PermissionRequestMessage,
+		ToolResultMessage,
+		type ChatMessage,
+	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
@@ -12,9 +15,8 @@
 	import type {
 		ConversationFeedRenderItem,
 		ConversationFeedRenderModel,
+		PermissionTerminalState,
 	} from '$lib/chat/transcript/conversation-feed-items.js';
-	import { getAppShell, getChatSessions, getFileSessions } from '$lib/context';
-	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
 	import type { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
 
 	interface PermissionDecision {
@@ -56,16 +58,6 @@
 		acquireTransientActivity,
 	}: Props = $props();
 
-	const sessions = getChatSessions();
-	const fileSessions = getFileSessions();
-	const appShell = getAppShell();
-	const projectBasePath = $derived(appShell.projectBasePath);
-	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
-		if (chatContext?.chatId) return chatContext;
-		const selected = sessions.selectedChat;
-		if (!selected?.id) return null;
-		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
-	});
 	const pendingExitPlanIds = $derived(
 		new Set(
 			pendingPermissionRequests
@@ -75,41 +67,18 @@
 	);
 	const disclosureState = $derived(itemState?.disclosurePort(item.id));
 
-	function handleReadFileOpen(filePath: string): void {
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
-		const resolved = resolveFileOpenTarget(filePath, {
-			fileRootPath: projectBasePath,
-			sourceDirectoryPath: chat.projectPath,
-		});
-		if (!resolved) return;
-		void fileSessions.open({
-			fileRootPath: resolved.fileRootPath,
-			relativePath: resolved.relativePath,
-			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : 'main',
-			reason: 'user-open',
-			line: resolved.line,
-			col: resolved.col,
-		});
+	function permissionTerminalFor(message: ChatMessage): PermissionTerminalState | undefined {
+		if (message instanceof PermissionRequestMessage) {
+			return renderModel.permissionTerminalById.get(message.permissionRequestId);
+		}
+		if (message.type !== 'exit-plan-mode-tool-use') return undefined;
+		const permissionRequestId = `plan-exit-${message.toolId}`;
+		if (pendingExitPlanIds.has(permissionRequestId)) return undefined;
+		return { state: 'resolved', allowed: true };
 	}
 </script>
 
-{#if item.kind === 'bash-group'}
-	<svelte:boundary>
-		<ChatBashToolGroup rows={item.rows} />
-		{#snippet failed(error)}
-			<MessageRenderFallback {error} />
-		{/snippet}
-	</svelte:boundary>
-{:else if item.kind === 'read-group'}
-	<svelte:boundary>
-		<ChatReadToolGroup rows={item.rows} onFileOpen={handleReadFileOpen} />
-		{#snippet failed(error)}
-			<MessageRenderFallback {error} />
-		{/snippet}
-	</svelte:boundary>
-{:else if item.kind === 'local-notice'}
+{#if item.kind === 'local-notice'}
 	<svelte:boundary>
 		<LocalNoticeRow notice={item.notice} />
 		{#snippet failed(error)}
@@ -119,18 +88,13 @@
 {:else}
 	{@const message = item.message}
 	{@const toolResult = isToolUseMessage(message)
-		? renderModel.toolResultIndex.get(message.toolId)
+		? renderModel.toolResultByUseRowId.get(item.id)
 		: undefined}
-	{@const exitPlanId =
-		message.type === 'exit-plan-mode-tool-use' ? `plan-exit-${message.toolId}` : null}
-	{@const permTerminal =
-		message instanceof PermissionRequestMessage
-			? renderModel.permissionTerminalById.get(message.permissionRequestId)
-			: exitPlanId
-				? pendingExitPlanIds.has(exitPlanId)
-					? undefined
-					: { state: 'resolved' as const, allowed: true }
-				: undefined}
+	{@const toolResultRowId = isToolUseMessage(message)
+		? renderModel.toolResultRowIdByUseRowId.get(item.id)
+		: undefined}
+	{@const pairedToolUse = message instanceof ToolResultMessage ? item.pairedToolUse : undefined}
+	{@const permTerminal = permissionTerminalFor(message)}
 	<svelte:boundary>
 		<ConversationMessage
 			{message}
@@ -138,8 +102,9 @@
 			anchorId={item.ordinal === undefined ? undefined : item.id}
 			index={item.index}
 			forkUpToSeq={item.ordinal}
-			prevMessage={item.prevMessage}
 			{toolResult}
+			{toolResultRowId}
+			{pairedToolUse}
 			permissionTerminal={permTerminal}
 			{onPermissionDecision}
 			{onExitPlanMode}

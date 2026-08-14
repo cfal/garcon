@@ -1,36 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { BashToolUseMessage, UserMessage } from '$shared/chat-types';
+import {
+	BashToolUseMessage,
+	GlobToolUseMessage,
+	ToolResultMessage,
+	UserMessage,
+} from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
-import type { ReconciledConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-render-model.js';
+import type { ConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-items.js';
+import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
 import {
 	appendConversationVirtualTranscriptTail,
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
 } from '../conversation-feed-virtual-items.js';
 
-function userItem(index: number): ReconciledConversationFeedRenderItem {
+function userItem(index: number): ConversationFeedRenderItem {
 	const rowId = `generation-1:${index}`;
 	return {
 		kind: 'message',
-		id: `message:${rowId}`,
-		rowIds: [rowId],
+		id: rowId,
 		message: new UserMessage('2026-08-03T00:00:00.000Z', `message ${index}`),
 		index,
 		ordinal: index,
-		prevMessage: null,
-		virtualKey: rowId,
 	};
 }
 
-function build(transcriptItems: ReconciledConversationFeedRenderItem[]) {
+function build(transcriptItems: ConversationFeedRenderItem[]) {
 	return buildConversationVirtualFeedModel({
 		showTopToolbarSpacer: false,
 		showRefreshError: false,
 		showEarlierBoundary: false,
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
+		transcriptViewId: 'view-1',
 		surfaceIdentity: 'chat-1:generation-1',
-		transcriptViewId: 'generation-1',
 		transcriptItems,
 		pendingPermissions: [],
 	});
@@ -60,8 +63,8 @@ describe('conversation virtual feed model', () => {
 			showEarlierBoundary: false,
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
-			surfaceIdentity: 'chat-2:generation-1',
-			transcriptViewId: 'generation-1',
+			transcriptViewId: 'view-1',
+		surfaceIdentity: 'chat-2:generation-1',
 			transcriptItems: [item],
 			pendingPermissions: [],
 		});
@@ -72,8 +75,58 @@ describe('conversation virtual feed model', () => {
 	});
 
 	it('rejects duplicate virtual keys before measurement state can be shared', () => {
-		const duplicate = { ...userItem(2), virtualKey: userItem(1).virtualKey };
+		const duplicate = { ...userItem(2), id: userItem(1).id };
 		expect(() => build([userItem(1), duplicate])).toThrow('Duplicate conversation feed key');
+	});
+
+	it('indexes each exact tool result occurrence in its own virtual row', () => {
+		const toolRowId = 'generation-1:10';
+		const resultRowId = 'generation-1:11';
+		const toolItem: ConversationFeedRenderItem = {
+			kind: 'message',
+			id: toolRowId,
+			message: new BashToolUseMessage('', 'reused-provider-id', 'pwd'),
+			index: 10,
+			ordinal: 10,
+		};
+		const resultItem: ConversationFeedRenderItem = {
+			kind: 'message',
+			id: resultRowId,
+			message: new ToolResultMessage('', 'reused-provider-id', { raw: '/tmp' }, false),
+			index: 11,
+			ordinal: 11,
+		};
+		const model = buildConversationVirtualFeedModel({
+			showTopToolbarSpacer: false,
+			showRefreshError: false,
+			showEarlierBoundary: false,
+			showLaterBoundary: false,
+			reserveComposerTraySpace: false,
+			transcriptViewId: 'view-1',
+		surfaceIdentity: 'chat-1:generation-1',
+			transcriptItems: [toolItem, resultItem],
+			pendingPermissions: [],
+		});
+
+		expect(model.targetByDomAnchorId.get(`tool-result-${resultRowId}`)).toEqual({
+			index: 2,
+			innerRowId: resultRowId,
+		});
+		expect(model.items[2]).toMatchObject({ spacingAfter: 'none' });
+		expect(estimateConversationFeedItemSize(model.items[2], 1)).toBe(0);
+	});
+
+	it('gives visible collapsible tool results their own estimated geometry', () => {
+		const tool = new GlobToolUseMessage('', 'glob-1', '**/*.ts');
+		const result = new ToolResultMessage('', 'glob-1', { filenames: ['a.ts'] }, false);
+		const renderModel = buildConversationFeedRenderModel([
+			{ kind: 'message', id: 'generation-1:10', ordinal: 10, message: tool },
+			{ kind: 'message', id: 'generation-1:11', ordinal: 11, message: result },
+		]);
+		const model = build(renderModel.items);
+
+		expect(model.items[2]).toMatchObject({ spacingAfter: 'scaled-transcript' });
+		expect(estimateConversationFeedItemSize(model.items[2], 1)).toBeGreaterThan(0);
 	});
 
 	it('scales transcript estimates without scaling feed controls', () => {
@@ -84,13 +137,13 @@ describe('conversation virtual feed model', () => {
 			showEarlierBoundary: true,
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
-			surfaceIdentity: 'chat-1:generation-1',
-			transcriptViewId: 'generation-1',
+			transcriptViewId: 'view-1',
+		surfaceIdentity: 'chat-1:generation-1',
 			transcriptItems: [],
 			pendingPermissions: [],
 		}).items[1];
 
-		expect(estimateConversationFeedItemSize(transcript, 0.7)).toBeCloseTo(78.4);
+		expect(estimateConversationFeedItemSize(transcript, 0.7)).toBeCloseTo(86.8);
 		expect(estimateConversationFeedItemSize(boundary, 0.7)).toBe(44);
 	});
 
@@ -106,8 +159,8 @@ describe('conversation virtual feed model', () => {
 			showEarlierBoundary: false,
 			showLaterBoundary: false,
 			reserveComposerTraySpace: true,
-			surfaceIdentity: 'chat-1:generation-1',
-			transcriptViewId: 'generation-1',
+			transcriptViewId: 'view-1',
+		surfaceIdentity: 'chat-1:generation-1',
 			transcriptItems: [userItem(1)],
 			pendingPermissions: [permission, { ...permission, permissionRequestId: 'permission-2' }],
 		});
@@ -124,60 +177,6 @@ describe('conversation virtual feed model', () => {
 		expect(estimateConversationFeedItemSize(model.items.at(-1), 1)).toBe(56);
 	});
 
-	it('moves a transient permission inline only when its exact view anchor is loaded', () => {
-		const permission: PendingPermissionRequest = {
-			chatId: 'chat-1',
-			permissionRequestId: 'permission-1',
-			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
-			transcript: { transcriptViewId: 'generation-1', afterOrdinal: 1 },
-			control: {
-				serverInstanceId: 'server-1',
-				chatId: 'chat-1',
-				runId: 'run-1',
-				id: 'permission-1',
-				incarnation: 'incarnation-1',
-			},
-		};
-		const inline = buildConversationVirtualFeedModel({
-			showTopToolbarSpacer: false,
-			showRefreshError: false,
-			showEarlierBoundary: false,
-			showLaterBoundary: false,
-			reserveComposerTraySpace: false,
-			surfaceIdentity: 'chat-1:generation-1',
-			transcriptViewId: 'generation-1',
-			transcriptItems: [userItem(1), userItem(2)],
-			pendingPermissions: [permission],
-		});
-		expect(inline.items.map((item) => item.kind)).toEqual([
-			'viewport-start-spacer',
-			'transcript',
-			'permission',
-			'transcript',
-			'viewport-end-spacer',
-		]);
-		expect(inline.items[2]?.key).toContain('permission-1:incarnation-1');
-
-		const detached = buildConversationVirtualFeedModel({
-			showTopToolbarSpacer: false,
-			showRefreshError: false,
-			showEarlierBoundary: false,
-			showLaterBoundary: false,
-			reserveComposerTraySpace: false,
-			surfaceIdentity: 'chat-1:generation-2',
-			transcriptViewId: 'generation-2',
-			transcriptItems: [userItem(1), userItem(2)],
-			pendingPermissions: [permission],
-		});
-		expect(detached.items.map((item) => item.kind)).toEqual([
-			'viewport-start-spacer',
-			'transcript',
-			'transcript',
-			'permission',
-			'viewport-end-spacer',
-		]);
-	});
-
 	it('updates suffix indexes when transcript items append incrementally', () => {
 		const permission: PendingPermissionRequest = {
 			chatId: 'chat-1',
@@ -190,13 +189,14 @@ describe('conversation virtual feed model', () => {
 			showEarlierBoundary: false,
 			showLaterBoundary: true,
 			reserveComposerTraySpace: false,
-			surfaceIdentity: 'chat-1:generation-1',
-			transcriptViewId: 'generation-1',
+			transcriptViewId: 'view-1',
+		surfaceIdentity: 'chat-1:generation-1',
 			transcriptItems: [userItem(1)],
 			pendingPermissions: [permission],
 		});
 		const priorEndKey = model.items.at(-1)!.key;
 		const priorEndIndex = model.items.length - 1;
+		const priorTranscriptTail = model.items[1];
 
 		const appended = appendConversationVirtualTranscriptTail(model, 'chat-1:generation-1', [
 			userItem(2),
@@ -211,6 +211,8 @@ describe('conversation virtual feed model', () => {
 			'viewport-end-spacer',
 		]);
 		expect(appended?.items[1]).toMatchObject({ spacingAfter: 'scaled-transcript' });
+		expect(appended?.items[1]).toBe(priorTranscriptTail);
+		expect(appended?.items[2]).toMatchObject({ spacingAfter: 'scaled-transcript' });
 		expect(appended?.indexByKey).not.toBe(model.indexByKey);
 		expect(appended?.indexByRowId).not.toBe(model.indexByRowId);
 		expect(appended?.targetByDomAnchorId).not.toBe(model.targetByDomAnchorId);
