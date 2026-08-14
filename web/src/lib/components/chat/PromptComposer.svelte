@@ -26,7 +26,6 @@
 		chatAttachmentAccept,
 		ImageAttachmentState,
 		isImageAttachment,
-		isSupportedChatAttachment,
 		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import {
@@ -63,8 +62,6 @@
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
-	import { PromptRefinementController } from '$lib/chat/composer/prompt-refinement-controller.svelte.js';
-	import { promptRefinementErrorMessage } from '$lib/chat/composer/prompt-refinement-error-message.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -98,7 +95,8 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
-	import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
+	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
+	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	interface Props {
 		onsubmit: () => void;
 		onSteerPreferredSubmit: () => void;
@@ -142,7 +140,6 @@
 		composerEditorOpenRequestId = 0,
 	}: Props = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
-
 	const composerState = getComposerState();
 	const lifecycle = getConversationLifecycle();
 	const agentState = getAgentState();
@@ -155,8 +152,6 @@
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const snippetExpansion = new SnippetExpansionController();
-	const promptRefinement = new PromptRefinementController();
-	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
 		id: allocateTransientLayerId('snippet-expansion'),
@@ -168,21 +163,9 @@
 		},
 		restoreFocus: () => void restoreComposerFocus(),
 	});
-	const promptRefinementLayer = transientLayerAttachment({
-		registry: transientLayers,
-		id: allocateTransientLayerId('prompt-refinement'),
-		kind: 'prompt-transform',
-		modality: 'nonmodal',
-		onEscape: () => {
-			cancelPromptRefinement();
-			return true;
-		},
-		restoreFocus: () => void restoreComposerFocus(),
-	});
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let expandedEditor: { open: () => boolean } | undefined = $state();
-	let fileInput: HTMLInputElement | undefined = $state();
 	let destroyed = false;
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
@@ -226,6 +209,36 @@
 
 	// Ephemeral UI state extracted to companion class.
 	const ui = new PromptComposerUiState();
+	const promptRefinement = new PromptComposerRefinementController({
+		composer: composerState,
+		sessions,
+		notifications,
+		ui,
+		transientLayers,
+		get textarea() {
+			return textarea;
+		},
+		get visible() {
+			return isVisible;
+		},
+		get presented() {
+			return isPresented;
+		},
+		get startBlocked() {
+			return isDisabled || directAdmissionPending || snippetExpansion.pending;
+		},
+		resizeTextarea: autoResize,
+	});
+	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	const attachmentController = new PromptComposerAttachmentController({
+		composer: composerState,
+		get promptTransformPending() {
+			return promptTransformPending;
+		},
+		get attachmentSupport() {
+			return attachmentSupport;
+		},
+	});
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
 
@@ -235,7 +248,7 @@
 		const changed = ui.resetOnChatSwitch(chatId);
 		if (!changed) return;
 		snippetExpansion.cancel();
-		promptRefinement.cancel();
+		promptRefinement.abort();
 		composerState.isDragActive = false;
 		requestComposerFocusForChat(chatId);
 	});
@@ -294,7 +307,7 @@
 	onDestroy(() => {
 		destroyed = true;
 		snippetExpansion.cancel();
-		promptRefinement.cancel();
+		promptRefinement.destroy();
 		composerState.flushDraftSave();
 		imageAttachments.revokeAll();
 	});
@@ -436,78 +449,6 @@
 	async function focusPendingSnippetExpansion(): Promise<void> {
 		await tick();
 		if (snippetExpansion.pending) textarea?.focus();
-	}
-
-	async function focusRefinementTarget(chatId: string, caret?: number): Promise<void> {
-		if (ui.composerEditorOpen && ui.composerEditorChatId === chatId && isPresented) {
-			if (caret === undefined) ui.requestComposerEditorFocus();
-			else ui.moveComposerEditorCaretToEnd(chatId, caret);
-			await tick();
-			return;
-		}
-
-		await tick();
-		if (destroyed || sessions.selectedChatId !== chatId || !isVisible || !textarea) return;
-		if (caret !== undefined) textarea.setSelectionRange(caret, caret);
-		autoResize();
-		textarea.focus({ preventScroll: true });
-	}
-
-	function cancelPromptRefinement(): void {
-		if (!promptRefinement.pending) return;
-		promptRefinement.cancel();
-		const chatId = sessions.selectedChatId;
-		if (chatId) void focusRefinementTarget(chatId);
-	}
-
-	function handlePromptRefinement(): void {
-		if (promptRefinement.pending) {
-			cancelPromptRefinement();
-			return;
-		}
-		if (!canRefinePrompt) return;
-		void runPromptRefinement();
-	}
-
-	async function runPromptRefinement(): Promise<void> {
-		const sourceChatId = sessions.selectedChatId;
-		if (!sourceChatId) return;
-		const sourceText = composerState.inputText;
-		const sourceRevision = composerState.contentRevision;
-		ui.closeFileMenu();
-		ui.closeSlashMenu();
-		ui.snippetPalette.dismiss();
-		composerState.isDragActive = false;
-
-		try {
-			const result = await promptRefinement.run(sourceText);
-			if (result.kind !== 'refined') return;
-			if (
-				sessions.selectedChatId !== sourceChatId ||
-				composerState.contentRevision !== sourceRevision ||
-				composerState.inputText !== sourceText
-			) {
-				notifications.info(m.chat_composer_prompt_changed_during_refinement());
-				await focusRefinementTarget(sourceChatId);
-				return;
-			}
-
-			const refinedPrompt = result.response.refinedPrompt;
-			if (refinedPrompt === sourceText) {
-				notifications.info(m.chat_composer_prompt_refinement_unchanged());
-				await focusRefinementTarget(sourceChatId);
-				return;
-			}
-
-			const focus = focusRefinementTarget(sourceChatId, refinedPrompt.length);
-			composerState.inputText = refinedPrompt;
-			composerState.queueDraftSave(sourceChatId, refinedPrompt);
-			notifications.info(m.chat_composer_prompt_refined());
-			await focus;
-		} catch (error) {
-			notifications.error(promptRefinementErrorMessage(error));
-			await focusRefinementTarget(sourceChatId);
-		}
 	}
 
 	async function insertSnippet(
@@ -682,62 +623,6 @@
 		queueCurrentDraft(value);
 	}
 
-	function handleImagePick() {
-		if (promptTransformPending) return;
-		fileInput?.click();
-	}
-
-	function handleFileChange(event: Event) {
-		const input = event.target as HTMLInputElement;
-		if (!input.files) return;
-		if (promptTransformPending) {
-			input.value = '';
-			return;
-		}
-		composerState.addImages(Array.from(input.files), attachmentSupport);
-		input.value = '';
-	}
-
-	// Drag-and-drop handlers for file attachment.
-	function handleDragOver(event: DragEvent) {
-		event.preventDefault();
-		if (promptTransformPending) return;
-		composerState.isDragActive = true;
-	}
-
-	function handleDragLeave() {
-		composerState.isDragActive = false;
-	}
-
-	function handleDrop(event: DragEvent) {
-		event.preventDefault();
-		if (promptTransformPending) return;
-		composerState.isDragActive = false;
-		const files = event.dataTransfer?.files;
-		if (!files) return;
-		const attachments = Array.from(files).filter((file) =>
-			isSupportedChatAttachment(file, attachmentSupport),
-		);
-		composerState.addImages(attachments, attachmentSupport);
-	}
-
-	// Paste handler for images from clipboard.
-	function handlePaste(event: ClipboardEvent) {
-		if (promptTransformPending) return;
-		const items = event.clipboardData?.items;
-		if (!items) return;
-		const imageFiles: File[] = [];
-		for (const item of items) {
-			if (item.type.startsWith('image/')) {
-				const file = item.getAsFile();
-				if (file) imageFiles.push(file);
-			}
-		}
-		if (imageFiles.length > 0) {
-			composerState.addImages(imageFiles, attachmentSupport);
-		}
-	}
-
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
@@ -753,13 +638,6 @@
 			composerState.inputText,
 			composerState.images.length,
 		),
-	);
-	const canRefinePrompt = $derived(
-		!isDisabled &&
-			!directAdmissionPending &&
-			!promptTransformPending &&
-			composerState.inputText.trim().length > 0 &&
-			composerState.inputText.length <= PROMPT_REFINEMENT_DRAFT_MAX_LENGTH,
 	);
 	const promptTransformStatus = $derived(
 		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
@@ -848,7 +726,7 @@
 		{@attach promptRefinement.pending &&
 			!ui.composerEditorOpen &&
 			isPresented &&
-			promptRefinementLayer}
+			promptRefinement.layerAttachment}
 	>
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
@@ -951,21 +829,21 @@
 			{/if}
 
 			<input
-				bind:this={fileInput}
+				bind:this={attachmentController.fileInput}
 				type="file"
 				accept={attachmentAccept}
 				multiple
 				disabled={promptTransformPending}
 				class="hidden"
-				onchange={handleFileChange}
+				onchange={(event) => attachmentController.handleFileChange(event)}
 			/>
 
 			<!-- svelte-ignore a11y_no_static_element_interactions -- labeled region accepts native file drops; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 			<div
 				class="relative bg-transparent focus-within:ring-0 transition-all duration-200 overflow-hidden"
-				ondragover={handleDragOver}
-				ondragleave={handleDragLeave}
-				ondrop={handleDrop}
+				ondragover={(event) => attachmentController.handleDragOver(event)}
+				ondragleave={() => attachmentController.handleDragLeave()}
+				ondrop={(event) => attachmentController.handleDrop(event)}
 				role="region"
 				aria-label={m.chat_composer_message_input_area()}
 			>
@@ -975,7 +853,7 @@
 						value={composerState.inputText}
 						onkeydown={handleKeyDown}
 						oninput={handleInput}
-						onpaste={handlePaste}
+						onpaste={(event) => attachmentController.handlePaste(event)}
 						onfocus={() => appShell.requestSidebarRecenterToSelected()}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
@@ -989,11 +867,11 @@
 			<ComposerBottomBar
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
-				onAddImage={handleImagePick}
+				onAddImage={() => attachmentController.pick()}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
-				onRefinePrompt={handlePromptRefinement}
-				{canRefinePrompt}
+				onRefinePrompt={() => promptRefinement.handleAction()}
+				canRefinePrompt={promptRefinement.canStart}
 				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
 				isPromptTransformPending={promptTransformPending}
@@ -1114,8 +992,8 @@
 	{isDisabled}
 	{promptTransformPending}
 	isPromptRefinementPending={promptRefinement.pending}
-	{canRefinePrompt}
-	onRefinePrompt={handlePromptRefinement}
+	canRefinePrompt={promptRefinement.canStart}
+	onRefinePrompt={() => promptRefinement.handleAction()}
 	openRequestId={composerEditorOpenRequestId}
 	resizeTextarea={autoResize}
 />
