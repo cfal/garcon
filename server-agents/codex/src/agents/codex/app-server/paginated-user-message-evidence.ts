@@ -5,34 +5,50 @@ import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/na
 import { convertCodexAppServerItem } from './converter.js';
 import type { CodexThreadItem, CodexUserInput } from './protocol.js';
 
+export interface CodexPaginatedItemEvidence {
+  readonly messages: ChatMessage[];
+  readonly orderedItemIdsByTurn: ReadonlyMap<string, readonly string[]>;
+}
+
 export async function loadPaginatedUserMessageEvidence(
   nativePath: string,
   fallbackTimestamp: string,
   signal: AbortSignal,
   survivingTurnIds: ReadonlySet<string>,
-): Promise<ChatMessage[]> {
+): Promise<CodexPaginatedItemEvidence> {
   // Pinned Codex persists ItemCompleted user messages but omits them from terminal
   // history reconstruction: https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/rollout/src/policy.rs#L86-L93
   // and https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/app-server-protocol/src/protocol/thread_history.rs#L586-L622
   const messages: ChatMessage[] = [];
+  const orderedItemIdsByTurn = new Map<string, string[]>();
   for await (const entry of readJsonlLineEntries(nativePath, { signal })) {
     const parsed = parseFirstJsonlValue<unknown>(entry.line);
     if (parsed.kind !== 'value') continue;
     const rollout = record(parsed.value);
     const payload = record(rollout?.payload);
     const item = record(payload?.item);
-    const turnId = nonEmptyString(payload?.turn_id) ?? nonEmptyString(payload?.turnId);
+    const turnId =
+      nonEmptyString(payload?.turn_id) ?? nonEmptyString(payload?.turnId);
     if (
-      rollout?.type !== 'event_msg'
-      || payload?.type !== 'item_completed'
-      || (item?.type !== 'UserMessage' && item?.type !== 'userMessage')
-      || !turnId
-      || !survivingTurnIds.has(turnId)
-    ) continue;
+      rollout?.type !== 'event_msg' ||
+      payload?.type !== 'item_completed' ||
+      !turnId ||
+      !survivingTurnIds.has(turnId)
+    ) {
+      continue;
+    }
+    if (!item) continue;
 
     const id = nonEmptyString(item.id);
-    const clientId = nonEmptyString(item.client_id) ?? nonEmptyString(item.clientId);
-    if (!id || !clientId || !Array.isArray(item.content)) continue;
+    if (!id) continue;
+    const orderedIds = orderedItemIdsByTurn.get(turnId) ?? [];
+    if (orderedIds.includes(id)) continue;
+    orderedIds.push(id);
+    orderedItemIdsByTurn.set(turnId, orderedIds);
+    if (item.type !== 'UserMessage' && item.type !== 'userMessage') continue;
+    const clientId =
+      nonEmptyString(item.client_id) ?? nonEmptyString(item.clientId);
+    if (!clientId || !Array.isArray(item.content)) continue;
     const threadItem: CodexThreadItem = {
       type: 'userMessage',
       id,
@@ -44,17 +60,20 @@ export async function loadPaginatedUserMessageEvidence(
       rollout.timestamp,
       fallbackTimestamp,
     );
-    convertCodexAppServerItem(threadItem, timestamp, { includeUserMessages: true })
-      .forEach((message, withinSourceOrdinal) => {
-        messages.push(attachNativeMessageSource(message, {
+    convertCodexAppServerItem(threadItem, timestamp, {
+      includeUserMessages: true,
+    }).forEach((message, withinSourceOrdinal) => {
+      messages.push(
+        attachNativeMessageSource(message, {
           entryId: `turn:${turnId}:item:${id}`,
           byteOffset: entry.byteOffset,
           lineNumber: entry.lineNumber,
           withinSourceOrdinal,
-        }));
-      });
+        }),
+      );
+    });
   }
-  return messages;
+  return { messages, orderedItemIdsByTurn };
 }
 
 function codexEvidenceTimestamp(
@@ -62,11 +81,18 @@ function codexEvidenceTimestamp(
   rolloutTimestamp: unknown,
   fallback: string,
 ): string {
-  if (typeof completedAtMs === 'number' && Number.isFinite(completedAtMs) && completedAtMs > 0) {
+  if (
+    typeof completedAtMs === 'number' &&
+    Number.isFinite(completedAtMs) &&
+    completedAtMs > 0
+  ) {
     const timestamp = new Date(completedAtMs);
     if (!Number.isNaN(timestamp.getTime())) return timestamp.toISOString();
   }
-  if (typeof rolloutTimestamp === 'string' && !Number.isNaN(Date.parse(rolloutTimestamp))) {
+  if (
+    typeof rolloutTimestamp === 'string' &&
+    !Number.isNaN(Date.parse(rolloutTimestamp))
+  ) {
     return rolloutTimestamp;
   }
   return fallback;
@@ -74,7 +100,7 @@ function codexEvidenceTimestamp(
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 

@@ -12,6 +12,10 @@ import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import type { ChatProcessingActivity } from './chats/chat-processing-activity.js';
+import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from './agents/shared/native-message-source.js';
 import { commandLedgerKey, type CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
@@ -583,4 +587,15 @@ export function wireServerEvents({
     notifyOperationalNotice,
     waitForIdle,
   };
+}
+
+function normalizeAgentMessages(messages: ChatMessage[]): ChatMessage[] {
+  const parsed = parseChatMessages(messages);
+  if (parsed.length !== messages.length) {
+    throw new Error('Agent emitted an invalid chat message');
+  }
+  return parsed.map((message, index) => attachNativeMessageSource(
+    message,
+    getNativeMessageRevisionSource(messages[index]),
+  ));
 }

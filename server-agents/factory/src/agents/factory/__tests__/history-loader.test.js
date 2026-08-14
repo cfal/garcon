@@ -3,7 +3,10 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import {
+  getNativeMessageRevisionSource,
+  getNativeMessageSource,
+} from '@garcon/server-agent-common/shared/native-message-source';
 import {
   findFactorySessionFileBySessionId,
   getFactoryPreviewFromSessionPath,
@@ -119,6 +122,8 @@ describe('factory history loader', () => {
     expect(messages[5].content).toBe('Done.');
     expect(getNativeMessageSource(messages[2])).toMatchObject({ lineNumber: 3 });
     expect(getNativeMessageSource(messages[4])).toMatchObject({ lineNumber: 4 });
+    expect(messages.map((message) => getNativeMessageRevisionSource(message)?.withinSourceOrdinal))
+      .toEqual([0, 1, 2, 0, 1, 0]);
 
     const preview = await getFactoryPreviewFromSessionPath(sessionPath);
     expect(preview).toEqual({

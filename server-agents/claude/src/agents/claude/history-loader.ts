@@ -178,6 +178,20 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
     }));
   }
 
+  function userMessage(
+    entry: Record<string, unknown>,
+    timestamp: string,
+    content: string,
+  ): UserMessage {
+    const upstreamRequestId = getNativeMessageSource(entry)?.entryId;
+    return new UserMessage(
+      timestamp,
+      content,
+      undefined,
+      upstreamRequestId ? { upstreamRequestId } : undefined,
+    );
+  }
+
   // A compact_boundary and its summary carry near-identical timestamps and can be
   // reordered by the chronological sort, so collect boundary metadata up front and
   // pair it FIFO with the summaries rather than relying on boundary-before-summary order.
@@ -207,7 +221,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
     if (queuedPrompts.length > 0) {
       const attachmentTimestamp = asString(asRecord(entry.attachment).timestamp);
       for (const prompt of queuedPrompts) {
-        pushMessage(entry, new UserMessage(attachmentTimestamp || ts, prompt));
+        pushMessage(entry, userMessage(entry, attachmentTimestamp || ts, prompt));
       }
       continue;
     }
@@ -265,7 +279,8 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
 
       for (const userText of claudeUserTexts(content)) {
         if (userText.steering || !isProviderOwnedUserMessage(entry, userText.text)) {
-          pushMessage(entry, new UserMessage(
+          pushMessage(entry, userMessage(
+            entry,
             ts,
             stripResolvedFileMentionContext(userText.text),
           ));

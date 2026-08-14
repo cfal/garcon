@@ -9,6 +9,7 @@ import {
   loadPiChatMessagesBySessionId,
 } from '../history-loader.js';
 import { testPiConfig } from './test-fixtures.js';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 const originalPiSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
 let tempRoot;
@@ -103,6 +104,13 @@ describe('Pi history loader', () => {
     expect(messages[0].content).toBe('hello pi');
     expect(messages[2].command).toBe('pwd');
     expect(messages[4].content).toEqual({ stdout: '/tmp/project' });
+    expect(messages.map((message) => getNativeMessageRevisionSource(message))).toEqual([
+      { entryId: 'user-1', withinSourceOrdinal: 0 },
+      { entryId: 'assistant-1', withinSourceOrdinal: 0 },
+      { entryId: 'assistant-1', withinSourceOrdinal: 1 },
+      { entryId: 'assistant-1', withinSourceOrdinal: 2 },
+      { entryId: 'tool-1-result', withinSourceOrdinal: 0 },
+    ]);
   });
 
   it('loads the active Pi branch rather than flattening sibling branches', async () => {

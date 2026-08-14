@@ -10,7 +10,7 @@ import { convertFactoryToolUse } from './tool-use-converter.js';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
-import { attachNativeSourceToMessages, type NativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { attachNativeMessageSource, type NativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import {
   getFactorySessionDiscoveryIndexPath,
@@ -266,8 +266,15 @@ function pushMessages(
   messages: ChatMessage[],
   source: NativeMessageSource | undefined,
   nextMessages: ChatMessage[],
-): void {
-  messages.push(...attachNativeSourceToMessages(nextMessages, source));
+  startOrdinal: number,
+): number {
+  nextMessages.forEach((message, index) => {
+    messages.push(attachNativeMessageSource(message, {
+      ...source,
+      withinSourceOrdinal: startOrdinal + index,
+    }));
+  });
+  return startOrdinal + nextMessages.length;
 }
 
 export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEventInput[]): ChatMessage[] {
@@ -281,27 +288,28 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEventInpu
     const timestamp = getMessageTimestamp(event);
     const role = event.message.role;
     const content = Array.isArray(event.message.content) ? event.message.content : [];
+    let sourceOrdinal = 0;
 
     if (role === 'user') {
       for (const part of content) {
         if (part.type !== 'tool_result') continue;
         const toolUseId = (part as FactoryToolResultPart).tool_use_id || (part as FactoryToolResultPart).toolUseID || '';
         const rawValue = (part as FactoryToolResultPart).value ?? (part as FactoryToolResultPart).content;
-        pushMessages(messages, source, [
+        sourceOrdinal = pushMessages(messages, source, [
           new ToolResultMessage(
             timestamp,
             toolUseId,
             normalizeToolResultContent(rawValue),
             Boolean((part as FactoryToolResultPart).is_error),
           ),
-        ]);
+        ], sourceOrdinal);
       }
 
       const text = getVisibleUserTextParts(content).join('\n');
       if (text) {
         pushMessages(messages, source, [
           new UserMessage(timestamp, stripResolvedFileMentionContext(text)),
-        ]);
+        ], sourceOrdinal);
       }
       continue;
     }
@@ -309,15 +317,20 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEventInpu
     if (role === 'assistant') {
       for (const part of content) {
         if (part.type === 'thinking' && typeof (part as FactoryTextPart).thinking === 'string') {
-          pushMessages(messages, source, [
+          sourceOrdinal = pushMessages(messages, source, [
             new ThinkingMessage(timestamp, (part as FactoryTextPart).thinking!),
-          ]);
+          ], sourceOrdinal);
         } else if (part.type === 'text' && typeof (part as FactoryTextPart).text === 'string') {
-          pushMessages(messages, source, convertFactoryAssistantText(timestamp, (part as FactoryTextPart).text!));
+          sourceOrdinal = pushMessages(
+            messages,
+            source,
+            convertFactoryAssistantText(timestamp, (part as FactoryTextPart).text!),
+            sourceOrdinal,
+          );
         } else if (part.type === 'tool_use') {
-          pushMessages(messages, source, [
+          sourceOrdinal = pushMessages(messages, source, [
             convertFactoryToolUse(timestamp, part as FactoryToolUsePart),
-          ]);
+          ], sourceOrdinal);
         }
       }
     }

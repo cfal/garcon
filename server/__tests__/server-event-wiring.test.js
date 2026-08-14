@@ -3,6 +3,10 @@ import { AssistantMessage } from '../../common/chat-types.js';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { wireServerEvents } from '../server-event-wiring.js';
+import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from '../agents/shared/native-message-source.ts';
 
 const at = '2026-08-12T00:00:00.000Z';
 

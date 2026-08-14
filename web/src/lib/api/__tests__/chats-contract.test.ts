@@ -905,13 +905,14 @@ describe('chats API contract', () => {
 	});
 
 	it('settings, model, project path, and history helpers use REST endpoints', async () => {
-		fetchMock.mockImplementation((url: string) =>
-			Promise.resolve(
+		fetchMock.mockImplementation((url: string) => {
+			const requestUrl = new URL(url, 'http://garcon.local');
+			return Promise.resolve(
 				jsonResponse(
 					url.startsWith('/api/v1/chats/messages')
 						? {
 								historyState: { kind: 'complete' },
-								chatId: 'c/1',
+								chatId: requestUrl.searchParams.get('chatId'),
 								messages: [],
 								transcriptViewId: 'view-1',
 								lastOrdinal: 0,
@@ -923,8 +924,8 @@ describe('chats API contract', () => {
 							}
 						: { success: true },
 				),
-			),
-		);
+			);
+		});
 
 		await updateExecutionSettings({ chatId: 'c-1', permissionMode: 'manualBypass' });
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/execution-settings');

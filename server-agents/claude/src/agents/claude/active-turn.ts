@@ -21,7 +21,10 @@ export class ClaudeActiveTurn {
     readonly eventMetadata: RuntimeEventMetadata,
     backgroundTaskCount: number,
   ) {
-    this.protocol = new ClaudeTurnState(crypto.randomUUID(), backgroundTaskCount);
+    this.protocol = new ClaudeTurnState(
+      crypto.randomUUID(),
+      backgroundTaskCount,
+    );
     this.completion = new Promise<void>((resolve) => {
       this.#resolve = resolve;
     });

@@ -4,6 +4,8 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import { AssistantMessage, type ChatMessage } from '@garcon/common/chat-types';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { directMessageNativeSource } from './direct-message-native-source.js';
 import type { SharedModelOption } from '@garcon/common/models';
 import {
   assertDirectExecutionOpen,
@@ -259,7 +261,13 @@ export abstract class DirectChatRuntimeBase<
 
       session.isFinalizing = true;
       session.messages.push(this.buildAssistantMessage(response));
-      this.emitMessages(session.chatId, [new AssistantMessage(new Date().toISOString(), response)], eventMetadata);
+      // The live row carries the same turn-scoped identity the importer derives, so
+      // reloaded history and streamed history dedupe against one key.
+      const liveMessage = attachNativeMessageSource(
+        new AssistantMessage(new Date().toISOString(), response),
+        directMessageNativeSource({ role: 'assistant', turnId: eventMetadata.turnId }),
+      );
+      this.emitMessages(session.chatId, [liveMessage], eventMetadata);
       this.#markSessionIdle(session);
       this.emitFinished(session.chatId, 0, eventMetadata);
     } catch (error: unknown) {

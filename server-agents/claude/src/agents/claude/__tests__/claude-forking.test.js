@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { access, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { UserMessage } from '@garcon/common/chat-types';
 import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import {
@@ -18,6 +19,26 @@ afterEach(async () => {
 });
 
 describe('Claude JSONL forking', () => {
+  it('ignores remapped native user UUIDs without ignoring other message semantics', () => {
+    const message = (content, upstreamRequestId, clientRequestId = 'client-1') => new UserMessage(
+      '2026-07-17T15:20:02.808Z',
+      content,
+      undefined,
+      { upstreamRequestId, clientRequestId },
+    );
+
+    const source = claudeForkSemanticDigest([message('source prompt', 'source-native-uuid')]);
+    expect(claudeForkSemanticDigest([
+      message('source prompt', 'fork-native-uuid'),
+    ])).toBe(source);
+    expect(claudeForkSemanticDigest([
+      message('different prompt', 'fork-native-uuid'),
+    ])).not.toBe(source);
+    expect(claudeForkSemanticDigest([
+      message('source prompt', 'fork-native-uuid', 'client-2'),
+    ])).not.toBe(source);
+  });
+
   it('writes and verifies an independently resumable transcript graph', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-claude-forking-'));
     roots.push(root);

@@ -64,7 +64,7 @@ describe('PaginatedCodexHistorySource', () => {
       const client = clientForPages(pages, shutdown);
       clients.push(client);
       return client;
-    }, async () => []);
+    }, async () => ({ messages: [], orderedItemIdsByTurn: new Map() }));
 
     const messages = await source.load(new AbortController().signal);
 
@@ -92,7 +92,7 @@ describe('PaginatedCodexHistorySource', () => {
     const source = new PaginatedCodexHistorySource(profile, () => clientForPages(new Map([
       ['first', { data: [], nextCursor: 'repeat', backwardsCursor: null }],
       ['repeat', { data: [], nextCursor: 'repeat', backwardsCursor: null }],
-    ]), shutdown), async () => []);
+    ]), shutdown), async () => ({ messages: [], orderedItemIdsByTurn: new Map() }));
 
     await expect(source.load(new AbortController().signal)).rejects.toMatchObject({
       code: 'TRANSCRIPT_UNAVAILABLE',
@@ -222,7 +222,7 @@ describe('PaginatedCodexHistorySource', () => {
     const source = new PaginatedCodexHistorySource(
       profile,
       () => ({ listThreadTurns, shutdown }),
-      async () => [],
+      async () => ({ messages: [], orderedItemIdsByTurn: new Map() }),
     );
 
     await expect(source.load(controller.signal)).rejects.toThrow('stop history');

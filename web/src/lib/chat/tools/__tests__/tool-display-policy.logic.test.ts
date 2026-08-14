@@ -1,61 +1,36 @@
 import { describe, it, expect } from 'vitest';
-import { shouldHideToolResult, resolveDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
+import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 import type { ToolDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 
-describe('shouldHideToolResult', () => {
-	it('returns false when no result rule is defined', () => {
-		const rule: ToolDisplayRule = {
-			input: { mode: 'inline' },
-		};
-		expect(shouldHideToolResult(rule, { content: 'ok' })).toBe(false);
+describe('shouldRenderToolResult', () => {
+	it('requires a visible standalone result mode', () => {
+		expect(
+			shouldRenderToolResult(
+				{ input: { mode: 'inline' }, result: { mode: 'collapsible' } },
+				{ content: 'data' },
+			),
+		).toBe(true);
+		expect(
+			shouldRenderToolResult(
+				{ input: { mode: 'inline' }, result: { mode: 'special' } },
+				{ content: 'data' },
+			),
+		).toBe(false);
+		expect(
+			shouldRenderToolResult(
+				{ input: { mode: 'inline' }, result: { mode: 'collapsible', hidden: true } },
+				{ content: 'data' },
+			),
+		).toBe(false);
 	});
 
-	it('returns true when result.hidden is true', () => {
+	it('hides successful results when configured without hiding failures', () => {
 		const rule: ToolDisplayRule = {
 			input: { mode: 'inline' },
-			result: { hidden: true },
+			result: { mode: 'collapsible', hideOnSuccess: true },
 		};
-		expect(shouldHideToolResult(rule, { content: 'ok' })).toBe(true);
-	});
-
-	it('returns true when result.hideOnSuccess is true and result is not an error', () => {
-		const rule: ToolDisplayRule = {
-			input: { mode: 'inline' },
-			result: { hideOnSuccess: true },
-		};
-		expect(shouldHideToolResult(rule, { content: 'ok' })).toBe(true);
-	});
-
-	it('returns false when result.hideOnSuccess is true but result is an error', () => {
-		const rule: ToolDisplayRule = {
-			input: { mode: 'inline' },
-			result: { hideOnSuccess: true },
-		};
-		expect(shouldHideToolResult(rule, { content: 'fail', isError: true })).toBe(false);
-	});
-
-	it('returns false when result.hideOnSuccess is true but toolResult is null', () => {
-		const rule: ToolDisplayRule = {
-			input: { mode: 'inline' },
-			result: { hideOnSuccess: true },
-		};
-		expect(shouldHideToolResult(rule, null)).toBe(false);
-	});
-
-	it('returns false when result.hideOnSuccess is true but toolResult is undefined', () => {
-		const rule: ToolDisplayRule = {
-			input: { mode: 'inline' },
-			result: { hideOnSuccess: true },
-		};
-		expect(shouldHideToolResult(rule, undefined)).toBe(false);
-	});
-
-	it('returns false when result has neither hidden nor hideOnSuccess', () => {
-		const rule: ToolDisplayRule = {
-			input: { mode: 'collapsible' },
-			result: { mode: 'collapsible' },
-		};
-		expect(shouldHideToolResult(rule, { content: 'data' })).toBe(false);
+		expect(shouldRenderToolResult(rule, { content: 'ok' })).toBe(false);
+		expect(shouldRenderToolResult(rule, { content: 'failed', isError: true })).toBe(true);
 	});
 });
 

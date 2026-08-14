@@ -675,4 +675,23 @@ describe('loadCodexChatMessages', () => {
       ]);
     });
   });
+it('keeps rollout order when message timestamps move backward', async () => {
+    const lines = ['first', 'second', 'third'].map((label, index) => JSON.stringify({
+      type: 'response_item',
+      // Codex stamps a turn's rows from separate clocks, so a later row can carry
+      // an earlier timestamp than the row it follows in the file.
+      timestamp: `2026-07-10T21:34:0${3 - index}.000Z`,
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: label }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
+        id: `item-${index}`,
+      },
+    }));
+
+    const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
+
+    expect(messages.map((message) => message.content)).toEqual(['first', 'second', 'third']);
+  });
 });

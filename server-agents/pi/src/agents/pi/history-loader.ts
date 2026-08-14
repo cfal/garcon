@@ -13,6 +13,7 @@ import {
 } from '@garcon/common/chat-types';
 import { findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { convertPiMessage } from './message-converter.js';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { PiConfig } from '../../config.js';
 
 export interface PiPreview {
@@ -58,19 +59,16 @@ async function readPiSessionFile(sessionPath: string): Promise<{
   assertAcyclicActivePath(sessionEntries);
   // buildContextEntries plus sessionEntryToContextMessages is exactly the
   // decomposition buildSessionContext performs, kept explicit here so each
-  // rendered row retains its session entry identity for the projection audit.
+  // rendered row retains its session entry identity through to providerMeta.
   const messages = buildContextEntries(sessionEntries).flatMap((entry) => {
     const entryId = typeof entry.id === 'string' && entry.id.length > 0 ? entry.id : null;
-    let withinSourceOrdinal = 0;
-    return sessionEntryToContextMessages(entry).flatMap((message) => (
-      convertPiMessage(message).map((rendered) => {
-        if (entryId === null) return rendered;
-        return attachNativeMessageSource(rendered, {
-          entryId,
-          withinSourceOrdinal: withinSourceOrdinal++,
-        });
-      })
-    ));
+    const converted = sessionEntryToContextMessages(entry)
+      .flatMap((message) => convertPiMessage(message));
+    if (entryId === null) return converted;
+    return converted.map((message, withinSourceOrdinal) => attachNativeMessageSource(message, {
+      entryId,
+      withinSourceOrdinal,
+    }));
   });
   return { entries, header, messages };
 }

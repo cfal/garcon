@@ -27,7 +27,6 @@
 		};
 		resultId?: string;
 		toolResult?: Record<string, unknown>;
-		toolId?: string;
 	}
 
 	const DEFAULT_SCHEME = {
@@ -50,7 +49,6 @@
 		colorScheme = DEFAULT_SCHEME,
 		resultId,
 		toolResult,
-		toolId,
 	}: OneLineDisplayProps = $props();
 
 	let copied = $state(false);
@@ -119,6 +117,17 @@
 	</button>
 {/snippet}
 
+{#snippet resultJumpIcon()}
+	<svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+		<path
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			stroke-width="2"
+			d="M19 9l-7 7-7-7"
+		/>
+	</svg>
+{/snippet}
+
 <div class="group my-0.5">
 	{#if isTerminal}
 		<ChatEventCard variant="default" compact>
@@ -182,19 +191,20 @@
 						</div>
 						{#if toolResult}
 							<a
-								href="#tool-result-{toolId}"
+								href={resultId ? `#${resultId}` : undefined}
 								class="flex-shrink-0 text-[11px] text-primary hover:text-primary/80 transition-colors flex items-center gap-0.5 mt-0.5"
 								aria-label={m.chat_tool_display_jump_to_results()}
 							>
-								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M19 9l-7 7-7-7"
-									/>
-								</svg>
+								{@render resultJumpIcon()}
 							</a>
+						{:else}
+							<span
+								class="invisible mt-0.5 flex flex-shrink-0 items-center gap-0.5 text-[11px]"
+								data-chat-tool-result-placeholder
+								aria-hidden="true"
+							>
+								{@render resultJumpIcon()}
+							</span>
 						{/if}
 					</div>
 					{#if secondary}

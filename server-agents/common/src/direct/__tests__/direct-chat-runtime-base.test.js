@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import { DirectChatRuntimeBase } from '../direct-chat-runtime-base.ts';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 const createdDirs = [];
 const runtimes = [];
@@ -116,6 +117,20 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
       thinkingMode: 'high',
       messages: [{ role: 'user', content: 'first message' }],
     }]);
+  });
+
+  it('emits the persisted assistant turn identity despite timestamp drift', async () => {
+    const runtime = new CapturingDirectRuntime(await tempDir());
+    const messages = waitForMessages(runtime);
+
+    await runtime.startSession(startRequest({ turnId: 'turn-1' }));
+    const emitted = await messages;
+
+    expect(emitted).toHaveLength(1);
+    expect(getNativeMessageRevisionSource(emitted[0])).toEqual({
+      entryId: 'direct-turn:turn-1',
+      withinSourceOrdinal: 1,
+    });
   });
 
   it('replaces effort on every in-memory resume, including Default', async () => {

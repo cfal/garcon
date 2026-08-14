@@ -1854,12 +1854,19 @@ describe('ClaudeCliRuntime steering', () => {
     let runtime;
 
     try {
+      const initialMessageId = '019ff704-7b0c-70a1-b062-875461e5b578';
+      const steeringMessageId = '019ff704-7b0c-70a1-b062-875461e5b579';
       runtime = createRuntime(logger);
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const run = runtime.startClaudeCliSession(startOptions({
+        turnId: 'turn-active',
+        clientMessageId: initialMessageId,
+      }));
       await waitForWrittenUserMessage(fake);
       expect(runtime.captureSteerTarget('expected-session')).toBeNull();
 
       const original = await enqueueInputStarted(fake);
+      expect(original.uuid).toMatch(/^[0-9a-f-]{36}$/);
+      expect(original.uuid).not.toBe(initialMessageId);
       const target = runtime.captureSteerTarget('expected-session');
       expect(target).not.toBeNull();
       expect(Object.isFrozen(target)).toBe(true);
@@ -1869,6 +1876,7 @@ describe('ClaudeCliRuntime steering', () => {
       let prepareCalls = 0;
       const steering = runtime.steer(steerRequest(target, {
         input: '/review\nCheck cafe',
+        clientMessageId: steeringMessageId,
         prepareDelivery: async () => {
           prepareCalls += 1;
           await preparation.promise;
@@ -1892,7 +1900,7 @@ describe('ClaudeCliRuntime steering', () => {
         },
       });
       expect(frame.uuid).toMatch(/^[0-9a-f-]{36}$/);
-      expect(frame.uuid).not.toBe('message-steer');
+      expect(frame.uuid).not.toBe(steeringMessageId);
       expect(frame.uuid).not.toBe(original.uuid);
       expect(JSON.stringify(Object.values(logger).flatMap((entry) => entry.mock.calls)))
         .not.toContain('/review\nCheck cafe');
@@ -2002,13 +2010,14 @@ describe('ClaudeCliRuntime steering', () => {
       runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
       const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
       const original = await enqueueInputStarted(fake);
+      const sharedMessageId = '019ff704-7b0c-70a1-b062-875461e5b578';
       const first = runtime.steer(steerRequest(
         runtime.captureSteerTarget('expected-session'),
-        { input: 'first', clientMessageId: 'shared-message' },
+        { input: 'first', clientMessageId: sharedMessageId },
       ));
       const second = runtime.steer(steerRequest(
         runtime.captureSteerTarget('expected-session'),
-        { input: 'second', clientMessageId: 'shared-message' },
+        { input: 'second', clientMessageId: sharedMessageId },
       ));
       await expect(Promise.all([first, second])).resolves.toEqual([
         { kind: 'accepted' },
@@ -2016,8 +2025,8 @@ describe('ClaudeCliRuntime steering', () => {
       ]);
       const [, firstFrame, secondFrame] = writtenUserMessages(fake);
       expect(firstFrame.uuid).not.toBe(secondFrame.uuid);
-      expect(firstFrame.uuid).not.toBe('shared-message');
-      expect(secondFrame.uuid).not.toBe('shared-message');
+      expect(firstFrame.uuid).not.toBe(sharedMessageId);
+      expect(secondFrame.uuid).not.toBe(sharedMessageId);
 
       enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
       for (const frame of [firstFrame, secondFrame]) {

@@ -3,11 +3,13 @@
 
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
 import type { CodexJsonlNormalizationContext } from './history-normalizer.js';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from '@garcon/server-agent-common/shared/native-message-source';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
-import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
 import { LegacyCodexProjection } from './legacy-history-projection.js';
 import { codexMessageSourceIdentity } from './message-source-identity.js';
 
@@ -28,18 +30,26 @@ export interface CodexMessageBuckets {
   hasCanonicalThinking: boolean;
 }
 
-function timestampMs(value: unknown): number {
-  const time = new Date((value as string | number | Date | undefined) ?? 0).getTime();
-  return Number.isNaN(time) ? 0 : time;
-}
-
-export function sortChatMessagesByTimestamp(messages: ChatMessage[]): ChatMessage[] {
+// Rollout position, not wall-clock time, is the order Codex recorded. Timestamps
+// repeat and run backwards within a turn, so sorting by them reordered rows against
+// their own file - and the ledger persists whatever the importer returns, which
+// would make that reordering permanent.
+export function sortCodexMessagesBySource(messages: ChatMessage[]): ChatMessage[] {
   return messages
     .map((message, index) => ({ message, index }))
     .sort((a, b) => {
-      const left = new Date(a.message.timestamp || 0).getTime();
-      const right = new Date(b.message.timestamp || 0).getTime();
-      return compareTranscriptTimestamps(left, right) || a.index - b.index;
+      const left = getNativeMessageRevisionSource(a.message);
+      const right = getNativeMessageRevisionSource(b.message);
+      if (left?.byteOffset !== undefined && right?.byteOffset !== undefined) {
+        const byteOrder = left.byteOffset - right.byteOffset;
+        if (byteOrder !== 0) return byteOrder;
+      } else if (left?.lineNumber !== undefined && right?.lineNumber !== undefined) {
+        const lineOrder = left.lineNumber - right.lineNumber;
+        if (lineOrder !== 0) return lineOrder;
+      }
+      const ordinalOrder =
+        (left?.withinSourceOrdinal ?? 0) - (right?.withinSourceOrdinal ?? 0);
+      return ordinalOrder || a.index - b.index;
     })
     .map(({ message }) => message);
 }
@@ -61,13 +71,12 @@ export function addCodexJsonlLine(
   line: string,
   context: CodexJsonlNormalizationContext = {},
   projection = new LegacyCodexProjection(),
-): boolean {
+): void {
   const entry = parseCodexJsonlEntry(line);
-  if (!entry) return false;
+  if (!entry) return;
   try {
     const result = projection.project(entry, context);
-    if (!result) return false;
-
+    if (!result) return;
     const identity = codexResponseItemIdentity(entry);
     let withinSourceOrdinal = 0;
     const appendMessages = (target: ChatMessage[], messages: ChatMessage[]): void => {
@@ -94,16 +103,8 @@ export function addCodexJsonlLine(
     if (result.isCanonicalUser) buckets.hasCanonicalUser = true;
     if (result.isCanonicalAssistant) buckets.hasCanonicalAssistant = true;
     if (result.isCanonicalThinking) buckets.hasCanonicalThinking = true;
-    const emitted = result.canonical.length
-      + result.fallbackUser.length
-      + result.fallbackAssistant.length
-      + result.fallbackThinking.length > 0;
-    return emitted && (
-      typeof entry.timestamp !== 'string'
-      || timestampMs(entry.timestamp) <= 0
-    );
   } catch {
-    return false;
+    return;
   }
 }
 
@@ -132,13 +133,12 @@ function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: bool
   if (includeFallback && !buckets.hasCanonicalUser) messages.push(...buckets.fallbackUser);
   if (includeFallback && !buckets.hasCanonicalAssistant) messages.push(...buckets.fallbackAssistant);
   if (includeFallback && !buckets.hasCanonicalThinking) messages.push(...buckets.fallbackThinking);
-  return sortChatMessagesByTimestamp(messages);
+  return sortCodexMessagesBySource(messages);
 }
 
 // Reads a Codex JSONL file and returns ChatMessage[].
-// Uses per-content-class dedup. event_msg user messages are treated as
-// canonical transcript content, while response_item user messages are
-// only included as fallback when event_msg user entries are missing.
+// Uses message-class source precedence. event_msg user messages are canonical,
+// while response_item user messages are included only when that class is absent.
 export async function loadCodexChatMessages(
   nativePath: string | null | undefined,
   logger: AgentLogger = NOOP_LOGGER,

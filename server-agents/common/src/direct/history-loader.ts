@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import { AssistantMessage, UserMessage, type ChatMessage } from '@garcon/common/chat-types';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { directMessageNativeSource } from './direct-message-native-source.js';
 
 interface StoredMessage {
   clientRequestId?: string;
@@ -67,12 +68,12 @@ export async function loadDirectCompatibleChatMessagesFromPath(
                 }
               : undefined,
           ),
-          { lineNumber },
+          directMessageNativeSource({ role: entry.role, turnId: entry.turnId }, lineNumber),
         ));
       } else if (entry.role === 'assistant' && content) {
         messages.push(attachNativeMessageSource(
           new AssistantMessage(timestamp, content),
-          { lineNumber },
+          directMessageNativeSource({ role: entry.role, turnId: entry.turnId }, lineNumber),
         ));
       }
     } catch {

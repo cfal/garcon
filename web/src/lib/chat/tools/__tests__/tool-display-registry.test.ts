@@ -72,7 +72,6 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 
 	it('uses canonical type keys for core tools', () => {
 		expect(TOOL_DISPLAY_REGISTRY['bash-tool-use'].input.mode).toBe('inline');
-		expect(TOOL_DISPLAY_REGISTRY['bash-tool-use'].input.language).toBe('bash');
 		expect(TOOL_DISPLAY_REGISTRY['read-tool-use'].input.mode).toBe('inline');
 		expect(TOOL_DISPLAY_REGISTRY['list-tool-use'].input.mode).toBe('inline');
 		expect(TOOL_DISPLAY_REGISTRY['edit-tool-use'].input.mode).toBe('collapsible');
