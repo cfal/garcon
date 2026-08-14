@@ -1107,24 +1107,4 @@ describe('ConversationSlashCommandService', () => {
 		expect(appendLocalNotice).not.toHaveBeenCalled();
 		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
 	});
-
-	it('shows the native-history notice without attempting recovery', async () => {
-		const { deps, appendLocalNotice } = createDeps();
-		mockForkChat.mockRejectedValueOnce(new ApiError(
-			409,
-			'The message is not persisted',
-			'MESSAGE_NOT_IN_NATIVE_HISTORY',
-			undefined,
-			true,
-		));
-
-		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
-
-		expect(mockForkChat).toHaveBeenCalledTimes(1);
-		expect(deps.refetchTranscript).not.toHaveBeenCalled();
-		expect(appendLocalNotice).toHaveBeenCalledWith(
-			'error',
-			"This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
-		);
-	});
 });

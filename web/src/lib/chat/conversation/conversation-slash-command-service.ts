@@ -824,12 +824,8 @@ function isUnsettledForkPointError(error: unknown): error is ApiError {
 		&& error.errorCode === 'TRANSCRIPT_NOT_YET_PERSISTED';
 }
 
-// A fork point the server could not resolve against native history is a recoverable state the
-// user can act on, so it reads as its own notice instead of a generic fork failure.
 function forkFailureNotice(error: unknown): string {
-	return error instanceof ApiError && error.errorCode === 'MESSAGE_NOT_IN_NATIVE_HISTORY'
-		? m.chat_notice_fork_message_not_in_native_history()
-		: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) });
+	return m.chat_notice_failed_fork_chat({ detail: errorDetail(error) });
 }
 
 function moveChatNotice(boundary: 'top' | 'bottom', changed: boolean): string {

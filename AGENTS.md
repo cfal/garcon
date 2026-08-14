@@ -500,7 +500,10 @@ If any of these are missing, the task is not done.
 
 - Regenerate Paraglide message modules whenever translation keys are renamed, added, or removed.
 - Run this command from the repository root:
-  - `cd web && bunx @inlang/paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide`
+  - `cd web && bun run i18n:compile`
+- Use the script rather than calling the compiler directly. It carries the `locale-modules`
+  output structure that `vite.config.ts` regenerates with, and a bare `paraglide-js compile`
+  emits a different layout.
 - After regenerating, run validation:
   - `bun run check`
   - `bun run test`
