@@ -99,6 +99,7 @@ import {
   SnippetService,
 } from './snippets/service.js';
 import {
+  importNativeHistoryDrafts,
   ledgerRowsToMessages,
   TranscriptAdoptionService,
   TranscriptLedgerService,
@@ -474,6 +475,21 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
       fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
+      readForkedNativeHistory: async ({ targetChatId, sourceSession, fork }) => {
+        const integration = integrationRegistry.get(sourceSession.agentId);
+        if (!integration?.nativeHistoryImport) return null;
+        return importNativeHistoryDrafts({
+          chatId: targetChatId,
+          entry: sourceSession,
+          integration,
+          session: fork,
+          // The fork target starts with no carryover of its own; its history is the
+          // session it resumes from.
+          carryOverRevision: carryOver.revision([]),
+          signal: new AbortController().signal,
+          now: () => new Date().toISOString(),
+        });
+      },
       transcripts: transcriptLedger,
       chatIds,
       chatListProjector,

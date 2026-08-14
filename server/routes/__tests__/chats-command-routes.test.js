@@ -801,6 +801,28 @@ describe('REST chat command routes', () => {
     });
   });
 
+  it('POST /fork carries handoff-fork consent and rejects a non-boolean', async () => {
+    const agent = createRouteAgent();
+
+    const accepted = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
+      sourceChatId: CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      allowHandoffFork: true,
+    });
+
+    expect(accepted.response.status).toBe(200);
+    expect(forkChatFileCopy.mock.calls.at(-1)[0]).toMatchObject({ allowHandoffFork: true });
+
+    const rejected = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
+      sourceChatId: CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      allowHandoffFork: 'yes',
+    });
+
+    expect(rejected.response.status).toBe(400);
+    expect(rejected.body).toMatchObject({ error: 'allowHandoffFork must be a boolean' });
+  });
+
   it('POST /queue/entries creates, deduplicates, and preserves queue state', async () => {
     const agent = createRouteAgent();
     const handler = agent.routes['/api/v1/chats/queue/entries'].POST;

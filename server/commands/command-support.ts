@@ -41,6 +41,7 @@ import type { PathCache } from '../chats/path-cache.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
+import type { LedgerRowDraft } from '../ledger/contracts.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import {
   CommandExecutionControlError,
@@ -106,6 +107,7 @@ export type ForkChatFileCopyDep = (args: {
   sourceChatId: string;
   targetChatId: string;
   upToOrdinal?: number;
+  allowHandoffFork?: boolean;
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
@@ -118,7 +120,18 @@ export type ForkChatFileCopyDep = (args: {
     messageOrdinal?: number;
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
+  readForkedNativeHistory: (args: {
+    targetChatId: string;
+    sourceSession: ChatRegistryEntry;
+    fork: StartedAgentSession;
+  }) => Promise<LedgerRowDraft[] | null>;
 }) => Promise<ForkChatFileCopyResult>;
+
+export type ForkedNativeHistoryReaderDep = (args: {
+  targetChatId: string;
+  sourceSession: ChatRegistryEntry;
+  fork: StartedAgentSession;
+}) => Promise<LedgerRowDraft[] | null>;
 
 export interface FileMentionResolverDep {
   resolve(command: string, projectPath: string): Promise<string>;
@@ -134,6 +147,7 @@ export interface ChatCommandServiceDeps {
   agents: AgentRegistryDep;
   fileMentions: FileMentionResolverDep;
   forkChatFileCopy: ForkChatFileCopyDep;
+  readForkedNativeHistory: ForkedNativeHistoryReaderDep;
   transcripts: TranscriptLedgerService;
   chatIds: Pick<ChatIdAllocator, 'allocate'>;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;

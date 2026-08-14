@@ -71,6 +71,7 @@ describe('Codex fork while a turn is running', () => {
           sourceChatId,
           chatId: targetChatId,
           transcriptViewId: running.transcriptViewId,
+          allowHandoffFork: true,
           upToOrdinal: sourcePoint.ordinal,
         });
         const forked = await fixture.client.getMessages(targetChatId);
@@ -91,12 +92,20 @@ describe('Codex fork while a turn is running', () => {
       expect(pointForked.messages.map((entry) => entry.message))
         .toEqual(settled.messages.slice(0, 1).map((entry) => entry.message));
 
-      // A whole-chat fork copies the transcript as it stands instead of refusing.
+      // A whole-chat fork branches natively and seeds from the forked session, so its feed
+      // holds what that session holds. The running turn is not in it yet, so the fork shows
+      // settled history rather than rows its own agent has no memory of.
       const sourceAtWholeFork = await fixture.client.getMessages(sourceChatId);
       const wholeChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: wholeChatId });
       const wholeForked = await fixture.client.getMessages(wholeChatId);
-      expect(wholeForked.messages.map(semantic)).toEqual(sourceAtWholeFork.messages.map(semantic));
+      const sourceSemantic = sourceAtWholeFork.messages.map(semantic);
+      const forkedSemantic = wholeForked.messages.map(semantic);
+      expect(forkedSemantic).toEqual(sourceSemantic.slice(0, forkedSemantic.length));
+      expect(sourceSemantic.slice(forkedSemantic.length)).toEqual([
+        ['assistant-message', `codex-live-${RUNNING_PROMPT}`],
+        ['assistant-message', `codex-live2-${RUNNING_PROMPT}`],
+      ]);
 
       await writeFile(turnReleasePath, '');
       await fixture.client.waitForTurnTerminal(sourceChatId, run.turnId, { afterIndex: runCursor });

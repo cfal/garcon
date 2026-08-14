@@ -122,6 +122,9 @@ export interface ForkChatCommandRequest {
   sourceChatId: string;
   chatId: string;
   upToOrdinal?: number;
+  // Consent to a handoff fork when the point cannot be forked natively. The client sets it
+  // only after asking the user, so an unconfirmed request surfaces the refusal instead.
+  allowHandoffFork?: boolean;
   transcriptViewId?: string;
 }
 
@@ -625,10 +628,15 @@ export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequ
   if (upToOrdinal !== undefined && transcriptViewId === undefined) {
     throw new CommandRequestValidationError('upToOrdinal requires transcriptViewId');
   }
+  const allowHandoffFork = body.allowHandoffFork;
+  if (allowHandoffFork !== undefined && typeof allowHandoffFork !== 'boolean') {
+    throw new CommandRequestValidationError('allowHandoffFork must be a boolean');
+  }
   return {
     sourceChatId: requiredChatId(body, 'sourceChatId'),
     chatId: requiredChatId(body, 'chatId'),
     ...(upToOrdinal === undefined ? {} : { upToOrdinal: Number(upToOrdinal) }),
+    ...(allowHandoffFork ? { allowHandoffFork: true } : {}),
     ...(transcriptViewId === undefined ? {} : { transcriptViewId }),
   };
 }

@@ -72,6 +72,7 @@ describe('Claude fork while a turn is running', () => {
         sourceChatId,
         chatId: streamingPointChatId,
         transcriptViewId: streaming.transcriptViewId,
+        allowHandoffFork: true,
         upToOrdinal: streaming.lastOrdinal,
       });
       const streamingPoint = await fixture.client.getMessages(streamingPointChatId);
@@ -91,14 +92,17 @@ describe('Claude fork while a turn is running', () => {
       expect(userContents(pointForked.messages)).toEqual([SETTLED_PROMPT]);
       expect(assistantContents(pointForked.messages)).toEqual([`echo:${SETTLED_PROMPT}`]);
 
-      // A whole-chat fork copies the transcript as it stands instead of refusing.
+      // A whole-chat fork branches natively and seeds from the forked session, so its feed
+      // holds what that session holds. The running turn is not in it yet, so the fork shows
+      // settled history rather than rows its own agent has no memory of.
       const sourceAtWholeFork = await fixture.client.getMessages(sourceChatId);
+      expect(assistantContents(sourceAtWholeFork.messages))
+        .toEqual([`echo:${SETTLED_PROMPT}`, `echo:${RUNNING_PROMPT}`]);
       const wholeChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: wholeChatId });
       const wholeForked = await fixture.client.getMessages(wholeChatId);
-      expect(userContents(wholeForked.messages)).toEqual(userContents(sourceAtWholeFork.messages));
-      expect(assistantContents(wholeForked.messages))
-        .toEqual(assistantContents(sourceAtWholeFork.messages));
+      expect(userContents(wholeForked.messages)).toEqual([SETTLED_PROMPT, RUNNING_PROMPT]);
+      expect(assistantContents(wholeForked.messages)).toEqual([`echo:${SETTLED_PROMPT}`]);
 
       await writeFile(turnReleasePath, '');
       expect((await fixture.client.waitForTurnTerminal(sourceChatId, running.turnId, {

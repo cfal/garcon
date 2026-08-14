@@ -102,6 +102,7 @@ function makeDeps(overrides = {}) {
     forkAgentSession,
     discardForkedAgentSession: overrides.discardForkedAgentSession
       ?? mock(async () => undefined),
+    readForkedNativeHistory: overrides.readForkedNativeHistory ?? mock(async () => null),
     sessions,
   };
 }
@@ -180,7 +181,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
   });
 
-  it('delegates a current-binding row with no native fork position', async () => {
+  it('resolves a core-authored row to the provider row before it', async () => {
     const deps = makeDeps();
 
     await forkChatFileCopy({
@@ -191,11 +192,12 @@ describe('forkChatFileCopy', () => {
       ...deps,
     });
 
-    // Core does not read providerMeta to decide forkability; the integration does.
+    // Row 3 is a user input with no provider identity, so the point resolves back to the
+    // provider row at ordinal 2 rather than asking the user about a handoff fork.
     expect(deps.forkAgentSession).toHaveBeenCalledTimes(1);
     expect(deps.forkAgentSession.mock.calls[0][0]).toMatchObject({
       messageOrdinal: 3,
-      providerMeta: null,
+      providerMeta: { native: true },
     });
     // Three frozen conversational rows plus the session the integration handed back.
     const drafts = deps.ledger.initializeChat.mock.calls[0][1];
@@ -225,6 +227,80 @@ describe('forkChatFileCopy', () => {
       expect.objectContaining({ kind: 'session' }),
     ]);
     expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(3);
+  });
+
+  it('seeds a native fork from the forked session instead of the source rows', async () => {
+    const imported = [
+      { kind: 'user-input', at: '2026-08-07T12:00:00.000Z', detail: { clientMessageId: null, message: {}, attachments: [], steer: false }, providerMeta: { native: 'imported' } },
+      { kind: 'provider-row', at: '2026-08-07T12:00:01.000Z', message: {}, providerMeta: { native: 'imported' } },
+    ];
+    const deps = makeDeps({ readForkedNativeHistory: mock(async () => imported) });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    });
+
+    expect(deps.readForkedNativeHistory).toHaveBeenCalledWith(expect.objectContaining({
+      targetChatId: 'target-chat',
+      fork: expect.objectContaining({ agentSessionId: 'target-native' }),
+    }));
+    // Rows below the source content start are earlier-agent history no provider ever held,
+    // so they survive alongside the imported current binding.
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'session' }),
+      ...imported,
+    ]);
+    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(1);
+  });
+
+  it('keeps earlier-agent history below the content start when seeding natively', async () => {
+    const imported = [
+      { kind: 'provider-row', at: '2026-08-07T12:00:01.000Z', message: {}, providerMeta: { native: 'imported' } },
+    ];
+    const deps = makeDeps({
+      readForkedNativeHistory: mock(async () => imported),
+      ledger: {
+        currentView: mock((chatId) => (chatId === 'source-chat'
+          ? { viewId: 'source-view', contentStartOrdinal: 2 }
+          : null)),
+      },
+    });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    });
+
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'user-input' }),
+      expect.objectContaining({ kind: 'session' }),
+      ...imported,
+    ]);
+    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(2);
+  });
+
+  it('discards the fork when its native history cannot be read', async () => {
+    const deps = makeDeps({
+      readForkedNativeHistory: mock(async () => { throw new Error('history unreadable'); }),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    })).rejects.toThrow('history unreadable');
+
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
   });
 
   it('rejects a point beyond the ledger watermark before creating artifacts', async () => {

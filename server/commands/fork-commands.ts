@@ -22,6 +22,7 @@ interface ForkContext {
   sourceSession: ChatRegistryEntry;
   sourceNextForkOrdinal: number;
   upToOrdinal?: number;
+  allowHandoffFork?: boolean;
 }
 
 export class ForkCommands {
@@ -250,6 +251,7 @@ export class ForkCommands {
       sourceSession,
       sourceNextForkOrdinal: normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1,
       ...(upToOrdinal ? { upToOrdinal } : {}),
+      ...(input.allowHandoffFork ? { allowHandoffFork: true } : {}),
     };
   }
 
@@ -294,6 +296,7 @@ export class ForkCommands {
       sourceChatId: context.sourceChatId,
       targetChatId: context.targetChatId,
       ...(context.upToOrdinal ? { upToOrdinal: context.upToOrdinal } : {}),
+      ...(context.allowHandoffFork ? { allowHandoffFork: true } : {}),
       registry: this.deps.chats,
       settings: this.deps.settings,
       metadata: this.deps.metadata,
@@ -301,6 +304,7 @@ export class ForkCommands {
       ownership: this.deps.ownership,
       forkAgentSession: this.deps.agents.forkAgentSession.bind(this.deps.agents),
       discardForkedAgentSession: this.deps.agents.discardForkedAgentSession.bind(this.deps.agents),
+      readForkedNativeHistory: this.deps.readForkedNativeHistory,
     });
   }
 }

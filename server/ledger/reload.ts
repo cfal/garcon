@@ -1,17 +1,14 @@
-import type { AgentIntegration } from '@garcon/server-agent-interface';
-import type { ChatMessage } from '../../common/chat-types.js';
-import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
-import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { StoredChatExecutionControlState } from '../chat-execution/control-state.js';
 import type { TranscriptSnapshotReservation } from '../chat-execution/types.js';
 import { DomainError } from '../lib/domain-error.js';
-import type { LedgerRow, LedgerRowDraft, TranscriptView } from './contracts.js';
+import type { LedgerRowDraft, TranscriptView } from './contracts.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import { TranscriptLedgerService } from './service.js';
 import { frozenConversationDrafts } from './projection.js';
+import { importNativeHistoryDrafts } from './native-history-seed.js';
 
 interface ReloadExecutionPort {
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
@@ -102,13 +99,15 @@ export class TranscriptReloadService {
         detail: session.detail,
         providerMeta: null,
       };
-      const imported = await this.#importCurrent(
+      const imported = await importNativeHistoryDrafts({
         chatId,
         entry,
         integration,
-        session.detail,
+        session: session.detail,
+        carryOverRevision: this.options.getCarryOverRevision(entry),
         signal,
-      );
+        now: this.#now,
+      });
       const contentStartOrdinal = prefix.length + 1;
       staging = this.options.ledger.stageView(
         chatId,
@@ -128,83 +127,4 @@ export class TranscriptReloadService {
     this.options.reopenProducer(chatId);
     return replacement;
   }
-
-  async #importCurrent(
-    chatId: string,
-    entry: AgentChatEntry,
-    integration: AgentIntegration,
-    session: Extract<LedgerRow, { readonly kind: 'session' }>['detail'],
-    signal: AbortSignal,
-  ): Promise<LedgerRowDraft[]> {
-    const imported: Array<{
-      readonly message: ChatMessage;
-      readonly providerMeta: LedgerRowDraft['providerMeta'];
-    }> = [];
-    const chat = toAgentChatReference(
-      integration,
-      chatId,
-      {
-        ...entry,
-        agentSessionId: session.agentSessionId,
-        nativeSession: session.nativeSession,
-        nativeSeedReceipt: session.nativeSeedReceipt,
-      },
-      this.options.getCarryOverRevision(entry),
-    );
-    for await (const batch of integration.nativeHistoryImport!.load({ chat, signal })) {
-      signal.throwIfAborted();
-      for (const row of batch) {
-        imported.push({ message: row.message, providerMeta: row.providerMeta ?? null });
-      }
-    }
-    const sanitized = sanitizeRecordedCarriedContext({
-      messages: imported.map((row) => row.message),
-      receipt: session.nativeSeedReceipt,
-      agentSessionId: session.agentSessionId,
-    });
-    if (sanitized.kind === 'mismatch') {
-      throw new DomainError(
-        'CONTEXT_ENVELOPE_MISMATCH',
-        'The native transcript seed does not match this chat.',
-        422,
-        false,
-      );
-    }
-    return sanitized.messages.flatMap((message, index) => importedDraft(
-      message,
-      imported[index]!.providerMeta,
-      this.#now,
-    ));
-  }
-}
-
-function importedDraft(
-  message: ChatMessage,
-  providerMeta: LedgerRowDraft['providerMeta'],
-  now: () => string,
-): readonly LedgerRowDraft[] {
-  if (message.type === 'permission-request'
-      || message.type === 'permission-resolved'
-      || message.type === 'permission-cancelled'
-      || message.type === 'permission-expired') return [];
-  const at = message.timestamp || now();
-  if (message.type === 'user-message') {
-    return [{
-      kind: 'user-input',
-      at,
-      detail: {
-        clientMessageId: null,
-        message,
-        attachments: (message.images ?? []).map((image) => ({
-          kind: 'image',
-          data: image.data,
-          name: image.name || null,
-          mimeType: image.mimeType ?? 'application/octet-stream',
-        })),
-        steer: false,
-      },
-      providerMeta,
-    }];
-  }
-  return [{ kind: 'provider-row', at, message, providerMeta }];
 }
