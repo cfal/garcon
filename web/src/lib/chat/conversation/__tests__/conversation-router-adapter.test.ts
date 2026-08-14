@@ -44,7 +44,9 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	};
 }
 
-function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStoreDeps {
+function depsFor(
+	selectedChat: ChatSessionRecord | null,
+): ConversationRouterStoreDeps & { chatState: ActiveTranscriptState } {
 	return {
 		sessions: {
 			selectedChat,
@@ -103,6 +105,34 @@ describe('buildRouterStores', () => {
 		expect(deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.seq)).toEqual([
 			1, 2,
 		]);
+	});
+
+	it('bounds background live growth before the chat becomes active', () => {
+		const deps = depsFor(chatRecord());
+		deps.chatState.transcriptCache.replace(
+			'chat-2',
+			'generation-2',
+			Array.from({ length: 100 }, (_, index) => entry(index + 1, `message-${index + 1}`)),
+			100,
+		);
+		const stores = buildRouterStores(deps);
+
+		expect(
+			stores.chatState.warmBackgroundTranscript(
+				'chat-2',
+				'generation-2',
+				Array.from({ length: 250 }, (_, index) => entry(index + 101, `live-${index + 101}`)),
+			),
+		).toBe(true);
+
+		expect(deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.seq)).toEqual(
+			Array.from({ length: 100 }, (_, index) => index + 251),
+		);
+		deps.chatState.activateChat('chat-2');
+		expect(deps.chatState.entries.map((item) => item.seq)).toEqual(
+			Array.from({ length: 100 }, (_, index) => index + 251),
+		);
+		expect(deps.chatState.visibleMessageCount).toBe(100);
 	});
 
 	it('does not create tail-only background transcripts and queues recovery', () => {

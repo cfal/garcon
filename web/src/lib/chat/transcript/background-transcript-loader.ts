@@ -67,7 +67,12 @@ export class BackgroundTranscriptLoader {
 				this.#pending.delete(chatId);
 				for (const batch of pending) {
 					if (batch.generationId !== page.generationId) continue;
-					this.#cache.applyMessages(chatId, batch.generationId, batch.messages, batch.lastSeq);
+					this.#cache.applyBackgroundMessages(
+						chatId,
+						batch.generationId,
+						batch.messages,
+						batch.lastSeq,
+					);
 				}
 				pending = this.#pending.get(chatId);
 			}

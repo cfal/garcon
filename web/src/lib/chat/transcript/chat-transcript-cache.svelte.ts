@@ -263,6 +263,28 @@ export class ChatTranscriptCache {
 		return { status: 'applied', changed: true, lastSeq: next.lastSeq };
 	}
 
+	applyBackgroundMessages(
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+		serverLastSeq?: number,
+	): ChatTranscriptApplyResult {
+		const result = this.applyMessages(chatId, generationId, messages, serverLastSeq);
+		if (result.status !== 'applied') return result;
+		const entry = this.#entries.get(chatId);
+		if (!entry || entry.messages.length <= this.#limit) return result;
+
+		const boundedMessages = entry.messages.slice(-this.#limit);
+		const boundedEntry: ChatTranscriptEntry = {
+			...entry,
+			messages: boundedMessages,
+			oldestSeq: boundedMessages[0]?.seq ?? 0,
+		};
+		this.#entries.set(chatId, boundedEntry);
+		this.#persistence.schedule(boundedEntry);
+		return result;
+	}
+
 	markStale(chatId: string): void {
 		if (!chatId) return;
 		this.#persistence.remove(chatId);

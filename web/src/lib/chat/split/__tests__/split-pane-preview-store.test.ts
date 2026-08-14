@@ -111,17 +111,29 @@ describe('SplitPanePreviewStore', () => {
 		expect(transcriptCache.get('chat-1')).toBeNull();
 	});
 
-	it('applies contiguous messages and windows the preview', () => {
-		const store = new SplitPanePreviewStore();
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+	it('applies contiguous messages through a bounded preview cache', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 2 });
+		const store = new SplitPanePreviewStore(transcriptCache);
+		store.replaceSnapshot(
+			'chat-1',
+			'generation-1',
+			[entry(1, 'first'), entry(2, 'second')],
+			2,
+		);
 
-		const applied = store.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 2);
+		const applied = store.applyMessages(
+			'chat-1',
+			'generation-1',
+			[entry(3, 'third'), entry(4, 'fourth')],
+			4,
+		);
 
 		expect(applied).toBe(true);
-		expect(store.entry('chat-1').lastSeq).toBe(2);
+		expect(store.entry('chat-1').lastSeq).toBe(4);
 		expect(
 			store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content),
-		).toEqual(['first', 'second']);
+		).toEqual(['third', 'fourth']);
+		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([3, 4]);
 	});
 
 	it('marks stale when incoming messages belong to another generation', () => {

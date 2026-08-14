@@ -121,7 +121,7 @@ export class SplitPanePreviewStore {
 		messages: ChatViewMessage[],
 		serverLastSeq?: number,
 	): boolean {
-		const result = this.#transcriptCache.applyMessages(
+		const result = this.#transcriptCache.applyBackgroundMessages(
 			chatId,
 			generationId,
 			messages,

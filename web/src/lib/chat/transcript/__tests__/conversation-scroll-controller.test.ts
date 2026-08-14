@@ -261,6 +261,24 @@ describe('ConversationScrollController', () => {
 		expect(pruneLoadedHistoryAtLiveEnd).toHaveBeenCalledOnce();
 	});
 
+	it('starts the prune delay when pinned live growth expands a bounded window', async () => {
+		vi.useFakeTimers();
+		const pruneLoadedHistoryAtLiveEnd = vi.fn(() => true);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: { hasExpandedLiveHistory: false, pruneLoadedHistoryAtLiveEnd },
+		});
+		fixture.controller.scrollToBottom();
+		expect(vi.getTimerCount()).toBe(0);
+
+		fixture.state.hasExpandedLiveHistory = true;
+		fixture.state.feedMutationClock = mutationClock(1);
+		fixture.controller.reconcilePinnedProjection();
+		await vi.advanceTimersByTimeAsync(LIVE_HISTORY_PRUNE_IDLE_MS);
+
+		expect(pruneLoadedHistoryAtLiveEnd).toHaveBeenCalledOnce();
+	});
+
 	it('cancels pending history pruning for chat switches, hidden viewports, and destruction', () => {
 		vi.useFakeTimers();
 		const state = {

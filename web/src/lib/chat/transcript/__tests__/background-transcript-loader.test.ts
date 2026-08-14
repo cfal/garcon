@@ -76,10 +76,10 @@ describe('BackgroundTranscriptLoader', () => {
 			.fn()
 			.mockResolvedValue(page('generation-1', [entry(1, 'one'), entry(2, 'two')]));
 		const loader = new BackgroundTranscriptLoader({ cache, loadPage });
-		const applyMessages = cache.applyMessages.bind(cache);
+		const applyMessages = cache.applyBackgroundMessages.bind(cache);
 		let queuedLateBatch = false;
 		const applyMessagesSpy = vi
-			.spyOn(cache, 'applyMessages')
+			.spyOn(cache, 'applyBackgroundMessages')
 			.mockImplementation((chatId, generationId, messages, lastSeq) => {
 				const result = applyMessages(chatId, generationId, messages, lastSeq);
 				if (!queuedLateBatch) {

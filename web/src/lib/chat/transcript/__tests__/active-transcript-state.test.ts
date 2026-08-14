@@ -319,6 +319,33 @@ describe('ActiveTranscriptState', () => {
 		);
 	});
 
+	it('prunes live growth that began from the bounded pinned window', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: INITIAL_VISIBLE_MESSAGES }, (_, index) =>
+				entry(index + 1, assistant(`message-${index + 1}`)),
+			),
+			{
+				lastSeq: INITIAL_VISIBLE_MESSAGES,
+				pageOldestSeq: 1,
+				hasMore: false,
+			},
+		);
+
+		chat.applyMessages('chat-1', 'generation-1', [
+			entry(INITIAL_VISIBLE_MESSAGES + 1, assistant('live')),
+		]);
+
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
+		expect(chat.hasExpandedLiveHistory).toBe(true);
+		expect(chat.pruneLoadedHistoryAtLiveEnd()).toBe(true);
+		expect(chat.entries).toHaveLength(INITIAL_VISIBLE_MESSAGES);
+		expect(chat.entries[0]?.seq).toBe(2);
+		expect(chat.entries.at(-1)?.seq).toBe(INITIAL_VISIBLE_MESSAGES + 1);
+	});
+
 	it.each([
 		{
 			name: 'detached window',
@@ -2373,6 +2400,53 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.entries.at(-1)).toMatchObject({ seq: 101, message: { content: 'live' } });
 		expect(chat.transcriptCache.get('chat-1')?.messages.at(-1)).toMatchObject({ seq: 101 });
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 101 });
+	});
+
+	it('replays a complete cached prefix when live messages arrive during latest restoration', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 100 }, (_, index) =>
+				entry(index + 1, assistant(`message-${index + 1}`)),
+			),
+			{ lastSeq: 100, pageOldestSeq: 1, hasMore: false },
+		);
+		chat.entries = Array.from({ length: 50 }, (_, index) =>
+			entry(index + 1, assistant(`initial-${index + 1}`)),
+		);
+		chat.oldestSeq = 1;
+		chat.hasEarlierMessages = false;
+		chat.visibleMessageCount = 50;
+		let resolveLatest!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveLatest = resolve;
+			}),
+		);
+
+		const latest = chat.navigateToWindow('chat-1', 'latest');
+		expect(chat.applyMessages('chat-1', 'generation-1', [entry(101, assistant('live'))])).toBe(
+			'applied',
+		);
+		resolveLatest({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 51, assistant(`latest-${index + 51}`)),
+				),
+				lastSeq: 100,
+				pageOldestSeq: 51,
+				hasMore: true,
+			}),
+		});
+
+		await expect(latest).resolves.toBe('loaded');
+		expect(chat.entries[0]?.seq).toBe(1);
+		expect(chat.entries.at(-1)).toMatchObject({ seq: 101, message: { content: 'live' } });
+		expect(chat.hasEarlierMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(false);
 	});
 
 	it.each([

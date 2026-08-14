@@ -85,7 +85,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		generationId: string,
 		messages: ChatViewMessage[],
 	): ChatTranscriptApplyResult => {
-		const result = transcriptCache.applyMessages(chatId, generationId, messages);
+		const result = transcriptCache.applyBackgroundMessages(chatId, generationId, messages);
 		if (result.status !== 'applied') {
 			queueBackgroundLoad(chatId, generationId, messages);
 		}

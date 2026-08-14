@@ -142,6 +142,7 @@ export class ConversationScrollController {
 
 	reconcilePinnedProjection(): void {
 		this.deps.chatState.isUserScrolledUp = !this.isPinnedToBottom;
+		this.#scheduleHistoryPrune();
 	}
 
 	noteUserScrollIntent(

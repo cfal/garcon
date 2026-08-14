@@ -175,11 +175,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get hasExpandedLiveHistory(): boolean {
-		return (
-			!this.hasLaterMessages &&
-			this.entries.length > INITIAL_VISIBLE_MESSAGES &&
-			this.visibleMessageCount > INITIAL_VISIBLE_MESSAGES
-		);
+		return !this.hasLaterMessages && this.entries.length > INITIAL_VISIBLE_MESSAGES;
 	}
 
 	get hasEarlierRowsToReveal(): boolean {
@@ -864,6 +860,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 								messages: cached.messages,
 								lastSeq: cached.lastSeq,
 								pageOldestSeq: cached.oldestSeq,
+								hasMore: cached.oldestSeq > 1,
 							}
 						: page;
 				return this.setFromPage(chatId, latestPage, loadEpoch) === 'applied'

@@ -195,7 +195,12 @@
 			applyVisiblePreviewMessages?.(chatId, generationId, messages, lastSeq),
 		markBackgroundStale: (chatId) => transcriptCache.markStale(chatId),
 		onBackgroundMessages: (chatId, generationId, messages, lastSeq) => {
-			const applied = transcriptCache.applyMessages(chatId, generationId, messages, lastSeq);
+			const applied = transcriptCache.applyBackgroundMessages(
+				chatId,
+				generationId,
+				messages,
+				lastSeq,
+			);
 			if (applied.status !== 'applied') return false;
 			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
 			if (preview) sessions.patchPreview(chatId, preview.content, preview.timestamp);
