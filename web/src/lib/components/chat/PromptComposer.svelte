@@ -63,6 +63,8 @@
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { PromptRefinementController } from '$lib/chat/composer/prompt-refinement-controller.svelte.js';
+	import { promptRefinementErrorMessage } from '$lib/chat/composer/prompt-refinement-error-message.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -96,6 +98,7 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
+	import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
 	interface Props {
 		onsubmit: () => void;
 		onSteerPreferredSubmit: () => void;
@@ -152,6 +155,8 @@
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const snippetExpansion = new SnippetExpansionController();
+	const promptRefinement = new PromptRefinementController();
+	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
 		id: allocateTransientLayerId('snippet-expansion'),
@@ -163,10 +168,22 @@
 		},
 		restoreFocus: () => void restoreComposerFocus(),
 	});
+	const promptRefinementLayer = transientLayerAttachment({
+		registry: transientLayers,
+		id: allocateTransientLayerId('prompt-refinement'),
+		kind: 'prompt-transform',
+		modality: 'nonmodal',
+		onEscape: () => {
+			cancelPromptRefinement();
+			return true;
+		},
+		restoreFocus: () => void restoreComposerFocus(),
+	});
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let expandedEditor: { open: () => boolean } | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
+	let destroyed = false;
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let nextFocusRequestId = 0;
@@ -218,6 +235,7 @@
 		const changed = ui.resetOnChatSwitch(chatId);
 		if (!changed) return;
 		snippetExpansion.cancel();
+		promptRefinement.cancel();
 		composerState.isDragActive = false;
 		requestComposerFocusForChat(chatId);
 	});
@@ -274,7 +292,9 @@
 	});
 
 	onDestroy(() => {
+		destroyed = true;
 		snippetExpansion.cancel();
+		promptRefinement.cancel();
 		composerState.flushDraftSave();
 		imageAttachments.revokeAll();
 	});
@@ -348,7 +368,7 @@
 	}
 
 	async function insertSlashCommand(name: string) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		const trigger =
 			ui.slashCommandTrigger ??
 			findSlashCommandTrigger(
@@ -370,7 +390,7 @@
 	}
 
 	async function insertFileMention(path: string) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		const trigger =
 			ui.fileMentionTrigger ??
 			findFileMentionTrigger(
@@ -407,9 +427,10 @@
 
 	async function restoreComposerFocus(caret?: number): Promise<void> {
 		await tick();
+		if (destroyed || !isVisible) return;
 		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
 		autoResize();
-		textarea?.focus();
+		textarea?.focus({ preventScroll: true });
 	}
 
 	async function focusPendingSnippetExpansion(): Promise<void> {
@@ -417,12 +438,84 @@
 		if (snippetExpansion.pending) textarea?.focus();
 	}
 
+	async function focusRefinementTarget(chatId: string, caret?: number): Promise<void> {
+		if (ui.composerEditorOpen && ui.composerEditorChatId === chatId && isPresented) {
+			if (caret === undefined) ui.requestComposerEditorFocus();
+			else ui.moveComposerEditorCaretToEnd(chatId, caret);
+			await tick();
+			return;
+		}
+
+		await tick();
+		if (destroyed || sessions.selectedChatId !== chatId || !isVisible || !textarea) return;
+		if (caret !== undefined) textarea.setSelectionRange(caret, caret);
+		autoResize();
+		textarea.focus({ preventScroll: true });
+	}
+
+	function cancelPromptRefinement(): void {
+		if (!promptRefinement.pending) return;
+		promptRefinement.cancel();
+		const chatId = sessions.selectedChatId;
+		if (chatId) void focusRefinementTarget(chatId);
+	}
+
+	function handlePromptRefinement(): void {
+		if (promptRefinement.pending) {
+			cancelPromptRefinement();
+			return;
+		}
+		if (!canRefinePrompt) return;
+		void runPromptRefinement();
+	}
+
+	async function runPromptRefinement(): Promise<void> {
+		const sourceChatId = sessions.selectedChatId;
+		if (!sourceChatId) return;
+		const sourceText = composerState.inputText;
+		const sourceRevision = composerState.contentRevision;
+		ui.closeFileMenu();
+		ui.closeSlashMenu();
+		ui.snippetPalette.dismiss();
+		composerState.isDragActive = false;
+
+		try {
+			const result = await promptRefinement.run(sourceText);
+			if (result.kind !== 'refined') return;
+			if (
+				sessions.selectedChatId !== sourceChatId ||
+				composerState.contentRevision !== sourceRevision ||
+				composerState.inputText !== sourceText
+			) {
+				notifications.info(m.chat_composer_prompt_changed_during_refinement());
+				await focusRefinementTarget(sourceChatId);
+				return;
+			}
+
+			const refinedPrompt = result.response.refinedPrompt;
+			if (refinedPrompt === sourceText) {
+				notifications.info(m.chat_composer_prompt_refinement_unchanged());
+				await focusRefinementTarget(sourceChatId);
+				return;
+			}
+
+			const focus = focusRefinementTarget(sourceChatId, refinedPrompt.length);
+			composerState.inputText = refinedPrompt;
+			composerState.queueDraftSave(sourceChatId, refinedPrompt);
+			notifications.info(m.chat_composer_prompt_refined());
+			await focus;
+		} catch (error) {
+			notifications.error(promptRefinementErrorMessage(error));
+			await focusRefinementTarget(sourceChatId);
+		}
+	}
+
 	async function insertSnippet(
 		snippet: Snippet,
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (snippetExpansion.pending || !textarea) return 'cancelled';
+		if (promptTransformPending || !textarea) return 'cancelled';
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
@@ -537,7 +630,7 @@
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		if (handleCompletionKeyDown(event)) return;
 		if (event.key !== 'Enter') return;
 		const action = resolveComposerKeydownAction(event, {
@@ -552,7 +645,7 @@
 	}
 
 	function handleFormSubmit(action: Exclude<ComposerEnterAction, 'newline'> = 'submit') {
-		if (!canSubmit || snippetExpansion.pending) return;
+		if (!canSubmit || promptTransformPending) return;
 		const command = parseSnippetCommand(composerState.inputText);
 		if (command.kind === 'invalid') {
 			notifications.error(
@@ -571,7 +664,13 @@
 	}
 
 	function handleInput(event: Event) {
-		const value = (event.currentTarget as HTMLTextAreaElement).value;
+		const target = event.currentTarget as HTMLTextAreaElement;
+		if (isDisabled || promptTransformPending) {
+			target.value = composerState.inputText;
+			return;
+		}
+		const value = target.value;
+		composerState.inputText = value;
 		autoResize();
 		const caret = textarea?.selectionStart ?? value.length;
 		ui.updateTriggers(
@@ -584,13 +683,17 @@
 	}
 
 	function handleImagePick() {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		fileInput?.click();
 	}
 
 	function handleFileChange(event: Event) {
 		const input = event.target as HTMLInputElement;
 		if (!input.files) return;
+		if (promptTransformPending) {
+			input.value = '';
+			return;
+		}
 		composerState.addImages(Array.from(input.files), attachmentSupport);
 		input.value = '';
 	}
@@ -598,7 +701,7 @@
 	// Drag-and-drop handlers for file attachment.
 	function handleDragOver(event: DragEvent) {
 		event.preventDefault();
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		composerState.isDragActive = true;
 	}
 
@@ -608,7 +711,7 @@
 
 	function handleDrop(event: DragEvent) {
 		event.preventDefault();
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		composerState.isDragActive = false;
 		const files = event.dataTransfer?.files;
 		if (!files) return;
@@ -620,7 +723,7 @@
 
 	// Paste handler for images from clipboard.
 	function handlePaste(event: ClipboardEvent) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
 		const imageFiles: File[] = [];
@@ -646,10 +749,20 @@
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			isDisabled || directAdmissionPending || snippetExpansion.pending,
+			isDisabled || directAdmissionPending || promptTransformPending,
 			composerState.inputText,
 			composerState.images.length,
 		),
+	);
+	const canRefinePrompt = $derived(
+		!isDisabled &&
+			!directAdmissionPending &&
+			!promptTransformPending &&
+			composerState.inputText.trim().length > 0 &&
+			composerState.inputText.length <= PROMPT_REFINEMENT_DRAFT_MAX_LENGTH,
+	);
+	const promptTransformStatus = $derived(
+		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
 	);
 	const permissionOptions = $derived(
 		buildPermissionOptions(modelCatalog.getPermissionModes(agentState.agentId)),
@@ -657,9 +770,16 @@
 	const thinkingOptions = $derived(
 		buildThinkingOptions(modelCatalog.getThinkingModes(agentState.agentId), agentState.model),
 	);
-	const canAttachImages = $derived(modelCatalog.supportsImages(agentState.agentId, agentState.model));
-	const fileAttachmentMimeTypes = $derived(modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES);
-	const attachmentSupport = $derived({ allowImages: canAttachImages, fileMimeTypes: fileAttachmentMimeTypes });
+	const canAttachImages = $derived(
+		modelCatalog.supportsImages(agentState.agentId, agentState.model),
+	);
+	const fileAttachmentMimeTypes = $derived(
+		modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
+	);
+	const attachmentSupport = $derived({
+		allowImages: canAttachImages,
+		fileMimeTypes: fileAttachmentMimeTypes,
+	});
 	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
 	const quickCommitRunningActionVisible = $derived(
@@ -723,8 +843,12 @@
 	<div
 		data-composer
 		class={composerSurfaceClass}
-		aria-busy={snippetExpansion.pending}
+		aria-busy={promptTransformPending}
 		{@attach snippetExpansion.pending && snippetExpansionLayer}
+		{@attach promptRefinement.pending &&
+			!ui.composerEditorOpen &&
+			isPresented &&
+			promptRefinementLayer}
 	>
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
@@ -794,13 +918,17 @@
 											<img src={url} alt={file.name} class="w-full h-full object-cover" />
 										{/if}
 									{:else}
-									<div class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground">
+										<div
+											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
+										>
 											{#if isVideoChatAttachment(file)}
 												<FileVideo class="h-5 w-5" aria-hidden="true" />
 											{:else}
 												<FileText class="h-5 w-5" aria-hidden="true" />
 											{/if}
-										<span class="w-full truncate text-center text-[10px] leading-tight">{file.name}</span>
+											<span class="w-full truncate text-center text-[10px] leading-tight"
+												>{file.name}</span
+											>
 										</div>
 									{/if}
 								</div>
@@ -809,8 +937,10 @@
 									aria-label={m.chat_composer_remove_image({ name: file.name })}
 									title={m.chat_composer_remove_image({ name: file.name })}
 									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-									onclick={() => composerState.removeImage(idx)}
-									disabled={snippetExpansion.pending}
+									onclick={() => {
+										if (!promptTransformPending) composerState.removeImage(idx);
+									}}
+									disabled={promptTransformPending}
 								>
 									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
@@ -825,6 +955,7 @@
 				type="file"
 				accept={attachmentAccept}
 				multiple
+				disabled={promptTransformPending}
 				class="hidden"
 				onchange={handleFileChange}
 			/>
@@ -841,15 +972,15 @@
 				<div class="relative z-10">
 					<textarea
 						bind:this={textarea}
-						bind:value={composerState.inputText}
+						value={composerState.inputText}
 						onkeydown={handleKeyDown}
 						oninput={handleInput}
 						onpaste={handlePaste}
 						onfocus={() => appShell.requestSidebarRecenterToSelected()}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
-						readonly={snippetExpansion.pending}
-						aria-busy={snippetExpansion.pending}
+						readonly={promptTransformPending}
+						aria-busy={promptTransformPending}
 						class={textareaClass}
 						style:height={`${composerHeight.renderedHeight}px`}></textarea>
 				</div>
@@ -861,8 +992,12 @@
 				onAddImage={handleImagePick}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
+				onRefinePrompt={handlePromptRefinement}
+				{canRefinePrompt}
+				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
-				isPromptTransformPending={snippetExpansion.pending}
+				isPromptTransformPending={promptTransformPending}
+				{promptTransformStatus}
 				{permissionOptions}
 				selectedPermission={agentState.permissionMode}
 				onPermissionSelect={(mode) => {
@@ -977,7 +1112,10 @@
 	{isVisible}
 	{isPresented}
 	{isDisabled}
-	promptTransformPending={snippetExpansion.pending}
+	{promptTransformPending}
+	isPromptRefinementPending={promptRefinement.pending}
+	{canRefinePrompt}
+	onRefinePrompt={handlePromptRefinement}
 	openRequestId={composerEditorOpenRequestId}
 	resizeTextarea={autoResize}
 />

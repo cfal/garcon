@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Paperclip from '@lucide/svelte/icons/paperclip';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
+	import Square from '@lucide/svelte/icons/square';
 	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -15,8 +17,12 @@
 		selection: ComposerEditorSelection;
 		attachmentCount: number;
 		focusRequestId: number;
+		readOnly: boolean;
+		canRefinePrompt: boolean;
+		isPromptRefinementPending: boolean;
 		onTextChange: (text: string) => void;
 		onSelectionChange: (selection: ComposerEditorSelection) => void;
+		onRefinePrompt: () => void;
 		onClose: () => void;
 	}
 
@@ -25,8 +31,12 @@
 		selection,
 		attachmentCount,
 		focusRequestId,
+		readOnly,
+		canRefinePrompt,
+		isPromptRefinementPending,
 		onTextChange,
 		onSelectionChange,
+		onRefinePrompt,
 		onClose,
 	}: Props = $props();
 	const editorRenderer = lazyRenderer(() => import('./ComposerEditor.svelte'));
@@ -58,6 +68,29 @@
 				</div>
 			{/if}
 			<Button
+				variant="outline"
+				size="sm"
+				class={isPromptRefinementPending
+					? 'shrink-0 border-accent bg-accent text-accent-foreground hover:bg-accent/80'
+					: 'shrink-0'}
+				disabled={!isPromptRefinementPending && !canRefinePrompt}
+				onclick={onRefinePrompt}
+				aria-label={isPromptRefinementPending
+					? m.chat_composer_cancel_prompt_refinement()
+					: m.chat_composer_refine_prompt()}
+				title={isPromptRefinementPending
+					? m.chat_composer_cancel_prompt_refinement()
+					: m.chat_composer_refine_prompt()}
+			>
+				{#if isPromptRefinementPending}
+					<Square class="size-3.5" aria-hidden="true" />
+					<span class="hidden sm:inline">{m.chat_composer_cancel_refinement()}</span>
+				{:else}
+					<Sparkles class="size-3.5" aria-hidden="true" />
+					<span class="hidden sm:inline">{m.chat_composer_refine_prompt()}</span>
+				{/if}
+			</Button>
+			<Button
 				variant="ghost"
 				size="icon-sm"
 				onclick={onClose}
@@ -67,7 +100,7 @@
 				<X class="size-4" aria-hidden="true" />
 			</Button>
 		</div>
-		<div class="min-h-0 flex-1 bg-background">
+		<div class="min-h-0 flex-1 bg-background" aria-busy={isPromptRefinementPending}>
 			{#key retryKey}
 				{#await editorRenderer()}
 					<div
@@ -83,6 +116,7 @@
 							{text}
 							{selection}
 							{focusRequestId}
+							{readOnly}
 							ariaLabel={m.chat_composer_expanded_editor_label()}
 							{onTextChange}
 							{onSelectionChange}
