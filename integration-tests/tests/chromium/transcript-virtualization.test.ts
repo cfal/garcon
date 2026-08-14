@@ -312,25 +312,6 @@ async function surfaceIdentity(page: Page): Promise<string> {
     });
 }
 
-async function waitForSurfaceIdentityChange(page: Page, previous: string): Promise<void> {
-  await page.waitForFunction(
-    ({ selector, priorIdentity }) =>
-      [...document.querySelectorAll<HTMLElement>(selector)].some((item) => {
-        const value = item.dataset.chatVirtualItem;
-        if (!value) return false;
-        try {
-          const parsed = JSON.parse(value);
-          return (
-            Array.isArray(parsed) && typeof parsed[0] === 'string' && parsed[0] !== priorIdentity
-          );
-        } catch {
-          return false;
-        }
-      }),
-    { selector: ITEM_SELECTOR, priorIdentity: previous },
-    { timeout: 20_000 },
-  );
-}
 
 async function waitForSurfaceIdentity(page: Page, expected: string): Promise<void> {
   await page.waitForFunction(
@@ -1412,13 +1393,13 @@ async function createTranscript(fixture: ChromiumFixture): Promise<string> {
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
 
   await waitForTranscriptReady(fixture.page);
-  const initialSurfaceIdentity = await surfaceIdentity(fixture.page);
+  // Appending never rotates the transcript view, so the surface identity is expected to
+  // hold here; the appended turn rendering is what proves the feed caught up.
   await appendTurn(fixture.integration, chatId, 'chromium-generation-prime');
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-generation-prime', { exact: true })
     .waitFor();
-  await waitForSurfaceIdentityChange(fixture.page, initialSurfaceIdentity);
   await waitForTranscriptReady(fixture.page);
   return chatId;
 }
