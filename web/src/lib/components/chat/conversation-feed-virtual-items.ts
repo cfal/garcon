@@ -78,6 +78,17 @@ function transcriptSpacing(item: ConversationFeedRenderItem): ConversationFeedSp
 	return conversationFeedItemLayout(item) === 'hidden' ? 'none' : 'scaled-transcript';
 }
 
+// Consumes the requests anchored to this row so a later row cannot claim them again.
+function takeAnchoredPermissions(
+	permissionsByAnchor: Map<number, PendingPermissionRequest[]>,
+	item: ConversationFeedRenderItem,
+): PendingPermissionRequest[] {
+	if (item.kind !== 'message' || item.ordinal === undefined) return [];
+	const anchored = permissionsByAnchor.get(item.ordinal) ?? [];
+	permissionsByAnchor.delete(item.ordinal);
+	return anchored;
+}
+
 export function buildConversationVirtualFeedModel(
 	input: ConversationVirtualFeedInput,
 ): ConversationVirtualFeedModel {
@@ -128,10 +139,9 @@ export function buildConversationVirtualFeedModel(
 		permissionsByAnchor.set(anchor.afterOrdinal, anchored);
 	}
 
-	for (const item of input.transcriptItems) {
-		const ordinal = item.kind === 'message' ? item.ordinal : undefined;
-		const anchored = ordinal === undefined ? [] : permissionsByAnchor.get(ordinal) ?? [];
-		if (ordinal !== undefined) permissionsByAnchor.delete(ordinal);
+	for (const [transcriptIndex, item] of input.transcriptItems.entries()) {
+		const anchored = takeAnchoredPermissions(permissionsByAnchor, item);
+		const isLastItem = transcriptIndex === input.transcriptItems.length - 1;
 		items.push({
 			kind: 'transcript',
 			key: key(`transcript:${item.id}`),
@@ -139,7 +149,13 @@ export function buildConversationVirtualFeedModel(
 			spacingAfter: anchored.length > 0 ? 'none' : transcriptSpacing(item),
 		});
 		for (const [permissionIndex, request] of anchored.entries()) {
-			items.push(permissionItem(key, request, permissionIndex === 0, true));
+			const isLastAnchored = permissionIndex === anchored.length - 1;
+			items.push(permissionItem(
+				key,
+				request,
+				permissionIndex === 0,
+				!(isLastAnchored && isLastItem),
+			));
 		}
 	}
 	for (const permissions of permissionsByAnchor.values()) detachedPermissions.push(...permissions);
