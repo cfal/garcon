@@ -36,6 +36,7 @@ function clock(
 			'live-append': liveAppendRevision,
 			'history-earlier': 0,
 			'history-later': 0,
+			'history-pruned': 0,
 			replacement: 0,
 			'presentation-structure': presentationRevision,
 		},
@@ -46,13 +47,13 @@ function assistantRow(id: string, content: string) {
 	return {
 		kind: 'message' as const,
 		id,
-		ordinal: Number(id),
+		seq: Number(id),
 		message: new AssistantMessage('2026-01-01T00:00:00.000Z', content),
 	};
 }
 
 function messageRow(id: string, message: ChatMessage) {
-	return { kind: 'message' as const, id, ordinal: Number(id), message };
+	return { kind: 'message' as const, id, seq: Number(id), message };
 }
 
 const enabled = {

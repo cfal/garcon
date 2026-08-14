@@ -1,6 +1,9 @@
-import { isToolUseMessage } from '$shared/chat-types';
+import { isToolUseMessage, ToolResultMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
-import type { ReconciledConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-render-model.js';
+import {
+	conversationFeedItemLayout,
+	type ConversationFeedRenderItem,
+} from '$lib/chat/transcript/conversation-feed-items.js';
 
 export type ConversationFeedSpacing = 'responsive-feed' | 'scaled-transcript' | 'none';
 
@@ -12,7 +15,7 @@ export type ConversationVirtualFeedItem =
 	| {
 			kind: 'transcript';
 			key: string;
-			item: ReconciledConversationFeedRenderItem;
+			item: ConversationFeedRenderItem;
 			spacingAfter: ConversationFeedSpacing;
 	  }
 	| { kind: 'later-boundary'; key: string; spacingAfter: 'none' }
@@ -51,8 +54,8 @@ export interface ConversationVirtualFeedInput {
 	showLaterBoundary: boolean;
 	reserveComposerTraySpace: boolean;
 	surfaceIdentity: string;
+	transcriptItems: ConversationFeedRenderItem[];
 	transcriptViewId: string;
-	transcriptItems: ReconciledConversationFeedRenderItem[];
 	pendingPermissions: PendingPermissionRequest[];
 }
 
@@ -60,16 +63,19 @@ function namespacedKey(surfaceIdentity: string, localKey: string): string {
 	return JSON.stringify([surfaceIdentity, localKey]);
 }
 
-function toolMembers(
-	item: ReconciledConversationFeedRenderItem,
-): Array<{ rowId: string; toolId: string }> {
-	if (item.kind === 'bash-group' || item.kind === 'read-group') {
-		return item.rows.map((row) => ({ rowId: row.id, toolId: row.message.toolId }));
+function toolAnchorIds(item: ConversationFeedRenderItem): string[] {
+	if (item.kind !== 'message') return [];
+	if (isToolUseMessage(item.message)) {
+		return [`tool-input-${item.message.toolId}`];
 	}
-	if (item.kind === 'message' && isToolUseMessage(item.message)) {
-		return [{ rowId: item.rowIds[0], toolId: item.message.toolId }];
+	if (item.message instanceof ToolResultMessage) {
+		return [`tool-result-${item.id}`];
 	}
 	return [];
+}
+
+function transcriptSpacing(item: ConversationFeedRenderItem): ConversationFeedSpacing {
+	return conversationFeedItemLayout(item) === 'hidden' ? 'none' : 'scaled-transcript';
 }
 
 export function buildConversationVirtualFeedModel(
@@ -105,7 +111,11 @@ export function buildConversationVirtualFeedModel(
 		});
 	}
 	const transcriptStartIndex = items.length;
-	const permissionByAnchor = new Map<number, PendingPermissionRequest[]>();
+
+	// A permission request renders after the row it was raised against, so it stays put as
+	// the transcript grows. Requests whose anchor belongs to another view, or to a row this
+	// window has not loaded, fall through to the end of the feed.
+	const permissionsByAnchor = new Map<number, PendingPermissionRequest[]>();
 	const detachedPermissions: PendingPermissionRequest[] = [];
 	for (const permission of input.pendingPermissions) {
 		const anchor = permission.transcript;
@@ -113,31 +123,26 @@ export function buildConversationVirtualFeedModel(
 			detachedPermissions.push(permission);
 			continue;
 		}
-		const anchored = permissionByAnchor.get(anchor.afterOrdinal) ?? [];
+		const anchored = permissionsByAnchor.get(anchor.afterOrdinal) ?? [];
 		anchored.push(permission);
-		permissionByAnchor.set(anchor.afterOrdinal, anchored);
+		permissionsByAnchor.set(anchor.afterOrdinal, anchored);
 	}
 
-	for (const [transcriptIndex, item] of input.transcriptItems.entries()) {
-		const ordinals = transcriptItemOrdinals(item);
-		const anchored = ordinals.flatMap((ordinal) => permissionByAnchor.get(ordinal) ?? []);
-		for (const ordinal of ordinals) permissionByAnchor.delete(ordinal);
+	for (const item of input.transcriptItems) {
+		const ordinal = item.kind === 'message' ? item.ordinal : undefined;
+		const anchored = ordinal === undefined ? [] : permissionsByAnchor.get(ordinal) ?? [];
+		if (ordinal !== undefined) permissionsByAnchor.delete(ordinal);
 		items.push({
 			kind: 'transcript',
-			key: key(`transcript:${item.virtualKey}`),
+			key: key(`transcript:${item.id}`),
 			item,
-			spacingAfter:
-				anchored.length === 0 && transcriptIndex < input.transcriptItems.length - 1
-					? 'scaled-transcript'
-					: 'none',
+			spacingAfter: anchored.length > 0 ? 'none' : transcriptSpacing(item),
 		});
 		for (const [permissionIndex, request] of anchored.entries()) {
-			items.push(permissionItem(key, request, permissionIndex === 0, (
-				permissionIndex < anchored.length - 1 || transcriptIndex < input.transcriptItems.length - 1
-			)));
+			items.push(permissionItem(key, request, permissionIndex === 0, true));
 		}
 	}
-	for (const permissions of permissionByAnchor.values()) detachedPermissions.push(...permissions);
+	for (const permissions of permissionsByAnchor.values()) detachedPermissions.push(...permissions);
 	const transcriptEndIndex = items.length;
 
 	if (input.showLaterBoundary) {
@@ -172,14 +177,13 @@ export function buildConversationVirtualFeedModel(
 		indexByKey.set(virtualItem.key, index);
 		if (virtualItem.kind !== 'transcript') continue;
 
-		for (const rowId of virtualItem.item.rowIds) {
-			indexByRowId.set(rowId, index);
-			targetByDomAnchorId.set(rowId, { index, innerRowId: rowId });
-		}
-		for (const member of toolMembers(virtualItem.item)) {
-			const target = { index, innerRowId: member.rowId };
-			targetByDomAnchorId.set(`tool-input-${member.toolId}`, target);
-			targetByDomAnchorId.set(`tool-result-${member.toolId}`, target);
+		indexByRowId.set(virtualItem.item.id, index);
+		targetByDomAnchorId.set(virtualItem.item.id, {
+			index,
+			innerRowId: virtualItem.item.id,
+		});
+		for (const anchorId of toolAnchorIds(virtualItem.item)) {
+			targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
 		}
 	}
 
@@ -193,52 +197,22 @@ export function buildConversationVirtualFeedModel(
 	};
 }
 
-function permissionItem(
-	key: (localKey: string) => string,
-	request: PendingPermissionRequest,
-	leadingSpacing: boolean,
-	trailingSpacing: boolean,
-): ConversationVirtualFeedItem {
-	return {
-		kind: 'permission',
-		key: key(`permission:${request.permissionRequestId}:${request.control?.incarnation ?? 'legacy'}`),
-		request,
-		leadingSpacing,
-		spacingAfter: trailingSpacing ? 'responsive-feed' : 'none',
-	};
-}
-
-function transcriptItemOrdinals(item: ReconciledConversationFeedRenderItem): number[] {
-	if (item.kind === 'message') return item.ordinal === undefined ? [] : [item.ordinal];
-	if (item.kind === 'bash-group' || item.kind === 'read-group') {
-		return item.rows.flatMap((row) => row.ordinal === undefined ? [] : [row.ordinal]);
-	}
-	return [];
-}
-
 export function appendConversationVirtualTranscriptTail(
 	model: ConversationVirtualFeedModel,
 	surfaceIdentity: string,
-	appendedItems: ReconciledConversationFeedRenderItem[],
+	appendedItems: ConversationFeedRenderItem[],
 ): ConversationVirtualFeedModel | null {
-	if (appendedItems.length === 0 || appendedItems.some((item) => item.rowIds.length !== 1)) {
-		return null;
-	}
+	if (appendedItems.length === 0) return null;
 	const insertIndex = model.transcriptEndIndex;
-	const appendedVirtualItems = appendedItems.map((item, index): ConversationVirtualFeedItem => ({
+	const appendedVirtualItems = appendedItems.map((item): ConversationVirtualFeedItem => ({
 		kind: 'transcript',
-		key: namespacedKey(surfaceIdentity, `transcript:${item.virtualKey}`),
+		key: namespacedKey(surfaceIdentity, `transcript:${item.id}`),
 		item,
-		spacingAfter: index < appendedItems.length - 1 ? 'scaled-transcript' : 'none',
+		spacingAfter: transcriptSpacing(item),
 	}));
 	if (appendedVirtualItems.some((item) => model.indexByKey.has(item.key))) return null;
 
 	const items = model.items.slice();
-	if (insertIndex > model.transcriptStartIndex) {
-		const priorTail = items[insertIndex - 1];
-		if (priorTail?.kind !== 'transcript') return null;
-		items[insertIndex - 1] = { ...priorTail, spacingAfter: 'scaled-transcript' };
-	}
 	items.splice(insertIndex, 0, ...appendedVirtualItems);
 
 	const indexByKey = new Map(model.indexByKey);
@@ -250,14 +224,13 @@ export function appendConversationVirtualTranscriptTail(
 	for (const [offset, virtualItem] of appendedVirtualItems.entries()) {
 		if (virtualItem.kind !== 'transcript') continue;
 		const index = insertIndex + offset;
-		for (const rowId of virtualItem.item.rowIds) {
-			indexByRowId.set(rowId, index);
-			targetByDomAnchorId.set(rowId, { index, innerRowId: rowId });
-		}
-		for (const member of toolMembers(virtualItem.item)) {
-			const target = { index, innerRowId: member.rowId };
-			targetByDomAnchorId.set(`tool-input-${member.toolId}`, target);
-			targetByDomAnchorId.set(`tool-result-${member.toolId}`, target);
+		indexByRowId.set(virtualItem.item.id, index);
+		targetByDomAnchorId.set(virtualItem.item.id, {
+			index,
+			innerRowId: virtualItem.item.id,
+		});
+		for (const anchorId of toolAnchorIds(virtualItem.item)) {
+			targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
 		}
 	}
 
@@ -295,12 +268,27 @@ export function estimateConversationFeedItemSize(
 	const renderItem = item.item;
 	const scale = Math.max(0.5, Math.min(textScale, 2));
 	const spacing = item.spacingAfter === 'scaled-transcript' ? 12 * scale : 0;
+	const layout = conversationFeedItemLayout(renderItem);
+	if (layout === 'hidden') return 0;
+	if (layout === 'permission') return 240 * scale + spacing;
 	if (renderItem.kind === 'local-notice') return 52 * scale + spacing;
-	if (renderItem.kind === 'bash-group' || renderItem.kind === 'read-group') {
-		return (44 + renderItem.rows.length * 34) * scale + spacing;
-	}
 	if (renderItem.message.type === 'user-message') return 112 * scale + spacing;
 	if (renderItem.message.type === 'assistant-message') return 180 * scale + spacing;
 	if (renderItem.message.type === 'thinking') return 160 * scale + spacing;
 	return 96 * scale + spacing;
+}
+
+function permissionItem(
+	key: (localKey: string) => string,
+	request: PendingPermissionRequest,
+	leadingSpacing: boolean,
+	trailingSpacing: boolean,
+): ConversationVirtualFeedItem {
+	return {
+		kind: 'permission',
+		key: key(`permission:${request.permissionRequestId}:${request.control?.incarnation ?? 'legacy'}`),
+		request,
+		leadingSpacing,
+		spacingAfter: trailingSpacing ? 'responsive-feed' : 'none',
+	};
 }

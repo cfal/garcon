@@ -13,7 +13,7 @@ import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 const TS = '2026-08-03T00:00:00.000Z';
 
 function row(ordinal: number, message: ChatMessage): ChatDisplayRow {
-	return { kind: 'message', id: `generation-1:${seq}`, seq, message };
+	return { kind: 'message', id: `generation-1:${ordinal}`, ordinal, message };
 }
 
 describe('ConversationFeedRenderModelController', () => {

@@ -15,7 +15,6 @@
 	import type {
 		ChatMessage,
 		ToolUseChatMessage,
-		UserMessageDeliveryStatus,
 	} from '$shared/chat-types';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
@@ -158,24 +157,7 @@
 		if (!(asToolResult && pairedToolUse instanceof AskUserQuestionToolUseMessage)) return null;
 		return historicalAskUserQuestion(pairedToolUse, asToolResult);
 	});
-	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
-
 	function ignorePermissionDecision(): void {}
-
-	function deliveryTitle(status: UserMessageDeliveryStatus | null): string {
-		switch (status) {
-			case 'submitting':
-				return m.chat_message_delivery_sending();
-			case 'unconfirmed':
-				return m.chat_message_delivery_unconfirmed();
-			case 'failed':
-				return m.chat_message_delivery_failed();
-			default:
-				return '';
-		}
-	}
-
-	const userDeliveryTitle = $derived(deliveryTitle(userDeliveryStatus));
 
 	const showNonAssistantHeader = $derived(message instanceof ErrorMessage);
 
@@ -537,23 +519,6 @@
 					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
 				>
 					{@render floatingMessageMenuButton('bottom-0 right-0')}
-					{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'unconfirmed' || userDeliveryStatus === 'failed'}
-						<span
-							class={cn(
-								'user-message-delivery-indicator absolute left-1/2 top-1/2 inline-flex size-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center',
-								userDeliveryStatus === 'failed' && 'text-status-error-foreground',
-								userDeliveryStatus === 'unconfirmed' && 'text-status-warning-muted-foreground',
-							)}
-							title={userDeliveryTitle}
-							aria-label={userDeliveryTitle}
-						>
-							{#if userDeliveryStatus === 'submitting'}
-								<LoaderCircle class="size-3.5 animate-spin" />
-							{:else}
-								<CircleAlert class="size-3" />
-							{/if}
-						</span>
-					{/if}
 				</div>
 			</div>
 		{:else}

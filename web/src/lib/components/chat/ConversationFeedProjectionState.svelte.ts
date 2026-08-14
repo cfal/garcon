@@ -37,7 +37,8 @@ export interface ConversationFeedProjectionInput {
 	showEarlierBoundary: boolean;
 	showLaterBoundary: boolean;
 	reserveComposerTraySpace: boolean;
-	floatingPermissions: PendingPermissionRequest[];
+	transcriptViewId: string;
+	pendingPermissions: PendingPermissionRequest[];
 }
 
 export interface ConversationVirtualGeometrySnapshot {
@@ -80,7 +81,7 @@ function sameInput(
 		left.showEarlierBoundary === right.showEarlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
 		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
-		left.floatingPermissions === right.floatingPermissions,
+		left.pendingPermissions === right.pendingPermissions,
 	);
 }
 
@@ -100,9 +101,9 @@ function sameProjectionConfiguration(
 		left.showEarlierBoundary === right.showEarlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
 		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
-		left.floatingPermissions.length === right.floatingPermissions.length &&
-		left.floatingPermissions.every(
-			(permission, index) => permission === right.floatingPermissions[index],
+		left.pendingPermissions.length === right.pendingPermissions.length &&
+		left.pendingPermissions.every(
+			(permission, index) => permission === right.pendingPermissions[index],
 		),
 	);
 }
@@ -134,7 +135,8 @@ export class ConversationFeedProjectionState {
 			showLaterBoundary: input.showLaterBoundary,
 			reserveComposerTraySpace: input.reserveComposerTraySpace,
 			transcriptItems: visibleTranscriptItems,
-			floatingPermissions: input.floatingPermissions,
+			transcriptViewId: input.transcriptViewId,
+			pendingPermissions: input.pendingPermissions,
 		});
 		const keys = model.items.map((item) => item.key);
 		const estimates = model.items.map((item) =>

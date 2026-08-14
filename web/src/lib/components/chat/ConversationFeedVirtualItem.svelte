@@ -11,7 +11,7 @@
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
-	import type { TranscriptPageState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { TranscriptPageState } from '$lib/chat/transcript/transcript-page-progress.js';
 	import type { ConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { ConversationVirtualFeedItem } from './conversation-feed-virtual-items.js';
 	import type { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
