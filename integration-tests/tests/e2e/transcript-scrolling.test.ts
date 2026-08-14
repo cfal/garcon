@@ -46,10 +46,13 @@ async function seedDirectChat(
       ).type,
     ).toBe("agent-run-finished");
   }
+  // Every turn above proved itself with a terminal, so this is only a cheap guard that the
+  // seed reached the ledger. Ordinals also cover session and run-ended rows, so the
+  // watermark runs ahead of the conversation rather than matching it.
   const seededTranscript = await fixture.integration.client.getMessages(chatId, {
     limit: 1,
   });
-  expect(seededTranscript.lastOrdinal).toBe(turns.length * 2);
+  expect(seededTranscript.lastOrdinal).toBeGreaterThanOrEqual(turns.length * 2);
   return chatId;
 }
 

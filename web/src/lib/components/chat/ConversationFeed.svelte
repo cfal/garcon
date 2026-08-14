@@ -280,7 +280,11 @@
 		untrack(() => {
 			const nextProjection = projectionState.reconcile(input);
 			// Captures old coordinates before publishing the projection that changes row geometry.
-			virtualController.prepareForGeometryPublication(nextProjection.geometry.geometryRevision);
+			virtualController.prepareForGeometryPublication(
+				nextProjection.geometry.geometryRevision,
+				nextProjection.geometry.mutationKinds.has('history-earlier'),
+				scrollbarPointerY !== null,
+			);
 			projection = nextProjection;
 			itemState.reconcile(
 				input.surfaceIdentity,
