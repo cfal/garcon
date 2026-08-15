@@ -238,6 +238,39 @@ describe('AgentHandoffService', () => {
     expect(ownership.completeHandoff).toHaveBeenCalledWith(second.operationId);
   });
 
+  it('returns after one failed recovery attempt and retries that operation independently', async () => {
+    const first = { ...persistedIntent(), chatId: 'chat-a', operationId: 'handoff-a' };
+    const second = { ...persistedIntent(), chatId: 'chat-b', operationId: 'handoff-b' };
+    let firstAttempts = 0;
+    const completed = [];
+    const ownership = {
+      pendingHandoffs: () => [first, second],
+      applyHandoffDecision: mock(async (operationId) => {
+        if (operationId !== first.operationId) return;
+        firstAttempts += 1;
+        if (firstAttempts === 1) throw new Error('injected first recovery failure');
+      }),
+      completeHandoff: mock(async (operationId) => {
+        completed.push(operationId);
+      }),
+    };
+    const service = createService({
+      ownership,
+      ledger: ledgerState([]),
+    });
+
+    await service.recoverPendingHandoffs();
+
+    expect(firstAttempts).toBe(1);
+    expect(completed).toEqual([second.operationId]);
+
+    for (let attempt = 0; attempt < 100 && !completed.includes(first.operationId); attempt += 1) {
+      await Bun.sleep(5);
+    }
+    expect(firstAttempts).toBe(2);
+    expect(completed).toEqual([second.operationId, first.operationId]);
+  });
+
   it('adopts an existing switch marker after unrelated post-watermark rows', async () => {
     const current = sourceChat();
     const calls = [];
