@@ -61,7 +61,7 @@ interface TranscriptTouchDrag {
 interface TouchPrependScenario {
   clampBeforeRelease: boolean;
   label: string;
-  liveBehavior: 'completed' | 'expanding' | 'interrupted';
+  liveBehavior: 'completed' | 'expanding' | 'paused-interrupted';
   viewport: { height: number; width: number };
 }
 
@@ -2016,6 +2016,8 @@ async function verifyTouchDragPrepend(
   let liveTurnId: string | null = null;
   let liveAbort: Promise<unknown> | null = null;
   let stopLiveTurn: ReturnType<typeof fixture.integration.client.stopChat> | null = null;
+  let queuedPrompt: string | null = null;
+  let queuePauseId: string | null = null;
 
   await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
     const url = new URL(route.request().url());
@@ -2048,6 +2050,15 @@ async function verifyTouchDragPrepend(
       await withDiagnosticTimeout('the held touch-drag turn', liveHold.received);
       initialEntryCount = await waitForTranscriptEntryCount(fixture.page, initialEntryCount + 1);
       await waitForStablePinnedTranscriptLayout(fixture.page, `${scenario.label}-held-live`);
+      if (scenario.liveBehavior === 'paused-interrupted') {
+        queuedPrompt = `chromium-touch-queued-${scenario.label}`;
+        const queued = await fixture.integration.client.enqueueNew(chatId, queuedPrompt);
+        expect(queued.control.queue.entries.map((entry) => entry.content)).toContain(queuedPrompt);
+        const paused = await fixture.integration.client.pauseQueue(chatId);
+        expect(paused.control.queue.pause?.kind).toBe('manual');
+        queuePauseId = paused.control.queue.pause?.id ?? null;
+        expect(queuePauseId).not.toBeNull();
+      }
       await scrollToPosition(fixture.page, 'middle');
     }
     await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement, clampBeforeRelease) => {
@@ -2088,7 +2099,7 @@ async function verifyTouchDragPrepend(
         initialEntryCount + 1,
       );
       expectedEntryCount += 1;
-    } else if (scenario.liveBehavior === 'interrupted' && liveHold) {
+    } else if (scenario.liveBehavior === 'paused-interrupted' && liveHold) {
       liveAbort = liveHold.expectAbort();
       stopLiveTurn = fixture.integration.client.stopChat({
         agentId: fixture.integration.directAgents.openAi.agentId,
@@ -2118,6 +2129,22 @@ async function verifyTouchDragPrepend(
       expect((await fixture.integration.client.waitForTurnTerminal(chatId, liveTurnId)).type).toBe(
         'agent-run-finished',
       );
+    }
+    if (queuedPrompt) {
+      const expectedQueuedPrompt = queuedPrompt;
+      if (!queuePauseId) throw new Error('The paused queue lost its pause identity.');
+      const control = await fixture.integration.client.getExecutionControl(chatId);
+      expect(control.queue.pause?.id).toBe(queuePauseId);
+      expect(control.queue.entries.map((entry) => entry.content)).toEqual([expectedQueuedPrompt]);
+      expect(
+        await fixture.page
+          .locator(FEED_SELECTOR)
+          .locator('[data-chat-row-id]')
+          .filter({ hasText: expectedQueuedPrompt })
+          .count(),
+      ).toBe(0);
+      await fixture.integration.client.clearQueue(chatId);
+      queuedPrompt = null;
     }
 
     const frames = await finishReadingAnchorFrameSampler(fixture.page);
@@ -2153,7 +2180,102 @@ async function verifyTouchDragPrepend(
     if (drag) await finishTranscriptTouchDrag(drag);
     if (stopLiveTurn) await stopLiveTurn.catch(() => undefined);
     if (liveAbort) await liveAbort.catch(() => undefined);
+    if (queuedPrompt) await fixture.integration.client.clearQueue(chatId).catch(() => undefined);
     liveHold?.releaseEcho();
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
+async function verifyScrollbarDragPrepend(
+  fixture: ChromiumFixture,
+  viewport: { height: number; width: number },
+): Promise<void> {
+  await fixture.page.setViewportSize(viewport);
+  const chatId = await seedTranscript(
+    fixture.integration,
+    90,
+    `chromium-scrollbar-${viewport.width}`,
+  );
+  let releaseEarlierPage!: () => void;
+  const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
+  let resolveEarlierRequest!: () => void;
+  const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
+  let earlierRequestCount = 0;
+  let mouseDown = false;
+
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
+      earlierRequestCount += 1;
+      if (earlierRequestCount === 1) {
+        resolveEarlierRequest();
+        await earlierPageGate;
+      }
+    }
+    await route.continue();
+  });
+
+  try {
+    const { initialModelCount } = await prepareTranscript(fixture, chatId);
+    await scrollToPosition(fixture.page, 'middle');
+    const scrollbar = fixture.page.locator('[data-chat-feed-scrollbar]');
+    const thumb = scrollbar.locator('[data-slot="scroll-area-thumb"]');
+    const trackBox = await scrollbar.boundingBox();
+    const thumbBox = await thumb.boundingBox();
+    if (!trackBox || !thumbBox) throw new Error('The transcript scrollbar is not measurable.');
+
+    const x = thumbBox.x + thumbBox.width / 2;
+    let y = thumbBox.y + thumbBox.height / 2;
+    await fixture.page.mouse.move(x, y);
+    await fixture.page.mouse.down();
+    mouseDown = true;
+    for (let step = 0; step < 24 && earlierRequestCount === 0; step += 1) {
+      y = Math.max(trackBox.y + 4, y - Math.max(4, trackBox.height / 24));
+      await fixture.page.mouse.move(x, y);
+    }
+    await withDiagnosticTimeout('the held scrollbar-drag earlier page', earlierRequest);
+    const upwardScrollTop = await fixture.page
+      .locator(FEED_SELECTOR)
+      .evaluate((feedElement) => (feedElement as HTMLElement).scrollTop);
+
+    const reversalY = Math.min(trackBox.y + trackBox.height - 4, y + trackBox.height / 8);
+    await fixture.page.mouse.move(x, reversalY, { steps: 6 });
+    const reversedScrollTop = await fixture.page
+      .locator(FEED_SELECTOR)
+      .evaluate((feedElement) => (feedElement as HTMLElement).scrollTop);
+    expect(reversedScrollTop).toBeGreaterThan(upwardScrollTop);
+
+    const anchor = await readingAnchor(fixture.page);
+    await startReadingAnchorFrameSampler(fixture.page, anchor);
+    releaseEarlierPage();
+    await waitForStableModelCount(fixture.page, initialModelCount + 50);
+    const frames = await finishReadingAnchorFrameSampler(fixture.page);
+    expect(
+      frames.filter(
+        (frame) =>
+          !frame.connected ||
+          !frame.sameNode ||
+          frame.offset === null ||
+          frame.rowId !== anchor.rowId ||
+          frame.text !== anchor.text,
+      ),
+      JSON.stringify({ anchor, frames, upwardScrollTop, reversedScrollTop }, null, 2),
+    ).toEqual([]);
+    expect(
+      Math.max(
+        ...frames.map((frame) =>
+          frame.offset === null
+            ? Number.POSITIVE_INFINITY
+            : Math.abs(frame.offset - anchor.offset),
+        ),
+      ),
+      JSON.stringify({ anchor, frames, upwardScrollTop, reversedScrollTop }, null, 2),
+    ).toBeLessThanOrEqual(1);
+    expect(earlierRequestCount).toBe(1);
+    fixture.assertNoBrowserErrors();
+  } finally {
+    releaseEarlierPage();
+    if (mouseDown) await fixture.page.mouse.up().catch(() => undefined);
     await fixture.page.unroute('**/api/v1/chats/messages?**');
   }
 }
@@ -3320,7 +3442,7 @@ describe('Chromium transcript virtualization', () => {
     {
       clampBeforeRelease: false,
       label: 'wide-paused-interrupted',
-      liveBehavior: 'interrupted',
+      liveBehavior: 'paused-interrupted',
       viewport: { height: 900, width: 1280 },
     },
   ] satisfies TouchPrependScenario[]) {
@@ -3331,6 +3453,25 @@ describe('Chromium transcript virtualization', () => {
         async (fixture, markPhase) => {
           markPhase(`continuing a touch drag through the ${scenario.label} prepend`);
           await verifyTouchDragPrepend(fixture, scenario);
+        },
+        diagnostics,
+        { serverEnvironment: environment.serverEnvironment },
+        browser,
+      );
+    }, 180_000);
+  }
+
+  for (const viewport of [
+    { label: 'compact', height: 700, width: 390 },
+    { label: 'wide', height: 900, width: 1280 },
+  ]) {
+    test(`keeps a ${viewport.label} scrollbar reversal stable through an earlier-page prepend`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      await withChromiumFixture(
+        `transcript-scrollbar-prepend-${viewport.label}`,
+        async (fixture, markPhase) => {
+          markPhase(`reversing a ${viewport.label} scrollbar drag during a held prepend`);
+          await verifyScrollbarDragPrepend(fixture, viewport);
         },
         diagnostics,
         { serverEnvironment: environment.serverEnvironment },
