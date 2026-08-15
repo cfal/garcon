@@ -1642,15 +1642,19 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     session: RunningCodexSession,
     reason: 'cancelled' | 'session-complete' | 'aborted',
   ): void {
-    const chatId = session.chatId;
-    const messages: PermissionCancelledMessage[] = [];
-    for (const [permissionRequestId, pending] of this.#pendingApprovals.entries()) {
-      if (pending.chatId !== chatId) continue;
+    // Each approval belongs to the operation that provoked it, so its cancellation is published
+    // through that operation rather than batched behind whichever one happens to be current.
+    for (const [permissionRequestId, pending] of [...this.#pendingApprovals.entries()]) {
+      if (pending.chatId !== session.chatId) continue;
       this.#pendingApprovals.delete(permissionRequestId);
-      messages.push(new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason));
+      this.emitMessages(
+        pending.chatId,
+        [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason)],
+        pending.eventMetadata,
+      );
     }
-    this.emitMessages(chatId, messages, session.eventMetadata);
   }
+
 
   #sessionForClientThread(client: CodexAppServerClient, threadId: string): RunningCodexSession | null {
     const session = this.#sessions.get(threadId);
