@@ -16,7 +16,6 @@ export interface TranscriptEventFanoutDeps {
   broadcast(payload: unknown): void;
   updateMetadata(chatId: string, messages: readonly ChatMessage[]): void;
   replaceMetadata(chatId: string): void;
-  markSearchDirty(chatId: string): void;
   resendCandidates(chatId: string): readonly ResendCandidate[];
 }
 
@@ -36,7 +35,6 @@ function applyTranscriptEvent(
   if (!deps.chatExists(event.chatId)) return;
   if (event.type === 'view-replaced') {
     deps.replaceMetadata(event.chatId);
-    deps.markSearchDirty(event.chatId);
     deps.broadcast(new ChatTranscriptReplacedMessage(
       event.chatId,
       event.previousViewId,
@@ -53,7 +51,6 @@ function applyTranscriptEvent(
   )));
   if (conversationalMessages.length > 0) {
     deps.updateMetadata(event.chatId, conversationalMessages);
-    deps.markSearchDirty(event.chatId);
   }
   deps.broadcast(new ChatMessagesMessage(
     event.chatId,

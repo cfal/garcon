@@ -10,14 +10,12 @@ describe('transcript event fanout', () => {
     const tasks = [];
     const broadcast = mock(() => undefined);
     const updateMetadata = mock(() => undefined);
-    const markSearchDirty = mock(() => undefined);
     const fanout = createTranscriptEventFanout({
       chatExists: () => true,
       schedule: (_chatId, task) => tasks.push(task),
       broadcast,
       updateMetadata,
       replaceMetadata: mock(() => undefined),
-      markSearchDirty,
       resendCandidates: () => [{ ordinal: 1, content: 'prompt', attachmentNames: [] }],
     });
     const viewId = transcriptViewId('view-1');
@@ -40,7 +38,6 @@ describe('transcript event fanout', () => {
     expect(updateMetadata).toHaveBeenCalledWith('chat-1', [
       expect.objectContaining({ content: 'answer' }),
     ]);
-    expect(markSearchDirty).toHaveBeenCalledWith('chat-1');
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
       type: 'chat-messages',
       chatId: 'chat-1',
@@ -54,14 +51,12 @@ describe('transcript event fanout', () => {
   it('broadcasts lifecycle-only commits without inventing rendered messages', () => {
     const broadcast = mock(() => undefined);
     const updateMetadata = mock(() => undefined);
-    const markSearchDirty = mock(() => undefined);
     const fanout = createTranscriptEventFanout({
       chatExists: () => true,
       schedule: (_chatId, task) => task(),
       broadcast,
       updateMetadata,
       replaceMetadata: mock(() => undefined),
-      markSearchDirty,
       resendCandidates: () => [],
     });
 
@@ -85,6 +80,5 @@ describe('transcript event fanout', () => {
       turnId: 'run-1',
     }));
     expect(updateMetadata).not.toHaveBeenCalled();
-    expect(markSearchDirty).not.toHaveBeenCalled();
   });
 });

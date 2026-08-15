@@ -379,6 +379,7 @@ export async function startServer(): Promise<void> {
       service: transcriptSearchService,
       ledger: transcriptLedger,
       listChatIds: () => Object.keys(chatRegistry.listAllChats()),
+      logger,
     });
     try {
       await chatSearch.initialize(

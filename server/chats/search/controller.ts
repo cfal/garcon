@@ -5,6 +5,7 @@ import {
   type ChatSearchResult,
 } from '@garcon/common/chat-search';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import { projectSearchMessage } from '@garcon/server-agent-common/search/message-projector';
 import type { HistoricalSearchMessageRow } from '@garcon/server-agent-common/search/rows';
 import type { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
@@ -31,6 +32,7 @@ export interface TranscriptSearchControllerDeps {
     'currentView' | 'currentRows' | 'subscribe'
   >;
   readonly service: TranscriptSearchService;
+  readonly logger: Pick<AgentLogger, 'warn'>;
   readonly searchTimeoutMs?: number;
 }
 
@@ -38,6 +40,7 @@ export class TranscriptSearchController {
   readonly #deps: TranscriptSearchControllerDeps;
   readonly #lifecycleAbort = new AbortController();
   readonly #chatTails = new Map<string, Promise<void>>();
+  readonly #indexedViews = new Map<string, TranscriptViewId>();
   readonly #unsubscribe: () => void;
   #enabled = false;
   #admissionFailed = false;
@@ -69,26 +72,15 @@ export class TranscriptSearchController {
     }
   }
 
-  sourceMayHaveChanged(chatId: string): void {
-    this.catalogMayHaveChanged(chatId);
-  }
-
-  markDirty(chatId: string): void {
-    this.catalogMayHaveChanged(chatId);
-  }
-
-  catalogMayHaveChanged(chatId?: string): void {
+  catalogMayHaveChanged(chatId: string): void {
     if (!this.#enabled || this.#closed) return;
-    if (chatId) {
-      void this.#enqueue(chatId, () => this.#syncChat(chatId));
-      return;
-    }
-    void this.#syncAll();
+    this.#schedule(chatId, 'catalog-refresh', () => this.#syncCatalogChat(chatId));
   }
 
   deleteChat(chatId: string): void {
+    this.#indexedViews.delete(chatId);
     if (!this.#enabled || this.#closed) return;
-    void this.#enqueue(chatId, () => this.#deps.service.deleteChat(chatId));
+    this.#schedule(chatId, 'delete', () => this.#deps.service.deleteChat(chatId));
   }
 
   async search(options: {
@@ -141,9 +133,10 @@ export class TranscriptSearchController {
         signal: abort.signal,
       });
       return {
-        results: response.results.filter(
-          (result) => allowedViews.get(result.chatId) === result.transcriptViewId,
-        ),
+        results: response.results.filter((result) => (
+          allowedViews.get(result.chatId) === result.transcriptViewId
+          && this.validateResultView(result.chatId, result.transcriptViewId)
+        )),
         index: {
           ...response.index,
           failedChatCount: response.index.failedChatCount + fencedChatIds.size,
@@ -175,6 +168,7 @@ export class TranscriptSearchController {
     this.#admissionFailed = false;
     await Promise.allSettled(this.#chatTails.values());
     this.#chatTails.clear();
+    this.#indexedViews.clear();
     await this.#deps.service.disableAndDelete(new AbortController().signal);
   }
 
@@ -186,6 +180,7 @@ export class TranscriptSearchController {
     this.#unsubscribe();
     await Promise.allSettled(this.#chatTails.values());
     this.#chatTails.clear();
+    this.#indexedViews.clear();
     await this.#deps.service.close();
   }
 
@@ -199,6 +194,7 @@ export class TranscriptSearchController {
   async #syncChat(chatId: string): Promise<void> {
     if (!this.#enabled || this.#closed) return;
     if (!this.#deps.listChatIds().includes(chatId)) {
+      this.#indexedViews.delete(chatId);
       await this.#deps.service.deleteChat(chatId);
       return;
     }
@@ -209,27 +205,47 @@ export class TranscriptSearchController {
       rows = view ? this.#deps.ledger.currentRows(chatId) : [];
     } catch (error) {
       if (!(error instanceof LedgerFencedError)) throw error;
+      this.#indexedViews.delete(chatId);
       await this.#deps.service.deleteChat(chatId);
       return;
     }
-    if (!view) return;
+    if (!view) {
+      this.#indexedViews.delete(chatId);
+      return;
+    }
     await this.#deps.service.replaceChat({
       chatId,
       transcriptViewId: view.viewId,
       throughOrdinal: rows.at(-1)?.ordinal ?? 0,
       rows: searchableRows(rows),
     });
+    this.#indexedViews.set(chatId, view.viewId);
+  }
+
+  async #syncCatalogChat(chatId: string): Promise<void> {
+    if (!this.#enabled || this.#closed) return;
+    let view: TranscriptView | null;
+    try {
+      view = this.#deps.ledger.currentView(chatId);
+    } catch (error) {
+      if (!(error instanceof LedgerFencedError)) throw error;
+      this.#indexedViews.delete(chatId);
+      await this.#deps.service.deleteChat(chatId);
+      return;
+    }
+    if (view && this.#indexedViews.get(chatId) === view.viewId) return;
+    await this.#syncChat(chatId);
   }
 
   #onCommit(event: TranscriptCommitEvent): void {
     if (!this.#enabled || this.#closed) return;
     if (event.type === 'view-replaced') {
-      void this.#enqueue(event.chatId, () => this.#syncChat(event.chatId));
+      this.#schedule(event.chatId, 'view-replacement', () => this.#syncChat(event.chatId));
       return;
     }
     const rows = rowsForCommit(event);
     if (rows.length === 0) return;
-    void this.#enqueue(event.chatId, async () => {
+    this.#schedule(event.chatId, 'append', async () => {
       try {
         await this.#deps.service.appendRows({
           chatId: event.chatId,
@@ -238,9 +254,21 @@ export class TranscriptSearchController {
           throughOrdinal: rows.at(-1)!.ordinal,
           rows: searchableRows(rows),
         });
-      } catch {
+        this.#indexedViews.set(event.chatId, event.viewId);
+      } catch (error) {
+        if (!isIndexPositionMismatch(error)) throw error;
         await this.#syncChat(event.chatId);
       }
+    });
+  }
+
+  #schedule(chatId: string, operation: string, work: () => Promise<void>): void {
+    void this.#enqueue(chatId, work).catch((error) => {
+      this.#deps.logger.warn('Transcript search indexing job failed', {
+        chatId,
+        operation,
+        code: searchFailureCode(error),
+      });
     });
   }
 
@@ -248,11 +276,24 @@ export class TranscriptSearchController {
     const previous = this.#chatTails.get(chatId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(work);
     this.#chatTails.set(chatId, next);
-    void next.finally(() => {
+    const removeTail = () => {
       if (this.#chatTails.get(chatId) === next) this.#chatTails.delete(chatId);
-    });
+    };
+    void next.then(removeTail, removeTail);
     return next;
   }
+}
+
+function isIndexPositionMismatch(error: unknown): boolean {
+  return error instanceof Error
+    && (error.message === 'SEARCH_INDEX_GAP' || error.message === 'SEARCH_VIEW_MISMATCH');
+}
+
+function searchFailureCode(error: unknown): string {
+  if (error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)) {
+    return error.message;
+  }
+  return 'SEARCH_INDEX_UNAVAILABLE';
 }
 
 function rowsForCommit(event: Exclude<TranscriptCommitEvent, { type: 'view-replaced' }>): readonly LedgerRow[] {

@@ -73,7 +73,6 @@ function createFixture(overrides = {}) {
     ...overrides.commandLedger,
   };
   const searchIndex = {
-    sourceMayHaveChanged: mock(() => undefined),
     catalogMayHaveChanged: mock(() => undefined),
     deleteChat: mock(() => undefined),
     ...overrides.searchIndex,
@@ -252,7 +251,7 @@ describe('server event wiring', () => {
     );
   });
 
-  it('updates preview and search only for conversational commits', async () => {
+  it('updates preview without scheduling a duplicate search rebuild for transcript commits', async () => {
     const fixture = createFixture();
 
     fixture.agent.transcript(providerCommit());
@@ -263,7 +262,7 @@ describe('server event wiring', () => {
     expect(fixture.metadata.updateFromAppendedMessages).toHaveBeenCalledWith('chat-1', [
       expect.objectContaining({ content: 'answer' }),
     ]);
-    expect(fixture.searchIndex.sourceMayHaveChanged).toHaveBeenCalledTimes(1);
+    expect(fixture.searchIndex.catalogMayHaveChanged).not.toHaveBeenCalled();
   });
 
   it('suppresses resend candidates in commit broadcasts while processing', async () => {

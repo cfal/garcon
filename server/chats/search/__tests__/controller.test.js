@@ -68,12 +68,14 @@ function harness() {
       return () => { listener = null; };
     }),
   };
+  const logger = { warn: mock(() => undefined) };
   const controller = new TranscriptSearchController({
     listChatIds: () => [...views.keys()],
     ledger,
     service,
+    logger,
   });
-  return { controller, ledger, listener: () => listener, rows, service, views };
+  return { controller, ledger, listener: () => listener, logger, rows, service, views };
 }
 
 async function settle() {
@@ -177,6 +179,12 @@ describe('TranscriptSearchController', () => {
       expectedAfterOrdinal: 4,
       throughOrdinal: 5,
     }));
+    expect(test.logger.warn).toHaveBeenCalledWith('Transcript search indexing job failed', {
+      chatId: 'chat-1',
+      operation: 'append',
+      code: 'SEARCH_INDEX_UNAVAILABLE',
+    });
+    expect(JSON.stringify(test.logger.warn.mock.calls)).not.toContain('disk unavailable');
   });
 
   it('does not rebuild a whole chat after its committed suffix is already queued', async () => {
@@ -188,7 +196,7 @@ describe('TranscriptSearchController', () => {
     test.rows.get('chat-1').push(row);
 
     test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [row] });
-    test.controller.sourceMayHaveChanged('chat-1');
+    test.controller.catalogMayHaveChanged('chat-1');
     await settle();
 
     expect(test.service.appendRows).toHaveBeenCalledTimes(1);

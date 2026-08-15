@@ -19,6 +19,10 @@ const onUnhandledRejection = (reason: unknown): void => {
 process.on('unhandledRejection', onUnhandledRejection);
 let rejectNextReplacement = false;
 let observeContinuation = false;
+const views = new Map([
+  ['chat-1', 'view-chat-1'],
+  ['chat-2', 'view-chat-2'],
+]);
 
 const service = {
   setResyncHandler() {},
@@ -53,20 +57,24 @@ const service = {
 const controller = new TranscriptSearchController({
   listChatIds: () => ['chat-1', 'chat-2'],
   ledger: {
-    currentView: (chatId: string) => ({ viewId: `view-${chatId}`, contentStartOrdinal: 1 }),
+    currentView: (chatId: string) => ({ viewId: views.get(chatId)!, contentStartOrdinal: 1 }),
     currentRows: () => [],
     subscribe: () => () => {},
   },
   service,
+  logger: { warn() {} },
 });
 
 await controller.initialize(true);
 observeContinuation = true;
 rejectNextReplacement = true;
-controller.sourceMayHaveChanged('chat-1');
+views.set('chat-1', 'view-chat-1-replacement');
+controller.catalogMayHaveChanged('chat-1');
 await failedJob.promise;
-controller.sourceMayHaveChanged('chat-1');
-controller.sourceMayHaveChanged('chat-2');
+views.set('chat-1', 'view-chat-1-retry');
+views.set('chat-2', 'view-chat-2-replacement');
+controller.catalogMayHaveChanged('chat-1');
+controller.catalogMayHaveChanged('chat-2');
 await Promise.all([sameChatContinued.promise, otherChatContinued.promise]);
 await Bun.sleep(0);
 await controller.close();

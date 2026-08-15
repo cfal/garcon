@@ -51,8 +51,7 @@ interface WebSocketPublisher {
 }
 
 interface ChatSearchEventIndex {
-  sourceMayHaveChanged(chatId: string): void;
-  catalogMayHaveChanged(chatId?: string): void;
+  catalogMayHaveChanged(chatId: string): void;
   deleteChat(chatId: string): void;
 }
 
@@ -201,16 +200,7 @@ export function wireServerEvents({
     }
   }
 
-  function markSearchChatDirty(chatId: string): void {
-    if (!searchIndex) return;
-    try {
-      searchIndex.sourceMayHaveChanged(chatId);
-    } catch (err) {
-      logger.warn(`search-index: mark dirty failed for ${chatId}:`, errorMessage(err));
-    }
-  }
-
-  function markSearchCatalogDirty(chatId?: string): void {
+  function markSearchCatalogDirty(chatId: string): void {
     if (!searchIndex) return;
     try {
       searchIndex.catalogMayHaveChanged(chatId);
@@ -335,7 +325,6 @@ export function wireServerEvents({
     replaceMetadata: (chatId) => {
       metadata.replaceFromTranscriptView(chatId, currentTranscriptMessages(chatId));
     },
-    markSearchDirty: markSearchChatDirty,
     resendCandidates: (chatId) => processing.phase(chatId) === null
       ? agentRegistry.resendCandidates(chatId)
       : [],
