@@ -71,51 +71,14 @@ import {
   CLAUDE_STEER_WRITE_TIMEOUT_MS,
   ClaudeSteeringController,
 } from './steering.js';
-
-const NOOP_LOGGER: AgentLogger = {
-  debug() {},
-  info() {},
-  warn() {},
-  error() {},
-};
-
-const INTERRUPT_RECEIPT_TIMEOUT_MS = 5_000;
-const INTERRUPT_COMPLETION_TIMEOUT_MS = 15_000;
-type InterruptFallbackStage = 'receipt' | 'completion';
-
-interface ClaudeRunningSession {
-  id: string;
-  chatId: string;
-  initialization: Promise<void> | null;
-  completeInitialization: (() => void) | null;
-  lastActivityAt: number;
-  providerState: ClaudeProviderSessionState;
-  backgroundTaskCount: number;
-  unownedProviderActivity: boolean;
-  activeTurn: ClaudeActiveTurn | null;
-  process: ReturnType<typeof Bun.spawn> | null;
-  transport: ClaudeProcessTransport<ClaudeCLIMessage> | null;
-  retirement: Promise<void> | null;
-  options: ClaudeSessionOptions;
-  currentPermissionMode: PermissionMode;
-  currentThinkingMode: ThinkingMode;
-  currentClaudeThinkingMode: ClaudeThinkingMode;
-  currentModel: string;
-  currentEnvOverrides?: Record<string, string>;
-}
-
-interface PendingPermission {
-  permissionRequestId: string;
-  incarnation: string;
-  cliRequestId: string;
-  agentSessionId: string;
-  chatId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  toolUseId?: string;
-  eventMetadata: RuntimeEventMetadata;
-  operation: AgentRuntimeOperation | undefined;
-}
+import {
+  INTERRUPT_COMPLETION_TIMEOUT_MS,
+  INTERRUPT_RECEIPT_TIMEOUT_MS,
+  NOOP_LOGGER,
+  type ClaudeRunningSession,
+  type InterruptFallbackStage,
+  type PendingPermission,
+} from './runtime-state.js';
 
 class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();

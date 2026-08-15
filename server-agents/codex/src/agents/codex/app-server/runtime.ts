@@ -31,13 +31,12 @@ import type { PermissionMode } from '@garcon/common/chat-modes';
 import { buildApprovalMessage, buildApprovalResponse, cancelPendingApprovals, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import {
   CodexAppServerClient,
-  CodexAppServerRpcError,
   type CodexAppServerClientOptions,
   type CodexAppServerMetric,
 } from './client.js';
 import { convertCodexRawCodeModeItem } from './converter.js';
 import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
-import { NativePathDiscoveryRefreshLimiter, type NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
+import { NativePathDiscoveryRefreshLimiter } from './native-path-discovery-refresh.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type {
   ErrorNotification,
@@ -50,7 +49,6 @@ import type {
   ThreadGoalUpdatedNotification,
   ThreadGoalSetResponse,
   RawResponseItemCompletedNotification,
-  CodexTurnError,
   TurnCompletedNotification,
   TurnStartedNotification,
 } from './protocol.js';
@@ -79,81 +77,41 @@ import {
   rejectedCodexSteer,
   steerCodexSession,
 } from './steering.ts';
+import {
+  adoptTurn,
+  cancelTurnStartWaiters,
+  sessionForClientThread,
+  sourceForClientThread,
+  sourceForClientTurn,
+  TurnStartWaitCancelledError,
+  waitForDifferentTurnStart,
+  waitForTurnStart,
+  type BufferedClientEvent,
+  type CodexAppServerRuntimeOptions,
+  type FinishSessionOptions,
+  type GoalCommandOptions,
+  type RunningCodexSession,
+} from './runtime-session-state.js';
+import {
+  CAPACITY_RETRY_DELAYS_MS,
+  delay,
+  denialResponseForRequest,
+  GOAL_TURN_START_TIMEOUT_MS,
+  hasActiveGoalContinuation,
+  hasTerminalPendingFinish,
+  humanizeCodexAppServerError,
+  isActiveSessionStatus,
+  isActiveTurnConflictError,
+  isCapacityError,
+  isTerminalSessionStatus,
+  isUtilityOverload,
+  MAX_CAPACITY_RETRIES,
+  MAX_GOAL_CONTROL_DELIVERY_TRANSITIONS,
+  mergeFinishOptions,
+  NOOP_LOGGER,
+} from './runtime-support.js';
 
-type RunningStatus = 'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted';
-type FinishSessionOptions = { failedMessage?: string; aborted?: boolean; emitFinishedOnAbort?: boolean };
-type GoalCommandOptions = {
-  keepSession: boolean;
-  goalSynchronized?: boolean;
-  propagateDeliveryFailure?: boolean;
-};
-const GOAL_TURN_START_TIMEOUT_MS = 30_000;
-const MAX_GOAL_CONTROL_DELIVERY_TRANSITIONS = 8;
-const MAX_CAPACITY_RETRIES = 3;
-const CAPACITY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
-const NOOP_LOGGER: AgentLogger = {
-  debug() {},
-  info() {},
-  warn() {},
-  error() {},
-};
-
-interface TurnStartWaiter {
-  resolve: (turnId: string) => void;
-  reject: (error: Error) => void;
-}
-
-class TurnStartWaitCancelledError extends Error {}
-
-type BufferedClientEvent =
-  | { type: 'notification'; notification: JsonRpcNotification }
-  | { type: 'serverRequest'; request: JsonRpcServerRequest };
-
-interface RunningCodexSession {
-  chatId: string;
-  threadId: string;
-  nativePath: string | null;
-  codexHome: string | null;
-  client: CodexAppServerClient;
-  activeTurnId: string | null;
-  status: RunningStatus;
-  permissionMode: PermissionMode;
-  startedAt: string;
-  cleanupAttachments?: () => Promise<void>;
-  turnStartWaiters: Set<TurnStartWaiter>;
-  goal: CodexThreadGoal | null;
-  managesGoalLifecycle: boolean;
-  completedGoalTurn: boolean;
-  ignoredGoalClears: number;
-  activeInputChain: Promise<void>;
-  goalAttachments: GoalAttachmentOperations;
-  activeDeliveryReservations: number;
-  pendingFinish: FinishSessionOptions | null;
-  pendingFinishOperation: CodexOperation | null;
-  liveCodeModeResultToolIds: Map<string, string>;
-  turnItems: CodexTurnItemLedger;
-  capacityRetryCount: number;
-  turnAttemptGeneration: number;
-  pendingCapacityFailure: { turnId: string; message: string } | null;
-  sourceOperation: CodexOperation;
-  nextTurnOperation: CodexOperation | null;
-  goalOperation: CodexOperation | null;
-  lastTurnOperation: CodexOperation | null;
-  turnRoutes: Map<string, CodexOperation>;
-  terminalTurnIds: Set<string>;
-  superseded: boolean;
-}
-
-export interface CodexAppServerRuntimeOptions {
-  createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
-  materializationTimeoutMs?: number;
-  capacityRetryDelaysMs?: readonly number[];
-  capacityRetryDelay?: (delayMs: number) => Promise<void>;
-  nativePathDiscoveryRefresh?: NativePathDiscoveryRefreshLimiterOptions;
-  logger?: AgentLogger;
-  skillDiscovery?: CodexSkillDiscovery;
-  cleanupOwnedGoalAttachments?: typeof cleanupOwnedGoalAttachments;
-}
+export type { CodexAppServerRuntimeOptions } from './runtime-session-state.js';
 
 export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #sessions = new Map<string, RunningCodexSession>();
@@ -265,7 +223,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       skills,
     }));
     if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
-    this.#adoptTurn(session, turn.turn.id, operation);
+    adoptTurn(session, turn.turn.id, operation);
   }
 
   async #handleGoalCommand(
@@ -307,7 +265,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
               : this.#setNewThreadGoal(client, session, objective),
           );
           session.goal = response.goal;
-          await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
+          await waitForTurnStart(this.#sessions, session, GOAL_TURN_START_TIMEOUT_MS);
           return;
         }
         case 'status': {
@@ -349,7 +307,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           session.goal = response.goal;
           if (response.goal.status === 'active') {
             session.managesGoalLifecycle = true;
-            await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
+            await waitForTurnStart(this.#sessions, session, GOAL_TURN_START_TIMEOUT_MS);
           } else {
             session.managesGoalLifecycle = previouslyManaged;
             publishRows(this.#logger, session.chatId, [
@@ -401,7 +359,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           );
           session.goal = response.goal;
           if (response.goal.status === 'active') {
-            await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
+            await waitForTurnStart(this.#sessions, session, GOAL_TURN_START_TIMEOUT_MS);
           } else {
             session.managesGoalLifecycle = previouslyManaged;
             publishRows(this.#logger, session.chatId, [
@@ -567,7 +525,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     let transitions = 0;
 
     if (!turnId && session.goal?.status === 'active') {
-      turnId = await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
+      turnId = await waitForTurnStart(this.#sessions, session, GOAL_TURN_START_TIMEOUT_MS);
     }
     let turnAttemptGeneration = session.turnAttemptGeneration;
 
@@ -586,7 +544,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           session.nextTurnOperation = operation;
           const turn = await session.client.startTurn(startParams);
           if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
-          this.#adoptTurn(session, turn.turn.id, operation);
+          adoptTurn(session, turn.turn.id, operation);
           return;
         } catch (error) {
           const isTurnTransition = isActiveTurnConflictError(error) || isActiveTurnNotSteerableError(error);
@@ -599,7 +557,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           }
           if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) throw error;
           if (!isTurnTransition) throw error;
-          turnId = await this.#waitForDifferentTurnStart(
+          turnId = await waitForDifferentTurnStart(
+            this.#sessions,
             session,
             previousTurnId,
             GOAL_TURN_START_TIMEOUT_MS,
@@ -635,14 +594,15 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         }
         if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) throw error;
         if (actualTurnId && actualTurnId !== turnId) {
-          this.#adoptTurn(session, actualTurnId, operation);
+          adoptTurn(session, actualTurnId, operation);
           turnId = actualTurnId;
           transitions += 1;
           continue;
         }
         if (actualTurnId) throw error;
         if (isNonSteerable) {
-          turnId = await this.#waitForDifferentTurnStart(
+          turnId = await waitForDifferentTurnStart(
+            this.#sessions,
             session,
             turnId,
             GOAL_TURN_START_TIMEOUT_MS,
@@ -877,7 +837,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     if (!session) return false;
     if (!turnId) {
       session.status = 'aborted';
-      this.#cancelTurnStartWaiters(session, 'Codex session aborted');
+      cancelTurnStartWaiters(session, 'Codex session aborted');
       this.#finishSession(session, { aborted: true });
       return true;
     }
@@ -972,7 +932,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#idlePurger.stop();
     const sessions = [...new Set(this.#sources.values())];
     for (const session of sessions) {
-      this.#cancelTurnStartWaiters(session, 'Codex runtime shut down');
+      cancelTurnStartWaiters(session, 'Codex runtime shut down');
       void session.cleanupAttachments?.();
     }
     this.#sessions.clear();
@@ -1268,17 +1228,17 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   #handleTurnStarted(client: CodexAppServerClient, params: TurnStartedNotification): void {
-    const session = this.#sessionForClientThread(client, params.threadId);
+    const session = sessionForClientThread(this.#sessions, client, params.threadId);
     if (!session) return;
     if (session.turnRoutes.has(params.turn.id)) return;
     const operation = session.nextTurnOperation ?? session.goalOperation ?? session.sourceOperation;
-    if (!this.#adoptTurn(session, params.turn.id, operation)) return;
+    if (!adoptTurn(session, params.turn.id, operation)) return;
     if (session.status !== 'interrupting') session.status = 'running';
     for (const waiter of session.turnStartWaiters) waiter.resolve(params.turn.id);
   }
 
   #handleGoalUpdated(client: CodexAppServerClient, params: ThreadGoalUpdatedNotification): void {
-    const session = this.#sessionForClientThread(client, params.threadId);
+    const session = sessionForClientThread(this.#sessions, client, params.threadId);
     if (!session) return;
     session.goal = params.goal;
     if (params.goal.status === 'active') session.managesGoalLifecycle = true;
@@ -1293,7 +1253,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   #handleGoalCleared(client: CodexAppServerClient, params: ThreadGoalClearedNotification): void {
-    const session = this.#sessionForClientThread(client, params.threadId);
+    const session = sessionForClientThread(this.#sessions, client, params.threadId);
     if (!session) return;
     if (session.ignoredGoalClears > 0) {
       session.ignoredGoalClears -= 1;
@@ -1407,13 +1367,13 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   #handleItemCompleted(client: CodexAppServerClient, params: ItemCompletedNotification): void {
-    const session = this.#sourceForClientTurn(client, params.threadId, params.turnId);
+    const session = sourceForClientTurn(this.#sources, client, params.threadId, params.turnId);
     if (!session) return;
     session.turnItems.emit(params.turnId, params.item);
   }
 
   #handleRawResponseItemCompleted(client: CodexAppServerClient, params: RawResponseItemCompletedNotification): void {
-    const session = this.#sourceForClientTurn(client, params.threadId, params.turnId);
+    const session = sourceForClientTurn(this.#sources, client, params.threadId, params.turnId);
     if (!session) return;
     const messages = convertCodexRawCodeModeItem(
       params.item,
@@ -1424,12 +1384,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   #handleTurnCompleted(client: CodexAppServerClient, params: TurnCompletedNotification): void {
-    const source = this.#sourceForClientThread(client, params.threadId);
+    const source = sourceForClientThread(this.#sources, client, params.threadId);
     if (source?.superseded) {
       void this.#shutdownClient(client);
       return;
     }
-    const session = this.#sourceForClientTurn(client, params.threadId, params.turn.id);
+    const session = sourceForClientTurn(this.#sources, client, params.threadId, params.turn.id);
     if (!session) return;
     const operation = session.turnRoutes.get(params.turn.id);
     if (!operation) return;
@@ -1506,7 +1466,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   #handleErrorNotification(client: CodexAppServerClient, params: ErrorNotification): void {
-    const session = this.#sourceForClientTurn(client, params.threadId, params.turnId);
+    const session = sourceForClientTurn(this.#sources, client, params.threadId, params.turnId);
     if (!session) return;
     const operation = session.turnRoutes.get(params.turnId);
     if (!operation) return;
@@ -1568,7 +1528,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           ) return true;
           session.goal = response.goal;
           if (response.goal.status !== 'active') return false;
-          await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
+          await waitForTurnStart(this.#sessions, session, GOAL_TURN_START_TIMEOUT_MS);
           return true;
         }
 
@@ -1584,7 +1544,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           || hasTerminalPendingFinish(session)
           || session.turnAttemptGeneration !== retryGeneration
         ) return true;
-        this.#adoptTurn(session, turn.turn.id, operation);
+        adoptTurn(session, turn.turn.id, operation);
         return true;
       } finally {
         session.activeDeliveryReservations -= 1;
@@ -1624,7 +1584,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         ? params.conversationId
         : null;
     const nativeTurnId = typeof params.turnId === 'string' ? params.turnId : null;
-    const session = threadId ? this.#sourceForClientThread(client, threadId) : null;
+    const session = threadId ? sourceForClientThread(this.#sources, client, threadId) : null;
     const operation = nativeTurnId ? session?.turnRoutes.get(nativeTurnId) : undefined;
     if (!session || !operation) {
       this.#logger.warn('Dropped an unowned Codex approval request', {
@@ -1678,7 +1638,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     operation: CodexOperation | null = null,
   ): void {
     if (this.#sessions.get(session.threadId) !== session) return;
-    this.#cancelTurnStartWaiters(session, 'Codex session finished');
+    cancelTurnStartWaiters(session, 'Codex session finished');
     if (session.activeDeliveryReservations > 0) {
       session.pendingFinish = mergeFinishOptions(session.pendingFinish, opts);
       session.pendingFinishOperation = operation ?? session.pendingFinishOperation;
@@ -1713,98 +1673,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     session.pendingFinish = null;
     session.pendingFinishOperation = null;
     this.#finishSession(session, pending, operation);
-  }
-
-  #waitForTurnStart(session: RunningCodexSession, timeoutMs: number): Promise<string> {
-    if (session.activeTurnId) return Promise.resolve(session.activeTurnId);
-    return this.#registerTurnStartWaiter(
-      session,
-      timeoutMs,
-      () => true,
-      `timed out waiting for Codex goal turn to start after ${Math.round(timeoutMs / 1000)} seconds`,
-    );
-  }
-
-  #waitForDifferentTurnStart(
-    session: RunningCodexSession,
-    previousTurnId: string | null,
-    timeoutMs: number,
-  ): Promise<string> {
-    if (session.activeTurnId && session.activeTurnId !== previousTurnId) {
-      return Promise.resolve(session.activeTurnId);
-    }
-    return this.#registerTurnStartWaiter(
-      session,
-      timeoutMs,
-      (turnId) => turnId !== previousTurnId,
-      `timed out waiting for the next Codex turn after ${Math.round(timeoutMs / 1000)} seconds`,
-    );
-  }
-
-  #registerTurnStartWaiter(
-    session: RunningCodexSession,
-    timeoutMs: number,
-    accepts: (turnId: string) => boolean,
-    timeoutMessage: string,
-  ): Promise<string> {
-    if (this.#sessions.get(session.threadId) !== session) {
-      return Promise.reject(new TurnStartWaitCancelledError('Codex session is no longer active'));
-    }
-    return new Promise((resolve, reject) => {
-      let timeout: ReturnType<typeof setTimeout>;
-      const settle = (action: () => void) => {
-        clearTimeout(timeout);
-        session.turnStartWaiters.delete(waiter);
-        action();
-      };
-      const waiter: TurnStartWaiter = {
-        resolve: (turnId) => {
-          if (accepts(turnId)) settle(() => resolve(turnId));
-        },
-        reject: (error) => settle(() => reject(error)),
-      };
-      timeout = setTimeout(() => waiter.reject(new Error(timeoutMessage)), timeoutMs);
-      session.turnStartWaiters.add(waiter);
-    });
-  }
-
-  #cancelTurnStartWaiters(session: RunningCodexSession, message: string): void {
-    const error = new TurnStartWaitCancelledError(message);
-    for (const waiter of [...session.turnStartWaiters]) waiter.reject(error);
-  }
-
-  #sessionForClientThread(client: CodexAppServerClient, threadId: string): RunningCodexSession | null {
-    const session = this.#sessions.get(threadId);
-    return session?.client === client ? session : null;
-  }
-
-  #adoptTurn(
-    session: RunningCodexSession,
-    turnId: string,
-    operation: CodexOperation,
-  ): boolean {
-    if (session.turnRoutes.has(turnId)) return false;
-    session.turnRoutes.set(turnId, operation);
-    session.activeTurnId = turnId;
-    if (session.nextTurnOperation === operation) session.nextTurnOperation = null;
-    return true;
-  }
-
-  #sourceForClientThread(
-    client: CodexAppServerClient,
-    threadId: string,
-  ): RunningCodexSession | null {
-    const session = this.#sources.get(client);
-    return session?.threadId === threadId ? session : null;
-  }
-
-  #sourceForClientTurn(
-    client: CodexAppServerClient,
-    threadId: string,
-    turnId: string,
-  ): RunningCodexSession | null {
-    const session = this.#sourceForClientThread(client, threadId);
-    return session?.turnRoutes.has(turnId) ? session : null;
   }
 
   #publishDetachedTurnTerminal(
@@ -1855,7 +1723,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   #supersedeSource(session: RunningCodexSession): void {
     session.superseded = true;
-    this.#cancelTurnStartWaiters(session, 'Codex session was superseded');
+    cancelTurnStartWaiters(session, 'Codex session was superseded');
     if (this.#sessions.get(session.threadId) === session) this.#sessions.delete(session.threadId);
     session.turnRoutes.clear();
     session.nextTurnOperation = null;
@@ -1863,77 +1731,4 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     cancelPendingApprovals(this.#logger, this.#pendingApprovals, session.client, 'cancelled');
   }
 
-}
-
-function denialResponseForRequest(method: string): unknown {
-  if (method === 'item/commandExecution/requestApproval') return { decision: 'decline' };
-  if (method === 'item/fileChange/requestApproval') return { decision: 'decline' };
-  if (method === 'item/permissions/requestApproval') return { permissions: {}, scope: 'turn' };
-  return { decision: 'denied' };
-}
-
-function humanizeCodexAppServerError(error: unknown): string {
-  const raw = String((error as Error)?.message || error || '');
-  if (/not found|ENOENT.*codex|spawn codex/i.test(raw)) {
-    return 'Codex CLI is not installed or not in PATH. Install it with: npm i -g @openai/codex';
-  }
-  if (/authentication|unauthorized|401|api.?key/i.test(raw)) {
-    return 'Codex authentication failed. Run "codex" in your terminal to sign in.';
-  }
-  if (/rate.?limit|429/i.test(raw)) {
-    return 'Codex rate limit exceeded. Please wait a moment and try again.';
-  }
-  if (/model.*not.?found|invalid.*model|does not exist/i.test(raw)) {
-    return 'Codex model not available. Check your model selection or Codex configuration.';
-  }
-  if (/ECONNREFUSED|ENOTFOUND|network|timeout|ETIMEDOUT/i.test(raw)) {
-    return 'Codex could not connect to the API. Check your network connection.';
-  }
-  return `Codex error: ${raw}`;
-}
-
-function isUtilityOverload(error: unknown): boolean {
-  if (error instanceof CodexAppServerRpcError && error.code === -32001) return true;
-  const record = error && typeof error === 'object' ? error as Record<string, unknown> : {};
-  if (record.code === -32001) return true;
-  return /overloaded/i.test(String((error as Error)?.message || error || ''));
-}
-
-function isCapacityError(error: CodexTurnError | null | undefined): boolean {
-  return error?.codexErrorInfo === 'serverOverloaded'
-    || /selected model is at capacity/i.test(error?.message ?? '');
-}
-
-function isActiveTurnConflictError(error: unknown): boolean {
-  const message = String((error as Error)?.message || error || '');
-  return /turn already active|active turn.*(?:exists|in progress)|cannot start.*active turn/i.test(message);
-}
-
-function mergeFinishOptions(
-  current: FinishSessionOptions | null,
-  next: FinishSessionOptions,
-): FinishSessionOptions {
-  return {
-    failedMessage: next.failedMessage ?? current?.failedMessage,
-    aborted: Boolean(next.aborted || current?.aborted),
-    emitFinishedOnAbort: Boolean(next.emitFinishedOnAbort || current?.emitFinishedOnAbort),
-  };
-}
-
-function hasTerminalPendingFinish(session: RunningCodexSession): boolean {
-  return Boolean(session.pendingFinish?.failedMessage || session.pendingFinish?.aborted);
-}
-
-function isTerminalSessionStatus(status: RunningStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'aborted';
-}
-
-function isActiveSessionStatus(status: RunningStatus): boolean { return status === 'running' || status === 'interrupting' || status === 'completing'; }
-function hasActiveGoalContinuation(session: RunningCodexSession): boolean {
-  return session.managesGoalLifecycle
-    && Boolean(session.activeTurnId || session.goal?.status === 'active');
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

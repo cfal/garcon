@@ -2,6 +2,23 @@
 // and frontend -- the server converts provider-specific formats into
 // these shapes, and the frontend renders them directly.
 
+import {
+  asAllowedPrompts,
+  asAskUserQuestions,
+  asChatImages,
+  asCursorAskQuestions,
+  asCursorPlanPhases,
+  asCursorPlanTodos,
+  asOptionalBoolean,
+  asOptionalChanges,
+  asOptionalNumber,
+  asOptionalString,
+  asRecord,
+  asStringArray,
+  parseChatMessageMetadata,
+  str,
+} from './chat-message-coercion.js';
+
 export interface ChatImage {
   data: string;
   name: string;
@@ -751,190 +768,6 @@ export type ChatMessage =
   | PermissionExpiredMessage
   | CompactionMessage
   | AgentSwitchMessage;
-
-// Narrows an unknown value to string, defaulting to ''.
-function str(v: unknown): string {
-  return typeof v === 'string' ? v : '';
-}
-
-function asOptionalString(v: unknown): string | undefined {
-  return typeof v === 'string' ? v : undefined;
-}
-
-function asOptionalNumber(v: unknown): number | undefined {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string') {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-
-function asRecord(v: unknown): Record<string, unknown> {
-  if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>;
-  return {};
-}
-
-function parseChatMessageMetadata(v: unknown): ChatMessageMetadata | undefined {
-  const raw = asRecord(v);
-  const metadata: ChatMessageMetadata = {};
-  if (typeof raw.clientRequestId === 'string') metadata.clientRequestId = raw.clientRequestId;
-  if (typeof raw.clientMessageId === 'string') metadata.clientMessageId = raw.clientMessageId;
-  if (typeof raw.upstreamRequestId === 'string') metadata.upstreamRequestId = raw.upstreamRequestId;
-  if (typeof raw.turnId === 'string') metadata.turnId = raw.turnId;
-  return Object.keys(metadata).length > 0 ? metadata : undefined;
-}
-
-function asStringArray(v: unknown): string[] | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const items = v.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-  return items.length > 0 ? items : undefined;
-}
-
-function asChatImages(v: unknown): ChatImage[] | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const images: ChatImage[] = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    if (typeof raw.data !== 'string' || typeof raw.name !== 'string') continue;
-    images.push({
-      data: raw.data,
-      name: raw.name,
-      ...(typeof raw.mimeType === 'string' && raw.mimeType ? { mimeType: raw.mimeType } : {}),
-    });
-  }
-  if (images.length > 0 || v.length === 0) return images;
-  return undefined;
-}
-
-function asAllowedPrompts(v: unknown): Array<{ tool: string; prompt: string }> | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const prompts: Array<{ tool: string; prompt: string }> = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    if (typeof raw.tool !== 'string' || typeof raw.prompt !== 'string') continue;
-    prompts.push({ tool: raw.tool, prompt: raw.prompt });
-  }
-  if (prompts.length > 0 || v.length === 0) return prompts;
-  return undefined;
-}
-
-function asOptionalBoolean(v: unknown): boolean | undefined {
-  return typeof v === 'boolean' ? v : undefined;
-}
-
-function asAskUserQuestionOptions(v: unknown): AskUserQuestionOption[] {
-  if (!Array.isArray(v)) return [];
-  const options: AskUserQuestionOption[] = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    if (typeof raw.id !== 'string' || typeof raw.label !== 'string') continue;
-    const option: AskUserQuestionOption = { id: raw.id, label: raw.label };
-    if (typeof raw.description === 'string') option.description = raw.description;
-    if (typeof raw.preview === 'string') option.preview = raw.preview;
-    options.push(option);
-  }
-  return options;
-}
-
-function asAskUserQuestions(v: unknown): AskUserQuestionPrompt[] {
-  if (!Array.isArray(v)) return [];
-  const questions: AskUserQuestionPrompt[] = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    if (typeof raw.id !== 'string' || typeof raw.prompt !== 'string') continue;
-    const question: AskUserQuestionPrompt = {
-      id: raw.id,
-      prompt: raw.prompt,
-      options: asAskUserQuestionOptions(raw.options),
-    };
-    if (typeof raw.header === 'string') question.header = raw.header;
-    question.allowMultiple = asOptionalBoolean(raw.allowMultiple);
-    questions.push(question);
-  }
-  return questions;
-}
-
-function asCursorAskQuestionOptions(v: unknown): CursorAskQuestionOption[] {
-  if (!Array.isArray(v)) return [];
-  const options: CursorAskQuestionOption[] = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    if (typeof raw.id !== 'string' || typeof raw.label !== 'string') continue;
-    options.push({ id: raw.id, label: raw.label });
-  }
-  return options;
-}
-
-function asCursorAskQuestions(v: unknown): CursorAskQuestionPrompt[] {
-  if (!Array.isArray(v)) return [];
-  const questions: CursorAskQuestionPrompt[] = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    if (typeof raw.id !== 'string' || typeof raw.prompt !== 'string') continue;
-    questions.push({
-      id: raw.id,
-      prompt: raw.prompt,
-      options: asCursorAskQuestionOptions(raw.options),
-      allowMultiple: asOptionalBoolean(raw.allowMultiple),
-    });
-  }
-  return questions;
-}
-
-function asCursorPlanTodoStatus(v: unknown): CursorPlanTodoStatus {
-  return v === 'completed'
-    || v === 'in_progress'
-    || v === 'cancelled'
-    ? v
-    : 'pending';
-}
-
-function asCursorPlanTodos(v: unknown): CursorPlanTodo[] | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const todos: CursorPlanTodo[] = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    if (typeof raw.content !== 'string') continue;
-    const todo: CursorPlanTodo = {
-      content: raw.content,
-      status: asCursorPlanTodoStatus(raw.status),
-    };
-    if (typeof raw.id === 'string') todo.id = raw.id;
-    todos.push(todo);
-  }
-  if (todos.length > 0 || v.length === 0) return todos;
-  return undefined;
-}
-
-function asCursorPlanPhases(v: unknown): CursorPlanPhase[] | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const phases: CursorPlanPhase[] = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    if (typeof raw.name !== 'string') continue;
-    phases.push({
-      name: raw.name,
-      todos: asCursorPlanTodos(raw.todos) ?? [],
-    });
-  }
-  if (phases.length > 0 || v.length === 0) return phases;
-  return undefined;
-}
-
-function asOptionalChanges(v: unknown): Array<{ path?: string; kind?: string }> | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const changes: Array<{ path?: string; kind?: string }> = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    const change: { path?: string; kind?: string } = {};
-    if (typeof raw.path === 'string') change.path = raw.path;
-    if (typeof raw.kind === 'string') change.kind = raw.kind;
-    if (change.path !== undefined || change.kind !== undefined) changes.push(change);
-  }
-  if (changes.length > 0 || v.length === 0) return changes;
-  return undefined;
-}
 
 const CODEX_SUBAGENT_ACTION_SET = new Set<string>(CODEX_SUBAGENT_ACTIONS);
 const CODEX_SUBAGENT_STATUS_SET = new Set<string>(CODEX_SUBAGENT_STATUSES);

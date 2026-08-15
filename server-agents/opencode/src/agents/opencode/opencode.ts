@@ -1441,7 +1441,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     }
     const allow = Boolean(decision?.allow);
     const reply = mapPermissionDecision(decision);
-
     const client = await this.getClient();
     const result = await this.#runScopedSessionRequest(
       'OpenCode permission reply',

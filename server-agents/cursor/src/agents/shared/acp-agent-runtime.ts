@@ -43,6 +43,21 @@ import { reconnectOrder } from '../../acp/reconnect-policy.js';
 import { AcpTransport } from '../../acp/transport.js';
 import type { AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import {
+  abortStrategy,
+  asObject,
+  asString,
+  autoApproveOptionId,
+  buildEnvFallback,
+  buildPromptFallback,
+  humanizeError,
+  isAutoApproveMode,
+  isJsonRpcId,
+  permissionCancelledOutcome,
+  permissionOptionId,
+  permissionOutcome,
+  upstreamRequestIdFromUpdate,
+} from './acp-runtime-helpers.js';
 
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
@@ -134,68 +149,6 @@ const SILENT_LOGGER: AgentLogger = {
   warn() {},
   error() {},
 };
-
-function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function buildPromptFallback(request: AcpStartRequest | AcpResumeRequest): Array<{ type: string; text: string }> {
-  return [{ type: 'text', text: request.command }];
-}
-
-function buildEnvFallback(request: AcpStartRequest | AcpResumeRequest): Record<string, string | undefined> {
-  return { ...process.env, ...request.envOverrides };
-}
-
-function isAutoApproveMode(mode: PermissionMode): boolean {
-  return mode === 'acceptEdits' || mode === 'manualBypass' || mode === 'bypassPermissions';
-}
-
-function autoApproveOptionId(mode: PermissionMode): 'allow-once' | 'allow-always' {
-  return mode === 'bypassPermissions' ? 'allow-always' : 'allow-once';
-}
-
-function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
-  return typeof value === 'number' || typeof value === 'string';
-}
-
-function optionIdFrom(option: Record<string, unknown>): string | undefined {
-  return asString(option.optionId ?? option.option_id ?? option.id);
-}
-
-function permissionOptionId(options: Array<Record<string, unknown>>, fallback: string): string {
-  const optionIds = options.map(optionIdFrom).filter((id): id is string => Boolean(id));
-  if (optionIds.includes(fallback)) return fallback;
-  return optionIds[0] ?? fallback;
-}
-
-function permissionOutcome(optionId: string): Record<string, unknown> {
-  return { outcome: { outcome: 'selected', optionId } };
-}
-
-function permissionCancelledOutcome(): Record<string, unknown> {
-  return { outcome: { outcome: 'cancelled' } };
-}
-
-function humanizeError(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  return String(error);
-}
-
-function upstreamRequestIdFromUpdate(notification: AcpSessionUpdateNotification): string | undefined {
-  const update = asObject(notification.update);
-  return asString(update.requestId ?? update.request_id);
-}
-
-function abortStrategy(policy: AcpAgentPolicy): AcpAbortStrategy {
-  return policy.abortStrategy ?? 'cancel';
-}
 
 export class AcpAgentRuntime extends AgentEventEmitterRuntime {
   #policy: AcpAgentPolicy;
