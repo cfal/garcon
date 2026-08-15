@@ -2,9 +2,12 @@ import crypto from 'crypto';
 import {
   BashToolUseMessage,
   EditToolUseMessage,
+  PermissionCancelledMessage,
   PermissionRequestMessage,
   RequestPermissionsToolUseMessage,
 } from '@garcon/common/chat-types';
+import type { AgentLogger } from '@garcon/server-agent-interface';
+import { publishRows, type CodexOperation } from './operation-routes.js';
 import type { JsonRpcServerRequest } from './protocol.js';
 
 export interface CodexPendingApproval {
@@ -133,4 +136,24 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function stringField(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+// Each approval belongs to the operation that provoked it, so its cancellation is published
+// through that operation rather than batched behind whichever one happens to be current.
+export function cancelPendingApprovals(
+  logger: AgentLogger,
+  pending: Map<string, CodexPendingApproval & { operation: CodexOperation }>,
+  chatId: string,
+  reason: 'cancelled' | 'session-complete' | 'aborted',
+): void {
+  for (const [permissionRequestId, approval] of [...pending.entries()]) {
+    if (approval.chatId !== chatId) continue;
+    pending.delete(permissionRequestId);
+    publishRows(
+      logger,
+      approval.chatId,
+      [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason)],
+      approval.operation,
+    );
+  }
 }

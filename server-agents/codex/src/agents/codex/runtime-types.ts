@@ -1,6 +1,5 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { CodexGoalCommand } from './goal-command.js';
 
 export type CodexConfigValue =
@@ -82,15 +81,4 @@ export async function markCodexExecutionStarted(
 ): Promise<void> {
   assertCodexExecutionOpen(request);
   await request.executionAdmission?.markStarted();
-}
-
-export function codexEventMetadata(
-  request: Pick<CodexExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: RuntimeEventMetadata['commandType'],
-): RuntimeEventMetadata {
-  return Object.freeze({
-    ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
-    ...(commandType ? { commandType } : {}),
-    ...(request.turnId ? { turnId: request.turnId } : {}),
-  });
 }

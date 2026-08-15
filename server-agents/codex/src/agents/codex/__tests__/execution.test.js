@@ -5,15 +5,67 @@ import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/eve
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { CodexExecution } from '../execution.ts';
 
-function createRuntime() {
+// Stands in for the app-server runtime, which captures the publisher on the operation that issued
+// the call and routes each event by the name Codex gives it. The emit helpers drive those routes,
+// so a test names the operation an event came from rather than the chat it landed in.
+function createRuntime(host = createHost()) {
   const runtime = new AgentEventEmitterRuntime();
-  runtime.startSession = mock(async (request) => {
+  const routes = new Map();
+  const capture = (request, publish) => {
+    const runId = request.turnId ?? request.clientRequestId;
+    if (runId) routes.set(runId, { chatId: request.chatId, runId, publish });
+  };
+  const deliver = (chatId, metadata, eventType, build) => {
+    const named = metadata?.turnId ?? metadata?.clientRequestId ?? null;
+    const route = named ? routes.get(named) : undefined;
+    if (!route || route.chatId !== chatId) {
+      host.logger.warn('Dropped a Codex provider event with no owning operation', {
+        chatId,
+        turnId: named,
+        eventType,
+      });
+      return;
+    }
+    try {
+      route.publish(build(route.runId));
+    } catch (error) {
+      host.logger.warn('Dropped a Codex provider event at an unavailable sink', {
+        chatId,
+        turnId: route.runId,
+        eventType,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+  runtime.captureOperation = capture;
+  runtime.emitMessages = (chatId, messages, metadata) => deliver(chatId, metadata, 'messages', (runId) => ({
+    type: 'messages',
+    rows: messages.map((message) => ({ message })),
+    runId,
+  }));
+  runtime.emitFinished = (chatId, exitCode, metadata) => deliver(chatId, metadata, 'run-ended', (runId) => ({
+    type: 'run-ended',
+    runId,
+    outcome: 'finished',
+    exitCode,
+  }));
+  runtime.emitFailed = (chatId, message, metadata) => deliver(chatId, metadata, 'run-ended', (runId) => ({
+    type: 'run-ended',
+    runId,
+    outcome: 'failed',
+    error: { code: 'PROVIDER_FAILURE', message },
+  }));
+  runtime.startSession = mock(async (request, publish) => {
+    capture(request, publish);
     request.executionAdmission?.markStarted();
     return { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' };
   });
-  runtime.runTurn = mock(async () => undefined);
-  runtime.submitGoalControl = mock(async () => true);
-  runtime.compact = mock(async () => undefined);
+  runtime.runTurn = mock(async (request, publish) => { capture(request, publish); });
+  runtime.submitGoalControl = mock(async (request, publish, beforeDelivery) => {
+    await beforeDelivery({ validate: () => undefined, commit: () => capture(request, publish) });
+    return true;
+  });
+  runtime.compact = mock(async (request, publish) => { capture(request, publish); });
   runtime.abort = mock(async () => false);
   runtime.isRunning = mock(() => false);
   runtime.getRunningSessions = mock(() => []);
@@ -138,7 +190,7 @@ describe('CodexExecution', () => {
       codexConfig: expect.objectContaining({
         env: { GARCON_CODEX_PROVIDER_API_KEY_ENDPOINT_1: 'secret' },
       }),
-    }));
+    }), expect.any(Function));
 
     runtime.emitMessages('chat-1', [
       new AssistantMessage('2026-07-19T00:00:00.000Z', 'done'),
@@ -193,7 +245,7 @@ describe('CodexExecution', () => {
       command: 'ship the migration',
       codexGoalCommand: { kind: 'set', objective: 'ship the migration' },
       codexSeedContext: prefix,
-    }));
+    }), expect.any(Function));
     expect(started.nativeSeedReceipt).toMatchObject({
       agentSessionId: 'thread-1',
       placement: 'provider-context',
@@ -261,10 +313,10 @@ describe('CodexExecution', () => {
     const events = [];
     const publish = (event) => events.push(event);
     await execution.start(startRequest(), publish);
-    runtime.submitGoalControl.mockImplementation(async (_request, beforeDelivery) => {
+    runtime.submitGoalControl.mockImplementation(async (request, publish, beforeDelivery) => {
       await beforeDelivery({
         validate: () => undefined,
-        commit: () => undefined,
+        commit: () => runtime.captureOperation(request, publish),
       });
       throw new Error('delivery outcome unknown');
     });
@@ -306,11 +358,11 @@ describe('CodexExecution', () => {
       [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
       { turnId: runId },
     );
-    runtime.submitGoalControl.mockImplementation(async (request, beforeDelivery) => {
+    runtime.submitGoalControl.mockImplementation(async (request, publish, beforeDelivery) => {
       emitOutput('before delivery', 'run-1');
       await beforeDelivery({
         validate: () => undefined,
-        commit: () => undefined,
+        commit: () => runtime.captureOperation(request, publish),
       });
       emitOutput('after delivery', 'run-2');
       return true;
@@ -348,8 +400,8 @@ describe('CodexExecution', () => {
   });
 
   it('keeps the prior source route when a replacement start fails before activation', async () => {
-    const runtime = createRuntime();
     const host = createHost();
+    const runtime = createRuntime(host);
     const execution = new CodexExecution(
       host,
       runtime,
@@ -401,8 +453,8 @@ describe('CodexExecution', () => {
   });
 
   it('drops a delayed provider event at its closed originating sink after view replacement', async () => {
-    const runtime = createRuntime();
     const host = createHost();
+    const runtime = createRuntime(host);
     const execution = new CodexExecution(
       host,
       runtime,

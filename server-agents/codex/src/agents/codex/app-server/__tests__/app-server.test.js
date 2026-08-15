@@ -25,6 +25,39 @@ import {
   mapThinkingModeToCodexEffort,
 } from '../request-builders.ts';
 
+// The runtime publishes transcript output through the capability each operation captured, so a
+// test observes it by supplying one publisher per call. The listener surface reports the request
+// that created the delivering publisher, which is how an event reaching the wrong operation stays
+// visible to assertions.
+function createRuntime(options) {
+  const provider = new CodexAppServerRuntime(options);
+  const listeners = { messages: [], finished: [], failed: [] };
+  provider.onMessages = (listener) => { listeners.messages.push(listener); };
+  provider.onFinished = (listener) => { listeners.finished.push(listener); };
+  provider.onFailed = (listener) => { listeners.failed.push(listener); };
+  const publisherFor = (request) => {
+    const metadata = {
+      ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
+      ...(request.turnId ? { turnId: request.turnId } : {}),
+    };
+    return (event) => {
+      if (event.type === 'messages') {
+        const messages = event.rows.map((row) => row.message);
+        for (const listener of listeners.messages) listener(request.chatId, messages, metadata);
+      } else if (event.type === 'run-ended' && event.outcome === 'finished') {
+        for (const listener of listeners.finished) listener(request.chatId, event.exitCode ?? 0, metadata);
+      } else if (event.type === 'run-ended' && event.outcome === 'failed') {
+        for (const listener of listeners.failed) listener(request.chatId, event.error?.message, metadata);
+      }
+    };
+  };
+  for (const name of ['startSession', 'runTurn', 'compact', 'submitGoalControl']) {
+    const method = provider[name].bind(provider);
+    provider[name] = (request, ...rest) => method(request, publisherFor(request), ...rest);
+  }
+  return provider;
+}
+
 function makeRequest(overrides = {}) {
   return {
     chatId: 'chat-1',
@@ -1571,7 +1604,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
 
     await expect(provider.startSession(makeRequest())).resolves.toEqual({
       agentSessionId: 'thread-1',
@@ -1602,7 +1635,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
     });
@@ -1650,7 +1683,7 @@ describe('CodexAppServerRuntime', () => {
         );
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
     });
@@ -1689,7 +1722,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-captured', status: 'inProgress' }) };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
     });
@@ -1743,7 +1776,7 @@ describe('CodexAppServerRuntime', () => {
           );
         },
       });
-      const provider = new CodexAppServerRuntime({
+      const provider = createRuntime({
         createClient: () => fake,
         materializationTimeoutMs: 20,
       });
@@ -1790,7 +1823,7 @@ describe('CodexAppServerRuntime', () => {
         );
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
     });
@@ -1831,7 +1864,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: 'turn-unexpected' };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
     });
@@ -1865,7 +1898,7 @@ describe('CodexAppServerRuntime', () => {
         return { userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const admission = new AbortController();
     const markStarted = mock();
     const start = provider.startSession(makeRequest({
@@ -1903,7 +1936,7 @@ describe('CodexAppServerRuntime', () => {
         },
         shutdown: () => shutdown.promise,
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const provider = createRuntime({ createClient: () => fake });
       const failed = new Promise((resolve) => provider.onFailed((_chatId, message) => resolve(message)));
 
       const operation = operate(provider);
@@ -1929,7 +1962,7 @@ describe('CodexAppServerRuntime', () => {
       durationMs: 12,
     };
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     const processing = [];
     const finished = [];
@@ -2016,7 +2049,7 @@ describe('CodexAppServerRuntime', () => {
         return {};
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     const processing = [];
     const finished = [];
@@ -2045,7 +2078,7 @@ describe('CodexAppServerRuntime', () => {
         throw new Error('interrupt rejected');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
 
@@ -2080,7 +2113,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
 
     await provider.startSession(makeRequest());
@@ -2115,7 +2148,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
 
     await provider.runTurn(makeRequest({
@@ -2137,7 +2170,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
     const emitted = [];
     const failures = [];
     const processing = [];
@@ -2208,7 +2241,7 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const clients = [staleClient, activeClient];
-    const provider = new CodexAppServerRuntime({ createClient: () => clients.shift(), materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => clients.shift(), materializationTimeoutMs: 20 });
     const emitted = [];
     const failures = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -2287,7 +2320,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'active-turn', status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
     const emitted = [];
     const failures = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -2355,7 +2388,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
@@ -2408,7 +2441,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
@@ -2471,7 +2504,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
@@ -2542,7 +2575,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
@@ -2615,7 +2648,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: activeGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
@@ -2674,7 +2707,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
@@ -2732,7 +2765,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: activeGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
@@ -2807,7 +2840,7 @@ describe('CodexAppServerRuntime', () => {
           goal: makeGoal(threadId, 'Finish the work', status),
         }),
       });
-      const provider = new CodexAppServerRuntime({
+      const provider = createRuntime({
         createClient: () => fake,
         capacityRetryDelaysMs: [25],
         capacityRetryDelay: controlledDelay.wait,
@@ -2865,7 +2898,7 @@ describe('CodexAppServerRuntime', () => {
           return { cleared: true };
         },
       });
-      const provider = new CodexAppServerRuntime({
+      const provider = createRuntime({
         createClient: () => fake,
         materializationTimeoutMs: 20,
         capacityRetryDelaysMs: [25],
@@ -2910,7 +2943,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [25],
@@ -2960,7 +2993,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0, 0],
@@ -3014,7 +3047,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
@@ -3057,7 +3090,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
     const emitted = [];
     const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -3093,7 +3126,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     await provider.startSession(makeRequest());
@@ -3199,7 +3232,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     await provider.startSession(makeRequest());
@@ -3249,7 +3282,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -3325,7 +3358,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
 
     await provider.startSession(makeRequest({ codexGoalCommand: { kind: 'set', objective: 'Ship the feature' } }));
 
@@ -3355,7 +3388,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
 
     await provider.startSession(makeRequest({
       command: 'Ship seeded work',
@@ -3382,7 +3415,7 @@ describe('CodexAppServerRuntime', () => {
       const fake = new FakeClient({
         getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Existing work', status) }),
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const provider = createRuntime({ createClient: () => fake });
       const emitted = [];
       provider.onMessages((_chatId, messages) => emitted.push(...messages));
       await provider.runTurn(makeRequest({
@@ -3416,7 +3449,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3446,7 +3479,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3473,7 +3506,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: { ...previous, threadId, ...params } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
@@ -3503,7 +3536,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: { ...previous, threadId, ...params } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3540,7 +3573,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3573,7 +3606,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
 
     await provider.runTurn(makeRequest({
@@ -3614,7 +3647,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3649,7 +3682,7 @@ describe('CodexAppServerRuntime', () => {
       clearThreadGoal: async () => ({ cleared: true }),
       setThreadGoal: async () => { throw new Error('goal set unavailable'); },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3669,7 +3702,7 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Ship the feature'),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
@@ -3693,7 +3726,7 @@ describe('CodexAppServerRuntime', () => {
     const fake = new FakeClient({
       clearThreadGoal: async () => ({ cleared: true }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     const finished = new Promise((resolve) => provider.onFinished(resolve));
@@ -3715,7 +3748,7 @@ describe('CodexAppServerRuntime', () => {
     const fake = new FakeClient({
       setThreadGoalStatus: async (threadId, status) => ({ goal: makeGoal(threadId, 'Ship the feature', status) }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     const finished = new Promise((resolve) => provider.onFinished(resolve));
@@ -3746,7 +3779,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, 'Ship the feature', status) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const running = provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3775,7 +3808,7 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Ship the feature', 'budgetLimited'),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     const finished = new Promise((resolve) => provider.onFinished(resolve));
@@ -3815,7 +3848,7 @@ describe('CodexAppServerRuntime', () => {
       },
       setThreadGoalStatus: async (threadId, status) => ({ goal: makeGoal(threadId, 'Ship the feature', status) }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3849,7 +3882,7 @@ describe('CodexAppServerRuntime', () => {
           return { cleared: false };
         },
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const provider = createRuntime({ createClient: () => fake });
 
       await provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
@@ -3887,7 +3920,7 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Ship the feature', status),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     const finished = new Promise((resolve) => provider.onFinished(resolve));
@@ -3939,7 +3972,7 @@ describe('CodexAppServerRuntime', () => {
       getThreadGoal: async () => ({ goal: makeGoal('thread-1', 'Ship the feature', 'active') }),
       clearThreadGoal: async () => ({ cleared: true }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     const finished = new Promise((resolve) => provider.onFinished(resolve));
@@ -4003,7 +4036,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, 'Ship the feature', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -4041,7 +4074,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal('thread-1', 'Ship the feature', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
@@ -4083,7 +4116,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal('thread-1', 'Ship the feature', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -4125,7 +4158,7 @@ describe('CodexAppServerRuntime', () => {
       },
       getThreadGoal: async () => ({ goal: makeGoal('thread-1', 'Ship the feature', 'active') }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -4155,7 +4188,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal('thread-1', 'Ship the feature', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
@@ -4202,7 +4235,7 @@ describe('CodexAppServerRuntime', () => {
         return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const processing = [];
     provider.onProcessing((_chatId, value) => processing.push(value));
 
@@ -4233,7 +4266,7 @@ describe('CodexAppServerRuntime', () => {
           return { goal: makeGoal(threadId, params.objective) };
         },
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const provider = createRuntime({ createClient: () => fake });
       const emitted = [];
       provider.onMessages((_chatId, messages) => emitted.push(...messages));
       const running = provider.runTurn(makeRequest({
@@ -4269,7 +4302,7 @@ describe('CodexAppServerRuntime', () => {
       getThreadGoal: async () => ({ goal: existing }),
       setThreadGoal: async (threadId, params) => ({ goal: { ...existing, threadId, ...params } }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
 
     await provider.runTurn(makeRequest({
@@ -4296,7 +4329,7 @@ describe('CodexAppServerRuntime', () => {
         goal: { ...current, threadId, objective: params.objective, status: 'budgetLimited' },
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
 
     await provider.runTurn(makeRequest({
@@ -4316,7 +4349,7 @@ describe('CodexAppServerRuntime', () => {
 
   it('shows actionable usage for a bare goal edit', async () => {
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     const finished = new Promise((resolve) => provider.onFinished(resolve));
@@ -4345,7 +4378,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
 
     await provider.runTurn(makeRequest({
@@ -4396,7 +4429,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4437,7 +4470,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: 'goal-turn' };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4489,7 +4522,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4530,7 +4563,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4595,7 +4628,7 @@ describe('CodexAppServerRuntime', () => {
       },
       setThreadGoalStatus: async () => { throw new Error('goal status unavailable'); },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     await provider.runTurn(makeRequest({
@@ -4636,7 +4669,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, 'Long-running work', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4673,7 +4706,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     await provider.startSession(makeRequest());
     fake.emit('notification', {
@@ -4695,7 +4728,7 @@ describe('CodexAppServerRuntime', () => {
 
   it('keeps compact and other unmanaged turns on the persisted queue path', async () => {
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.compact(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
     let accepted = false;
 
@@ -4724,7 +4757,7 @@ describe('CodexAppServerRuntime', () => {
       steerTurn: async () => { throw new Error('no active turn to steer'); },
       startTurn: async () => ({ turn: makeTurn({ id: 'priority-turn', status: 'inProgress' }) }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4771,7 +4804,7 @@ describe('CodexAppServerRuntime', () => {
         throw new Error('active turn already in progress');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4811,7 +4844,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4856,7 +4889,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4906,7 +4939,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4963,7 +4996,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       capacityRetryDelaysMs: [25],
       capacityRetryDelay: controlledDelay.wait,
@@ -5025,7 +5058,7 @@ describe('CodexAppServerRuntime', () => {
           return { turnId: expectedTurnId };
         },
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const provider = createRuntime({ createClient: () => fake });
       await provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -5081,7 +5114,7 @@ describe('CodexAppServerRuntime', () => {
       },
       startTurn: async () => ({ turn: makeTurn({ id: 'user-turn', status: 'inProgress' }) }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -5125,7 +5158,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -5154,7 +5187,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const failed = new Promise((resolve) => provider.onFailed(
       (chatId, message, metadata) => resolve({ chatId, message, metadata }),
     ));
@@ -5220,7 +5253,7 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Long-running work', status),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -5259,7 +5292,7 @@ describe('CodexAppServerRuntime', () => {
       },
       clearThreadGoal: async () => ({ cleared: true }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -5303,7 +5336,7 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Long-running work', status),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -5338,7 +5371,7 @@ describe('CodexAppServerRuntime', () => {
       },
       clearThreadGoal: async () => ({ cleared: false }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     await provider.runTurn(makeRequest({
@@ -5381,7 +5414,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     await provider.startSession(makeRequest({
       codexGoalCommand: { kind: 'set', objective: 'Inspect attachments' },
@@ -5432,7 +5465,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: currentGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Inspect video' },
@@ -5467,7 +5500,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const original = new CodexAppServerRuntime({ createClient: () => fake });
+    const original = createRuntime({ createClient: () => fake });
     await original.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Inspect video' },
@@ -5476,7 +5509,7 @@ describe('CodexAppServerRuntime', () => {
     }));
     await original.shutdown();
 
-    const restored = new CodexAppServerRuntime({ createClient: () => new FakeClient({
+    const restored = createRuntime({ createClient: () => new FakeClient({
       connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
     }) });
     await restored.runTurn(makeRequest({
@@ -5506,7 +5539,7 @@ describe('CodexAppServerRuntime', () => {
         throw new Error('response lost');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -5538,7 +5571,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: currentGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1', codexGoalCommand: { kind: 'set', objective: 'Initial goal' }, nativePath: null,
     }));
@@ -5576,7 +5609,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: currentGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1', codexGoalCommand: { kind: 'set', objective: 'Initial goal' }, nativePath: null,
     }));
@@ -5607,7 +5640,7 @@ describe('CodexAppServerRuntime', () => {
         throw new Error('mutation response lost');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -5651,7 +5684,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: currentGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       cleanupOwnedGoalAttachments: delayedCleanup,
     });
@@ -5704,7 +5737,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: currentGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1', codexGoalCommand: { kind: 'set', objective: 'Initial goal' }, nativePath: null,
     }));
@@ -5747,7 +5780,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.startSession(makeRequest({
       command: largeObjective,
@@ -5772,7 +5805,7 @@ describe('CodexAppServerRuntime', () => {
         throw new Error('goal set rejected');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -5791,7 +5824,7 @@ describe('CodexAppServerRuntime', () => {
       getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Existing goal', 'blocked') }),
       clearThreadGoal: async () => { throw new Error('goal clear rejected'); },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -5843,7 +5876,7 @@ describe('CodexAppServerRuntime', () => {
       },
     ]);
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const messages = await provider.loadMessages({
       provider: 'codex',
@@ -5883,7 +5916,7 @@ describe('CodexAppServerRuntime', () => {
         backwardsCursor: null,
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const messages = await provider.loadMessages({
       provider: 'codex',
@@ -5917,7 +5950,7 @@ describe('CodexAppServerRuntime', () => {
       },
     }]);
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await expect(provider.loadMessages({
       provider: 'codex',
@@ -5941,7 +5974,7 @@ describe('CodexAppServerRuntime', () => {
         backwardsCursor: null,
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const resolvedPath = await provider.resolveNativePath({
       provider: 'codex',
@@ -5965,7 +5998,7 @@ describe('CodexAppServerRuntime', () => {
         backwardsCursor: null,
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const session = {
       provider: 'codex',
       agentSessionId: 'thread-1',
@@ -5986,7 +6019,7 @@ describe('CodexAppServerRuntime', () => {
 
   it('uses one discovery snapshot for sequential missing-session resolutions', async () => {
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     for (let index = 0; index < 100; index += 1) {
       await expect(provider.resolveNativePath({
@@ -6003,7 +6036,7 @@ describe('CodexAppServerRuntime', () => {
   it('bounds repeated native path discovery refresh requests', async () => {
     let now = 0;
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       nativePathDiscoveryRefresh: {
         sessionIntervalMs: 30_000,
@@ -6039,7 +6072,7 @@ describe('CodexAppServerRuntime', () => {
   it('lets another session request a refresh after the global minimum interval', async () => {
     let now = 0;
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       nativePathDiscoveryRefresh: {
         sessionIntervalMs: 30_000,
@@ -6075,7 +6108,7 @@ describe('CodexAppServerRuntime', () => {
         throw new Error('app-server unavailable');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await expect(provider.resolveNativePath({
       provider: 'codex',
@@ -6096,7 +6129,7 @@ describe('CodexAppServerRuntime', () => {
       unsubscribeThread: async () => ({ status: 'unsubscribed' }),
     });
     const clientOptions = [];
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: (options) => {
         clientOptions.push(options);
         return operationClient;
@@ -6151,7 +6184,7 @@ describe('CodexAppServerRuntime', () => {
         backwardsCursor: null,
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.startSession(makeRequest());
     const session = {
       provider: 'codex',
@@ -6192,7 +6225,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -6227,7 +6260,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -6262,7 +6295,7 @@ describe('CodexAppServerRuntime', () => {
       memoryCitation: null,
     };
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -6320,7 +6353,7 @@ describe('CodexAppServerRuntime', () => {
         };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     const finished = new Promise((resolve) => provider.onFinished(resolve));
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -6366,7 +6399,7 @@ describe('CodexAppServerRuntime', () => {
         };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const resolvedPath = await provider.resolveNativePath({
       provider: 'codex',
@@ -6388,7 +6421,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.startSession(makeRequest());
 
     const emitted = [];
@@ -6433,7 +6466,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emissions = [];
     provider.onMessages((_chatId, messages, metadata) => {
       emissions.push(...messages.map((message) => ({ message, metadata })));
@@ -6493,6 +6526,99 @@ describe('CodexAppServerRuntime', () => {
       .toMatchObject({ turnId: 'run-b' });
   });
 
+  it('keeps a native turn with the run that started it after a later operation takes the session', async () => {
+    const nativePath = path.join(tmpDir, 'turn-route-thread.jsonl');
+    let goal = null;
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      getThreadGoal: async () => ({ goal }),
+      setThreadGoal: async (threadId, params) => {
+        goal = makeGoal(threadId, params.objective, 'active');
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }),
+          },
+        }));
+        return { goal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const emissions = [];
+    provider.onMessages((_chatId, messages, metadata) => {
+      emissions.push(...messages.map((message) => ({ message, metadata })));
+    });
+    await provider.startSession(makeRequest({
+      clientRequestId: 'run-a',
+      turnId: 'run-a',
+      command: 'Keep working',
+      codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+    }));
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath,
+      clientRequestId: 'run-b',
+      turnId: 'run-b',
+      codexGoalCommand: { kind: 'status' },
+    }));
+
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'goal-turn',
+        item: { type: 'agentMessage', id: 'goal-turn-item', text: 'still working', phase: null, memoryCitation: null },
+      },
+    });
+
+    const turnContent = emissions.find(({ message }) => message.content === 'still working');
+    expect(turnContent?.metadata).toMatchObject({ turnId: 'run-a' });
+    const statusReply = emissions.find(({ message }) => (
+      typeof message.content === 'string' && message.content.includes('Keep working')
+    ));
+    expect(statusReply?.metadata).toMatchObject({ turnId: 'run-b' });
+  });
+
+  it('publishes compaction through the operation that requested it', async () => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const emissions = [];
+    provider.onMessages((_chatId, messages, metadata) => {
+      emissions.push(...messages.map((message) => ({ message, metadata })));
+    });
+
+    await provider.compact(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      clientRequestId: 'run-compact',
+      turnId: 'run-compact',
+    }));
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: { type: 'agentMessage', id: 'compaction-note', text: 'compacted', phase: null, memoryCitation: null },
+      },
+    });
+
+    expect(emissions.find(({ message }) => message.content === 'compacted')?.metadata)
+      .toMatchObject({ turnId: 'run-compact' });
+  });
+
   it('auto-approves app-server approvals in manual bypass without emitting a permission row', async () => {
     const nativePath = path.join(tmpDir, 'manual-bypass-thread.jsonl');
     const fake = new FakeClient({
@@ -6502,7 +6628,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
@@ -6527,7 +6653,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
@@ -6552,7 +6678,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 

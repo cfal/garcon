@@ -1,6 +1,13 @@
 import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage } from '@garcon/common/chat-types';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
+import {
+  codexOperation,
+  publishFailed,
+  publishFinished,
+  publishRows,
+  type CodexOperation,
+} from './operation-routes.js';
 import type {
   AgentGoalControlHandoff,
   AgentLogger,
@@ -11,7 +18,6 @@ import type {
 import { CodexHistoryService } from '../history-source.js';
 import {
   assertCodexExecutionOpen,
-  codexEventMetadata,
   markCodexExecutionStarted,
   type CodexChatEntry,
   type CodexForkSessionRequest,
@@ -20,7 +26,7 @@ import {
   type CodexStartRequest,
 } from '../runtime-types.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
-import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
+import { buildApprovalMessage, buildApprovalResponse, cancelPendingApprovals, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import {
   CodexAppServerClient,
   CodexAppServerRpcError,
@@ -126,8 +132,11 @@ interface RunningCodexSession {
   capacityRetryCount: number;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
-  eventMetadata: RuntimeEventMetadata;
-  turnMetadata: Map<string, RuntimeEventMetadata>;
+  // The operation that issued the call this session is currently serving. Session-scoped output
+  // belongs to it; a native turn keeps its own route so content Codex labels with that turn
+  // still reaches the operation that asked for it after the session moves on.
+  operation: CodexOperation;
+  turnRoutes: Map<string, CodexOperation>;
 }
 
 export interface CodexAppServerRuntimeOptions {
@@ -149,7 +158,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }>();
   #pendingApprovals = new Map<
     string,
-    CodexPendingApproval & { client: CodexAppServerClient; eventMetadata: RuntimeEventMetadata }
+    CodexPendingApproval & { client: CodexAppServerClient; operation: CodexOperation }
   >();
   #bufferingClients = new Set<CodexAppServerClient>();
   #bufferedClientEvents = new Map<CodexAppServerClient, BufferedClientEvent[]>();
@@ -241,7 +250,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       skills,
     }));
     if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
-    session.activeTurnId = turn.turn.id;
+    this.#adoptTurn(session, turn.turn.id);
   }
 
   async #handleGoalCommand(
@@ -264,10 +273,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             ? { goal: session.goal }
             : await client.getThreadGoal(session.threadId);
           if (command.kind === 'set' && current.goal && current.goal.status !== 'complete') {
-            this.emitMessages(session.chatId, [new ErrorMessage(
+            publishRows(this.#logger, session.chatId, [new ErrorMessage(
               new Date().toISOString(),
               `An unfinished Codex goal is already ${goalStatusLabel(current.goal.status)}: ${current.goal.objective}\nUse /goal replace <objective> to replace it explicitly, or /goal clear first.`,
-            )], session.eventMetadata);
+            )], session.operation);
             if (!keepSession) this.#finishSession(session);
             return;
           }
@@ -289,9 +298,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             : await client.getThreadGoal(session.threadId);
           session.goal = response.goal;
           if (response.goal?.status === 'active') session.managesGoalLifecycle = true;
-          this.emitMessages(session.chatId, [
+          publishRows(this.#logger, session.chatId, [
             new AssistantMessage(new Date().toISOString(), formatGoalStatusMessage(response.goal)),
-          ], session.eventMetadata);
+          ], session.operation);
           if (!keepSession && !hasActiveGoalContinuation(session)) this.#finishSession(session);
           return;
         }
@@ -299,16 +308,16 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           const response = await session.goalAttachments.clear(() => this.#clearThreadGoal(client, session));
           if (response.cleared) session.goal = null;
           const message = response.cleared ? 'Codex goal cleared.' : 'No Codex goal was set.';
-          this.emitMessages(session.chatId, [new AssistantMessage(new Date().toISOString(), message)], session.eventMetadata);
+          publishRows(this.#logger, session.chatId, [new AssistantMessage(new Date().toISOString(), message)], session.operation);
           if (!keepSession || !session.activeTurnId) this.#finishSession(session);
           return;
         }
         case 'pause': {
           const response = await client.setThreadGoalStatus(session.threadId, 'paused');
           session.goal = response.goal;
-          this.emitMessages(session.chatId, [
+          publishRows(this.#logger, session.chatId, [
             new AssistantMessage(new Date().toISOString(), formatGoalUpdatedMessage('paused', response.goal)),
-          ], session.eventMetadata);
+          ], session.operation);
           if (!keepSession || !session.activeTurnId) this.#finishSession(session);
           return;
         }
@@ -323,19 +332,19 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
           } else {
             session.managesGoalLifecycle = previouslyManaged;
-            this.emitMessages(session.chatId, [
+            publishRows(this.#logger, session.chatId, [
               new AssistantMessage(new Date().toISOString(), formatGoalUpdatedMessage('updated', response.goal)),
-            ], session.eventMetadata);
+            ], session.operation);
             if (!hasActiveGoalContinuation(session)) this.#finishSession(session);
           }
           return;
         }
         case 'edit': {
           if (!command.objective) {
-            this.emitMessages(session.chatId, [new ErrorMessage(
+            publishRows(this.#logger, session.chatId, [new ErrorMessage(
               new Date().toISOString(),
               'Usage: /goal edit <objective>',
-            )], session.eventMetadata);
+            )], session.operation);
             if (!keepSession) this.#finishSession(session);
             return;
           }
@@ -344,10 +353,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             ? session.goal
             : (await client.getThreadGoal(session.threadId)).goal;
           if (!current) {
-            this.emitMessages(session.chatId, [new ErrorMessage(
+            publishRows(this.#logger, session.chatId, [new ErrorMessage(
               new Date().toISOString(),
               'No Codex goal is set. Start one with /goal <objective>.',
-            )], session.eventMetadata);
+            )], session.operation);
             if (!keepSession) this.#finishSession(session);
             return;
           }
@@ -371,20 +380,20 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
           } else {
             session.managesGoalLifecycle = previouslyManaged;
-            this.emitMessages(session.chatId, [
+            publishRows(this.#logger, session.chatId, [
               new AssistantMessage(new Date().toISOString(), formatGoalUpdatedMessage('updated', response.goal)),
-            ], session.eventMetadata);
+            ], session.operation);
             if (!keepSession || !session.activeTurnId) this.#finishSession(session);
           }
           return;
         }
         case 'unsupported':
-          this.emitMessages(session.chatId, [
+          publishRows(this.#logger, session.chatId, [
             new ErrorMessage(
               new Date().toISOString(),
               `Unsupported Codex goal command: /goal ${command.subcommand}. Use /goal <objective>, /goal replace <objective>, /goal edit <objective>, /goal pause, /goal resume, or /goal clear.`,
             ),
-          ], session.eventMetadata);
+          ], session.operation);
           if (!keepSession) this.#finishSession(session);
           return;
       }
@@ -393,7 +402,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         if (propagateDeliveryFailure) throw error;
         return;
       }
-      this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), humanizeCodexAppServerError(error))], session.eventMetadata);
+      publishRows(this.#logger, session.chatId, [new ErrorMessage(new Date().toISOString(), humanizeCodexAppServerError(error))], session.operation);
       if (!hasActiveGoalContinuation(session)) {
         this.#finishSession(session);
       }
@@ -438,6 +447,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async submitGoalControl(
     request: CodexResumeRequest,
+    publish: AgentRuntimePublisher,
     beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void> = async (handoff) => {
       handoff.validate();
       handoff.commit();
@@ -448,7 +458,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return false;
     }
     if (!session.managesGoalLifecycle) return false;
-    const operation = session.activeInputChain.then(async () => {
+    const delivery = session.activeInputChain.then(async () => {
       if (this.#sessions.get(request.agentSessionId) !== session) return false;
       if (
         !session.managesGoalLifecycle
@@ -473,7 +483,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         await beforeDelivery({
           validate,
           commit: () => {
-            session.eventMetadata = codexEventMetadata(request);
+            session.operation = codexOperation(request, publish);
             committed = true;
           },
         });
@@ -491,8 +501,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#flushPendingFinish(session);
       }
     });
-    session.activeInputChain = operation.then(() => undefined, () => undefined);
-    return operation;
+    session.activeInputChain = delivery.then(() => undefined, () => undefined);
+    return delivery;
   }
 
   async #deliverReservedGoalControl(session: RunningCodexSession, request: CodexResumeRequest): Promise<void> {
@@ -540,7 +550,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         try {
           const turn = await session.client.startTurn(startParams);
           if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
-          session.activeTurnId = turn.turn.id;
+          this.#adoptTurn(session, turn.turn.id);
           return;
         } catch (error) {
           const isTurnTransition = isActiveTurnConflictError(error) || isActiveTurnNotSteerableError(error);
@@ -589,7 +599,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         }
         if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) throw error;
         if (actualTurnId && actualTurnId !== turnId) {
-          session.activeTurnId = actualTurnId;
+          this.#adoptTurn(session, actualTurnId);
           turnId = actualTurnId;
           transitions += 1;
           continue;
@@ -626,7 +636,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       : cleanup;
   }
 
-  async startSession(request: CodexStartRequest): Promise<CodexStartedSession> {
+  async startSession(
+    request: CodexStartRequest,
+    publish: AgentRuntimePublisher,
+  ): Promise<CodexStartedSession> {
     assertCodexExecutionOpen(request);
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
@@ -643,7 +656,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
-        eventMetadata: codexEventMetadata(request, 'chat-start'),
+        operation: codexOperation(request, publish),
       });
       activeSession = session;
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
@@ -669,7 +682,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
-          this.emitFailed(request.chatId, message, codexEventMetadata(request, 'chat-start'));
+          publishFailed(this.#logger, request.chatId, message, codexOperation(request, publish));
         }
         await this.#shutdownClient(client);
       }
@@ -677,7 +690,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async runTurn(request: CodexResumeRequest): Promise<void> {
+  async runTurn(request: CodexResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
     assertCodexExecutionOpen(request);
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
@@ -693,7 +706,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
-        eventMetadata: codexEventMetadata(request),
+        operation: codexOperation(request, publish),
       });
       activeSession = session;
       await session.turnItems.seedHistory(session.nativePath);
@@ -748,7 +761,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
-          this.emitFailed(request.chatId, message, codexEventMetadata(request));
+          publishFailed(this.#logger, request.chatId, message, codexOperation(request, publish));
         }
         await this.#shutdownClient(client);
       }
@@ -759,7 +772,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   // Triggers native context compaction as its own turn. Mirrors runTurn but
   // starts the turn via thread/compact/start; the resulting contextCompaction
   // item and turn lifecycle arrive through the shared notification handlers.
-  async compact(request: CodexResumeRequest): Promise<void> {
+  async compact(request: CodexResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
     assertCodexExecutionOpen(request);
     // A live session means a turn is already active for this thread; starting a
     // second one would overwrite the session map and leak the existing client.
@@ -781,7 +794,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
-        eventMetadata: codexEventMetadata(request),
+        operation: codexOperation(request, publish),
       });
       activeSession = session;
       await session.turnItems.seedHistory(session.nativePath);
@@ -799,7 +812,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
-          this.emitFailed(request.chatId, message, codexEventMetadata(request));
+          publishFailed(this.#logger, request.chatId, message, codexOperation(request, publish));
         }
         await this.#shutdownClient(client);
       }
@@ -894,10 +907,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
     this.#pendingApprovals.delete(permissionRequestId);
     pending.client.respond(pending.requestId, buildApprovalResponse(pending, decision));
-    this.emitMessages(
-      pending.chatId,
+    publishRows(this.#logger, pending.chatId,
       [new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow))],
-      pending.eventMetadata,
+      pending.operation,
     );
   }
 
@@ -1074,11 +1086,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     codexHome: string | null;
     client: CodexAppServerClient;
     permissionMode: PermissionMode;
-    eventMetadata: RuntimeEventMetadata;
+    operation: CodexOperation;
   }): RunningCodexSession {
     // Keyed by Codex's own turn id so an event it labels later still names the run that asked
     // for that turn, long after the session moved on to the next one.
-    const turnMetadata = new Map<string, RuntimeEventMetadata>();
+    const turnRoutes = new Map<string, CodexOperation>();
     const session: RunningCodexSession = {
       chatId: args.chatId,
       threadId: args.threadId,
@@ -1107,13 +1119,13 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       pendingFinish: null,
       liveCodeModeResultToolIds: new Map(),
       turnItems: new CodexTurnItemLedger(this.#logger, (turnId, messages) => (
-        this.emitMessages(args.chatId, messages, turnMetadata.get(turnId))
+        publishRows(this.#logger, args.chatId, messages, turnRoutes.get(turnId))
       )),
-      turnMetadata,
+      turnRoutes,
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
-      eventMetadata: args.eventMetadata,
+      operation: args.operation,
     };
     this.#sessions.set(args.threadId, session);
     return session;
@@ -1202,10 +1214,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #handleTurnStarted(client: CodexAppServerClient, params: TurnStartedNotification): void {
     const session = this.#sessionForClientThread(client, params.threadId);
     if (!session) return;
-    session.activeTurnId = params.turn.id;
-    // The run that asked for this turn is known now and will not be once the next turn starts,
-    // so every event Codex later labels with this turn id can still name its originating run.
-    session.turnMetadata.set(params.turn.id, session.eventMetadata);
+    this.#adoptTurn(session, params.turn.id);
     if (session.status !== 'interrupting') session.status = 'running';
     for (const waiter of session.turnStartWaiters) waiter.resolve(params.turn.id);
   }
@@ -1413,10 +1422,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const session = this.#sessionForClientTurn(client, params.threadId, params.turnId);
     if (!session) return;
     const message = params.error.message || params.error.additionalDetails || 'Codex app-server error';
-    this.emitMessages(
-      session.chatId,
+    publishRows(this.#logger, session.chatId,
       [new ErrorMessage(new Date().toISOString(), message)],
-      session.turnMetadata.get(params.turnId) ?? session.eventMetadata,
+      session.turnRoutes.get(params.turnId),
     );
     if (params.willRetry) return;
     if (isCapacityError(params.error)) {
@@ -1478,7 +1486,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           || hasTerminalPendingFinish(session)
           || session.turnAttemptGeneration !== retryGeneration
         ) return true;
-        session.activeTurnId = turn.turn.id;
+        this.#adoptTurn(session, turn.turn.id);
         return true;
       } finally {
         session.activeDeliveryReservations -= 1;
@@ -1532,14 +1540,14 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const pending = {
       ...createPendingApproval(session.chatId, request),
       client,
-      eventMetadata: session.eventMetadata,
+      operation: session.operation,
     };
     if (session.permissionMode === 'manualBypass') {
       client.respond(request.id, buildApprovalResponse(pending, { allow: true, alwaysAllow: false }));
       return;
     }
     this.#pendingApprovals.set(pending.permissionRequestId, pending);
-    this.emitMessages(session.chatId, [buildApprovalMessage(pending)], pending.eventMetadata);
+    publishRows(this.#logger, session.chatId, [buildApprovalMessage(pending)], pending.operation);
   }
 
   #handleClientExit(client: CodexAppServerClient, code: number): void {
@@ -1559,14 +1567,14 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#sessions.delete(session.threadId);
     this.#threadListCaches.clear();
     session.status = opts.failedMessage ? 'failed' : opts.aborted ? 'aborted' : 'completed';
-    this.#cancelPendingApprovals(session, opts.aborted ? 'aborted' : 'session-complete');
+    cancelPendingApprovals(this.#logger, this.#pendingApprovals, session.chatId, opts.aborted ? 'aborted' : 'session-complete');
     this.emitProcessing(session.chatId, false);
     void session.cleanupAttachments?.();
 
     if (opts.failedMessage) {
-      this.emitFailed(session.chatId, opts.failedMessage, session.eventMetadata);
+      publishFailed(this.#logger, session.chatId, opts.failedMessage, session.operation);
     } else if (!opts.aborted || opts.emitFinishedOnAbort) {
-      this.emitFinished(session.chatId, 0, session.eventMetadata);
+      publishFinished(this.#logger, session.chatId, 0, session.operation);
     }
 
     void this.#shutdownClient(session.client);
@@ -1637,27 +1645,17 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     for (const waiter of [...session.turnStartWaiters]) waiter.reject(error);
   }
 
-  #cancelPendingApprovals(
-    session: RunningCodexSession,
-    reason: 'cancelled' | 'session-complete' | 'aborted',
-  ): void {
-    // Each approval belongs to the operation that provoked it, so its cancellation is published
-    // through that operation rather than batched behind whichever one happens to be current.
-    for (const [permissionRequestId, pending] of [...this.#pendingApprovals.entries()]) {
-      if (pending.chatId !== session.chatId) continue;
-      this.#pendingApprovals.delete(permissionRequestId);
-      this.emitMessages(
-        pending.chatId,
-        [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason)],
-        pending.eventMetadata,
-      );
-    }
-  }
-
-
   #sessionForClientThread(client: CodexAppServerClient, threadId: string): RunningCodexSession | null {
     const session = this.#sessions.get(threadId);
     return session?.client === client ? session : null;
+  }
+
+  // Binding the route wherever the turn becomes active keeps the two in step: any event Codex
+  // labels with a turn the session accepted resolves, including one that arrives before
+  // turn/started and one that arrives after the session has moved on to a later turn.
+  #adoptTurn(session: RunningCodexSession, turnId: string): void {
+    session.activeTurnId = turnId;
+    session.turnRoutes.set(turnId, session.operation);
   }
 
   #sessionForClientTurn(
