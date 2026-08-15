@@ -73,6 +73,44 @@ describe('TranscriptLedgerStore', () => {
 
   });
 
+  it('rolls back a failed commit and fences only that chat', () => {
+    const failedView = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const healthyView = store.initializeCurrentView('healthy-chat', {
+      viewId: transcriptViewId('healthy-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        throw new Error('injected transcript commit failure');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      expect(() => store.append('failed-chat', failedView.viewId, [
+        provider('must roll back one'),
+        provider('must roll back two'),
+      ])).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(store.append('healthy-chat', healthyView.viewId, [provider('still writable')])
+      .map(renderedContent)).toEqual(['still writable']);
+
+    store.close();
+    store = new TranscriptLedgerStore(root);
+    expect(store.currentRows('failed-chat')).toEqual([]);
+    expect(store.currentRows('healthy-chat').map(renderedContent)).toEqual(['still writable']);
+  });
+
   it('deduplicates a committed submission without redispatching it', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
