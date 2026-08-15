@@ -234,6 +234,16 @@ export function normalizeAgentSwitchCompactionUiSettings(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+function normalizeGenerationPromptTemplate(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string'
+    || value.length > GENERATION_PROMPT_TEMPLATE_MAX_LENGTH
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 export function normalizeCommitMessageUiSettings(
   value: unknown,
 ): CommitMessageUiSettings | undefined {
@@ -243,12 +253,8 @@ export function normalizeCommitMessageUiSettings(
   const normalized: CommitMessageUiSettings = {
     ...normalizeGenerationSelection(raw),
   };
-  if (
-    typeof raw.customPrompt === 'string'
-    && raw.customPrompt.length <= GENERATION_PROMPT_TEMPLATE_MAX_LENGTH
-  ) {
-    normalized.customPrompt = raw.customPrompt;
-  }
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
   }
@@ -264,12 +270,8 @@ export function normalizePromptRefinementUiSettings(
   const normalized: PromptRefinementUiSettings = {
     ...normalizeGenerationSelection(raw),
   };
-  if (
-    typeof raw.customPrompt === 'string'
-    && raw.customPrompt.length <= GENERATION_PROMPT_TEMPLATE_MAX_LENGTH
-  ) {
-    normalized.customPrompt = raw.customPrompt;
-  }
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
@@ -296,12 +298,8 @@ function normalizeEffectivePromptGenerationExtras(
   normalized: EffectivePromptGenerationExtras,
 ): void {
   normalizeEffectiveGenerationSelection(raw, normalized);
-  if (
-    typeof raw.customPrompt === 'string'
-    && raw.customPrompt.length <= GENERATION_PROMPT_TEMPLATE_MAX_LENGTH
-  ) {
-    normalized.customPrompt = raw.customPrompt;
-  }
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
 }
 
 function normalizeEffectiveCommitMessageExtras(

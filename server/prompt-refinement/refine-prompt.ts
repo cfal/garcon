@@ -103,20 +103,14 @@ function configuredTemplate(persisted: unknown): string {
 }
 
 function renderTemplate(template: string, draft: string): string {
-  let renderedLength = template.length;
-  let tokenIndex = template.indexOf(PROMPT_REFINEMENT_USER_PROMPT_TOKEN);
-  while (tokenIndex !== -1) {
-    renderedLength += draft.length - PROMPT_REFINEMENT_USER_PROMPT_TOKEN.length;
-    if (renderedLength > RENDERED_PROMPT_MAX_LENGTH) {
-      throw new PromptRefinementError(
-        'PROMPT_REFINEMENT_TEMPLATE_INVALID',
-        'The saved prompt refinement template expands beyond the supported input size.',
-        409,
-      );
-    }
-    tokenIndex = template.indexOf(
-      PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
-      tokenIndex + PROMPT_REFINEMENT_USER_PROMPT_TOKEN.length,
+  const tokenCount = template.split(PROMPT_REFINEMENT_USER_PROMPT_TOKEN).length - 1;
+  const renderedLength = template.length
+    + tokenCount * (draft.length - PROMPT_REFINEMENT_USER_PROMPT_TOKEN.length);
+  if (renderedLength > RENDERED_PROMPT_MAX_LENGTH) {
+    throw new PromptRefinementError(
+      'PROMPT_REFINEMENT_TEMPLATE_INVALID',
+      'The saved prompt refinement template expands beyond the supported input size.',
+      409,
     );
   }
   return template.replaceAll(PROMPT_REFINEMENT_USER_PROMPT_TOKEN, () => draft);
@@ -134,41 +128,40 @@ function classifyPromptRefinementError(error: unknown): PromptRefinementError {
     );
   }
   if (error instanceof AgentIntegrationError) {
-    if (error.code === 'AUTH_REQUIRED') {
-      return new PromptRefinementError(
-        'PROMPT_REFINEMENT_AUTH_REQUIRED',
-        'The refinement model requires authentication.',
-        401,
-        false,
-        { cause: error },
-      );
-    }
-    if (error.code === 'RATE_LIMITED') {
-      return new PromptRefinementError(
-        'PROMPT_REFINEMENT_RATE_LIMITED',
-        'The refinement model is rate limited. Try again later.',
-        429,
-        true,
-        { cause: error },
-      );
-    }
-    if (error.code === 'BINARY_NOT_FOUND' || error.code === 'UNAVAILABLE') {
-      return new PromptRefinementError(
-        'PROMPT_REFINEMENT_AGENT_UNAVAILABLE',
-        'The selected refinement agent is unavailable.',
-        503,
-        error.retryable,
-        { cause: error },
-      );
-    }
-    if (error.code === 'TIMEOUT') {
-      return new PromptRefinementError(
-        'PROMPT_REFINEMENT_TIMEOUT',
-        'Prompt refinement timed out.',
-        504,
-        true,
-        { cause: error },
-      );
+    switch (error.code) {
+      case 'AUTH_REQUIRED':
+        return new PromptRefinementError(
+          'PROMPT_REFINEMENT_AUTH_REQUIRED',
+          'The refinement model requires authentication.',
+          401,
+          false,
+          { cause: error },
+        );
+      case 'RATE_LIMITED':
+        return new PromptRefinementError(
+          'PROMPT_REFINEMENT_RATE_LIMITED',
+          'The refinement model is rate limited. Try again later.',
+          429,
+          true,
+          { cause: error },
+        );
+      case 'BINARY_NOT_FOUND':
+      case 'UNAVAILABLE':
+        return new PromptRefinementError(
+          'PROMPT_REFINEMENT_AGENT_UNAVAILABLE',
+          'The selected refinement agent is unavailable.',
+          503,
+          error.retryable,
+          { cause: error },
+        );
+      case 'TIMEOUT':
+        return new PromptRefinementError(
+          'PROMPT_REFINEMENT_TIMEOUT',
+          'Prompt refinement timed out.',
+          504,
+          true,
+          { cause: error },
+        );
     }
   }
   if (isGenerationTimeoutError(error)) {
@@ -297,8 +290,7 @@ export async function refinePrompt(
     });
     return response;
   } catch (error) {
-    const cancelled = signal?.aborted === true;
-    if (cancelled && signal) throw abortReason(signal);
+    if (signal?.aborted) throw abortReason(signal);
 
     const failure = classifyPromptRefinementError(error);
     const outcome = failure.code

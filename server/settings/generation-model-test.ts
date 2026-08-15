@@ -45,6 +45,35 @@ export class GenerationModelTestError extends DomainError {
   }
 }
 
+function classifyGenerationModelTestError(error: unknown): GenerationModelTestError {
+  if (error instanceof GenerationModelTestError) return error;
+  if (isUnsupportedSingleQueryThinkingMode(error)) {
+    return new GenerationModelTestError(
+      'GENERATION_TEST_UNSUPPORTED_EFFORT',
+      'This agent cannot use the selected effort for one-shot generation.',
+      422,
+      false,
+      { cause: error },
+    );
+  }
+  if (isGenerationTimeoutError(error)) {
+    return new GenerationModelTestError(
+      'GENERATION_TEST_TIMEOUT',
+      'The model test timed out.',
+      504,
+      true,
+      { cause: error },
+    );
+  }
+  return new GenerationModelTestError(
+    'GENERATION_TEST_FAILED',
+    'Model test failed. Check the provider, model, protocol, and effort.',
+    502,
+    true,
+    { cause: error },
+  );
+}
+
 export async function testGenerationModel(input: {
   target: GenerationTestTarget;
   configurationKey: string;
@@ -147,13 +176,11 @@ export async function testGenerationModel(input: {
     return { success: true, target: input.target, durationMs };
   } catch (error) {
     const durationMs = Math.round(performance.now() - startedAt);
-    const outcome = error instanceof GenerationModelTestError
-      ? error.code.toLowerCase().replace('generation_test_', '').replaceAll('_', '-')
-      : isUnsupportedSingleQueryThinkingMode(error)
-        ? 'unsupported-effort'
-        : isGenerationTimeoutError(error)
-          ? 'timeout'
-          : 'failed';
+    const failure = classifyGenerationModelTestError(error);
+    const outcome = failure.code
+      .toLowerCase()
+      .replace('generation_test_', '')
+      .replaceAll('_', '-');
     logger.warn('generation model test failed', {
       target: input.target,
       agentId: config?.agentId ?? 'unresolved',
@@ -162,33 +189,6 @@ export async function testGenerationModel(input: {
       durationMs,
       outcome,
     });
-
-    if (error instanceof GenerationModelTestError) throw error;
-
-    if (isUnsupportedSingleQueryThinkingMode(error)) {
-      throw new GenerationModelTestError(
-        'GENERATION_TEST_UNSUPPORTED_EFFORT',
-        'This agent cannot use the selected effort for one-shot generation.',
-        422,
-        false,
-        { cause: error },
-      );
-    }
-    if (isGenerationTimeoutError(error)) {
-      throw new GenerationModelTestError(
-        'GENERATION_TEST_TIMEOUT',
-        'The model test timed out.',
-        504,
-        true,
-        { cause: error },
-      );
-    }
-    throw new GenerationModelTestError(
-      'GENERATION_TEST_FAILED',
-      'Model test failed. Check the provider, model, protocol, and effort.',
-      502,
-      true,
-      { cause: error },
-    );
+    throw failure;
   }
 }

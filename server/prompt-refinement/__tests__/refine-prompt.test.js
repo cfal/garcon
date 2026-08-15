@@ -127,24 +127,24 @@ describe('refinePrompt', () => {
   });
 
   it('rejects corrupt and over-expanded saved templates before provider invocation', async () => {
-    const invalidTemplates = [
-      42,
-      'No user prompt token',
-      '{{USER_PROMPT}}'.repeat(9),
-      PROMPT_REFINEMENT_USER_PROMPT_TOKEN.repeat(
-        Math.floor(
-          GENERATION_PROMPT_TEMPLATE_MAX_LENGTH / PROMPT_REFINEMENT_USER_PROMPT_TOKEN.length,
+    const cases = [
+      { customPrompt: 42, draft: 'draft' },
+      { customPrompt: 'No user prompt token', draft: 'draft' },
+      {
+        customPrompt: '{{USER_PROMPT}}'.repeat(9),
+        draft: 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH),
+      },
+      {
+        customPrompt: PROMPT_REFINEMENT_USER_PROMPT_TOKEN.repeat(
+          Math.floor(
+            GENERATION_PROMPT_TEMPLATE_MAX_LENGTH / PROMPT_REFINEMENT_USER_PROMPT_TOKEN.length,
+          ),
         ),
-      ),
+        draft: 'x'.repeat(1_024),
+      },
     ];
-    for (const customPrompt of invalidTemplates) {
+    for (const { customPrompt, draft } of cases) {
       const test = harness({ config: { customPrompt } });
-      const draft =
-        customPrompt === invalidTemplates[2]
-          ? 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH)
-          : customPrompt === invalidTemplates[3]
-            ? 'x'.repeat(1_024)
-            : 'draft';
       await expect(refinePrompt({ draft }, test)).rejects.toMatchObject({
         code: 'PROMPT_REFINEMENT_TEMPLATE_INVALID',
         status: 409,
