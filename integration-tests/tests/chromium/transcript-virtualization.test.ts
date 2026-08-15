@@ -31,6 +31,8 @@ import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
 const ITEM_SELECTOR = '[data-chat-virtual-item]';
+const ACTIVE_TRANSCRIPT_PRUNE_TARGET = 200;
+const LIVE_EDGE_PRUNE_IDLE_MS = 180_000;
 const TRANSCRIPT_VIEWPORTS = [
   { label: 'compact', height: 700, width: 390 },
   { label: 'wide', height: 900, width: 1280 },
@@ -3329,6 +3331,109 @@ async function loadCompleteTranscript(page: Page, expectedEntryCount: number): P
   expect(entryCount, JSON.stringify({ expectedEntryCount, attempts })).toBe(expectedEntryCount);
 }
 
+async function readCompleteCanonicalTranscript(
+  fixture: ChromiumFixture,
+  chatId: string,
+): Promise<{ messages: TranscriptMessage[]; transcriptViewId: string }> {
+  let response = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const transcriptViewId = response.transcriptViewId;
+  let messages = [...response.messages];
+  for (let pageCount = 1; response.hasMore; pageCount += 1) {
+    if (pageCount > 10) throw new Error('Canonical transcript pagination did not converge.');
+    response = await fixture.integration.client.getMessages(chatId, {
+      beforeOrdinal: response.pageOldestOrdinal,
+      limit: 200,
+    });
+    expect(response.transcriptViewId).toBe(transcriptViewId);
+    messages = [...response.messages, ...messages];
+  }
+  return { messages, transcriptViewId };
+}
+
+async function dispatchClockedTranscriptPosition(
+  page: Page,
+  position: 'away' | 'end',
+): Promise<void> {
+  const geometry = await page.locator(FEED_SELECTOR).evaluate((feedElement, target) => {
+    const feed = feedElement as HTMLElement;
+    const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+    const scrollTop = target === 'end' ? maximum : maximum / 2;
+    feed.dispatchEvent(
+      new WheelEvent('wheel', {
+        bubbles: true,
+        deltaY: scrollTop < feed.scrollTop ? -600 : 600,
+      }),
+    );
+    feed.scrollTop = scrollTop;
+    feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+    return { clientHeight: feed.clientHeight, maximum };
+  }, position);
+  expect(geometry.maximum).toBeGreaterThan(geometry.clientHeight * 2);
+}
+
+async function verifyLiveEdgePruning(
+  fixture: ChromiumFixture,
+  viewport: { height: number; width: number },
+): Promise<void> {
+  const promptPrefix = `chromium-live-edge-prune-${viewport.width}`;
+  const turnCount = 110;
+  const expectedEntryCount = turnCount * 2;
+  const chatId = await seedTranscript(fixture.integration, turnCount, promptPrefix);
+  await fixture.page.setViewportSize(viewport);
+  await prepareTranscript(fixture, chatId);
+  await loadCompleteTranscript(fixture.page, expectedEntryCount);
+  const canonicalBeforePrune = await readCompleteCanonicalTranscript(fixture, chatId);
+  expect(canonicalBeforePrune.messages).toHaveLength(expectedEntryCount);
+
+  const clockStart = Date.now();
+  await fixture.page.clock.install({ time: clockStart });
+  await fixture.page.clock.pauseAt(clockStart + 1_000);
+
+  await dispatchClockedTranscriptPosition(fixture.page, 'end');
+  await fixture.page.clock.runFor(100);
+  expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount);
+
+  await dispatchClockedTranscriptPosition(fixture.page, 'away');
+  await fixture.page.clock.runFor(100);
+  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: false, userScrolledUp: true });
+
+  await dispatchClockedTranscriptPosition(fixture.page, 'end');
+  await fixture.page.clock.runFor(100);
+  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
+  await fixture.page.clock.runFor(LIVE_EDGE_PRUNE_IDLE_MS - 101);
+  expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount);
+
+  await dispatchClockedTranscriptPosition(fixture.page, 'away');
+  await fixture.page.clock.runFor(100);
+  expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount);
+  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: false, userScrolledUp: true });
+
+  await dispatchClockedTranscriptPosition(fixture.page, 'end');
+  await fixture.page.clock.runFor(100);
+  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
+  await fixture.page.clock.runFor(LIVE_EDGE_PRUNE_IDLE_MS);
+  expect(await transcriptEntryCount(fixture.page)).toBe(ACTIVE_TRANSCRIPT_PRUNE_TARGET);
+
+  const canonicalAfterPrune = await readCompleteCanonicalTranscript(fixture, chatId);
+  expect(canonicalAfterPrune.transcriptViewId).toBe(canonicalBeforePrune.transcriptViewId);
+  expect(canonicalAfterPrune.messages.map(exactTranscriptRow)).toEqual(
+    canonicalBeforePrune.messages.map(exactTranscriptRow),
+  );
+  const finalEntry = canonicalAfterPrune.messages.at(-1);
+  expect(finalEntry).toMatchObject({
+    message: {
+      content: `echo:${promptPrefix}-${turnCount - 1}`,
+      type: 'assistant-message',
+    },
+  });
+  const finalRow = fixture.page.locator(
+    `[data-chat-row-id="${canonicalAfterPrune.transcriptViewId}:${finalEntry?.ordinal}"]`,
+  );
+  await finalRow.waitFor({ state: 'visible' });
+  expect((await finalRow.innerText()).trim()).toBe(`echo:${promptPrefix}-${turnCount - 1}`);
+  fixture.assertNoBrowserErrors();
+}
+
 async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<void> {
   const promptPrefix = 'chromium-retained-window';
   const turnCount = 110;
@@ -3831,4 +3936,20 @@ describe('Chromium transcript virtualization', () => {
       browser,
     );
   }, 180_000);
+
+  for (const viewport of TRANSCRIPT_VIEWPORTS) {
+    test(`prunes a ${viewport.label} expanded transcript only after live-edge idle`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      await withChromiumFixture(
+        `transcript-live-edge-prune-${viewport.label}`,
+        async (fixture, markPhase) => {
+          markPhase(`verifying delayed ${viewport.label} live-edge pruning`);
+          await verifyLiveEdgePruning(fixture, viewport);
+        },
+        diagnostics,
+        { serverEnvironment: environment.serverEnvironment },
+        browser,
+      );
+    }, 180_000);
+  }
 });
