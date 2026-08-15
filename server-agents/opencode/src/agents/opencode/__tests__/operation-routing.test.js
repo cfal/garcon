@@ -379,6 +379,69 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
+  it('keeps reused provider permission ids bound to separate decision capabilities', async () => {
+    const { eventStream, permissionReply, promptAsync, runtime } = createRuntime(['session-1']);
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'answer',
+    });
+    const request = (eventId) => eventStream.push({
+      id: eventId,
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'session-1',
+        requestID: 'permission-reused',
+        permission: 'bash',
+        tool: { messageID: 'assistant-a' },
+      },
+    });
+
+    request('event-04');
+    await waitFor(() => events.some((event) => event.type === 'permission'));
+    const first = events.find((event) => event.type === 'permission');
+    await first.decision.respond({ allow: true });
+
+    request('event-05');
+    await waitFor(() => events.filter((event) => event.type === 'permission').length === 2);
+    const permissions = events.filter((event) => event.type === 'permission');
+    const second = permissions[1];
+    expect(second.lifecycle.requestId).not.toBe(first.lifecycle.requestId);
+    expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+    await expect(first.decision.respond({ allow: false }))
+      .rejects.toThrow('no longer pending');
+    await second.decision.respond({ allow: false });
+    expect(permissionReply.mock.calls.map(([input]) => ({
+      requestID: input.requestID,
+      reply: input.reply,
+    }))).toEqual([
+      { requestID: 'permission-reused', reply: 'once' },
+      { requestID: 'permission-reused', reply: 'reject' },
+    ]);
+
+    pushIdle(eventStream, 'session-1', 'event-06');
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
   it('does not cross-route equal provider message identities from different sessions', async () => {
     const { eventStream, promptAsync, runtime } = createRuntime(['session-a', 'session-b']);
     const firstEvents = [];

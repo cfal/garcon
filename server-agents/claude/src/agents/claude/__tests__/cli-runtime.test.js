@@ -1374,6 +1374,74 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('keeps reused CLI permission ids bound to separate decision capabilities', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const events = [];
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: { runId: 'run-1', publish: (event) => events.push(event) },
+      }));
+      await enqueueInputStarted(fake);
+      const request = () => fake.stdout.enqueue(encoder.encode(`${JSON.stringify({
+        type: 'control_request',
+        request_id: 'cli-permission-reused',
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'Bash',
+          input: { command: 'printf reused' },
+          tool_use_id: 'tool-reused',
+        },
+      })}\n`));
+
+      request();
+      for (let attempt = 0; attempt < 100 && events.length === 0; attempt += 1) {
+        await Promise.resolve();
+      }
+      const first = events.find((event) => event.type === 'permission');
+      expect(first).toBeDefined();
+      await first.decision.respond({ allow: true, alwaysAllow: false });
+
+      request();
+      for (let attempt = 0; attempt < 100 && events.filter(
+        (event) => event.type === 'permission',
+      ).length < 2; attempt += 1) {
+        await Promise.resolve();
+      }
+      const permissions = events.filter((event) => event.type === 'permission');
+      const second = permissions[1];
+      expect(second).toBeDefined();
+      expect(second.lifecycle.requestId).not.toBe(first.lifecycle.requestId);
+      expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+      await expect(first.decision.respond({ allow: false }))
+        .rejects.toThrow('no longer pending');
+      await second.decision.respond({ allow: false });
+
+      const responses = fake.proc.stdin.write.mock.calls
+        .map(([line]) => JSON.parse(line))
+        .filter((message) => (
+          message.type === 'control_response'
+          && message.response?.request_id === 'cli-permission-reused'
+        ));
+      expect(responses.map((message) => message.response.response.behavior))
+        .toEqual(['allow', 'deny']);
+
+      fake.stdout.enqueue(encoder.encode(`${JSON.stringify({
+        type: 'result',
+        is_error: false,
+        result: 'done',
+      })}\n`));
+      enqueueProviderState(fake, 'idle');
+      await start;
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   for (const [name, settle] of [
     [
       'successful result',
