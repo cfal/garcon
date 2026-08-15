@@ -60,10 +60,6 @@
 			: m.settings_prompt_refinement_prompt_dialog_description(),
 	);
 
-	function handleOpenChange(open: boolean): void {
-		if (!open && !isSaving) onCancel();
-	}
-
 	async function handleSubmit(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
 		saveError = null;
@@ -78,7 +74,7 @@
 	}
 </script>
 
-<Dialog.Root open onOpenChange={handleOpenChange}>
+<Dialog.Root open requestClose={() => !isSaving && onCancel()}>
 	<Dialog.Content
 		class="flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] max-w-[calc(100%_-_1rem)] flex-col gap-0 overflow-hidden p-0 sm:h-[min(80dvh,48rem)] sm:max-w-4xl"
 		showCloseButton={false}

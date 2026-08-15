@@ -878,6 +878,37 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.getByRole('dialog')).toBeTruthy();
 	});
 
+	it('keeps the generation prompt dialog open when Escape is pressed during save', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		let rejectUpdate!: (reason?: unknown) => void;
+		const updatePromise = new Promise<Awaited<ReturnType<typeof updateRemoteSettings>>>(
+			(_resolve, reject) => {
+				rejectUpdate = reject;
+			},
+		);
+		vi.mocked(updateRemoteSettings).mockReturnValueOnce(updatePromise);
+		render(RemoteSettingsSectionTestHost);
+
+		const [editCommitPrompt] = screen.getAllByRole('button', {
+			name: 'Edit generation prompt',
+		});
+		await fireEvent.click(editCommitPrompt);
+		const prompt = screen.getByRole('textbox', { name: 'Edit commit generation prompt' });
+		await fireEvent.input(prompt, { target: { value: 'Keep this private draft.' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		const dialog = screen.getByRole('dialog');
+		await screen.findByRole('button', { name: 'Saving...' });
+		await fireEvent.keyDown(dialog, { key: 'Escape' });
+		expect(dialog.isConnected).toBe(true);
+
+		rejectUpdate(new Error('Settings are unavailable.'));
+		expect(await screen.findByText('Settings are unavailable.')).toBeTruthy();
+		expect((prompt as HTMLTextAreaElement).value).toBe('Keep this private draft.');
+		expect(screen.getByRole('dialog')).toBe(dialog);
+	});
+
 	it('saves the Telegram bot token and applies the redacted settings snapshot', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeSnapshot({ version: 1 }));
