@@ -6,6 +6,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  IncompleteLedgerCheckpointError,
   LedgerFencedError,
   StaleTranscriptViewError,
   SubmissionConflictError,
@@ -508,6 +509,39 @@ describe('TranscriptLedgerStore', () => {
     expect(checkpoint.viewId).toBe(view.viewId);
     expect(checkpoint.ordinal).toBe(1);
     expect(checkpoint.logFrames).toBe(checkpoint.checkpointedFrames);
+  });
+
+  it('rejects an incomplete handoff checkpoint without fencing the ledger', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+      rows: [provider('one')],
+    });
+    const query = Database.prototype.query;
+    let checkpointAttempted = false;
+    Database.prototype.query = function (sql) {
+      if (!checkpointAttempted && sql === 'PRAGMA wal_checkpoint(FULL)') {
+        checkpointAttempted = true;
+        return {
+          get: () => ({ busy: 1, log: 3, checkpointed: 2 }),
+        };
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.checkpointForHandoff('chat-one'))
+        .toThrow(IncompleteLedgerCheckpointError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(checkpointAttempted).toBe(true);
+    expect(store.append('chat-one', view.viewId, [provider('two')]).map(renderedContent))
+      .toEqual(['two']);
+    expect(store.checkpointForHandoff('chat-one')).toMatchObject({
+      viewId: view.viewId,
+      ordinal: 2,
+    });
   });
 
   it('validates user_version and isolates corrupt databases by chat', () => {
