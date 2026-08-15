@@ -271,6 +271,47 @@ describe('AgentHandoffService', () => {
     expect(completed).toEqual([second.operationId, first.operationId]);
   });
 
+  it('unrefs the timer for an independently retried handoff recovery', async () => {
+    const intent = persistedIntent();
+    let attempts = 0;
+    const ownership = {
+      pendingHandoffs: () => [intent],
+      applyHandoffDecision: mock(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('injected recovery failure');
+      }),
+      completeHandoff: mock(async () => {}),
+    };
+    const timer = { unref: mock(() => undefined) };
+    const originalSetTimeout = globalThis.setTimeout;
+    let fireRetry = null;
+    globalThis.setTimeout = mock((callback) => {
+      fireRetry = callback;
+      return timer;
+    });
+    const service = createService({ ownership, ledger: ledgerState([]) });
+    const recovery = service.recoverPendingHandoffs();
+
+    try {
+      for (let tick = 0; tick < 20 && fireRetry === null; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(fireRetry).toBeFunction();
+      expect(timer.unref).toHaveBeenCalledTimes(1);
+
+      fireRetry();
+      await recovery;
+      for (let tick = 0; tick < 20 && attempts < 2; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(attempts).toBe(2);
+    } finally {
+      if (attempts < 2) fireRetry?.();
+      await recovery.catch(() => undefined);
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
   it('adopts an existing switch marker after unrelated post-watermark rows', async () => {
     const current = sourceChat();
     const calls = [];
