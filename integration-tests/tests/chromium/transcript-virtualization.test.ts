@@ -247,7 +247,7 @@ function mixedOrderingRows(firstOrdinal: number): {
   };
   const timestamp = () => new Date(Date.UTC(2026, 7, 15) + ordinal).toISOString();
 
-  for (let turn = 0; turn < 24; turn += 1) {
+  for (let turn = 0; turn < 74; turn += 1) {
     addMessage(new UserMessage(timestamp(), `mixed-user-${turn}`));
     addMessage(new AssistantMessage(timestamp(), `mixed-assistant-${turn}`));
   }
@@ -272,7 +272,7 @@ function mixedOrderingRows(firstOrdinal: number): {
     }
   }
 
-  for (let turn = 24; turn < 34; turn += 1) {
+  for (let turn = 74; turn < 84; turn += 1) {
     addMessage(new UserMessage(timestamp(), `mixed-user-${turn}`));
     addMessage(new AssistantMessage(timestamp(), `mixed-assistant-${turn}`));
   }
@@ -3516,7 +3516,7 @@ async function verifyMixedTranscriptOrdering(fixture: ChromiumFixture): Promise<
   const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
   const generated = mixedOrderingRows(initial.lastOrdinal + 1);
   const expected = [...initial.messages.map(exactTranscriptRow), ...generated.expected];
-  expect(expected).toHaveLength(168);
+  expect(expected).toHaveLength(268);
   await appendLedgerRows(
     fixture,
     chatId,
@@ -3524,8 +3524,8 @@ async function verifyMixedTranscriptOrdering(fixture: ChromiumFixture): Promise<
     generated.drafts,
   );
 
-  const canonical = await fixture.integration.client.getMessages(chatId, { limit: 200 });
-  expect(canonical.hasMore).toBe(false);
+  const canonical = await readCompleteCanonicalTranscript(fixture, chatId);
+  expect(canonical.transcriptViewId).toBe(initial.transcriptViewId);
   expect(canonical.messages.map(exactTranscriptRow)).toEqual(expected);
   expect(canonical.messages.at(-1)).toMatchObject({
     ordinal: expected.at(-1)?.ordinal,
