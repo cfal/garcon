@@ -51,7 +51,7 @@ interface ReplayPage {
 }
 
 const REPLAY_BYTE_STRESS_ROW_COUNT = 24;
-const REPLAY_BYTE_STRESS_TEXT = 'x'.repeat(64 * 1024);
+const REPLAY_BYTE_STRESS_TEXT = '\u{1F642}'.repeat(32 * 1024);
 
 function exactTranscriptRow(entry: TranscriptMessage): ExactTranscriptRow {
   return {
