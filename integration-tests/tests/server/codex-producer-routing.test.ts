@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentCatalogEntry } from '../../../common/agents.js';
@@ -8,6 +8,7 @@ import type { ServerWsMessage } from '../../../common/ws-events.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { reloadFromNativeHistory } from '../../support/live-agent.js';
 
 const FAKE_CODEX = fileURLToPath(new URL(
   '../../support/fake-codex-app-server.ts',
@@ -157,6 +158,98 @@ describe('Codex producer routing', () => {
       },
     });
   }, 30_000);
+
+  test('drops content emitted by the old native client after transcript replacement', async () => {
+    let controlDirectory = '';
+    let turnReleasePath = '';
+    await withIntegrationFixture('codex-stale-content-routing', async (fixture) => {
+      const codex = await codexAgent(fixture);
+      const chatId = fixture.newChatId();
+      const firstPrompt = `source-content-${randomUUID()}`;
+      await fixture.client.startChat(startRequest(fixture, codex, chatId, firstPrompt));
+      await waitForAssistant(fixture, chatId, `codex-live2-${firstPrompt}`);
+
+      const stopCursor = fixture.client.markEvents();
+      expect(await fixture.client.stopChat({
+        clientRequestId: randomUUID(),
+        chatId,
+      })).toMatchObject({ outcome: 'interrupt-requested' });
+      await fixture.client.waitForProcessing(chatId, false, { afterIndex: stopCursor });
+
+      const replacedView = (await fixture.client.getMessages(chatId)).transcriptViewId;
+      await reloadFromNativeHistory(fixture, chatId);
+      expect((await fixture.client.getMessages(chatId)).transcriptViewId).not.toBe(replacedView);
+
+      const replacementPrompt = `replacement-content-${randomUUID()}`;
+      const replacementCursor = fixture.client.markEvents();
+      const replacement = await fixture.client.runChat(runRequest(codex, chatId, replacementPrompt));
+      await waitForAssistant(fixture, chatId, `codex-live2-${replacementPrompt}`);
+
+      const staleContent = `stale-content-${randomUUID()}`;
+      const currentContent = `current-content-${randomUUID()}`;
+      const staleControl = 'stale-source.message.json';
+      const currentControl = 'current-source.message.json';
+      const acknowledgementCommand = `acknowledge-stale-${randomUUID()}`;
+      const acknowledgementControl = 'stale-source-ack.request.json';
+      await writeFile(join(controlDirectory, staleControl), JSON.stringify({
+        target: 'started',
+        content: staleContent,
+      }));
+
+      try {
+        await waitForPath(join(controlDirectory, `${staleControl}.sent`));
+        await writeFile(join(controlDirectory, acknowledgementControl), JSON.stringify({
+          target: 'started',
+          requestId: 7_002,
+          command: acknowledgementCommand,
+        }));
+        expect(await waitForApprovalOutcome(
+          fixture,
+          join(controlDirectory, `${acknowledgementControl}.response.json`),
+          chatId,
+          acknowledgementCommand,
+          replacementCursor,
+        )).toEqual({
+          kind: 'denied',
+          response: { result: { decision: 'decline' }, error: null },
+        });
+
+        await writeFile(join(controlDirectory, currentControl), JSON.stringify({
+          target: 'resumed',
+          content: currentContent,
+        }));
+        await waitForPath(join(controlDirectory, `${currentControl}.sent`));
+        await waitForAssistant(fixture, chatId, currentContent);
+
+        const snapshot = await fixture.client.getChatSnapshot(chatId, 100);
+        expect(JSON.stringify(snapshot.transientFeed.rows)).not.toContain(staleContent);
+        expect(JSON.stringify((await fixture.client.getMessages(chatId)).messages))
+          .not.toContain(staleContent);
+        expect(JSON.stringify(fixture.client.eventsSince(replacementCursor)))
+          .not.toContain(staleContent);
+      } finally {
+        await writeFile(turnReleasePath, 'release');
+        await fixture.client.waitForTurnTerminal(chatId, replacement.turnId, {
+          afterIndex: replacementCursor,
+        });
+      }
+    }, {
+      resolveServerEnvironment(directories) {
+        controlDirectory = join(directories.root, 'codex-content-routing-controls');
+        turnReleasePath = join(directories.root, 'codex-content-turn-release');
+        return {
+          GARCON_CODEX_CLI: FAKE_CODEX,
+          PATH: SYSTEM_PATH,
+          INTEGRATION_CODEX_ROUTING_CONTROL_DIR: controlDirectory,
+          INTEGRATION_CODEX_STREAMING_TURN: '1',
+          INTEGRATION_CODEX_TURN_RELEASE: turnReleasePath,
+        };
+      },
+      async prepareWorkspace() {
+        await mkdir(controlDirectory, { recursive: true });
+      },
+    });
+  }, 30_000);
 });
 
 function startRequest(
@@ -243,6 +336,19 @@ async function waitForApprovalOutcome(
     await Bun.sleep(10);
   }
   throw new Error(`Codex did not deny or publish the controlled approval: ${command}`);
+}
+
+async function waitForPath(path: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      await Bun.sleep(10);
+    }
+  }
+  throw new Error(`Timed out waiting for ${path}`);
 }
 
 function chatRows(events: readonly ServerWsMessage[], chatId: string) {

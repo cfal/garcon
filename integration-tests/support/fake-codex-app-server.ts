@@ -19,13 +19,17 @@ const startedThreads = new Map<string, string>();
 const routingControlDirectory = process.env.INTEGRATION_CODEX_ROUTING_CONTROL_DIR;
 const answeredApprovalControls = new Map<number, string>();
 const emittedApprovalControls = new Set<string>();
+const emittedMessageControls = new Set<string>();
 let processRole: 'started' | 'resumed' | null = null;
 let processThreadId: string | null = null;
 let processTurnId: string | null = null;
 let buffered = '';
 
 const routingControlPoll = routingControlDirectory
-  ? setInterval(publishControlledApprovals, 10)
+  ? setInterval(() => {
+      publishControlledApprovals();
+      publishControlledMessages();
+    }, 10)
   : null;
 routingControlPoll?.unref();
 
@@ -582,6 +586,42 @@ function publishControlledApprovals(): void {
         turnId: processTurnId,
         itemId: entry.slice(0, -'.request.json'.length),
         command: control.command,
+      });
+      writeFileSync(join(routingControlDirectory, `${entry}.sent`), '');
+    } catch {
+      continue;
+    }
+  }
+}
+
+function publishControlledMessages(): void {
+  if (!routingControlDirectory || !processRole || !processThreadId || !processTurnId) return;
+  let entries: string[];
+  try {
+    entries = readdirSync(routingControlDirectory);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.message.json') || emittedMessageControls.has(entry)) continue;
+    try {
+      const control = JSON.parse(readFileSync(join(routingControlDirectory, entry), 'utf8')) as {
+        target?: unknown;
+        content?: unknown;
+      };
+      if (control.target !== processRole) continue;
+      if (typeof control.content !== 'string' || !control.content) continue;
+      emittedMessageControls.add(entry);
+      notify('item/completed', {
+        threadId: processThreadId,
+        turnId: processTurnId,
+        item: {
+          type: 'agentMessage',
+          id: entry.slice(0, -'.message.json'.length),
+          text: control.content,
+          phase: null,
+          memoryCitation: null,
+        },
       });
       writeFileSync(join(routingControlDirectory, `${entry}.sent`), '');
     } catch {
