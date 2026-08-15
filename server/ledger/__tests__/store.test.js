@@ -374,6 +374,38 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentView('chat-two').viewId).toBe('view-two');
   });
 
+  it('attributes an eviction checkpoint failure to the evicted chat', () => {
+    store.close();
+    store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
+    store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+
+    const exec = Database.prototype.exec;
+    let checkpointFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!checkpointFailed && sql === 'PRAGMA wal_checkpoint(PASSIVE)') {
+        checkpointFailed = true;
+        throw new Error('injected eviction checkpoint failure');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      const opened = store.initializeCurrentView('chat-two', {
+        viewId: transcriptViewId('view-two'),
+        contentStartOrdinal: 1,
+      });
+
+      expect(checkpointFailed).toBe(true);
+      expect(opened.viewId).toBe('view-two');
+      expect(store.currentView('chat-two').viewId).toBe('view-two');
+      expect(() => store.currentView('chat-one')).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+  });
+
   it('removes only unregistered target ledgers during startup cleanup', async () => {
     store.initializeCurrentView('registered-chat', {
       viewId: transcriptViewId('registered-view'),
