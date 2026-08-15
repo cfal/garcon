@@ -64,6 +64,26 @@ export function echoedClientMessageIds(entries: readonly TranscriptMessage[]): S
 	return ids;
 }
 
+export function visibleOptimisticTranscriptInputs(
+	hasLaterMessages: boolean,
+	inputs: readonly OptimisticUserInput[],
+	echoedIds: ReadonlySet<string>,
+): OptimisticUserInput[] {
+	if (hasLaterMessages) return [];
+	return inputs.filter((input) => !echoedIds.has(input.clientMessageId));
+}
+
+export function hasEarlierTranscriptRowsToReveal(
+	visibleRows: readonly ChatDisplayRow[],
+	entries: readonly TranscriptMessage[],
+): boolean {
+	const firstVisibleOrdinal = visibleRows.find(
+		(row): row is ChatTranscriptRow => row.kind === 'message' && row.ordinal !== undefined,
+	)?.ordinal;
+	return firstVisibleOrdinal !== undefined
+		&& (entries[0]?.ordinal ?? firstVisibleOrdinal) < firstVisibleOrdinal;
+}
+
 export function responseMessageTypesAfter(
 	entries: readonly TranscriptMessage[],
 	ordinal: number,

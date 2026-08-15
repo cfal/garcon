@@ -3,7 +3,6 @@ import {
 	isUnavailableChatHistoryResponse,
 	type ChatHistoryState,
 	type ResendCandidate,
-	type TranscriptAppend,
 	type TranscriptMessage,
 	type TranscriptPage,
 } from '$shared/chat-view';
@@ -16,7 +15,6 @@ import { TranscriptOptimisticInputs } from './transcript-optimistic-inputs.svelt
 import { TranscriptResendCandidates } from './transcript-resend-candidates.svelte.js';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
 import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
-import type { ConversationFeedMutationKind } from './conversation-feed-mutations.js';
 import type {
 	ActiveTranscriptPort,
 	ChatCursor,
@@ -27,21 +25,28 @@ import {
 	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 	idlePageState,
 	retainTranscriptEntries,
+	validateEarlierTranscriptPage,
 	type TranscriptPageDirection,
 	type TranscriptPageLoadResult,
 	type TranscriptPageState,
 	type TranscriptWindowLoadResult,
 	type TranscriptWindowTarget,
 } from './transcript-page-progress.js';
+import {
+	TranscriptReconnectReplayState,
+	type TranscriptBufferedBatch,
+	type TranscriptReplayApplyResult,
+} from './transcript-reconnect-replay.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import {
 	echoedClientMessageIds,
+	hasEarlierTranscriptRowsToReveal,
 	messagesFromDisplayRows,
 	responseMessageTypesAfter,
 	transcriptDisplayRows,
+	visibleOptimisticTranscriptInputs,
 	visibleTranscriptRows,
 	type ChatDisplayRow,
-	type ChatTranscriptRow,
 } from './transcript-row-projection.js';
 export type {
 	ActiveTranscriptPort,
@@ -55,54 +60,10 @@ const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
 type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
-type SnapshotBatch = Pick<TranscriptAppend, 'firstOrdinal' | 'lastOrdinal' | 'messages'> & {
-	transcriptViewId: string;
-	noticeRevision: number;
-	resendCandidates: ResendCandidate[];
-};
-type ReconnectReplay = {
-	token: number;
-	chatId: string;
-	transcriptViewId: string;
-	buffered: SnapshotBatch[];
-};
-export type MessageApplyResult = 'applied' | 'view-changed' | 'gap-detected';
+export type MessageApplyResult = TranscriptReplayApplyResult;
 type PageApplyResult = MessageApplyResult | 'stale';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
-
-function validateEarlierTranscriptPage(page: ChatPage, currentOldestOrdinal: number): void {
-	if (page.pageNewestOrdinal !== currentOldestOrdinal - 1) {
-		throw new Error('Earlier transcript page did not advance the loaded window');
-	}
-	if (
-		page.pageOldestOrdinal > page.pageNewestOrdinal
-		|| page.pageNewestOrdinal > page.lastOrdinal
-	) {
-		throw new Error('Earlier transcript page has invalid ordinal bounds');
-	}
-	if (page.messages.length === 0) {
-		if (page.pageOldestOrdinal !== 0 || page.hasMore) {
-			throw new Error('Earlier transcript page did not advance the loaded window');
-		}
-		return;
-	}
-	if (page.messages[0]?.ordinal !== page.pageOldestOrdinal) {
-		throw new Error('Earlier transcript page has an invalid oldest message');
-	}
-	let previousOrdinal = 0;
-	for (const message of page.messages) {
-		if (
-			!Number.isSafeInteger(message.ordinal)
-			|| message.ordinal <= previousOrdinal
-			|| message.ordinal < page.pageOldestOrdinal
-			|| message.ordinal > page.pageNewestOrdinal
-		) {
-			throw new Error('Earlier transcript page has invalid message ordinals');
-		}
-		previousOrdinal = message.ordinal;
-	}
-}
 
 export class ActiveTranscriptState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
@@ -127,15 +88,21 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
 	historyState = $state<ChatHistoryState>({ kind: 'complete' });
-	#snapshotBuffer: SnapshotBatch[] | null = null;
-	#reconnectReplay: ReconnectReplay | null = null;
-	#reconnectReplayEpoch = 0;
-	#applyingReconnectReplayToken: number | null = null;
+	#snapshotBuffer: TranscriptBufferedBatch[] | null = null;
+	#reconnectReplay = new TranscriptReconnectReplayState((chatId, batch) => this.applyMessages(
+		chatId,
+		batch.transcriptViewId,
+		batch.messages,
+		batch.firstOrdinal,
+		batch.lastOrdinal,
+		batch.resendCandidates,
+		batch.noticeRevision,
+	));
 	#loadEpoch = 0;
 	#notices = new TranscriptNoticeFeed();
 	#optimisticInputs = new TranscriptOptimisticInputs(() => {
 		this.#growExpandedVisibleWindow();
-		this.#recordFeedMutation('presentation-structure');
+		this.#feedMutations.record('presentation-structure');
 	});
 	#pageLoadPromise: Promise<TranscriptPageLoadResult> | null = null;
 	#loadingPageChatId: string | null = null;
@@ -231,12 +198,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get hasEarlierRowsToReveal(): boolean {
-		const firstVisibleSeq = this.#visibleRows.find(
-			(row): row is ChatTranscriptRow => row.kind === 'message' && row.ordinal !== undefined,
-		)?.ordinal;
-		return (
-			firstVisibleSeq !== undefined && (this.entries[0]?.ordinal ?? firstVisibleSeq) < firstVisibleSeq
-		);
+		return hasEarlierTranscriptRowsToReveal(this.#visibleRows, this.entries);
 	}
 
 	get canLoadEarlier(): boolean {
@@ -252,9 +214,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get visibleOptimisticInputs(): OptimisticUserInput[] {
-		if (this.hasLaterMessages) return [];
-		return this.optimisticUserInputs.filter(
-			(input) => !this.#echoedClientMessageIds.has(input.clientMessageId),
+		return visibleOptimisticTranscriptInputs(
+			this.hasLaterMessages,
+			this.optimisticUserInputs,
+			this.#echoedClientMessageIds,
 		);
 	}
 
@@ -263,9 +226,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number {
-		const token = ++this.#reconnectReplayEpoch;
-		this.#reconnectReplay = { token, chatId, transcriptViewId, buffered: [] };
-		return token;
+		return this.#reconnectReplay.begin(chatId, transcriptViewId);
 	}
 
 	applyReconnectReplayPage(
@@ -277,54 +238,22 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		lastOrdinal: number,
 		resendCandidates: ResendCandidate[],
 	): MessageApplyResult | 'stale' {
-		const replay = this.#reconnectReplay;
-		if (
-			!replay
-			|| replay.token !== token
-			|| replay.chatId !== chatId
-			|| replay.transcriptViewId !== transcriptViewId
-		) {
-			return 'stale';
-		}
-
-		this.#applyingReconnectReplayToken = token;
-		try {
-			return this.applyMessages(
-				chatId,
-				transcriptViewId,
-				messages,
-				firstOrdinal,
-				lastOrdinal,
-				resendCandidates,
-			);
-		} finally {
-			this.#applyingReconnectReplayToken = null;
-		}
+		return this.#reconnectReplay.applyPage(token, chatId, {
+			transcriptViewId,
+			messages,
+			firstOrdinal,
+			lastOrdinal,
+			resendCandidates,
+			noticeRevision: this.#notices.revision,
+		});
 	}
 
 	finishReconnectReplay(token: number, chatId: string): MessageApplyResult | 'stale' {
-		const replay = this.#reconnectReplay;
-		if (!replay || replay.token !== token || replay.chatId !== chatId) return 'stale';
-
-		this.#reconnectReplay = null;
-		for (const batch of replay.buffered) {
-			const result = this.applyMessages(
-				chatId,
-				batch.transcriptViewId,
-				batch.messages,
-				batch.firstOrdinal,
-				batch.lastOrdinal,
-				batch.resendCandidates,
-				batch.noticeRevision,
-			);
-			if (result !== 'applied') return result;
-		}
-		return 'applied';
+		return this.#reconnectReplay.finish(token, chatId);
 	}
 
 	abortReconnectReplay(token: number): void {
-		if (this.#reconnectReplay?.token !== token) return;
-		this.#reconnectReplay = null;
+		this.#reconnectReplay.abort(token);
 	}
 
 	applyMessages(
@@ -343,18 +272,14 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const previousLastOrdinal = this.lastOrdinal;
 		this.#optimisticInputs.clearMany(echoedClientMessageIds(messages));
 		const append = { firstOrdinal, lastOrdinal, messages };
-		const reconnectReplay = this.#reconnectReplay;
 		if (
-			reconnectReplay
-			&& reconnectReplay.token !== this.#applyingReconnectReplayToken
-			&& reconnectReplay.chatId === chatId
-		) {
-			reconnectReplay.buffered.push({
+			this.#reconnectReplay.buffer(chatId, {
 				transcriptViewId,
 				...append,
 				noticeRevision,
 				resendCandidates,
-			});
+			})
+		) {
 			return 'applied';
 		}
 		if (this.#snapshotBuffer) {
@@ -400,7 +325,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				this.loadStatus = 'loaded';
 			}
 			if (result.changed || cursorAdvanced) {
-				this.#recordFeedMutation('live-append', responseMessageTypes);
+				this.#feedMutations.record('live-append', responseMessageTypes);
 			}
 			this.setResendCandidates(resendCandidates);
 			return 'applied';
@@ -442,7 +367,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.loadStatus = 'loaded';
 		}
 		if (entriesChanged) {
-			this.#recordFeedMutation('live-append', responseMessageTypes);
+			this.#feedMutations.record('live-append', responseMessageTypes);
 		}
 		this.setResendCandidates(resendCandidates);
 		return 'applied';
@@ -504,7 +429,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
-		this.#reconnectReplay = null;
+		this.#reconnectReplay.reset();
 		this.transcriptCache.replaceFromPage(chatId, {
 			transcriptViewId,
 			messages,
@@ -529,7 +454,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
-		this.#recordFeedMutation('replacement');
+		this.#feedMutations.record('replacement');
 	}
 
 	setFromPage(
@@ -580,7 +505,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
-		this.#recordFeedMutation('replacement');
+		this.#feedMutations.record('replacement');
 		for (const batch of buffered) {
 			const result = this.applyMessages(
 				chatId,
@@ -746,7 +671,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = this.entries.length;
 		this.visibleMessageCount += addedMessages.length;
 		this.#rememberExpandedVisibleWindow();
-		this.#recordFeedMutation('history-earlier');
+		this.#feedMutations.record('history-earlier');
 		return 'loaded';
 	}
 
@@ -777,7 +702,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.visibleMessageCount = Math.min(this.visibleMessageCount, this.displayMessageCount);
 		}
 		this.#rememberExpandedVisibleWindow();
-		this.#recordFeedMutation('history-later');
+		this.#feedMutations.record('history-later');
 		return 'loaded';
 	}
 
@@ -808,7 +733,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
 		this.#notices.append(noticeType, content);
 		this.#growExpandedVisibleWindow();
-		this.#recordFeedMutation('presentation-structure');
+		this.#feedMutations.record('presentation-structure');
 	}
 
 	// Routes a server-issued overlay notice by its chat identity: the active
@@ -826,12 +751,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#drainServerNotices(chatId: string): void {
 		if (!this.#notices.drain(chatId)) return;
 		this.#growExpandedVisibleWindow();
-		this.#recordFeedMutation('presentation-structure');
+		this.#feedMutations.record('presentation-structure');
 	}
 
 	clearLocalNotices(throughRevision?: number): void {
 		if (!this.#notices.clearThrough(throughRevision)) return;
-		this.#recordFeedMutation('presentation-structure');
+		this.#feedMutations.record('presentation-structure');
 	}
 
 	upsertOptimisticUserInput(input: OptimisticUserInput): void {
@@ -852,7 +777,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#resetToEmptyTranscript();
 		this.loadStatus = 'idle';
 		this.historyState = { kind: 'complete' };
-		this.#recordFeedMutation('replacement');
+		this.#feedMutations.record('replacement');
 	}
 
 	#resetToEmptyTranscript(): void {
@@ -874,7 +799,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
-		this.#reconnectReplay = null;
+		this.#reconnectReplay.reset();
 	}
 
 	compactToRecentMessages(): boolean {
@@ -885,7 +810,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasEarlierMessages = true;
 		this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		this.#preserveExpandedVisibleWindow = false;
-		this.#recordFeedMutation('history-pruned');
+		this.#feedMutations.record('history-pruned');
 		return true;
 	}
 
@@ -896,7 +821,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.visibleMessageCount = nextCount;
 		this.pageStates.earlier = idlePageState();
 		this.#rememberExpandedVisibleWindow();
-		this.#recordFeedMutation('history-earlier');
+		this.#feedMutations.record('history-earlier');
 		return true;
 	}
 
@@ -904,7 +829,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const changed = this.visibleMessageCount < this.displayMessageCount;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 		this.#rememberExpandedVisibleWindow();
-		if (changed) this.#recordFeedMutation('initial');
+		if (changed) this.#feedMutations.record('initial');
 	}
 
 	async navigateToWindow(
@@ -989,7 +914,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			}
 			this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 			this.loadError = null;
-			this.#recordFeedMutation('replacement');
+			this.#feedMutations.record('replacement');
 			return 'loaded';
 		} catch (error) {
 			if (
@@ -1026,7 +951,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.loadStatus = 'loaded';
 		this.historyState = historyState;
-		this.#recordFeedMutation('replacement');
+		this.#feedMutations.record('replacement');
 	}
 
 	activateChat(chatId: string | null): ChatRestoreResult | null {
@@ -1054,13 +979,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	removeCachedMessages(chatId: string): void {
 		this.transcriptCache.remove(chatId);
-	}
-
-	#recordFeedMutation(
-		kind: ConversationFeedMutationKind,
-		responseMessageTypes: readonly string[] = [],
-	): void {
-		this.#feedMutations.record(kind, responseMessageTypes);
 	}
 
 	#rememberExpandedVisibleWindow(): void {

@@ -1,4 +1,4 @@
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { TranscriptMessage, TranscriptPage } from '$shared/chat-view';
 
 export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
 export type TranscriptPageDirection = 'earlier' | 'later';
@@ -23,4 +23,43 @@ export function retainTranscriptEntries(
 	return edge === 'earlier'
 		? entries.slice(0, ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
 		: entries.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+}
+
+export function validateEarlierTranscriptPage(
+	page: Pick<
+		TranscriptPage,
+		'hasMore' | 'lastOrdinal' | 'messages' | 'pageOldestOrdinal' | 'pageNewestOrdinal'
+	>,
+	currentOldestOrdinal: number,
+): void {
+	if (page.pageNewestOrdinal !== currentOldestOrdinal - 1) {
+		throw new Error('Earlier transcript page did not advance the loaded window');
+	}
+	if (
+		page.pageOldestOrdinal > page.pageNewestOrdinal
+		|| page.pageNewestOrdinal > page.lastOrdinal
+	) {
+		throw new Error('Earlier transcript page has invalid ordinal bounds');
+	}
+	if (page.messages.length === 0) {
+		if (page.pageOldestOrdinal !== 0 || page.hasMore) {
+			throw new Error('Earlier transcript page did not advance the loaded window');
+		}
+		return;
+	}
+	if (page.messages[0]?.ordinal !== page.pageOldestOrdinal) {
+		throw new Error('Earlier transcript page has an invalid oldest message');
+	}
+	let previousOrdinal = 0;
+	for (const message of page.messages) {
+		if (
+			!Number.isSafeInteger(message.ordinal)
+			|| message.ordinal <= previousOrdinal
+			|| message.ordinal < page.pageOldestOrdinal
+			|| message.ordinal > page.pageNewestOrdinal
+		) {
+			throw new Error('Earlier transcript page has invalid message ordinals');
+		}
+		previousOrdinal = message.ordinal;
+	}
 }
