@@ -8,12 +8,11 @@ import {
   type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
 import {
-  runtimeRows,
+  runtimeOperation,
   type AgentRuntimeExecution,
   type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
 } from '@garcon/server-agent-common/execution/runtime-events';
-import { AgentRunTracker } from '@garcon/server-agent-common/execution/run-tracker';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import {
@@ -29,110 +28,72 @@ import type { ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeConfig } from '../../config.js';
 
 export class ClaudeExecution implements AgentRuntimeExecution {
-  readonly #runs = new AgentRunTracker();
-
   constructor(
     private readonly host: AgentHost,
     private readonly runtime: ClaudeCliRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
     private readonly logger: AgentLogger,
     private readonly config: ClaudeConfig,
-  ) {
-    runtime.onMessages((chatId, messages, metadata) => {
-      const run = this.#runs.correlate(chatId, metadata);
-      if (!run) return;
-      run.publish({ type: 'messages', rows: runtimeRows(messages), runId: run.runId });
-    });
-    runtime.onFinished((chatId, exitCode, metadata) => {
-      const run = this.#runs.correlate(chatId, metadata);
-      if (!run) return;
-      run.publish({ type: 'run-ended', runId: run.runId, outcome: 'finished', exitCode });
-      this.#runs.finish(chatId, run.runId);
-    });
-    runtime.onFailed((chatId, message, metadata) => {
-      const run = this.#runs.correlate(chatId, metadata);
-      if (!run) return;
-      run.publish({
-        type: 'run-ended',
-        runId: run.runId,
-        outcome: 'failed',
-        error: { code: 'PROVIDER_FAILURE', message },
-      });
-      this.#runs.finish(chatId, run.runId);
-    });
-  }
+  ) {}
 
   async start(
     request: Parameters<AgentRuntimeExecution['start']>[0],
     publish: AgentRuntimePublisher,
   ) {
-    // A fresh session supersedes whatever produced this chat before, so the routes that
-    // belonged to it retire here rather than lingering for the life of the process.
-    this.#runs.release(request.chatId);
-    this.#runs.register(request.chatId, request.runId, publish);
-    try {
-      request.admission.signal.throwIfAborted();
-      const envOverrides = await this.#endpointEnvironment(request);
-      const agentSessionId = crypto.randomUUID();
-      const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId, {
-        configHomeDir: envOverrides?.CLAUDE_CONFIG_DIR,
-        logger: this.logger,
+    request.admission.signal.throwIfAborted();
+    const envOverrides = await this.#endpointEnvironment(request);
+    const agentSessionId = crypto.randomUUID();
+    const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId, {
+      configHomeDir: envOverrides?.CLAUDE_CONFIG_DIR,
+      logger: this.logger,
+    });
+    request.admission.signal.throwIfAborted();
+    const runtimeRequest = {
+      ...executionFields(request),
+      agentSessionId,
+      command: `${request.carriedContext?.prefix ?? ''}${request.prompt}`,
+      images: request.attachments,
+      envOverrides,
+      operation: runtimeOperation(request.runId, publish),
+    };
+    void this.runtime.startClaudeCliSession(runtimeRequest).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('Claude session start failed', {
+        chatId: request.chatId,
+        error: message,
       });
-      request.admission.signal.throwIfAborted();
-      const runtimeRequest = {
-        ...executionFields(request),
+      this.runtime.failClaudeInternalSession(
         agentSessionId,
-        command: `${request.carriedContext?.prefix ?? ''}${request.prompt}`,
-        images: request.attachments,
-        envOverrides,
-      };
-      void this.runtime.startClaudeCliSession(runtimeRequest).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error('Claude session start failed', {
-          chatId: request.chatId,
-          error: message,
-        });
-        this.runtime.failClaudeInternalSession(
-          agentSessionId,
-          request.chatId,
-          message,
-          claudeEventMetadata(runtimeRequest, 'chat-start'),
-        );
-      });
-      const session = {
+        request.chatId,
+        message,
+        claudeEventMetadata(runtimeRequest, 'chat-start'),
+        runtimeRequest.operation,
+      );
+    });
+    return {
+      agentSessionId,
+      nativeSession: this.nativeSessions.encode({
+        path: nativePath,
         agentSessionId,
-        nativeSession: this.nativeSessions.encode({
-          path: nativePath,
-          agentSessionId,
-          modelEndpointId: request.endpoint?.endpointId ?? null,
-        }),
-        nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
-      };
-      return session;
-    } catch (error) {
-      this.#runs.finish(request.chatId, request.runId);
-      throw error;
-    }
+        modelEndpointId: request.endpoint?.endpointId ?? null,
+      }),
+      nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
+    };
   }
 
   async resume(
     request: Parameters<AgentRuntimeExecution['resume']>[0],
     publish: AgentRuntimePublisher,
   ): Promise<void> {
-    this.#runs.register(request.chatId, request.runId, publish);
-    try {
-      await this.runtime.runClaudeTurn({
-        ...executionFields(request),
-        agentSessionId: request.agentSessionId,
-        command: request.prompt,
-        images: request.attachments,
-        nativePath: this.nativeSessions.decode(request.nativeSession).path,
-        envOverrides: await this.#endpointEnvironment(request),
-      });
-    } catch (error) {
-      this.#runs.finish(request.chatId, request.runId);
-      throw error;
-    }
+    await this.runtime.runClaudeTurn({
+      ...executionFields(request),
+      agentSessionId: request.agentSessionId,
+      command: request.prompt,
+      images: request.attachments,
+      nativePath: this.nativeSessions.decode(request.nativeSession).path,
+      envOverrides: await this.#endpointEnvironment(request),
+      operation: runtimeOperation(request.runId, publish),
+    });
   }
 
   async abort(agentSessionId: string): Promise<boolean> {

@@ -5,6 +5,7 @@ import type {
   ThinkingMode,
 } from '@garcon/common/chat-modes';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 
 export interface ClaudeExecutionAdmission {
   readonly signal: AbortSignal;
@@ -25,6 +26,7 @@ export interface ClaudeExecutionRequest {
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Record<string, string>;
+  readonly operation: AgentRuntimeOperation;
 }
 
 export interface ClaudeStartRequest extends ClaudeExecutionRequest {

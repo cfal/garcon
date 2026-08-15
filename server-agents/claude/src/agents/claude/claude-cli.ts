@@ -10,6 +10,7 @@ import {
   AgentEventEmitterRuntime,
   type RuntimeEventMetadata,
 } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type {
   AgentLogger,
   AgentSteerRequest,
@@ -112,6 +113,7 @@ interface PendingPermission {
   toolInput: Record<string, unknown>;
   toolUseId?: string;
   eventMetadata: RuntimeEventMetadata;
+  operation: AgentRuntimeOperation | undefined;
 }
 
 class ClaudeCliRuntime extends AgentEventEmitterRuntime {
@@ -163,11 +165,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #beginTurn(
     session: ClaudeRunningSession,
     eventMetadata: ReturnType<typeof claudeEventMetadata>,
+    operation: AgentRuntimeOperation | undefined,
   ): ClaudeActiveTurn {
     if (session.activeTurn) {
       throw new Error(`Claude session ${session.id} already has an active turn`);
     }
-    const activeTurn = new ClaudeActiveTurn(eventMetadata, session.backgroundTaskCount);
+    const activeTurn = new ClaudeActiveTurn(eventMetadata, session.backgroundTaskCount, operation);
     session.unownedProviderActivity = false;
     session.activeTurn = activeTurn;
     session.lastActivityAt = activeTurn.startedAt;
@@ -241,7 +244,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
           chatMessages.some((message) => message.type === 'assistant-message'),
         );
         if (chatMessages.length > 0) {
-          this.emitMessages(session.chatId, chatMessages, turn.eventMetadata);
+          this.emitMessages(session.chatId, chatMessages, turn.eventMetadata, turn.operation);
         }
         break;
       }
@@ -335,6 +338,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         session.chatId,
         [new ErrorMessage(new Date().toISOString(), reason)],
         activeTurn.eventMetadata,
+        activeTurn.operation,
       );
       return;
     }
@@ -375,7 +379,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const chatMessages = convertCLIMessageToChatMessages(msg);
     if (chatMessages.length > 0) {
       activeTurn.protocol.addOutputMessages(chatMessages.length);
-      this.emitMessages(session.chatId, chatMessages, activeTurn.eventMetadata);
+      this.emitMessages(
+        session.chatId,
+        chatMessages,
+        activeTurn.eventMetadata,
+        activeTurn.operation,
+      );
     }
 
     if (!activeTurn.pendingCompaction) return;
@@ -400,7 +409,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     );
     // Match the JSONL loader's compaction identity: the summary uuid at ordinal 0.
     if (typeof msg.uuid === 'string' && msg.uuid) attachNativeMessageSource(compactionMessage, { entryId: msg.uuid, withinSourceOrdinal: 0 });
-    this.emitMessages(session.chatId, [compactionMessage], activeTurn.eventMetadata);
+    this.emitMessages(
+      session.chatId,
+      [compactionMessage],
+      activeTurn.eventMetadata,
+      activeTurn.operation,
+    );
   }
 
   // Cancels the pending force-kill fallback armed by an abort. Safe to call
@@ -464,6 +478,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         session.chatId,
         [new AssistantMessage(new Date().toISOString(), resultText)],
         activeTurn.eventMetadata,
+        activeTurn.operation,
       );
     }
     protocol.recordAcceptedResult(msg);
@@ -519,9 +534,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     chatId: string,
     messages: ChatMessage[],
     eventMetadata?: RuntimeEventMetadata,
+    operation?: AgentRuntimeOperation,
   ): void {
     if (!messages.length) return;
-    this.emitMessages(chatId, messages, eventMetadata);
+    this.emitMessages(chatId, messages, eventMetadata, operation);
   }
 
   #cancelPendingPermissions(session: ClaudeRunningSession): void {
@@ -530,7 +546,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       this.#pendingPermissions.delete(permissionRequestId);
       this.#emitPermissionMessages(pending.chatId, [
         new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled'),
-      ], pending.eventMetadata);
+      ], pending.eventMetadata, pending.operation);
     }
   }
 
@@ -590,6 +606,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       toolInput,
       toolUseId,
       eventMetadata: activeTurn.eventMetadata,
+      operation: activeTurn.operation,
     });
 
     const now = new Date().toISOString();
@@ -599,7 +616,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         permissionRequestId,
         convertClaudePermissionTool(now, toolUseId ?? permissionRequestId, toolName, request.input),
       ),
-    ], activeTurn.eventMetadata);
+    ], activeTurn.eventMetadata, activeTurn.operation);
   }
 
   #handleControlCancelRequest(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
@@ -611,6 +628,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         pending.chatId,
         [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled')],
         pending.eventMetadata,
+        pending.operation,
       );
       return;
     }
@@ -680,7 +698,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#cancelPendingPermissions(session);
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
-    this.emitFailed(session.chatId, message, activeTurn.eventMetadata);
+    this.emitFailed(session.chatId, message, activeTurn.eventMetadata, activeTurn.operation);
     activeTurn.finish();
   }
 
@@ -695,7 +713,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#cancelPendingPermissions(session);
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
-    this.emitFinished(session.chatId, 0, activeTurn.eventMetadata);
+    this.emitFinished(session.chatId, 0, activeTurn.eventMetadata, activeTurn.operation);
     activeTurn.finish();
   }
 
@@ -801,6 +819,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       pending.chatId,
       [new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow))],
       pending.eventMetadata,
+      pending.operation,
     );
   }
 
@@ -1041,6 +1060,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       clientRequestId,
       turnId,
       executionAdmission,
+      operation,
     } = request;
     const requestAdmission = { executionAdmission };
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
@@ -1085,6 +1105,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const activeTurn = this.#beginTurn(
       session,
       claudeEventMetadata({ clientRequestId, turnId }, 'chat-start'),
+      operation,
     );
 
     const previous = this.#runningSessions.get(agentSessionId);
@@ -1148,6 +1169,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       clientRequestId,
       turnId,
       executionAdmission,
+      operation,
     } = request;
     const requestAdmission = { executionAdmission };
     if (!agentSessionId) {
@@ -1283,6 +1305,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       const activeTurn = this.#beginTurn(
         session,
         claudeEventMetadata({ clientRequestId, turnId }),
+        operation,
       );
       ownedTurn = activeTurn;
       const prepared = await materializeClaudeVideoAttachments(command, images);
@@ -1420,6 +1443,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     chatId: string,
     errorMessage: string,
     eventMetadata: RuntimeEventMetadata,
+    operation?: AgentRuntimeOperation,
   ): void {
     const session = this.#runningSessions.get(agentSessionId);
     if (session) {
@@ -1428,7 +1452,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       return;
     }
     this.emitProcessing(chatId, false);
-    this.emitFailed(chatId, errorMessage, eventMetadata);
+    this.emitFailed(chatId, errorMessage, eventMetadata, operation);
   }
 
   isClaudeInternalSessionRunning(agentSessionId: string): boolean {

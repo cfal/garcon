@@ -224,6 +224,46 @@ function startOptions(overrides = {}) {
 }
 
 describe('ClaudeCliRuntime stdout protocol handling', () => {
+  it('publishes two turns on one native session through their concrete operations', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    const firstEvents = [];
+    const secondEvents = [];
+
+    try {
+      const runtime = createRuntime();
+      const first = runtime.startClaudeCliSession(startOptions({
+        clientRequestId: 'run-a',
+        turnId: 'run-a',
+        operation: { runId: 'run-a', publish: (event) => firstEvents.push(event) },
+      }));
+      const firstInput = await enqueueInputStarted(fake);
+      enqueueAssistantAndResult(fake, firstInput.uuid, 'first answer');
+      enqueueProviderState(fake, 'idle');
+      await first;
+
+      const second = runtime.runClaudeTurn(startOptions({
+        command: 'again',
+        clientRequestId: 'run-b',
+        turnId: 'run-b',
+        operation: { runId: 'run-b', publish: (event) => secondEvents.push(event) },
+      }));
+      const secondInput = await enqueueInputStarted(fake);
+      enqueueAssistantAndResult(fake, secondInput.uuid, 'second answer');
+      enqueueProviderState(fake, 'idle');
+      await second;
+
+      expect(firstEvents.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+      expect(secondEvents.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+      expect(firstEvents.at(-1)).toMatchObject({ runId: 'run-a', outcome: 'finished' });
+      expect(secondEvents.at(-1)).toMatchObject({ runId: 'run-b', outcome: 'finished' });
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('logs terminal result diagnostics without logging result content', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();

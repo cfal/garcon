@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { AssistantMessage } from '@garcon/common/chat-types';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { ClaudeExecution } from '../execution.ts';
@@ -28,9 +29,9 @@ function createClaudeStub(startError) {
   claude.setInternalThinkingMode = mock(() => undefined);
   claude.setInternalClaudeThinkingMode = mock(() => undefined);
   claude.prepareClaudeProjectPathUpdate = mock(() => Promise.resolve());
-  claude.failClaudeInternalSession = mock((agentSessionId, chatId, errorMessage, metadata) => {
+  claude.failClaudeInternalSession = mock((agentSessionId, chatId, errorMessage, metadata, operation) => {
     claude.emitProcessing(chatId, false);
-    claude.emitFailed(chatId, errorMessage, metadata);
+    claude.emitFailed(chatId, errorMessage, metadata, operation);
   });
   return claude;
 }
@@ -100,6 +101,7 @@ describe('ClaudeExecution', () => {
           commandType: 'chat-start',
           turnId: 'run-1',
         },
+        expect.objectContaining({ runId: 'run-1', publish: expect.any(Function) }),
       );
       expect(failure).toMatchObject({
         type: 'run-ended',
@@ -139,6 +141,64 @@ describe('ClaudeExecution', () => {
         outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message: 'server is shutting down' },
       });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a delayed failed start on the publisher that created it', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-agent-routing-'));
+    try {
+      let rejectFirst;
+      const claude = createClaudeStub(new Error('unused'));
+      let starts = 0;
+      claude.startClaudeCliSession = mock(() => {
+        starts += 1;
+        if (starts > 1) return Promise.resolve('replacement-session');
+        return new Promise((_resolve, reject) => { rejectFirst = reject; });
+      });
+      const execution = createExecution(claude, projectPath);
+      const firstEvents = [];
+      const replacementEvents = [];
+      let resolveFailure;
+      const failure = new Promise((resolve) => { resolveFailure = resolve; });
+
+      await execution.start(startRequest(projectPath), (event) => {
+        firstEvents.push(event);
+        if (event.type === 'run-ended') resolveFailure();
+      });
+      await execution.start(
+        { ...startRequest(projectPath), runId: 'run-2' },
+        (event) => replacementEvents.push(event),
+      );
+      rejectFirst(new Error('delayed launch failure'));
+      await failure;
+
+      expect(firstEvents).toEqual([expect.objectContaining({
+        type: 'run-ended',
+        runId: 'run-1',
+        outcome: 'failed',
+      })]);
+      expect(replacementEvents).toEqual([]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('does not infer a publisher for an unnamed runtime observation', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-agent-unnamed-'));
+    try {
+      const claude = createClaudeStub(new Error('unused'));
+      claude.startClaudeCliSession = mock(() => Promise.resolve('session-1'));
+      const execution = createExecution(claude, projectPath);
+      const events = [];
+
+      await execution.start(startRequest(projectPath), (event) => events.push(event));
+      claude.emitMessages('chat-1', [
+        new AssistantMessage('2026-08-15T00:00:00.000Z', 'unnamed'),
+      ], { turnId: 'run-1' });
+
+      expect(events).toEqual([]);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
