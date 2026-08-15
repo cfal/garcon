@@ -43,6 +43,17 @@ describe('bounded transcript replay WebSocket contract', () => {
     });
   });
 
+  it('rejects a continuation watermark behind its replay cursor', () => {
+    expect(parseClientWsMessage({
+      type: 'chat-subscribe',
+      clientRequestId: 'request-2',
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 501,
+      throughOrdinal: 500,
+    })).toBeNull();
+  });
+
   it('preserves the fixed watermark and next cursor on replay responses', () => {
     expect(parseServerWsMessage(replayResponse())).toMatchObject({
       nextAfterOrdinal: 220,
@@ -65,5 +76,35 @@ describe('bounded transcript replay WebSocket contract', () => {
       nextAfterOrdinal: 501,
       throughOrdinal: 500,
     }))).toBeNull();
+  });
+
+  it('rejects replay metadata that does not advance one raw range', () => {
+    for (const overrides of [
+      { nextAfterOrdinal: 219 },
+      { nextAfterOrdinal: 221 },
+      { nextAfterOrdinal: 501, throughOrdinal: 500 },
+    ]) {
+      expect(parseServerWsMessage(replayResponse(overrides))).toBeNull();
+    }
+  });
+
+  it('requires hasMore to agree with the fixed high-watermark', () => {
+    expect(parseServerWsMessage(replayResponse({
+      lastOrdinal: 500,
+      nextAfterOrdinal: 500,
+      throughOrdinal: 500,
+      hasMore: true,
+    }))).toBeNull();
+    expect(parseServerWsMessage(replayResponse({ hasMore: false }))).toBeNull();
+    expect(parseServerWsMessage(replayResponse({
+      lastOrdinal: 500,
+      nextAfterOrdinal: 500,
+      throughOrdinal: 500,
+      hasMore: false,
+    }))).toMatchObject({
+      nextAfterOrdinal: 500,
+      throughOrdinal: 500,
+      hasMore: false,
+    });
   });
 });
