@@ -287,6 +287,45 @@ describe('forkChatFileCopy', () => {
     ]);
   });
 
+  it('retries an unmaterialized fork as native when the provider later materializes it', async () => {
+    let attempt = 0;
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => {
+        attempt += 1;
+        if (attempt === 1) return { kind: 'unmaterialized' };
+        return {
+          kind: 'materialized',
+          session: {
+            agentSessionId: 'target-native-after-retry',
+            nativeSession: {
+              ownerId: 'test',
+              schemaVersion: 1,
+              value: { id: 'target-native-after-retry' },
+            },
+            nativeSeedReceipt: null,
+          },
+        };
+      }),
+    });
+    const request = {
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      allowHandoffFork: false,
+      ...deps,
+    };
+
+    await expect(forkChatFileCopy(request)).rejects.toBeDefined();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+
+    const result = await forkChatFileCopy(request);
+
+    expect(result.agentSessionId).toBe('target-native-after-retry');
+    expect(deps.forkAgentSession).toHaveBeenCalledTimes(2);
+    expect(deps.ledger.initializeChat).toHaveBeenCalledOnce();
+    expect(deps.registry.addChat).toHaveBeenCalledOnce();
+  });
+
   it('seeds a native fork from the forked session instead of the source rows', async () => {
     const imported = [
       { kind: 'user-input', at: '2026-08-07T12:00:00.000Z', detail: { clientMessageId: null, message: {}, attachments: [], steer: false }, providerMeta: { native: 'imported' } },
