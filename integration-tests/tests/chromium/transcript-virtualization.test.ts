@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, CDPSession, Page } from 'playwright';
 import {
@@ -25,10 +26,15 @@ import {
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
 const ITEM_SELECTOR = '[data-chat-virtual-item]';
+const TRANSCRIPT_VIEWPORTS = [
+  { label: 'compact', height: 700, width: 390 },
+  { label: 'wide', height: 900, width: 1280 },
+] as const;
 
 interface ReadingAnchor {
   key: string;
@@ -309,14 +315,15 @@ async function appendLedgerRows(
 }
 
 async function selectSidebarChat(page: Page, chatId: string, marker: string): Promise<void> {
-  await page.evaluate((expected) => {
-    const summary = [
-      ...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]'),
-    ].find((candidate) => candidate.innerText.includes(expected));
-    const button = summary?.closest('button');
-    if (!button) throw new Error(`Missing sidebar chat containing: ${expected}`);
-    button.click();
-  }, marker);
+  const summary = page
+    .locator('[data-slot="sidebar-chat-summary"]')
+    .filter({ hasText: marker })
+    .first();
+  if (!(await summary.isVisible())) {
+    await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  }
+  await summary.waitFor({ state: 'visible' });
+  await summary.locator('xpath=ancestor::button[1]').click();
   await page.waitForURL((url) => url.pathname === `/chat/${encodeURIComponent(chatId)}`);
   await waitForTranscriptReady(page);
 }
@@ -2870,6 +2877,240 @@ async function verifyChatSwitchBottomRestore(
   fixture.assertNoBrowserErrors();
 }
 
+async function verifyHeldEarlierPageChatSwitch(
+  fixture: ChromiumFixture,
+  viewport: { height: number; width: number },
+): Promise<void> {
+  await fixture.page.setViewportSize(viewport);
+  const sourceChatId = await seedTranscript(
+    fixture.integration,
+    90,
+    `held-page-switch-source-${viewport.width}`,
+  );
+  const targetChatId = await seedTranscript(
+    fixture.integration,
+    8,
+    `held-page-switch-target-${viewport.width}`,
+  );
+  const targetPage = await fixture.integration.client.getMessages(targetChatId, { limit: 200 });
+  let releaseEarlierPage!: () => void;
+  const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
+  let resolveEarlierRequest!: () => void;
+  const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
+  let earlierRequestCount = 0;
+
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (
+      url.searchParams.get('chatId') === sourceChatId &&
+      url.searchParams.has('beforeOrdinal')
+    ) {
+      const response = await route.fetch();
+      earlierRequestCount += 1;
+      if (earlierRequestCount === 1) {
+        resolveEarlierRequest();
+        await earlierPageGate;
+      }
+      await route.fulfill({ response });
+      return;
+    }
+    await route.continue();
+  });
+
+  try {
+    await prepareTranscript(fixture, sourceChatId);
+    await fixture.page.evaluate((heldChatId) => {
+      const browserGlobal = globalThis as typeof globalThis & {
+        __restoreHeldEarlierPageFetch?: () => void;
+      };
+      const originalFetch = globalThis.fetch;
+      browserGlobal.__restoreHeldEarlierPageFetch = () => {
+        globalThis.fetch = originalFetch;
+        delete browserGlobal.__restoreHeldEarlierPageFetch;
+      };
+      globalThis.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(
+          typeof input === 'string' || input instanceof URL ? input : input.url,
+          location.href,
+        );
+        if (
+          url.pathname === '/api/v1/chats/messages' &&
+          url.searchParams.get('chatId') === heldChatId &&
+          url.searchParams.has('beforeOrdinal')
+        ) {
+          return originalFetch(input, { ...init, signal: undefined });
+        }
+        return originalFetch(input, init);
+      }, originalFetch);
+    }, sourceChatId);
+    await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+      const feed = feedElement as HTMLElement;
+      const target = Math.min(
+        Math.max(0, feed.scrollHeight - feed.clientHeight),
+        feed.clientHeight * 0.75,
+      );
+      feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -80 }));
+      feed.scrollTop = target;
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    await withDiagnosticTimeout('the held source-chat earlier page', earlierRequest);
+    await fixture.page.locator(`${FEED_SELECTOR}[aria-busy="true"]`).waitFor({ state: 'visible' });
+
+    await selectSidebarChat(
+      fixture.page,
+      targetChatId,
+      `held-page-switch-target-${viewport.width}-0`,
+    );
+    await waitForSurfaceIdentity(
+      fixture.page,
+      `${targetChatId}:${targetPage.transcriptViewId}`,
+    );
+    const targetRevision = await virtualDataRevision(fixture.page);
+    const targetEntryCount = await transcriptEntryCount(fixture.page);
+    releaseEarlierPage();
+    await fixture.page.evaluate(async () => {
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+
+    expect(fixture.page.url()).toContain(`/chat/${targetChatId}`);
+    expect(await transcriptEntryCount(fixture.page)).toBe(targetEntryCount);
+    expect(await virtualDataRevision(fixture.page)).toBe(targetRevision);
+    expect(await surfaceIdentity(fixture.page)).toBe(
+      `${targetChatId}:${targetPage.transcriptViewId}`,
+    );
+    const targetScan = await scanLoadedTranscript(fixture.page);
+    expect(targetScan.rows.map((row) => row.rowId)).toEqual(
+      targetPage.messages.map(
+        (entry) => `${targetPage.transcriptViewId}:${entry.ordinal}`,
+      ),
+    );
+    expect(targetScan.rows.map((row) => row.messageType)).toEqual(
+      targetPage.messages.map((entry) => entry.message.type),
+    );
+    expect(targetScan.rows.map((row) => row.text)).toEqual(
+      targetPage.messages.map((entry) => exactTranscriptText(entry.message)),
+    );
+    expect(
+      await fixture.page
+        .locator(FEED_SELECTOR)
+        .getByText(`held-page-switch-source-${viewport.width}-0`, { exact: true })
+        .count(),
+    ).toBe(0);
+    expect(earlierRequestCount).toBe(1);
+    fixture.assertNoBrowserErrors();
+  } finally {
+    releaseEarlierPage();
+    await fixture.page
+      .evaluate(() => {
+        (
+          globalThis as typeof globalThis & {
+            __restoreHeldEarlierPageFetch?: () => void;
+          }
+        ).__restoreHeldEarlierPageFetch?.();
+      })
+      .catch(() => undefined);
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
+async function claudeNativeTranscript(
+  fixture: ChromiumFixture,
+  chatId: string,
+): Promise<{ agentSessionId: string; path: string }> {
+  const chat = await waitForPersistedNativeSession({
+    directories: fixture.integration.dirs,
+    chatId,
+    agentId: 'claude',
+  });
+  const agentSessionId = typeof chat.agentSessionId === 'string' ? chat.agentSessionId : '';
+  const nativeSession =
+    chat.nativeSession && typeof chat.nativeSession === 'object'
+      ? (chat.nativeSession as Record<string, unknown>)
+      : null;
+  const value =
+    nativeSession?.value && typeof nativeSession.value === 'object'
+      ? (nativeSession.value as Record<string, unknown>)
+      : null;
+  const path = typeof value?.path === 'string' ? value.path : '';
+  if (!agentSessionId || !path) {
+    throw new Error(`Claude chat ${chatId} has no persisted native transcript.`);
+  }
+  return { agentSessionId, path };
+}
+
+async function verifyDetachedNativeReload(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+  viewport: { height: number; width: number },
+): Promise<void> {
+  const chatId = await seedHeterogeneousTranscript(fixture, environment);
+  const beforeReload = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  await fixture.page.setViewportSize(viewport);
+  await prepareTranscript(fixture, chatId, 1);
+  await scrollToPosition(fixture.page, 'middle');
+  expect(await viewportPolicy(fixture.page)).toEqual({
+    pinned: false,
+    userScrolledUp: true,
+  });
+  const oldSurfaceIdentity = await surfaceIdentity(fixture.page);
+  expect(oldSurfaceIdentity).toBe(`${chatId}:${beforeReload.transcriptViewId}`);
+
+  const native = await claudeNativeTranscript(fixture, chatId);
+  const externalContent = `detached-native-reload-final-assistant-${viewport.width}`;
+  await appendFile(
+    native.path,
+    `${JSON.stringify({
+      sessionId: native.agentSessionId,
+      type: 'assistant',
+      uuid: crypto.randomUUID(),
+      timestamp: new Date(Date.now() + 1_000).toISOString(),
+      cwd: fixture.integration.dirs.project,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: externalContent }],
+      },
+    })}\n`,
+    'utf8',
+  );
+
+  const reloaded = await fixture.integration.client.reloadChat(chatId);
+  expect(reloaded.transcriptViewId).not.toBe(beforeReload.transcriptViewId);
+  await waitForSurfaceIdentity(fixture.page, `${chatId}:${reloaded.transcriptViewId}`);
+  await waitForTranscriptReady(fixture.page);
+  expect(await surfaceIdentity(fixture.page)).not.toBe(oldSurfaceIdentity);
+
+  const canonical = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  expect(canonical.transcriptViewId).toBe(reloaded.transcriptViewId);
+  expect(canonical.messages.at(-1)).toMatchObject({
+    message: { type: 'assistant-message', content: externalContent },
+  });
+  await loadCompleteTranscript(fixture.page, canonical.messages.length);
+  const renderedExpected = canonical.messages.filter(
+    (entry) => entry.message.type !== 'tool-result',
+  );
+  const scan = await scanLoadedTranscript(fixture.page);
+  expect(scan.rows.map((row) => row.rowId)).toEqual(
+    renderedExpected.map(
+      (entry) => `${canonical.transcriptViewId}:${entry.ordinal}`,
+    ),
+  );
+  expect(scan.rows.map((row) => row.messageType)).toEqual(
+    renderedExpected.map((entry) => entry.message.type),
+  );
+  expect(scan.rows.at(-1)).toMatchObject({
+    messageType: 'assistant-message',
+    rowId: `${canonical.transcriptViewId}:${canonical.messages.at(-1)?.ordinal}`,
+    text: externalContent,
+  });
+  expect(
+    await fixture.page.locator(FEED_SELECTOR).getByText(externalContent, { exact: true }).isVisible(),
+  ).toBe(true);
+  fixture.assertNoBrowserErrors();
+}
+
 async function verifyDirectChatHidesNativeReload(fixture: ChromiumFixture): Promise<void> {
   const chatId = await seedTranscript(fixture.integration, 15, 'chromium-no-native-reload-base');
   await prepareTranscript(fixture, chatId, 20);
@@ -3190,10 +3431,7 @@ async function verifyMixedTranscriptOrdering(fixture: ChromiumFixture): Promise<
   });
   const renderedExpected = expected.filter((row) => row.type !== 'tool-result');
 
-  for (const viewport of [
-    { label: 'compact', height: 700, width: 390 },
-    { label: 'wide', height: 900, width: 1280 },
-  ]) {
+  for (const viewport of TRANSCRIPT_VIEWPORTS) {
     await fixture.page.setViewportSize(viewport);
     await prepareTranscript(fixture, chatId, 1);
     await loadCompleteTranscript(fixture.page, expected.length);
@@ -3461,10 +3699,7 @@ describe('Chromium transcript virtualization', () => {
     }, 180_000);
   }
 
-  for (const viewport of [
-    { label: 'compact', height: 700, width: 390 },
-    { label: 'wide', height: 900, width: 1280 },
-  ]) {
+  for (const viewport of TRANSCRIPT_VIEWPORTS) {
     test(`keeps a ${viewport.label} scrollbar reversal stable through an earlier-page prepend`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       await withChromiumFixture(
@@ -3537,6 +3772,37 @@ describe('Chromium transcript virtualization', () => {
       browser,
     );
   }, 120_000);
+
+  for (const viewport of TRANSCRIPT_VIEWPORTS) {
+    test(`isolates a held earlier page across a ${viewport.label} chat switch`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      await withChromiumFixture(
+        `transcript-held-page-switch-${viewport.label}`,
+        async (fixture, markPhase) => {
+          markPhase(`switching a ${viewport.label} feed while its earlier page is held`);
+          await verifyHeldEarlierPageChatSwitch(fixture, viewport);
+        },
+        diagnostics,
+        { serverEnvironment: environment.serverEnvironment },
+        browser,
+      );
+    }, 180_000);
+
+    test(`replaces an idle detached ${viewport.label} transcript from native history`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      const testEnvironment = environment;
+      await withChromiumFixture(
+        `transcript-detached-native-reload-${viewport.label}`,
+        async (fixture, markPhase) => {
+          markPhase(`reloading a detached ${viewport.label} native transcript`);
+          await verifyDetachedNativeReload(fixture, testEnvironment, viewport);
+        },
+        diagnostics,
+        { serverEnvironment: testEnvironment.serverEnvironment },
+        browser,
+      );
+    }, 180_000);
+  }
 
   test('renders mixed paged transcripts in exact ledger order on compact and wide layouts', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
