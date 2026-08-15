@@ -307,6 +307,26 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('does not retain a prepared composition for a duplicate committed input', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+      const input = {
+        chatId: 'chat-1',
+        viewId: view.viewId,
+        message: new UserMessage(TS, 'send once'),
+        attachments: [],
+        clientMessageId: 'message-1',
+        steer: false,
+      };
+
+      expect(ledger.appendInputAndCompose(input).inserted).toBe(true);
+      expect(ledger.takePreparedInput('chat-1', 'message-1')).not.toBeNull();
+      expect(ledger.appendInputAndCompose(input).inserted).toBe(false);
+
+      expect(ledger.takePreparedInput('chat-1', 'message-1')).toBeNull();
+    });
+  });
+
   it('applies one-composition resend exclusions without changing durable history', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');
