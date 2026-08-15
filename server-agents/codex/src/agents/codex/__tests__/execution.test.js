@@ -24,6 +24,13 @@ function createRuntime() {
 
 function createHost() {
   return {
+    agentId: 'codex',
+    logger: {
+      debug: mock(() => undefined),
+      info: mock(() => undefined),
+      warn: mock(() => undefined),
+      error: mock(() => undefined),
+    },
     apiProviders: {
       resolveCredential: mock(async () => ({ kind: 'api-key', value: 'secret' })),
     },
@@ -391,5 +398,45 @@ describe('CodexExecution', () => {
       })],
     }));
     expect(replacementEvents).toEqual([]);
+  });
+
+  it('drops a delayed provider event at its closed originating sink after view replacement', async () => {
+    const runtime = createRuntime();
+    const host = createHost();
+    const execution = new CodexExecution(
+      host,
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const originatingEvents = [];
+    const replacementEvents = [];
+    let originatingSinkClosed = false;
+    const originatingPublisher = (event) => {
+      if (originatingSinkClosed) throw new Error('originating sink closed');
+      originatingEvents.push(event);
+    };
+    await execution.start(startRequest(), originatingPublisher);
+    originatingSinkClosed = true;
+    await execution.resume(goalControlRequest('run-2'), (event) => replacementEvents.push(event));
+    const delayedContent = 'delayed output from the replaced view';
+
+    expect(() => runtime.emitMessages(
+      'chat-1',
+      [new AssistantMessage('2026-08-15T00:00:00.000Z', delayedContent)],
+      { turnId: 'run-1' },
+    )).not.toThrow();
+
+    expect(originatingEvents.filter((event) => event.type === 'messages')).toEqual([]);
+    expect(replacementEvents).toEqual([]);
+    expect(host.logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/drop.*Codex.*event/i),
+      expect.objectContaining({
+        chatId: 'chat-1',
+        turnId: 'run-1',
+        eventType: 'messages',
+      }),
+    );
+    expect(JSON.stringify(host.logger.warn.mock.calls)).not.toContain(delayedContent);
   });
 });
