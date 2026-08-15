@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
+import type { AgentRuntimeEvent } from '@garcon/server-agent-common/execution/runtime-events';
 import { PiRpcRuntime } from '../pi-rpc-runtime.js';
 import { testLogger, testModels, testPiConfig } from './test-fixtures.js';
 
@@ -225,6 +226,7 @@ function baseStartRequest(overrides = {}) {
     model: 'github-copilot/gpt-5.4',
     permissionMode: 'default',
     thinkingMode: 'none',
+    operation: { runId: 'run-default', publish() {} },
     ...overrides,
   };
 }
@@ -246,6 +248,19 @@ function collect(runtime) {
   runtime.onFailed((chatId, message) => seen.failed.push({ chatId, message }));
   runtime.onSessionCreated((chatId) => seen.created.push(chatId));
   return seen;
+}
+
+function collectOperation(runId: string) {
+  const events: AgentRuntimeEvent[] = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event: AgentRuntimeEvent) {
+        events.push(event);
+      },
+    },
+  };
 }
 
 async function settleIo() {
@@ -708,6 +723,121 @@ describe('PiRpcRuntime', () => {
     await turn;
     expect(seen.finished).toEqual(['chat-2']);
     expect(seen.messages.flatMap((entry) => entry.messages)).toHaveLength(3);
+    await runtime.shutdown();
+  });
+
+  it('publishes sequential turns through the concrete operation that started each turn', async () => {
+    const runtime = createRuntime();
+    const first = collectOperation('run-a');
+    const started = await runtime.startSession(baseStartRequest({ operation: first.operation }));
+    const fake = fakes[0];
+    await fs.writeFile(started.nativePath, '');
+
+    fake.pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'from operation A' }],
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    });
+    fake.pushEvent({ type: 'agent_settled' });
+    await settleIo();
+
+    const second = collectOperation('run-b');
+    const secondTurn = runtime.runTurn(baseResumeRequest({
+      agentSessionId: started.agentSessionId,
+      chatId: 'chat-1',
+      operation: second.operation,
+    }));
+    await waitForActive(runtime);
+    fake.pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'from operation B' }],
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    });
+    fake.pushEvent({ type: 'agent_settled' });
+    await secondTurn;
+
+    expect(first.events.map((event) => [event.type, 'runId' in event ? event.runId : null]))
+      .toEqual([['messages', 'run-a'], ['run-ended', 'run-a']]);
+    expect(second.events.map((event) => [event.type, 'runId' in event ? event.runId : null]))
+      .toEqual([['messages', 'run-b'], ['run-ended', 'run-b']]);
+    expect(JSON.stringify(first.events)).toContain('from operation A');
+    expect(JSON.stringify(first.events)).not.toContain('from operation B');
+    expect(JSON.stringify(second.events)).toContain('from operation B');
+    expect(JSON.stringify(second.events)).not.toContain('from operation A');
+    await runtime.shutdown();
+  });
+
+  it('keeps an active turn route when another chat collides on the same native session', async () => {
+    const runtime = createRuntime();
+    const first = collectOperation('run-a');
+    const started = await runtime.startSession(baseStartRequest({
+      chatId: 'chat-a',
+      operation: first.operation,
+    }));
+    const colliding = collectOperation('run-b');
+
+    await expect(runtime.runTurn(baseResumeRequest({
+      agentSessionId: started.agentSessionId,
+      chatId: 'chat-b',
+      operation: colliding.operation,
+    }))).rejects.toThrow(/already running/);
+
+    fakes[0].pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'still belongs to A' }],
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    });
+    fakes[0].pushEvent({ type: 'agent_settled' });
+    await settleIo();
+
+    expect(JSON.stringify(first.events)).toContain('still belongs to A');
+    expect(first.events.at(-1)).toMatchObject({ type: 'run-ended', runId: 'run-a' });
+    expect(colliding.events).toEqual([]);
+    await runtime.shutdown();
+  });
+
+  it('logs and drops a message emitted without an active turn', async () => {
+    const warnings: Array<{ message: string; context: unknown }> = [];
+    const runtime = createRuntime({
+      logger: {
+        ...testLogger,
+        warn(message, context) {
+          warnings.push({ message, context });
+        },
+      },
+    });
+    const operation = collectOperation('run-a');
+    await runtime.startSession(baseStartRequest({ operation: operation.operation }));
+    fakes[0].pushEvent({ type: 'agent_settled' });
+    await settleIo();
+    fakes[0].pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'unnamed late output' }],
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    });
+    await settleIo();
+
+    expect(operation.events).toHaveLength(1);
+    expect(operation.events[0]).toMatchObject({ type: 'run-ended', runId: 'run-a' });
+    expect(warnings).toContainEqual(expect.objectContaining({
+      message: 'Ignoring Pi message without an active turn',
+    }));
     await runtime.shutdown();
   });
 

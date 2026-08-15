@@ -5,8 +5,13 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import {
   ErrorMessage,
+  type ChatMessage,
 } from '@garcon/common/chat-types';
 import { isArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
+import {
+  runtimeRows,
+  type AgentRuntimeEvent,
+} from '@garcon/server-agent-common/execution/runtime-events';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
@@ -185,7 +190,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       this.#assertAcceptingOperations();
       if (spawned) this.#sessions.set(request.agentSessionId, session);
       session.chatId = request.chatId;
-      session.eventMetadata = piEventMetadata(request);
       session.lastActivityAt = Date.now();
       const dispatch = await this.#dispatchPrompt(session, request, prompt);
       this.#launchingSessionIds.delete(request.agentSessionId);
@@ -449,7 +453,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       pendingFinish: null,
       startTime: now,
       lastActivityAt: now,
-      eventMetadata: piEventMetadata(request, resume ? undefined : 'chat-start'),
       exitPromise: null,
     };
     this.#liveSessions.add(session);
@@ -580,6 +583,8 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     });
     const turn: PiActiveTurn = {
       turnId: request.turnId,
+      operation: request.operation,
+      eventMetadata: piEventMetadata(request, 'agentSessionId' in request ? undefined : 'chat-start'),
       stopRequested: false,
       settleObserved: false,
       completion: 'pending',
@@ -656,6 +661,13 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     }
 
     if (type === 'message_end') {
+      const turn = session.turn;
+      if (!turn) {
+        this.#logger.warn('Ignoring Pi message without an active turn', {
+          sessionId: session.id,
+        });
+        return;
+      }
       const message = event.message as unknown;
       const role = message && typeof message === 'object'
         ? (message as Record<string, unknown>).role
@@ -665,7 +677,7 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
         return;
       }
       const messages = convertPiMessage(message, { includeUser: false });
-      if (messages.length > 0) this.emitMessages(session.chatId, messages, session.eventMetadata);
+      if (messages.length > 0) this.#publishMessages(session, turn, messages);
 
       const stopReason = message && typeof message === 'object'
         ? (message as Record<string, unknown>).stopReason
@@ -674,9 +686,9 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
         const errorMessage = message && typeof message === 'object'
           ? (message as Record<string, unknown>).errorMessage
           : null;
-        this.emitMessages(session.chatId, [
+        this.#publishMessages(session, turn, [
           new ErrorMessage(timestamp, typeof errorMessage === 'string' ? errorMessage : 'Pi turn failed.'),
-        ], session.eventMetadata);
+        ]);
       }
       return;
     }
@@ -786,24 +798,74 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     });
     if (outcome === 'finished') {
       this.#emitLifecycle(session, 'turn-finished', () => {
-        this.emitFinished(session.chatId, 0, session.eventMetadata);
+        this.#publishTurnEvent(session, turn, {
+          type: 'run-ended',
+          runId: turn.operation.runId,
+          outcome: 'finished',
+          exitCode: 0,
+        });
+        this.emitFinished(session.chatId, 0, turn.eventMetadata);
       });
     } else if (outcome === 'stopped') {
       this.#emitLifecycle(session, 'turn-stopped', () => {
-        this.emitFinished(session.chatId, 0, session.eventMetadata);
+        this.#publishTurnEvent(session, turn, {
+          type: 'run-ended',
+          runId: turn.operation.runId,
+          outcome: 'finished',
+          exitCode: 0,
+        });
+        this.emitFinished(session.chatId, 0, turn.eventMetadata);
       });
     } else if (outcome === 'failed') {
       this.#emitLifecycle(session, 'turn-failed', () => {
+        this.#publishTurnEvent(session, turn, {
+          type: 'run-ended',
+          runId: turn.operation.runId,
+          outcome: 'failed',
+          error: {
+            code: 'PROVIDER_FAILURE',
+            message: failureMessage ?? 'Pi turn failed before completion',
+          },
+        });
         this.emitFailed(
           session.chatId,
           failureMessage ?? 'Pi turn failed before completion',
-          session.eventMetadata,
+          turn.eventMetadata,
         );
       });
     }
     turn.settle();
     if (session.state !== 'retiring' && session.process && session.client) {
       session.state = 'idle';
+    }
+  }
+
+  #publishMessages(
+    session: PiRpcSession,
+    turn: PiActiveTurn,
+    messages: ChatMessage[],
+  ): void {
+    this.#publishTurnEvent(session, turn, {
+      type: 'messages',
+      rows: runtimeRows(messages),
+      runId: turn.operation.runId,
+    });
+    this.emitMessages(session.chatId, messages, turn.eventMetadata);
+  }
+
+  #publishTurnEvent(
+    session: PiRpcSession,
+    turn: PiActiveTurn,
+    event: AgentRuntimeEvent,
+  ): void {
+    try {
+      turn.operation.publish(event);
+    } catch (error) {
+      this.#logger.warn('Pi publisher rejected an event', {
+        sessionId: session.id,
+        eventType: event.type,
+        error: errorMessage(error),
+      });
     }
   }
 

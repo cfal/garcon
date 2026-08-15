@@ -1,5 +1,6 @@
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { PiRpcClient } from './pi-rpc-client.js';
-import type { piEventMetadata } from './runtime-types.js';
 
 export type PiRpcSessionState = 'starting' | 'idle' | 'prompting' | 'active' | 'retiring';
 
@@ -12,6 +13,8 @@ export interface PiSteerSubmission {
 
 export interface PiActiveTurn {
   turnId: string | undefined;
+  readonly operation: AgentRuntimeOperation;
+  readonly eventMetadata: RuntimeEventMetadata;
   stopRequested: boolean;
   settleObserved: boolean;
   completion: 'pending' | 'finished' | 'failed' | 'stopped' | 'shutdown';
@@ -36,7 +39,6 @@ export interface PiRpcSession {
   pendingFinish: (() => void) | null;
   startTime: number;
   lastActivityAt: number;
-  eventMetadata: ReturnType<typeof piEventMetadata>;
   exitPromise: Promise<void> | null;
 }
 

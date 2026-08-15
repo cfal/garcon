@@ -1,5 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface PiExecutionAdmission {
@@ -15,6 +16,7 @@ export interface PiExecutionRequest {
   readonly thinkingMode: ThinkingMode;
   readonly clientRequestId?: string;
   readonly turnId?: string;
+  readonly operation: AgentRuntimeOperation;
   readonly executionAdmission?: PiExecutionAdmission;
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
