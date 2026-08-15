@@ -86,6 +86,57 @@ describe('NativeTranscriptActivityService', () => {
     }, { probeTimeoutMs: 10 });
   });
 
+  it('logs stalled requested checks with structured context', async () => {
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = mock((...args) => warnings.push(args));
+
+    try {
+      await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
+        ledger.initializeChat('chat-1', baseRows());
+        setResult(new Promise(() => {}));
+
+        activity.requestCheck('chat-1', 'open');
+        expect(await waitForAbort(lastActivity.mock.calls[0][1])).toBe(true);
+        await waitForWarnings(warnings);
+
+        expect(warnings.length).toBeGreaterThan(0);
+        expect(warnings.some((entry) => {
+          const details = entry.find((value) => value && typeof value === 'object');
+          return details?.chatId === 'chat-1' && details?.reason === 'open';
+        })).toBe(true);
+      }, { probeTimeoutMs: 10 });
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('does not include provider error content in requested-check diagnostics', async () => {
+    const privateContent = 'private-native-provider-content';
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = mock((...args) => warnings.push(args));
+
+    try {
+      await withFixture(async ({ ledger, activity, setResult }) => {
+        ledger.initializeChat('chat-1', baseRows());
+        setResult(new Error(privateContent));
+
+        activity.requestCheck('chat-1', 'pre-resume');
+        await waitForWarnings(warnings);
+
+        expect(warnings.length).toBeGreaterThan(0);
+        expect(JSON.stringify(warnings)).not.toContain(privateContent);
+        expect(warnings.some((entry) => {
+          const details = entry.find((value) => value && typeof value === 'object');
+          return details?.chatId === 'chat-1' && details?.reason === 'pre-resume';
+        })).toBe(true);
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
   it('does not let later core-authored rows hide missed native output', async () => {
     await withFixture(async ({ ledger, activity }) => {
       ledger.initializeChat('chat-1', [
@@ -278,6 +329,12 @@ async function waitForAbort(signal) {
     new Promise((resolve) => signal.addEventListener('abort', () => resolve(true), { once: true })),
     Bun.sleep(250).then(() => false),
   ]);
+}
+
+async function waitForWarnings(warnings) {
+  for (let attempt = 0; attempt < 100 && warnings.length === 0; attempt += 1) {
+    await Bun.sleep(1);
+  }
 }
 
 function baseRows() {
