@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.ts';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.ts';
 import { transcriptViewId } from '../contracts.ts';
-import { LedgerFencedError } from '../errors.ts';
+import { LedgerFencedError, StaleTranscriptViewError } from '../errors.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { TranscriptViewReader } from '../view-reader.ts';
@@ -84,6 +84,51 @@ describe('TranscriptViewReader', () => {
         .rejects.toThrow('watermark');
       await expect(reader.replay('chat-1', viewId, 0, 1)).resolves.toMatchObject({
         transcriptViewId: viewId,
+        nextAfterOrdinal: 1,
+        throughOrdinal: 1,
+        hasMore: false,
+      });
+    });
+  });
+
+  it('rejects a fixed-watermark continuation after the transcript view is replaced', async () => {
+    await withReader(async ({ ledger, reader, viewId }) => {
+      const producer = ledger.openProducer('chat-1', 'test');
+      producer.sink.publish({
+        type: 'rows',
+        rows: Array.from({ length: 300 }, (_, index) => ({
+          message: new AssistantMessage(TS, `old-${index + 1}`),
+        })),
+      });
+      const first = await reader.replay('chat-1', viewId, 0);
+      expect(first).toMatchObject({
+        transcriptViewId: viewId,
+        nextAfterOrdinal: 200,
+        throughOrdinal: 300,
+        hasMore: true,
+      });
+
+      const replacementViewId = transcriptViewId('view-2');
+      ledger.closeProducer('chat-1');
+      ledger.stageView('chat-1', [{
+        kind: 'provider-row',
+        at: TS,
+        message: new AssistantMessage(TS, 'replacement'),
+      }], 1, replacementViewId);
+      ledger.replaceCurrentView('chat-1', viewId, replacementViewId);
+
+      await expect(reader.replay(
+        'chat-1',
+        viewId,
+        first.nextAfterOrdinal,
+        first.throughOrdinal,
+      )).rejects.toBeInstanceOf(StaleTranscriptViewError);
+      await expect(reader.replay('chat-1', replacementViewId, 0)).resolves.toMatchObject({
+        transcriptViewId: replacementViewId,
+        messages: [expect.objectContaining({
+          ordinal: 1,
+          message: expect.objectContaining({ content: 'replacement' }),
+        })],
         nextAfterOrdinal: 1,
         throughOrdinal: 1,
         hasMore: false,
