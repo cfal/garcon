@@ -1178,6 +1178,46 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.localNotices.map((notice) => notice.content)).toEqual(['notice after live batch']);
 	});
 
+	it('retires an obsolete reconnect replay when a replacement snapshot installs', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			hasMore: false,
+		});
+		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-old');
+		expect(chat.applyReconnectReplayPage(
+			replayToken,
+			'chat-1',
+			'generation-old',
+			[entry(2, assistant('old replay'))],
+			2,
+			2,
+			[],
+		)).toBe('applied');
+
+		const snapshotEpoch = chat.beginSnapshotLoad();
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-new',
+				messages: [entry(1, assistant('replacement'))],
+				lastOrdinal: 1,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+		expect(applyMessages(
+			chat,
+			'chat-1',
+			'generation-new',
+			[entry(2, assistant('replacement live'))],
+		)).toBe('applied');
+
+		expect(chat.chatMessages.map(contentOf)).toEqual(['replacement', 'replacement live']);
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-new', lastOrdinal: 2 });
+		expect(chat.finishReconnectReplay(replayToken, 'chat-1')).toBe('stale');
+	});
+
 	it('clears optimistic rows when a transcript view is replaced', () => {
 		const chat = new ActiveTranscriptState();
 		chat.upsertOptimisticUserInput(optimisticInput());
