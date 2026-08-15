@@ -68,10 +68,67 @@ describe('transcript permission occurrences', () => {
         .toThrow(PermissionNotActionableError);
     });
   });
+
+  it('drops old occurrence capabilities when the producer sink is replaced', async () => {
+    await withLedger((ledger) => {
+      const first = startRun(ledger);
+      const firstDecision = permissionDecision('incarnation-1');
+      publishRequest(first.sink, 'incarnation-1', firstDecision);
+
+      ledger.closeProducer(CHAT_ID);
+      const second = ledger.openProducer(CHAT_ID, 'test');
+      ledger.beginRun(CHAT_ID, 'run-2');
+      const secondDecision = permissionDecision('incarnation-2');
+      publishRequest(second.sink, 'incarnation-2', secondDecision, 'run-2');
+
+      expect(() => ledger.claimPermissionResolution(
+        permissionControl('incarnation-1', RUN_ID),
+      )).toThrow(PermissionNotActionableError);
+      expect(ledger.claimPermissionResolution(
+        permissionControl('incarnation-2', 'run-2'),
+      ).decision).toBe(secondDecision);
+      expect(() => first.sink.publish({ type: 'rows', rows: [] }))
+        .toThrow('Transcript producer sink is closed');
+    });
+  });
+
+  it('keeps permission history but restores no actionability after restart', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-restart-'));
+    try {
+      const first = createLedger(root);
+      const lease = startRun(first.ledger);
+      publishRequest(lease.sink, 'incarnation-1', permissionDecision('incarnation-1'));
+      first.ledger.close();
+
+      const restarted = createLedger(root);
+      try {
+        expect(restarted.ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
+          'permission-requested',
+        ]);
+        expect(() => restarted.ledger.claimPermissionResolution(
+          permissionControl('incarnation-1'),
+        )).toThrow(PermissionNotActionableError);
+      } finally {
+        restarted.ledger.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 async function withLedger(run) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-occurrence-'));
+  const { ledger } = createLedger(root);
+  try {
+    await run(ledger);
+  } finally {
+    ledger.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+function createLedger(root) {
   const store = new TranscriptLedgerStore(root, {
     createViewId: () => transcriptViewId('view-1'),
     now: () => TS,
@@ -80,12 +137,7 @@ async function withLedger(run) {
     now: () => TS,
     serverInstanceId: 'server-1',
   });
-  try {
-    await run(ledger);
-  } finally {
-    ledger.close();
-    await rm(root, { recursive: true, force: true });
-  }
+  return { ledger, store };
 }
 
 function startRun(ledger) {
@@ -95,10 +147,10 @@ function startRun(ledger) {
   return lease;
 }
 
-function publishRequest(sink, incarnation, decision) {
+function publishRequest(sink, incarnation, decision, runId = RUN_ID) {
   sink.publish({
     type: 'permission',
-    runId: RUN_ID,
+    runId,
     lifecycle: permissionRequest(incarnation),
     decision,
   });
@@ -122,11 +174,11 @@ function permissionDecision(incarnation, requestId = REQUEST_ID) {
   };
 }
 
-function permissionControl(incarnation) {
+function permissionControl(incarnation, runId = RUN_ID) {
   return {
     serverInstanceId: 'server-1',
     chatId: CHAT_ID,
-    runId: RUN_ID,
+    runId,
     id: REQUEST_ID,
     incarnation,
   };
