@@ -1,12 +1,36 @@
+import assert from 'node:assert/strict';
 import { TranscriptSearchController } from '../../controller.ts';
 
-let rejectReplacement = false;
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const failedJob = deferred();
+const sameChatContinued = deferred();
+const otherChatContinued = deferred();
+const unhandledRejections: unknown[] = [];
+const onUnhandledRejection = (reason: unknown): void => {
+  unhandledRejections.push(reason);
+};
+process.on('unhandledRejection', onUnhandledRejection);
+let rejectNextReplacement = false;
+let observeContinuation = false;
 
 const service = {
   setResyncHandler() {},
   async enable() {},
-  async replaceChat() {
-    if (rejectReplacement) throw new Error('index unavailable');
+  async replaceChat({ chatId }: { chatId: string }) {
+    if (rejectNextReplacement && chatId === 'chat-1') {
+      rejectNextReplacement = false;
+      failedJob.resolve();
+      throw new Error('index unavailable');
+    }
+    if (observeContinuation && chatId === 'chat-1') sameChatContinued.resolve();
+    if (observeContinuation && chatId === 'chat-2') otherChatContinued.resolve();
   },
   async appendRows() {},
   async deleteChat() {},
@@ -27,9 +51,9 @@ const service = {
 };
 
 const controller = new TranscriptSearchController({
-  listChatIds: () => ['chat-1'],
+  listChatIds: () => ['chat-1', 'chat-2'],
   ledger: {
-    currentView: () => ({ viewId: 'view-1', contentStartOrdinal: 1 }),
+    currentView: (chatId: string) => ({ viewId: `view-${chatId}`, contentStartOrdinal: 1 }),
     currentRows: () => [],
     subscribe: () => () => {},
   },
@@ -37,7 +61,15 @@ const controller = new TranscriptSearchController({
 });
 
 await controller.initialize(true);
-rejectReplacement = true;
+observeContinuation = true;
+rejectNextReplacement = true;
 controller.sourceMayHaveChanged('chat-1');
-await Bun.sleep(25);
+await failedJob.promise;
+controller.sourceMayHaveChanged('chat-1');
+controller.sourceMayHaveChanged('chat-2');
+await Promise.all([sameChatContinued.promise, otherChatContinued.promise]);
+await Bun.sleep(0);
 await controller.close();
+process.off('unhandledRejection', onUnhandledRejection);
+
+assert.deepEqual(unhandledRejections, []);

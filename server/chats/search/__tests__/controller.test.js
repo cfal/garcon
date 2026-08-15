@@ -140,7 +140,7 @@ describe('TranscriptSearchController', () => {
     expect(test.service.replaceChat).not.toHaveBeenCalled();
   });
 
-  it('absorbs a rejected fire-and-forget indexing job', async () => {
+  it('absorbs a rejected indexing job and continues same-chat and cross-chat queues', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/rejected-index-job.ts', import.meta.url));
     const child = Bun.spawn([process.execPath, fixture], {
       cwd: process.cwd(),
