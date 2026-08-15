@@ -145,6 +145,74 @@ describe('NativeTranscriptActivityService', () => {
       expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
     });
   });
+
+  it('drops a pending native result when the transcript view is replaced', async () => {
+    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
+      const current = ledger.initializeChat('chat-1', baseRows());
+      const pending = deferred();
+      setResult(pending.promise);
+
+      const check = activity.check('chat-1');
+      expect(lastActivity).toHaveBeenCalledTimes(1);
+      const staging = ledger.stageView('chat-1', baseRows(), 1);
+      ledger.replaceCurrentView('chat-1', current.viewId, staging.viewId);
+      pending.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+
+      expect(await check).toBe(false);
+      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
+    });
+  });
+
+  it('drops a pending native result when the current native session changes', async () => {
+    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
+      ledger.initializeChat('chat-1', baseRows());
+      const pending = deferred();
+      setResult(pending.promise);
+
+      const check = activity.check('chat-1');
+      expect(lastActivity).toHaveBeenCalledTimes(1);
+      ledger.openProducer('chat-1', 'test').sink.publish({
+        type: 'session',
+        session: {
+          agentSessionId: 'native-2',
+          nativeSession: {
+            ownerId: 'test',
+            schemaVersion: 1,
+            value: { path: '/tmp/native-2.jsonl' },
+          },
+          nativeSeedReceipt: null,
+        },
+      });
+      pending.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+
+      expect(await check).toBe(false);
+      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
+    });
+  });
+
+  it('drops a pending native result when provider output advances the watermark', async () => {
+    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
+      ledger.initializeChat('chat-1', baseRows());
+      const pending = deferred();
+      setResult(pending.promise);
+
+      const check = activity.check('chat-1');
+      expect(lastActivity).toHaveBeenCalledTimes(1);
+      ledger.openProducer('chat-1', 'test').sink.publish({
+        type: 'rows',
+        rows: [{
+          message: new AssistantMessage('2026-08-12T00:00:02.500Z', 'late provider output'),
+        }],
+      });
+      pending.resolve({
+        kind: 'ready',
+        value: { lastEntryAt: '2026-08-12T00:00:04.000Z' },
+      });
+
+      expect(await check).toBe(false);
+      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
+    });
+  });
 });
 
 function deferred() {
