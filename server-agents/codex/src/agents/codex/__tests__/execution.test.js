@@ -339,4 +339,57 @@ describe('CodexExecution', () => {
       { content: 'after delivery', runId: 'run-2' },
     ]);
   });
+
+  it('keeps the prior source route when a replacement start fails before activation', async () => {
+    const runtime = createRuntime();
+    const host = createHost();
+    const execution = new CodexExecution(
+      host,
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const priorEvents = [];
+    const replacementEvents = [];
+    await execution.start(startRequest(), (event) => priorEvents.push(event));
+    runtime.emitFinished('chat-1', 0, { turnId: 'run-1' });
+    host.apiProviders.resolveCredential.mockImplementation(async () => {
+      throw new Error('credential lookup failed before session activation');
+    });
+
+    await expect(execution.start(startRequest({
+      runId: 'run-2',
+      endpoint: {
+        apiProviderId: 'provider-1',
+        endpointId: 'endpoint-1',
+        providerLabel: 'Provider One',
+        protocol: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        model: 'gpt-5.4',
+        isLocal: false,
+        capabilities: { chatCompletions: false, responses: true },
+        headers: {},
+        credential: {
+          kind: 'api-provider-endpoint',
+          apiProviderId: 'provider-1',
+          endpointId: 'endpoint-1',
+        },
+      },
+    }), (event) => replacementEvents.push(event))).rejects.toThrow(
+      'credential lookup failed before session activation',
+    );
+
+    runtime.emitMessages('chat-1', [
+      new AssistantMessage('2026-08-15T00:00:00.000Z', 'late prior output'),
+    ], { turnId: 'run-1' });
+
+    expect(priorEvents).toContainEqual(expect.objectContaining({
+      type: 'messages',
+      runId: 'run-1',
+      rows: [expect.objectContaining({
+        message: expect.objectContaining({ content: 'late prior output' }),
+      })],
+    }));
+    expect(replacementEvents).toEqual([]);
+  });
 });

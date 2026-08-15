@@ -16,7 +16,18 @@ export {};
 
 const decoder = new TextDecoder();
 const startedThreads = new Map<string, string>();
+const routingControlDirectory = process.env.INTEGRATION_CODEX_ROUTING_CONTROL_DIR;
+const answeredApprovalControls = new Map<number, string>();
+const emittedApprovalControls = new Set<string>();
+let processRole: 'started' | 'resumed' | null = null;
+let processThreadId: string | null = null;
+let processTurnId: string | null = null;
 let buffered = '';
+
+const routingControlPoll = routingControlDirectory
+  ? setInterval(publishControlledApprovals, 10)
+  : null;
+routingControlPoll?.unref();
 
 for await (const chunk of Bun.stdin.stream()) {
   buffered += decoder.decode(chunk, { stream: true });
@@ -35,8 +46,14 @@ function respond(line: string): void {
     id?: number;
     method?: string;
     params?: Record<string, unknown>;
+    result?: unknown;
+    error?: unknown;
   };
   if (typeof request.id !== 'number') return;
+  if (!request.method && ('result' in request || 'error' in request)) {
+    recordApprovalResponse(request.id, request.result, request.error);
+    return;
+  }
   if (request.method === 'initialize') {
     write(request.id, {
       userAgent: 'integration-fake-codex',
@@ -64,6 +81,10 @@ function respond(line: string): void {
   }
   if (request.method === 'turn/start') {
     startTurn(request.id, request.params);
+    return;
+  }
+  if (request.method === 'turn/interrupt' && routingControlDirectory) {
+    write(request.id, {});
     return;
   }
   if (request.method === 'thread/list') {
@@ -186,6 +207,8 @@ function startThread(id: number, params: Record<string, unknown> | undefined): v
     { mode: 0o600 },
   );
   startedThreads.set(threadId, nativePath);
+  processRole = 'started';
+  processThreadId = threadId;
   write(id, {
     thread: { id: threadId, path: nativePath },
     model: typeof params?.model === 'string' ? params.model : 'gpt',
@@ -203,6 +226,8 @@ function resumeThread(id: number, params: Record<string, unknown> | undefined): 
     return;
   }
   startedThreads.set(threadId, nativePath);
+  processRole = 'resumed';
+  processThreadId = threadId;
   write(id, {
     thread: { id: threadId, path: nativePath },
     model: typeof params?.model === 'string' ? params.model : 'gpt',
@@ -271,6 +296,7 @@ function startTurn(id: number, params: Record<string, unknown> | undefined): voi
   );
 
   const turnId = randomUUID();
+  processTurnId = turnId;
   write(id, {
     turn: codexTurn(turnId, 'inProgress', timestamp),
   });
@@ -299,6 +325,7 @@ function startStreamingTurn(
 ): void {
   const timestamp = new Date().toISOString();
   const turnId = randomUUID();
+  processTurnId = turnId;
   const metadata = { turn_id: turnId };
   const reasoningItemId = `${turnId}-reasoning`;
   appendFileSync(
@@ -527,4 +554,52 @@ function collectRolloutFiles(directory: string, files: Array<{ id: string; path:
   } catch {
     return;
   }
+}
+
+function publishControlledApprovals(): void {
+  if (!routingControlDirectory || !processRole || !processThreadId || !processTurnId) return;
+  let entries: string[];
+  try {
+    entries = readdirSync(routingControlDirectory);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.request.json') || emittedApprovalControls.has(entry)) continue;
+    try {
+      const control = JSON.parse(readFileSync(join(routingControlDirectory, entry), 'utf8')) as {
+        target?: unknown;
+        requestId?: unknown;
+        command?: unknown;
+      };
+      if (control.target !== processRole) continue;
+      if (typeof control.requestId !== 'number' || !Number.isSafeInteger(control.requestId)) continue;
+      if (typeof control.command !== 'string' || !control.command) continue;
+      emittedApprovalControls.add(entry);
+      answeredApprovalControls.set(control.requestId, entry);
+      notifyServerRequest(control.requestId, 'item/commandExecution/requestApproval', {
+        threadId: processThreadId,
+        turnId: processTurnId,
+        itemId: entry.slice(0, -'.request.json'.length),
+        command: control.command,
+      });
+      writeFileSync(join(routingControlDirectory, `${entry}.sent`), '');
+    } catch {
+      continue;
+    }
+  }
+}
+
+function notifyServerRequest(id: number, method: string, params: Record<string, unknown>): void {
+  process.stdout.write(`${JSON.stringify({ id, method, params })}\n`);
+}
+
+function recordApprovalResponse(id: number, result: unknown, error: unknown): void {
+  const control = answeredApprovalControls.get(id);
+  if (!routingControlDirectory || !control) return;
+  answeredApprovalControls.delete(id);
+  writeFileSync(
+    join(routingControlDirectory, `${control}.response.json`),
+    JSON.stringify({ result: result ?? null, error: error ?? null }),
+  );
 }

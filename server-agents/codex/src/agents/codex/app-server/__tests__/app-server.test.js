@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
+import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionCancelledMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import {
@@ -6365,6 +6365,92 @@ describe('CodexAppServerRuntime', () => {
 
     expect(fake.respond).toHaveBeenCalledWith(7, { decision: 'accept' });
     expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(true);
+  });
+
+  it('cancels each pending approval through the operation that created it', async () => {
+    const nativePath = path.join(tmpDir, 'approval-routing-thread.jsonl');
+    let goal = null;
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      getThreadGoal: async () => ({ goal }),
+      setThreadGoal: async (threadId, params) => {
+        goal = makeGoal(threadId, params.objective, 'active');
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }),
+          },
+        }));
+        return { goal };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emissions = [];
+    provider.onMessages((_chatId, messages, metadata) => {
+      emissions.push(...messages.map((message) => ({ message, metadata })));
+    });
+    await provider.startSession(makeRequest({
+      clientRequestId: 'run-a',
+      turnId: 'run-a',
+      command: 'Keep working',
+      codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+    }));
+
+    fake.emit('serverRequest', {
+      id: 71,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'goal-turn', itemId: 'cmd-a', command: 'command-a' },
+    });
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath,
+      clientRequestId: 'run-b',
+      turnId: 'run-b',
+      codexGoalCommand: { kind: 'status' },
+    }));
+    fake.emit('serverRequest', {
+      id: 72,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'goal-turn', itemId: 'cmd-b', command: 'command-b' },
+    });
+
+    goal = makeGoal('thread-1', 'Keep working', 'complete');
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'goal-turn', goal },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+    });
+    await Promise.resolve();
+
+    const requests = emissions.filter(({ message }) => message instanceof PermissionRequestMessage);
+    const requestByCommand = new Map(requests.map(({ message, metadata }) => [
+      message.requestedTool.command,
+      { permissionRequestId: message.permissionRequestId, metadata },
+    ]));
+    expect(requestByCommand.get('command-a')?.metadata).toMatchObject({ turnId: 'run-a' });
+    expect(requestByCommand.get('command-b')?.metadata).toMatchObject({ turnId: 'run-b' });
+
+    const cancelled = emissions.filter(({ message }) => message instanceof PermissionCancelledMessage);
+    const cancellationMetadata = new Map(cancelled.map(({ message, metadata }) => [
+      message.permissionRequestId,
+      metadata,
+    ]));
+    expect(cancellationMetadata.get(requestByCommand.get('command-a').permissionRequestId))
+      .toMatchObject({ turnId: 'run-a' });
+    expect(cancellationMetadata.get(requestByCommand.get('command-b').permissionRequestId))
+      .toMatchObject({ turnId: 'run-b' });
   });
 
   it('auto-approves app-server approvals in manual bypass without emitting a permission row', async () => {
