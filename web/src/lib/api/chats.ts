@@ -19,6 +19,7 @@ import {
 	parseResendCandidates,
 	parseTranscriptMessages,
 	type ChatHistoryResponse,
+	type TranscriptMessage,
 } from '$shared/chat-view';
 import type {
 	ChatListEntry,
@@ -370,29 +371,92 @@ function requireNonEmptyString(value: unknown, fieldName: string): string {
 }
 
 function requireNonNegativeInteger(value: unknown, fieldName: string): number {
-	if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
 		throw new Error(`Invalid chat messages page: ${fieldName}`);
 	}
 	return value;
 }
 
 function requirePositiveInteger(value: unknown, fieldName: string): number {
-	if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
 		throw new Error(`Invalid chat messages page: ${fieldName}`);
 	}
 	return value;
 }
 
-export async function getChatMessages(params: {
+type ChatMessagesRequest = {
 	chatId: string;
 	limit?: number;
-	beforeOrdinal?: number;
-}): Promise<ChatHistoryResponse> {
+} & (
+	| { beforeOrdinal?: undefined; transcriptViewId?: never }
+	| { beforeOrdinal: number; transcriptViewId: string }
+);
+
+interface ValidatedChatMessagesPage {
+	chatId: string;
+	transcriptViewId: string;
+	messages: TranscriptMessage[];
+	lastOrdinal: number;
+	pageOldestOrdinal: number;
+	pageNewestOrdinal: number;
+	hasMore: boolean;
+	limit: number;
+}
+
+function invalidChatMessagesPage(reason: string): never {
+	throw new Error(`Invalid chat messages page: ${reason}`);
+}
+
+function validateChatMessagesPage(
+	request: ChatMessagesRequest,
+	page: ValidatedChatMessagesPage,
+): void {
+	if (page.chatId !== request.chatId) invalidChatMessagesPage('chatId does not match request');
+	if (page.limit !== (request.limit ?? 50)) invalidChatMessagesPage('limit does not match request');
+	if (request.beforeOrdinal === undefined) {
+		if (page.pageNewestOrdinal !== page.lastOrdinal) {
+			invalidChatMessagesPage('newest page cursor does not match lastOrdinal');
+		}
+	} else {
+		if (page.transcriptViewId !== request.transcriptViewId) {
+			invalidChatMessagesPage('transcriptViewId does not match request');
+		}
+		if (page.pageNewestOrdinal !== request.beforeOrdinal - 1) {
+			invalidChatMessagesPage('pageNewestOrdinal does not precede beforeOrdinal');
+		}
+	}
+	if (page.pageNewestOrdinal > page.lastOrdinal) {
+		invalidChatMessagesPage('pageNewestOrdinal exceeds lastOrdinal');
+	}
+	if (page.pageOldestOrdinal > page.pageNewestOrdinal) {
+		invalidChatMessagesPage('pageOldestOrdinal exceeds pageNewestOrdinal');
+	}
+	if (page.messages.length > page.limit) invalidChatMessagesPage('messages exceed limit');
+	if (page.messages.length === 0) {
+		if (page.pageOldestOrdinal !== 0) invalidChatMessagesPage('empty page has an oldest ordinal');
+		if (page.hasMore) invalidChatMessagesPage('empty page claims earlier messages');
+		return;
+	}
+	if (page.pageOldestOrdinal === 0) invalidChatMessagesPage('nonempty page has no oldest ordinal');
+	if (page.messages[0]?.ordinal !== page.pageOldestOrdinal) {
+		invalidChatMessagesPage('first message does not match pageOldestOrdinal');
+	}
+	if (page.messages.some((message) => (
+		message.ordinal < page.pageOldestOrdinal || message.ordinal > page.pageNewestOrdinal
+	))) {
+		invalidChatMessagesPage('message ordinal is outside page bounds');
+	}
+}
+
+export async function getChatMessages(params: ChatMessagesRequest): Promise<ChatHistoryResponse> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
 		limit: String(params.limit ?? 50),
 	});
-	if (params.beforeOrdinal !== undefined) query.set('beforeOrdinal', String(params.beforeOrdinal));
+	if (params.beforeOrdinal !== undefined) {
+		query.set('beforeOrdinal', String(params.beforeOrdinal));
+		query.set('transcriptViewId', params.transcriptViewId);
+	}
 	const response = await apiGet<{
 		historyState?: unknown;
 		chatId?: unknown;
@@ -408,6 +472,7 @@ export async function getChatMessages(params: {
 	const historyState = parseChatHistoryState(response.historyState);
 	if (historyState === null) throw new Error('Invalid chat messages page: historyState');
 	const chatId = requireNonEmptyString(response.chatId, 'chatId');
+	if (chatId !== params.chatId) invalidChatMessagesPage('chatId does not match request');
 	if (historyState.kind !== 'complete') {
 		if (!Array.isArray(response.messages) || response.messages.length !== 0) {
 			throw new Error('Invalid unavailable chat history: messages');
@@ -435,7 +500,7 @@ export async function getChatMessages(params: {
 	if (typeof response.hasMore !== 'boolean') {
 		throw new Error('Invalid chat messages page: hasMore');
 	}
-	return {
+	const page = {
 		historyState,
 		chatId,
 		messages,
@@ -447,6 +512,8 @@ export async function getChatMessages(params: {
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
 	};
+	validateChatMessagesPage(params, page);
+	return page;
 }
 
 // Resolves one search result to a browser ordinal under its composite content

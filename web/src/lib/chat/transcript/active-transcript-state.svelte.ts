@@ -25,7 +25,6 @@ import type {
 } from './active-transcript-port.js';
 import {
 	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
-	collectEarlierTranscriptMessages,
 	idlePageState,
 	retainTranscriptEntries,
 	type TranscriptPageDirection,
@@ -65,6 +64,39 @@ export type MessageApplyResult = 'applied' | 'view-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
+
+function validateEarlierTranscriptPage(page: ChatPage, currentOldestOrdinal: number): void {
+	if (page.pageNewestOrdinal !== currentOldestOrdinal - 1) {
+		throw new Error('Earlier transcript page did not advance the loaded window');
+	}
+	if (
+		page.pageOldestOrdinal > page.pageNewestOrdinal
+		|| page.pageNewestOrdinal > page.lastOrdinal
+	) {
+		throw new Error('Earlier transcript page has invalid ordinal bounds');
+	}
+	if (page.messages.length === 0) {
+		if (page.pageOldestOrdinal !== 0 || page.hasMore) {
+			throw new Error('Earlier transcript page did not advance the loaded window');
+		}
+		return;
+	}
+	if (page.messages[0]?.ordinal !== page.pageOldestOrdinal) {
+		throw new Error('Earlier transcript page has an invalid oldest message');
+	}
+	let previousOrdinal = 0;
+	for (const message of page.messages) {
+		if (
+			!Number.isSafeInteger(message.ordinal)
+			|| message.ordinal <= previousOrdinal
+			|| message.ordinal < page.pageOldestOrdinal
+			|| message.ordinal > page.pageNewestOrdinal
+		) {
+			throw new Error('Earlier transcript page has invalid message ordinals');
+		}
+		previousOrdinal = message.ordinal;
+	}
+}
 
 export class ActiveTranscriptState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
@@ -582,7 +614,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				? this.oldestOrdinal
 				: Math.min(loadedThroughOrdinal + MESSAGES_PER_PAGE + 1, this.lastOrdinal + 1);
 			const page = await getChatMessages(
-				{ chatId, limit: MESSAGES_PER_PAGE, beforeOrdinal },
+				{ chatId, limit: MESSAGES_PER_PAGE, beforeOrdinal, transcriptViewId },
 			);
 			if (!this.#isCurrentPageLoad(chatId, transcriptViewId, operationEpoch)) {
 				return 'invalidated';
@@ -611,19 +643,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	#applyEarlierPage(page: ChatPage): TranscriptPageLoadResult {
+		validateEarlierTranscriptPage(page, this.oldestOrdinal);
 		if (page.messages.length === 0) {
-			if (page.hasMore)
-				throw new Error('Earlier transcript page did not advance the loaded window');
 			this.hasEarlierMessages = false;
 			return 'exhausted';
 		}
-		const addedMessages = collectEarlierTranscriptMessages(this.oldestOrdinal, page.messages);
-		if (addedMessages.length === 0) {
-			if (page.hasMore)
-				throw new Error('Earlier transcript page did not advance the loaded window');
-			this.hasEarlierMessages = false;
-			return 'exhausted';
-		}
+		const addedMessages = page.messages;
 		const mergedEntries = [...addedMessages, ...this.entries];
 		this.entries = mergedEntries;
 		this.oldestOrdinal = addedMessages[0].ordinal;
@@ -818,6 +843,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 							chatId,
 							limit: MESSAGES_PER_PAGE,
 							beforeOrdinal: Math.min(latestLastOrdinal + 1, MESSAGES_PER_PAGE + 1),
+							transcriptViewId,
 						}
 					: { chatId, limit: MESSAGES_PER_PAGE },
 			);

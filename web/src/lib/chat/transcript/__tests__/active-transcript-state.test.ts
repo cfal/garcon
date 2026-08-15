@@ -1451,6 +1451,7 @@ describe('ActiveTranscriptState', () => {
 			chatId: 'chat-1',
 			limit: 50,
 			beforeOrdinal: 51,
+			transcriptViewId: 'generation-1',
 		});
 		expect(chat.visibleRows).toHaveLength(50);
 		expect(chat.visibleRows[0]).toMatchObject({ kind: 'message', ordinal: 1 });
@@ -1514,6 +1515,7 @@ describe('ActiveTranscriptState', () => {
 			chatId: 'chat-1',
 			limit: 50,
 			beforeOrdinal: 101,
+			transcriptViewId: 'generation-1',
 		});
 		expect(chat.entries).toHaveLength(100);
 		expect(chat.entries.at(-1)).toMatchObject({ ordinal: 100 });
@@ -1525,6 +1527,7 @@ describe('ActiveTranscriptState', () => {
 			chatId: 'chat-1',
 			limit: 50,
 			beforeOrdinal: 121,
+			transcriptViewId: 'generation-1',
 		});
 		expect(chat.entries).toHaveLength(120);
 		expect(chat.visibleRows).toHaveLength(120);
@@ -2558,6 +2561,7 @@ describe('ActiveTranscriptState', () => {
 				messages: [],
 				lastOrdinal: 100,
 				pageOldestOrdinal: 0,
+				pageNewestOrdinal: 50,
 				hasMore: false,
 			}),
 		});

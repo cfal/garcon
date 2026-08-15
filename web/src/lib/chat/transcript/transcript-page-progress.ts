@@ -24,15 +24,3 @@ export function retainTranscriptEntries(
 		? entries.slice(0, ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
 		: entries.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 }
-
-export function collectEarlierTranscriptMessages(
-	currentOldestSeq: number,
-	pageMessages: readonly TranscriptMessage[],
-): TranscriptMessage[] {
-	const pageSeqs = new Set<number>();
-	return pageMessages.filter((message) => {
-		if (message.ordinal >= currentOldestSeq || pageSeqs.has(message.ordinal)) return false;
-		pageSeqs.add(message.ordinal);
-		return true;
-	});
-}

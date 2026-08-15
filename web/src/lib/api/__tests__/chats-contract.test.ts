@@ -909,6 +909,8 @@ describe('chats API contract', () => {
 	it('settings, model, project path, and history helpers use REST endpoints', async () => {
 		fetchMock.mockImplementation((url: string) => {
 			const requestUrl = new URL(url, 'http://garcon.local');
+			const beforeOrdinal = requestUrl.searchParams.get('beforeOrdinal');
+			const pageNewestOrdinal = beforeOrdinal === null ? 0 : Number(beforeOrdinal) - 1;
 			return Promise.resolve(
 				jsonResponse(
 					url.startsWith('/api/v1/chats/messages')
@@ -917,9 +919,9 @@ describe('chats API contract', () => {
 								chatId: requestUrl.searchParams.get('chatId'),
 								messages: [],
 								transcriptViewId: 'view-1',
-								lastOrdinal: 0,
+								lastOrdinal: pageNewestOrdinal,
 								pageOldestOrdinal: 0,
-								pageNewestOrdinal: 0,
+								pageNewestOrdinal,
 								resendCandidates: [],
 								hasMore: false,
 								limit: 50,
@@ -955,9 +957,14 @@ describe('chats API contract', () => {
 			projectPath: '/workspace/repo-worktree',
 		});
 
-		const messages = await getChatMessages({ chatId: 'c/1', limit: 50, beforeOrdinal: 20 });
+		const messages = await getChatMessages({
+			chatId: 'c/1',
+			limit: 50,
+			beforeOrdinal: 20,
+			transcriptViewId: 'view-1',
+		});
 		expect(fetchMock.mock.calls[3][0]).toBe(
-			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeOrdinal=20',
+			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeOrdinal=20&transcriptViewId=view-1',
 		);
 		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
 		expect(messages).toMatchObject({
@@ -1027,7 +1034,7 @@ describe('chats API contract', () => {
 			transcriptViewId: 'view-1',
 			limit: 20,
 			beforeOrdinal: 50,
-		} as Parameters<typeof getChatMessages>[0] & { transcriptViewId: string };
+		} satisfies Parameters<typeof getChatMessages>[0];
 		fetchMock.mockResolvedValueOnce(jsonResponse(validPage));
 
 		await getChatMessages(request);

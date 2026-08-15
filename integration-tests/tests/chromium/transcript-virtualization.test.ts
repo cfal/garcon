@@ -3441,6 +3441,7 @@ async function readCompleteCanonicalTranscript(
     response = await fixture.integration.client.getMessages(chatId, {
       beforeOrdinal: response.pageOldestOrdinal,
       limit: 200,
+      transcriptViewId,
     });
     expect(response.transcriptViewId).toBe(transcriptViewId);
     messages = [...response.messages, ...messages];

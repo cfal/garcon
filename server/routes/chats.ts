@@ -36,7 +36,7 @@ import type {
   SetLastSelectedChatRequest,
   SetLastSelectedChatResponse,
 } from '../../common/chat-list.js';
-import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
+import { CHAT_MESSAGES_MAX_LIMIT } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
@@ -229,6 +229,15 @@ function parseBeforeOrdinal(value: string | null): number | Response | undefined
     return jsonError('beforeOrdinal must be a positive integer', 400, 'VALIDATION_FAILED');
   }
   return parsed;
+}
+
+function parseMessagesLimit(value: string | null): number | Response {
+  if (value === null || value.trim() === '') return 20;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return jsonError('limit must be a positive integer', 400, 'VALIDATION_FAILED', false);
+  }
+  return Math.min(parsed, CHAT_MESSAGES_MAX_LIMIT);
 }
 
 function optionalStringOrNull(value: unknown): string | null | undefined {
@@ -495,14 +504,33 @@ export default function createChatRoutes({
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
-      const { limit } = parsePagination(url.searchParams.get('limit'), null, {
-        maxLimit: CHAT_MESSAGES_MAX_LIMIT,
-      });
+      const limit = parseMessagesLimit(url.searchParams.get('limit'));
+      if (limit instanceof Response) return limit;
       const beforeOrdinalRaw = url.searchParams.get('beforeOrdinal');
       const beforeOrdinal = parseBeforeOrdinal(beforeOrdinalRaw);
       if (beforeOrdinal instanceof Response) return beforeOrdinal;
+      const expectedTranscriptViewId = url.searchParams.get('transcriptViewId')?.trim() ?? '';
+      if (beforeOrdinal !== undefined && !expectedTranscriptViewId) {
+        return jsonError(
+          'transcriptViewId query parameter is required for earlier pages',
+          400,
+          'VALIDATION_FAILED',
+          false,
+        );
+      }
 
       const page = await chatViews.page(chatId, limit, beforeOrdinal);
+      if (
+        beforeOrdinal !== undefined
+        && page.transcriptViewId !== expectedTranscriptViewId
+      ) {
+        return jsonError(
+          'Transcript view changed while paging',
+          409,
+          'STALE_TRANSCRIPT_VIEW',
+          false,
+        );
+      }
       return Response.json({
         historyState: { kind: 'complete' },
         chatId,

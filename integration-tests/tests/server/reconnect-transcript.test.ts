@@ -585,6 +585,7 @@ describe('reconnect and transcript stability', () => {
         page = await fixture.client.getMessages(chatId, {
           limit: 2,
           beforeOrdinal: page.pageOldestOrdinal,
+          transcriptViewId: viewId,
         });
         expect(page.transcriptViewId).toBe(viewId);
         reconstructed = [...page.messages, ...reconstructed];

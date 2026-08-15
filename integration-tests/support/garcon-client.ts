@@ -790,7 +790,10 @@ export class GarconTestClient {
 
   async getMessages(
     chatId: string,
-    options: { limit?: number; beforeOrdinal?: number } = {},
+    options: { limit?: number } & (
+      | { beforeOrdinal?: undefined; transcriptViewId?: never }
+      | { beforeOrdinal: number; transcriptViewId: string }
+    ) = {},
   ): Promise<ChatMessagesPage> {
     const query = new URLSearchParams({
       chatId,
@@ -798,6 +801,7 @@ export class GarconTestClient {
     });
     if (options.beforeOrdinal !== undefined) {
       query.set('beforeOrdinal', String(options.beforeOrdinal));
+      query.set('transcriptViewId', options.transcriptViewId);
     }
     const response = await this.get<Record<string, unknown>>(`/api/v1/chats/messages?${query}`);
     const historyState = response.historyState as { kind?: unknown } | undefined;
