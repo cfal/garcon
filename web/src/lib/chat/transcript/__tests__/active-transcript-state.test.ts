@@ -427,6 +427,40 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleMessageCount).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 	});
 
+	it('keeps the loaded later edge when earlier paging expands a detached window', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
+				entry(index + 201, assistant(`message-${index + 201}`)),
+			),
+			{ lastOrdinal: 400, pageOldestOrdinal: 201, hasMore: true },
+		);
+		chat.isUserScrolledUp = true;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 151, assistant(`message-${index + 151}`)),
+				),
+				lastOrdinal: 400,
+				pageOldestOrdinal: 151,
+				pageNewestOrdinal: 200,
+				hasMore: true,
+			}),
+		});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 250 }, (_, index) => index + 151),
+		);
+		expect(chat.loadedThroughOrdinal).toBe(400);
+		expect(chat.hasLaterMessages).toBe(false);
+	});
+
 	it('fails an earlier page that claims more history without advancing', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
