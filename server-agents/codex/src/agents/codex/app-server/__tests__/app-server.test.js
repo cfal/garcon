@@ -1608,6 +1608,7 @@ describe('CodexAppServerRuntime', () => {
       {
         admitInput: async () => ({ inserted: true }),
         admitQueuedInput: () => ({ inserted: true }),
+        discardPreparedInput: () => {},
       },
       () => ({
         model: 'gpt-5.4-codex',
@@ -4648,6 +4649,7 @@ describe('CodexAppServerRuntime', () => {
           return { inserted: true };
         },
         admitQueuedInput: () => ({ inserted: true }),
+        discardPreparedInput: () => {},
       },
       () => ({
         model: 'gpt-5.4-codex',
