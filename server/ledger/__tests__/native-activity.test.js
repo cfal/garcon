@@ -62,6 +62,30 @@ describe('NativeTranscriptActivityService', () => {
     });
   });
 
+  it('aborts a stalled requested check and releases its coalescing slot', async () => {
+    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
+      ledger.initializeChat('chat-1', baseRows());
+      setResult(new Promise(() => {}));
+
+      activity.requestCheck('chat-1', 'open');
+      expect(lastActivity).toHaveBeenCalledTimes(1);
+      const firstSignal = lastActivity.mock.calls[0][1];
+      expect(firstSignal).toBeInstanceOf(AbortSignal);
+      expect(await waitForAbort(firstSignal)).toBe(true);
+
+      for (let attempt = 0; attempt < 100 && lastActivity.mock.calls.length < 2; attempt += 1) {
+        activity.requestCheck('chat-1', 'pre-resume');
+        await Bun.sleep(1);
+      }
+
+      expect(lastActivity).toHaveBeenCalledTimes(2);
+      const secondSignal = lastActivity.mock.calls[1][1];
+      expect(secondSignal).toBeInstanceOf(AbortSignal);
+      expect(await waitForAbort(secondSignal)).toBe(true);
+      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
+    }, { probeTimeoutMs: 10 });
+  });
+
   it('does not let later core-authored rows hide missed native output', async () => {
     await withFixture(async ({ ledger, activity }) => {
       ledger.initializeChat('chat-1', [
@@ -250,6 +274,14 @@ async function waitFor(predicate) {
   throw new Error('Condition did not settle within the microtask budget.');
 }
 
+async function waitForAbort(signal) {
+  if (signal.aborted) return true;
+  return Promise.race([
+    new Promise((resolve) => signal.addEventListener('abort', () => resolve(true), { once: true })),
+    Bun.sleep(250).then(() => false),
+  ]);
+}
+
 function baseRows() {
   return [
     {
@@ -275,7 +307,7 @@ function baseRows() {
   ];
 }
 
-async function withFixture(run) {
+async function withFixture(run, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-native-activity-'));
   const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(root), {
     now: () => '2026-08-12T00:00:20.000Z',
@@ -291,6 +323,7 @@ async function withFixture(run) {
     integrations: {
       get: () => ({ nativeActivity: { lastActivity } }),
     },
+    ...options,
   });
   try {
     await run({
