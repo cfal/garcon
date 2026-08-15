@@ -36,6 +36,28 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('decides publish and close by synchronous call order', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+
+      lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'accepted before close') }],
+      });
+      lease.close();
+
+      expect(ledger.conversationMessages('chat-1').map((message) => message.content))
+        .toEqual(['accepted before close']);
+      expect(() => lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'rejected after close') }],
+      })).toThrow(TranscriptSinkClosedError);
+      expect(ledger.conversationMessages('chat-1').map((message) => message.content))
+        .toEqual(['accepted before close']);
+    });
+  });
+
   it('fences an ambiguous commit without broadcasting it', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('failed-chat');
