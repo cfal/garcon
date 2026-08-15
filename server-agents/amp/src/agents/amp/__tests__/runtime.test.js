@@ -470,4 +470,90 @@ describe('AmpCliRuntime lifecycle', () => {
       { clientRequestId: 'req-b', turnId: 'turn-b' },
     ]);
   });
+
+  it('contains a closed prior publisher without disturbing the current turn', async () => {
+    const warnings = [];
+    let resolveWarning;
+    const warningObserved = new Promise((resolve) => { resolveWarning = resolve; });
+    const provider = new AmpCliRuntime({
+      logger: {
+        debug() {},
+        info() {},
+        warn(message, details) {
+          warnings.push({ message, details });
+          resolveWarning();
+        },
+        error() {},
+      },
+    });
+    const firstProc = createFakeProc();
+    const secondProc = createFakeProc();
+    const threadId = 'T-44444444-4444-4444-4444-444444444444';
+    spawnMock
+      .mockReturnValueOnce(createFakeCommandProc(`${threadId}\n`))
+      .mockReturnValueOnce(firstProc)
+      .mockReturnValueOnce(secondProc);
+    let firstClosed = false;
+    const firstEvents = [];
+    let resolveFirstTerminal;
+    const firstTerminal = new Promise((resolve) => { resolveFirstTerminal = resolve; });
+    const second = collectOperation('run-current');
+
+    await provider.startSession({
+      command: 'first',
+      chatId: 'chat-closed-publisher',
+      projectPath: '/proj',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: {
+        runId: 'run-stale',
+        publish(event) {
+          if (firstClosed) throw new Error('Transcript producer sink is closed');
+          firstEvents.push(event);
+          if (event.type === 'run-ended') resolveFirstTerminal();
+        },
+      },
+    });
+    firstProc.pushJson({ type: 'result', is_error: false });
+    await firstTerminal;
+    firstClosed = true;
+
+    const secondTurn = provider.runTurn({
+      command: 'second',
+      agentSessionId: threadId,
+      chatId: 'chat-closed-publisher',
+      projectPath: '/proj',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: second.operation,
+    });
+    firstProc.pushJson({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'rejected stale output' }] },
+    });
+    await warningObserved;
+    secondProc.pushJson({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'accepted current output' }] },
+    });
+    secondProc.pushJson({ type: 'result', is_error: false });
+    secondProc.close(0);
+    await secondTurn;
+
+    expect(firstEvents.map((event) => event.type)).toEqual(['run-ended']);
+    expect(second.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(second.events[0].rows[0].message.content).toBe('accepted current output');
+    expect(warnings).toContainEqual({
+      message: 'Amp publisher rejected an event.',
+      details: expect.objectContaining({
+        eventType: 'messages',
+        error: 'Transcript producer sink is closed',
+      }),
+    });
+
+    firstProc.close(0);
+    provider.shutdown();
+  });
 });

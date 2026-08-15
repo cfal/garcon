@@ -575,6 +575,96 @@ describe('FactoryCliRuntime lifecycle', () => {
     ]);
   });
 
+  it('contains a closed prior publisher without disturbing the current turn', async () => {
+    const warnings = [];
+    let resolveWarning;
+    const warningObserved = new Promise((resolve) => { resolveWarning = resolve; });
+    const provider = new FactoryCliRuntime({
+      logger: {
+        debug() {},
+        info() {},
+        warn(message, details) {
+          warnings.push({ message, details });
+          resolveWarning();
+        },
+        error() {},
+      },
+    });
+    const firstProc = createFakeProc();
+    const secondProc = createFakeProc();
+    spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc);
+    let firstClosed = false;
+    const firstEvents = [];
+    const second = collectOperation('run-current');
+
+    const firstTurn = provider.runTurn({
+      command: 'first',
+      agentSessionId: 'factory-session-closed-publisher',
+      chatId: 'chat-closed-publisher',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: {
+        runId: 'run-stale',
+        publish(event) {
+          if (firstClosed) throw new Error('Transcript producer sink is closed');
+          firstEvents.push(event);
+        },
+      },
+    });
+    firstProc.pushJson({
+      type: 'completion',
+      session_id: 'factory-session-closed-publisher',
+    });
+    await firstTurn;
+    firstClosed = true;
+
+    const secondTurn = provider.runTurn({
+      command: 'second',
+      agentSessionId: 'factory-session-closed-publisher',
+      chatId: 'chat-closed-publisher',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: second.operation,
+    });
+    firstProc.pushJson({
+      type: 'message',
+      role: 'assistant',
+      text: 'rejected stale output',
+      session_id: 'factory-session-closed-publisher',
+    });
+    await warningObserved;
+    secondProc.pushJson({
+      type: 'message',
+      role: 'assistant',
+      text: 'accepted current output',
+      session_id: 'factory-session-closed-publisher',
+    });
+    secondProc.pushJson({
+      type: 'completion',
+      session_id: 'factory-session-closed-publisher',
+    });
+    secondProc.close(0);
+    await secondTurn;
+
+    expect(firstEvents.map((event) => event.type)).toEqual(['run-ended']);
+    expect(second.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(second.events[0].rows[0].message.content).toBe('accepted current output');
+    expect(warnings).toContainEqual({
+      message: 'Factory publisher rejected an event.',
+      details: expect.objectContaining({
+        eventType: 'messages',
+        error: 'Transcript producer sink is closed',
+      }),
+    });
+
+    firstProc.close(0);
+    provider.shutdown();
+  });
+
   it('rolls back a synchronous resume spawn failure so the session can retry', async () => {
     const provider = new FactoryCliRuntime();
     const processing = [];
