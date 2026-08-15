@@ -246,7 +246,11 @@ describe('AgentHandoffService', () => {
     const ledger = ledgerState(calls);
     ledger.rowsAfter.mockReturnValue([
       { kind: 'notice', ordinal: 8 },
-      { kind: 'agent-switch', ordinal: 9 },
+      {
+        kind: 'agent-switch',
+        ordinal: 9,
+        detail: { fromAgentId: 'source-agent', toAgentId: 'target-agent' },
+      },
     ]);
     const service = createService({
       registry: { getChat: () => current },
@@ -258,6 +262,35 @@ describe('AgentHandoffService', () => {
 
     expect(ledger.appendAgentSwitch).not.toHaveBeenCalled();
     expect(ledger.advanceContentStart).toHaveBeenCalledWith('chat', 'view-1', 10);
+  });
+
+  it('fences a persisted switch marker that conflicts with the handoff decision', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    const ledger = ledgerState(calls);
+    ledger.rowsAfter.mockReturnValue([{
+      kind: 'agent-switch',
+      ordinal: 8,
+      detail: { fromAgentId: 'different-source', toAgentId: 'different-target' },
+    }]);
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger,
+    });
+
+    await service.recoverPendingHandoffs();
+
+    expect(ledger.appendAgentSwitch).not.toHaveBeenCalled();
+    expect(ledger.advanceContentStart).not.toHaveBeenCalled();
+    expect(state.ownership.applyHandoffDecision).not.toHaveBeenCalled();
+    expect(state.ownership.completeHandoff).not.toHaveBeenCalled();
+    expect(current).toMatchObject({
+      agentId: 'source-agent',
+      agentOwnershipEpoch: 'source-epoch',
+    });
   });
 
   it('rejects a resumed request whose target differs from the durable decision', async () => {
