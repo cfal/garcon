@@ -20,6 +20,18 @@ mock.module('../history-loader.js', () => ({
 
 import { FactoryCliRuntime, runSingleQuery } from '../factory-cli.js';
 
+function noopOperation(runId = 'run-default') {
+  return { runId, publish() {} };
+}
+
+function collectOperation(runId) {
+  const events = [];
+  return {
+    events,
+    operation: { runId, publish: (event) => events.push(event) },
+  };
+}
+
 function createFakeProc() {
   const encoder = new TextEncoder();
   let stdoutController;
@@ -132,6 +144,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'default',
       thinkingMode: 'none',
+      operation: noopOperation('run-preparing'),
       executionAdmission: { signal: admission.signal, markStarted },
     });
     await metadataEntered;
@@ -155,6 +168,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'default',
       thinkingMode: 'none',
+      operation: noopOperation('run-start'),
     });
 
     proc.pushJson({
@@ -193,6 +207,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'default',
       thinkingMode: 'none',
+      operation: noopOperation('run-real-path'),
     });
 
     proc.pushJson({
@@ -224,6 +239,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'default',
       thinkingMode: 'none',
+      operation: noopOperation('run-missing-path'),
     });
 
     proc.pushJson({
@@ -234,6 +250,121 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     await expect(startedPromise).rejects.toThrow('Factory did not create a JSONL transcript path');
     expect(proc.killed).toBe(true);
+  });
+
+  it('preserves an established source when a fresh session fails to spawn', async () => {
+    const provider = new FactoryCliRuntime();
+    const establishedProc = createFakeProc();
+    spawnMock
+      .mockReturnValueOnce(establishedProc)
+      .mockImplementationOnce(() => {
+        throw new Error('replacement spawn failed');
+      });
+    const established = collectOperation('run-established');
+
+    const started = provider.startSession({
+      command: 'first',
+      chatId: 'chat-replacement',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: established.operation,
+    });
+    establishedProc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-established',
+    });
+    await started;
+    establishedProc.pushJson({
+      type: 'completion',
+      session_id: 'factory-session-established',
+    });
+    await Promise.resolve();
+
+    await expect(provider.startSession({
+      command: 'replacement',
+      chatId: 'chat-replacement',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: noopOperation('run-failed-replacement'),
+    })).rejects.toThrow('replacement spawn failed');
+    expect(establishedProc.killed).toBe(false);
+
+    establishedProc.pushJson({
+      type: 'message',
+      role: 'assistant',
+      text: 'survives failed replacement',
+      session_id: 'factory-session-established',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(JSON.stringify(established.events)).toContain('survives failed replacement');
+
+    establishedProc.close(0);
+    provider.shutdown();
+  });
+
+  it('rejects a cross-chat native session collision without rebinding either publisher', async () => {
+    const provider = new FactoryCliRuntime();
+    const firstProc = createFakeProc();
+    const collidingProc = createFakeProc();
+    spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(collidingProc);
+    const first = collectOperation('run-chat-a');
+    const colliding = collectOperation('run-chat-b');
+
+    const firstStarted = provider.startSession({
+      command: 'chat A',
+      chatId: 'chat-a',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: first.operation,
+    });
+    firstProc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-collision',
+    });
+    await firstStarted;
+    firstProc.pushJson({ type: 'completion', session_id: 'factory-session-collision' });
+    await Promise.resolve();
+
+    const collision = provider.startSession({
+      command: 'chat B',
+      chatId: 'chat-b',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: colliding.operation,
+    });
+    collidingProc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-collision',
+    });
+    await expect(collision).rejects.toThrow(/already bound to another chat/);
+    expect(collidingProc.killed).toBe(true);
+    expect(firstProc.killed).toBe(false);
+
+    firstProc.pushJson({
+      type: 'message',
+      role: 'assistant',
+      text: 'still belongs to chat A',
+      session_id: 'factory-session-collision',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(JSON.stringify(first.events)).toContain('still belongs to chat A');
+    expect(colliding.events).toEqual([]);
+
+    firstProc.close(0);
+    provider.shutdown();
   });
 
   it('enables Factory airgap for custom model sessions', async () => {
@@ -248,6 +379,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'custom:GLM-5.2-[Alibaba]-0',
       permissionMode: 'default',
       thinkingMode: 'none',
+      operation: noopOperation('run-custom'),
     });
 
     proc.pushJson({
@@ -343,6 +475,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'acceptEdits',
       thinkingMode: 'medium',
+      operation: noopOperation('run-continue'),
     });
 
     proc.pushJson({
@@ -369,11 +502,15 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(spawnMock.mock.calls[0][1].env.FACTORY_AIRGAP_ENABLED).toBeUndefined();
   });
 
-  it('does not let a prior process close settle or relabel its successor turn', async () => {
+  it('keeps a prior process bound to its publisher until that source closes', async () => {
     const provider = new FactoryCliRuntime();
     const firstProc = createFakeProc();
     const secondProc = createFakeProc();
     spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc);
+    const first = collectOperation('run-a');
+    const second = collectOperation('run-b');
+    const messages = mock();
+    provider.onMessages(messages);
     const terminals = [];
     provider.onFinished((_chatId, _exitCode, metadata) => terminals.push(metadata));
 
@@ -387,6 +524,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       thinkingMode: 'none',
       clientRequestId: 'req-a',
       turnId: 'turn-a',
+      operation: first.operation,
     });
     firstProc.pushJson({ type: 'completion', session_id: 'factory-session-reused' });
     await firstTurn;
@@ -402,20 +540,35 @@ describe('FactoryCliRuntime lifecycle', () => {
       thinkingMode: 'none',
       clientRequestId: 'req-b',
       turnId: 'turn-b',
+      operation: second.operation,
     }).then(() => { secondSettled = true; });
 
+    firstProc.pushJson({
+      type: 'message',
+      role: 'assistant',
+      text: 'late output from A',
+      session_id: 'factory-session-reused',
+    });
     firstProc.close(0);
     await firstProc.exited;
     await Promise.resolve();
 
     expect(secondSettled).toBe(false);
     expect(provider.isRunning('factory-session-reused')).toBe(true);
+    expect(messages).toHaveBeenCalledTimes(1);
+    expect(messages.mock.calls[0][1][0].content).toBe('late output from A');
+    expect(first.events.map((event) => event.type)).toEqual(['run-ended', 'messages']);
+    expect(JSON.stringify(first.events)).toContain('late output from A');
+    expect(second.events).toEqual([]);
     expect(terminals).toEqual([{ clientRequestId: 'req-a', turnId: 'turn-a' }]);
 
     secondProc.pushJson({ type: 'completion', session_id: 'factory-session-reused' });
     secondProc.close(0);
     await secondTurn;
 
+    expect(second.events).toEqual([
+      expect.objectContaining({ type: 'run-ended', runId: 'run-b' }),
+    ]);
     expect(terminals).toEqual([
       { clientRequestId: 'req-a', turnId: 'turn-a' },
       { clientRequestId: 'req-b', turnId: 'turn-b' },
@@ -440,6 +593,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'default',
       thinkingMode: 'none',
+      operation: noopOperation('run-spawn-retry'),
     };
 
     await expect(provider.runTurn(request)).rejects.toThrow('spawn failed');
@@ -468,6 +622,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'default',
       thinkingMode: 'none',
+      operation: noopOperation('run-stdin-failure'),
     })).rejects.toThrow('stdin failed');
 
     expect(proc.killed).toBe(true);
@@ -487,6 +642,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'custom:GLM-5.2-[Alibaba]-0',
       permissionMode: 'default',
       thinkingMode: 'none',
+      operation: noopOperation('run-custom-resume'),
     });
 
     proc.pushJson({
@@ -525,6 +681,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'manualBypass',
       thinkingMode: 'none',
+      operation: noopOperation('run-manual-bypass'),
     });
 
     proc.pushJson({
