@@ -37,17 +37,47 @@ describe('AgentRunTracker routing', () => {
     expect(second.events).toHaveLength(1);
   });
 
-  test('keeps a route after its run ends so late content still reaches the transcript', () => {
+  test('keeps a named route after its run ends so late content still reaches the transcript', () => {
     const tracker = new AgentRunTracker();
     const run = collector();
     tracker.register('chat-1', 'run-1', run.publish);
     tracker.finish('chat-1', 'run-1');
 
     expect(tracker.current('chat-1')).toBeNull();
-    tracker.correlate('chat-1')?.publish(CONTENT);
     tracker.correlate('chat-1', { turnId: 'run-1' })?.publish(CONTENT);
 
-    expect(run.events).toHaveLength(2);
+    expect(run.events).toHaveLength(1);
+  });
+
+  test('refuses to attribute an event the provider did not name', () => {
+    const tracker = new AgentRunTracker();
+    const run = collector();
+    tracker.register('chat-1', 'run-1', run.publish);
+
+    expect(tracker.correlate('chat-1')).toBeNull();
+    expect(tracker.correlate('chat-1', {})).toBeNull();
+    expect(run.events).toHaveLength(0);
+  });
+
+  test('never lets one chat\u2019s name reach another chat\u2019s transcript', () => {
+    const tracker = new AgentRunTracker();
+    const chatA = collector();
+    tracker.register('chat-a', 'run-1', chatA.publish);
+
+    expect(tracker.correlate('chat-b', { turnId: 'run-1' })).toBeNull();
+    expect(chatA.events).toHaveLength(0);
+  });
+
+  test('retires a chat\u2019s routes when a new session supersedes them', () => {
+    const tracker = new AgentRunTracker();
+    const old = collector();
+    tracker.register('chat-1', 'run-1', old.publish);
+
+    tracker.release('chat-1');
+
+    expect(tracker.correlate('chat-1', { turnId: 'run-1' })).toBeNull();
+    expect(tracker.current('chat-1')).toBeNull();
+    expect(old.events).toHaveLength(0);
   });
 
   test('reports no route for a name it never registered rather than guessing', () => {
@@ -58,18 +88,6 @@ describe('AgentRunTracker routing', () => {
     expect(tracker.correlate('chat-1', { turnId: 'run-unknown' })).toBeNull();
     expect(tracker.correlate('chat-2')).toBeNull();
     expect(run.events).toHaveLength(0);
-  });
-
-  test('retires the oldest routes once a chat accumulates enough of them', () => {
-    const tracker = new AgentRunTracker();
-    const first = collector();
-    tracker.register('chat-1', 'run-0', first.publish);
-    for (let index = 1; index <= 8; index += 1) {
-      tracker.register('chat-1', `run-${index}`, collector().publish);
-    }
-
-    expect(tracker.correlate('chat-1', { turnId: 'run-0' })).toBeNull();
-    expect(tracker.correlate('chat-1', { turnId: 'run-8' })).not.toBeNull();
   });
 
   test('hands a goal-control successor the route its predecessor was using', () => {

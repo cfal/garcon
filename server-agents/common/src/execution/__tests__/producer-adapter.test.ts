@@ -180,6 +180,93 @@ describe('createAgentProducerAdapter', () => {
   });
 });
 
+// Compaction and goal control reach the transcript through runExisting, which must hand the
+// operation the same capability start and resume get rather than a path of its own.
+it('publishes a runExisting operation through the same capability as a run', async () => {
+  const fixture = createFixture();
+  let published = false;
+
+  const outcome = await fixture.adapter.runExisting(
+    { chatId: 'chat-1', agentSessionId: 'session-1', sink: fixture.request.sink },
+    async (request, publish) => {
+      expect(request).not.toHaveProperty('sink');
+      publish({
+        type: 'messages',
+        runId: 'run-1',
+        rows: runtimeRows([new AssistantMessage(TS, 'compacted')]),
+      });
+      published = true;
+      return 'done';
+    },
+  );
+
+  expect(published).toBeTrue();
+  expect(outcome.value).toBe('done');
+  expect(fixture.events.map((event) => event.type)).toContain('rows');
+});
+
+// The reported failure: a provider callback that outlived the transcript it was started
+// against. Sink A is closed and replaced by sink B, then A's delayed callback fires. The event
+// must reach A's closed sink and be dropped, never B's open one.
+it('keeps a delayed callback on its own sink after a replacement takes over the chat', async () => {
+  const delivered: Array<{ sink: 'a' | 'b'; event: AgentProducerEvent }> = [];
+  let closedA = false;
+  const sinkA: AgentProducerSink = {
+    publish: (event) => {
+      if (closedA) throw new Error('Transcript producer sink is closed');
+      delivered.push({ sink: 'a', event });
+    },
+  };
+  const sinkB: AgentProducerSink = {
+    publish: (event) => { delivered.push({ sink: 'b', event }); },
+  };
+  const warnings: string[] = [];
+  let delayed: (() => void) | null = null;
+  const runtime: AgentRuntimeExecution = {
+    async start(request, publish) {
+      if (request.runId === 'run-a') {
+        delayed = () => publish({
+          type: 'messages',
+          runId: 'run-a',
+          rows: runtimeRows([new AssistantMessage(TS, 'from the replaced generation')]),
+        });
+      }
+      return { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null };
+    },
+    async resume() {},
+    async abort() { return true; },
+    runningSessions() { return []; },
+  };
+  const adapter = createAgentProducerAdapter(runtime, {
+    debug() {}, info() {}, error() {},
+    warn: (message: string) => { warnings.push(message); },
+  } satisfies AgentLogger);
+  const baseRequest = {
+    chatId: 'chat-1',
+    projectPath: '/tmp/project',
+    model: 'model',
+    permissionMode: 'default',
+    thinkingMode: 'medium',
+    settings: { ownerId: 'test', schemaVersion: 1, values: {} },
+    endpoint: null,
+    priorContext: [],
+    admission: { signal: new AbortController().signal, async markStarted() {} },
+    prompt: 'hello',
+    attachments: [],
+    carriedContext: null,
+  };
+
+  await adapter.execution.start({ ...baseRequest, runId: 'run-a', sink: sinkA } satisfies AgentStartRequestV5);
+  closedA = true;
+  await adapter.execution.start({ ...baseRequest, runId: 'run-b', sink: sinkB } satisfies AgentStartRequestV5);
+  delivered.length = 0;
+
+  delayed?.();
+
+  expect(delivered).toEqual([]);
+  expect(warnings.some((warning) => warning.includes('unavailable transcript sink'))).toBeTrue();
+});
+
 function createFixture(
   afterSession?: (input: {
     readonly publish: AgentRuntimePublisher;

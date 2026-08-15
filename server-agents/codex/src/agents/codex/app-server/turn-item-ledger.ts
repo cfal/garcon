@@ -9,12 +9,15 @@ import { codexMessageSourceIdentity } from '../message-source-identity.js';
 export class CodexTurnItemLedger {
   readonly #seenIds = new Set<string>();
   readonly #logger: AgentLogger;
-  readonly #emit: (messages: ReturnType<typeof convertCodexAppServerLiveItem>) => void;
+  readonly #emit: (
+    turnId: string,
+    messages: ReturnType<typeof convertCodexAppServerLiveItem>,
+  ) => void;
   #manualCompactionPending = false;
 
   constructor(
     logger: AgentLogger,
-    emit: (messages: ReturnType<typeof convertCodexAppServerLiveItem>) => void,
+    emit: (turnId: string, messages: ReturnType<typeof convertCodexAppServerLiveItem>) => void,
   ) {
     this.#logger = logger;
     this.#emit = emit;
@@ -55,7 +58,7 @@ export class CodexTurnItemLedger {
         fallbackOrdinal: withinSourceOrdinal,
       }));
     });
-    if (messages.length) this.#emit(messages);
+    if (messages.length) this.#emit(turnId, messages);
   }
 
   recordMessages(messages: ChatMessage[]): void {
@@ -65,7 +68,8 @@ export class CodexTurnItemLedger {
     }
   }
 
-  async reconcileInterrupted(nativePath: string | null): Promise<void> {
+  // The interrupted turn owns the items it never got to report, so they carry its id too.
+  async reconcileInterrupted(turnId: string, nativePath: string | null): Promise<void> {
     if (!nativePath) return;
     try {
       // Loaded turn views omit interrupted commands, while the JSONL is complete before turn/completed.
@@ -78,6 +82,7 @@ export class CodexTurnItemLedger {
       if (!missingIds.size) return;
       for (const id of missingIds) this.#seenIds.add(id);
       this.#emit(
+        turnId,
         messages.filter((message) => {
           const toolId = messageToolId(message);
           return toolId ? missingIds.has(toolId) : false;

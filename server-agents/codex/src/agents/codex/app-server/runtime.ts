@@ -127,6 +127,7 @@ interface RunningCodexSession {
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
   eventMetadata: RuntimeEventMetadata;
+  turnMetadata: Map<string, RuntimeEventMetadata>;
 }
 
 export interface CodexAppServerRuntimeOptions {
@@ -1070,6 +1071,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     permissionMode: PermissionMode;
     eventMetadata: RuntimeEventMetadata;
   }): RunningCodexSession {
+    // Keyed by Codex's own turn id so an event it labels later still names the run that asked
+    // for that turn, long after the session moved on to the next one.
+    const turnMetadata = new Map<string, RuntimeEventMetadata>();
     const session: RunningCodexSession = {
       chatId: args.chatId,
       threadId: args.threadId,
@@ -1097,7 +1101,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeDeliveryReservations: 0,
       pendingFinish: null,
       liveCodeModeResultToolIds: new Map(),
-      turnItems: new CodexTurnItemLedger(this.#logger, (messages) => this.emitMessages(args.chatId, messages)),
+      turnItems: new CodexTurnItemLedger(this.#logger, (turnId, messages) => (
+        this.emitMessages(args.chatId, messages, turnMetadata.get(turnId))
+      )),
+      turnMetadata,
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
@@ -1191,6 +1198,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const session = this.#sessionForClientThread(client, params.threadId);
     if (!session) return;
     session.activeTurnId = params.turn.id;
+    // The run that asked for this turn is known now and will not be once the next turn starts,
+    // so every event Codex later labels with this turn id can still name its originating run.
+    session.turnMetadata.set(params.turn.id, session.eventMetadata);
     if (session.status !== 'interrupting') session.status = 'running';
     for (const waiter of session.turnStartWaiters) waiter.resolve(params.turn.id);
   }
@@ -1379,7 +1389,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
     const aborted = params.turn.status === 'interrupted' || session.status === 'interrupting';
     for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item);
-    if (aborted) await session.turnItems.reconcileInterrupted(session.nativePath);
+    if (aborted) await session.turnItems.reconcileInterrupted(params.turn.id, session.nativePath);
     session.capacityRetryCount = 0;
     session.pendingCapacityFailure = null;
     session.status = 'completing';
@@ -1399,7 +1409,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const session = this.#sessionForClientTurn(client, params.threadId, params.turnId);
     if (!session) return;
     const message = params.error.message || params.error.additionalDetails || 'Codex app-server error';
-    this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), message)]);
+    this.emitMessages(
+      session.chatId,
+      [new ErrorMessage(new Date().toISOString(), message)],
+      session.turnMetadata.get(params.turnId) ?? session.eventMetadata,
+    );
     if (params.willRetry) return;
     if (isCapacityError(params.error)) {
       session.pendingCapacityFailure = { turnId: params.turnId, message };
@@ -1511,7 +1525,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return;
     }
     this.#pendingApprovals.set(pending.permissionRequestId, pending);
-    this.emitMessages(session.chatId, [buildApprovalMessage(pending)]);
+    this.emitMessages(session.chatId, [buildApprovalMessage(pending)], session.eventMetadata);
   }
 
   #handleClientExit(client: CodexAppServerClient, code: number): void {
@@ -1531,7 +1545,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#sessions.delete(session.threadId);
     this.#threadListCaches.clear();
     session.status = opts.failedMessage ? 'failed' : opts.aborted ? 'aborted' : 'completed';
-    this.#cancelPendingApprovals(session.chatId, opts.aborted ? 'aborted' : 'session-complete');
+    this.#cancelPendingApprovals(session, opts.aborted ? 'aborted' : 'session-complete');
     this.emitProcessing(session.chatId, false);
     void session.cleanupAttachments?.();
 
@@ -1609,14 +1623,18 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     for (const waiter of [...session.turnStartWaiters]) waiter.reject(error);
   }
 
-  #cancelPendingApprovals(chatId: string, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
+  #cancelPendingApprovals(
+    session: RunningCodexSession,
+    reason: 'cancelled' | 'session-complete' | 'aborted',
+  ): void {
+    const chatId = session.chatId;
     const messages: PermissionCancelledMessage[] = [];
     for (const [permissionRequestId, pending] of this.#pendingApprovals.entries()) {
       if (pending.chatId !== chatId) continue;
       this.#pendingApprovals.delete(permissionRequestId);
       messages.push(new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason));
     }
-    this.emitMessages(chatId, messages);
+    this.emitMessages(chatId, messages, session.eventMetadata);
   }
 
   #sessionForClientThread(client: CodexAppServerClient, threadId: string): RunningCodexSession | null {

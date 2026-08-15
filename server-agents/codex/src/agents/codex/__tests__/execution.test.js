@@ -292,31 +292,34 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     await execution.start(startRequest(), publish);
-    const emitOutput = (content) => runtime.emitMessages(
+    // Codex names every emission with the turn that produced it, and the runtime maps that
+    // name back to the run which asked for the turn. The fake carries the name directly.
+    const emitOutput = (content, runId) => runtime.emitMessages(
       'chat-1',
       [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
+      { turnId: runId },
     );
     runtime.submitGoalControl.mockImplementation(async (request, beforeDelivery) => {
-      emitOutput('before delivery');
+      emitOutput('before delivery', 'run-1');
       await beforeDelivery({
         validate: () => undefined,
         commit: () => undefined,
       });
-      emitOutput('after delivery');
+      emitOutput('after delivery', 'run-2');
       return true;
     });
 
     await expect(execution.submitGoalControl(goalControlRequest('run-rejected', async (handoff) => {
       handoff.validate();
-      emitOutput('while rejected handoff validates');
+      emitOutput('while rejected handoff validates', 'run-1');
       throw new Error('persistence failed');
     }), publish)).rejects.toThrow('persistence failed');
-    emitOutput('after rejected handoff');
+    emitOutput('after rejected handoff', 'run-1');
 
     await expect(execution.submitGoalControl({
       ...goalControlRequest('run-2', async (handoff) => {
         handoff.validate();
-        emitOutput('while accepted handoff validates');
+        emitOutput('while accepted handoff validates', 'run-1');
         handoff.commit();
       }),
       admission: {
@@ -325,6 +328,8 @@ describe('CodexExecution', () => {
       },
     }, publish)).resolves.toBe(true);
 
+    // run-2 only becomes routable once the handoff commits, and it then publishes through the
+    // route it inherited, which is the same publisher the predecessor was using.
     expect(messages).toEqual([
       { content: 'before delivery', runId: 'run-1' },
       { content: 'while rejected handoff validates', runId: 'run-1' },

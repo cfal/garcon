@@ -73,6 +73,9 @@ export class CodexExecution implements AgentRuntimeExecution {
   }
 
   async start(request: AgentRuntimeStartRequest, publish: AgentRuntimePublisher) {
+    // A fresh session supersedes whatever produced this chat before, so the routes that
+    // belonged to it retire here rather than lingering for the life of the process.
+    this.#runs.release(request.chatId);
     this.#runs.register(request.chatId, request.runId, publish);
     try {
       const configuration = await this.#runtimeConfiguration(request);
