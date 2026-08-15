@@ -241,4 +241,30 @@ describe('reconnect and transcript stability', () => {
         .toEqual(transcriptProjection(reconstructed));
     });
   });
+
+  test('rejects an HTTP page cursor from another transcript view', async () => {
+    await withIntegrationFixture('view-qualified-http-paging', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const accepted = await fixture.client.startDirectChat({
+        chatId,
+        content: 'view-qualified-page',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      const latest = await fixture.client.getMessages(chatId, { limit: 1 });
+      const query = new URLSearchParams({
+        chatId,
+        transcriptViewId: crypto.randomUUID(),
+        limit: '1',
+        beforeOrdinal: String(latest.pageOldestOrdinal),
+      });
+
+      const response = await fetch(`${fixture.client.baseUrl}/api/v1/chats/messages?${query}`);
+      const body = await response.json() as { errorCode?: unknown };
+
+      expect(response.status).toBe(409);
+      expect(body.errorCode).toBe('STALE_TRANSCRIPT_VIEW');
+    });
+  });
 });

@@ -999,6 +999,47 @@ describe('chats API contract', () => {
 		}
 	});
 
+	it('qualifies transcript page requests by view and validates the response against the request', async () => {
+		const validPage = {
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 100,
+			pageOldestOrdinal: 40,
+			pageNewestOrdinal: 49,
+			resendCandidates: [],
+			hasMore: true,
+			limit: 20,
+		};
+		const request = {
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			limit: 20,
+			beforeOrdinal: 50,
+		} as Parameters<typeof getChatMessages>[0] & { transcriptViewId: string };
+		fetchMock.mockResolvedValueOnce(jsonResponse(validPage));
+
+		await getChatMessages(request);
+
+		expect(fetchMock.mock.calls[0][0]).toBe(
+			'/api/v1/chats/messages?chatId=c-1&limit=20&beforeOrdinal=50&transcriptViewId=view-1',
+		);
+
+		const invalidResponses = [
+			{ ...validPage, chatId: 'another-chat' },
+			{ ...validPage, transcriptViewId: 'another-view' },
+			{ ...validPage, limit: 19 },
+			{ ...validPage, pageNewestOrdinal: 50 },
+			{ ...validPage, pageOldestOrdinal: 51, pageNewestOrdinal: 49 },
+			{ ...validPage, lastOrdinal: 48 },
+		];
+		for (const response of invalidResponses) {
+			fetchMock.mockResolvedValueOnce(jsonResponse(response));
+			await expect(getChatMessages(request)).rejects.toThrow('Invalid chat messages page');
+		}
+	});
+
 	it('accepts degraded history only without sequence metadata', async () => {
 		fetchMock.mockResolvedValueOnce(
 			jsonResponse({

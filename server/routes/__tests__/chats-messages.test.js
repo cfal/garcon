@@ -201,6 +201,33 @@ describe('GET /api/v1/chats/messages', () => {
     expect(chatViews.page).not.toHaveBeenCalled();
   });
 
+  it('rejects invalid limit values instead of silently defaulting them', async () => {
+    const { chatViews, routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}&limit=not-a-number`,
+    );
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).errorCode).toBe('VALIDATION_FAILED');
+    expect(chatViews.page).not.toHaveBeenCalled();
+  });
+
+  it('rejects a page from a transcript view other than the requested view', async () => {
+    const { routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`
+      + '&limit=20&beforeOrdinal=10&transcriptViewId=requested-view',
+    );
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('STALE_TRANSCRIPT_VIEW');
+  });
+
   it('returns a typed fenced-ledger state instead of an empty complete page', async () => {
     const { routes } = createRoutesFixture({
       chatViews: {
