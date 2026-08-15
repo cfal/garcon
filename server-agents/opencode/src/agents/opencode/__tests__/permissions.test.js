@@ -327,12 +327,40 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
     eventStream.push({
       directory: '/repo',
       payload: {
+        id: 'evt_prompt_manual',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'sess-1',
+          part: {
+            id: client.session.promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-manual',
+            type: 'text',
+            text: 'test command',
+          },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_assistant_manual',
+        type: 'message.updated',
+        properties: {
+          sessionID: 'sess-1',
+          info: { id: 'assistant-manual', role: 'assistant', parentID: 'user-manual' },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
         id: 'evt_permission_manual',
         type: 'permission.asked',
         properties: {
           sessionID: 'sess-1',
           requestID: 'req-manual',
           permission: 'bash',
+          tool: { messageID: 'assistant-manual', callID: 'call-manual' },
         },
       },
     });
@@ -375,12 +403,40 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
     eventStream.push({
       directory: '/repo',
       payload: {
+        id: 'evt_manual_prompt',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'sess-1',
+          part: {
+            id: client.session.promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-manual',
+            type: 'text',
+            text: 'manual command',
+          },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_manual_assistant',
+        type: 'message.updated',
+        properties: {
+          sessionID: 'sess-1',
+          info: { id: 'assistant-manual', role: 'assistant', parentID: 'user-manual' },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
         id: 'evt_0001',
         type: 'permission.asked',
         properties: {
           sessionID: 'sess-1',
           requestID: 'req-manual',
           permission: 'bash',
+          tool: { messageID: 'assistant-manual', callID: 'call-manual' },
         },
       },
     });

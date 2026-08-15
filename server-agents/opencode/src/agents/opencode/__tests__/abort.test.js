@@ -850,6 +850,19 @@ describe('OpenCodeRuntime abort', () => {
     await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
     eventStream.push(envelope({
       id: 'evt_0001',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0002',
       type: 'session.error',
       properties: {
         sessionID: 'session-1',
@@ -859,7 +872,7 @@ describe('OpenCodeRuntime abort', () => {
     await waitFor(() => failures.length === 1);
 
     eventStream.push(envelope({
-      id: 'evt_0002',
+      id: 'evt_0003',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -1089,6 +1102,19 @@ describe('OpenCodeRuntime abort', () => {
 
       eventStream.push(envelope({
         id: 'evt_0001',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'session-1',
+          part: {
+            id: promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-a',
+            type: 'text',
+            text: 'hello',
+          },
+        },
+      }));
+      eventStream.push(envelope({
+        id: 'evt_0002',
         type: 'session.error',
         properties: {
           sessionID: 'session-1',
@@ -1134,7 +1160,7 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
-  it('ignores late events for a stream-failed session while a successor turn still works', async () => {
+  it('routes late named content from a stream-failed turn while its successor works', async () => {
     const firstStream = createEventStream();
     const secondStream = createEventStream();
     const streams = [firstStream, secondStream];
@@ -1150,6 +1176,7 @@ describe('OpenCodeRuntime abort', () => {
       abort,
       promptAsync,
       subscribe,
+      { sseRetryDelayMs: 1 },
     );
     const messages = [];
     const failures = [];
@@ -1178,7 +1205,8 @@ describe('OpenCodeRuntime abort', () => {
       promptAsync.mock.invocationCallOrder[1],
     );
 
-    // Late output from the retired turn carries its old provider identity and is dropped.
+    // The replacement stream belongs to the same provider process, so named late content
+    // retains the publisher captured by the original turn.
     secondStream.push(envelope({
       id: 'evt_0001',
       type: 'message.updated',
@@ -1229,11 +1257,11 @@ describe('OpenCodeRuntime abort', () => {
         error: { name: 'ProviderError', data: { message: 'retired turn failure' } },
       },
     }));
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitFor(() => messages.length === 1);
 
     expect(runtime.isRunning('session-1')).toBe(true);
-    expect(messages).toEqual([]);
+    expect(messages[0].emitted[0].content).toBe('stale');
+    expect(messages[0].metadata).toMatchObject({ clientRequestId: 'req-a', turnId: 'turn-a' });
     expect(finishes).toEqual([]);
     expect(failures).toHaveLength(1);
 
@@ -1280,10 +1308,12 @@ describe('OpenCodeRuntime abort', () => {
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
 
+    await waitFor(() => messages.length === 2);
+    await waitFor(() => finishes.length === 1);
     await expect(successor).resolves.toBeUndefined();
-    expect(messages).toHaveLength(1);
-    expect(messages[0].emitted[0].content).toBe('current');
-    expect(messages[0].metadata).toMatchObject({ clientRequestId: 'req-b', turnId: 'turn-b' });
+    expect(messages).toHaveLength(2);
+    expect(messages[1].emitted[0].content).toBe('current');
+    expect(messages[1].metadata).toMatchObject({ clientRequestId: 'req-b', turnId: 'turn-b' });
     expect(finishes).toEqual([
       expect.objectContaining({ clientRequestId: 'req-b', turnId: 'turn-b' }),
     ]);

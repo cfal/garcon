@@ -5,6 +5,7 @@ import type {
   ChatSessionStoppedMessage,
   ServerWsMessage,
 } from '../../../common/ws-events.js';
+import type { TranscriptMessage } from '../../../common/chat-view.js';
 import {
   assistantContents,
   messagesOfType,
@@ -201,13 +202,13 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       await expect(access(join(fixture.dirs.project, 'stop-completed.marker')))
         .rejects.toMatchObject({ code: 'ENOENT' });
 
-      // OpenCode publishes tool parts on completion, so the aborted tool's late events are
-      // fenced: the stopped transcript holds the user prompt with no assistant output and no
-      // fabricated failure. The native DB records the killed tool and the abort unwind.
+      // OpenCode publishes the aborted tool occurrence after the run terminal but before its
+      // source retires, so the ledger retains those named rows without fabricating a failure.
       const stoppedTranscript = (await fixture.client.getMessages(chatId)).messages;
       expect(userContents(stoppedTranscript)).toContain(stoppedPrompt);
       expect(assistantContents(stoppedTranscript).join('\n')).not.toContain(stoppedReply);
       expect(messagesOfType(stoppedTranscript, 'error')).toEqual([]);
+      expectAbortedToolRows(stoppedTranscript, command);
       const native = await openCodeNativeSession(fixture, chatId);
       const rows = readOpenCodeSessionRows(native);
       const toolPart = rows.parts.find((row) => row.data.type === 'tool');
@@ -226,9 +227,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       expect(userContents(restored)).toContain(stoppedPrompt);
       expect(assistantContents(restored).join('\n')).not.toContain(stoppedReply);
       expect(messagesOfType(restored, 'error')).toEqual([]);
-      expect(messagesOfType(restored, 'bash-tool-use').some(
-        (message) => message.command === command,
-      )).toBe(false);
+      expectAbortedToolRows(restored, command);
 
       testEnvironment.model.reset();
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
@@ -317,6 +316,22 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 });
+
+function expectAbortedToolRows(
+  messages: readonly TranscriptMessage[],
+  command: string,
+): void {
+  const tools = messagesOfType(messages, 'bash-tool-use').filter(
+    (message) => message.command === command,
+  );
+  expect(tools).toHaveLength(1);
+  const results = messagesOfType(messages, 'tool-result').filter(
+    (message) => message.toolId === tools[0]?.toolId,
+  );
+  expect(results).toHaveLength(1);
+  expect(results[0]?.isError).toBe(false);
+  expect(JSON.stringify(results[0]?.content)).toContain('User aborted the command');
+}
 
 function requireEnvironment(): ScriptedOpenCodeTestEnvironment {
   if (!environment) throw new Error('Scripted OpenCode environment was not initialized.');

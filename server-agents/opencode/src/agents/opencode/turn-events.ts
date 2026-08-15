@@ -2,16 +2,19 @@ import crypto from 'node:crypto';
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type { SSEEvent } from './sse-events.js';
 
 export interface OpenCodeTurnContext {
   eventMetadata: RuntimeEventMetadata;
+  operation: AgentRuntimeOperation;
   // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
   providerMessageId: string | null;
   providerPromptPartId: string;
   providerPromptText: string;
   providerObservedEventId: string | null;
   providerContinuationMessageIds: Set<string>;
+  recentEventIds: Set<string>;
   providerSteeringPartIds: Set<string>;
   pendingSteeringMessageIds: Set<string>;
   observedUserMessageIds: Set<string>;
@@ -34,7 +37,6 @@ export interface OpenCodeSession {
   directory?: string;
   startedAt: string;
   lastActivityAt: number;
-  recentEventIds: Set<string>;
   // A transport or control-plane failure can retire Garcon's turn while OpenCode still owns
   // provider work. The next turn aborts that work before submitting another prompt.
   providerWorkRequiresQuiescence: boolean;
@@ -58,14 +60,17 @@ const RECENT_EVENT_ID_LIMIT = 512;
 export function createOpenCodeTurnContext(
   eventMetadata: RuntimeEventMetadata,
   promptText: string,
+  operation: AgentRuntimeOperation,
 ): OpenCodeTurnContext {
   return {
     eventMetadata,
+    operation,
     providerMessageId: null,
     providerPromptPartId: createOpenCodePromptPartId(),
     providerPromptText: promptText,
     providerObservedEventId: null,
     providerContinuationMessageIds: new Set(),
+    recentEventIds: new Set(),
     providerSteeringPartIds: new Set(),
     pendingSteeringMessageIds: new Set(),
     observedUserMessageIds: new Set(),
@@ -98,7 +103,7 @@ export function observeOpenCodeSteeringPart(
 }
 
 export function acceptUniqueOpenCodeTurnEvent(
-  session: OpenCodeSession,
+  turn: OpenCodeTurnContext,
   event: SSEEvent,
   logger: AgentLogger,
 ): boolean {
@@ -117,26 +122,26 @@ export function acceptUniqueOpenCodeTurnEvent(
     logger.warn('Ignoring OpenCode event without an event ID', { eventType: event.type });
     return false;
   }
-  if (session.recentEventIds.has(event.id)) {
+  if (turn.recentEventIds.has(event.id)) {
     logger.debug('Ignoring replayed OpenCode event', {
       eventType: event.type,
       eventId: event.id,
     });
     return false;
   }
-  session.recentEventIds.add(event.id);
-  if (session.recentEventIds.size > RECENT_EVENT_ID_LIMIT) {
-    const oldestEventId = session.recentEventIds.values().next().value;
-    if (oldestEventId) session.recentEventIds.delete(oldestEventId);
+  turn.recentEventIds.add(event.id);
+  if (turn.recentEventIds.size > RECENT_EVENT_ID_LIMIT) {
+    const oldestEventId = turn.recentEventIds.values().next().value;
+    if (oldestEventId) turn.recentEventIds.delete(oldestEventId);
   }
   return true;
 }
 
 export function openCodeEventBelongsToTurn(
-  session: OpenCodeSession,
+  turn: OpenCodeTurnContext,
   event: SSEEvent,
+  onPromptBound?: () => void,
 ): boolean {
-  const turn = session.turn;
   if (event.type === 'message.updated') {
     const info = event.properties?.info;
     const messageId = typeof info?.id === 'string' ? info.id : '';
@@ -175,7 +180,7 @@ export function openCodeEventBelongsToTurn(
       ) return false;
       turn.providerMessageId = messageId;
       turn.providerObservedEventId = event.id ?? null;
-      session.terminalEventsFencedUntilPrompt = false;
+      onPromptBound?.();
       return false;
     }
     if (messageId && turn.observedUserMessageIds.has(messageId)) {

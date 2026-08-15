@@ -44,6 +44,8 @@ interface OpenCodeSteeringOptions {
     session: OpenCodeSession,
     idleEventId: string | null,
   ): void;
+  bindOperationPart(turn: OpenCodeTurnContext, partId: string): boolean;
+  unbindOperationPart(turn: OpenCodeTurnContext, partId: string): void;
 }
 
 export class OpenCodeSteeringController {
@@ -104,6 +106,9 @@ export class OpenCodeSteeringController {
       promise: acknowledgement,
       resolve: acknowledge,
     } satisfies PendingOpenCodeSteeringAcknowledgement;
+    if (!this.options.bindOperationPart(turn, partId)) {
+      return rejectedSteer('turn-changed', 'The active OpenCode turn changed');
+    }
     turn.providerSteeringPartIds.add(partId);
     this.#acknowledgements.set(partId, pending);
     session.activeSteeringDeliveries += 1;
@@ -154,7 +159,10 @@ export class OpenCodeSteeringController {
       if (this.#acknowledgements.get(partId) === pending) {
         this.#acknowledgements.delete(partId);
       }
-      if (!preserveCorrelation) turn.providerSteeringPartIds.delete(partId);
+      if (!preserveCorrelation) {
+        turn.providerSteeringPartIds.delete(partId);
+        this.options.unbindOperationPart(turn, partId);
+      }
       this.#releaseDelivery(request.agentSessionId, session, turn);
     }
   }

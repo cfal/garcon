@@ -1,6 +1,7 @@
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 
 export interface OpenCodeExecutionAdmission {
   readonly signal: AbortSignal;
@@ -16,6 +17,7 @@ export interface OpenCodeExecutionRequest {
   readonly clientRequestId?: string;
   readonly turnId?: string;
   readonly executionAdmission?: OpenCodeExecutionAdmission;
+  readonly operation: AgentRuntimeOperation;
 }
 
 export interface OpenCodeStartRequest extends OpenCodeExecutionRequest {
