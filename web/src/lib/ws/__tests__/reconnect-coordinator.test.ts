@@ -101,6 +101,23 @@ function deltaResponse(
 	};
 }
 
+function boundedReplayResponse(options: {
+	afterOrdinal: number;
+	nextAfterOrdinal: number;
+	throughOrdinal: number;
+	hasMore: boolean;
+	messages?: unknown[];
+}) {
+	return {
+		...deltaResponse('chat-1', 'generation-selected', options.messages ?? []),
+		firstOrdinal: options.afterOrdinal + 1,
+		lastOrdinal: options.nextAfterOrdinal,
+		nextAfterOrdinal: options.nextAfterOrdinal,
+		throughOrdinal: options.throughOrdinal,
+		hasMore: options.hasMore,
+	};
+}
+
 function snapshotRequiredResponse(
 	chatId: string,
 	transcriptViewId: string | null = `generation-${chatId}`,
@@ -869,6 +886,151 @@ describe('ChatReconnectCoordinator', () => {
 
 		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('applies bounded replay pages in order before validating the selected transcript', async () => {
+		const pages = [
+			boundedReplayResponse({
+				afterOrdinal: 2,
+				nextAfterOrdinal: 4,
+				throughOrdinal: 7,
+				hasMore: true,
+				messages: [messageJson(3, 'page-one')],
+			}),
+			boundedReplayResponse({
+				afterOrdinal: 4,
+				nextAfterOrdinal: 6,
+				throughOrdinal: 7,
+				hasMore: true,
+			}),
+			boundedReplayResponse({
+				afterOrdinal: 6,
+				nextAfterOrdinal: 7,
+				throughOrdinal: 7,
+				hasMore: false,
+				messages: [messageJson(7, 'page-three')],
+			}),
+		];
+		const deps = createReconnectDeps();
+		let pageIndex = 0;
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'reconnect-state-query') {
+					return reconnectStateResponse([], ['chat-1']);
+				}
+				if (request.type === 'chat-subscribe') {
+					if (pageIndex > 0) {
+						expect(deps.chatState.applyMessages).toHaveBeenCalledTimes(pageIndex);
+					}
+					const response = pages[pageIndex];
+					if (!response) throw new Error('The coordinator requested beyond the fixed watermark.');
+					pageIndex += 1;
+					return response;
+				}
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		await reconnectAfterFirstConnection(deps);
+
+		const subscribeRequests = deps.ws.sendRequest.mock.calls
+			.map(([request]) => request as Record<string, unknown>)
+			.filter((request) => request.type === 'chat-subscribe');
+		expect(subscribeRequests).toHaveLength(3);
+		expect(subscribeRequests[0]).toMatchObject({
+			chatId: 'chat-1',
+			transcriptViewId: 'generation-selected',
+			afterOrdinal: 2,
+		});
+		expect(subscribeRequests[0]).not.toHaveProperty('throughOrdinal');
+		expect(subscribeRequests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 7 });
+		expect(subscribeRequests[2]).toMatchObject({ afterOrdinal: 6, throughOrdinal: 7 });
+		expect(deps.chatState.applyMessages.mock.calls.map((call) => ({
+			messages: call[2].map((entry) => entry.ordinal),
+			firstOrdinal: call[3],
+			lastOrdinal: call[4],
+		}))).toEqual([
+			{ messages: [3], firstOrdinal: 3, lastOrdinal: 4 },
+			{ messages: [], firstOrdinal: 5, lastOrdinal: 6 },
+			{ messages: [7], firstOrdinal: 7, lastOrdinal: 7 },
+		]);
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledOnce();
+	});
+
+	it('abandons a partial replay on disconnect and restarts with a fresh watermark', async () => {
+		const heldContinuation = deferred<Record<string, unknown>>();
+		const deps = createReconnectDeps();
+		let subscribeCount = 0;
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'reconnect-state-query') {
+					return reconnectStateResponse([], ['chat-1']);
+				}
+				if (request.type !== 'chat-subscribe') {
+					throw new Error(`Unexpected request: ${String(request.type)}`);
+				}
+				subscribeCount += 1;
+				if (subscribeCount === 1) {
+					return boundedReplayResponse({
+						afterOrdinal: 2,
+						nextAfterOrdinal: 4,
+						throughOrdinal: 6,
+						hasMore: true,
+						messages: [messageJson(3, 'old-page-one')],
+					});
+				}
+				if (subscribeCount === 2) return heldContinuation.promise;
+				if (subscribeCount === 3) {
+					return boundedReplayResponse({
+						afterOrdinal: 4,
+						nextAfterOrdinal: 8,
+						throughOrdinal: 8,
+						hasMore: false,
+						messages: [messageJson(5, 'fresh-page'), messageJson(8, 'fresh-live-tail')],
+					});
+				}
+				throw new Error('The coordinator requested an unexpected replay page.');
+			},
+		);
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		clearConnectionCalls(deps);
+		await coordinator.handleConnectionState(false);
+		const interruptedReplay = coordinator.handleConnectionState(true);
+		await flushUntil(() => subscribeCount === 2);
+		expect(deps.chatState.transcriptCache.markValidated).not.toHaveBeenCalled();
+
+		await coordinator.handleConnectionState(false);
+		const restartedReplay = coordinator.handleConnectionState(true);
+		await flushUntil(() => subscribeCount === 3);
+		await restartedReplay;
+
+		heldContinuation.resolve(boundedReplayResponse({
+			afterOrdinal: 4,
+			nextAfterOrdinal: 6,
+			throughOrdinal: 6,
+			hasMore: false,
+			messages: [messageJson(6, 'stale-page')],
+		}));
+		await interruptedReplay;
+
+		const subscribeRequests = deps.ws.sendRequest.mock.calls
+			.map(([request]) => request as Record<string, unknown>)
+			.filter((request) => request.type === 'chat-subscribe');
+		expect(subscribeRequests).toHaveLength(3);
+		expect(subscribeRequests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 6 });
+		expect(subscribeRequests[2]).toMatchObject({ afterOrdinal: 4 });
+		expect(subscribeRequests[2]).not.toHaveProperty('throughOrdinal');
+		expect(deps.chatState.applyMessages.mock.calls.flatMap((call) => (
+			call[2].map((entry) => (
+				entry.message.type === 'assistant-message'
+					? entry.message.content
+					: entry.message.type
+			))
+		))).toEqual(['old-page-one', 'fresh-page', 'fresh-live-tail']);
+		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledOnce();
 	});
 
 	it('falls back to selected snapshot when subscribe request fails', async () => {

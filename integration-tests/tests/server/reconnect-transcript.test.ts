@@ -1,11 +1,25 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import {
   applyTranscriptAppend,
   type TranscriptMessage,
 } from '../../../common/chat-view.js';
 import { CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT } from '../../../common/chat-snapshot.js';
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+  CompactionMessage,
+  ToolResultMessage,
+  UserMessage,
+  type ChatMessage,
+} from '../../../common/chat-types.js';
+import type { LedgerRowDraft } from '../../../server/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import { countUserContent, userContents } from '../../support/chat-assertions.js';
-import { GarconWsRequestError } from '../../support/garcon-client.js';
+import {
+  type GarconTestClient,
+  GarconWsRequestError,
+} from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 function transcriptProjection(messages: readonly TranscriptMessage[]): Array<{
@@ -20,6 +34,208 @@ function transcriptProjection(messages: readonly TranscriptMessage[]): Array<{
       ? { content: entry.message.content }
       : {}),
   }));
+}
+
+interface ExactTranscriptRow {
+  readonly ordinal: number;
+  readonly type: string;
+  readonly text: string;
+}
+
+interface ReplayPage {
+  readonly messages: readonly TranscriptMessage[];
+  readonly nextAfterOrdinal: number;
+  readonly throughOrdinal: number;
+  readonly hasMore: boolean;
+  readonly frameBytes: number;
+}
+
+function exactTranscriptRow(entry: TranscriptMessage): ExactTranscriptRow {
+  return {
+    ordinal: entry.ordinal,
+    type: entry.message.type,
+    text: exactMessageText(entry.message),
+  };
+}
+
+function exactMessageText(message: ChatMessage): string {
+  switch (message.type) {
+    case 'user-message':
+    case 'assistant-message':
+    case 'thinking':
+    case 'error':
+    case 'transcript-notice':
+      return message.content;
+    case 'bash-tool-use':
+      return `$ ${message.command}`;
+    case 'tool-result':
+      return typeof message.content.raw === 'string'
+        ? message.content.raw
+        : JSON.stringify(message.content);
+    case 'compaction':
+      return message.summary;
+    default:
+      return JSON.stringify(message);
+  }
+}
+
+function mixedReplayRows(
+  firstOrdinal: number,
+  count: number,
+): { drafts: LedgerRowDraft[]; presented: ExactTranscriptRow[] } {
+  const drafts: LedgerRowDraft[] = [];
+  const presented: ExactTranscriptRow[] = [];
+  const hiddenPrefixLength = Math.max(0, count - 1_000);
+
+  for (let index = 0; index < count; index += 1) {
+    const ordinal = firstOrdinal + index;
+    const timestamp = new Date(Date.UTC(2026, 7, 15) + index).toISOString();
+    if (index < hiddenPrefixLength) {
+      drafts.push({
+        kind: 'run-ended',
+        at: timestamp,
+        outcome: index % 2 === 0 ? 'finished' : 'interrupted',
+        origin: index % 2 === 0 ? 'provider' : 'core',
+        providerMeta: null,
+      });
+      continue;
+    }
+
+    const occurrence = index - hiddenPrefixLength;
+    const toolId = `replay-tool-${occurrence}`;
+    let message: ChatMessage;
+    let draft: LedgerRowDraft;
+    switch (occurrence % 6) {
+      case 0:
+        message = new UserMessage(timestamp, `replay-user-${occurrence}`);
+        draft = {
+          kind: 'user-input',
+          at: timestamp,
+          detail: {
+            clientMessageId: `replay-client-${occurrence}`,
+            message,
+            attachments: [],
+            steer: false,
+          },
+          providerMeta: null,
+        };
+        break;
+      case 1:
+        message = new AssistantMessage(timestamp, `replay-assistant-${occurrence}`);
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+      case 2:
+        message = new BashToolUseMessage(timestamp, toolId, `printf replay-${occurrence}`);
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+      case 3:
+        message = new ToolResultMessage(
+          timestamp,
+          `replay-tool-${occurrence - 1}`,
+          { raw: `replay-result-${occurrence}` },
+          false,
+        );
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+      case 4:
+        message = new CompactionMessage(timestamp, 'auto', `replay-compaction-${occurrence}`);
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+      default:
+        message = new AssistantMessage(timestamp, 'repeated-equal-assistant-content');
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+    }
+    drafts.push(draft);
+    presented.push({ ordinal, type: message.type, text: exactMessageText(message) });
+  }
+
+  return { drafts, presented };
+}
+
+async function subscribeReplayPage(
+  client: GarconTestClient,
+  chatId: string,
+  transcriptViewId: string,
+  afterOrdinal: number,
+  throughOrdinal?: number,
+): Promise<ReplayPage> {
+  const rawCursor = client.rawEvents().length;
+  const response = await client.subscribe(
+    chatId,
+    transcriptViewId,
+    afterOrdinal,
+    throughOrdinal,
+  );
+  const raw = client.rawEvents().slice(rawCursor).find((event): event is Record<string, unknown> => (
+    isRecord(event)
+    && event.type === 'chat-subscribed'
+    && event.clientRequestId === response.clientRequestId
+  ));
+  if (!raw) throw new Error('The raw transcript replay response was not recorded.');
+  if (
+    !Number.isSafeInteger(raw.nextAfterOrdinal)
+    || !Number.isSafeInteger(raw.throughOrdinal)
+    || typeof raw.hasMore !== 'boolean'
+  ) {
+    throw new Error(
+      `Transcript replay response is not a bounded page: ${JSON.stringify({
+        firstOrdinal: raw.firstOrdinal,
+        lastOrdinal: raw.lastOrdinal,
+        messageCount: response.messages.length,
+        nextAfterOrdinal: raw.nextAfterOrdinal ?? null,
+        throughOrdinal: raw.throughOrdinal ?? null,
+        hasMore: raw.hasMore ?? null,
+      })}`,
+    );
+  }
+  return {
+    messages: response.messages,
+    nextAfterOrdinal: replayInteger(raw.nextAfterOrdinal, 'nextAfterOrdinal'),
+    throughOrdinal: replayInteger(raw.throughOrdinal, 'throughOrdinal'),
+    hasMore: raw.hasMore as boolean,
+    frameBytes: new TextEncoder().encode(JSON.stringify(raw)).byteLength,
+  };
+}
+
+async function replayAllPages(
+  client: GarconTestClient,
+  chatId: string,
+  transcriptViewId: string,
+): Promise<{ rows: ExactTranscriptRow[]; throughOrdinal: number }> {
+  const rows: ExactTranscriptRow[] = [];
+  let afterOrdinal = 0;
+  let throughOrdinal: number | undefined;
+  for (let pageCount = 0; pageCount < 1_000; pageCount += 1) {
+    const page = await subscribeReplayPage(
+      client,
+      chatId,
+      transcriptViewId,
+      afterOrdinal,
+      throughOrdinal,
+    );
+    throughOrdinal ??= page.throughOrdinal;
+    expect(page.throughOrdinal).toBe(throughOrdinal);
+    expect(page.nextAfterOrdinal).toBeGreaterThan(afterOrdinal);
+    expect(page.nextAfterOrdinal - afterOrdinal)
+      .toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
+    expect(page.frameBytes).toBeLessThanOrEqual(1_048_576);
+    rows.push(...page.messages.map(exactTranscriptRow));
+    afterOrdinal = page.nextAfterOrdinal;
+    if (!page.hasMore) return { rows, throughOrdinal };
+  }
+  throw new Error('Restarted transcript replay did not converge.');
+}
+
+function replayInteger(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new Error(`Replay response has an invalid ${field}.`);
+  }
+  return Number(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 describe('reconnect and transcript stability', () => {
@@ -153,7 +369,7 @@ describe('reconnect and transcript stability', () => {
     });
   });
 
-  test('bounds reconnect replay and preserves the newest snapshot fallback', async () => {
+  test('replays fifty thousand mixed rows in bounded fixed-watermark pages', async () => {
     await withIntegrationFixture('reconnect-bounded-replay', async (fixture) => {
       const chatId = fixture.newChatId();
       const started = await fixture.client.startDirectChat({
@@ -163,56 +379,127 @@ describe('reconnect and transcript stability', () => {
         agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, started.turnId);
-      const cursor = await fixture.client.getMessages(chatId);
-      const missedTurnCount = CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT / 2 + 1;
-      for (let index = 0; index < missedTurnCount; index += 1) {
-        const accepted = await fixture.client.runDirectChat({
+      const initial = await fixture.client.getMessages(chatId);
+      const generated = mixedReplayRows(initial.lastOrdinal + 1, 50_000);
+
+      await fixture.restartGarcon({
+        beforeStart: async () => {
+          const store = new TranscriptLedgerStore(
+            join(fixture.dirs.workspace, 'transcript-ledgers'),
+          );
+          try {
+            const view = store.currentView(chatId);
+            if (view?.viewId !== initial.transcriptViewId) {
+              throw new Error('The replay fixture opened a different transcript view.');
+            }
+            for (let offset = 0; offset < generated.drafts.length; offset += 1_000) {
+              store.append(
+                chatId,
+                view.viewId,
+                generated.drafts.slice(offset, offset + 1_000),
+              );
+            }
+          } finally {
+            store.close();
+          }
+        },
+      });
+
+      const injectedThroughOrdinal = initial.lastOrdinal + generated.drafts.length;
+      const expectedBeforeLive = [
+        ...initial.messages.map(exactTranscriptRow),
+        ...generated.presented,
+      ];
+      const liveContent = 'bounded-replay-concurrent-live';
+      let liveTurn: Awaited<ReturnType<typeof fixture.client.runDirectChat>> | null = null;
+      let liveCursor = -1;
+      let afterOrdinal = 0;
+      let throughOrdinal: number | undefined;
+      let pageCount = 0;
+      let sawHiddenOnlyPage = false;
+      const replayed: ExactTranscriptRow[] = [];
+
+      while (true) {
+        const page = await subscribeReplayPage(
+          fixture.client,
           chatId,
-          content: `bounded-replay-${index}`,
-          agent: fixture.directAgents.openAi,
-        });
-        await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+          initial.transcriptViewId,
+          afterOrdinal,
+          throughOrdinal,
+        );
+        pageCount += 1;
+        throughOrdinal ??= page.throughOrdinal;
+        expect(page.throughOrdinal).toBe(throughOrdinal);
+        expect(throughOrdinal).toBe(injectedThroughOrdinal);
+        expect(page.nextAfterOrdinal).toBeGreaterThan(afterOrdinal);
+        expect(page.nextAfterOrdinal - afterOrdinal)
+          .toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
+        expect(page.frameBytes).toBeLessThanOrEqual(1_048_576);
+        expect(page.messages.length).toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
+        if (page.messages.length === 0) sawHiddenOnlyPage = true;
+        for (const message of page.messages) {
+          expect(message.ordinal).toBeGreaterThan(afterOrdinal);
+          expect(message.ordinal).toBeLessThanOrEqual(page.nextAfterOrdinal);
+        }
+        replayed.push(...page.messages.map(exactTranscriptRow));
+
+        if (pageCount === 1) {
+          liveCursor = fixture.client.markEvents();
+          liveTurn = await fixture.client.runDirectChat({
+            chatId,
+            content: liveContent,
+            agent: fixture.directAgents.openAi,
+          });
+        }
+
+        afterOrdinal = page.nextAfterOrdinal;
+        if (!page.hasMore) break;
+        if (pageCount > 1_000) throw new Error('Bounded transcript replay did not converge.');
       }
 
+      expect(afterOrdinal).toBe(throughOrdinal);
+      expect(pageCount).toBeGreaterThan(1);
+      expect(sawHiddenOnlyPage).toBe(true);
+      expect(replayed).toEqual(expectedBeforeLive);
+      expect(new Set(replayed.map((row) => row.ordinal)).size).toBe(replayed.length);
+
+      expect(liveTurn).not.toBeNull();
+      await fixture.client.waitForTurnTerminal(chatId, liveTurn!.turnId, {
+        afterIndex: liveCursor,
+      });
+      const liveRows = fixture.client.eventsSince(liveCursor).flatMap((event) => (
+        event.type === 'chat-messages' && event.chatId === chatId
+          ? event.messages.filter((message) => message.ordinal > throughOrdinal!)
+          : []
+      ));
+      expect(liveRows.map(exactTranscriptRow)).toEqual([
+        expect.objectContaining({ type: 'user-message', text: liveContent }),
+        expect.objectContaining({ type: 'assistant-message', text: `echo:${liveContent}` }),
+      ]);
+      expect(new Set(liveRows.map((message) => message.ordinal)).size).toBe(liveRows.length);
+
+      const interrupted = await subscribeReplayPage(
+        fixture.client,
+        chatId,
+        initial.transcriptViewId,
+        0,
+      );
+      expect(interrupted.hasMore).toBe(true);
       await fixture.client.disconnect();
       await fixture.client.reconnect();
-      const newest = await fixture.client.getMessages(chatId, {
-        limit: CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT,
-      });
-      expect(newest.messages).toHaveLength(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
-      expect(newest.messages.at(-1)?.message).toMatchObject({
-        type: 'assistant-message',
-        content: `echo:bounded-replay-${missedTurnCount - 1}`,
-      });
 
-      let replayFailure: unknown;
-      let replay: Awaited<ReturnType<typeof fixture.client.subscribe>> | undefined;
-      try {
-        replay = await fixture.client.subscribe(
-          chatId,
-          cursor.transcriptViewId,
-          cursor.lastOrdinal,
-        );
-      } catch (error) {
-        replayFailure = error;
-      }
-
-      if (replay) {
-        expect(replay.messages.length).toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
-        expect(replay.firstOrdinal).toBeGreaterThan(cursor.lastOrdinal + 1);
-        expect(replay.lastOrdinal).toBe(newest.lastOrdinal);
-        expect(transcriptProjection(replay.messages)).toEqual(transcriptProjection(newest.messages));
-      } else {
-        expect(replayFailure).toBeInstanceOf(GarconWsRequestError);
-        expect((replayFailure as GarconWsRequestError).response).toMatchObject({
-          requestType: 'chat-subscribe',
-          code: 'HISTORY_LOAD_FAILED',
-          retryable: true,
-          chatId,
-        });
-      }
+      const restarted = await replayAllPages(
+        fixture.client,
+        chatId,
+        initial.transcriptViewId,
+      );
+      expect(restarted.rows).toEqual([
+        ...expectedBeforeLive,
+        ...liveRows.map(exactTranscriptRow),
+      ]);
+      expect(restarted.throughOrdinal).toBeGreaterThan(throughOrdinal!);
     });
-  });
+  }, 60_000);
 
   test('rejects an obsolete view cursor with a typed stale-view error', async () => {
     await withIntegrationFixture('reconnect-stale-cursor', async (fixture) => {

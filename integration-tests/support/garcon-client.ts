@@ -851,15 +851,20 @@ export class GarconTestClient {
     chatId: string,
     transcriptViewId: string,
     afterOrdinal: number,
+    throughOrdinal?: number,
   ): Promise<ChatSubscribedMessage> {
     const clientRequestId = crypto.randomUUID();
     const afterIndex = this.markEvents();
-    this.sendWs(new ChatSubscribeRequest(
+    const request = new ChatSubscribeRequest(
       clientRequestId,
       chatId,
       transcriptViewId,
       afterOrdinal,
-    ));
+    );
+    if (throughOrdinal !== undefined) {
+      (request as ChatSubscribeRequest & { throughOrdinal: number }).throughOrdinal = throughOrdinal;
+    }
+    this.sendWs(request);
     const outcome = await this.waitForEvent(
       (message): message is ChatSubscribedMessage | ClientRequestErrorMessage =>
         (message.type === 'chat-subscribed' && message.clientRequestId === clientRequestId)

@@ -426,6 +426,71 @@ describe('chat WebSocket handler', () => {
     });
   });
 
+  it('captures a bounded replay watermark and returns its continuation fields', async () => {
+    const replayMessage = { ...chatViewMessage, ordinal: 11 };
+    mockChatViews.readReplay.mockReturnValueOnce({
+      transcriptViewId: 'view-1',
+      messages: [replayMessage],
+      firstOrdinal: 11,
+      lastOrdinal: 200,
+      nextAfterOrdinal: 200,
+      throughOrdinal: 600,
+      hasMore: true,
+    });
+
+    await chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-bounded-first',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 10,
+    });
+
+    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 10);
+    expect(lastSentPayload()).toMatchObject({
+      type: 'chat-subscribed',
+      clientRequestId: 'req-sub-bounded-first',
+      chatId: '123',
+      transcriptViewId: 'view-1',
+      nextAfterOrdinal: 200,
+      throughOrdinal: 600,
+      hasMore: true,
+    });
+  });
+
+  it('repeats the captured replay watermark on continuation requests', async () => {
+    mockChatViews.readReplay.mockReturnValueOnce({
+      transcriptViewId: 'view-1',
+      messages: [],
+      firstOrdinal: 201,
+      lastOrdinal: 400,
+      nextAfterOrdinal: 400,
+      throughOrdinal: 600,
+      hasMore: true,
+    });
+
+    await chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-bounded-next',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 200,
+      throughOrdinal: 600,
+    });
+
+    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 200, 600);
+    expect(lastSentPayload()).toMatchObject({
+      type: 'chat-subscribed',
+      clientRequestId: 'req-sub-bounded-next',
+      chatId: '123',
+      transcriptViewId: 'view-1',
+      messages: [],
+      nextAfterOrdinal: 400,
+      throughOrdinal: 600,
+      hasMore: true,
+    });
+  });
+
   it('suppresses resend candidates while the chat is processing', async () => {
     mockProcessing.phase.mockReturnValueOnce('running');
     mockChatViews.resendCandidates.mockReturnValueOnce([
