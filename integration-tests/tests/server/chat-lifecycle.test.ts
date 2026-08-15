@@ -264,6 +264,57 @@ describe('chat lifecycle', () => {
     });
   });
 
+  test('does not dispatch a second command that reuses a committed client message identity', async () => {
+    await withIntegrationFixture('message-idempotency-across-commands', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const clientMessageId = crypto.randomUUID();
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: 'message-identity-once',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+        clientMessageId,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId);
+      const beforeDuplicate = await fixture.client.getMessages(chatId);
+
+      await fixture.client.runDirectChat({
+        chatId,
+        content: 'message-identity-once',
+        agent: fixture.directAgents.openAi,
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId,
+      });
+      await fixture.client.ping();
+
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+      expect(await fixture.client.getMessages(chatId)).toEqual(beforeDuplicate);
+
+      const fresh = await fixture.client.runDirectChat({
+        chatId,
+        content: 'message-identity-fresh',
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, fresh.turnId);
+
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(2);
+      expect(fixture.fakeProviders.openAi.requests().at(-1)?.body.messages).toEqual([
+        { role: 'user', content: 'message-identity-once' },
+        { role: 'assistant', content: 'echo:message-identity-once' },
+        { role: 'user', content: 'message-identity-fresh' },
+      ]);
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(userContents(transcript.messages)).toEqual([
+        'message-identity-once',
+        'message-identity-fresh',
+      ]);
+      expect(assistantContents(transcript.messages)).toEqual([
+        'echo:message-identity-once',
+        'echo:message-identity-fresh',
+      ]);
+    });
+  });
+
   test('rejects a concurrent direct turn before mutating transcript state', async () => {
     await withIntegrationFixture('same-chat-direct-admission', async (fixture) => {
       const chatId = fixture.newChatId();
