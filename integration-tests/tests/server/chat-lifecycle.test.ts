@@ -315,6 +315,73 @@ describe('chat lifecycle', () => {
     });
   });
 
+  test('uses client message identity rather than content equality for duplicate submission', async () => {
+    await withIntegrationFixture('message-idempotency-not-content', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const firstMessageId = crypto.randomUUID();
+      const secondMessageId = crypto.randomUUID();
+      const repeatedContent = 'equal-content-distinct-occurrences';
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: repeatedContent,
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+        clientMessageId: firstMessageId,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId);
+
+      let conflictingReuse: unknown;
+      try {
+        await fixture.client.runDirectChat({
+          chatId,
+          content: 'different-content-with-reused-identity',
+          agent: fixture.directAgents.openAi,
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: firstMessageId,
+        });
+      } catch (error) {
+        conflictingReuse = error;
+      }
+      expect(conflictingReuse).toBeInstanceOf(GarconApiError);
+      expect((conflictingReuse as GarconApiError).body).toMatchObject({
+        errorCode: 'IDEMPOTENCY_CONFLICT',
+      });
+      await fixture.client.ping();
+
+      const second = await fixture.client.runDirectChat({
+        chatId,
+        content: repeatedContent,
+        agent: fixture.directAgents.openAi,
+        clientMessageId: secondMessageId,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, second.turnId);
+
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(2);
+      const transcript = await fixture.client.getMessages(chatId);
+      const userRows = transcript.messages.filter((entry) => entry.message.type === 'user-message');
+      expect(userRows.map((entry) => ({
+        ordinal: entry.ordinal,
+        content: entry.message.type === 'user-message' ? entry.message.content : null,
+        clientMessageId: entry.message.type === 'user-message'
+          ? entry.message.metadata?.clientMessageId
+          : null,
+      }))).toEqual([
+        {
+          ordinal: expect.any(Number),
+          content: repeatedContent,
+          clientMessageId: firstMessageId,
+        },
+        {
+          ordinal: expect.any(Number),
+          content: repeatedContent,
+          clientMessageId: secondMessageId,
+        },
+      ]);
+      expect(userRows[1]!.ordinal).toBeGreaterThan(userRows[0]!.ordinal);
+      expect(JSON.stringify(transcript.messages)).not.toContain('different-content-with-reused-identity');
+    });
+  }, 15_000);
+
   test('rejects a concurrent direct turn before mutating transcript state', async () => {
     await withIntegrationFixture('same-chat-direct-admission', async (fixture) => {
       const chatId = fixture.newChatId();
