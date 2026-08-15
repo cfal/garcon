@@ -8,12 +8,12 @@ import {
 import {
   runtimeRows,
   type AgentRuntimeExecution,
+  type AgentRuntimeEvent,
   type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
   type AgentRuntimeResumeRequest,
   type AgentRuntimeStartRequest,
 } from '@garcon/server-agent-common/execution/runtime-events';
-import { AgentRunTracker } from '@garcon/server-agent-common/execution/run-tracker';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { CodexConfig } from '../../config.js';
@@ -36,8 +36,17 @@ interface CodexRuntimeConfiguration {
 
 type CodexGoalControlRuntimeRequest = Omit<AgentGoalControlRequest, 'sink'>;
 
+interface CodexOperation {
+  readonly chatId: string;
+  readonly runId: string;
+  readonly publish: AgentRuntimePublisher;
+}
+
 export class CodexExecution implements AgentRuntimeExecution {
-  readonly #runs = new AgentRunTracker();
+  // Keyed by the operation the app-server names its events with. Nothing is resolved from what
+  // the chat or session is doing now, so an event from a replaced operation reaches that
+  // operation's own publisher and its closed sink refuses it.
+  readonly #operations = new Map<string, CodexOperation>();
 
   constructor(
     private readonly host: AgentHost,
@@ -46,37 +55,34 @@ export class CodexExecution implements AgentRuntimeExecution {
     private readonly config: CodexConfig,
   ) {
     // The app-server multiplexes every chat over one process-wide stream, so each event is
-    // matched to the turn that produced it by the turn id Codex itself assigns. Content it
-    // flushes after a turn ends carries no turn id and follows that session's last turn.
+    // matched to the operation Codex names it with and to nothing else.
     runtime.onMessages((chatId, messages, metadata) => {
-      const run = this.#runs.correlate(chatId, metadata);
-      if (!run) return;
-      run.publish({ type: 'messages', rows: runtimeRows(messages), runId: run.runId });
+      this.#deliver(chatId, metadata, (operation) => ({
+        type: 'messages',
+        rows: runtimeRows(messages),
+        runId: operation.runId,
+      }));
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const run = this.#runs.correlate(chatId, metadata);
-      if (!run) return;
-      run.publish({ type: 'run-ended', runId: run.runId, outcome: 'finished', exitCode });
-      this.#runs.finish(chatId, run.runId);
+      this.#deliver(chatId, metadata, (operation) => ({
+        type: 'run-ended',
+        runId: operation.runId,
+        outcome: 'finished',
+        exitCode,
+      }));
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const run = this.#runs.correlate(chatId, metadata);
-      if (!run) return;
-      run.publish({
+      this.#deliver(chatId, metadata, (operation) => ({
         type: 'run-ended',
-        runId: run.runId,
+        runId: operation.runId,
         outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message },
-      });
-      this.#runs.finish(chatId, run.runId);
+      }));
     });
   }
 
   async start(request: AgentRuntimeStartRequest, publish: AgentRuntimePublisher) {
-    // A fresh session supersedes whatever produced this chat before, so the routes that
-    // belonged to it retire here rather than lingering for the life of the process.
-    this.#runs.release(request.chatId);
-    this.#runs.register(request.chatId, request.runId, publish);
+    this.#capture(request.chatId, request.runId, publish);
     try {
       const configuration = await this.#runtimeConfiguration(request);
       const runtimeRequest = prepareStartRequest(request, configuration);
@@ -120,7 +126,6 @@ export class CodexExecution implements AgentRuntimeExecution {
           }
         : emitStarted(started);
     } catch (error) {
-      this.#runs.finish(request.chatId, request.runId);
       throw error;
     }
   }
@@ -133,7 +138,7 @@ export class CodexExecution implements AgentRuntimeExecution {
     request: CodexGoalControlRuntimeRequest,
     publish: AgentRuntimePublisher,
   ): Promise<boolean> {
-    const predecessor = this.#runs.current(request.chatId);
+    const predecessor = this.#operations.get(request.chatId) ?? null;
     const runtimeRequest = prepareResumeRequest(
       request,
       await this.#runtimeConfiguration(request),
@@ -141,13 +146,15 @@ export class CodexExecution implements AgentRuntimeExecution {
     );
     return this.runtime.submitGoalControl(
       runtimeRequest,
-      (handoff) => request.beforeDelivery(this.#runs.handoff(
-        request.chatId,
-        predecessor,
-        request.runId,
-        publish,
-        handoff,
-      )),
+      (handoff) => request.beforeDelivery({
+        validate: () => handoff.validate(),
+        commit: () => {
+          // The successor continues the operation its predecessor owned, so it keeps that
+          // publisher and only its ephemeral run id changes.
+          this.#capture(request.chatId, request.runId, predecessor?.publish ?? publish);
+          handoff.commit();
+        },
+      }),
     );
   }
 
@@ -193,7 +200,7 @@ export class CodexExecution implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,
   ): Promise<void> {
-    this.#runs.register(request.chatId, request.runId, publish);
+    this.#capture(request.chatId, request.runId, publish);
     try {
       await action(prepareResumeRequest(
         request,
@@ -201,8 +208,41 @@ export class CodexExecution implements AgentRuntimeExecution {
         this.nativeSessions,
       ));
     } catch (error) {
-      this.#runs.finish(request.chatId, request.runId);
       throw error;
+    }
+  }
+
+  #capture(chatId: string, runId: string, publish: AgentRuntimePublisher): void {
+    this.#operations.set(runId, { chatId, runId, publish });
+  }
+
+  // Publishing at a sink the transcript has closed is how a superseded operation is refused, so
+  // the rejection is contained here rather than tearing down a stream every chat shares.
+  #deliver(
+    chatId: string,
+    metadata: { readonly turnId?: string; readonly clientRequestId?: string } | undefined,
+    build: (operation: CodexOperation) => AgentRuntimeEvent,
+  ): void {
+    const named = metadata?.turnId ?? metadata?.clientRequestId ?? null;
+    const operation = named ? this.#operations.get(named) : undefined;
+    if (!operation || operation.chatId !== chatId) {
+      this.host.logger.warn('Dropped a Codex provider event with no owning operation', {
+        chatId,
+        turnId: named,
+        eventType: build({ chatId, runId: named ?? '', publish: () => {} }).type,
+      });
+      return;
+    }
+    const event = build(operation);
+    try {
+      operation.publish(event);
+    } catch (error) {
+      this.host.logger.warn('Dropped a Codex provider event at an unavailable sink', {
+        chatId,
+        turnId: operation.runId,
+        eventType: event.type,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
