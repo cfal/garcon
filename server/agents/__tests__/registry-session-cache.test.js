@@ -3,12 +3,18 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+  UserMessage,
+} from '../../../common/chat-types.ts';
 import { ChatRegistry } from '../../chats/store.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRegistry } from '../registry.ts';
 
 const CHAT_ID = '1783725900000200';
+const AT = '2026-08-15T00:00:00.000Z';
 
 describe('AgentRegistry session cache', () => {
   let root;
@@ -78,5 +84,92 @@ describe('AgentRegistry session cache', () => {
       },
     });
     expect(chats.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('selects preview text only from the conversational ledger fold', async () => {
+    const viewId = ledger.currentView(CHAT_ID).viewId;
+    ledger.appendInputAndCompose({
+      chatId: CHAT_ID,
+      viewId,
+      message: new UserMessage(AT, 'preview-first-user'),
+      attachments: [],
+      clientMessageId: 'preview-message-1',
+      steer: false,
+    });
+    const producer = ledger.openProducer(CHAT_ID, 'test');
+    producer.sink.publish({
+      type: 'session',
+      session: { agentSessionId: 'native-preview', nativeSession: null, nativeSeedReceipt: null },
+    });
+    producer.sink.publish({
+      type: 'rows',
+      rows: [{ message: new AssistantMessage(AT, 'preview-initial-answer') }],
+    });
+    ledger.beginRun(CHAT_ID, 'preview-run');
+    producer.sink.publish({
+      type: 'permission',
+      runId: 'preview-run',
+      lifecycle: {
+        kind: 'requested',
+        requestId: 'preview-permission',
+        incarnation: 'preview-incarnation',
+        requestedTool: new BashToolUseMessage(AT, 'preview-tool', 'pwd'),
+        options: [],
+      },
+      decision: {
+        requestId: 'preview-permission',
+        incarnation: 'preview-incarnation',
+        respond: async () => {},
+      },
+    });
+    producer.sink.publish({
+      type: 'run-ended',
+      runId: 'preview-run',
+      outcome: 'finished',
+    });
+    producer.sink.publish({
+      type: 'rows',
+      rows: [{ message: new AssistantMessage(AT, 'preview-late-answer') }],
+    });
+    producer.sink.publish({
+      type: 'permission',
+      runId: 'preview-run',
+      lifecycle: {
+        kind: 'cancelled',
+        requestId: 'preview-permission',
+        incarnation: 'preview-incarnation',
+        reason: 'already ended',
+      },
+    });
+    ledger.appendNotice({
+      chatId: CHAT_ID,
+      viewId,
+      message: 'preview-notice',
+      detail: { action: 'reload-native-history' },
+    });
+    await Promise.resolve();
+    const registry = new AgentRegistry({
+      registry: chats,
+      integrations: {
+        has: () => false,
+        get: () => null,
+        require: () => { throw new Error('unused'); },
+        list: () => [],
+      },
+      endpointResolver: {},
+      getCarryOverRevision: () => 'carry-1',
+      ledger,
+      adoption: { ensure: async () => ledger.currentView(CHAT_ID) },
+      hasPendingOwnershipTransfer: () => false,
+    });
+
+    await expect(registry.getPreview(chats.getChat(CHAT_ID), CHAT_ID)).resolves.toEqual({
+      preview: {
+        firstMessage: 'preview-first-user',
+        lastMessage: 'preview-late-answer',
+        createdAt: AT,
+        lastActivity: AT,
+      },
+    });
   });
 });

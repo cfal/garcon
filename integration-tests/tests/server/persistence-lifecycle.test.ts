@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 import { parseServerRuntimeProbe } from '../../../common/server-runtime.js';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+} from '../../../common/chat-types.js';
+import type { LedgerRowDraft } from '../../../server/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -74,6 +81,104 @@ describe('persistence lifecycle', () => {
       ]);
     });
   });
+
+  test('builds direct context from every conversational row and no lifecycle rows', async () => {
+    await withIntegrationFixture('direct-context-ledger-fold', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const initial = await fixture.client.startDirectChat({
+        chatId,
+        content: 'context-initial-user',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, initial.turnId);
+      const before = await fixture.client.getMessages(chatId);
+      const at = '2026-08-15T00:00:00.000Z';
+      const injected: LedgerRowDraft[] = [
+        {
+          kind: 'notice',
+          at,
+          message: 'context-notice-must-not-reach-provider',
+          detail: { action: 'reload-native-history' },
+          providerMeta: null,
+        },
+        {
+          kind: 'permission-requested',
+          at,
+          lifecycle: {
+            kind: 'requested',
+            requestId: 'context-permission',
+            incarnation: 'context-incarnation',
+            requestedTool: new BashToolUseMessage(at, 'context-tool', 'printf hidden'),
+            options: [],
+          },
+          providerMeta: null,
+        },
+        {
+          kind: 'provider-row',
+          at,
+          message: new AssistantMessage(at, 'context-late-provider-output'),
+          providerMeta: null,
+        },
+        {
+          kind: 'permission-cancelled',
+          at,
+          lifecycle: {
+            kind: 'cancelled',
+            requestId: 'context-permission',
+            incarnation: 'context-incarnation',
+            reason: 'run ended',
+          },
+          providerMeta: null,
+        },
+      ];
+
+      await fixture.restartGarcon({
+        beforeStart: async () => {
+          const store = new TranscriptLedgerStore(
+            join(fixture.dirs.workspace, 'transcript-ledgers'),
+          );
+          try {
+            const view = store.currentView(chatId);
+            if (view?.viewId !== before.transcriptViewId) {
+              throw new Error('The context fixture opened a different transcript view.');
+            }
+            store.append(chatId, view.viewId, injected);
+          } finally {
+            store.close();
+          }
+        },
+      });
+
+      const next = await fixture.client.runDirectChat({
+        chatId,
+        content: 'context-next-user',
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, next.turnId);
+
+      expect(fixture.fakeProviders.openAi.requests().at(-1)?.body.messages).toEqual([
+        { role: 'user', content: 'context-initial-user' },
+        { role: 'assistant', content: 'echo:context-initial-user' },
+        { role: 'assistant', content: 'context-late-provider-output' },
+        { role: 'user', content: 'context-next-user' },
+      ]);
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(transcript.messages.map((entry) => entry.message.type)).toEqual([
+        'user-message',
+        'assistant-message',
+        'transcript-notice',
+        'permission-request',
+        'assistant-message',
+        'permission-cancelled',
+        'user-message',
+        'assistant-message',
+      ]);
+      const ordinals = transcript.messages.map((entry) => entry.ordinal);
+      expect(ordinals).toEqual([...ordinals].sort((left, right) => left - right));
+      expect(new Set(ordinals).size).toBe(ordinals.length);
+    });
+  }, 20_000);
 
   test('deduplicates committed submissions after a crash restart', async () => {
     await withIntegrationFixture('committed-submission-restart', async (fixture) => {
