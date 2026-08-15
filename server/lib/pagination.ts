@@ -1,10 +1,12 @@
+import { CHAT_MESSAGES_MAX_LIMIT } from '../../common/chat-view.js';
+
 export interface PaginationOptions {
   defaultLimit?: number;
   defaultOffset?: number;
   maxLimit: number;
 }
 
-export const CHAT_MESSAGES_MAX_LIMIT = 200;
+export { CHAT_MESSAGES_MAX_LIMIT };
 
 export interface PaginationParams {
   limit: number;

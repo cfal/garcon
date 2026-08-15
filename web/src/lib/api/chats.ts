@@ -15,6 +15,7 @@ import {
 } from '$shared/chat-snapshot';
 import type { ApiProtocol } from '$shared/api-providers';
 import {
+	CHAT_MESSAGES_MAX_LIMIT,
 	parseChatHistoryState,
 	parseResendCandidates,
 	parseTranscriptMessages,
@@ -412,7 +413,8 @@ function validateChatMessagesPage(
 	page: ValidatedChatMessagesPage,
 ): void {
 	if (page.chatId !== request.chatId) invalidChatMessagesPage('chatId does not match request');
-	if (page.limit !== (request.limit ?? 50)) invalidChatMessagesPage('limit does not match request');
+	const expectedLimit = Math.min(request.limit ?? 50, CHAT_MESSAGES_MAX_LIMIT);
+	if (page.limit !== expectedLimit) invalidChatMessagesPage('limit does not match request');
 	if (request.beforeOrdinal === undefined) {
 		if (page.pageNewestOrdinal !== page.lastOrdinal) {
 			invalidChatMessagesPage('newest page cursor does not match lastOrdinal');

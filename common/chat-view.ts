@@ -1,6 +1,8 @@
 import { ErrorMessage, parseChatMessage } from './chat-types';
 import type { ChatMessage } from './chat-types';
 
+export const CHAT_MESSAGES_MAX_LIMIT = 200;
+
 export interface TranscriptMessage {
   readonly ordinal: number;
   readonly message: ChatMessage;
