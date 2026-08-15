@@ -504,6 +504,7 @@ describe('chats API contract', () => {
 			sourceChatId: 'c-1',
 			chatId: 'c-2',
 			command: 'continue',
+			allowHandoffFork: true,
 			permissionMode: 'default',
 			thinkingMode: 'none',
 			agentSettings: CLAUDE_SETTINGS,
@@ -519,6 +520,7 @@ describe('chats API contract', () => {
 			sourceChatId: 'c-1',
 			chatId: 'c-2',
 			command: 'continue',
+			allowHandoffFork: true,
 		});
 	});
 

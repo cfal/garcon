@@ -929,6 +929,51 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
 	});
 
+	it('asks before a fork run falls back and repeats it with the same command identities', async () => {
+		const { deps } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkRunChat
+			.mockRejectedValueOnce(new ApiError(
+				409,
+				'The native fork is not materialized yet',
+				'TRANSCRIPT_NOT_YET_PERSISTED',
+				undefined,
+				true,
+			))
+			.mockResolvedValueOnce({
+				success: true,
+				commandType: 'fork-run',
+				clientRequestId: 'request-1',
+				chatId: 'chat-2',
+				turnId: 'turn-1',
+				status: 'accepted',
+				acceptedAt: '2026-07-14T00:00:00.000Z',
+				chat: forked,
+			});
+
+		await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(deps.confirmHandoffFork).toHaveBeenCalledOnce();
+		expect(mockForkRunChat).toHaveBeenCalledTimes(2);
+		const first = mockForkRunChat.mock.calls[0]![0];
+		const confirmed = mockForkRunChat.mock.calls[1]![0];
+		expect(first).not.toHaveProperty('allowHandoffFork');
+		expect(confirmed).toEqual({ ...first, allowHandoffFork: true });
+		expect(confirmed).toMatchObject({
+			clientRequestId: first.clientRequestId,
+			clientMessageId: first.clientMessageId,
+			chatId: first.chatId,
+		});
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
+	});
+
 	it('retries an ambiguous fork response with the same command identity', async () => {
 		const { deps } = createDeps();
 		const forked = createServerEntry('chat-2');

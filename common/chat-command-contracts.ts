@@ -121,7 +121,7 @@ export interface ForkChatCommandRequest {
   sourceChatId: string;
   chatId: string;
   upToOrdinal?: number;
-  // Consent to a handoff fork when the point cannot be forked natively. The client sets it
+  // Consent to a handoff fork when the request cannot be forked natively. The client sets it
   // only after asking the user, so an unconfirmed request surfaces the refusal instead.
   allowHandoffFork?: boolean;
   transcriptViewId?: string;
@@ -200,6 +200,7 @@ export interface ForkRunCommandRequest {
   sourceChatId: string;
   chatId: string;
   command: string;
+  allowHandoffFork?: boolean;
   images?: AgentCommandImage[];
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
@@ -590,12 +591,14 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
   const images = optionalImages(body.images);
   const agentSettings = optionalAgentSettings(body.agentSettings, 'agentSettings');
   const model = optionalString(body, 'model');
+  const allowHandoffFork = parseHandoffForkConsent(body);
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     sourceChatId: requiredChatId(body, 'sourceChatId'),
     chatId: requiredChatId(body, 'chatId'),
     command: contentOrImages(body, 'command', images),
+    ...(allowHandoffFork ? { allowHandoffFork: true } : {}),
     ...(images === undefined ? {} : { images }),
     permissionMode: body.permissionMode === undefined
       ? undefined
@@ -627,10 +630,7 @@ export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequ
   if (upToOrdinal !== undefined && transcriptViewId === undefined) {
     throw new CommandRequestValidationError('upToOrdinal requires transcriptViewId');
   }
-  const allowHandoffFork = body.allowHandoffFork;
-  if (allowHandoffFork !== undefined && typeof allowHandoffFork !== 'boolean') {
-    throw new CommandRequestValidationError('allowHandoffFork must be a boolean');
-  }
+  const allowHandoffFork = parseHandoffForkConsent(body);
   return {
     sourceChatId: requiredChatId(body, 'sourceChatId'),
     chatId: requiredChatId(body, 'chatId'),
@@ -638,6 +638,14 @@ export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequ
     ...(allowHandoffFork ? { allowHandoffFork: true } : {}),
     ...(transcriptViewId === undefined ? {} : { transcriptViewId }),
   };
+}
+
+function parseHandoffForkConsent(body: Record<string, unknown>): true | undefined {
+  const consent = body.allowHandoffFork;
+  if (consent !== undefined && typeof consent !== 'boolean') {
+    throw new CommandRequestValidationError('allowHandoffFork must be a boolean');
+  }
+  return consent === true ? true : undefined;
 }
 
 export function parseDeleteChatCommandRequest(value: unknown): DeleteChatCommandRequest {

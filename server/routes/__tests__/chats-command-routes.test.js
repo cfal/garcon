@@ -778,6 +778,35 @@ describe('REST chat command routes', () => {
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledOnce();
   });
 
+  it('POST /fork-run carries handoff-fork consent and rejects a non-boolean', async () => {
+    const agent = createRouteAgent();
+    const request = agentRunBody({
+      clientRequestId: 'req-fork-run-consent',
+      clientMessageId: 'msg-fork-run-consent',
+      sourceChatId: CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue',
+    });
+
+    const accepted = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
+      ...request,
+      allowHandoffFork: true,
+    });
+
+    expect(accepted.response.status).toBe(202);
+    expect(forkChatFileCopy).toHaveBeenCalledWith(
+      expect.objectContaining({ allowHandoffFork: true }),
+    );
+
+    const rejected = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
+      ...request,
+      allowHandoffFork: 'yes',
+    });
+
+    expect(rejected.response.status).toBe(400);
+    expect(rejected.body).toMatchObject({ error: 'allowHandoffFork must be a boolean' });
+  });
+
   it('POST /fork preserves retryable transcript-persistence refusals', async () => {
     const agent = createRouteAgent();
     forkChatFileCopy.mockRejectedValueOnce(new CommandValidationError(

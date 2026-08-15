@@ -260,7 +260,11 @@ describe('forkChatFileCopy', () => {
       targetChatId: 'target-chat',
       allowHandoffFork: false,
       ...deps,
-    })).rejects.toBeDefined();
+    })).rejects.toMatchObject({
+      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      status: 409,
+      retryable: true,
+    });
 
     expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
@@ -315,7 +319,11 @@ describe('forkChatFileCopy', () => {
       ...deps,
     };
 
-    await expect(forkChatFileCopy(request)).rejects.toBeDefined();
+    await expect(forkChatFileCopy(request)).rejects.toMatchObject({
+      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      status: 409,
+      retryable: true,
+    });
     expect(deps.registry.addChat).not.toHaveBeenCalled();
 
     const result = await forkChatFileCopy(request);

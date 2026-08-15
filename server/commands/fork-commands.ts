@@ -54,6 +54,7 @@ export class ForkCommands {
       images: input.images,
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
+      ...(input.allowHandoffFork ? { allowHandoffFork: true } : {}),
       options: runOptionsForCommand(input),
     };
     return this.support.withChatMutationLocks(
@@ -319,6 +320,9 @@ function normalizeNextForkOrdinal(value: unknown): number | null {
 }
 
 function forkPayload(input: NormalizedSubmitForkRunInput, clientMessageId: string): Record<string, unknown> {
+  // Consent retries the same logical command after a pre-schedule refusal, so it is not part of
+  // the idempotency payload. The prompt, attachments, target, and both client identities remain
+  // unchanged while the explicit capability permits only the handoff fallback.
   return {
     sourceChatId: input.sourceChatId,
     chatId: input.chatId,

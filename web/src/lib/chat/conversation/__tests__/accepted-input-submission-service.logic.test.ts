@@ -96,6 +96,35 @@ describe('AcceptedInputSubmissionService', () => {
 		expect(createId).toHaveBeenCalledTimes(2);
 	});
 
+	it('adds handoff-fork consent without changing the logical command identities', async () => {
+		const fork = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
+		const service = new AcceptedInputSubmissionService(
+			transport({ fork }),
+			vi.fn().mockReturnValueOnce('request-fork').mockReturnValueOnce('message-fork'),
+		);
+		const submission = service.fork({
+			sourceChatId: 'chat-1',
+			chatId: 'chat-2',
+			command: 'continue',
+		});
+
+		await submission.submit();
+		await submission.submitWithHandoffFork();
+
+		expect(fork).toHaveBeenCalledTimes(2);
+		expect(fork.mock.calls[0]?.[0]).toEqual({
+			sourceChatId: 'chat-1',
+			chatId: 'chat-2',
+			command: 'continue',
+			clientRequestId: 'request-fork',
+			clientMessageId: 'message-fork',
+		});
+		expect(fork.mock.calls[1]?.[0]).toEqual({
+			...fork.mock.calls[0]?.[0],
+			allowHandoffFork: true,
+		});
+	});
+
 	it('uses stable request and message identities for queued and goal-control submissions', async () => {
 		const enqueue = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
 		const goalControl = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });

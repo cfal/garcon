@@ -2244,6 +2244,48 @@ describe('ChatCommandService', () => {
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
+  it('retries a refused fork run with consent under the same command identity', async () => {
+    const forkChatFileCopy = mock(async (input) => {
+      if (!input.allowHandoffFork) {
+        throw new DomainError(
+          'TRANSCRIPT_NOT_YET_PERSISTED',
+          'The native fork is not materialized yet.',
+          409,
+          true,
+        );
+      }
+      return {
+        sourceChatId: SOURCE_CHAT_ID,
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        agentSessionId: null,
+        sourceNextForkOrdinal: 1,
+        rollback: mock(async () => undefined),
+      };
+    });
+    const { service, queue } = makeService({ forkChatFileCopy });
+    const request = {
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      clientRequestId: 'req-fork-consent',
+      clientMessageId: 'msg-fork-consent',
+    };
+
+    await expect(service.submitForkRun(request)).rejects.toMatchObject({
+      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      status: 409,
+    });
+    const retry = await service.submitForkRun({ ...request, allowHandoffFork: true });
+
+    expect(retry.status).toBe('accepted');
+    expect(forkChatFileCopy).toHaveBeenCalledTimes(2);
+    expect(forkChatFileCopy.mock.calls[0][0]).not.toHaveProperty('allowHandoffFork');
+    expect(forkChatFileCopy.mock.calls[1][0]).toMatchObject({ allowHandoffFork: true });
+    expect(queue.admitUserInput).toHaveBeenCalledOnce();
+    expect(queue.runReservedTurn).toHaveBeenCalledOnce();
+  });
+
   it('cleans a fork target when preparation fails before returning its result', async () => {
     const forkChatFileCopy = mock(async ({ registry }) => {
       registry.addChat({

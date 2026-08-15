@@ -187,6 +187,14 @@ export async function forkChatFileCopy({
       forkOutcome = null;
     }
   }
+  if (forkOutcome?.kind === 'unmaterialized' && !allowHandoffFork) {
+    throw new DomainError(
+      'TRANSCRIPT_NOT_YET_PERSISTED',
+      'The native fork is not materialized yet. Try again shortly or confirm a handoff fork.',
+      409,
+      true,
+    );
+  }
   const nativeFork = forkOutcome?.kind === 'materialized' ? forkOutcome.session : null;
   try {
     validateForkedSeedReceipt(sourceSession, nativeFork);

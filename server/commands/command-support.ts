@@ -183,6 +183,7 @@ export interface NormalizedSubmitRunInput {
 
 export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
   sourceChatId: string;
+  allowHandoffFork?: boolean;
 }
 
 export type ChatStartInput = StartChatCommandRequest;

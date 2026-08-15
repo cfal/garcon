@@ -347,6 +347,28 @@ describe('chat command request parsers', () => {
     })).toThrow('upToOrdinal requires transcriptViewId');
   });
 
+  it('carries handoff-fork consent on both fork request shapes', () => {
+    const forkRun = {
+      clientRequestId: 'request-fork-run',
+      clientMessageId: 'message-fork-run',
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: CHAT_ID,
+      command: 'continue in fork',
+    };
+
+    expect(parseForkRunCommandRequest({ ...forkRun, allowHandoffFork: true }))
+      .toMatchObject({ allowHandoffFork: true });
+    expect(parseForkChatCommandRequest({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: CHAT_ID,
+      allowHandoffFork: true,
+    })).toMatchObject({ allowHandoffFork: true });
+    expect(parseForkRunCommandRequest({ ...forkRun, allowHandoffFork: false }))
+      .not.toHaveProperty('allowHandoffFork');
+    expect(() => parseForkRunCommandRequest({ ...forkRun, allowHandoffFork: 'yes' }))
+      .toThrow('allowHandoffFork must be a boolean');
+  });
+
   it('rejects malformed structured command fields', () => {
     expect(() => parseQueueEntryReplaceCommandRequest({
       clientRequestId: 'request-4',
