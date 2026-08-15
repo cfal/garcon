@@ -337,6 +337,51 @@ describe('TranscriptLedgerStore', () => {
     db.close();
   });
 
+  it('preserves submission identity through staging and promotion', () => {
+    const current = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('old-view'),
+      contentStartOrdinal: 1,
+      rows: [userDraft('message-one', 'old content')],
+    });
+
+    expect(() => store.stageView('chat-one', {
+      viewId: transcriptViewId('invalid-stage'),
+      contentStartOrdinal: 1,
+      rows: [
+        userDraft('message-one', 'preserved content'),
+        userDraft('message-one', 'duplicate content'),
+      ],
+    })).toThrow('Transcript view contains duplicate client message IDs');
+    expect(store.currentView('chat-one').viewId).toBe(current.viewId);
+    expect(store.currentRows('chat-one')).toMatchObject([{
+      kind: 'user-input',
+      detail: {
+        clientMessageId: 'message-one',
+        message: { content: 'old content' },
+      },
+    }]);
+
+    const staged = store.stageView('chat-one', {
+      viewId: transcriptViewId('new-view'),
+      contentStartOrdinal: 1,
+      rows: [
+        userDraft('message-one', 'preserved content'),
+        provider('replacement answer'),
+      ],
+    });
+    store.replaceCurrentView('chat-one', current.viewId, staged.viewId);
+
+    const retry = store.appendInputAndCompose('chat-one', {
+      viewId: staged.viewId,
+      at: '2026-08-12T00:00:01.000Z',
+      detail: inputDetail('message-one', 'preserved content'),
+    });
+    expect(retry).toMatchObject({ inserted: false, prompt: [] });
+    expect(retry.input).toMatchObject({ ordinal: 1, detail: { clientMessageId: 'message-one' } });
+    expect(store.currentRows('chat-one')).toHaveLength(2);
+    expect(store.currentRows('chat-one').map((row) => row.ordinal)).toEqual([1, 2]);
+  });
+
   it('reopens the complete old view when cutover fails before commit', () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
