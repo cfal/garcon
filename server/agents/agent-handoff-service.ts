@@ -15,10 +15,19 @@ import { createLogger } from '../lib/log.js';
 import type { IntegrationRegistry } from './integration-registry.js';
 import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
-import type { TranscriptWatermark } from '../ledger/contracts.js';
+import type { LedgerAgentSwitchRow, TranscriptWatermark } from '../ledger/contracts.js';
 import { frozenConversationDrafts } from '../ledger/projection.js';
 
 const logger = createLogger('agents:handoff');
+const MAX_RECOVERY_RETRY_DELAY_MS = 1_000;
+const INITIAL_RECOVERY_RETRY_DELAY_MS = 25;
+
+type HandoffRecoveryStep = 'ledger-boundary' | 'registry' | 'journal' | 'producer' | 'fenced';
+
+interface PendingHandoffRecovery {
+  readonly intent: AgentHandoffIntent;
+  step: HandoffRecoveryStep;
+}
 
 export interface AgentHandoffPreparation {
   readonly operation: 'agent-handoff';
@@ -27,6 +36,10 @@ export interface AgentHandoffPreparation {
 }
 
 export class AgentHandoffService {
+  readonly #recoveries = new Map<string, PendingHandoffRecovery>();
+  readonly #activeRecoveryAttempts = new Map<string, Promise<void>>();
+  readonly #recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   constructor(private readonly deps: {
     readonly registry: IChatRegistry;
     readonly integrations: IntegrationRegistry;
@@ -256,41 +269,24 @@ export class AgentHandoffService {
   }
 
   async recoverPendingHandoffs(): Promise<void> {
-    for (const intent of this.deps.ownership.pendingHandoffs()) {
-      await this.#rollForwardPersistedHandoff(intent);
-      await this.#notifyCommitted(intent.chatId);
-    }
+    await Promise.all(
+      this.deps.ownership.pendingHandoffs().map((intent) => {
+        let recovery = this.#recoveries.get(intent.operationId);
+        if (!recovery) {
+          recovery = { intent, step: 'ledger-boundary' };
+          this.#recoveries.set(intent.operationId, recovery);
+        }
+        return this.#recoverHandoff(recovery, 0);
+      }),
+    );
   }
 
   async #rollForwardPersistedHandoff(intent: AgentHandoffIntent): Promise<void> {
     this.deps.ledger.closeProducer(intent.chatId);
-    await retryHandoffStep('ledger boundary recovery', async () => {
-      // The boundary marker is written past the captured watermark and the content start is
-      // advanced past the marker, so it closes the outgoing owner's history rather than
-      // opening the successor's. Roll-forward reruns after a crash, so an existing marker
-      // is adopted instead of appended twice.
-      const existing = this.deps.ledger.rowsAfter(
-        intent.chatId,
-        intent.watermark.viewId,
-        intent.watermark.ordinal,
-      )[0];
-      const marker = existing?.kind === 'agent-switch'
-        ? existing
-        : this.deps.ledger.appendAgentSwitch(intent.chatId, intent.watermark.viewId, {
-          fromAgentId: intent.source.agentId,
-          toAgentId: intent.target.execution.agentId,
-          // The decision record carries no source model, and the registry still holds the
-          // source here because ownership flips further down. A recovery run that already
-          // flipped it also already wrote the marker, so it adopts rather than re-reads.
-          fromModel: this.deps.registry.getChat(intent.chatId)?.model ?? null,
-          toModel: intent.target.execution.model ?? null,
-        });
-      this.deps.ledger.advanceContentStart(
-        intent.chatId,
-        intent.watermark.viewId,
-        marker.ordinal + 1,
-      );
-    });
+    await retryHandoffStep(
+      'ledger boundary recovery',
+      () => this.#applyLedgerBoundary(intent),
+    );
     await retryHandoffStep(
       'registry recovery',
       () => this.deps.ownership.applyHandoffDecision(intent.operationId),
@@ -305,6 +301,114 @@ export class AgentHandoffService {
       'producer recovery',
       () => this.deps.reopenProducer(intent.chatId),
     );
+  }
+
+  #applyLedgerBoundary(intent: AgentHandoffIntent): void {
+    const markers = this.deps.ledger.rowsAfter(
+      intent.chatId,
+      intent.watermark.viewId,
+      intent.watermark.ordinal,
+    ).filter((row): row is LedgerAgentSwitchRow => row.kind === 'agent-switch');
+    if (markers.length > 1 || markers.some((marker) => !matchesSwitchMarker(marker, intent))) {
+      throw new HandoffBoundaryCorruptionError(intent.chatId);
+    }
+    const marker = markers[0]
+      ?? this.deps.ledger.appendAgentSwitch(intent.chatId, intent.watermark.viewId, {
+        fromAgentId: intent.source.agentId,
+        toAgentId: intent.target.execution.agentId,
+        fromModel: this.deps.registry.getChat(intent.chatId)?.model ?? null,
+        toModel: intent.target.execution.model ?? null,
+      });
+    this.deps.ledger.advanceContentStart(
+      intent.chatId,
+      intent.watermark.viewId,
+      marker.ordinal + 1,
+    );
+  }
+
+  #recoverHandoff(recovery: PendingHandoffRecovery, retryAttempt: number): Promise<void> {
+    const operationId = recovery.intent.operationId;
+    const active = this.#activeRecoveryAttempts.get(operationId);
+    if (active) return active;
+    if (recovery.step === 'fenced' || this.#recoveryTimers.has(operationId)) {
+      return Promise.resolve();
+    }
+    const attempt = this.#attemptHandoffRecovery(recovery, retryAttempt);
+    this.#activeRecoveryAttempts.set(operationId, attempt);
+    const clear = () => {
+      if (this.#activeRecoveryAttempts.get(operationId) === attempt) {
+        this.#activeRecoveryAttempts.delete(operationId);
+      }
+    };
+    void attempt.then(clear, clear);
+    return attempt;
+  }
+
+  async #attemptHandoffRecovery(
+    recovery: PendingHandoffRecovery,
+    retryAttempt: number,
+  ): Promise<void> {
+    const { intent } = recovery;
+    try {
+      while (recovery.step !== 'fenced') {
+        switch (recovery.step) {
+          case 'ledger-boundary':
+            this.deps.ledger.closeProducer(intent.chatId);
+            this.#applyLedgerBoundary(intent);
+            recovery.step = 'registry';
+            break;
+          case 'registry':
+            await this.deps.ownership.applyHandoffDecision(intent.operationId);
+            recovery.step = 'journal';
+            break;
+          case 'journal':
+            await this.deps.ownership.completeHandoff(intent.operationId);
+            recovery.step = 'producer';
+            break;
+          case 'producer':
+            await this.deps.reopenProducer(intent.chatId);
+            this.#recoveries.delete(intent.operationId);
+            await this.#notifyCommitted(intent.chatId);
+            return;
+        }
+      }
+    } catch (error) {
+      logger.warn('Pending handoff recovery attempt failed', {
+        chatId: intent.chatId,
+        operationId: intent.operationId,
+        attempt: retryAttempt + 1,
+        code: error instanceof HandoffBoundaryCorruptionError
+          ? 'HANDOFF_BOUNDARY_CORRUPT'
+          : 'HANDOFF_RECOVERY_FAILED',
+      });
+      if (error instanceof HandoffBoundaryCorruptionError) {
+        recovery.step = 'fenced';
+        return;
+      }
+      this.#scheduleHandoffRecovery(recovery, retryAttempt);
+    }
+  }
+
+  #scheduleHandoffRecovery(recovery: PendingHandoffRecovery, retryAttempt: number): void {
+    const operationId = recovery.intent.operationId;
+    if (this.#recoveryTimers.has(operationId)) return;
+    const delay = Math.min(
+      MAX_RECOVERY_RETRY_DELAY_MS,
+      INITIAL_RECOVERY_RETRY_DELAY_MS * 2 ** retryAttempt,
+    );
+    const timer = setTimeout(() => {
+      if (this.#recoveryTimers.get(operationId) === timer) {
+        this.#recoveryTimers.delete(operationId);
+      }
+      const retry = () => {
+        void this.#recoverHandoff(recovery, retryAttempt + 1);
+      };
+      const active = this.#activeRecoveryAttempts.get(operationId);
+      if (active) void active.then(retry, retry);
+      else retry();
+    }, delay);
+    timer.unref?.();
+    this.#recoveryTimers.set(operationId, timer);
   }
 
   #requireUnchangedSource(chatId: string, expected: OwnershipFence): void {
@@ -340,6 +444,23 @@ function assertMatchingHandoff(intent: AgentHandoffIntent, submittedTargetHash: 
   );
 }
 
+class HandoffBoundaryCorruptionError extends Error {
+  override readonly name = 'HandoffBoundaryCorruptionError';
+
+  constructor(chatId: string) {
+    super(`Durable agent-switch boundary conflicts with the pending handoff for ${chatId}`);
+  }
+}
+
+function matchesSwitchMarker(
+  marker: LedgerAgentSwitchRow,
+  intent: AgentHandoffIntent,
+): boolean {
+  return marker.detail.fromAgentId === intent.source.agentId
+    && marker.detail.toAgentId === intent.target.execution.agentId
+    && marker.detail.toModel === (intent.target.execution.model ?? null);
+}
+
 async function retryHandoffStep<T>(
   label: string,
   operation: () => T | Promise<T>,
@@ -348,6 +469,7 @@ async function retryHandoffStep<T>(
     try {
       return await operation();
     } catch (error) {
+      if (error instanceof HandoffBoundaryCorruptionError) throw error;
       logger.warn('Decided handoff step will be retried', {
         label,
         attempts: attempts + 1,

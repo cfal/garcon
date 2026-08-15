@@ -204,9 +204,9 @@ describe('AgentHandoffService', () => {
   it('recovers later chats while an earlier handoff remains blocked', async () => {
     const first = { ...persistedIntent(), chatId: 'chat-a', operationId: 'handoff-a' };
     const second = { ...persistedIntent(), chatId: 'chat-b', operationId: 'handoff-b' };
-    let releaseFirst;
-    const firstBlocked = new Promise((resolve) => {
-      releaseFirst = resolve;
+    let markSecondStarted;
+    const secondStarted = new Promise((resolve) => {
+      markSecondStarted = resolve;
     });
     let markSecondRecovered;
     const secondRecovered = new Promise((resolve) => {
@@ -215,7 +215,8 @@ describe('AgentHandoffService', () => {
     const ownership = {
       pendingHandoffs: () => [first, second],
       applyHandoffDecision: mock(async (operationId) => {
-        if (operationId === first.operationId) await firstBlocked;
+        if (operationId === first.operationId) await secondStarted;
+        if (operationId === second.operationId) markSecondStarted();
       }),
       completeHandoff: mock(async (operationId) => {
         if (operationId === second.operationId) markSecondRecovered();
@@ -227,14 +228,9 @@ describe('AgentHandoffService', () => {
     });
 
     const recovery = service.recoverPendingHandoffs();
-    const recoveredBeforeFirstReleased = await Promise.race([
-      secondRecovered.then(() => true),
-      Bun.sleep(25).then(() => false),
-    ]);
-    releaseFirst();
+    await secondRecovered;
     await recovery;
 
-    expect(recoveredBeforeFirstReleased).toBe(true);
     expect(ownership.completeHandoff).toHaveBeenCalledWith(second.operationId);
   });
 
@@ -323,7 +319,11 @@ describe('AgentHandoffService', () => {
       {
         kind: 'agent-switch',
         ordinal: 9,
-        detail: { fromAgentId: 'source-agent', toAgentId: 'target-agent' },
+        detail: {
+          fromAgentId: 'source-agent',
+          toAgentId: 'target-agent',
+          toModel: 'target-model',
+        },
       },
     ]);
     const service = createService({
@@ -347,7 +347,11 @@ describe('AgentHandoffService', () => {
     ledger.rowsAfter.mockReturnValue([{
       kind: 'agent-switch',
       ordinal: 8,
-      detail: { fromAgentId: 'different-source', toAgentId: 'different-target' },
+      detail: {
+        fromAgentId: 'source-agent',
+        toAgentId: 'target-agent',
+        toModel: 'different-target-model',
+      },
     }]);
     const service = createService({
       registry: { getChat: () => current },
