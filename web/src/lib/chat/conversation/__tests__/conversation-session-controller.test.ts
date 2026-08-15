@@ -10,6 +10,7 @@ import {
 	pauseChatQueue,
 	resumeChatQueue,
 	runChat,
+	sendPermissionDecision,
 	replaceQueuedInput,
 	steerChat,
 	steerQueuedEntry,
@@ -25,8 +26,10 @@ import {
 	type SessionControllerDeps,
 } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
+import type { ChatTransientControlAction } from '$shared/chat-transient-feed';
+import type { CommandAcceptedResponse } from '$shared/chat-command-contracts';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import type {
@@ -74,6 +77,7 @@ const mockInterruptAndSendChat = vi.mocked(interruptAndSendChat);
 const mockPauseChatQueue = vi.mocked(pauseChatQueue);
 const mockResumeChatQueue = vi.mocked(resumeChatQueue);
 const mockRunChat = vi.mocked(runChat);
+const mockSendPermissionDecision = vi.mocked(sendPermissionDecision);
 const mockStartChat = vi.mocked(startChat);
 const mockCreateQueuedInput = vi.mocked(createQueuedInput);
 const mockDeleteQueuedInput = vi.mocked(deleteQueuedInput);
@@ -93,6 +97,17 @@ function deferred<T>() {
 		reject = rej;
 	});
 	return { promise, resolve, reject };
+}
+
+function permissionDecisionAccepted(clientRequestId: string): CommandAcceptedResponse {
+	return {
+		success: true,
+		commandType: 'permission-decision',
+		clientRequestId,
+		chatId: 'chat-1',
+		status: 'accepted',
+		acceptedAt: '2026-05-14T00:00:00.000Z',
+	};
 }
 
 async function flushPromises(): Promise<void> {
@@ -451,6 +466,7 @@ describe('ConversationSessionController', () => {
 		mockPauseChatQueue.mockReset();
 		mockResumeChatQueue.mockReset();
 		mockRunChat.mockReset();
+		mockSendPermissionDecision.mockReset();
 		mockStartChat.mockReset();
 		mockCreateQueuedInput.mockReset();
 		mockDeleteQueuedInput.mockReset();
@@ -1691,7 +1707,12 @@ describe('ConversationSessionController', () => {
 		};
 		const controller = new ConversationSessionController(deps);
 
-		controller.handleExitPlanMode('perm-1', 'bypass', 'Use the approved design.');
+		controller.handleExitPlanMode(
+			'perm-1',
+			'incarnation-1',
+			'bypass',
+			'Use the approved design.',
+		);
 		await flushPromises();
 
 		expect(mockRunChat).toHaveBeenCalledWith(
@@ -1701,6 +1722,68 @@ describe('ConversationSessionController', () => {
 				agentSettings: expect.objectContaining({ values: { thinkingMode: 'off' } }),
 			}),
 		);
+	});
+
+	it('routes reused permission ids to their exact controls and removes only completed occurrences', async () => {
+		const firstResponse = deferred<CommandAcceptedResponse>();
+		const secondResponse = deferred<CommandAcceptedResponse>();
+		const firstControl = {
+			serverInstanceId: 'server-1',
+			chatId: 'chat-1',
+			runId: 'run-1',
+			id: 'permission-1',
+			incarnation: 'incarnation-1',
+		} satisfies ChatTransientControlAction;
+		const secondControl = {
+			...firstControl,
+			incarnation: 'incarnation-2',
+		} satisfies ChatTransientControlAction;
+		const { deps } = createDeps();
+		deps.conversationUi.pendingPermissionRequests = [
+			{
+				permissionRequestId: 'permission-1',
+				incarnation: 'incarnation-1',
+				requestedTool: new BashToolUseMessage('', 'tool-1', 'printf first'),
+				control: firstControl,
+			},
+			{
+				permissionRequestId: 'permission-1',
+				incarnation: 'incarnation-2',
+				requestedTool: new BashToolUseMessage('', 'tool-2', 'printf second'),
+				control: secondControl,
+			},
+		];
+		mockSendPermissionDecision.mockImplementation(({ control }) => {
+			if (control === firstControl) return firstResponse.promise;
+			if (control === secondControl) return secondResponse.promise;
+			throw new Error('Unexpected permission control');
+		});
+		const controller = new ConversationSessionController(deps);
+
+		controller.handlePermissionDecision('permission-1', 'incarnation-1', { allow: true });
+		controller.handlePermissionDecision('permission-1', 'incarnation-2', { allow: false });
+
+		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(1, expect.objectContaining({
+			permissionRequestId: 'permission-1',
+			control: firstControl,
+			allow: true,
+		}));
+		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(2, expect.objectContaining({
+			permissionRequestId: 'permission-1',
+			control: secondControl,
+			allow: false,
+		}));
+		expect(deps.conversationUi.pendingPermissionRequests).toHaveLength(2);
+
+		secondResponse.resolve(permissionDecisionAccepted('decision-2'));
+		await flushPromises();
+		expect(deps.conversationUi.pendingPermissionRequests.map((request) => request.incarnation)).toEqual([
+			'incarnation-1',
+		]);
+
+		firstResponse.resolve(permissionDecisionAccepted('decision-1'));
+		await flushPromises();
+		expect(deps.conversationUi.pendingPermissionRequests).toEqual([]);
 	});
 
 	it('submits image attachments as native data URLs', async () => {
