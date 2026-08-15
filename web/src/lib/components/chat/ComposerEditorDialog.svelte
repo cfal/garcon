@@ -41,6 +41,11 @@
 	}: Props = $props();
 	const editorRenderer = lazyRenderer(() => import('./ComposerEditor.svelte'));
 	let retryKey = $state(0);
+	let promptRefinementActionLabel = $derived(
+		isPromptRefinementPending
+			? m.chat_composer_cancel_prompt_refinement()
+			: m.chat_composer_refine_prompt(),
+	);
 </script>
 
 <Dialog.Root open={true} requestClose={onClose}>
@@ -75,12 +80,8 @@
 					: 'shrink-0'}
 				disabled={!isPromptRefinementPending && !canRefinePrompt}
 				onclick={onRefinePrompt}
-				aria-label={isPromptRefinementPending
-					? m.chat_composer_cancel_prompt_refinement()
-					: m.chat_composer_refine_prompt()}
-				title={isPromptRefinementPending
-					? m.chat_composer_cancel_prompt_refinement()
-					: m.chat_composer_refine_prompt()}
+				aria-label={promptRefinementActionLabel}
+				title={promptRefinementActionLabel}
 			>
 				{#if isPromptRefinementPending}
 					<Square class="size-3.5" aria-hidden="true" />

@@ -53,11 +53,12 @@ export class PromptComposerAttachmentController {
 		if (this.options.promptTransformPending) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
-		const images = Array.from(items).flatMap((item) => {
-			if (!item.type.startsWith('image/')) return [];
+		const images: File[] = [];
+		for (const item of items) {
+			if (!item.type.startsWith('image/')) continue;
 			const file = item.getAsFile();
-			return file ? [file] : [];
-		});
+			if (file) images.push(file);
+		}
 		if (images.length > 0) {
 			this.options.composer.addImages(images, this.options.attachmentSupport);
 		}

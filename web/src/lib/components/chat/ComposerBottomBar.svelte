@@ -80,6 +80,14 @@
 	const activePermission = $derived(
 		permissionOptions.find((option) => option.value === selectedPermission) ?? permissionOptions[0],
 	);
+	const promptRefinementActionLabel = $derived(
+		isPromptRefinementPending
+			? m.chat_composer_cancel_prompt_refinement()
+			: m.chat_composer_refine_prompt(),
+	);
+	const sendActionLabel = $derived(
+		isPromptTransformPending ? promptTransformStatus : sendTitle,
+	);
 	const activeThinking = $derived(
 		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0],
 	);
@@ -207,12 +215,8 @@
 					class="inline-flex size-9 items-center justify-center rounded-lg border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 {isPromptRefinementPending
 						? 'border-accent bg-accent text-accent-foreground hover:bg-accent/80'
 						: 'border-border bg-background text-foreground hover:bg-muted'}"
-					title={isPromptRefinementPending
-						? m.chat_composer_cancel_prompt_refinement()
-						: m.chat_composer_refine_prompt()}
-					aria-label={isPromptRefinementPending
-						? m.chat_composer_cancel_prompt_refinement()
-						: m.chat_composer_refine_prompt()}
+					title={promptRefinementActionLabel}
+					aria-label={promptRefinementActionLabel}
 				>
 					{#if isPromptRefinementPending}
 						<Square class="size-4" aria-hidden="true" />
@@ -228,8 +232,8 @@
 					onclick={onSend}
 					disabled={!canSend || isPromptTransformPending}
 					class="inline-flex size-9 items-center justify-center rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed {sendButtonClass}"
-					title={isPromptTransformPending ? promptTransformStatus : sendTitle}
-					aria-label={isPromptTransformPending ? promptTransformStatus : sendTitle}
+					title={sendActionLabel}
+					aria-label={sendActionLabel}
 				>
 					{#if isPromptTransformPending}
 						<Loader2 class="size-4 animate-spin" aria-hidden="true" />
