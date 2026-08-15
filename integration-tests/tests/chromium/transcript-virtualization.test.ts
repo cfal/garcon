@@ -3778,8 +3778,20 @@ describe('Chromium transcript virtualization', () => {
     },
     {
       clampBeforeRelease: false,
+      label: 'compact-paused-interrupted',
+      liveBehavior: 'paused-interrupted',
+      viewport: { height: 700, width: 390 },
+    },
+    {
+      clampBeforeRelease: false,
       label: 'wide-completed',
       liveBehavior: 'completed',
+      viewport: { height: 900, width: 1280 },
+    },
+    {
+      clampBeforeRelease: true,
+      label: 'wide-live-expanding',
+      liveBehavior: 'expanding',
       viewport: { height: 900, width: 1280 },
     },
     {
