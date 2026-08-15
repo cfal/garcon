@@ -1140,6 +1140,112 @@ describe('ChatReconnectCoordinator', () => {
 		]);
 	});
 
+	it('discards a partial selected replay when its transcript view is replaced', async () => {
+		const activeTranscript = new ActiveTranscriptState();
+		activeTranscript.replaceGeneration(
+			'chat-1',
+			'generation-selected',
+			[
+				{ ordinal: 1, message: new AssistantMessage(TS, 'old-one') },
+				{ ordinal: 2, message: new AssistantMessage(TS, 'old-two') },
+			],
+			{
+				lastOrdinal: 2,
+				pageOldestOrdinal: 1,
+				pageNewestOrdinal: 2,
+				hasMore: false,
+			},
+		);
+		const heldContinuation = deferred<Record<string, unknown>>();
+		const baseDeps = createReconnectDeps();
+		let subscribeCount = 0;
+		baseDeps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
+			const request = rawRequest as Record<string, unknown>;
+			if (request.type === 'reconnect-state-query') {
+				return reconnectStateResponse([], ['chat-1']);
+			}
+			if (request.type !== 'chat-subscribe') {
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			}
+			subscribeCount += 1;
+			if (subscribeCount === 1) {
+				return boundedReplayResponse({
+					afterOrdinal: 2,
+					nextAfterOrdinal: 4,
+					throughOrdinal: 6,
+					hasMore: true,
+					messages: [messageJson(3, 'old-three'), messageJson(4, 'old-four')],
+				});
+			}
+			if (subscribeCount === 2) return heldContinuation.promise;
+			throw new Error('The coordinator requested beyond the replaced transcript view.');
+		});
+		const loadMessages = vi.fn(async () => activeTranscript.chatMessages);
+		const markValidated = vi.spyOn(activeTranscript.transcriptCache, 'markValidated');
+		const chatState = {
+			getCursor: () => activeTranscript.getCursor(),
+			applyMessages: activeTranscript.applyMessages.bind(activeTranscript),
+			beginReconnectReplay: activeTranscript.beginReconnectReplay.bind(activeTranscript),
+			applyReconnectReplayPage: activeTranscript.applyReconnectReplayPage.bind(activeTranscript),
+			finishReconnectReplay: activeTranscript.finishReconnectReplay.bind(activeTranscript),
+			abortReconnectReplay: activeTranscript.abortReconnectReplay.bind(activeTranscript),
+			loadMessages,
+			transcriptCache: activeTranscript.transcriptCache,
+		} satisfies ReconnectTranscriptState;
+		const deps = { ...baseDeps, chatState } satisfies ChatReconnectCoordinatorOptions;
+		const reloadChatTranscript = vi.fn();
+		const liveMessages = createChatMessagesAccumulator({
+			applyChatMessages: chatState.applyMessages,
+			reloadChatTranscript,
+		});
+		const coordinator = new ChatReconnectCoordinator(deps);
+
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+		await flushUntil(() => subscribeCount === 2);
+
+		activeTranscript.replaceGeneration(
+			'chat-1',
+			'generation-reloaded',
+			[{ ordinal: 1, message: new AssistantMessage(TS, 'reloaded-one') }],
+			{ lastOrdinal: 1, pageOldestOrdinal: 1, pageNewestOrdinal: 1, hasMore: false },
+		);
+		liveMessages.enqueue(new ChatMessagesMessage(
+			'chat-1',
+			'generation-reloaded',
+			[{ ordinal: 2, message: new AssistantMessage(TS, 'reloaded-live-two') }],
+			2,
+			2,
+			[],
+		));
+		liveMessages.flush();
+		heldContinuation.resolve(boundedReplayResponse({
+			afterOrdinal: 4,
+			nextAfterOrdinal: 6,
+			throughOrdinal: 6,
+			hasMore: false,
+			messages: [messageJson(5, 'old-five'), messageJson(6, 'old-six')],
+		}));
+		await reconnect;
+
+		expect(reloadChatTranscript).not.toHaveBeenCalled();
+		expect(loadMessages).toHaveBeenCalledOnce();
+		expect(loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(markValidated).toHaveBeenCalledOnce();
+		expect(activeTranscript.entries.map((entry) => ({
+			ordinal: entry.ordinal,
+			content: 'content' in entry.message ? entry.message.content : entry.message.type,
+		}))).toEqual([
+			{ ordinal: 1, content: 'reloaded-one' },
+			{ ordinal: 2, content: 'reloaded-live-two' },
+		]);
+		expect(activeTranscript.getCursor()).toEqual({
+			transcriptViewId: 'generation-reloaded',
+			lastOrdinal: 2,
+		});
+	});
+
 	it('applies every bounded replay page to a visible transcript', async () => {
 		const deps = createReconnectDeps({
 			visibleChatIds: ['chat-visible'],
