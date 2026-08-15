@@ -147,6 +147,46 @@ describe('transcript permission occurrences', () => {
     });
   });
 
+  it('retires only the exact claimed occurrence when a request id is reused', async () => {
+    await withLedger((ledger) => {
+      const lease = startRun(ledger);
+      publishRequest(
+        lease.sink,
+        'incarnation-1',
+        permissionDecision('incarnation-1'),
+      );
+      publishRequest(
+        lease.sink,
+        'incarnation-2',
+        permissionDecision('incarnation-2'),
+      );
+      const first = ledger.claimPermissionResolution(permissionControl('incarnation-1'));
+      const second = ledger.claimPermissionResolution(permissionControl('incarnation-2'));
+
+      lease.sink.publish({
+        type: 'permission',
+        runId: RUN_ID,
+        lifecycle: {
+          kind: 'cancelled',
+          requestId: REQUEST_ID,
+          incarnation: 'incarnation-1',
+          reason: null,
+        },
+      });
+
+      expect(() => ledger.completePermissionResolution(first, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.completePermissionResolution(second, { allow: false })).toMatchObject({
+        kind: 'permission-resolved',
+        lifecycle: {
+          requestId: REQUEST_ID,
+          incarnation: 'incarnation-2',
+          decision: { allow: false },
+        },
+      });
+    });
+  });
+
   it('invalidates an in-flight permission claim when control moves to another run', async () => {
     await withLedger((ledger) => {
       const lease = startRun(ledger);
