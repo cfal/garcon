@@ -50,7 +50,7 @@ describe('reloadChatFromNative', () => {
 			transcriptViewId: 'generation-2',
 			lastOrdinal: 4,
 			pageOldestOrdinal: 1,
-			pageNewestOrdinal: 4,
+			pageNewestOrdinal: 2,
 			hasMore: false,
 			limit: 50,
 			resendCandidates: [],
@@ -83,6 +83,7 @@ describe('reloadChatFromNative', () => {
 			chatId: 'chat-1',
 			limit: 50,
 			beforeOrdinal: 3,
+			transcriptViewId: 'generation-2',
 		});
 		expect(chat.chatMessages.map((message) => (message as AssistantMessage).content)).toEqual([
 			'one',
