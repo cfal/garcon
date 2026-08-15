@@ -6,6 +6,7 @@ import {
 	UnknownToolUseMessage,
 	UserMessage,
 	isToolUseMessage,
+	permissionOccurrenceKey,
 } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import {
@@ -63,7 +64,7 @@ interface ConversationFeedAnnouncerInput {
 	isLiveWindow: boolean;
 	detachedStatus: string;
 	hiddenToolTypes: readonly string[];
-	floatingPermissionIds: readonly string[];
+	floatingPermissionOccurrences: readonly string[];
 }
 
 function announcementText(update: ConversationFeedAnnouncementUpdate): string {
@@ -150,9 +151,9 @@ export class ConversationFeedAnnouncerState {
 	#contentByRowId = new Map<string, string>();
 	#rowIds = new Set<string>();
 	#tailRowId: string | null = null;
-	#floatingPermissionIds = new Set<string>();
+	#floatingPermissionOccurrences = new Set<string>();
 	#observedUserRequestIds = new Set<string>();
-	#observedPermissionIds = new Set<string>();
+	#observedPermissionOccurrences = new Set<string>();
 	#dataRevision = 0;
 	#detachedStatusAnnounced = false;
 	#isLiveWindow: boolean | null = null;
@@ -172,9 +173,12 @@ export class ConversationFeedAnnouncerState {
 			this.#contentByRowId = this.#visibleContentByRowId(tailRows);
 			this.#rowIds = new Set(tailRows.map((row) => row.id));
 			this.#tailRowId = tailRows.at(-1)?.id ?? null;
-			this.#floatingPermissionIds = new Set(input.floatingPermissionIds);
+			this.#floatingPermissionOccurrences = new Set(input.floatingPermissionOccurrences);
 			this.#observedUserRequestIds = this.#userRequestIds(tailRows);
-			this.#observedPermissionIds = this.#permissionIds(tailRows, input.floatingPermissionIds);
+			this.#observedPermissionOccurrences = this.#permissionOccurrences(
+				tailRows,
+				input.floatingPermissionOccurrences,
+			);
 			this.#dataRevision = input.mutationClock.dataRevision;
 			this.#detachedStatusAnnounced = false;
 			this.#isLiveWindow = input.isLiveWindow;
@@ -216,14 +220,14 @@ export class ConversationFeedAnnouncerState {
 			const next = nextContent.get(row.id);
 			return prior !== undefined && next !== undefined && next !== prior;
 		});
-		const nextFloatingPermissionIds = new Set(input.floatingPermissionIds);
-		const addedFloatingPermissionIds = input.floatingPermissionIds.filter(
-			(id) => !this.#floatingPermissionIds.has(id),
+		const nextFloatingPermissionOccurrences = new Set(input.floatingPermissionOccurrences);
+		const addedFloatingPermissionOccurrences = input.floatingPermissionOccurrences.filter(
+			(occurrence) => !this.#floatingPermissionOccurrences.has(occurrence),
 		);
 		this.#contentByRowId = nextContent;
 		this.#rowIds = new Set(tailRows.map((row) => row.id));
 		this.#tailRowId = tailRows.at(-1)?.id ?? null;
-		this.#floatingPermissionIds = nextFloatingPermissionIds;
+		this.#floatingPermissionOccurrences = nextFloatingPermissionOccurrences;
 		this.#dataRevision = input.mutationClock.dataRevision;
 		const resumedLiveEnd =
 			this.#detachedStatusAnnounced && input.visible && input.isLiveWindow && input.pinnedToBottom;
@@ -235,17 +239,17 @@ export class ConversationFeedAnnouncerState {
 					revision > previousDataRevision &&
 					isAnnounceableResponseMessageType(messageType, input.hiddenToolTypes),
 			);
-		const addedPermissionAnnouncements = addedFloatingPermissionIds.filter((permissionId) => {
-			if (this.#observedPermissionIds.has(permissionId)) return false;
-			rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
+		const addedPermissionAnnouncements = addedFloatingPermissionOccurrences.filter((occurrence) => {
+			if (this.#observedPermissionOccurrences.has(occurrence)) return false;
+			rememberAnnouncementLineage(this.#observedPermissionOccurrences, occurrence);
 			return true;
 		});
 		if (!input.visible) {
-			this.#rememberLineages(tailRows, input.floatingPermissionIds);
+			this.#rememberLineages(tailRows, input.floatingPermissionOccurrences);
 			return { kind: 'clear' };
 		}
 		if (!input.isLiveWindow) {
-			this.#rememberLineages(tailRows, input.floatingPermissionIds);
+			this.#rememberLineages(tailRows, input.floatingPermissionOccurrences);
 			if (
 				this.#detachedStatusAnnounced ||
 				(!responseUpdatedOutsideWindow && addedPermissionAnnouncements.length === 0)
@@ -259,7 +263,7 @@ export class ConversationFeedAnnouncerState {
 			};
 		}
 		const hasRowAppend = kinds.has('live-append') || kinds.has('presentation-structure');
-		if (!hasRowAppend && addedFloatingPermissionIds.length === 0) {
+		if (!hasRowAppend && addedFloatingPermissionOccurrences.length === 0) {
 			return resumedLiveEnd || clearedDetachedStatus ? { kind: 'clear' } : null;
 		}
 
@@ -275,9 +279,12 @@ export class ConversationFeedAnnouncerState {
 				rememberAnnouncementLineage(this.#observedUserRequestIds, requestId);
 			}
 			if (row.message instanceof PermissionRequestMessage) {
-				const permissionId = row.message.permissionRequestId;
-				if (this.#observedPermissionIds.has(permissionId)) return false;
-				rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
+				const occurrence = permissionOccurrenceKey(
+					row.message.permissionRequestId,
+					row.message.incarnation,
+				);
+				if (this.#observedPermissionOccurrences.has(occurrence)) return false;
+				rememberAnnouncementLineage(this.#observedPermissionOccurrences, occurrence);
 			}
 			return true;
 		});
@@ -309,7 +316,7 @@ export class ConversationFeedAnnouncerState {
 				return content ? [{ kind: 'discrete', text: content }] : [];
 			},
 		);
-		for (const _permissionId of addedPermissionAnnouncements) {
+		for (const _occurrence of addedPermissionAnnouncements) {
 			announcements.push({
 				kind: 'discrete',
 				text: m.chat_permission_permission_required(),
@@ -332,12 +339,12 @@ export class ConversationFeedAnnouncerState {
 		);
 	}
 
-	#rememberLineages(rows: ChatDisplayRow[], floatingPermissionIds: readonly string[]): void {
+	#rememberLineages(rows: ChatDisplayRow[], floatingPermissionOccurrences: readonly string[]): void {
 		for (const requestId of this.#userRequestIds(rows)) {
 			rememberAnnouncementLineage(this.#observedUserRequestIds, requestId);
 		}
-		for (const permissionId of this.#permissionIds(rows, floatingPermissionIds)) {
-			rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
+		for (const occurrence of this.#permissionOccurrences(rows, floatingPermissionOccurrences)) {
+			rememberAnnouncementLineage(this.#observedPermissionOccurrences, occurrence);
 		}
 	}
 
@@ -353,15 +360,21 @@ export class ConversationFeedAnnouncerState {
 		);
 	}
 
-	#permissionIds(rows: ChatDisplayRow[], floatingPermissionIds: readonly string[]): Set<string> {
+	#permissionOccurrences(
+		rows: ChatDisplayRow[],
+		floatingPermissionOccurrences: readonly string[],
+	): Set<string> {
 		return new Set(
 			[
 				...rows.flatMap((row) =>
 					row.kind === 'message' && row.message instanceof PermissionRequestMessage
-						? [row.message.permissionRequestId]
+						? [permissionOccurrenceKey(
+								row.message.permissionRequestId,
+								row.message.incarnation,
+							)]
 						: [],
 				),
-				...floatingPermissionIds,
+				...floatingPermissionOccurrences,
 			].slice(-ANNOUNCEMENT_LINEAGE_LIMIT),
 		);
 	}
@@ -383,9 +396,9 @@ export class ConversationFeedAnnouncerState {
 		this.#contentByRowId.clear();
 		this.#rowIds.clear();
 		this.#tailRowId = null;
-		this.#floatingPermissionIds.clear();
+		this.#floatingPermissionOccurrences.clear();
 		this.#observedUserRequestIds.clear();
-		this.#observedPermissionIds.clear();
+		this.#observedPermissionOccurrences.clear();
 		this.#dataRevision = 0;
 		this.#detachedStatusAnnounced = false;
 		this.#isLiveWindow = null;

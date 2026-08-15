@@ -100,6 +100,11 @@ export function createRuntimeTranscriptFixture(options = {}) {
         requestId: control.id,
         incarnation: control.incarnation,
         claimId: 'claim-1',
+        decision: options.permissionDecision ?? {
+          requestId: control.id,
+          incarnation: control.incarnation,
+          respond: async () => undefined,
+        },
       };
       options.onPermissionClaim?.(permissionClaim);
       return permissionClaim;

@@ -2,9 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import {
   AssistantMessage,
   BashToolUseMessage,
-  PermissionCancelledMessage,
-  PermissionRequestMessage,
-  PermissionResolvedMessage,
 } from '@garcon/common/chat-types';
 import type {
   AgentLogger,
@@ -45,19 +42,30 @@ describe('createAgentProducerAdapter', () => {
     await expect(fixture.adapter.execution.abort(handle)).resolves.toBe(true);
   });
 
-  it('turns permission messages into typed lifecycle events and drops provider resolutions', async () => {
+  it('forwards typed permission lifecycle events without interpreting chat rows', async () => {
+    const decision = permissionDecision('permission-1', 'incarnation-1');
     const fixture = createFixture(({ publish, runId }) => {
       const tool = new BashToolUseMessage(TS, 'tool-1', 'pwd');
       publish({
         type: 'messages',
         runId,
-        rows: runtimeRows([
-          new AssistantMessage(TS, 'before'),
-          new PermissionRequestMessage(TS, 'permission-1', tool),
-          new PermissionResolvedMessage(TS, 'permission-1', true),
-          new PermissionCancelledMessage(TS, 'permission-1', 'aborted'),
-          new AssistantMessage(TS, 'after'),
-        ]),
+        rows: runtimeRows([new AssistantMessage(TS, 'before')]),
+      });
+      publish({
+        type: 'permission',
+        runId,
+        lifecycle: permissionRequest('permission-1', 'incarnation-1', tool),
+        decision,
+      });
+      publish({
+        type: 'permission',
+        runId,
+        lifecycle: permissionCancellation('permission-1', 'incarnation-1'),
+      });
+      publish({
+        type: 'messages',
+        runId,
+        rows: runtimeRows([new AssistantMessage(TS, 'after')]),
       });
     });
 
@@ -75,33 +83,53 @@ describe('createAgentProducerAdapter', () => {
     expect(requested).toMatchObject({
       type: 'permission',
       runId: 'run-1',
-      lifecycle: { kind: 'requested', requestId: 'permission-1' },
+      lifecycle: {
+        kind: 'requested',
+        requestId: 'permission-1',
+        incarnation: 'incarnation-1',
+      },
+      decision,
     });
     expect(cancelled).toMatchObject({
       type: 'permission',
       runId: 'run-1',
-      lifecycle: { kind: 'cancelled', requestId: 'permission-1', reason: 'aborted' },
+      lifecycle: {
+        kind: 'cancelled',
+        requestId: 'permission-1',
+        incarnation: 'incarnation-1',
+        reason: 'aborted',
+      },
     });
   });
 
   it('preserves the exact permission occurrence when a request id is reused', async () => {
-    const firstRequest = Object.assign(
-      new PermissionRequestMessage(TS, 'shared-request', new BashToolUseMessage(TS, 'tool-1', 'first')),
-      { incarnation: 'first-occurrence' },
-    );
-    const secondRequest = Object.assign(
-      new PermissionRequestMessage(TS, 'shared-request', new BashToolUseMessage(TS, 'tool-2', 'second')),
-      { incarnation: 'second-occurrence' },
-    );
-    const firstCancellation = Object.assign(
-      new PermissionCancelledMessage(TS, 'shared-request', 'aborted'),
-      { incarnation: 'first-occurrence' },
-    );
+    const firstDecision = permissionDecision('shared-request', 'first-occurrence');
+    const secondDecision = permissionDecision('shared-request', 'second-occurrence');
     const fixture = createFixture(({ publish, runId }) => {
       publish({
-        type: 'messages',
+        type: 'permission',
         runId,
-        rows: runtimeRows([firstRequest, secondRequest, firstCancellation]),
+        lifecycle: permissionRequest(
+          'shared-request',
+          'first-occurrence',
+          new BashToolUseMessage(TS, 'tool-1', 'first'),
+        ),
+        decision: firstDecision,
+      });
+      publish({
+        type: 'permission',
+        runId,
+        lifecycle: permissionRequest(
+          'shared-request',
+          'second-occurrence',
+          new BashToolUseMessage(TS, 'tool-2', 'second'),
+        ),
+        decision: secondDecision,
+      });
+      publish({
+        type: 'permission',
+        runId,
+        lifecycle: permissionCancellation('shared-request', 'first-occurrence'),
       });
     });
 
@@ -114,17 +142,27 @@ describe('createAgentProducerAdapter', () => {
       'second-occurrence',
       'first-occurrence',
     ]);
+    expect(fixture.events[1]).toMatchObject({ decision: firstDecision });
+    expect(fixture.events[2]).toMatchObject({ decision: secondDecision });
   });
 
   it('keeps uncorrelated permission facts typed instead of leaking them into rows', async () => {
+    const decision = permissionDecision('permission-1', 'incarnation-1');
     const fixture = createFixture(({ publish }) => {
       publish({
-        type: 'messages',
+        type: 'permission',
         runId: null,
-        rows: runtimeRows([
-          new PermissionRequestMessage(TS, 'permission-1', new BashToolUseMessage(TS, 'tool-1', 'pwd')),
-          new PermissionCancelledMessage(TS, 'permission-1', 'aborted'),
-        ]),
+        lifecycle: permissionRequest(
+          'permission-1',
+          'incarnation-1',
+          new BashToolUseMessage(TS, 'tool-1', 'pwd'),
+        ),
+        decision,
+      });
+      publish({
+        type: 'permission',
+        runId: null,
+        lifecycle: permissionCancellation('permission-1', 'incarnation-1'),
       });
     });
 
@@ -133,10 +171,19 @@ describe('createAgentProducerAdapter', () => {
     const permissions = fixture.events.filter((event) => event.type === 'permission');
     expect(fixture.events.map((event) => event.type)).toEqual(['session', 'permission', 'permission']);
     expect(permissions[0]).toMatchObject({
-      lifecycle: { kind: 'requested', requestId: 'permission-1' },
+      lifecycle: {
+        kind: 'requested',
+        requestId: 'permission-1',
+        incarnation: 'incarnation-1',
+      },
+      decision,
     });
     expect(permissions[1]).toMatchObject({
-      lifecycle: { kind: 'cancelled', requestId: 'permission-1' },
+      lifecycle: {
+        kind: 'cancelled',
+        requestId: 'permission-1',
+        incarnation: 'incarnation-1',
+      },
     });
     const correlations = permissions.map((event) => (
       event.type === 'permission' ? event.runId : null
@@ -380,5 +427,36 @@ function createFixture(
     runtime,
     warnings,
     closeSink: () => { sinkClosed = true; },
+  };
+}
+
+function permissionRequest(
+  requestId: string,
+  incarnation: string,
+  requestedTool: BashToolUseMessage,
+) {
+  return {
+    kind: 'requested' as const,
+    requestId,
+    incarnation,
+    requestedTool,
+    options: [],
+  };
+}
+
+function permissionCancellation(requestId: string, incarnation: string) {
+  return {
+    kind: 'cancelled' as const,
+    requestId,
+    incarnation,
+    reason: 'aborted',
+  };
+}
+
+function permissionDecision(requestId: string, incarnation: string) {
+  return {
+    requestId,
+    incarnation,
+    respond: async () => undefined,
   };
 }

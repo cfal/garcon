@@ -185,6 +185,7 @@ describe('TranscriptLedgerService', () => {
         type: 'permission',
         runId: 'run-1',
         lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+        decision: permissionDecision('permission-1', 'incarnation-1'),
       });
 
       const claim = ledger.claimPermissionResolution(permissionControl());
@@ -249,6 +250,7 @@ describe('TranscriptLedgerService', () => {
         type: 'permission',
         runId: 'run-1',
         lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+        decision: permissionDecision('permission-1', 'incarnation-1'),
       });
 
       expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
@@ -269,6 +271,7 @@ describe('TranscriptLedgerService', () => {
         type: 'permission',
         runId: 'run-1',
         lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+        decision: permissionDecision('permission-1', 'incarnation-1'),
       });
 
       const claim = ledger.claimPermissionResolution(permissionControl());

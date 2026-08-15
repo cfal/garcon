@@ -1,8 +1,8 @@
+import crypto from 'node:crypto';
 import {
   ErrorMessage,
   PermissionCancelledMessage,
   PermissionRequestMessage,
-  PermissionResolvedMessage,
   UnknownToolUseMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
@@ -41,12 +41,14 @@ import type {
 import type { AcpAdvertisedCapabilities, ReconnectStrategy } from '../../acp/reconnect-policy.js';
 import { reconnectOrder } from '../../acp/reconnect-policy.js';
 import { AcpTransport } from '../../acp/transport.js';
-import type { AcpBlockingRequestToolUse, AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
+import type { AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
 interface PendingPermissionRequest {
+  readonly permissionRequestId: string;
+  readonly incarnation: string;
   readonly session: AcpAgentRuntimeSession;
   readonly turn: AcpTurnContext;
   readonly requestId: AcpJsonRpcId;
@@ -77,7 +79,7 @@ interface AcpTurnContext {
   readonly session: AcpAgentRuntimeSession;
   readonly operation: AgentRuntimeOperation;
   readonly eventMetadata: RuntimeEventMetadata;
-  readonly pendingPermissionIds: Set<string>;
+  readonly pendingPermissions: Set<PendingPermissionRequest>;
   readonly detachSourceListeners: Array<() => void>;
   permissionMode: PermissionMode;
   running: boolean;
@@ -202,7 +204,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
   #createTransport: () => AcpTransport;
   #logger: AgentLogger;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
-  #pendingPermissions = new Map<string, PendingPermissionRequest>();
+  #pendingPermissions = new Set<PendingPermissionRequest>();
   #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
     sessions: () => this.#sessions.entries(),
     isRunning: (session) => session.activeTurn?.running === true,
@@ -317,7 +319,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     if (session.activeTurn?.running) {
       throw new Error(`Session ${agentSessionId} is already running`);
     }
-    if ((session.sourceTurn?.pendingPermissionIds.size ?? 0) > 0) {
+    if ((session.sourceTurn?.pendingPermissions.size ?? 0) > 0) {
       throw new Error(`Session ${agentSessionId} is waiting for permission`);
     }
 
@@ -358,20 +360,19 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       }));
   }
 
-  resolvePermission(permissionRequestId: string, decision: PermissionDecisionPayload): void {
-    const pending = this.#pendingPermissions.get(permissionRequestId);
-    if (!pending) return;
-    this.#pendingPermissions.delete(permissionRequestId);
-    pending.turn.pendingPermissionIds.delete(permissionRequestId);
-    if (pending.turn.sourceRetired) return;
-
+  async #resolvePermission(
+    pending: PendingPermissionRequest,
+    decision: PermissionDecisionPayload,
+  ): Promise<void> {
+    if (!this.#pendingPermissions.has(pending) || pending.turn.sourceRetired) {
+      throw new Error('ACP permission occurrence is no longer pending');
+    }
     pending.session.client.respond(
       pending.requestId,
       decision.response ?? pending.responseForDecision(decision),
     );
-    this.#publishMessages(pending.turn, [
-      new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow)),
-    ]);
+    this.#pendingPermissions.delete(pending);
+    pending.turn.pendingPermissions.delete(pending);
   }
 
   updateSessionSettings(agentSessionId: string, patch: AcpSessionSettingsPatch): void {
@@ -614,7 +615,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
         request,
         'agentSessionId' in request ? undefined : 'chat-start',
       ),
-      pendingPermissionIds: new Set(),
+      pendingPermissions: new Set(),
       detachSourceListeners: [],
       permissionMode: request.permissionMode,
       running: false,
@@ -768,22 +769,31 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
         fallbackInput,
       );
 
-    turn.pendingPermissionIds.add(permissionRequestId);
-    this.#pendingPermissions.set(permissionRequestId, {
-      session,
+    const pending = this.#registerPendingPermission(
       turn,
+      permissionRequestId,
       requestId,
-      responseForDecision: (decision) => {
+      (decision) => {
         const fallback = decision.allow
           ? (decision.alwaysAllow ? 'allow-always' : 'allow-once')
           : 'reject-once';
         return permissionOutcome(permissionOptionId(options, fallback));
       },
-      responseForCancellation: permissionCancelledOutcome,
-    });
-    this.#publishMessages(turn, [
-      new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, requestedTool),
-    ]);
+      permissionCancelledOutcome,
+    );
+    const message = new PermissionRequestMessage(
+      new Date().toISOString(),
+      permissionRequestId,
+      pending.incarnation,
+      requestedTool,
+    );
+    this.emitPermissionRequested(
+      session.chatId,
+      message,
+      this.#decisionCapability(pending),
+      turn.eventMetadata,
+      turn.operation,
+    );
   }
 
   #onCustomBlockingRequest(
@@ -802,26 +812,55 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     if (!converted) return false;
 
     const permissionRequestId = `${this.#policy.agentId}-${session.id}-${String(requestId)}`;
-    this.#registerBlockingRequest(turn, permissionRequestId, requestId, converted);
-    this.#publishMessages(turn, [
-      new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, converted.tool),
-    ]);
+    const pending = this.#registerPendingPermission(
+      turn,
+      permissionRequestId,
+      requestId,
+      converted.responseForDecision,
+      converted.responseForCancellation,
+    );
+    const message = new PermissionRequestMessage(
+      new Date().toISOString(),
+      permissionRequestId,
+      pending.incarnation,
+      converted.tool,
+    );
+    this.emitPermissionRequested(
+      turn.session.chatId,
+      message,
+      this.#decisionCapability(pending),
+      turn.eventMetadata,
+      turn.operation,
+    );
     return true;
   }
 
-  #registerBlockingRequest(
+  #registerPendingPermission(
     turn: AcpTurnContext,
     permissionRequestId: string,
     requestId: AcpJsonRpcId,
-    converted: AcpBlockingRequestToolUse,
-  ): void {
-    turn.pendingPermissionIds.add(permissionRequestId);
-    this.#pendingPermissions.set(permissionRequestId, {
+    responseForDecision: PendingPermissionRequest['responseForDecision'],
+    responseForCancellation: PendingPermissionRequest['responseForCancellation'],
+  ): PendingPermissionRequest {
+    const pending: PendingPermissionRequest = {
+      permissionRequestId,
+      incarnation: crypto.randomUUID(),
       session: turn.session,
       turn,
       requestId,
-      responseForDecision: converted.responseForDecision,
-      responseForCancellation: converted.responseForCancellation,
+      responseForDecision,
+      responseForCancellation,
+    };
+    turn.pendingPermissions.add(pending);
+    this.#pendingPermissions.add(pending);
+    return pending;
+  }
+
+  #decisionCapability(pending: PendingPermissionRequest) {
+    return Object.freeze({
+      requestId: pending.permissionRequestId,
+      incarnation: pending.incarnation,
+      respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
     });
   }
 
@@ -829,18 +868,24 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     turn: AcpTurnContext,
     reason: 'cancelled' | 'session-complete' | 'aborted',
   ): void {
-    for (const permissionRequestId of turn.pendingPermissionIds) {
-      const pending = this.#pendingPermissions.get(permissionRequestId);
-      if (!pending || pending.turn !== turn) continue;
-      this.#pendingPermissions.delete(permissionRequestId);
+    for (const pending of [...turn.pendingPermissions]) {
+      if (!this.#pendingPermissions.delete(pending)) continue;
       try {
         pending.session.client.respond(pending.requestId, pending.responseForCancellation(reason));
       } catch {}
-      this.#publishMessages(turn, [
-        new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason),
-      ]);
+      this.emitPermissionCancelled(
+        turn.session.chatId,
+        new PermissionCancelledMessage(
+          new Date().toISOString(),
+          pending.permissionRequestId,
+          pending.incarnation,
+          reason,
+        ),
+        turn.eventMetadata,
+        turn.operation,
+      );
     }
-    turn.pendingPermissionIds.clear();
+    turn.pendingPermissions.clear();
   }
 
   #completeTurn(turn: AcpTurnContext): void {

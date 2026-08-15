@@ -21,6 +21,7 @@ function row(overrides: Partial<TransientFeedRow> = {}): TransientFeedRow {
 		message: new PermissionRequestMessage(
 			'2026-08-11T00:00:00.000Z',
 			'permission-1',
+			'incarnation-1',
 			new BashToolUseMessage('2026-08-11T00:00:00.000Z', 'tool-1', 'bun test'),
 		),
 		...overrides,
@@ -134,6 +135,7 @@ describe('transient feed browser reducer', () => {
 			message: new PermissionRequestMessage(
 				'2026-08-11T00:00:00.000Z',
 				'permission-1',
+				'incarnation-2',
 				new BashToolUseMessage('2026-08-11T00:00:00.000Z', 'tool-2', 'bun test --watch'),
 			),
 		});

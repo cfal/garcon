@@ -1446,9 +1446,12 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       const runtime = createRuntime();
       const messages = [];
       const failures = [];
+      const events = [];
       runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
       runtime.onFailed((_chatId, message) => failures.push(message));
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: { runId: 'run-1', publish: (event) => events.push(event) },
+      }));
       await enqueueInputStarted(fake);
 
       fake.stdout.enqueue(encoder.encode(JSON.stringify({
@@ -1468,10 +1471,16 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         new Error('permission flush exploded'),
       ));
 
-      runtime.resolveInternalToolApproval(
-        messages[0].permissionRequestId,
-        { allow: true, alwaysAllow: false },
-      );
+      const permission = events.find((event) => event.type === 'permission');
+      expect(permission).toMatchObject({
+        lifecycle: {
+          kind: 'requested',
+          requestId: messages[0].permissionRequestId,
+          incarnation: messages[0].incarnation,
+        },
+      });
+      await expect(permission.decision.respond({ allow: true, alwaysAllow: false }))
+        .rejects.toThrow('permission flush exploded');
 
       await start;
       expect(failures).toEqual([

@@ -24,7 +24,6 @@ function createClaudeStub(startError) {
   claude.abortClaudeInternalSession = mock(() => Promise.resolve(false));
   claude.isClaudeInternalSessionRunning = mock(() => false);
   claude.getRunningClaudeInternalSessions = mock(() => []);
-  claude.resolveInternalToolApproval = mock(() => undefined);
   claude.setInternalPermissionMode = mock(() => undefined);
   claude.setInternalThinkingMode = mock(() => undefined);
   claude.setInternalClaudeThinkingMode = mock(() => undefined);

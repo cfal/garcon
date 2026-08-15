@@ -1,5 +1,4 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { PermissionRequestMessage } from '@garcon/common/chat-types';
 import { OpenCodeRuntime } from '../opencode.js';
 
 function createEventStream() {
@@ -33,10 +32,11 @@ function createRuntime(sessionIds) {
   const eventStream = createEventStream();
   const promptAsync = mock(() => Promise.resolve({}));
   const create = mock(() => Promise.resolve({ data: { id: sessionIds.shift() } }));
+  const permissionReply = mock(() => Promise.resolve({}));
   const runtime = new OpenCodeRuntime({
     createInstance: mock(() => Promise.resolve({
       client: {
-        permission: { reply: mock(() => Promise.resolve({})) },
+        permission: { reply: permissionReply },
         global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
         session: {
           create,
@@ -47,7 +47,7 @@ function createRuntime(sessionIds) {
       server: { close: mock(() => undefined) },
     })),
   });
-  return { eventStream, promptAsync, runtime };
+  return { eventStream, permissionReply, promptAsync, runtime };
 }
 
 function operation(runId, events) {
@@ -118,7 +118,7 @@ async function waitFor(predicate) {
 
 describe('OpenCode operation routing', () => {
   it('publishes late named rows and permissions through the operation that produced them', async () => {
-    const { eventStream, promptAsync, runtime } = createRuntime(['session-1']);
+    const { eventStream, permissionReply, promptAsync, runtime } = createRuntime(['session-1']);
     const firstEvents = [];
     const secondEvents = [];
     await runtime.startSession({
@@ -186,6 +186,17 @@ describe('OpenCode operation routing', () => {
         tool: { messageID: 'assistant-a-late' },
       },
     });
+    await waitFor(() => firstEvents.some((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    )));
+    const permission = firstEvents.find((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    ));
+    await permission.decision.respond({ allow: true });
+    expect(permissionReply.mock.calls.at(-1)[0]).toMatchObject({
+      requestID: 'permission-a',
+      reply: 'once',
+    });
     pushAssistant(eventStream, {
       eventNumber: 10,
       messageId: 'assistant-b',
@@ -206,14 +217,20 @@ describe('OpenCode operation routing', () => {
       'messages',
       'run-ended',
       'messages',
-      'messages',
-      'messages',
+      'permission',
     ]);
     expect(firstMessages.slice(0, 2).map((message) => message.content)).toEqual([
       'first reply',
       'late first reply',
     ]);
-    expect(firstMessages.some((message) => message instanceof PermissionRequestMessage)).toBe(true);
+    expect(permission).toMatchObject({
+      type: 'permission',
+      runId: 'run-a',
+      lifecycle: {
+        kind: 'requested',
+        requestedTool: { type: 'request-permissions-tool-use' },
+      },
+    });
     expect(secondMessages.map((message) => message.content)).toEqual(['second reply']);
     expect(secondEvents.at(-1)).toMatchObject({
       type: 'run-ended',
@@ -221,6 +238,57 @@ describe('OpenCode operation routing', () => {
       outcome: 'finished',
     });
 
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('keeps an exact permission capability pending after a failed forward', async () => {
+    const { eventStream, permissionReply, promptAsync, runtime } = createRuntime(['session-1']);
+    permissionReply
+      .mockRejectedValueOnce(new Error('permission reply failed'))
+      .mockResolvedValueOnce({});
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'answer',
+    });
+    eventStream.push({
+      id: 'event-04',
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'session-1',
+        requestID: 'permission-a',
+        permission: 'bash',
+        tool: { messageID: 'assistant-a' },
+      },
+    });
+    await waitFor(() => events.some((event) => event.type === 'permission'));
+    const permission = events.find((event) => event.type === 'permission');
+
+    await expect(permission.decision.respond({ allow: true }))
+      .rejects.toThrow('permission reply failed');
+    await expect(permission.decision.respond({ allow: false })).resolves.toBeUndefined();
+    expect(permissionReply).toHaveBeenCalledTimes(2);
+
+    pushIdle(eventStream, 'session-1', 'event-05');
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
     eventStream.close();
     await runtime.shutdown();
   });

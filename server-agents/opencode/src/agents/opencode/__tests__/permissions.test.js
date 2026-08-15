@@ -267,7 +267,7 @@ describe('mapPermissionMode', () => {
   });
 });
 
-describe('OpenCodeRuntime resolvePermission guards', () => {
+describe('OpenCodeRuntime permissions', () => {
   let provider;
   let client;
 
@@ -499,20 +499,5 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
 
     eventStream.close();
     await provider.shutdown();
-  });
-
-  it('returns early for null permissionRequestId', async () => {
-    await provider.resolvePermission(null, { allow: true, alwaysAllow: false });
-    expect(client.permission.reply).not.toHaveBeenCalled();
-  });
-
-  it('returns early for unknown permissionRequestId', async () => {
-    await provider.resolvePermission('nonexistent-id', { allow: true, alwaysAllow: false });
-    expect(client.permission.reply).not.toHaveBeenCalled();
-  });
-
-  it('returns early for empty string permissionRequestId', async () => {
-    await provider.resolvePermission('', { allow: true, alwaysAllow: false });
-    expect(client.permission.reply).not.toHaveBeenCalled();
   });
 });

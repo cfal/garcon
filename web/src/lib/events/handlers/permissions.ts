@@ -1,11 +1,12 @@
 // Handles permission lifecycle from chat event message batches.
 // Inspects ChatMessage entries for permission-request, permission-resolved,
-// and permission-cancelled types.
+// permission-cancelled, and permission-expired types.
 
 import {
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	PermissionCancelledMessage,
+	PermissionExpiredMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
 import type { LoadingStatusEntry } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
@@ -34,13 +35,17 @@ export function handlePermissionLifecycleFromBatch(
 		if (entry instanceof PermissionRequestMessage) {
 			let requestAdded = false;
 			ctx.conversationUi.setPendingPermissionRequests((previous) => {
-				if (previous.some((r) => r.permissionRequestId === entry.permissionRequestId))
+				if (previous.some((request) => (
+					request.permissionRequestId === entry.permissionRequestId
+					&& request.incarnation === entry.incarnation
+				)))
 					return previous;
 				requestAdded = true;
 				return [
 					...previous,
 					{
 						permissionRequestId: entry.permissionRequestId,
+						incarnation: entry.incarnation,
 						requestedTool: entry.requestedTool,
 						chatId: msg.chatId || null,
 						receivedAt: new Date(),
@@ -62,14 +67,23 @@ export function handlePermissionLifecycleFromBatch(
 		if (entry instanceof PermissionResolvedMessage) {
 			ctx.popLoadingStatus(WAITING_FOR_PERMISSION_ID);
 			ctx.conversationUi.setPendingPermissionRequests((previous) =>
-				previous.filter((r) => r.permissionRequestId !== entry.permissionRequestId),
+				previous.filter((request) => (
+					request.permissionRequestId !== entry.permissionRequestId
+					|| request.incarnation !== entry.incarnation
+				)),
 			);
 		}
 
-		if (entry instanceof PermissionCancelledMessage) {
+		if (
+			entry instanceof PermissionCancelledMessage
+			|| entry instanceof PermissionExpiredMessage
+		) {
 			ctx.popLoadingStatus(WAITING_FOR_PERMISSION_ID);
 			ctx.conversationUi.setPendingPermissionRequests((previous) =>
-				previous.filter((r) => r.permissionRequestId !== entry.permissionRequestId),
+				previous.filter((request) => (
+					request.permissionRequestId !== entry.permissionRequestId
+					|| request.incarnation !== entry.incarnation
+				)),
 			);
 		}
 	}

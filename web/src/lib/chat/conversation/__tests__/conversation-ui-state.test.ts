@@ -44,6 +44,7 @@ function makeEntry(id: string, content: string, revision = 1) {
 function makePermissionRequest(id: string, chatId: string | null = null): PendingPermissionRequest {
 	return {
 		permissionRequestId: id,
+		incarnation: `incarnation-${id}`,
 		requestedTool: new BashToolUseMessage('2026-07-15T00:00:00.000Z', `tool-${id}`, 'echo test'),
 		chatId,
 	};

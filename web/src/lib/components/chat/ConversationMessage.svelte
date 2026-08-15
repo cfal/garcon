@@ -69,9 +69,15 @@
 		permissionTerminal?: PermissionTerminalState;
 		onPermissionDecision?: (
 			permissionRequestId: string,
+			incarnation: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
-		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
+		onExitPlanMode?: (
+			permissionRequestId: string,
+			incarnation: string,
+			choice: string,
+			plan: string,
+		) => void;
 		agentId: SessionAgentId | string;
 		showThinking?: boolean;
 		chatContext?: ConversationMessageChatContext | null;
@@ -80,8 +86,15 @@
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
 		disclosureState?: ConversationDisclosureStatePort;
-		permissionDraft?: (permissionRequestId: string) => PermissionQuestionDraft;
-		onPermissionDraftChange?: (permissionRequestId: string, draft: PermissionQuestionDraft) => void;
+		permissionDraft?: (
+			permissionRequestId: string,
+			incarnation: string,
+		) => PermissionQuestionDraft;
+		onPermissionDraftChange?: (
+			permissionRequestId: string,
+			incarnation: string,
+			draft: PermissionQuestionDraft,
+		) => void;
 		acquireTransientActivity?: (close: () => void) => () => void;
 	}
 
@@ -153,7 +166,12 @@
 	);
 	const exitPlanPermissionRequest = $derived(
 		asToolUse?.type === 'exit-plan-mode-tool-use'
-			? new PermissionRequestMessage(message.timestamp, `plan-exit-${asToolUse.toolId}`, asToolUse)
+			? new PermissionRequestMessage(
+					message.timestamp,
+					`plan-exit-${asToolUse.toolId}`,
+					`plan-exit-${asToolUse.toolId}`,
+					asToolUse,
+				)
 			: null,
 	);
 	const historicalQuestion = $derived.by(() => {
@@ -562,11 +580,18 @@
 							onDecision={onPermissionDecision ?? ignorePermissionDecision}
 							{onExitPlanMode}
 							{chatContext}
-							draft={permissionDraft?.(exitPlanPermissionRequest.permissionRequestId)}
+							draft={permissionDraft?.(
+								exitPlanPermissionRequest.permissionRequestId,
+								exitPlanPermissionRequest.incarnation,
+							)}
 							{acquireTransientActivity}
 							onDraftChange={onPermissionDraftChange
 								? (draft) =>
-										onPermissionDraftChange(exitPlanPermissionRequest.permissionRequestId, draft)
+										onPermissionDraftChange(
+											exitPlanPermissionRequest.permissionRequestId,
+											exitPlanPermissionRequest.incarnation,
+											draft,
+										)
 								: undefined}
 						/>
 					{:else if historicalQuestion}
@@ -696,10 +721,17 @@
 							onDecision={onPermissionDecision}
 							{onExitPlanMode}
 							{chatContext}
-							draft={permissionDraft?.(asPermissionRequest.permissionRequestId)}
+							draft={permissionDraft?.(
+								asPermissionRequest.permissionRequestId,
+								asPermissionRequest.incarnation,
+							)}
 							{acquireTransientActivity}
 							onDraftChange={onPermissionDraftChange
-								? (draft) => onPermissionDraftChange(asPermissionRequest.permissionRequestId, draft)
+								? (draft) => onPermissionDraftChange(
+										asPermissionRequest.permissionRequestId,
+										asPermissionRequest.incarnation,
+										draft,
+									)
 								: undefined}
 						/>
 					{/if}

@@ -1,10 +1,12 @@
-import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage } from '@garcon/common/chat-types';
+import { AssistantMessage, ErrorMessage, type ChatMessage } from '@garcon/common/chat-types';
+import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   codexOperation,
   publishFailed,
   publishFinished,
+  publishPermissionRequested,
   publishRows,
   type CodexOperation,
 } from './operation-routes.js';
@@ -161,8 +163,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     session: RunningCodexSession;
     turnId: string;
   }>();
-  #pendingApprovals = new Map<
-    string,
+  #pendingApprovals = new Set<
     CodexPendingApproval & { client: CodexAppServerClient; operation: CodexOperation }
   >();
   #bufferingClients = new Set<CodexAppServerClient>();
@@ -946,21 +947,15 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#threadListCaches.delete(false);
   }
 
-  async resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> {
-    const pending = this.#pendingApprovals.get(permissionRequestId);
-    if (!pending) {
-      this.#logger.warn('Codex permission response has no pending request', {
-        permissionRequestId,
-      });
-      return;
+  async #resolvePermission(
+    pending: CodexPendingApproval & { client: CodexAppServerClient; operation: CodexOperation },
+    decision: { allow: boolean; alwaysAllow?: boolean },
+  ): Promise<void> {
+    if (!this.#pendingApprovals.has(pending)) {
+      throw new Error('Codex permission occurrence is no longer pending');
     }
-
-    this.#pendingApprovals.delete(permissionRequestId);
     pending.client.respond(pending.requestId, buildApprovalResponse(pending, decision));
-    publishRows(this.#logger, pending.chatId,
-      [new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow))],
-      pending.operation,
-    );
+    this.#pendingApprovals.delete(pending);
   }
 
   updateSessionSettings(agentSessionId: string, patch: { readonly permissionMode?: PermissionMode }): void {
@@ -1650,8 +1645,19 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       client.respond(request.id, buildApprovalResponse(pending, { allow: true, alwaysAllow: false }));
       return;
     }
-    this.#pendingApprovals.set(pending.permissionRequestId, pending);
-    publishRows(this.#logger, session.chatId, [buildApprovalMessage(pending)], pending.operation);
+    this.#pendingApprovals.add(pending);
+    const message = buildApprovalMessage(pending);
+    publishPermissionRequested(
+      this.#logger,
+      session.chatId,
+      message,
+      Object.freeze({
+        requestId: pending.permissionRequestId,
+        incarnation: pending.incarnation,
+        respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
+      }),
+      pending.operation,
+    );
   }
 
   #handleClientExit(client: CodexAppServerClient, code: number): void {

@@ -693,7 +693,8 @@ describe('Cursor ACP runtime', () => {
 
   it('emits standard ACP permission requests and responds with selected option outcomes', async () => {
     const { acp, runtime, waitForMessage } = createRuntimeHarness();
-    const started = await runtime.startSession(startRequest());
+    const operation = collectOperation('run-1');
+    const started = await runtime.startSession(startRequest({ operation: operation.operation }));
 
     expect(started).toEqual({
       agentSessionId: 'cursor-session',
@@ -719,11 +720,62 @@ describe('Cursor ACP runtime', () => {
     expect(request.requestedTool).toBeInstanceOf(BashToolUseMessage);
     expect(request.requestedTool.command).toBe('echo hello');
 
-    runtime.resolvePermission(request.permissionRequestId, { allow: true });
+    const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    expect(permission).toMatchObject({
+      runId: 'run-1',
+      lifecycle: {
+        kind: 'requested',
+        requestId: request.permissionRequestId,
+        incarnation: request.incarnation,
+      },
+    });
+    await permission.decision.respond({ allow: true });
     const response = await acp.waitForWrite((message) => message.id === 'permission-1' && message.result);
     expect(response.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'allow-once' },
     });
+
+    acp.finishPrompt();
+    runtime.shutdown();
+  });
+
+  it('keeps reused ACP request ids bound to separate permission capabilities', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    const operation = collectOperation('run-1');
+    await runtime.startSession(startRequest({ operation: operation.operation }));
+    await acp.waitForClientMethod('session/prompt');
+    const request = () => acp.serverRequest({
+      id: 'permission-reused',
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'cursor-session',
+        toolCall: {
+          toolCallId: 'tool-reused',
+          toolName: 'Bash',
+          rawInput: { command: 'echo hello' },
+        },
+        options: [{ optionId: 'allow-once' }, { optionId: 'reject-once' }],
+      },
+    });
+
+    request();
+    const first = await operation.waitForEvent((event) => event.type === 'permission');
+    await first.decision.respond({ allow: true });
+    request();
+    const second = await operation.waitForEvent((event) => (
+      event.type === 'permission'
+      && event.lifecycle.incarnation !== first.lifecycle.incarnation
+    ));
+
+    expect(second.lifecycle.requestId).toBe(first.lifecycle.requestId);
+    expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+    await expect(first.decision.respond({ allow: false }))
+      .rejects.toThrow('no longer pending');
+    await second.decision.respond({ allow: false });
+    expect(acp.writes.filter((message) => message.id === 'permission-reused')).toMatchObject([
+      { result: { outcome: { outcome: 'selected', optionId: 'allow-once' } } },
+      { result: { outcome: { outcome: 'selected', optionId: 'reject-once' } } },
+    ]);
 
     acp.finishPrompt();
     runtime.shutdown();
@@ -790,7 +842,8 @@ describe('Cursor ACP runtime', () => {
 
   it('emits Cursor ask-question requests and forwards answered responses', async () => {
     const { acp, runtime, waitForMessage } = createRuntimeHarness();
-    await runtime.startSession(startRequest());
+    const operation = collectOperation('run-1');
+    await runtime.startSession(startRequest({ operation: operation.operation }));
     await acp.waitForClientMethod('session/prompt');
 
     acp.serverRequest({
@@ -817,7 +870,8 @@ describe('Cursor ACP runtime', () => {
         answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
       },
     };
-    runtime.resolvePermission(request.permissionRequestId, { allow: true, response: answered });
+    const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    await permission.decision.respond({ allow: true, response: answered });
 
     const response = await acp.waitForWrite((message) => message.id === 'question-1' && message.result);
     expect(response.result).toEqual(answered);
@@ -828,7 +882,8 @@ describe('Cursor ACP runtime', () => {
 
   it('emits Cursor create-plan requests and can reject them', async () => {
     const { acp, runtime, waitForMessage } = createRuntimeHarness();
-    await runtime.startSession(startRequest());
+    const operation = collectOperation('run-1');
+    await runtime.startSession(startRequest({ operation: operation.operation }));
     await acp.waitForClientMethod('session/prompt');
 
     acp.serverRequest({
@@ -846,7 +901,8 @@ describe('Cursor ACP runtime', () => {
     expect(request.requestedTool).toBeInstanceOf(CursorCreatePlanToolUseMessage);
     expect(request.requestedTool.plan).toBe('Do the work');
 
-    runtime.resolvePermission(request.permissionRequestId, { allow: false });
+    const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    await permission.decision.respond({ allow: false });
     const response = await acp.waitForWrite((message) => message.id === 'plan-1' && message.result);
     expect(response.result).toEqual({
       outcome: { outcome: 'rejected', reason: 'User rejected plan' },

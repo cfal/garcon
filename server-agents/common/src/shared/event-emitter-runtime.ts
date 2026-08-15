@@ -2,7 +2,13 @@
 // the operation captured by the concrete turn; listeners support runtime tests and diagnostics.
 
 import { EventEmitter } from 'events';
-import type { ChatMessage } from '@garcon/common/chat-types';
+import {
+  PermissionCancelledMessage,
+  PermissionExpiredMessage,
+  PermissionRequestMessage,
+  type ChatMessage,
+} from '@garcon/common/chat-types';
+import type { AgentPermissionResponseCapability } from '@garcon/server-agent-interface';
 import {
   runtimeRows,
   type AgentRuntimeOperation,
@@ -46,6 +52,71 @@ export class AgentEventEmitterRuntime extends EventEmitter {
         this.emit('messages', chatId, messages);
       }
     }
+  }
+
+  emitPermissionRequested(
+    chatId: string,
+    message: PermissionRequestMessage,
+    decision: AgentPermissionResponseCapability,
+    metadata?: RuntimeEventMetadata,
+    operation?: AgentRuntimeOperation,
+  ): void {
+    if (
+      decision.requestId !== message.permissionRequestId
+      || decision.incarnation !== message.incarnation
+    ) {
+      throw new TypeError('Permission response capability does not match its request occurrence');
+    }
+    operation?.publish({
+      type: 'permission',
+      runId: operation.runId,
+      lifecycle: {
+        kind: 'requested',
+        requestId: message.permissionRequestId,
+        incarnation: message.incarnation,
+        requestedTool: message.requestedTool,
+        options: [],
+      },
+      decision,
+    });
+    this.#emitPermissionMessage(chatId, message, metadata);
+  }
+
+  emitPermissionCancelled(
+    chatId: string,
+    message: PermissionCancelledMessage,
+    metadata?: RuntimeEventMetadata,
+    operation?: AgentRuntimeOperation,
+  ): void {
+    operation?.publish({
+      type: 'permission',
+      runId: operation.runId,
+      lifecycle: {
+        kind: 'cancelled',
+        requestId: message.permissionRequestId,
+        incarnation: message.incarnation,
+        reason: message.reason ?? null,
+      },
+    });
+    this.#emitPermissionMessage(chatId, message, metadata);
+  }
+
+  emitPermissionExpired(
+    chatId: string,
+    message: PermissionExpiredMessage,
+    metadata?: RuntimeEventMetadata,
+    operation?: AgentRuntimeOperation,
+  ): void {
+    operation?.publish({
+      type: 'permission',
+      runId: operation.runId,
+      lifecycle: {
+        kind: 'expired',
+        requestId: message.permissionRequestId,
+        incarnation: message.incarnation,
+      },
+    });
+    this.#emitPermissionMessage(chatId, message, metadata);
   }
 
   emitProcessing(chatId: string, isProcessing: boolean): void {
@@ -110,5 +181,17 @@ export class AgentEventEmitterRuntime extends EventEmitter {
 
   onFailed(cb: FailedCallback): void {
     this.on('failed', cb);
+  }
+
+  #emitPermissionMessage(
+    chatId: string,
+    message: PermissionRequestMessage | PermissionCancelledMessage | PermissionExpiredMessage,
+    metadata?: RuntimeEventMetadata,
+  ): void {
+    if (metadata) {
+      this.emit('messages', chatId, [message], metadata);
+    } else {
+      this.emit('messages', chatId, [message]);
+    }
   }
 }

@@ -73,7 +73,6 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly nativeActivity;
   readonly nativeSessions;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
-  readonly permissionDecisions: NonNullable<AgentIntegration['permissionDecisions']>;
   readonly projectPathUpdates = null;
   readonly catalog;
   readonly settings;
@@ -127,11 +126,6 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.sessionConfiguration = {
       apply: (agentSessionId, configuration) => (
         execution.applySessionConfiguration(agentSessionId, configuration)
-      ),
-    };
-    this.permissionDecisions = {
-      respond: (permissionRequestId, decision) => (
-        execution.respondToPermission(permissionRequestId, decision)
       ),
     };
     const nativeEvidence = createCodexNativeEvidence(runtime, nativeSessions, logger);

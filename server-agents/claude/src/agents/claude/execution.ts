@@ -124,13 +124,6 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     );
   }
 
-  async respondToPermission(
-    permissionRequestId: string,
-    decision: Parameters<import('@garcon/server-agent-interface').AgentPermissionDecisions['respond']>[1],
-  ): Promise<void> {
-    this.runtime.resolveInternalToolApproval(permissionRequestId, decision);
-  }
-
   async prepareProjectPathUpdate(
     request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
   ): Promise<AgentProjectPathUpdatePreparation | void> {

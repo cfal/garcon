@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionCancelledMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
+import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionCancelledMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint, permissionOccurrenceKey } from '@garcon/common/chat-types';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import {
@@ -32,6 +32,7 @@ import {
 function createRuntime(options) {
   const provider = new CodexAppServerRuntime(options);
   const listeners = { messages: [], finished: [], failed: [] };
+  const permissionCapabilities = new Map();
   provider.onMessages = (listener) => { listeners.messages.push(listener); };
   provider.onFinished = (listener) => { listeners.finished.push(listener); };
   provider.onFailed = (listener) => { listeners.failed.push(listener); };
@@ -44,6 +45,28 @@ function createRuntime(options) {
       if (event.type === 'messages') {
         const messages = event.rows.map((row) => row.message);
         for (const listener of listeners.messages) listener(request.chatId, messages, metadata);
+      } else if (event.type === 'permission') {
+        const lifecycle = event.lifecycle;
+        const message = lifecycle.kind === 'requested'
+          ? new PermissionRequestMessage(
+              '',
+              lifecycle.requestId,
+              lifecycle.incarnation,
+              lifecycle.requestedTool,
+            )
+          : new PermissionCancelledMessage(
+              '',
+              lifecycle.requestId,
+              lifecycle.incarnation,
+              lifecycle.reason ?? undefined,
+            );
+        if (event.decision) {
+          permissionCapabilities.set(
+            permissionOccurrenceKey(lifecycle.requestId, lifecycle.incarnation),
+            event.decision,
+          );
+        }
+        for (const listener of listeners.messages) listener(request.chatId, [message], metadata);
       } else if (event.type === 'run-ended' && event.outcome === 'finished') {
         for (const listener of listeners.finished) listener(request.chatId, event.exitCode ?? 0, metadata);
       } else if (event.type === 'run-ended' && event.outcome === 'failed') {
@@ -55,6 +78,9 @@ function createRuntime(options) {
     const method = provider[name].bind(provider);
     provider[name] = (request, ...rest) => method(request, publisherFor(request), ...rest);
   }
+  provider.permissionCapabilityFor = (message) => permissionCapabilities.get(
+    permissionOccurrenceKey(message.permissionRequestId, message.incarnation),
+  );
   return provider;
 }
 
@@ -4091,7 +4117,7 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.steerTurn).toHaveBeenCalledWith(expect.objectContaining({
       expectedTurnId: 'automatic-turn',
     }));
-    await provider.resolvePermission(request.permissionRequestId, { allow: true });
+    await provider.permissionCapabilityFor(request).respond({ allow: true });
     expect(fake.respond).toHaveBeenCalledWith(77, { decision: 'accept' });
   });
 
@@ -6461,10 +6487,10 @@ describe('CodexAppServerRuntime', () => {
 
     const request = emitted.find((message) => message instanceof PermissionRequestMessage);
     expect(request).toBeTruthy();
-    await provider.resolvePermission(request.permissionRequestId, { allow: true });
+    await provider.permissionCapabilityFor(request).respond({ allow: true });
 
     expect(fake.respond).toHaveBeenCalledWith(7, { decision: 'accept' });
-    expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(true);
+    expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(false);
   });
 
   it('cancels each pending approval through the operation that created it', async () => {

@@ -26,8 +26,17 @@
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		textScale?: number;
-		onPermissionDecision?: (permissionRequestId: string, decision: PermissionDecision) => void;
-		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
+		onPermissionDecision?: (
+			permissionRequestId: string,
+			incarnation: string,
+			decision: PermissionDecision,
+		) => void;
+		onExitPlanMode?: (
+			permissionRequestId: string,
+			incarnation: string,
+			choice: string,
+			plan: string,
+		) => void;
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;

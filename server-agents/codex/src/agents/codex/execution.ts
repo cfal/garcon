@@ -131,13 +131,6 @@ export class CodexExecution implements AgentRuntimeExecution {
     });
   }
 
-  async respondToPermission(
-    permissionRequestId: string,
-    decision: Parameters<import('@garcon/server-agent-interface').AgentPermissionDecisions['respond']>[1],
-  ): Promise<void> {
-    await this.runtime.resolvePermission(permissionRequestId, decision);
-  }
-
   async #resume(
     request: AgentRuntimeResumeRequest,
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,

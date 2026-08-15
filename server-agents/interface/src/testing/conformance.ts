@@ -36,7 +36,6 @@ export function validateAgentIntegration(
     'nativeActivity',
     'nativeSessions',
     'sessionConfiguration',
-    'permissionDecisions',
     'projectPathUpdates',
   ] as const) {
     if (!(facet in integration) || integration[facet] === undefined) {

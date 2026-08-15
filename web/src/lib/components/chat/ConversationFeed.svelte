@@ -3,6 +3,7 @@
 	import ConversationFeedVirtualRow from './ConversationFeedVirtualRow.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+	import { permissionOccurrenceKey } from '$shared/chat-types';
 	import {
 		getActiveTranscriptState,
 		getAgentState,
@@ -51,9 +52,15 @@
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
 		onPermissionDecision?: (
 			permissionRequestId: string,
+			incarnation: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
-		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
+		onExitPlanMode?: (
+			permissionRequestId: string,
+			incarnation: string,
+			choice: string,
+			plan: string,
+		) => void;
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
 		onLoadEarlier?: () => void;
@@ -231,8 +238,11 @@
 			isLiveWindow: !chatState.hasLaterMessages,
 			detachedStatus: m.chat_feed_new_response_available(),
 			hiddenToolTypes: localSettings.hiddenToolTypes,
-			floatingPermissionIds: projectionInput.pendingPermissions.map(
-				(request) => request.permissionRequestId,
+			floatingPermissionOccurrences: projectionInput.pendingPermissions.map(
+				(request) => permissionOccurrenceKey(
+					request.permissionRequestId,
+					request.incarnation,
+				),
 			),
 		};
 		untrack(() => {
@@ -274,8 +284,11 @@
 
 	$effect.pre(() => {
 		const input = projectionInput;
-		const pendingPermissionIds = new Set(
-			activePendingPermissionRequests.map((request) => request.permissionRequestId),
+		const pendingPermissionOccurrences = new Set(
+			activePendingPermissionRequests.map((request) => permissionOccurrenceKey(
+				request.permissionRequestId,
+				request.incarnation,
+			)),
 		);
 		untrack(() => {
 			const nextProjection = projectionState.reconcile(input);
@@ -289,7 +302,7 @@
 			itemState.reconcile(
 				input.surfaceIdentity,
 				new Set(input.rows.map((row) => row.id)),
-				pendingPermissionIds,
+				pendingPermissionOccurrences,
 			);
 		});
 	});

@@ -52,6 +52,26 @@ export type AgentProviderPermissionLifecycle = Exclude<
   { readonly kind: 'resolved' }
 >;
 
+export interface AgentPermissionResponseCapability {
+  readonly requestId: string;
+  readonly incarnation: string;
+  respond(decision: PermissionDecisionPayload): Promise<void>;
+}
+
+type AgentPermissionRequestedEvent = {
+  readonly type: 'permission';
+  readonly runId: string;
+  readonly lifecycle: Extract<AgentProviderPermissionLifecycle, { readonly kind: 'requested' }>;
+  readonly decision: AgentPermissionResponseCapability;
+};
+
+type AgentPermissionTerminalEvent = {
+  readonly type: 'permission';
+  readonly runId: string;
+  readonly lifecycle: Exclude<AgentProviderPermissionLifecycle, { readonly kind: 'requested' }>;
+  readonly decision?: never;
+};
+
 export interface AgentRunFailureDetail {
   readonly code: string;
   readonly message?: string;
@@ -60,11 +80,8 @@ export interface AgentRunFailureDetail {
 export type AgentProducerEvent =
   | { readonly type: 'rows'; readonly rows: readonly AgentProducedRow[] }
   | { readonly type: 'session'; readonly session: AgentEstablishedSession }
-  | {
-      readonly type: 'permission';
-      readonly runId: string;
-      readonly lifecycle: AgentProviderPermissionLifecycle;
-    }
+  | AgentPermissionRequestedEvent
+  | AgentPermissionTerminalEvent
   | {
       readonly type: 'run-ended';
       readonly runId: string;

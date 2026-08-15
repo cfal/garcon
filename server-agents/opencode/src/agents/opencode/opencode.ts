@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { isRecord } from '@garcon/common/json';
+import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
 import { extractSessionId, extractTextParts, isOpenCodeAbortError, isOpenCodeContextOverflowError, openCodeSessionError, type SSEEvent } from './sse-events.js';
@@ -14,8 +15,7 @@ import {
   type OpenCodeSession,
   type OpenCodeTurnContext,
 } from './turn-events.js';
-import { ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
-import type { ChatMessage } from '@garcon/common/chat-types';
+import { ErrorMessage, PermissionRequestMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
@@ -164,6 +164,8 @@ interface PendingTurnWaiter {
 }
 
 interface PendingPermission {
+  permissionRequestId: string;
+  incarnation: string;
   originalRequestId: string;
   agentSessionId: string;
   chatId: string;
@@ -382,7 +384,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #shuttingDown = false;
   #sessions = new Map<string, OpenCodeSession>();
   #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
-  #pendingPermissions = new Map<string, PendingPermission>();
+  #pendingPermissions = new Set<PendingPermission>();
   readonly steering: OpenCodeSteeringController;
   readonly #endpointCoordinator: OpenCodeEndpointCoordinator;
   readonly #globalEventListener: OpenCodeGlobalEventListener;
@@ -734,16 +736,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     );
   }
 
-  #emitPermissionMessages(
-    chatId: string,
-    messages: ChatMessage[],
-    eventMetadata?: RuntimeEventMetadata,
-    operation?: OpenCodeTurnContext['operation'],
-  ): void {
-    if (!messages.length) return;
-    this.emitMessages(chatId, messages, eventMetadata, operation);
-  }
-
   #replyManualBypassPermission(
     client: any,
     agentSessionId: string,
@@ -778,12 +770,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   #cancelPendingPermissionsForSession(agentSessionId: string, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
-    for (const [permissionRequestId, pending] of this.#pendingPermissions.entries()) {
+    for (const pending of [...this.#pendingPermissions]) {
       if (pending.agentSessionId !== agentSessionId) continue;
-      this.#pendingPermissions.delete(permissionRequestId);
-      this.#emitPermissionMessages(
+      this.#pendingPermissions.delete(pending);
+      this.emitPermissionCancelled(
         pending.chatId,
-        [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason)],
+        new PermissionCancelledMessage(
+          new Date().toISOString(),
+          pending.permissionRequestId,
+          pending.incarnation,
+          reason,
+        ),
         pending.eventMetadata,
         pending.operation,
       );
@@ -891,22 +888,36 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       return;
     }
     const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
-    this.#pendingPermissions.set(permissionRequestId, {
+    const incarnation = crypto.randomUUID();
+    const pending: PendingPermission = {
+      permissionRequestId,
+      incarnation,
       originalRequestId: permission.requestId,
       agentSessionId: sessionId,
       chatId: route.chatId,
       directory: route.directory,
       eventMetadata: route.turn.eventMetadata,
       operation: route.turn.operation,
-    });
+    };
+    this.#pendingPermissions.add(pending);
     const now = new Date().toISOString();
-    this.#emitPermissionMessages(route.chatId, [
-      new PermissionRequestMessage(
-        now,
-        permissionRequestId,
-        convertOpencodePermissionTool(now, permissionRequestId, permission.toolInput),
-      ),
-    ], route.turn.eventMetadata, route.turn.operation);
+    const message = new PermissionRequestMessage(
+      now,
+      permissionRequestId,
+      incarnation,
+      convertOpencodePermissionTool(now, permissionRequestId, permission.toolInput),
+    );
+    this.emitPermissionRequested(
+      route.chatId,
+      message,
+      Object.freeze({
+        requestId: permissionRequestId,
+        incarnation,
+        respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
+      }),
+      route.turn.eventMetadata,
+      route.turn.operation,
+    );
   }
 
   async getClient(): Promise<any> {
@@ -1421,28 +1432,14 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       .map(([id, session]) => ({ id, status: session.status, startedAt: session.startedAt }));
   }
 
-  async resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> {
-    if (!permissionRequestId) return;
-    const pending = this.#pendingPermissions.get(permissionRequestId);
-    this.#pendingPermissions.delete(permissionRequestId);
-    if (!pending) {
-      this.#logger.warn('OpenCode permission response has no pending request', {
-        permissionRequestId,
-      });
-      return;
+  async #resolvePermission(
+    pending: PendingPermission,
+    decision: { allow: boolean; alwaysAllow?: boolean },
+  ): Promise<void> {
+    if (!this.#pendingPermissions.has(pending)) {
+      throw new Error('OpenCode permission occurrence is no longer pending');
     }
-
     const allow = Boolean(decision?.allow);
-
-    if (pending.chatId) {
-      this.#emitPermissionMessages(
-        pending.chatId,
-        [new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, allow)],
-        pending.eventMetadata,
-        pending.operation,
-      );
-    }
-
     const reply = mapPermissionDecision(decision);
 
     const client = await this.getClient();
@@ -1459,6 +1456,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       ),
     );
     throwOpenCodeResultError(result, 'OpenCode permission reply failed');
+    this.#pendingPermissions.delete(pending);
   }
 
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {

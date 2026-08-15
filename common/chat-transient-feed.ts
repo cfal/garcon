@@ -1,4 +1,9 @@
-import { parseChatMessage, type ChatMessage } from './chat-types';
+import {
+  PermissionRequestMessage,
+  parseChatMessage,
+  permissionOccurrenceKey,
+  type ChatMessage,
+} from './chat-types';
 
 export interface TransientFeedRow {
   readonly id: string;
@@ -55,6 +60,13 @@ export function parseTransientFeedRow(value: unknown): TransientFeedRow | null {
   const parsedMessage = parseChatMessage(message);
   if (!id || !incarnation || !runId || !transcriptViewId
       || afterOrdinal === null || displayOrder === null || !parsedMessage) return null;
+  if (
+    parsedMessage instanceof PermissionRequestMessage
+    && (
+      parsedMessage.permissionRequestId !== id
+      || parsedMessage.incarnation !== incarnation
+    )
+  ) return null;
   return {
     id,
     incarnation,
@@ -127,11 +139,13 @@ function parseFeedBase(
 
 function parseRows(values: readonly unknown[]): TransientFeedRow[] | null {
   const rows: TransientFeedRow[] = [];
-  const ids = new Set<string>();
+  const occurrences = new Set<string>();
   for (const value of values) {
     const row = parseTransientFeedRow(value);
-    if (!row || ids.has(row.id)) return null;
-    ids.add(row.id);
+    if (!row) return null;
+    const key = permissionOccurrenceKey(row.id, row.incarnation);
+    if (occurrences.has(key)) return null;
+    occurrences.add(key);
     rows.push(row);
   }
   return rows;

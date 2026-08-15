@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type {
   AgentPermissionLifecycle,
+  AgentPermissionResponseCapability,
   AgentProducerEvent,
   AgentProducerSink,
   AgentRunFailureDetail,
@@ -92,11 +93,14 @@ export interface PermissionResolutionClaim {
   readonly requestId: string;
   readonly incarnation: string;
   readonly claimId: string;
+  readonly decision: AgentPermissionResponseCapability;
 }
 
 interface ActivePermission {
   readonly runId: string;
+  readonly requestId: string;
   readonly incarnation: string;
+  readonly decision: AgentPermissionResponseCapability;
   readonly claimId: string | null;
 }
 
@@ -110,7 +114,7 @@ export class TranscriptLedgerService {
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
-  readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
+  readonly #activePermissions = new Map<string, Map<string, Map<string, ActivePermission>>>();
   readonly #permissionClaims = new Map<string, PermissionResolutionClaim>();
   readonly #preparedInputs = new Map<string, InputComposition>();
 
@@ -264,7 +268,10 @@ export class TranscriptLedgerService {
   claimPermissionResolution(action: ChatTransientControlAction): PermissionResolutionClaim {
     if (action.serverInstanceId !== this.#serverInstanceId) throw new PermissionNotActionableError();
     const runId = action.runId;
-    const permission = this.#activePermissions.get(action.chatId)?.get(action.id);
+    const permission = this.#activePermissions
+      .get(action.chatId)
+      ?.get(action.id)
+      ?.get(action.incarnation);
     if (
       !permission
       || permission.runId !== runId
@@ -283,8 +290,9 @@ export class TranscriptLedgerService {
       requestId: action.id,
       incarnation: action.incarnation,
       claimId: crypto.randomUUID(),
+      decision: permission.decision,
     });
-    this.#activePermissions.get(action.chatId)!.set(action.id, {
+    this.#activePermissions.get(action.chatId)!.get(action.id)!.set(action.incarnation, {
       ...permission,
       claimId: claim.claimId,
     });
@@ -312,9 +320,11 @@ export class TranscriptLedgerService {
       providerMeta: null,
     }]);
     const permission = row as LedgerPermissionRow;
-    const active = this.#activePermissions.get(claim.chatId)?.get(claim.requestId);
+    const occurrences = this.#activePermissions.get(claim.chatId)?.get(claim.requestId);
+    const active = occurrences?.get(claim.incarnation);
     if (active?.claimId === claim.claimId) {
-      this.#activePermissions.get(claim.chatId)?.delete(claim.requestId);
+      occurrences!.delete(claim.incarnation);
+      this.#deleteEmptyPermissionMaps(claim.chatId, claim.requestId);
     }
     this.#notify({
       type: 'permission',
@@ -330,12 +340,12 @@ export class TranscriptLedgerService {
     if (this.#permissionClaims.get(claim.claimId) !== claim) return;
     this.#permissionClaims.delete(claim.claimId);
     const permissions = this.#activePermissions.get(claim.chatId);
-    const active = permissions?.get(claim.requestId);
+    const active = permissions?.get(claim.requestId)?.get(claim.incarnation);
     if (
       active?.claimId === claim.claimId
       && this.#activeRuns.get(claim.chatId) === claim.runId
     ) {
-      permissions!.set(claim.requestId, { ...active, claimId: null });
+      permissions!.get(claim.requestId)!.set(claim.incarnation, { ...active, claimId: null });
     }
   }
 
@@ -566,6 +576,13 @@ export class TranscriptLedgerService {
         return;
       }
       case 'permission': {
+        let decision: AgentPermissionResponseCapability | null = null;
+        if (event.lifecycle.kind === 'requested') {
+          if (!event.decision) {
+            throw new TypeError('Permission request response capability is required');
+          }
+          decision = validatePermissionDecision(event.lifecycle, event.decision);
+        }
         const [row] = this.#store.append(chatId, viewId, [{
           kind: permissionRowKind(event.lifecycle),
           at: this.#now(),
@@ -579,7 +596,12 @@ export class TranscriptLedgerService {
           runId: event.runId,
           row: row as LedgerPermissionRow,
         });
-        this.#applyPermissionLifecycle(chatId, event.runId, event.lifecycle);
+        this.#applyPermissionLifecycle(
+          chatId,
+          event.runId,
+          event.lifecycle,
+          decision,
+        );
         return;
       }
       case 'run-ended': {
@@ -623,34 +645,54 @@ export class TranscriptLedgerService {
     chatId: string,
     runId: string,
     lifecycle: Exclude<AgentPermissionLifecycle, { readonly kind: 'resolved' }>,
+    decision: AgentPermissionResponseCapability | null,
   ): void {
     if (lifecycle.kind === 'requested') {
       if (this.#activeRuns.get(chatId) !== runId) return;
+      if (!decision) throw new TypeError('Permission request response capability is required');
       let permissions = this.#activePermissions.get(chatId);
       if (!permissions) {
         permissions = new Map();
         this.#activePermissions.set(chatId, permissions);
       }
-      permissions.set(lifecycle.requestId, {
+      let occurrences = permissions.get(lifecycle.requestId);
+      if (!occurrences) {
+        occurrences = new Map();
+        permissions.set(lifecycle.requestId, occurrences);
+      }
+      occurrences.set(lifecycle.incarnation, {
         runId,
+        requestId: lifecycle.requestId,
         incarnation: lifecycle.incarnation,
+        decision,
         claimId: null,
       });
       return;
     }
     const permissions = this.#activePermissions.get(chatId);
-    const active = permissions?.get(lifecycle.requestId);
+    const active = permissions?.get(lifecycle.requestId)?.get(lifecycle.incarnation);
     if (active?.runId === runId && active.incarnation === lifecycle.incarnation) {
-      permissions!.delete(lifecycle.requestId);
+      permissions!.get(lifecycle.requestId)!.delete(lifecycle.incarnation);
+      this.#deleteEmptyPermissionMaps(chatId, lifecycle.requestId);
     }
   }
 
   #clearRunPermissions(chatId: string, runId: string): void {
     const permissions = this.#activePermissions.get(chatId);
     if (!permissions) return;
-    for (const [requestId, permission] of permissions) {
-      if (permission.runId === runId) permissions.delete(requestId);
+    for (const [requestId, occurrences] of permissions) {
+      for (const [incarnation, permission] of occurrences) {
+        if (permission.runId === runId) occurrences.delete(incarnation);
+      }
+      if (occurrences.size === 0) permissions.delete(requestId);
     }
+    if (permissions.size === 0) this.#activePermissions.delete(chatId);
+  }
+
+  #deleteEmptyPermissionMaps(chatId: string, requestId: string): void {
+    const permissions = this.#activePermissions.get(chatId);
+    if (!permissions) return;
+    if (permissions.get(requestId)?.size === 0) permissions.delete(requestId);
     if (permissions.size === 0) this.#activePermissions.delete(chatId);
   }
 
@@ -675,6 +717,21 @@ export class TranscriptLedgerService {
 
 function inputKey(chatId: string, clientMessageId: string): string {
   return `${chatId}\u0000${clientMessageId}`;
+}
+
+function validatePermissionDecision(
+  lifecycle: Extract<AgentPermissionLifecycle, { readonly kind: 'requested' }>,
+  capability: AgentPermissionResponseCapability,
+): AgentPermissionResponseCapability {
+  if (
+    !capability
+    || capability.requestId !== lifecycle.requestId
+    || capability.incarnation !== lifecycle.incarnation
+    || typeof capability.respond !== 'function'
+  ) {
+    throw new TypeError('Permission response capability does not match its request occurrence');
+  }
+  return capability;
 }
 
 class ProducerLease implements TranscriptProducerLease {

@@ -52,7 +52,6 @@ export default class DirectOpenAiResponsesCompatibleIntegration implements Agent
   readonly nativeActivity = null;
   readonly nativeSessions = null;
   readonly sessionConfiguration = null;
-  readonly permissionDecisions = null;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;

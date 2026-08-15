@@ -1,10 +1,17 @@
-import type { ChatMessage } from '@garcon/common/chat-types';
+import {
+  PermissionCancelledMessage,
+  PermissionRequestMessage,
+  type ChatMessage,
+} from '@garcon/common/chat-types';
 import {
   runtimeRows,
   type AgentRuntimeEvent,
   type AgentRuntimePublisher,
 } from '@garcon/server-agent-common/execution/runtime-events';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import type {
+  AgentLogger,
+  AgentPermissionResponseCapability,
+} from '@garcon/server-agent-interface';
 
 // A Codex call together with the capability core handed it. The app-server multiplexes every chat
 // over one process-wide stream, so the operation carries the route and the event carries none.
@@ -33,6 +40,51 @@ export function publishRows(
 ): void {
   if (!messages.length) return;
   publish(logger, chatId, operation, (runId) => ({ type: 'messages', rows: runtimeRows(messages), runId }));
+}
+
+export function publishPermissionRequested(
+  logger: AgentLogger,
+  chatId: string,
+  message: PermissionRequestMessage,
+  decision: AgentPermissionResponseCapability,
+  operation: CodexOperation | undefined,
+): void {
+  if (
+    decision.requestId !== message.permissionRequestId
+    || decision.incarnation !== message.incarnation
+  ) {
+    throw new TypeError('Permission response capability does not match its request occurrence');
+  }
+  publish(logger, chatId, operation, (runId) => ({
+    type: 'permission',
+    runId,
+    lifecycle: {
+      kind: 'requested',
+      requestId: message.permissionRequestId,
+      incarnation: message.incarnation,
+      requestedTool: message.requestedTool,
+      options: [],
+    },
+    decision,
+  }));
+}
+
+export function publishPermissionCancelled(
+  logger: AgentLogger,
+  chatId: string,
+  message: PermissionCancelledMessage,
+  operation: CodexOperation | undefined,
+): void {
+  publish(logger, chatId, operation, (runId) => ({
+    type: 'permission',
+    runId,
+    lifecycle: {
+      kind: 'cancelled',
+      requestId: message.permissionRequestId,
+      incarnation: message.incarnation,
+      reason: message.reason ?? null,
+    },
+  }));
 }
 
 export function publishFinished(

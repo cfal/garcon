@@ -63,7 +63,7 @@ const enabled = {
 	isLiveWindow: true,
 	detachedStatus: 'New response available',
 	hiddenToolTypes: [] as string[],
-	floatingPermissionIds: [] as string[],
+	floatingPermissionOccurrences: [] as string[],
 };
 
 function permissionKey(id: string, incarnation = 'incarnation-1'): string {
@@ -223,7 +223,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				...enabled,
 				pinnedToBottom: false,
 				isLiveWindow: false,
-				floatingPermissionIds: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: [permissionKey('permission-1')],
 			}),
 		).toBe('New response available');
 	});
@@ -609,7 +609,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				],
 				mutationClock: clock(2, 0, 2),
 				...enabled,
-				floatingPermissionIds: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: [permissionKey('permission-1')],
 			}),
 		).toBe('Permission required');
 	});
@@ -680,7 +680,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				rows: [assistantRow('1', 'existing')],
 				mutationClock: clock(2, 0, 2),
 				...enabled,
-				floatingPermissionIds: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: [permissionKey('permission-1')],
 			}),
 		).toBe('Permission required');
 		const permission = messageRow(
@@ -802,7 +802,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				mutationClock: clock(2, 0, 2),
 				...enabled,
 				visible: false,
-				floatingPermissionIds: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: [permissionKey('permission-1')],
 			}),
 		).toBe('');
 		expect(
@@ -811,7 +811,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				rows: [assistantRow('1', 'existing')],
 				mutationClock: clock(2, 0, 2),
 				...enabled,
-				floatingPermissionIds: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: [permissionKey('permission-1')],
 			}),
 		).toBeNull();
 		const permission = messageRow(
@@ -847,7 +847,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				rows: [assistantRow('1', 'existing')],
 				mutationClock: clock(2, 0, 2),
 				...enabled,
-				floatingPermissionIds: [permissionKey('permission-active')],
+				floatingPermissionOccurrences: [permissionKey('permission-active')],
 			}),
 		).toBe('Permission required');
 
@@ -869,7 +869,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				mutationClock: clock(3, 3, 2),
 				...enabled,
 				visible: false,
-				floatingPermissionIds: [permissionKey('permission-active')],
+				floatingPermissionOccurrences: [permissionKey('permission-active')],
 			}),
 		).toBe('');
 

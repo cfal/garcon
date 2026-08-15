@@ -792,12 +792,21 @@ export class ConversationSessionController {
 			});
 	}
 
-	handlePermissionDecision(permissionRequestId: string, decision: PermissionDecisionPayload): void {
-		this.#permissions.handlePermissionDecision(permissionRequestId, decision);
+	handlePermissionDecision(
+		permissionRequestId: string,
+		incarnation: string,
+		decision: PermissionDecisionPayload,
+	): void {
+		this.#permissions.handlePermissionDecision(permissionRequestId, incarnation, decision);
 	}
 
-	handleExitPlanMode(permissionRequestId: string, choice: string, plan: string): void {
-		this.#permissions.handleExitPlanMode(permissionRequestId, choice, plan);
+	handleExitPlanMode(
+		permissionRequestId: string,
+		incarnation: string,
+		choice: string,
+		plan: string,
+	): void {
+		this.#permissions.handleExitPlanMode(permissionRequestId, incarnation, choice, plan);
 	}
 
 	handleQueuePause(): Promise<void> {

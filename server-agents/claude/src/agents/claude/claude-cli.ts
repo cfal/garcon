@@ -1,6 +1,5 @@
 import crypto from 'crypto';
-import { AssistantMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from '@garcon/common/chat-types';
-import type { ChatMessage } from '@garcon/common/chat-types';
+import { AssistantMessage, PermissionRequestMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
@@ -106,6 +105,8 @@ interface ClaudeRunningSession {
 }
 
 interface PendingPermission {
+  permissionRequestId: string;
+  incarnation: string;
   cliRequestId: string;
   agentSessionId: string;
   chatId: string;
@@ -119,7 +120,7 @@ interface PendingPermission {
 class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
   #processRetirements = new ClaudeProcessRetirementTracker();
-  #pendingPermissions = new Map<string, PendingPermission>();
+  #pendingPermissions = new Set<PendingPermission>();
   #controlBroker: ClaudeControlBroker;
   #steering: ClaudeSteeringController;
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
@@ -530,23 +531,21 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#failSession(session, failure);
   }
 
-  #emitPermissionMessages(
-    chatId: string,
-    messages: ChatMessage[],
-    eventMetadata?: RuntimeEventMetadata,
-    operation?: AgentRuntimeOperation,
-  ): void {
-    if (!messages.length) return;
-    this.emitMessages(chatId, messages, eventMetadata, operation);
-  }
-
   #cancelPendingPermissions(session: ClaudeRunningSession): void {
-    for (const [permissionRequestId, pending] of this.#pendingPermissions) {
+    for (const pending of [...this.#pendingPermissions]) {
       if (pending.agentSessionId !== session.id) continue;
-      this.#pendingPermissions.delete(permissionRequestId);
-      this.#emitPermissionMessages(pending.chatId, [
-        new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled'),
-      ], pending.eventMetadata, pending.operation);
+      this.#pendingPermissions.delete(pending);
+      this.emitPermissionCancelled(
+        pending.chatId,
+        new PermissionCancelledMessage(
+          new Date().toISOString(),
+          pending.permissionRequestId,
+          pending.incarnation,
+          'cancelled',
+        ),
+        pending.eventMetadata,
+        pending.operation,
+      );
     }
   }
 
@@ -578,6 +577,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
 
     const permissionRequestId = `claude-${crypto.randomBytes(8).toString('hex')}`;
+    const incarnation = crypto.randomUUID();
     const toolName = request.tool_name || 'Unknown';
     const toolInput = request.input || {};
     const toolUseId = request.tool_use_id;
@@ -598,7 +598,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       return;
     }
 
-    this.#pendingPermissions.set(permissionRequestId, {
+    const pending: PendingPermission = {
+      permissionRequestId,
+      incarnation,
       cliRequestId: msg.request_id!,
       agentSessionId: session.id,
       chatId: session.chatId,
@@ -607,26 +609,44 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       toolUseId,
       eventMetadata: activeTurn.eventMetadata,
       operation: activeTurn.operation,
-    });
+    };
+    this.#pendingPermissions.add(pending);
 
     const now = new Date().toISOString();
-    this.#emitPermissionMessages(session.chatId, [
-      new PermissionRequestMessage(
-        now,
-        permissionRequestId,
-        convertClaudePermissionTool(now, toolUseId ?? permissionRequestId, toolName, request.input),
-      ),
-    ], activeTurn.eventMetadata, activeTurn.operation);
+    const message = new PermissionRequestMessage(
+      now,
+      permissionRequestId,
+      incarnation,
+      convertClaudePermissionTool(now, toolUseId ?? permissionRequestId, toolName, request.input),
+    );
+    this.emitPermissionRequested(
+      session.chatId,
+      message,
+      Object.freeze({
+        requestId: permissionRequestId,
+        incarnation,
+        respond: (decision: PermissionDecisionPayload) => (
+          this.#resolvePendingPermission(pending, decision)
+        ),
+      }),
+      activeTurn.eventMetadata,
+      activeTurn.operation,
+    );
   }
 
   #handleControlCancelRequest(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
     if (!msg.request_id) return;
-    for (const [permissionRequestId, pending] of this.#pendingPermissions) {
+    for (const pending of this.#pendingPermissions) {
       if (pending.agentSessionId !== session.id || pending.cliRequestId !== msg.request_id) continue;
-      this.#pendingPermissions.delete(permissionRequestId);
-      this.#emitPermissionMessages(
+      this.#pendingPermissions.delete(pending);
+      this.emitPermissionCancelled(
         pending.chatId,
-        [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled')],
+        new PermissionCancelledMessage(
+          new Date().toISOString(),
+          pending.permissionRequestId,
+          pending.incarnation,
+          'cancelled',
+        ),
         pending.eventMetadata,
         pending.operation,
       );
@@ -738,7 +758,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (session?.activeTurn) {
       throw new Error('Cannot update project path while Claude is running');
     }
-    for (const pending of this.#pendingPermissions.values()) {
+    for (const pending of this.#pendingPermissions) {
       if (pending.agentSessionId === agentSessionId) {
         throw new Error('Cannot update project path while Claude is waiting for permission');
       }
@@ -794,19 +814,15 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  resolveInternalToolApproval(permissionRequestId: string, decision: PermissionDecisionPayload): void {
-    const pending = this.#pendingPermissions.get(permissionRequestId);
-    if (!pending) {
-      this.#dependencies.logger.warn('Claude permission response has no pending request', {
-        permissionRequestId,
-      });
-      return;
+  async #resolvePendingPermission(
+    pending: PendingPermission,
+    decision: PermissionDecisionPayload,
+  ): Promise<void> {
+    if (!this.#pendingPermissions.has(pending)) {
+      throw new Error('Claude permission occurrence is no longer pending');
     }
-    this.#pendingPermissions.delete(permissionRequestId);
-
     const response = buildClaudePermissionApprovalResponse(pending, decision);
-
-    this.#trySendToCLI(pending.agentSessionId, JSON.stringify({
+    await this.#writeToCLI(pending.agentSessionId, JSON.stringify({
       type: 'control_response',
       response: {
         subtype: 'success',
@@ -814,13 +830,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         response,
       },
     }));
-
-    this.#emitPermissionMessages(
-      pending.chatId,
-      [new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow))],
-      pending.eventMetadata,
-      pending.operation,
-    );
+    this.#pendingPermissions.delete(pending);
   }
 
   async #sendUserMessage(

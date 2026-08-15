@@ -1,4 +1,7 @@
-import { PermissionRequestMessage } from '../../common/chat-types.js';
+import {
+  PermissionRequestMessage,
+  permissionOccurrenceKey,
+} from '../../common/chat-types.js';
 import type {
   ChatTransientControlAction,
   ChatTransientFeedMutation,
@@ -59,18 +62,16 @@ export class ChatTransientFeedStore {
         message: new PermissionRequestMessage(
           event.row.at,
           lifecycle.requestId,
+          lifecycle.incarnation,
           lifecycle.requestedTool,
         ),
       };
-      record.rows.set(row.id, row);
+      record.rows.set(permissionOccurrenceKey(row.id, row.incarnation), row);
       mutation = { kind: 'upsert', row };
     } else {
       const lifecycle = event.row.lifecycle;
-      const existing = record.rows.get(lifecycle.requestId);
-      if (!existing || existing.incarnation !== lifecycle.incarnation) {
-        return { kind: 'unchanged' };
-      }
-      record.rows.delete(lifecycle.requestId);
+      const key = permissionOccurrenceKey(lifecycle.requestId, lifecycle.incarnation);
+      if (!record.rows.delete(key)) return { kind: 'unchanged' };
       mutation = {
         kind: 'remove',
         id: lifecycle.requestId,
@@ -115,8 +116,10 @@ export class ChatTransientFeedStore {
     if (action.serverInstanceId !== this.serverInstanceId) {
       throw new TransientControlActionError('TRANSIENT_CONTROL_SERVER_RESTARTED');
     }
-    const row = this.#records.get(action.chatId)?.rows.get(action.id);
-    if (!row || row.incarnation !== action.incarnation || row.runId !== action.runId) {
+    const row = this.#records
+      .get(action.chatId)
+      ?.rows.get(permissionOccurrenceKey(action.id, action.incarnation));
+    if (!row || row.runId !== action.runId) {
       throw new TransientControlActionError('TRANSIENT_CONTROL_STALE');
     }
     return row;
@@ -172,7 +175,9 @@ function snapshotOf(
     transcriptViewId: record.transcriptViewId,
     transientRevision: record.transientRevision,
     rows: [...record.rows.values()].sort((left, right) => (
-      left.displayOrder - right.displayOrder || left.id.localeCompare(right.id)
+      left.displayOrder - right.displayOrder
+      || left.id.localeCompare(right.id)
+      || left.incarnation.localeCompare(right.incarnation)
     )),
   };
 }

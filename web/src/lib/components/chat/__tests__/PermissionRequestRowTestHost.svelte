@@ -11,6 +11,7 @@
 		terminal?: PermissionTerminalState;
 		onDecision: (
 			permissionRequestId: string,
+			incarnation: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		draft?: PermissionQuestionDraft;

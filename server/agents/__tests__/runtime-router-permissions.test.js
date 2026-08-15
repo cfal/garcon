@@ -3,7 +3,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
-function makeRouter(permissionDecisions, transcript = createRuntimeTranscriptFixture({
+function makeRouter(transcript = createRuntimeTranscriptFixture({
     rows: [{
       kind: 'permission-requested',
       lifecycle: {
@@ -13,16 +13,12 @@ function makeRouter(permissionDecisions, transcript = createRuntimeTranscriptFix
       },
     }],
   })) {
-  const integration = {
-    descriptor: { id: 'test' },
-    permissionDecisions,
-  };
   return new AgentRuntimeRouter({
     registry: {
       getChat: mock(() => ({ agentId: 'test' })),
     },
     directory: {
-      get: mock((agentId) => agentId === 'test' ? integration : null),
+      get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
     },
     endpointResolver: {},
     events: {},
@@ -37,20 +33,25 @@ createCarriedContext: async () => null,
 }
 
 describe('AgentRuntimeRouter permission replies', () => {
-  it('invokes the integration permission handler with its execution receiver', async () => {
+  it('invokes the exact permission capability with its receiver', async () => {
     const resolvePermission = mock(async () => undefined);
-    const permissionDecisions = {
+    const decisionCapability = {
+      requestId: 'permission-1',
+      incarnation: 'incarnation-1',
       runtime: { resolvePermission },
-      async respond(permissionRequestId, decision) {
-        await this.runtime.resolvePermission(permissionRequestId, decision);
+      async respond(decision) {
+        await this.runtime.resolvePermission(decision);
       },
     };
-    const router = makeRouter(permissionDecisions);
+    const transcript = createRuntimeTranscriptFixture({
+      permissionDecision: decisionCapability,
+    });
+    const router = makeRouter(transcript);
     const decision = { allow: true };
 
     await router.resolvePermission('chat-1', 'permission-1', decision, permissionControl());
 
-    expect(resolvePermission).toHaveBeenCalledWith('permission-1', decision);
+    expect(resolvePermission).toHaveBeenCalledWith(decision);
   });
 
   it('releases the actionability claim when the provider rejects the decision', async () => {
@@ -58,25 +59,15 @@ describe('AgentRuntimeRouter permission replies', () => {
       throw new Error('provider rejected permission');
     });
     const abandoned = mock(() => undefined);
-    const transcript = createRuntimeTranscriptFixture({ onPermissionAbandoned: abandoned });
-    const router = new AgentRuntimeRouter({
-      registry: { getChat: mock(() => ({ agentId: 'test' })) },
-      directory: {
-        get: mock(() => ({
-          descriptor: { id: 'test' },
-          permissionDecisions: { respond: respondToPermission },
-        })),
+    const transcript = createRuntimeTranscriptFixture({
+      onPermissionAbandoned: abandoned,
+      permissionDecision: {
+        requestId: 'permission-1',
+        incarnation: 'incarnation-1',
+        respond: respondToPermission,
       },
-      endpointResolver: {},
-      events: {},
-      projection: {},
-      getCarryOverRevision: () => 'carry-1',
-      createCarriedContext: async () => null,
-      getCarryOverMessageCount: async () => 0,
-      ledger: transcript.ledger,
-      hasPendingOwnershipTransfer: () => false,
-      adoption: transcript.adoption,
     });
+    const router = makeRouter(transcript);
 
     await expect(router.resolvePermission(
       'chat-1',
@@ -88,7 +79,6 @@ describe('AgentRuntimeRouter permission replies', () => {
   });
 
   it('responds through the exact claimed permission occurrence capability', async () => {
-    const legacyRespond = mock(async () => undefined);
     const firstRespond = mock(async () => undefined);
     const secondRespond = mock(async () => undefined);
     const transcript = createRuntimeTranscriptFixture();
@@ -101,7 +91,7 @@ describe('AgentRuntimeRouter permission replies', () => {
       if (!claim) throw new Error('Permission occurrence is not actionable');
       return claim;
     });
-    const router = makeRouter({ respond: legacyRespond }, transcript);
+    const router = makeRouter(transcript);
     const firstDecision = { allow: true };
     const secondDecision = { allow: false };
 
@@ -120,11 +110,9 @@ describe('AgentRuntimeRouter permission replies', () => {
 
     expect(firstRespond).toHaveBeenCalledWith(firstDecision);
     expect(secondRespond).toHaveBeenCalledWith(secondDecision);
-    expect(legacyRespond).not.toHaveBeenCalled();
   });
 
   it('rejects a mismatched permission incarnation before provider code executes', async () => {
-    const legacyRespond = mock(async () => undefined);
     const exactRespond = mock(async () => undefined);
     const transcript = createRuntimeTranscriptFixture();
     const activeClaim = permissionClaim('incarnation-1', exactRespond);
@@ -132,7 +120,7 @@ describe('AgentRuntimeRouter permission replies', () => {
       if (control.incarnation === activeClaim.incarnation) return activeClaim;
       throw new Error('Permission occurrence is not actionable');
     });
-    const router = makeRouter({ respond: legacyRespond }, transcript);
+    const router = makeRouter(transcript);
 
     await expect(router.resolvePermission(
       'chat-1',
@@ -142,7 +130,6 @@ describe('AgentRuntimeRouter permission replies', () => {
     )).rejects.toThrow('Permission occurrence is not actionable');
 
     expect(exactRespond).not.toHaveBeenCalled();
-    expect(legacyRespond).not.toHaveBeenCalled();
   });
 });
 

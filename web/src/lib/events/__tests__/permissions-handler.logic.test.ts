@@ -7,6 +7,7 @@ import {
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	PermissionCancelledMessage,
+	PermissionExpiredMessage,
 	AssistantMessage,
 	BashToolUseMessage,
 	ReadToolUseMessage,
@@ -14,6 +15,8 @@ import {
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
+
+const INCARNATION = 'incarnation-1';
 
 function makeContext(initial: PendingPermissionRequest[] = []): {
 	ctx: PermissionLifecycleContext;
@@ -56,6 +59,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-abc123',
+					INCARNATION,
 					new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
 				),
 			]),
@@ -65,6 +69,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const pending = read();
 		expect(pending).toHaveLength(1);
 		expect(pending[0].permissionRequestId).toBe('claude-abc123');
+		expect(pending[0].incarnation).toBe(INCARNATION);
 		expect(pending[0].requestedTool).toBeInstanceOf(BashToolUseMessage);
 		expect((pending[0].requestedTool as BashToolUseMessage).command).toBe('ls');
 	});
@@ -77,6 +82,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-abc123',
+					INCARNATION,
 					new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
 				),
 			]),
@@ -97,11 +103,13 @@ describe('permissions handler (message-batch lifecycle)', () => {
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-aaa',
+					'incarnation-a',
 					new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
 				),
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-bbb',
+					'incarnation-b',
 					new ReadToolUseMessage(new Date().toISOString(), 'tool-2', 'foo.txt'),
 				),
 			]),
@@ -115,6 +123,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read, popLoadingStatus } = makeContext([
 			{
 				permissionRequestId: 'claude-abc123',
+				incarnation: INCARNATION,
 				requestedTool: new ReadToolUseMessage(new Date().toISOString(), 'tool-1', '/tmp/test'),
 				chatId: 'chat-1',
 			},
@@ -122,7 +131,12 @@ describe('permissions handler (message-batch lifecycle)', () => {
 
 		handlePermissionLifecycleFromBatch(
 			makeBatch('chat-1', [
-				new PermissionCancelledMessage(new Date().toISOString(), 'claude-abc123', 'cancelled'),
+				new PermissionCancelledMessage(
+					new Date().toISOString(),
+					'claude-abc123',
+					INCARNATION,
+					'cancelled',
+				),
 			]),
 			ctx,
 		);
@@ -135,6 +149,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read, popLoadingStatus } = makeContext([
 			{
 				permissionRequestId: 'claude-abc123',
+				incarnation: INCARNATION,
 				requestedTool: new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
 				chatId: 'chat-1',
 			},
@@ -142,13 +157,43 @@ describe('permissions handler (message-batch lifecycle)', () => {
 
 		handlePermissionLifecycleFromBatch(
 			makeBatch('chat-1', [
-				new PermissionResolvedMessage(new Date().toISOString(), 'claude-abc123', true),
+				new PermissionResolvedMessage(
+					new Date().toISOString(),
+					'claude-abc123',
+					INCARNATION,
+					true,
+				),
 			]),
 			ctx,
 		);
 
 		expect(popLoadingStatus).toHaveBeenCalledWith('WAITING_FOR_PERMISSION');
 		expect(read()).toHaveLength(0);
+	});
+
+	it('removes only the expired permission occurrence', () => {
+		const current = {
+			permissionRequestId: 'shared',
+			incarnation: 'incarnation-current',
+			requestedTool: new BashToolUseMessage(new Date().toISOString(), 'tool-current', 'pwd'),
+			chatId: 'chat-1',
+		};
+		const expired = {
+			...current,
+			incarnation: 'incarnation-expired',
+		};
+		const { ctx, read } = makeContext([expired, current]);
+
+		handlePermissionLifecycleFromBatch(
+			makeBatch('chat-1', [new PermissionExpiredMessage(
+				new Date().toISOString(),
+				'shared',
+				'incarnation-expired',
+			)]),
+			ctx,
+		);
+
+		expect(read()).toEqual([current]);
 	});
 
 	it('handles request then resolved in same batch', () => {
@@ -159,9 +204,15 @@ describe('permissions handler (message-batch lifecycle)', () => {
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-xyz',
+					INCARNATION,
 					new WriteToolUseMessage(new Date().toISOString(), 'tool-1', 'test.txt'),
 				),
-				new PermissionResolvedMessage(new Date().toISOString(), 'claude-xyz', true),
+				new PermissionResolvedMessage(
+					new Date().toISOString(),
+					'claude-xyz',
+					INCARNATION,
+					true,
+				),
 			]),
 			ctx,
 		);
@@ -175,6 +226,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read, markTurnRunning, pushLoadingStatus } = makeContext([
 			{
 				permissionRequestId: 'claude-abc123',
+				incarnation: INCARNATION,
 				requestedTool: new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
 				chatId: 'chat-1',
 			},
@@ -185,6 +237,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-abc123',
+					INCARNATION,
 					new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
 				),
 			]),

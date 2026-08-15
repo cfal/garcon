@@ -26,7 +26,6 @@ const integration = {
   nativeActivity: null,
   nativeSessions: null,
   sessionConfiguration: null,
-  permissionDecisions: null,
   projectPathUpdates: null,
   catalog: {
     snapshot: async () => ({

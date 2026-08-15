@@ -5,16 +5,9 @@ import {
   type AgentEstablishedSession,
   type AgentExecutionV5,
   type AgentLogger,
-  type AgentPermissionLifecycle,
-  type AgentProducedRow,
   type AgentProducerSink,
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
-import {
-  PermissionCancelledMessage,
-  PermissionRequestMessage,
-  PermissionResolvedMessage,
-} from '@garcon/common/chat-types';
 import type {
   AgentRuntimeEvent,
   AgentRuntimePublisher,
@@ -27,7 +20,6 @@ interface RuntimeHandle extends AgentExecutionHandle {
 
 interface ProducerBinding {
   readonly sink: AgentProducerSink;
-  readonly permissions: Map<string, string>;
   publishedSession: AgentEstablishedSession | null;
 }
 
@@ -56,7 +48,7 @@ export function createAgentProducerAdapter(
   function bindingFor(sink: AgentProducerSink): ProducerBinding {
     const existing = bindings.get(sink);
     if (existing) return existing;
-    const created: ProducerBinding = { sink, permissions: new Map(), publishedSession: null };
+    const created: ProducerBinding = { sink, publishedSession: null };
     bindings.set(sink, created);
     return created;
   }
@@ -153,6 +145,23 @@ function publishRuntimeEvent(binding: ProducerBinding, event: AgentRuntimeEvent)
     binding.publishedSession = event.session;
     return;
   }
+  if (event.type === 'permission') {
+    const runId = event.runId ?? crypto.randomUUID();
+    if (event.lifecycle.kind === 'requested') {
+      if (!event.decision) {
+        throw new TypeError('Permission request response capability is required');
+      }
+      binding.sink.publish({
+        type: 'permission',
+        runId,
+        lifecycle: event.lifecycle,
+        decision: event.decision,
+      });
+    } else {
+      binding.sink.publish({ type: 'permission', runId, lifecycle: event.lifecycle });
+    }
+    return;
+  }
   binding.sink.publish({
     type: 'run-ended',
     runId: event.runId,
@@ -172,70 +181,10 @@ function sameSession(
 
 function publishMessages(
   binding: ProducerBinding,
-  runId: string | null,
+  _runId: string | null,
   messages: Extract<AgentRuntimeEvent, { readonly type: 'messages' }>['rows'],
 ): void {
-  let pendingRows: AgentProducedRow[] = [];
-
-  function flush(): void {
-    if (pendingRows.length === 0) return;
-    binding.sink.publish({ type: 'rows', rows: pendingRows });
-    pendingRows = [];
-  }
-
-  for (const row of messages) {
-    const { message } = row;
-    // Permission facts stay typed even when no run correlates them. A fresh ID can never
-    // match the chat's active run, so core commits the fact as durable history that is
-    // never actionable, instead of leaking a permission message into conversational rows.
-    if (message instanceof PermissionRequestMessage) {
-      flush();
-      const incarnation = crypto.randomUUID();
-      binding.permissions.set(message.permissionRequestId, incarnation);
-      binding.sink.publish({
-        type: 'permission',
-        runId: runId ?? crypto.randomUUID(),
-        lifecycle: {
-          kind: 'requested',
-          requestId: message.permissionRequestId,
-          incarnation,
-          requestedTool: message.requestedTool,
-          options: [],
-        },
-      });
-      continue;
-    }
-    if (message instanceof PermissionCancelledMessage) {
-      flush();
-      binding.sink.publish({
-        type: 'permission',
-        runId: runId ?? crypto.randomUUID(),
-        lifecycle: cancelledLifecycle(binding, message),
-      });
-      continue;
-    }
-    if (message instanceof PermissionResolvedMessage) {
-      flush();
-      binding.permissions.delete(message.permissionRequestId);
-      continue;
-    }
-    pendingRows.push(row);
-  }
-  flush();
-}
-
-function cancelledLifecycle(
-  binding: ProducerBinding,
-  message: PermissionCancelledMessage,
-): Extract<AgentPermissionLifecycle, { readonly kind: 'cancelled' }> {
-  const incarnation = binding.permissions.get(message.permissionRequestId) ?? crypto.randomUUID();
-  binding.permissions.delete(message.permissionRequestId);
-  return {
-    kind: 'cancelled',
-    requestId: message.permissionRequestId,
-    incarnation,
-    reason: message.reason ?? null,
-  };
+  if (messages.length > 0) binding.sink.publish({ type: 'rows', rows: messages });
 }
 
 function withoutSink<T extends { readonly sink: AgentProducerSink }>(request: T): Omit<T, 'sink'> {

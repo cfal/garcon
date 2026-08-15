@@ -9,6 +9,7 @@
 import {
   AssistantMessage,
   isAbortAcknowledged,
+  permissionOccurrenceKey,
   type ChatMessage,
   type ChatStopOutcome,
 } from '../../common/chat-types.js';
@@ -94,7 +95,7 @@ export class AttentionTracker {
   #telegram: TelegramNotifier;
   #telegramSettings: TelegramSettingsDep;
 
-  // Tracks pending permission request IDs per chat to avoid duplicate
+  // Tracks pending permission occurrences per chat to avoid duplicate
   // notifications and to suppress idle notifications when a permission
   // is already being surfaced.
   #pendingPermissions = new Map<string, Set<string>>();
@@ -174,11 +175,12 @@ export class AttentionTracker {
       this.#trackPermission(
         event.chatId,
         lifecycle.requestId,
+        lifecycle.incarnation,
         toolDisplayName(lifecycle.requestedTool),
       );
       return;
     }
-    this.#clearPermission(event.chatId, lifecycle.requestId);
+    this.#clearPermission(event.chatId, lifecycle.requestId, lifecycle.incarnation);
   }
 
   // Reads the last user message from the history cache. This covers both
@@ -193,14 +195,20 @@ export class AttentionTracker {
     return null;
   }
 
-  #trackPermission(chatId: string, permissionRequestId: string, toolName: string): void {
+  #trackPermission(
+    chatId: string,
+    permissionRequestId: string,
+    incarnation: string,
+    toolName: string,
+  ): void {
     let ids = this.#pendingPermissions.get(chatId);
     if (!ids) {
       ids = new Set();
       this.#pendingPermissions.set(chatId, ids);
     }
-    if (ids.has(permissionRequestId)) return;
-    ids.add(permissionRequestId);
+    const occurrence = permissionOccurrenceKey(permissionRequestId, incarnation);
+    if (ids.has(occurrence)) return;
+    ids.add(occurrence);
 
     const meta = this.#chatMeta(chatId);
     const userMsg = this.#getLastUserMessage(chatId);
@@ -209,10 +217,10 @@ export class AttentionTracker {
     ));
   }
 
-  #clearPermission(chatId: string, permissionRequestId: string): void {
+  #clearPermission(chatId: string, permissionRequestId: string, incarnation: string): void {
     const ids = this.#pendingPermissions.get(chatId);
     if (!ids) return;
-    ids.delete(permissionRequestId);
+    ids.delete(permissionOccurrenceKey(permissionRequestId, incarnation));
     if (ids.size === 0) this.#pendingPermissions.delete(chatId);
   }
 

@@ -2,6 +2,8 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import type {
   AgentExecutionContextV5,
   AgentEstablishedSession,
+  AgentPermissionResponseCapability,
+  AgentProviderPermissionLifecycle,
   AgentProducedRow,
   AgentResumeRequestV5,
   AgentRunFailureDetail,
@@ -26,6 +28,18 @@ export type AgentRuntimeEvent =
   | {
       readonly type: 'session';
       readonly session: AgentEstablishedSession;
+    }
+  | {
+      readonly type: 'permission';
+      readonly runId: string | null;
+      readonly lifecycle: Extract<AgentProviderPermissionLifecycle, { readonly kind: 'requested' }>;
+      readonly decision: AgentPermissionResponseCapability;
+    }
+  | {
+      readonly type: 'permission';
+      readonly runId: string | null;
+      readonly lifecycle: Exclude<AgentProviderPermissionLifecycle, { readonly kind: 'requested' }>;
+      readonly decision?: never;
     }
   | {
       readonly type: 'run-ended';

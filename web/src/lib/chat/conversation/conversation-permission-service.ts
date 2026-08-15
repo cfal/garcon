@@ -31,12 +31,19 @@ export interface ConversationPermissionServiceOptions {
 export class ConversationPermissionService {
 	constructor(private readonly options: ConversationPermissionServiceOptions) {}
 
-	handlePermissionDecision(permissionRequestId: string, decision: PermissionDecisionPayload): void {
+	handlePermissionDecision(
+		permissionRequestId: string,
+		incarnation: string,
+		decision: PermissionDecisionPayload,
+	): void {
 		const { deps } = this.options;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return;
 		const request = deps.conversationUi.pendingPermissionRequests.find(
-			(entry) => entry.permissionRequestId === permissionRequestId,
+			(entry) => (
+				entry.permissionRequestId === permissionRequestId
+				&& entry.incarnation === incarnation
+			),
 		);
 		if (!request?.control) {
 			deps.chatState.appendLocalNotice(
@@ -57,7 +64,10 @@ export class ConversationPermissionService {
 			.then(() => {
 				deps.conversationUi.setPendingPermissionRequests(
 					deps.conversationUi.pendingPermissionRequests.filter(
-						(r) => r.permissionRequestId !== permissionRequestId,
+						(request) => (
+							request.permissionRequestId !== permissionRequestId
+							|| request.incarnation !== incarnation
+						),
 					),
 				);
 			})
@@ -69,14 +79,25 @@ export class ConversationPermissionService {
 			});
 	}
 
-	handleExitPlanMode(permissionRequestId: string, choice: string, plan: string): void {
+	handleExitPlanMode(
+		permissionRequestId: string,
+		incarnation: string,
+		choice: string,
+		plan: string,
+	): void {
 		const { deps } = this.options;
 		const permissionControl = deps.conversationUi.pendingPermissionRequests.find(
-			(request) => request.permissionRequestId === permissionRequestId,
+			(request) => (
+				request.permissionRequestId === permissionRequestId
+				&& request.incarnation === incarnation
+			),
 		)?.control;
 		deps.conversationUi.setPendingPermissionRequests(
 			deps.conversationUi.pendingPermissionRequests.filter(
-				(r) => r.permissionRequestId !== permissionRequestId,
+				(request) => (
+					request.permissionRequestId !== permissionRequestId
+					|| request.incarnation !== incarnation
+				),
 			),
 		);
 

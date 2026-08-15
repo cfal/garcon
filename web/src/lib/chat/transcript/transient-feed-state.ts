@@ -1,4 +1,4 @@
-import { PermissionRequestMessage } from '$shared/chat-types';
+import { PermissionRequestMessage, permissionOccurrenceKey } from '$shared/chat-types';
 import type {
   ChatTransientControlAction,
   ChatTransientFeedMutation,
@@ -45,14 +45,16 @@ export function applyTransientFeedMutation(
       || incoming.transcriptViewId !== current.transcriptViewId) {
     return { kind: 'snapshot-required' };
   }
-  const rows = new Map(current.rows.map((row) => [row.id, row]));
+  const rows = new Map(current.rows.map((row) => [
+    permissionOccurrenceKey(row.id, row.incarnation),
+    row,
+  ]));
   const mutation = incoming.mutation;
   if (mutation.kind === 'upsert') {
-    rows.set(mutation.row.id, mutation.row);
+    rows.set(permissionOccurrenceKey(mutation.row.id, mutation.row.incarnation), mutation.row);
   } else if (mutation.kind === 'remove') {
-    const row = rows.get(mutation.id);
-    if (!row || row.incarnation !== mutation.incarnation) return { kind: 'corrupt' };
-    rows.delete(mutation.id);
+    const key = permissionOccurrenceKey(mutation.id, mutation.incarnation);
+    if (!rows.delete(key)) return { kind: 'corrupt' };
   } else {
     for (const [id, row] of rows) {
       if (row.runId === mutation.runId) rows.delete(id);
@@ -85,6 +87,7 @@ export function pendingPermissionsFromTransientFeed(
     };
     return [{
       permissionRequestId: row.message.permissionRequestId,
+      incarnation: row.incarnation,
       requestedTool: row.message.requestedTool,
       chatId: snapshot.chatId,
       receivedAt: new Date(row.message.timestamp),

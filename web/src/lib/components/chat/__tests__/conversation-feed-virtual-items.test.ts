@@ -151,6 +151,7 @@ describe('conversation virtual feed model', () => {
 		const permission: PendingPermissionRequest = {
 			chatId: 'chat-1',
 			permissionRequestId: 'permission-1',
+			incarnation: 'incarnation-1',
 			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
 		};
 		const model = buildConversationVirtualFeedModel({
@@ -162,7 +163,11 @@ describe('conversation virtual feed model', () => {
 			transcriptViewId: 'view-1',
 		surfaceIdentity: 'chat-1:generation-1',
 			transcriptItems: [userItem(1)],
-			pendingPermissions: [permission, { ...permission, permissionRequestId: 'permission-2' }],
+			pendingPermissions: [permission, {
+				...permission,
+				permissionRequestId: 'permission-2',
+				incarnation: 'incarnation-2',
+			}],
 		});
 
 		expect(model.items.map((item) => item.kind)).toEqual([
@@ -215,6 +220,7 @@ describe('conversation virtual feed model', () => {
 		const permission: PendingPermissionRequest = {
 			chatId: 'chat-1',
 			permissionRequestId: 'permission-1',
+			incarnation: 'incarnation-1',
 			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
 		};
 		const model = buildConversationVirtualFeedModel({

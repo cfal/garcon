@@ -61,7 +61,6 @@ export default class PiAgentIntegration implements AgentIntegration {
   readonly nativeActivity;
   readonly nativeSessions;
   readonly sessionConfiguration = null;
-  readonly permissionDecisions = null;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;

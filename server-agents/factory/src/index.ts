@@ -51,7 +51,6 @@ export default class FactoryAgentIntegration implements AgentIntegration {
   readonly nativeActivity;
   readonly nativeSessions;
   readonly sessionConfiguration = null;
-  readonly permissionDecisions = null;
   readonly projectPathUpdates = null;
   readonly catalog;
   readonly settings;

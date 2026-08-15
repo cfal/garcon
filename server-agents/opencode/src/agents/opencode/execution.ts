@@ -77,13 +77,6 @@ export class OpenCodeExecution implements AgentRuntimeExecution {
     });
   }
 
-  async respondToPermission(
-    permissionRequestId: string,
-    decision: Parameters<import('@garcon/server-agent-interface').AgentPermissionDecisions['respond']>[1],
-  ): Promise<void> {
-    await this.runtime.resolvePermission(permissionRequestId, decision);
-  }
-
 }
 
 function executionFields(request: AgentRuntimeExecutionContext) {

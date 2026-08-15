@@ -623,22 +623,45 @@ export class TranscriptNoticeMessage {
 
 export class PermissionRequestMessage {
   readonly type = 'permission-request' as const;
-  constructor(public timestamp: string, public permissionRequestId: string, public requestedTool: ToolUseChatMessage) {}
+  constructor(
+    public timestamp: string,
+    public permissionRequestId: string,
+    public incarnation: string,
+    public requestedTool: ToolUseChatMessage,
+  ) {}
 }
 
 export class PermissionResolvedMessage {
   readonly type = 'permission-resolved' as const;
-  constructor(public timestamp: string, public permissionRequestId: string, public allowed: boolean) {}
+  constructor(
+    public timestamp: string,
+    public permissionRequestId: string,
+    public incarnation: string,
+    public allowed: boolean,
+  ) {}
 }
 
 export class PermissionCancelledMessage {
   readonly type = 'permission-cancelled' as const;
-  constructor(public timestamp: string, public permissionRequestId: string, public reason?: 'cancelled' | 'session-complete' | 'aborted') {}
+  constructor(
+    public timestamp: string,
+    public permissionRequestId: string,
+    public incarnation: string,
+    public reason?: 'cancelled' | 'session-complete' | 'aborted',
+  ) {}
 }
 
 export class PermissionExpiredMessage {
   readonly type = 'permission-expired' as const;
-  constructor(public timestamp: string, public permissionRequestId: string) {}
+  constructor(
+    public timestamp: string,
+    public permissionRequestId: string,
+    public incarnation: string,
+  ) {}
+}
+
+export function permissionOccurrenceKey(requestId: string, incarnation: string): string {
+  return JSON.stringify([requestId, incarnation]);
 }
 
 // What initiated a context compaction: an explicit `/compact` command or an
@@ -1280,17 +1303,48 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         data.action === 'reload-native-history' ? data.action : undefined,
       );
     case 'permission-request': {
+      const permissionRequestId = str(data.permissionRequestId);
+      const incarnation = str(data.incarnation);
       const requestedToolData = asRecord(data.requestedTool);
       const requestedTool = parseChatMessage(requestedToolData);
-      if (!requestedTool || !isToolUseMessage(requestedTool)) return null;
-      return new PermissionRequestMessage(str(data.timestamp), str(data.permissionRequestId), requestedTool);
+      if (!permissionRequestId || !incarnation || !requestedTool || !isToolUseMessage(requestedTool)) {
+        return null;
+      }
+      return new PermissionRequestMessage(
+        str(data.timestamp),
+        permissionRequestId,
+        incarnation,
+        requestedTool,
+      );
     }
-    case 'permission-resolved':
-      return new PermissionResolvedMessage(str(data.timestamp), str(data.permissionRequestId), Boolean(data.allowed));
-    case 'permission-cancelled':
-      return new PermissionCancelledMessage(str(data.timestamp), str(data.permissionRequestId), data.reason as 'cancelled' | 'session-complete' | 'aborted' | undefined);
-    case 'permission-expired':
-      return new PermissionExpiredMessage(str(data.timestamp), str(data.permissionRequestId));
+    case 'permission-resolved': {
+      const permissionRequestId = str(data.permissionRequestId);
+      const incarnation = str(data.incarnation);
+      if (!permissionRequestId || !incarnation) return null;
+      return new PermissionResolvedMessage(
+        str(data.timestamp),
+        permissionRequestId,
+        incarnation,
+        Boolean(data.allowed),
+      );
+    }
+    case 'permission-cancelled': {
+      const permissionRequestId = str(data.permissionRequestId);
+      const incarnation = str(data.incarnation);
+      if (!permissionRequestId || !incarnation) return null;
+      return new PermissionCancelledMessage(
+        str(data.timestamp),
+        permissionRequestId,
+        incarnation,
+        data.reason as 'cancelled' | 'session-complete' | 'aborted' | undefined,
+      );
+    }
+    case 'permission-expired': {
+      const permissionRequestId = str(data.permissionRequestId);
+      const incarnation = str(data.incarnation);
+      if (!permissionRequestId || !incarnation) return null;
+      return new PermissionExpiredMessage(str(data.timestamp), permissionRequestId, incarnation);
+    }
     case 'compaction':
       return new CompactionMessage(
         str(data.timestamp),

@@ -37,8 +37,17 @@
 		onRetry?: () => void;
 		onLoadEarlier: () => void;
 		onLoadLater: () => void;
-		onPermissionDecision?: (permissionRequestId: string, decision: PermissionDecision) => void;
-		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
+		onPermissionDecision?: (
+			permissionRequestId: string,
+			incarnation: string,
+			decision: PermissionDecision,
+		) => void;
+		onExitPlanMode?: (
+			permissionRequestId: string,
+			incarnation: string,
+			choice: string,
+			plan: string,
+		) => void;
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow: boolean;
@@ -74,6 +83,7 @@
 		return new PermissionRequestMessage(
 			timestamp,
 			request.permissionRequestId,
+			request.incarnation,
 			request.requestedTool,
 		);
 	}
@@ -125,10 +135,17 @@
 			<PermissionRequestRow
 				request={permissionRequestMessage(item.request)}
 				onDecision={onPermissionDecision}
-				draft={itemState.permissionDraft(item.request.permissionRequestId)}
+				draft={itemState.permissionDraft(
+					item.request.permissionRequestId,
+					item.request.incarnation,
+				)}
 				{acquireTransientActivity}
 				onDraftChange={(draft) =>
-					itemState.setPermissionDraft(item.request.permissionRequestId, draft)}
+					itemState.setPermissionDraft(
+						item.request.permissionRequestId,
+						item.request.incarnation,
+						draft,
+					)}
 			/>
 		{/if}
 		{#if item.spacingAfter === 'responsive-feed'}

@@ -497,19 +497,13 @@ export class AgentRuntimeRouter {
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
   ): Promise<void> {
-    const entry = this.#registry.getChat(chatId);
-    const permissionDecisions = entry
-      ? this.#directory.get(entry.agentId)?.permissionDecisions
-      : null;
-    if (!permissionDecisions || !permissionRequestId) {
-      throw new Error('The active integration cannot resolve this permission request');
-    }
+    if (!permissionRequestId) throw new Error('Permission request ID is required');
     if (control.chatId !== chatId || control.id !== permissionRequestId) {
       throw new Error('Permission control does not match the request');
     }
     const claim = this.#ledger.claimPermissionResolution(control);
     try {
-      await permissionDecisions.respond(permissionRequestId, decision);
+      await claim.decision.respond(decision);
     } catch (error) {
       this.#ledger.abandonPermissionResolution(claim);
       throw error;

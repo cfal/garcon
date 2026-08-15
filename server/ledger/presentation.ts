@@ -57,16 +57,31 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
       );
     case 'permission-requested':
       return row.lifecycle.kind === 'requested'
-        ? new PermissionRequestMessage(row.at, row.lifecycle.requestId, row.lifecycle.requestedTool)
+        ? new PermissionRequestMessage(
+          row.at,
+          row.lifecycle.requestId,
+          row.lifecycle.incarnation,
+          row.lifecycle.requestedTool,
+        )
         : null;
     case 'permission-resolved':
       return row.lifecycle.kind === 'resolved'
-        ? new PermissionResolvedMessage(row.at, row.lifecycle.requestId, row.lifecycle.decision.allow)
+        ? new PermissionResolvedMessage(
+          row.at,
+          row.lifecycle.requestId,
+          row.lifecycle.incarnation,
+          row.lifecycle.decision.allow,
+        )
         : null;
     case 'permission-cancelled':
-      return new PermissionCancelledMessage(row.at, row.lifecycle.requestId, 'cancelled');
+      return new PermissionCancelledMessage(
+        row.at,
+        row.lifecycle.requestId,
+        row.lifecycle.incarnation,
+        'cancelled',
+      );
     case 'permission-expired':
-      return new PermissionExpiredMessage(row.at, row.lifecycle.requestId);
+      return new PermissionExpiredMessage(row.at, row.lifecycle.requestId, row.lifecycle.incarnation);
     case 'session':
     case 'run-ended':
       return null;

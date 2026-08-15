@@ -1,3 +1,5 @@
+import { permissionOccurrenceKey } from '$shared/chat-types';
+
 export type ConversationDisclosureKind = 'thinking' | 'tool-input' | 'tool-result' | 'compaction';
 
 export interface ConversationDisclosureStatePort {
@@ -62,20 +64,26 @@ export class ConversationFeedItemState {
 		this.#disclosureOverrides = next;
 	}
 
-	permissionDraft(permissionRequestId: string): PermissionQuestionDraft {
-		return this.#permissionDrafts.get(permissionRequestId) ?? EMPTY_PERMISSION_DRAFT;
+	permissionDraft(permissionRequestId: string, incarnation: string): PermissionQuestionDraft {
+		return this.#permissionDrafts.get(
+			permissionOccurrenceKey(permissionRequestId, incarnation),
+		) ?? EMPTY_PERMISSION_DRAFT;
 	}
 
-	setPermissionDraft(permissionRequestId: string, draft: PermissionQuestionDraft): void {
+	setPermissionDraft(
+		permissionRequestId: string,
+		incarnation: string,
+		draft: PermissionQuestionDraft,
+	): void {
 		const next = new Map(this.#permissionDrafts);
-		next.set(permissionRequestId, draft);
+		next.set(permissionOccurrenceKey(permissionRequestId, incarnation), draft);
 		this.#permissionDrafts = next;
 	}
 
 	reconcile(
 		surfaceIdentity: string,
 		validRowIds: ReadonlySet<string>,
-		pendingPermissionIds: ReadonlySet<string>,
+		pendingPermissionOccurrences: ReadonlySet<string>,
 	): void {
 		if (surfaceIdentity !== this.#surfaceIdentity) {
 			this.clear();
@@ -91,7 +99,7 @@ export class ConversationFeedItemState {
 			this.#disclosureOverrides = disclosures;
 		}
 		const drafts = new Map(
-			[...this.#permissionDrafts].filter(([id]) => pendingPermissionIds.has(id)),
+			[...this.#permissionDrafts].filter(([key]) => pendingPermissionOccurrences.has(key)),
 		);
 		if (drafts.size !== this.#permissionDrafts.size) this.#permissionDrafts = drafts;
 	}

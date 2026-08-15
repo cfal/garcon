@@ -1,10 +1,12 @@
 import {
 	AskUserQuestionToolUseMessage,
 	PermissionCancelledMessage,
+	PermissionExpiredMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	ToolResultMessage,
 	isToolUseMessage,
+	permissionOccurrenceKey,
 } from '$shared/chat-types';
 import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
@@ -14,6 +16,7 @@ import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js'
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 
 export interface PermissionTerminalState {
+	incarnation: string;
 	state: 'resolved' | 'cancelled';
 	allowed?: boolean;
 	reason?: string;
@@ -44,7 +47,7 @@ export interface ConversationFeedRenderModel {
 	items: ConversationFeedRenderItem[];
 	toolResultByUseRowId: Map<string, ToolResultMessage>;
 	toolResultRowIdByUseRowId: Map<string, string>;
-	permissionTerminalById: Map<string, PermissionTerminalState>;
+	permissionTerminalByOccurrence: Map<string, PermissionTerminalState>;
 }
 
 export type ConversationFeedItemLayout = 'hidden' | 'standard' | 'permission';
@@ -70,7 +73,8 @@ export function conversationFeedItemLayout(
 	const message = item.message;
 	if (
 		message instanceof PermissionResolvedMessage ||
-		message instanceof PermissionCancelledMessage
+		message instanceof PermissionCancelledMessage ||
+		message instanceof PermissionExpiredMessage
 	) {
 		return 'hidden';
 	}
@@ -179,7 +183,7 @@ export function buildConversationFeedRenderModel(
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
 	const toolPairs = pairToolResults(rows);
-	const permissionTerminalById = new Map<string, PermissionTerminalState>();
+	const permissionTerminalByOccurrence = new Map<string, PermissionTerminalState>();
 
 	for (const [index, row] of rows.entries()) {
 		if (row.kind === 'local-notice') {
@@ -195,14 +199,31 @@ export function buildConversationFeedRenderModel(
 		const message = row.message;
 
 		if (message instanceof PermissionResolvedMessage) {
-			permissionTerminalById.set(message.permissionRequestId, {
+			permissionTerminalByOccurrence.set(permissionOccurrenceKey(
+				message.permissionRequestId,
+				message.incarnation,
+			), {
+				incarnation: message.incarnation,
 				state: 'resolved',
 				allowed: message.allowed,
 			});
 		} else if (message instanceof PermissionCancelledMessage) {
-			permissionTerminalById.set(message.permissionRequestId, {
+			permissionTerminalByOccurrence.set(permissionOccurrenceKey(
+				message.permissionRequestId,
+				message.incarnation,
+			), {
+				incarnation: message.incarnation,
 				state: 'cancelled',
 				reason: message.reason,
+			});
+		} else if (message instanceof PermissionExpiredMessage) {
+			permissionTerminalByOccurrence.set(permissionOccurrenceKey(
+				message.permissionRequestId,
+				message.incarnation,
+			), {
+				incarnation: message.incarnation,
+				state: 'cancelled',
+				reason: 'expired',
 			});
 		}
 
@@ -226,7 +247,7 @@ export function buildConversationFeedRenderModel(
 		items,
 		toolResultByUseRowId: toolPairs.toolResultByUseRowId,
 		toolResultRowIdByUseRowId: toolPairs.toolResultRowIdByUseRowId,
-		permissionTerminalById,
+		permissionTerminalByOccurrence,
 	};
 }
 
@@ -240,32 +261,42 @@ export function visiblePendingPermissionRequests(
 	rows: ChatDisplayRow[],
 	pendingPermissionRequests: PendingPermissionRequest[],
 ): PendingPermissionRequest[] {
-	const renderedPermissionIds = new Set<string>();
-	const terminalPermissionIds = new Set<string>();
+	const renderedPermissionOccurrences = new Set<string>();
+	const renderedExitPlanIds = new Set<string>();
+	const terminalPermissionOccurrences = new Set<string>();
 
 	for (const row of rows) {
 		if (row.kind !== 'message') continue;
 		if (row.message instanceof PermissionRequestMessage) {
-			renderedPermissionIds.add(row.message.permissionRequestId);
+			renderedPermissionOccurrences.add(permissionOccurrenceKey(
+				row.message.permissionRequestId,
+				row.message.incarnation,
+			));
 		}
 		if (row.message.type === 'exit-plan-mode-tool-use') {
-			renderedPermissionIds.add(`plan-exit-${row.message.toolId}`);
+			renderedExitPlanIds.add(`plan-exit-${row.message.toolId}`);
 		}
 		if (
 			row.message instanceof PermissionResolvedMessage ||
-			row.message instanceof PermissionCancelledMessage
+			row.message instanceof PermissionCancelledMessage ||
+			row.message instanceof PermissionExpiredMessage
 		) {
-			terminalPermissionIds.add(row.message.permissionRequestId);
+			terminalPermissionOccurrences.add(permissionOccurrenceKey(
+				row.message.permissionRequestId,
+				row.message.incarnation,
+			));
 		}
 	}
 
-	const visiblePermissionIds = new Set<string>();
+	const visiblePermissionOccurrences = new Set<string>();
 	return pendingPermissionRequests.filter((request) => {
 		const id = request.permissionRequestId;
-		if (renderedPermissionIds.has(id)) return false;
-		if (terminalPermissionIds.has(id)) return false;
-		if (visiblePermissionIds.has(id)) return false;
-		visiblePermissionIds.add(id);
+		const occurrence = permissionOccurrenceKey(id, request.incarnation);
+		if (renderedPermissionOccurrences.has(occurrence)) return false;
+		if (renderedExitPlanIds.has(id)) return false;
+		if (terminalPermissionOccurrences.has(occurrence)) return false;
+		if (visiblePermissionOccurrences.has(occurrence)) return false;
+		visiblePermissionOccurrences.add(occurrence);
 		return true;
 	});
 }

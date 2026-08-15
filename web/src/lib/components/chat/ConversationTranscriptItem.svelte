@@ -6,6 +6,7 @@
 		isToolUseMessage,
 		PermissionRequestMessage,
 		ToolResultMessage,
+		permissionOccurrenceKey,
 		type ChatMessage,
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
@@ -33,8 +34,17 @@
 		showThinking?: boolean;
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
-		onPermissionDecision?: (permissionRequestId: string, decision: PermissionDecision) => void;
-		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
+		onPermissionDecision?: (
+			permissionRequestId: string,
+			incarnation: string,
+			decision: PermissionDecision,
+		) => void;
+		onExitPlanMode?: (
+			permissionRequestId: string,
+			incarnation: string,
+			choice: string,
+			plan: string,
+		) => void;
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
@@ -69,12 +79,15 @@
 
 	function permissionTerminalFor(message: ChatMessage): PermissionTerminalState | undefined {
 		if (message instanceof PermissionRequestMessage) {
-			return renderModel.permissionTerminalById.get(message.permissionRequestId);
+			return renderModel.permissionTerminalByOccurrence.get(permissionOccurrenceKey(
+				message.permissionRequestId,
+				message.incarnation,
+			));
 		}
 		if (message.type !== 'exit-plan-mode-tool-use') return undefined;
 		const permissionRequestId = `plan-exit-${message.toolId}`;
 		if (pendingExitPlanIds.has(permissionRequestId)) return undefined;
-		return { state: 'resolved', allowed: true };
+		return { incarnation: permissionRequestId, state: 'resolved', allowed: true };
 	}
 </script>
 
@@ -116,9 +129,11 @@
 			{onGenerateTitleFromMessage}
 			{canForkAtMessageNow}
 			{disclosureState}
-			permissionDraft={itemState ? (id) => itemState.permissionDraft(id) : undefined}
+			permissionDraft={itemState
+				? (id, incarnation) => itemState.permissionDraft(id, incarnation)
+				: undefined}
 			onPermissionDraftChange={itemState
-				? (id, draft) => itemState.setPermissionDraft(id, draft)
+				? (id, incarnation, draft) => itemState.setPermissionDraft(id, incarnation, draft)
 				: undefined}
 			{acquireTransientActivity}
 		/>

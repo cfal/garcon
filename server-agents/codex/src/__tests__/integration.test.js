@@ -31,7 +31,7 @@ describe('CodexAgentIntegration', () => {
     expect(integration.steering?.steer).toBeDefined();
     expect(integration.goals?.submitControl).toBeDefined();
     expect(integration.compaction?.compact).toBeDefined();
-    expect(integration.permissionDecisions).toBeDefined();
+    expect(integration).not.toHaveProperty('permissionDecisions');
     expect(integration.projectPathUpdates).toBeNull();
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({

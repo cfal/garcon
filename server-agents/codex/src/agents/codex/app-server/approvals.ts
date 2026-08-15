@@ -7,11 +7,12 @@ import {
   RequestPermissionsToolUseMessage,
 } from '@garcon/common/chat-types';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import { publishRows, type CodexOperation } from './operation-routes.js';
+import { publishPermissionCancelled, type CodexOperation } from './operation-routes.js';
 import type { JsonRpcServerRequest } from './protocol.js';
 
 export interface CodexPendingApproval {
   permissionRequestId: string;
+  incarnation: string;
   requestId: number;
   chatId: string;
   method: string;
@@ -31,6 +32,7 @@ export function isApprovalRequest(request: JsonRpcServerRequest): boolean {
 export function createPendingApproval(chatId: string, request: JsonRpcServerRequest): CodexPendingApproval {
   return {
     permissionRequestId: `codex-${crypto.randomBytes(8).toString('hex')}`,
+    incarnation: crypto.randomUUID(),
     requestId: request.id,
     chatId,
     method: request.method,
@@ -47,23 +49,39 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
       || networkApprovalLabel(pending.params.networkApprovalContext)
       || stringField(pending.params.reason)
       || 'Command approval requested';
-    return new PermissionRequestMessage(now, pending.permissionRequestId, new BashToolUseMessage(now, toolId, command));
+    return new PermissionRequestMessage(
+      now,
+      pending.permissionRequestId,
+      pending.incarnation,
+      new BashToolUseMessage(now, toolId, command),
+    );
   }
 
   if (pending.method === 'execCommandApproval') {
     const command = Array.isArray(pending.params.command)
       ? pending.params.command.map(String).join(' ')
       : stringField(pending.params.reason) || 'Command approval requested';
-    return new PermissionRequestMessage(now, pending.permissionRequestId, new BashToolUseMessage(now, toolId, command));
+    return new PermissionRequestMessage(
+      now,
+      pending.permissionRequestId,
+      pending.incarnation,
+      new BashToolUseMessage(now, toolId, command),
+    );
   }
 
   if (pending.method === 'item/fileChange/requestApproval' || pending.method === 'applyPatchApproval') {
-    return new PermissionRequestMessage(now, pending.permissionRequestId, new EditToolUseMessage(now, toolId));
+    return new PermissionRequestMessage(
+      now,
+      pending.permissionRequestId,
+      pending.incarnation,
+      new EditToolUseMessage(now, toolId),
+    );
   }
 
   return new PermissionRequestMessage(
     now,
     pending.permissionRequestId,
+    pending.incarnation,
     new RequestPermissionsToolUseMessage(
       now,
       toolId,
@@ -142,17 +160,22 @@ function stringField(value: unknown): string | undefined {
 // through that operation rather than batched behind whichever one happens to be current.
 export function cancelPendingApprovals(
   logger: AgentLogger,
-  pending: Map<string, CodexPendingApproval & { client: object; operation: CodexOperation }>,
+  pending: Set<CodexPendingApproval & { client: object; operation: CodexOperation }>,
   client: object,
   reason: 'cancelled' | 'session-complete' | 'aborted',
 ): void {
-  for (const [permissionRequestId, approval] of [...pending.entries()]) {
+  for (const approval of [...pending]) {
     if (approval.client !== client) continue;
-    pending.delete(permissionRequestId);
-    publishRows(
+    pending.delete(approval);
+    publishPermissionCancelled(
       logger,
       approval.chatId,
-      [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason)],
+      new PermissionCancelledMessage(
+        new Date().toISOString(),
+        approval.permissionRequestId,
+        approval.incarnation,
+        reason,
+      ),
       approval.operation,
     );
   }

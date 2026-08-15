@@ -54,7 +54,6 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly nativeActivity;
   readonly nativeSessions;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
-  readonly permissionDecisions: NonNullable<AgentIntegration['permissionDecisions']>;
   readonly projectPathUpdates = null;
   readonly catalog;
   readonly settings;
@@ -86,11 +85,6 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
     this.sessionConfiguration = {
       apply: (agentSessionId, configuration) => (
         providerExecution.applySessionConfiguration(agentSessionId, configuration)
-      ),
-    };
-    this.permissionDecisions = {
-      respond: (permissionRequestId, decision) => (
-        providerExecution.respondToPermission(permissionRequestId, decision)
       ),
     };
     const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId, logger);
