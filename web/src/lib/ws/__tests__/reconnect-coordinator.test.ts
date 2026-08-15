@@ -966,6 +966,49 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledOnce();
 	});
 
+	it('rejects a continuation that changes the captured replay watermark', async () => {
+		const deps = createReconnectDeps();
+		let pageIndex = 0;
+		deps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
+			const request = rawRequest as Record<string, unknown>;
+			if (request.type === 'reconnect-state-query') {
+				return reconnectStateResponse([], ['chat-1']);
+			}
+			if (request.type !== 'chat-subscribe') {
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			}
+			pageIndex += 1;
+			if (pageIndex === 1) {
+				return boundedReplayResponse({
+					afterOrdinal: 2,
+					nextAfterOrdinal: 4,
+					throughOrdinal: 6,
+					hasMore: true,
+					messages: [messageJson(3, 'stable-page')],
+				});
+			}
+			if (pageIndex === 2) {
+				return boundedReplayResponse({
+					afterOrdinal: 4,
+					nextAfterOrdinal: 7,
+					throughOrdinal: 7,
+					hasMore: false,
+					messages: [messageJson(7, 'foreign-watermark-page')],
+				});
+			}
+			throw new Error('The coordinator requested beyond the malformed continuation.');
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(pageIndex).toBe(2);
+		expect(deps.chatState.applyMessages).toHaveBeenCalledOnce();
+		expect(deps.chatState.applyMessages.mock.calls[0]?.[2]).toEqual([
+			expect.objectContaining({ ordinal: 3 }),
+		]);
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+	});
+
 	it('preserves live rows that arrive beyond the fixed watermark during selected replay', async () => {
 		const activeTranscript = new ActiveTranscriptState();
 		activeTranscript.replaceGeneration(
