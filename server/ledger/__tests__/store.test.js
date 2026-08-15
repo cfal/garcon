@@ -49,6 +49,22 @@ describe('TranscriptLedgerStore', () => {
     expect(store.highWatermark('chat-one')).toEqual({ viewId: view.viewId, ordinal: 2 });
   });
 
+  it('seeds the next ordinal from durable rows when reopening a ledger', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+      rows: [provider('first'), provider('second')],
+    });
+    store.close();
+    store = new TranscriptLedgerStore(root);
+
+    const appended = store.append('chat-one', view.viewId, [provider('third')]);
+
+    expect(appended.map((row) => row.ordinal)).toEqual([3]);
+    expect(store.currentRows('chat-one').map((row) => row.ordinal)).toEqual([1, 2, 3]);
+    expect(store.highWatermark('chat-one')).toEqual({ viewId: view.viewId, ordinal: 3 });
+  });
+
   it('rejects an invalid multi-row batch before committing without fencing the chat', () => {
     const broken = store.initializeCurrentView('broken-chat', {
       viewId: transcriptViewId('broken-view'),
