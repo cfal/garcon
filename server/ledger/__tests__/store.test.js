@@ -406,6 +406,48 @@ describe('TranscriptLedgerStore', () => {
     }
   });
 
+  it('attributes an eviction close failure and retries that handle on shutdown', () => {
+    store.close();
+    store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
+    store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+
+    const close = Database.prototype.close;
+    const attempts = new WeakMap();
+    let failedDatabase = null;
+    Database.prototype.close = function () {
+      const count = (attempts.get(this) ?? 0) + 1;
+      attempts.set(this, count);
+      if (failedDatabase === null) {
+        failedDatabase = this;
+        throw new Error('injected eviction close failure');
+      }
+      return close.call(this);
+    };
+    try {
+      const opened = store.initializeCurrentView('chat-two', {
+        viewId: transcriptViewId('view-two'),
+        contentStartOrdinal: 1,
+      });
+
+      expect(opened.viewId).toBe('view-two');
+      expect(store.currentView('chat-two').viewId).toBe('view-two');
+      expect(() => store.currentView('chat-one')).toThrow(LedgerFencedError);
+      expect(attempts.get(failedDatabase)).toBe(1);
+
+      store.close();
+
+      expect(attempts.get(failedDatabase)).toBe(2);
+    } finally {
+      Database.prototype.close = close;
+      if (failedDatabase !== null && attempts.get(failedDatabase) === 1) {
+        close.call(failedDatabase);
+      }
+    }
+  });
+
   it('removes only unregistered target ledgers during startup cleanup', async () => {
     store.initializeCurrentView('registered-chat', {
       viewId: transcriptViewId('registered-view'),
