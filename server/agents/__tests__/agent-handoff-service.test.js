@@ -201,6 +201,65 @@ describe('AgentHandoffService', () => {
     expect(current.agentId).toBe('target-agent');
   });
 
+  it('recovers later chats while an earlier handoff remains blocked', async () => {
+    const first = { ...persistedIntent(), chatId: 'chat-a', operationId: 'handoff-a' };
+    const second = { ...persistedIntent(), chatId: 'chat-b', operationId: 'handoff-b' };
+    let releaseFirst;
+    const firstBlocked = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    let markSecondRecovered;
+    const secondRecovered = new Promise((resolve) => {
+      markSecondRecovered = resolve;
+    });
+    const ownership = {
+      pendingHandoffs: () => [first, second],
+      applyHandoffDecision: mock(async (operationId) => {
+        if (operationId === first.operationId) await firstBlocked;
+      }),
+      completeHandoff: mock(async (operationId) => {
+        if (operationId === second.operationId) markSecondRecovered();
+      }),
+    };
+    const service = createService({
+      ownership,
+      ledger: ledgerState([]),
+    });
+
+    const recovery = service.recoverPendingHandoffs();
+    const recoveredBeforeFirstReleased = await Promise.race([
+      secondRecovered.then(() => true),
+      Bun.sleep(25).then(() => false),
+    ]);
+    releaseFirst();
+    await recovery;
+
+    expect(recoveredBeforeFirstReleased).toBe(true);
+    expect(ownership.completeHandoff).toHaveBeenCalledWith(second.operationId);
+  });
+
+  it('adopts an existing switch marker after unrelated post-watermark rows', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    const ledger = ledgerState(calls);
+    ledger.rowsAfter.mockReturnValue([
+      { kind: 'notice', ordinal: 8 },
+      { kind: 'agent-switch', ordinal: 9 },
+    ]);
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger,
+    });
+
+    await service.recoverPendingHandoffs();
+
+    expect(ledger.appendAgentSwitch).not.toHaveBeenCalled();
+    expect(ledger.advanceContentStart).toHaveBeenCalledWith('chat', 'view-1', 10);
+  });
+
   it('rejects a resumed request whose target differs from the durable decision', async () => {
     const current = sourceChat();
     const state = handoffState(current, []);
