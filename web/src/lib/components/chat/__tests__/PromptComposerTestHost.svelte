@@ -95,6 +95,11 @@
 	}: Props = $props();
 
 	const composer = new ComposerState();
+
+	export function getComposerContentRevision(): number {
+		return composer.contentRevision;
+	}
+
 	const agent = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const appShell = new AppShellStore();
@@ -388,7 +393,6 @@
 >
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
-<div data-testid="composer-content-revision">{composer.contentRevision}</div>
 <div data-testid="composer-attachment-count">{composer.images.length}</div>
 {#each notifications.items as notification (notification.id)}
 	<div data-testid="notification">{notification.message}</div>

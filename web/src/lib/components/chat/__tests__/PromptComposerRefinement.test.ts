@@ -164,12 +164,14 @@ describe('PromptComposer prompt refinement', () => {
 			success: true,
 			refinedPrompt: 'Already clear',
 		});
-		render(PromptComposerTestHost, { selectedChatId: 'chat-refine-unchanged' });
+		const { component } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-refine-unchanged',
+		});
 		const textarea = await typeDraft('Already clear');
-		const revision = screen.getByTestId('composer-content-revision').textContent;
+		const revision = component.getComposerContentRevision();
 		await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
 		await screen.findByText('No changes were needed.');
-		expect(screen.getByTestId('composer-content-revision').textContent).toBe(revision);
+		expect(component.getComposerContentRevision()).toBe(revision);
 
 		vi.mocked(refinementApi.refinePrompt).mockRejectedValueOnce(
 			new ApiError(504, 'private provider detail', 'PROMPT_REFINEMENT_TIMEOUT'),
@@ -237,6 +239,31 @@ describe('PromptComposer prompt refinement', () => {
 		await waitFor(() => expect(textarea.value).toBe('Refined after close'));
 		expect(textarea.selectionStart).toBe(textarea.value.length);
 		await waitFor(() => expect(document.activeElement).toBe(textarea));
+	});
+
+	it('does not reopen snippet surfaces when the expanded editor closes during refinement', async () => {
+		const pending = deferredRefinement();
+		vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
+		render(PromptComposerTestHost, { selectedChatId: 'chat-refine-expanded-trigger' });
+		const textarea = await typeDraft('Expanded source');
+		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		const editor = (await screen.findByRole('textbox', {
+			name: 'Expanded composer text',
+		})) as HTMLTextAreaElement;
+		await fireEvent.input(editor, { target: { value: 'Review ;;dep' } });
+		editor.setSelectionRange(editor.value.length, editor.value.length);
+		await fireEvent.pointerUp(editor);
+		await settleExpandedDialogOpen();
+		const dialog = screen.getByRole('dialog');
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Refine prompt' }));
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Close expanded composer' }));
+
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(screen.queryByRole('option', { name: /review/i })).toBeNull();
+
+		pending.resolve({ success: true, refinedPrompt: 'Refined without a palette' });
+		await waitFor(() => expect(textarea.value).toBe('Refined without a palette'));
 	});
 
 	it('gives expanded Escape precedence, then lets compact Escape cancel', async () => {

@@ -93,11 +93,13 @@ export class PromptComposerEditorController {
 		textarea.focus({ preventScroll: true });
 		restoreComposerEditorSelection(textarea, selection);
 		const restoredSelection = composerEditorSelectionFromTextarea(textarea);
-		this.options.ui.updateTriggers(
-			this.options.composer.inputText,
-			restoredSelection.head,
-			this.options.snippetTrigger,
-		);
+		if (!this.options.promptTransformPending) {
+			this.options.ui.updateTriggers(
+				this.options.composer.inputText,
+				restoredSelection.head,
+				this.options.snippetTrigger,
+			);
+		}
 		this.options.resizeTextarea();
 	}
 }
