@@ -3,6 +3,7 @@ import {
   applyTranscriptAppend,
   type TranscriptMessage,
 } from '../../../common/chat-view.js';
+import { CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT } from '../../../common/chat-snapshot.js';
 import { countUserContent, userContents } from '../../support/chat-assertions.js';
 import { GarconWsRequestError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -149,6 +150,67 @@ describe('reconnect and transcript stability', () => {
         initial.transcriptViewId,
         initial.lastOrdinal,
       )).messages).toEqual(replay.messages);
+    });
+  });
+
+  test('bounds reconnect replay and preserves the newest snapshot fallback', async () => {
+    await withIntegrationFixture('reconnect-bounded-replay', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const started = await fixture.client.startDirectChat({
+        chatId,
+        content: 'bounded-replay-initial',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, started.turnId);
+      const cursor = await fixture.client.getMessages(chatId);
+      const missedTurnCount = CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT / 2 + 1;
+      for (let index = 0; index < missedTurnCount; index += 1) {
+        const accepted = await fixture.client.runDirectChat({
+          chatId,
+          content: `bounded-replay-${index}`,
+          agent: fixture.directAgents.openAi,
+        });
+        await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      }
+
+      await fixture.client.disconnect();
+      await fixture.client.reconnect();
+      const newest = await fixture.client.getMessages(chatId, {
+        limit: CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT,
+      });
+      expect(newest.messages).toHaveLength(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
+      expect(newest.messages.at(-1)?.message).toMatchObject({
+        type: 'assistant-message',
+        content: `echo:bounded-replay-${missedTurnCount - 1}`,
+      });
+
+      let replayFailure: unknown;
+      let replay: Awaited<ReturnType<typeof fixture.client.subscribe>> | undefined;
+      try {
+        replay = await fixture.client.subscribe(
+          chatId,
+          cursor.transcriptViewId,
+          cursor.lastOrdinal,
+        );
+      } catch (error) {
+        replayFailure = error;
+      }
+
+      if (replay) {
+        expect(replay.messages.length).toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
+        expect(replay.firstOrdinal).toBeGreaterThan(cursor.lastOrdinal + 1);
+        expect(replay.lastOrdinal).toBe(newest.lastOrdinal);
+        expect(transcriptProjection(replay.messages)).toEqual(transcriptProjection(newest.messages));
+      } else {
+        expect(replayFailure).toBeInstanceOf(GarconWsRequestError);
+        expect((replayFailure as GarconWsRequestError).response).toMatchObject({
+          requestType: 'chat-subscribe',
+          code: 'HISTORY_LOAD_FAILED',
+          retryable: true,
+          chatId,
+        });
+      }
     });
   });
 
