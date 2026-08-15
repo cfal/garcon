@@ -2,8 +2,11 @@ import { describe, expect, mock, test } from 'bun:test';
 import {
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import { UserMessage } from '@garcon/common/chat-types';
+import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
+import { AgentEventEmitterRuntime } from '../../shared/event-emitter-runtime.js';
 import type {
+  AgentRuntimeEvent,
+  AgentRuntimeOperation,
   AgentRuntimeResumeRequest,
   AgentRuntimeStartRequest,
 } from '../../execution/runtime-events.js';
@@ -81,7 +84,7 @@ describe('DirectExecution', () => {
       carriedContext: { prefix: '<carried>history</carried>\n\n' },
     };
 
-    await execution.start(start);
+    await execution.start(start, () => {});
 
     expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
       priorContext: start.priorContext,
@@ -102,10 +105,60 @@ describe('DirectExecution', () => {
     const execution = new DirectExecution(host(), runtime as never);
     const resume = request('endpoint-b');
 
-    await expect(execution.resume(resume)).resolves.toBeUndefined();
+    await expect(execution.resume(resume, () => {})).resolves.toBeUndefined();
     expect(runTurn).toHaveBeenCalledWith(expect.objectContaining({
       priorContext: resume.priorContext,
       command: 'continue',
     }));
+  });
+
+  test('keeps each concrete request bound to the publisher that created it', async () => {
+    const operations: AgentRuntimeOperation[] = [];
+    const runtime = {
+      startSession: mock(async (input: { operation: AgentRuntimeOperation }) => {
+        operations.push(input.operation);
+        if (operations.length === 2) throw new Error('replacement failed');
+        return { agentSessionId: 'session-1', nativePath: '/tmp/session-1.json' };
+      }),
+    };
+    const execution = new DirectExecution(host(), runtime as never);
+    const { agentSessionId: _agentSessionId, nativeSession: _nativeSession, ...start } = request('endpoint-a');
+    const firstEvents: AgentRuntimeEvent[] = [];
+    const replacementEvents: AgentRuntimeEvent[] = [];
+
+    await execution.start({ ...start, carriedContext: null }, (event) => firstEvents.push(event));
+    await expect(execution.start(
+      { ...start, runId: 'run-2', carriedContext: null },
+      (event) => replacementEvents.push(event),
+    )).rejects.toThrow('replacement failed');
+
+    operations[0].publish({
+      type: 'messages',
+      runId: operations[0].runId,
+      rows: [],
+    });
+
+    expect(firstEvents).toHaveLength(1);
+    expect(replacementEvents).toEqual([]);
+  });
+
+  test('does not route an unnamed runtime emission through a current request', async () => {
+    const emitted: AgentRuntimeEvent[] = [];
+    const runtime = new AgentEventEmitterRuntime() as AgentEventEmitterRuntime & {
+      startSession: () => Promise<{ agentSessionId: string; nativePath: string }>;
+    };
+    runtime.startSession = mock(async () => ({
+      agentSessionId: 'session-1',
+      nativePath: '/tmp/session-1.json',
+    }));
+    const execution = new DirectExecution(host(), runtime as never);
+    const { agentSessionId: _agentSessionId, nativeSession: _nativeSession, ...start } = request('endpoint-a');
+
+    await execution.start({ ...start, carriedContext: null }, (event) => emitted.push(event));
+    runtime.emitMessages('chat-1', [
+      new AssistantMessage('2026-01-01T00:00:00.000Z', 'unnamed'),
+    ]);
+
+    expect(emitted).toEqual([]);
   });
 });

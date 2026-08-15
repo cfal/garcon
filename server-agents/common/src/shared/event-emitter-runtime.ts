@@ -1,12 +1,12 @@
-// Event-emitting base for concrete agent runtimes. The composition root wires
-// listeners for broadcasting and history cache persistence.
-//
-// Both emit and on wrappers are provided so the string event names
-// are encapsulated here -- neither subclasses nor server.js need to
-// know them.
+// Event-emitting observation surface for concrete agent runtimes. Transcript publication uses
+// the operation captured by the concrete turn; listeners support runtime tests and diagnostics.
 
 import { EventEmitter } from 'events';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import {
+  runtimeRows,
+  type AgentRuntimeOperation,
+} from '../execution/runtime-events.js';
 
 export interface RuntimeEventMetadata {
   readonly clientRequestId?: string;
@@ -28,8 +28,18 @@ export type FailedCallback = (
 export class AgentEventEmitterRuntime extends EventEmitter {
   // Emit helpers (used by subclasses)
 
-  emitMessages(chatId: string, messages: ChatMessage[], metadata?: RuntimeEventMetadata): void {
+  emitMessages(
+    chatId: string,
+    messages: ChatMessage[],
+    metadata?: RuntimeEventMetadata,
+    operation?: AgentRuntimeOperation,
+  ): void {
     if (messages.length > 0) {
+      operation?.publish({
+        type: 'messages',
+        rows: runtimeRows(messages),
+        runId: operation.runId,
+      });
       if (metadata) {
         this.emit('messages', chatId, messages, metadata);
       } else {
@@ -46,7 +56,18 @@ export class AgentEventEmitterRuntime extends EventEmitter {
     this.emit('session-created', chatId);
   }
 
-  emitFinished(chatId: string, exitCode: number = 0, metadata?: RuntimeEventMetadata): void {
+  emitFinished(
+    chatId: string,
+    exitCode: number = 0,
+    metadata?: RuntimeEventMetadata,
+    operation?: AgentRuntimeOperation,
+  ): void {
+    operation?.publish({
+      type: 'run-ended',
+      runId: operation.runId,
+      outcome: 'finished',
+      exitCode,
+    });
     if (metadata) {
       this.emit('finished', chatId, exitCode, metadata);
     } else {
@@ -54,7 +75,18 @@ export class AgentEventEmitterRuntime extends EventEmitter {
     }
   }
 
-  emitFailed(chatId: string, errorMessage: string, metadata?: RuntimeEventMetadata): void {
+  emitFailed(
+    chatId: string,
+    errorMessage: string,
+    metadata?: RuntimeEventMetadata,
+    operation?: AgentRuntimeOperation,
+  ): void {
+    operation?.publish({
+      type: 'run-ended',
+      runId: operation.runId,
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: errorMessage },
+    });
     this.emit('failed', chatId, errorMessage, metadata);
   }
 

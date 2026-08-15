@@ -5,6 +5,7 @@ import type {
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { RuntimeEventMetadata } from '../shared/event-emitter-runtime.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { AgentRuntimeOperation } from '../execution/runtime-events.js';
 
 export interface DirectEndpointRuntime {
   readonly selection: AgentEndpointSelection;
@@ -30,6 +31,7 @@ export interface DirectExecutionRequest {
   readonly images?: readonly AgentAttachment[];
   readonly endpoint: DirectEndpointRuntime;
   readonly priorContext?: readonly ChatMessage[];
+  readonly operation: AgentRuntimeOperation;
 }
 
 export type DirectStartRequest = DirectExecutionRequest;

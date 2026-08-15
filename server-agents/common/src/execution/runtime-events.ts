@@ -41,6 +41,18 @@ export type AgentRuntimeEvent =
 // Garcon's current run - and drops what it cannot correlate rather than guessing.
 export type AgentRuntimePublisher = (event: AgentRuntimeEvent) => void;
 
+export interface AgentRuntimeOperation {
+  readonly runId: string;
+  readonly publish: AgentRuntimePublisher;
+}
+
+export function runtimeOperation(
+  runId: string,
+  publish: AgentRuntimePublisher,
+): AgentRuntimeOperation {
+  return Object.freeze({ runId, publish });
+}
+
 export interface AgentRuntimeExecution {
   start(
     request: AgentRuntimeStartRequest,

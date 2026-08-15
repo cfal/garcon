@@ -19,6 +19,7 @@ import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/eve
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 
 const DEFAULT_MAX_MESSAGES_PER_SESSION = 200;
 
@@ -35,6 +36,7 @@ export interface DirectRuntimeSession<TMessage> {
   startTime: number;
   lastActivityAt: number;
   eventMetadata: RuntimeEventMetadata;
+  operation: AgentRuntimeOperation | undefined;
 }
 
 export interface DirectUserTurn<TMessage> {
@@ -100,6 +102,7 @@ export abstract class DirectChatRuntimeBase<
       startTime: now,
       lastActivityAt: now,
       eventMetadata: directEventMetadata(request, 'chat-start'),
+      operation: request.operation,
     };
 
     assertDirectExecutionOpen(request);
@@ -127,6 +130,7 @@ export abstract class DirectChatRuntimeBase<
     }
     session.thinkingMode = normalizeThinkingMode(request.thinkingMode);
     session.eventMetadata = directEventMetadata(request);
+    session.operation = request.operation;
 
     const userTurn = this.buildUserTurn(request.command, request.images);
     this.#markSessionRunning(session);
@@ -206,6 +210,7 @@ export abstract class DirectChatRuntimeBase<
       startTime: now,
       lastActivityAt: now,
       eventMetadata: directEventMetadata(request),
+      operation: request.operation,
     };
     this.#sessions.set(sessionId, session);
     return session;
@@ -239,9 +244,10 @@ export abstract class DirectChatRuntimeBase<
     request: Pick<DirectStartRequest, 'executionAdmission'>,
   ): Promise<void> {
     const eventMetadata = session.eventMetadata;
+    const operation = session.operation;
     this.#markSessionRunning(session);
     if (session.aborted) {
-      this.#finishAbortedTurn(session, eventMetadata);
+      this.#finishAbortedTurn(session, eventMetadata, operation);
       return;
     }
 
@@ -255,6 +261,7 @@ export abstract class DirectChatRuntimeBase<
           session.chatId,
           `Empty response from ${this.config.runtimeLabel}`,
           eventMetadata,
+          operation,
         );
         return;
       }
@@ -267,17 +274,17 @@ export abstract class DirectChatRuntimeBase<
         new AssistantMessage(new Date().toISOString(), response),
         directMessageNativeSource({ role: 'assistant', turnId: eventMetadata.turnId }),
       );
-      this.emitMessages(session.chatId, [liveMessage], eventMetadata);
+      this.emitMessages(session.chatId, [liveMessage], eventMetadata, operation);
       this.#markSessionIdle(session);
-      this.emitFinished(session.chatId, 0, eventMetadata);
+      this.emitFinished(session.chatId, 0, eventMetadata, operation);
     } catch (error: unknown) {
       if (session.aborted) {
-        this.#finishAbortedTurn(session, eventMetadata);
+        this.#finishAbortedTurn(session, eventMetadata, operation);
         return;
       }
       this.#markSessionIdle(session);
       const failure = error instanceof Error ? error : new Error(String(error));
-      this.emitFailed(session.chatId, failure.message, eventMetadata);
+      this.emitFailed(session.chatId, failure.message, eventMetadata, operation);
       throw failure;
     } finally {
       session.isFinalizing = false;
@@ -288,8 +295,9 @@ export abstract class DirectChatRuntimeBase<
   #finishAbortedTurn(
     session: DirectRuntimeSession<TMessage>,
     eventMetadata: RuntimeEventMetadata,
+    operation: AgentRuntimeOperation | undefined,
   ): void {
     this.#markSessionIdle(session);
-    this.emitFinished(session.chatId, 0, eventMetadata);
+    this.emitFinished(session.chatId, 0, eventMetadata, operation);
   }
 }
