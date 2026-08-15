@@ -6309,6 +6309,75 @@ describe('CodexAppServerRuntime', () => {
     expect(emitted.map((message) => message.content)).toEqual(['Recovered final line']);
   });
 
+  it('does not append native-only interrupted tools behind live assistant output', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-native-tail.jsonl');
+    const liveItem = {
+      type: 'agentMessage',
+      id: 'live-assistant',
+      text: 'The live answer is already visible',
+      phase: null,
+      memoryCitation: null,
+    };
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await writeJsonl(nativePath, [
+          {
+            timestamp: '2026-08-15T00:00:00.000Z',
+            type: 'response_item',
+            payload: {
+              type: 'function_call',
+              name: 'shell',
+              call_id: 'native-only-command',
+              arguments: JSON.stringify({ command: ['echo', 'ran-before-the-answer'] }),
+            },
+          },
+        ]);
+        return {
+          turn: makeTurn({
+            id: 'turn-1',
+            status: 'inProgress',
+            completedAt: null,
+            durationMs: null,
+          }),
+        };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.startSession(makeRequest());
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: { threadId: 'thread-1', turnId: 'turn-1', item: liveItem },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({
+          id: 'turn-1',
+          status: 'interrupted',
+          items: [liveItem],
+          itemsView: 'summary',
+        }),
+      },
+    });
+    await finished;
+
+    expect(emitted.map((message) => [message.type, message.content])).toEqual([
+      ['assistant-message', 'The live answer is already visible'],
+    ]);
+  });
+
   it('retries retryable utility app-server overload responses while resolving native paths', async () => {
     const nativePath = path.join(tmpDir, 'retry-thread.jsonl');
     await fs.writeFile(nativePath, '{}\n');
