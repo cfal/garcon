@@ -60,6 +60,12 @@ type SnapshotBatch = Pick<TranscriptAppend, 'firstOrdinal' | 'lastOrdinal' | 'me
 	noticeRevision: number;
 	resendCandidates: ResendCandidate[];
 };
+type ReconnectReplay = {
+	token: number;
+	chatId: string;
+	transcriptViewId: string;
+	buffered: SnapshotBatch[];
+};
 export type MessageApplyResult = 'applied' | 'view-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
 
@@ -122,6 +128,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	loadError = $state<string | null>(null);
 	historyState = $state<ChatHistoryState>({ kind: 'complete' });
 	#snapshotBuffer: SnapshotBatch[] | null = null;
+	#reconnectReplay: ReconnectReplay | null = null;
+	#reconnectReplayEpoch = 0;
+	#applyingReconnectReplayToken: number | null = null;
 	#loadEpoch = 0;
 	#notices = new TranscriptNoticeFeed();
 	#optimisticInputs = new TranscriptOptimisticInputs(() => {
@@ -253,6 +262,71 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return { transcriptViewId: this.transcriptViewId, lastOrdinal: this.lastOrdinal };
 	}
 
+	beginReconnectReplay(chatId: string, transcriptViewId: string): number {
+		const token = ++this.#reconnectReplayEpoch;
+		this.#reconnectReplay = { token, chatId, transcriptViewId, buffered: [] };
+		return token;
+	}
+
+	applyReconnectReplayPage(
+		token: number,
+		chatId: string,
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
+		resendCandidates: ResendCandidate[],
+	): MessageApplyResult | 'stale' {
+		const replay = this.#reconnectReplay;
+		if (
+			!replay
+			|| replay.token !== token
+			|| replay.chatId !== chatId
+			|| replay.transcriptViewId !== transcriptViewId
+		) {
+			return 'stale';
+		}
+
+		this.#applyingReconnectReplayToken = token;
+		try {
+			return this.applyMessages(
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+				resendCandidates,
+			);
+		} finally {
+			this.#applyingReconnectReplayToken = null;
+		}
+	}
+
+	finishReconnectReplay(token: number, chatId: string): MessageApplyResult | 'stale' {
+		const replay = this.#reconnectReplay;
+		if (!replay || replay.token !== token || replay.chatId !== chatId) return 'stale';
+
+		this.#reconnectReplay = null;
+		for (const batch of replay.buffered) {
+			const result = this.applyMessages(
+				chatId,
+				batch.transcriptViewId,
+				batch.messages,
+				batch.firstOrdinal,
+				batch.lastOrdinal,
+				batch.resendCandidates,
+				batch.noticeRevision,
+			);
+			if (result !== 'applied') return result;
+		}
+		return 'applied';
+	}
+
+	abortReconnectReplay(token: number): void {
+		if (this.#reconnectReplay?.token !== token) return;
+		this.#reconnectReplay = null;
+	}
+
 	applyMessages(
 		chatId: string,
 		transcriptViewId: string,
@@ -269,6 +343,20 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const previousLastOrdinal = this.lastOrdinal;
 		this.#optimisticInputs.clearMany(echoedClientMessageIds(messages));
 		const append = { firstOrdinal, lastOrdinal, messages };
+		const reconnectReplay = this.#reconnectReplay;
+		if (
+			reconnectReplay
+			&& reconnectReplay.token !== this.#applyingReconnectReplayToken
+			&& reconnectReplay.chatId === chatId
+		) {
+			reconnectReplay.buffered.push({
+				transcriptViewId,
+				...append,
+				noticeRevision,
+				resendCandidates,
+			});
+			return 'applied';
+		}
 		if (this.#snapshotBuffer) {
 			this.transcriptCache.applyMessages(chatId, transcriptViewId, append);
 			this.#snapshotBuffer.push({
@@ -416,6 +504,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
+		this.#reconnectReplay = null;
 		this.transcriptCache.replaceFromPage(chatId, {
 			transcriptViewId,
 			messages,
@@ -785,6 +874,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
+		this.#reconnectReplay = null;
 	}
 
 	compactToRecentMessages(): boolean {

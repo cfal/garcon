@@ -869,10 +869,8 @@ export class GarconTestClient {
       chatId,
       transcriptViewId,
       afterOrdinal,
+      throughOrdinal,
     );
-    if (throughOrdinal !== undefined) {
-      (request as ChatSubscribeRequest & { throughOrdinal: number }).throughOrdinal = throughOrdinal;
-    }
     this.sendWs(request);
     const outcome = await this.waitForEvent(
       (message): message is ChatSubscribedMessage | ClientRequestErrorMessage =>

@@ -62,6 +62,9 @@ describe('TranscriptViewReader', () => {
         firstOrdinal: 1,
         lastOrdinal: 1,
         messages: [],
+        nextAfterOrdinal: 1,
+        throughOrdinal: 1,
+        hasMore: false,
       });
     });
   });

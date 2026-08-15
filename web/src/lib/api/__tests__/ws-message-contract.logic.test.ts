@@ -180,6 +180,9 @@ describe('parseServerWsMessage', () => {
 			messages: [chatViewMessage],
 			firstOrdinal: 1,
 			lastOrdinal: 1,
+			nextAfterOrdinal: 1,
+			throughOrdinal: 1,
+			hasMore: false,
 			resendCandidates: [],
 			transientFeed: transientFeed(),
 		});
@@ -198,6 +201,9 @@ describe('parseServerWsMessage', () => {
 			messages: [],
 			firstOrdinal: 1,
 			lastOrdinal: 0,
+			nextAfterOrdinal: 0,
+			throughOrdinal: 0,
+			hasMore: false,
 			resendCandidates: [],
 		};
 		expect(parseServerWsMessage({
@@ -230,6 +236,9 @@ describe('parseServerWsMessage', () => {
 				messages: [],
 				firstOrdinal: 1,
 				lastOrdinal: 0,
+				nextAfterOrdinal: 0,
+				throughOrdinal: 0,
+				hasMore: false,
 				resendCandidates: [],
 			}),
 		).toBeNull();
@@ -254,6 +263,9 @@ describe('parseServerWsMessage', () => {
 				messages: [],
 				firstOrdinal: 1,
 				lastOrdinal: 0,
+				nextAfterOrdinal: 0,
+				throughOrdinal: 0,
+				hasMore: false,
 				transientFeed: transientFeed(),
 			}),
 		).toBeNull();
@@ -267,6 +279,9 @@ describe('parseServerWsMessage', () => {
 				messages: [],
 				firstOrdinal: 1,
 				lastOrdinal: 0,
+				nextAfterOrdinal: 0,
+				throughOrdinal: 0,
+				hasMore: false,
 				transientFeed: transientFeed(),
 			}),
 		).toBeNull();
@@ -788,7 +803,7 @@ describe('parseClientWsMessage', () => {
 		expect((ping as WsPingRequest).sentAt).toBe(1234);
 	});
 
-	it('defaults malformed subscribe cursors to an empty cursor', () => {
+	it('rejects malformed subscribe cursors', () => {
 		const subscribe = parseClientWsMessage({
 			type: 'chat-subscribe',
 			clientRequestId: 'req-subscribe',
@@ -797,9 +812,7 @@ describe('parseClientWsMessage', () => {
 			afterOrdinal: -1,
 		});
 
-		expect(subscribe).toBeInstanceOf(ChatSubscribeRequest);
-		expect((subscribe as ChatSubscribeRequest).transcriptViewId).toBe('');
-		expect((subscribe as ChatSubscribeRequest).afterOrdinal).toBe(0);
+		expect(subscribe).toBeNull();
 	});
 
 	it('rejects unknown client request messages', () => {

@@ -621,8 +621,8 @@ export async function startServer(): Promise<void> {
       processing: chatProcessingActivity,
       chatViews: {
         ...chatViewPages,
-        readReplay: (chatId, viewId, afterOrdinal) =>
-          transcriptReader.replay(chatId, viewId, afterOrdinal),
+        readReplay: (chatId, viewId, afterOrdinal, throughOrdinal) =>
+          transcriptReader.replay(chatId, viewId, afterOrdinal, throughOrdinal),
         resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
       },
       transcriptReload: async (chatId) => {

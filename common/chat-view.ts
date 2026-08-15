@@ -89,7 +89,11 @@ export interface TranscriptAppend {
   readonly messages: TranscriptMessage[];
 }
 
-export type TranscriptReplayResult = TranscriptAppend;
+export interface TranscriptReplayResult extends TranscriptAppend {
+  readonly nextAfterOrdinal: number;
+  readonly throughOrdinal: number;
+  readonly hasMore: boolean;
+}
 
 export type TranscriptApplyStatus = 'applied' | 'gap-detected';
 

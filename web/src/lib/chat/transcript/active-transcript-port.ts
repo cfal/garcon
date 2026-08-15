@@ -37,6 +37,21 @@ export interface ActiveTranscriptPort {
 		lastOrdinal: number,
 		resendCandidates?: ResendCandidate[],
 	): 'applied' | 'view-changed' | 'gap-detected';
+	beginReconnectReplay(chatId: string, transcriptViewId: string): number;
+	applyReconnectReplayPage(
+		token: number,
+		chatId: string,
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
+		resendCandidates: ResendCandidate[],
+	): 'applied' | 'view-changed' | 'gap-detected' | 'stale';
+	finishReconnectReplay(
+		token: number,
+		chatId: string,
+	): 'applied' | 'view-changed' | 'gap-detected' | 'stale';
+	abortReconnectReplay(token: number): void;
 	setResendCandidates(candidates: readonly ResendCandidate[]): void;
 	excludeResendCandidate(ordinal: number): void;
 	clearResendExclusions(): void;

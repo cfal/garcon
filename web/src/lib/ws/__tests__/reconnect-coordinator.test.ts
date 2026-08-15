@@ -14,7 +14,7 @@ import { createChatMessagesAccumulator } from '$lib/events/router.svelte.js';
 import { AssistantMessage } from '$shared/chat-types';
 import { ChatMessagesMessage } from '$shared/ws-events';
 import type { WsMessageConsumer } from '../connection.svelte.js';
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -89,17 +89,23 @@ function deltaResponse(
 	chatId: string,
 	transcriptViewId = `generation-${chatId}`,
 	messages: unknown[] = [],
+	emptyAfterOrdinal = 2,
 ) {
 	const first = messages[0] as { ordinal?: unknown } | undefined;
 	const last = messages.at(-1) as { ordinal?: unknown } | undefined;
+	const firstOrdinal = typeof first?.ordinal === 'number' ? first.ordinal : emptyAfterOrdinal + 1;
+	const lastOrdinal = typeof last?.ordinal === 'number' ? last.ordinal : emptyAfterOrdinal;
 	return {
 		type: 'chat-subscribed',
 		clientRequestId: `req-${chatId}`,
 		chatId,
 		transcriptViewId,
 		messages,
-		firstOrdinal: typeof first?.ordinal === 'number' ? first.ordinal : 1,
-		lastOrdinal: typeof last?.ordinal === 'number' ? last.ordinal : 0,
+		firstOrdinal,
+		lastOrdinal,
+		nextAfterOrdinal: lastOrdinal,
+		throughOrdinal: lastOrdinal,
+		hasMore: false,
 		resendCandidates: [],
 		transientFeed: transientFeed(chatId, transcriptViewId),
 	};
@@ -138,6 +144,9 @@ function snapshotRequiredResponse(
 		messages: [],
 		firstOrdinal: 1,
 		lastOrdinal: 0,
+		nextAfterOrdinal: 0,
+		throughOrdinal: 0,
+		hasMore: false,
 		resendCandidates: [],
 		transientFeed: transientFeed(chatId, transcriptViewId ?? `pending:${chatId}`),
 	};
@@ -178,6 +187,7 @@ function createReconnectDeps(
 ) {
 	const selectedChatId = options.selectedChatId ?? 'chat-1';
 	let selectedCursor = { transcriptViewId: 'generation-selected', lastOrdinal: 2 };
+	let reconnectReplayToken = 0;
 	const sendRequest = vi.fn(async (request: object) => {
 		if (!('type' in request)) throw new Error('Request is missing a type');
 		if (request.type === 'reconnect-state-query') {
@@ -193,21 +203,35 @@ function createReconnectDeps(
 		}
 		throw new Error(`Unexpected request: ${String(request.type)}`);
 	});
+	const applyMessages = vi.fn(
+		(
+			_chatId: string,
+			transcriptViewId: string,
+			_messages: TranscriptMessage[],
+			_firstOrdinal: number,
+			lastOrdinal: number,
+		) => {
+			selectedCursor = { transcriptViewId, lastOrdinal };
+			return 'applied' as const;
+		},
+	);
 	const chatState = {
 		getCursor: vi.fn(() => selectedCursor),
-		applyMessages: vi.fn(
+		applyMessages,
+		beginReconnectReplay: vi.fn(() => ++reconnectReplayToken),
+		applyReconnectReplayPage: vi.fn(
 			(
-				_chatId: string,
+				_token: number,
+				chatId: string,
 				transcriptViewId: string,
-				_messages: TranscriptMessage[],
-				_firstOrdinal: number,
+				messages: TranscriptMessage[],
+				firstOrdinal: number,
 				lastOrdinal: number,
-			) => {
-				selectedCursor = { transcriptViewId, lastOrdinal };
-				return 'applied' as const;
-			},
+				_resendCandidates: ResendCandidate[],
+			) => applyMessages(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal),
 		),
-		setResendCandidates: vi.fn(),
+		finishReconnectReplay: vi.fn(() => 'applied' as const),
+		abortReconnectReplay: vi.fn(),
 		loadMessages: vi.fn(async () => []),
 		transcriptCache: {
 			markStale: vi.fn(),
@@ -252,6 +276,10 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.ws.sendRequest,
 		deps.chatState.getCursor,
 		deps.chatState.applyMessages,
+		deps.chatState.beginReconnectReplay,
+		deps.chatState.applyReconnectReplayPage,
+		deps.chatState.finishReconnectReplay,
+		deps.chatState.abortReconnectReplay,
 		deps.chatState.loadMessages,
 		deps.chatState.transcriptCache.markStale,
 		deps.chatState.transcriptCache.markValidated,
@@ -886,6 +914,9 @@ describe('ChatReconnectCoordinator', () => {
 				'chat-1': {
 					...deltaResponse('chat-1', 'generation-selected', [messageJson(3, 'partial')]),
 					lastOrdinal: 4,
+					nextAfterOrdinal: 4,
+					throughOrdinal: 4,
+					hasMore: false,
 				},
 			},
 		});
@@ -1055,7 +1086,10 @@ describe('ChatReconnectCoordinator', () => {
 		const chatState = {
 			getCursor: () => activeTranscript.getCursor(),
 			applyMessages: activeTranscript.applyMessages.bind(activeTranscript),
-			setResendCandidates: activeTranscript.setResendCandidates.bind(activeTranscript),
+			beginReconnectReplay: activeTranscript.beginReconnectReplay.bind(activeTranscript),
+			applyReconnectReplayPage: activeTranscript.applyReconnectReplayPage.bind(activeTranscript),
+			finishReconnectReplay: activeTranscript.finishReconnectReplay.bind(activeTranscript),
+			abortReconnectReplay: activeTranscript.abortReconnectReplay.bind(activeTranscript),
 			loadMessages,
 			transcriptCache: activeTranscript.transcriptCache,
 		} satisfies ReconnectTranscriptState;
@@ -1571,7 +1605,7 @@ describe('ChatReconnectCoordinator', () => {
 				if (request.type === 'chat-subscribe' && request.chatId === 'chat-2') {
 					visibleSubscribeCount += 1;
 					if (visibleSubscribeCount === 1) return firstVisibleSubscribe.promise;
-					return deltaResponse('chat-2', 'generation-2');
+					return deltaResponse('chat-2', 'generation-2', [], 1);
 				}
 				if (request.type === 'chat-subscribe') {
 					return deltaResponse('chat-1', 'generation-selected');

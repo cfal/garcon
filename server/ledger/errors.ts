@@ -30,6 +30,10 @@ export class StaleTranscriptViewError extends LedgerError {
   }
 }
 
+export class InvalidTranscriptReplayRequestError extends LedgerError {
+  override readonly name = 'InvalidTranscriptReplayRequestError';
+}
+
 export class SubmissionConflictError extends LedgerError {
   override readonly name = 'SubmissionConflictError';
 

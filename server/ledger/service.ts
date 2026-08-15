@@ -409,6 +409,16 @@ export class TranscriptLedgerService {
     return this.#store.rowsAfter(chatId, viewId, afterOrdinal);
   }
 
+  replayRows(
+    chatId: string,
+    viewId: TranscriptViewId,
+    afterOrdinal: number,
+    throughOrdinal: number,
+    limit: number,
+  ): readonly LedgerRow[] {
+    return this.#store.replayRows(chatId, viewId, afterOrdinal, throughOrdinal, limit);
+  }
+
   currentRows(chatId: string): readonly LedgerRow[] {
     return this.#store.currentRows(chatId);
   }

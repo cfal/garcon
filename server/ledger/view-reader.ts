@@ -3,11 +3,16 @@ import type {
   TranscriptPage as PresentedTranscriptPage,
   TranscriptReplayResult,
 } from '../../common/chat-view.js';
+import { CHAT_MESSAGES_MAX_LIMIT } from '../../common/chat-view.js';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import type { TranscriptViewId } from './contracts.js';
-import { LedgerFencedError } from './errors.js';
+import {
+  InvalidTranscriptReplayRequestError,
+  LedgerFencedError,
+  StaleTranscriptViewError,
+} from './errors.js';
 import { ledgerRowsToMessages, ledgerRowsToTranscriptMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
 
@@ -85,17 +90,50 @@ export class TranscriptViewReader {
     chatId: string,
     viewId: TranscriptViewId,
     afterOrdinal: number,
+    throughOrdinal?: number,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<TranscriptReplayResult> {
     signal.throwIfAborted();
-    await this.#adoption.ensure(chatId, signal);
-    const rows = this.#ledger.rowsAfter(chatId, viewId, afterOrdinal);
-    const lastOrdinal = this.#ledger.highWatermark(chatId).ordinal;
+    const currentView = await this.#adoption.ensure(chatId, signal);
+    if (currentView.viewId !== viewId) {
+      throw new StaleTranscriptViewError(chatId, viewId, currentView.viewId);
+    }
+    if (!Number.isSafeInteger(afterOrdinal) || afterOrdinal < 0) {
+      throw new InvalidTranscriptReplayRequestError(
+        'Transcript replay cursor must be a non-negative safe integer',
+      );
+    }
+    const highWatermark = this.#ledger.highWatermark(chatId).ordinal;
+    const fixedWatermark = throughOrdinal ?? highWatermark;
+    if (!Number.isSafeInteger(fixedWatermark) || fixedWatermark < afterOrdinal) {
+      throw new InvalidTranscriptReplayRequestError(
+        'Transcript replay watermark must not precede its cursor',
+      );
+    }
+    if (fixedWatermark > highWatermark) {
+      throw new InvalidTranscriptReplayRequestError(
+        'Transcript replay watermark is ahead of the current view',
+      );
+    }
+    const rows = this.#ledger.replayRows(
+      chatId,
+      viewId,
+      afterOrdinal,
+      fixedWatermark,
+      CHAT_MESSAGES_MAX_LIMIT,
+    );
+    const nextAfterOrdinal = rows.at(-1)?.ordinal ?? afterOrdinal;
+    if (nextAfterOrdinal === afterOrdinal && afterOrdinal < fixedWatermark) {
+      throw new Error('Transcript replay page did not advance its cursor');
+    }
     return {
       transcriptViewId: viewId,
       firstOrdinal: afterOrdinal + 1,
-      lastOrdinal,
+      lastOrdinal: nextAfterOrdinal,
       messages: ledgerRowsToTranscriptMessages(rows),
+      nextAfterOrdinal,
+      throughOrdinal: fixedWatermark,
+      hasMore: nextAfterOrdinal < fixedWatermark,
     };
   }
 

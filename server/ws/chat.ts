@@ -3,7 +3,6 @@
 // All dependencies are injected via the constructor.
 
 import { sendWebSocketJson } from './utils.js';
-import { publishWebSocketPayload } from './transport.js';
 import {
   ReconnectStateMessage,
   WsFaultMessage,
@@ -27,7 +26,11 @@ import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
 import { isDomainError } from '../lib/domain-error.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
-import type { TranscriptReplayResult } from '../../common/chat-view.js';
+import type {
+  ResendCandidate,
+  TranscriptReplayResult,
+} from '../../common/chat-view.js';
+import type { ChatTransientFeedSnapshot } from '../../common/chat-transient-feed.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatExecutionQueries } from '../chat-execution/chat-execution-coordinator.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
@@ -35,6 +38,7 @@ import { toClientChatExecutionControlState } from '../chat-execution/control-sta
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 import {
   StaleTranscriptViewError,
+  InvalidTranscriptReplayRequestError,
   transcriptViewId,
   type TranscriptViewId,
 } from '../ledger/index.js';
@@ -50,6 +54,7 @@ type ChatViewsDep = {
     chatId: string,
     viewId: TranscriptViewId,
     afterOrdinal: number,
+    throughOrdinal?: number,
   ): Promise<TranscriptReplayResult>;
   resendCandidates(chatId: string): readonly import('../../common/chat-view.js').ResendCandidate[];
 };
@@ -70,7 +75,7 @@ interface ChatHandlerDeps {
 }
 
 const RECONNECT_CONTROL_READ_CONCURRENCY = 8;
-const SLOW_REPLAY_WARNING_MS = 2_000;
+const MAX_TRANSCRIPT_REPLAY_FRAME_BYTES = 1024 * 1024;
 
 function readProcessingSnapshot(
   processing: Pick<ChatProcessingActivity, 'snapshot'>,
@@ -95,11 +100,87 @@ class WebSocketWriter {
     this.#ws = ws;
   }
   send(data: unknown): void {
-    sendWebSocketJson(this.#ws, data);
+    if (!sendWebSocketJson(this.#ws, data)) {
+      throw new WebSocketResponseDroppedError();
+    }
   }
-  publish(data: unknown): void {
-    publishWebSocketPayload(this.#ws, 'chat', JSON.stringify(data));
+}
+
+class WebSocketResponseDroppedError extends Error {
+  override readonly name = 'WebSocketResponseDroppedError';
+
+  constructor() {
+    super('WebSocket response was not accepted by the socket');
   }
+}
+
+class TranscriptReplayFrameLimitError extends Error {
+  override readonly name = 'TranscriptReplayFrameLimitError';
+
+  constructor() {
+    super('A transcript replay row exceeds the WebSocket response limit');
+  }
+}
+
+interface ChatSubscribedPageInput {
+  readonly clientRequestId: string;
+  readonly chatId: string;
+  readonly replay: TranscriptReplayResult;
+  readonly resendCandidates: ResendCandidate[];
+  readonly transientFeed: ChatTransientFeedSnapshot;
+}
+
+function chatSubscribedPage(
+  input: ChatSubscribedPageInput,
+  messageCount: number,
+): ChatSubscribedMessage {
+  const { replay } = input;
+  const nextAfterOrdinal = messageCount === replay.messages.length
+    ? replay.nextAfterOrdinal
+    : replay.messages[messageCount]!.ordinal - 1;
+  return new ChatSubscribedMessage(
+    input.clientRequestId,
+    input.chatId,
+    replay.transcriptViewId,
+    replay.messages.slice(0, messageCount),
+    replay.firstOrdinal,
+    nextAfterOrdinal,
+    nextAfterOrdinal,
+    replay.throughOrdinal,
+    nextAfterOrdinal < replay.throughOrdinal,
+    input.resendCandidates,
+    input.transientFeed,
+  );
+}
+
+function serializedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function fitChatSubscribedPage(input: ChatSubscribedPageInput): ChatSubscribedMessage {
+  const complete = chatSubscribedPage(input, input.replay.messages.length);
+  if (serializedBytes(complete) <= MAX_TRANSCRIPT_REPLAY_FRAME_BYTES) return complete;
+
+  const afterOrdinal = input.replay.firstOrdinal - 1;
+  let lower = 0;
+  let upper = input.replay.messages.length - 1;
+  let fitted: ChatSubscribedMessage | null = null;
+  while (lower <= upper) {
+    const messageCount = Math.floor((lower + upper) / 2);
+    const candidate = chatSubscribedPage(input, messageCount);
+    if (candidate.nextAfterOrdinal <= afterOrdinal && candidate.hasMore) {
+      lower = messageCount + 1;
+      continue;
+    }
+    if (serializedBytes(candidate) <= MAX_TRANSCRIPT_REPLAY_FRAME_BYTES) {
+      fitted = candidate;
+      lower = messageCount + 1;
+    } else {
+      upper = messageCount - 1;
+    }
+  }
+  if (!fitted) throw new TranscriptReplayFrameLimitError();
+  return fitted;
 }
 
 interface RequestErrorParams {
@@ -114,6 +195,14 @@ interface RequestErrorParams {
 function reloadErrorCode(error: unknown): ClientRequestErrorCode {
   if (isDomainError(error) && (error.code === 'CHAT_RUNNING' || error.code === 'HISTORY_LOAD_FAILED')) {
     return error.code;
+  }
+  return 'HISTORY_LOAD_FAILED';
+}
+
+function replayErrorCode(error: unknown): ClientRequestErrorCode {
+  if (error instanceof StaleTranscriptViewError) return 'STALE_TRANSCRIPT_VIEW';
+  if (error instanceof InvalidTranscriptReplayRequestError) {
+    return 'REQUEST_VALIDATION_FAILED';
   }
   return 'HISTORY_LOAD_FAILED';
 }
@@ -157,24 +246,6 @@ export class ChatHandler {
       message: (ws, data) => this.#handleMessage(ws, data),
       close: (ws, code, reason) => this.#handleClose(ws, code, reason),
     };
-  }
-
-  // A subscribe answers from the ledger, so it settles in milliseconds. One that does not is
-  // holding a client on a request that looks answered to nobody, and the silence is the whole
-  // symptom; saying so is what separates a stuck read from a request that never arrived.
-  async #watchSlowReplay<T>(chatId: string, replay: Promise<T>): Promise<T> {
-    const timer = setTimeout(
-      () => logger.warn('ws: chat-subscribe replay is still pending', {
-        chatId,
-        afterMs: SLOW_REPLAY_WARNING_MS,
-      }),
-      SLOW_REPLAY_WARNING_MS,
-    );
-    try {
-      return await replay;
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   #sendRequestError(writer: WebSocketWriter, params: RequestErrorParams): void {
@@ -222,6 +293,7 @@ export class ChatHandler {
         data.clientRequestId ?? undefined,
       ));
     } catch (error: unknown) {
+      if (error instanceof WebSocketResponseDroppedError) throw error;
       logger.error(
         'reconnect state query failed:',
         error instanceof Error ? error.message : String(error),
@@ -251,7 +323,11 @@ export class ChatHandler {
     ));
   }
 
-  async #handleChatSubscribe(data: ChatSubscribeRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
+  async #handleChatSubscribe(
+    data: ChatSubscribeRequest,
+    chatId: string,
+    writer: WebSocketWriter,
+  ): Promise<void> {
     const clientRequestId = data.clientRequestId;
     if (!clientRequestId) {
       // The client is waiting on a correlated answer it can never receive otherwise.
@@ -271,34 +347,40 @@ export class ChatHandler {
         });
         return;
       }
-      const replay = await this.#watchSlowReplay(chatId, this.#chatViews.readReplay(
-        chatId,
-        transcriptViewId(data.transcriptViewId),
-        data.afterOrdinal,
-      ));
-      writer.send(new ChatSubscribedMessage(
+      const viewId = transcriptViewId(data.transcriptViewId);
+      const replay = data.throughOrdinal === undefined
+        ? await this.#chatViews.readReplay(chatId, viewId, data.afterOrdinal)
+        : await this.#chatViews.readReplay(
+            chatId,
+            viewId,
+            data.afterOrdinal,
+            data.throughOrdinal,
+          );
+      const response = fitChatSubscribedPage({
         clientRequestId,
         chatId,
-        replay.transcriptViewId,
-        replay.messages,
-        replay.firstOrdinal,
-        replay.lastOrdinal,
-        this.#processing.phase(chatId) === null
+        replay,
+        resendCandidates: this.#processing.phase(chatId) === null
           ? [...this.#chatViews.resendCandidates(chatId)]
           : [],
-        this.#transientFeeds.snapshot({
+        transientFeed: this.#transientFeeds.snapshot({
           chatId,
           transcriptViewId: replay.transcriptViewId,
         }),
-      ));
+      });
+      writer.send(response);
     } catch (error: unknown) {
+      if (error instanceof WebSocketResponseDroppedError) throw error;
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
-        code: error instanceof StaleTranscriptViewError
-          ? 'STALE_TRANSCRIPT_VIEW'
-          : 'HISTORY_LOAD_FAILED',
+        code: replayErrorCode(error),
         message: (error as Error).message || 'Failed to replay chat messages',
-        retryable: !(error instanceof StaleTranscriptViewError), chatId,
+        retryable: !(
+          error instanceof StaleTranscriptViewError
+          || error instanceof InvalidTranscriptReplayRequestError
+          || error instanceof TranscriptReplayFrameLimitError
+        ),
+        chatId,
       });
     }
   }
@@ -330,6 +412,7 @@ export class ChatHandler {
         reload.hasMore,
       ));
     } catch (error: unknown) {
+      if (error instanceof WebSocketResponseDroppedError) throw error;
       const message = (error as Error).message || 'Failed to reload chat';
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
@@ -374,13 +457,43 @@ export class ChatHandler {
   async #handleMessage(ws: WS, rawData: unknown): Promise<void> {
     const writer = new WebSocketWriter(ws);
     try {
-      const data = parseClientWsMessage(rawData as Record<string, unknown>);
-      if (!data) return;
+      const raw = rawData as Record<string, unknown>;
+      const data = parseClientWsMessage(raw);
+      if (!data) {
+        this.#handleMalformedRequest(raw, writer);
+        return;
+      }
       await this.#requestHandlers[data.type](data, writer);
     } catch (error: unknown) {
+      if (error instanceof WebSocketResponseDroppedError) throw error;
       logger.error('ws: chat error:', (error as Error).message);
       writer.send(new WsFaultMessage((error as Error).message));
     }
+  }
+
+  #handleMalformedRequest(data: Record<string, unknown>, writer: WebSocketWriter): void {
+    if (data?.type !== 'chat-subscribe') return;
+    const clientRequestId = typeof data.clientRequestId === 'string' && data.clientRequestId
+      ? data.clientRequestId
+      : null;
+    const chatId = typeof data.chatId === 'string' && data.chatId ? data.chatId : null;
+    if (!clientRequestId) {
+      logger.warn('ws: chat-subscribe arrived without a client request id', { chatId });
+      writer.send(new WsFaultMessage('chat-subscribe requires a clientRequestId'));
+      return;
+    }
+    if (!chatId) {
+      this.#sendMissingSessionError(writer, 'chat-subscribe');
+      return;
+    }
+    this.#sendRequestError(writer, {
+      clientRequestId,
+      requestType: 'chat-subscribe',
+      code: 'REQUEST_VALIDATION_FAILED',
+      message: 'Invalid chat-subscribe request',
+      retryable: false,
+      chatId,
+    });
   }
 
   #sendMissingSessionError(writer: WebSocketWriter, type: string): void {

@@ -55,6 +55,9 @@ export class ChatSubscribedMessage {
     public messages: TranscriptMessage[],
     public firstOrdinal: number,
     public lastOrdinal: number,
+    public nextAfterOrdinal: number,
+    public throughOrdinal: number,
+    public hasMore: boolean,
     public resendCandidates: ResendCandidate[],
     public transientFeed: ChatTransientFeedSnapshot,
   ) {}
@@ -361,7 +364,7 @@ function requiredStr(v: unknown): string | null {
 }
 
 function nonNegativeInt(v: unknown): number | null {
-  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null;
 }
 
 function isValidTranscriptSpan(
@@ -467,12 +470,17 @@ export function parseServerWsMessage(
       const transcriptViewId = requiredStr(data.transcriptViewId);
       const firstOrdinal = nonNegativeInt(data.firstOrdinal);
       const lastOrdinal = nonNegativeInt(data.lastOrdinal);
+      const nextAfterOrdinal = nonNegativeInt(data.nextAfterOrdinal);
+      const throughOrdinal = nonNegativeInt(data.throughOrdinal);
       if (
         !clientRequestId ||
         !chatId ||
         !transcriptViewId ||
         firstOrdinal === null ||
-        lastOrdinal === null
+        lastOrdinal === null ||
+        nextAfterOrdinal === null ||
+        throughOrdinal === null ||
+        typeof data.hasMore !== 'boolean'
       )
         return null;
       const messages = parseTranscriptMessages(data.messages);
@@ -480,7 +488,13 @@ export function parseServerWsMessage(
       const transientFeed = parseChatTransientFeedSnapshot(data.transientFeed);
       if (messages === null || resendCandidates === null
           || !transientFeed) return null;
-      if (!isValidTranscriptSpan(firstOrdinal, lastOrdinal, messages)) return null;
+      if (
+        !isValidTranscriptSpan(firstOrdinal, lastOrdinal, messages)
+        || nextAfterOrdinal !== lastOrdinal
+        || nextAfterOrdinal > throughOrdinal
+        || data.hasMore !== (nextAfterOrdinal < throughOrdinal)
+        || (data.hasMore && lastOrdinal < firstOrdinal)
+      ) return null;
       if (transientFeed.chatId !== chatId
           || transientFeed.transcriptViewId !== transcriptViewId) return null;
       return new ChatSubscribedMessage(
@@ -490,6 +504,9 @@ export function parseServerWsMessage(
         messages,
         firstOrdinal,
         lastOrdinal,
+        nextAfterOrdinal,
+        throughOrdinal,
+        data.hasMore,
         resendCandidates,
         transientFeed,
       );

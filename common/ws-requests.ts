@@ -51,22 +51,34 @@ export class ChatSubscribeRequest {
     public chatId: string | null,
     public transcriptViewId: string,
     public afterOrdinal: number,
+    public throughOrdinal?: number,
   ) { }
 
-  static fromJson(data: Record<string, unknown>): ChatSubscribeRequest {
-    const afterOrdinal = typeof data.afterOrdinal === 'number'
-      && Number.isInteger(data.afterOrdinal)
-      && data.afterOrdinal >= 0
-      ? data.afterOrdinal
-      : 0;
-    const transcriptViewId = typeof data.transcriptViewId === 'string'
-      ? data.transcriptViewId
-      : '';
+  static fromJson(data: Record<string, unknown>): ChatSubscribeRequest | null {
+    if (
+      typeof data.afterOrdinal !== 'number'
+      || !Number.isSafeInteger(data.afterOrdinal)
+      || data.afterOrdinal < 0
+      || typeof data.transcriptViewId !== 'string'
+      || data.transcriptViewId.length === 0
+    ) return null;
+    const throughOrdinal = data.throughOrdinal === undefined
+      ? undefined
+      : data.throughOrdinal;
+    if (
+      throughOrdinal !== undefined
+      && (
+        typeof throughOrdinal !== 'number'
+        || !Number.isSafeInteger(throughOrdinal)
+        || throughOrdinal < data.afterOrdinal
+      )
+    ) return null;
     return new ChatSubscribeRequest(
       strOrNull(data.clientRequestId),
       strOrNull(data.chatId),
-      transcriptViewId,
-      afterOrdinal,
+      data.transcriptViewId,
+      data.afterOrdinal,
+      throughOrdinal,
     );
   }
 }

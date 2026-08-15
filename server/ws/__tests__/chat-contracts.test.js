@@ -44,6 +44,9 @@ const mockChatViews = {
     messages: [chatViewMessage],
     firstOrdinal: 2,
     lastOrdinal: 2,
+    nextAfterOrdinal: 2,
+    throughOrdinal: 2,
+    hasMore: false,
   })),
   resendCandidates: mock(() => []),
 };
@@ -142,6 +145,9 @@ describe('chat WebSocket handler', () => {
       messages: [chatViewMessage],
       firstOrdinal: 2,
       lastOrdinal: 2,
+      nextAfterOrdinal: 2,
+      throughOrdinal: 2,
+      hasMore: false,
     });
     mockChatViews.resendCandidates.mockReturnValue([]);
     mockTranscriptReload.mockResolvedValue({
