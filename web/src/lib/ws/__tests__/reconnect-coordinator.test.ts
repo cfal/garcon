@@ -1081,7 +1081,6 @@ describe('ChatReconnectCoordinator', () => {
 			throw new Error('The coordinator requested beyond the fixed watermark.');
 		});
 		const loadMessages = vi.fn(async () => []);
-		const markStale = vi.spyOn(activeTranscript.transcriptCache, 'markStale');
 		const markValidated = vi.spyOn(activeTranscript.transcriptCache, 'markValidated');
 		const chatState = {
 			getCursor: () => activeTranscript.getCursor(),

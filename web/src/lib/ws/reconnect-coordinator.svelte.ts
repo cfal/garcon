@@ -9,7 +9,7 @@ import {
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { TranscriptMessage } from '$shared/chat-view';
 import type { ChatTranscriptCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
