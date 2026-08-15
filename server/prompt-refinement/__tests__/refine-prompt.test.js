@@ -6,6 +6,7 @@ import {
 } from '@garcon/server-agent-interface';
 import {
   DEFAULT_PROMPT_REFINEMENT_PROMPT,
+  GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
   PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
 } from '../../../common/generation-prompts.js';
 import {
@@ -91,15 +92,27 @@ describe('refinePrompt', () => {
   });
 
   it('rejects invalid input before settings or model discovery', async () => {
-    for (const draft of ['   ', 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH + 1)]) {
-      const test = harness();
-      await expect(refinePrompt({ draft }, test)).rejects.toMatchObject({
-        code: 'PROMPT_REFINEMENT_INVALID_REQUEST',
-        status: 400,
-      });
-      expect(test.settings.getUiSettings).not.toHaveBeenCalled();
-      expect(test.agents.runSingleQuery).not.toHaveBeenCalled();
-    }
+    const blank = harness();
+    await expect(refinePrompt({ draft: '   ' }, blank)).rejects.toMatchObject({
+      code: 'PROMPT_REFINEMENT_INVALID_REQUEST',
+      status: 400,
+    });
+    expect(blank.settings.getUiSettings).not.toHaveBeenCalled();
+
+    const oversized = harness();
+    await expect(
+      refinePrompt(
+        {
+          draft: 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH + 1),
+        },
+        oversized,
+      ),
+    ).rejects.toMatchObject({
+      code: 'PROMPT_REFINEMENT_INPUT_TOO_LONG',
+      status: 413,
+    });
+    expect(oversized.settings.getUiSettings).not.toHaveBeenCalled();
+    expect(oversized.agents.runSingleQuery).not.toHaveBeenCalled();
   });
 
   it('rejects unsafe agents before reading or rendering the custom template', async () => {
@@ -113,19 +126,27 @@ describe('refinePrompt', () => {
     expect(test.agents.runSingleQuery).not.toHaveBeenCalled();
   });
 
-  it('rejects corrupt and amplifying saved templates', async () => {
+  it('rejects corrupt and over-expanded saved templates before provider invocation', async () => {
     const invalidTemplates = [
       42,
       'No user prompt token',
       '{{USER_PROMPT}}'.repeat(9),
+      PROMPT_REFINEMENT_USER_PROMPT_TOKEN.repeat(
+        Math.floor(
+          GENERATION_PROMPT_TEMPLATE_MAX_LENGTH / PROMPT_REFINEMENT_USER_PROMPT_TOKEN.length,
+        ),
+      ),
     ];
     for (const customPrompt of invalidTemplates) {
       const test = harness({ config: { customPrompt } });
-      const draft = customPrompt === invalidTemplates[2]
-        ? 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH)
-        : 'draft';
+      const draft =
+        customPrompt === invalidTemplates[2]
+          ? 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH)
+          : customPrompt === invalidTemplates[3]
+            ? 'x'.repeat(1_024)
+            : 'draft';
       await expect(refinePrompt({ draft }, test)).rejects.toMatchObject({
-        code: 'PROMPT_REFINEMENT_INVALID_TEMPLATE',
+        code: 'PROMPT_REFINEMENT_TEMPLATE_INVALID',
         status: 409,
       });
       expect(test.agents.runSingleQuery).not.toHaveBeenCalled();
@@ -138,11 +159,13 @@ describe('refinePrompt', () => {
         failure: '',
         code: 'PROMPT_REFINEMENT_EMPTY_RESPONSE',
         status: 502,
+        retryable: true,
       },
       {
         failure: 'x'.repeat(PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH + 1),
-        code: 'PROMPT_REFINEMENT_OUTPUT_TOO_LARGE',
+        code: 'PROMPT_REFINEMENT_OUTPUT_TOO_LONG',
         status: 502,
+        retryable: true,
       },
       {
         failure: new AgentIntegrationError(
@@ -153,16 +176,49 @@ describe('refinePrompt', () => {
         ),
         code: 'PROMPT_REFINEMENT_UNSUPPORTED_EFFORT',
         status: 422,
+        retryable: false,
+      },
+      {
+        failure: new AgentIntegrationError('AUTH_REQUIRED', 'secret auth detail', false),
+        code: 'PROMPT_REFINEMENT_AUTH_REQUIRED',
+        status: 401,
+        retryable: false,
+      },
+      {
+        failure: new AgentIntegrationError('RATE_LIMITED', 'secret rate detail', true),
+        code: 'PROMPT_REFINEMENT_RATE_LIMITED',
+        status: 429,
+        retryable: true,
+      },
+      {
+        failure: new AgentIntegrationError('BINARY_NOT_FOUND', 'secret binary detail', false),
+        code: 'PROMPT_REFINEMENT_AGENT_UNAVAILABLE',
+        status: 503,
+        retryable: false,
+      },
+      {
+        failure: new AgentIntegrationError('UNAVAILABLE', 'secret unavailable detail', true),
+        code: 'PROMPT_REFINEMENT_AGENT_UNAVAILABLE',
+        status: 503,
+        retryable: true,
+      },
+      {
+        failure: new AgentIntegrationError('TIMEOUT', 'secret provider timeout detail', true),
+        code: 'PROMPT_REFINEMENT_TIMEOUT',
+        status: 504,
+        retryable: true,
       },
       {
         failure: new DOMException('secret timeout detail', 'TimeoutError'),
         code: 'PROMPT_REFINEMENT_TIMEOUT',
         status: 504,
+        retryable: true,
       },
       {
         failure: new Error('secret provider detail'),
         code: 'PROMPT_REFINEMENT_FAILED',
         status: 502,
+        retryable: true,
       },
     ];
 
@@ -178,7 +234,11 @@ describe('refinePrompt', () => {
         throw new Error('Expected prompt refinement to fail');
       } catch (error) {
         expect(error).toBeInstanceOf(PromptRefinementError);
-        expect(error).toMatchObject({ code: testCase.code, status: testCase.status });
+        expect(error).toMatchObject({
+          code: testCase.code,
+          status: testCase.status,
+          retryable: testCase.retryable,
+        });
         expect(error.message).not.toContain('secret');
       }
     }
@@ -204,6 +264,7 @@ describe('refinePrompt', () => {
     await expect(running).rejects.toBe(reason);
     await expect(access(temporaryDirectory)).rejects.toThrow();
     expect(test.log.info).not.toHaveBeenCalled();
+    expect(test.log.warn).not.toHaveBeenCalled();
 
     const serializedLogs = JSON.stringify([
       test.log.info.mock.calls,

@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { isNoAuthHandler } from '../../lib/http-route.js';
 import createPromptRefinementRoutes from '../prompt-refinement.js';
+import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '../../../common/prompt-refinement.js';
 
 function dependencies() {
   return {
@@ -59,6 +60,16 @@ describe('prompt refinement routes', () => {
     expect(invalid.body).toMatchObject({
       success: false,
       errorCode: 'PROMPT_REFINEMENT_INVALID_REQUEST',
+      retryable: false,
+    });
+
+    const oversized = await post(routes, {
+      draft: 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH + 1),
+    });
+    expect(oversized.response.status).toBe(413);
+    expect(oversized.body).toMatchObject({
+      success: false,
+      errorCode: 'PROMPT_REFINEMENT_INPUT_TOO_LONG',
       retryable: false,
     });
 

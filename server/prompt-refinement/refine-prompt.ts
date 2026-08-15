@@ -2,7 +2,10 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { isUnsupportedSingleQueryThinkingMode } from '@garcon/server-agent-interface';
+import {
+  AgentIntegrationError,
+  isUnsupportedSingleQueryThinkingMode,
+} from '@garcon/server-agent-interface';
 import {
   DEFAULT_PROMPT_REFINEMENT_PROMPT,
   GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
@@ -11,6 +14,7 @@ import {
 import {
   normalizeRefinePromptRequest,
   normalizeRefinePromptResponse,
+  PROMPT_REFINEMENT_DRAFT_MAX_LENGTH,
   type RefinePromptRequest,
   type RefinePromptResponse,
 } from '../../common/prompt-refinement.js';
@@ -32,12 +36,16 @@ const RENDERED_PROMPT_MAX_LENGTH = 512_000;
 
 type PromptRefinementErrorCode =
   | 'PROMPT_REFINEMENT_INVALID_REQUEST'
+  | 'PROMPT_REFINEMENT_INPUT_TOO_LONG'
   | 'PROMPT_REFINEMENT_UNAVAILABLE'
   | 'PROMPT_REFINEMENT_UNSAFE_AGENT'
-  | 'PROMPT_REFINEMENT_INVALID_TEMPLATE'
+  | 'PROMPT_REFINEMENT_TEMPLATE_INVALID'
+  | 'PROMPT_REFINEMENT_AUTH_REQUIRED'
+  | 'PROMPT_REFINEMENT_RATE_LIMITED'
+  | 'PROMPT_REFINEMENT_AGENT_UNAVAILABLE'
   | 'PROMPT_REFINEMENT_UNSUPPORTED_EFFORT'
   | 'PROMPT_REFINEMENT_EMPTY_RESPONSE'
-  | 'PROMPT_REFINEMENT_OUTPUT_TOO_LARGE'
+  | 'PROMPT_REFINEMENT_OUTPUT_TOO_LONG'
   | 'PROMPT_REFINEMENT_TIMEOUT'
   | 'PROMPT_REFINEMENT_FAILED';
 
@@ -75,7 +83,7 @@ function configuredTemplate(persisted: unknown): string {
   }
   if (typeof persisted.customPrompt !== 'string') {
     throw new PromptRefinementError(
-      'PROMPT_REFINEMENT_INVALID_TEMPLATE',
+      'PROMPT_REFINEMENT_TEMPLATE_INVALID',
       'The saved prompt refinement template is invalid.',
       409,
     );
@@ -86,7 +94,7 @@ function configuredTemplate(persisted: unknown): string {
     || !persisted.customPrompt.includes(PROMPT_REFINEMENT_USER_PROMPT_TOKEN)
   ) {
     throw new PromptRefinementError(
-      'PROMPT_REFINEMENT_INVALID_TEMPLATE',
+      'PROMPT_REFINEMENT_TEMPLATE_INVALID',
       `The saved prompt refinement template must include ${PROMPT_REFINEMENT_USER_PROMPT_TOKEN}.`,
       409,
     );
@@ -95,18 +103,90 @@ function configuredTemplate(persisted: unknown): string {
 }
 
 function renderTemplate(template: string, draft: string): string {
-  const rendered = template.replaceAll(
-    PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
-    () => draft,
-  );
-  if (rendered.length > RENDERED_PROMPT_MAX_LENGTH) {
-    throw new PromptRefinementError(
-      'PROMPT_REFINEMENT_INVALID_TEMPLATE',
-      'The saved prompt refinement template expands beyond the supported input size.',
-      409,
+  let renderedLength = template.length;
+  let tokenIndex = template.indexOf(PROMPT_REFINEMENT_USER_PROMPT_TOKEN);
+  while (tokenIndex !== -1) {
+    renderedLength += draft.length - PROMPT_REFINEMENT_USER_PROMPT_TOKEN.length;
+    if (renderedLength > RENDERED_PROMPT_MAX_LENGTH) {
+      throw new PromptRefinementError(
+        'PROMPT_REFINEMENT_TEMPLATE_INVALID',
+        'The saved prompt refinement template expands beyond the supported input size.',
+        409,
+      );
+    }
+    tokenIndex = template.indexOf(
+      PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
+      tokenIndex + PROMPT_REFINEMENT_USER_PROMPT_TOKEN.length,
     );
   }
-  return rendered;
+  return template.replaceAll(PROMPT_REFINEMENT_USER_PROMPT_TOKEN, () => draft);
+}
+
+function classifyPromptRefinementError(error: unknown): PromptRefinementError {
+  if (error instanceof PromptRefinementError) return error;
+  if (isUnsupportedSingleQueryThinkingMode(error)) {
+    return new PromptRefinementError(
+      'PROMPT_REFINEMENT_UNSUPPORTED_EFFORT',
+      'The selected agent cannot use this effort for one-shot generation.',
+      422,
+      false,
+      { cause: error },
+    );
+  }
+  if (error instanceof AgentIntegrationError) {
+    if (error.code === 'AUTH_REQUIRED') {
+      return new PromptRefinementError(
+        'PROMPT_REFINEMENT_AUTH_REQUIRED',
+        'The refinement model requires authentication.',
+        401,
+        false,
+        { cause: error },
+      );
+    }
+    if (error.code === 'RATE_LIMITED') {
+      return new PromptRefinementError(
+        'PROMPT_REFINEMENT_RATE_LIMITED',
+        'The refinement model is rate limited. Try again later.',
+        429,
+        true,
+        { cause: error },
+      );
+    }
+    if (error.code === 'BINARY_NOT_FOUND' || error.code === 'UNAVAILABLE') {
+      return new PromptRefinementError(
+        'PROMPT_REFINEMENT_AGENT_UNAVAILABLE',
+        'The selected refinement agent is unavailable.',
+        503,
+        error.retryable,
+        { cause: error },
+      );
+    }
+    if (error.code === 'TIMEOUT') {
+      return new PromptRefinementError(
+        'PROMPT_REFINEMENT_TIMEOUT',
+        'Prompt refinement timed out.',
+        504,
+        true,
+        { cause: error },
+      );
+    }
+  }
+  if (isGenerationTimeoutError(error)) {
+    return new PromptRefinementError(
+      'PROMPT_REFINEMENT_TIMEOUT',
+      'Prompt refinement timed out.',
+      504,
+      true,
+      { cause: error },
+    );
+  }
+  return new PromptRefinementError(
+    'PROMPT_REFINEMENT_FAILED',
+    'Prompt refinement failed. Check the configured provider and model.',
+    502,
+    true,
+    { cause: error },
+  );
 }
 
 export async function refinePrompt(
@@ -114,6 +194,17 @@ export async function refinePrompt(
   dependencies: PromptRefinementDependencies,
   signal?: AbortSignal,
 ): Promise<RefinePromptResponse> {
+  if (
+    isRecord(request) &&
+    typeof request.draft === 'string' &&
+    request.draft.length > PROMPT_REFINEMENT_DRAFT_MAX_LENGTH
+  ) {
+    throw new PromptRefinementError(
+      'PROMPT_REFINEMENT_INPUT_TOO_LONG',
+      'The prompt draft exceeds the supported size limit.',
+      413,
+    );
+  }
   const input = normalizeRefinePromptRequest(request);
   if (!input) {
     throw new PromptRefinementError(
@@ -190,7 +281,7 @@ export async function refinePrompt(
     }
     if (!response) {
       throw new PromptRefinementError(
-        'PROMPT_REFINEMENT_OUTPUT_TOO_LARGE',
+        'PROMPT_REFINEMENT_OUTPUT_TOO_LONG',
         'The prompt refinement model returned more text than the composer supports.',
         502,
         true,
@@ -207,15 +298,13 @@ export async function refinePrompt(
     return response;
   } catch (error) {
     const cancelled = signal?.aborted === true;
-    const outcome = cancelled
-      ? 'cancelled'
-      : error instanceof PromptRefinementError
-        ? error.code.toLowerCase().replace('prompt_refinement_', '').replaceAll('_', '-')
-        : isUnsupportedSingleQueryThinkingMode(error)
-          ? 'unsupported-effort'
-          : isGenerationTimeoutError(error)
-            ? 'timeout'
-            : 'failed';
+    if (cancelled && signal) throw abortReason(signal);
+
+    const failure = classifyPromptRefinementError(error);
+    const outcome = failure.code
+      .toLowerCase()
+      .replace('prompt_refinement_', '')
+      .replaceAll('_', '-');
     log.warn('prompt refinement did not complete', {
       agentId: selection?.agentId ?? 'unresolved',
       model: selection?.model ?? 'unresolved',
@@ -223,33 +312,6 @@ export async function refinePrompt(
       durationMs: Math.round(performance.now() - startedAt),
       outcome,
     });
-
-    if (cancelled && signal) throw abortReason(signal);
-    if (error instanceof PromptRefinementError) throw error;
-    if (isUnsupportedSingleQueryThinkingMode(error)) {
-      throw new PromptRefinementError(
-        'PROMPT_REFINEMENT_UNSUPPORTED_EFFORT',
-        'The selected agent cannot use this effort for one-shot generation.',
-        422,
-        false,
-        { cause: error },
-      );
-    }
-    if (isGenerationTimeoutError(error)) {
-      throw new PromptRefinementError(
-        'PROMPT_REFINEMENT_TIMEOUT',
-        'Prompt refinement timed out.',
-        504,
-        true,
-        { cause: error },
-      );
-    }
-    throw new PromptRefinementError(
-      'PROMPT_REFINEMENT_FAILED',
-      'Prompt refinement failed. Check the configured provider and model.',
-      502,
-      true,
-      { cause: error },
-    );
+    throw failure;
   }
 }
