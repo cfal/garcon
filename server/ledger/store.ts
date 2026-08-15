@@ -60,6 +60,11 @@ interface ConnectionEntry {
   fenced: Error | null;
 }
 
+interface ConnectionCloseAttempt {
+  readonly closed: boolean;
+  readonly failure: Error | null;
+}
+
 export interface TranscriptLedgerStoreOptions {
   readonly connectionCacheSize?: number;
   readonly createViewId?: () => TranscriptViewId;
@@ -91,6 +96,7 @@ export class TranscriptLedgerStore {
   readonly #now: () => string;
   readonly #synchronous: 'NORMAL' | 'FULL';
   readonly #connections = new Map<string, ConnectionEntry>();
+  readonly #failedCloseEntries = new Map<string, ConnectionEntry>();
   readonly #openFailures = new Map<string, Error>();
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
@@ -482,10 +488,11 @@ export class TranscriptLedgerStore {
   }
 
   closeChat(chatId: string): void {
-    const entry = this.#connections.get(chatId);
+    const entry = this.#connections.get(chatId) ?? this.#failedCloseEntries.get(chatId);
     if (!entry) return;
     this.#connections.delete(chatId);
-    closeConnection(entry);
+    const failure = this.#closeConnectionEntry(entry);
+    if (failure) throw failure;
   }
 
   deleteChat(chatId: string): void {
@@ -511,9 +518,16 @@ export class TranscriptLedgerStore {
   }
 
   close(): void {
-    for (const entry of this.#connections.values()) closeConnection(entry);
+    const entries = new Map(this.#failedCloseEntries);
+    for (const [chatId, entry] of this.#connections) entries.set(chatId, entry);
     this.#connections.clear();
-    this.#openFailures.clear();
+    let firstFailure: Error | null = null;
+    for (const entry of entries.values()) {
+      const failure = this.#closeConnectionEntry(entry);
+      if (!firstFailure && failure) firstFailure = failure;
+    }
+    if (this.#failedCloseEntries.size === 0) this.#openFailures.clear();
+    if (firstFailure) throw firstFailure;
   }
 
   #composePrompt(
@@ -605,9 +619,17 @@ export class TranscriptLedgerStore {
       const oldest = this.#connections.entries().next().value as [string, ConnectionEntry] | undefined;
       if (!oldest) break;
       this.#connections.delete(oldest[0]);
-      closeConnection(oldest[1]);
+      this.#closeConnectionEntry(oldest[1]);
     }
     return opened;
+  }
+
+  #closeConnectionEntry(entry: ConnectionEntry): Error | null {
+    const attempt = closeConnection(entry);
+    if (attempt.closed) this.#failedCloseEntries.delete(entry.chatId);
+    else this.#failedCloseEntries.set(entry.chatId, entry);
+    if (attempt.failure) this.#openFailures.set(entry.chatId, attempt.failure);
+    return attempt.failure;
   }
 
   #requireCurrent(entry: ConnectionEntry): TranscriptView {
@@ -846,12 +868,23 @@ function runTransaction<T>(db: Database, work: () => T): T {
   }
 }
 
-function closeConnection(entry: ConnectionEntry): void {
+function closeConnection(entry: ConnectionEntry): ConnectionCloseAttempt {
+  let checkpointFailure: Error | null = null;
   try {
     entry.db.exec('PRAGMA wal_checkpoint(PASSIVE)');
-  } finally {
-    entry.db.close();
+  } catch (error) {
+    checkpointFailure = asError(error);
   }
+  try {
+    entry.db.close();
+  } catch (error) {
+    return { closed: false, failure: asError(error) };
+  }
+  return { closed: true, failure: checkpointFailure };
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function validateChatDirectoryName(chatId: string): void {
