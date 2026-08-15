@@ -246,6 +246,34 @@ describe('TranscriptSearchController', () => {
     expect({ exitCode, stdout, stderr }).toEqual({ exitCode: 0, stdout: '', stderr: '' });
   });
 
+  it('isolates a stalled chat while preserving that chat\'s append order', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.appendRows.mockClear();
+    const stalled = deferred();
+    const started = [];
+    test.service.appendRows.mockImplementation(async (input) => {
+      started.push(`${input.chatId}:${input.throughOrdinal}`);
+      if (input.chatId === 'chat-1' && input.throughOrdinal === 3) {
+        await stalled.promise;
+      }
+    });
+
+    const first = providerRow('view-1', 3, 'stalled-first');
+    const second = providerRow('view-1', 4, 'ordered-second');
+    const other = providerRow('view-2', 1, 'independent-chat');
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [first] });
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [second] });
+    test.listener()({ type: 'rows', chatId: 'chat-2', viewId: 'view-2', rows: [other] });
+    await settle();
+
+    expect(started).toEqual(['chat-1:3', 'chat-2:1']);
+
+    stalled.resolve();
+    await settle();
+    expect(started).toEqual(['chat-1:3', 'chat-2:1', 'chat-1:4']);
+  });
+
   it('replaces old-view entries before accepting new-view navigation', async () => {
     const test = harness();
     await test.controller.initialize(true);
