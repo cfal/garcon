@@ -70,12 +70,48 @@ describe('scripted Claude permissions', () => {
       const permissionRequestId = permission.message.permissionRequestId;
       expect(permission.message.requestedTool.type).toBe('ask-user-question-tool-use');
 
+      const control = {
+        serverInstanceId: (await fixture.client.getChatSnapshot(chatId, 0))
+          .transientFeed.serverInstanceId,
+        chatId,
+        runId: permission.runId,
+        id: permission.id,
+        incarnation: permission.incarnation,
+      };
+      await expect(fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionRequestId,
+        allow: true,
+        alwaysAllow: false,
+        control: { ...control, incarnation: crypto.randomUUID() },
+        response: {
+          type: 'ask-user-question-response',
+          outcome: 'answered',
+          answers: [{
+            questionId: 'Which database?',
+            selectedOptionIds: ['SQLite'],
+          }],
+        },
+      })).rejects.toMatchObject({
+        status: 409,
+        body: {
+          errorCode: 'VALIDATION_FAILED',
+          retryable: false,
+        },
+      });
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId)).messages,
+        'permission-resolved',
+      )).toEqual([]);
+
       const decision = await fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
         permissionRequestId,
         allow: true,
         alwaysAllow: false,
+        control,
         response: {
           type: 'ask-user-question-response',
           outcome: 'answered',
