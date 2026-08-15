@@ -66,6 +66,28 @@ describe('TranscriptViewReader', () => {
     });
   });
 
+  it('rejects a client-supplied replay watermark beyond the committed view', async () => {
+    await withReader(async ({ ledger, reader, viewId }) => {
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId,
+        message: new UserMessage(TS, 'one'),
+        attachments: [],
+        clientMessageId: 'message-1',
+        steer: false,
+      });
+
+      await expect(reader.replay('chat-1', viewId, 0, 2))
+        .rejects.toThrow('watermark');
+      await expect(reader.replay('chat-1', viewId, 0, 1)).resolves.toMatchObject({
+        transcriptViewId: viewId,
+        nextAfterOrdinal: 1,
+        throughOrdinal: 1,
+        hasMore: false,
+      });
+    });
+  });
+
   it('captures the rendering fold as a self-contained view snapshot', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       ledger.appendInputAndCompose({

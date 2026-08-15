@@ -401,6 +401,26 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload().error).toContain('Missing chatId');
   });
 
+  it('answers a malformed correlated subscribe instead of replaying or staying silent', async () => {
+    await chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-invalid-cursor',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 'not-an-ordinal',
+    });
+
+    expect(mockChatViews.readReplay).not.toHaveBeenCalled();
+    expect(lastSentPayload()).toMatchObject({
+      type: 'client-request-error',
+      clientRequestId: 'req-sub-invalid-cursor',
+      requestType: 'chat-subscribe',
+      code: 'REQUEST_VALIDATION_FAILED',
+      retryable: false,
+      chatId: '123',
+    });
+  });
+
   it('replays view-qualified deltas for a subscribe cursor', async () => {
     mockChatViews.resendCandidates.mockReturnValueOnce([
       { ordinal: 1, content: 'hello', attachmentNames: [] },
