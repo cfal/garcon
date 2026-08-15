@@ -61,6 +61,14 @@ describe('TranscriptReloadService', () => {
       expect(ledger.currentView('chat-1')?.viewId).toBe('view-1');
       expect(lease.closed).toBe(true);
       expect(replacementLease.current?.closed).toBe(false);
+
+      replacementLease.current.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'output after failed reload') }],
+      });
+      expect(ledger.currentView('chat-1')?.viewId).toBe('view-1');
+      expect(ledger.conversationMessages('chat-1').at(-1)?.content)
+        .toBe('output after failed reload');
     });
   });
 });
