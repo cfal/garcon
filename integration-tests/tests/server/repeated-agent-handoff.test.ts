@@ -33,6 +33,10 @@ interface HoldableProvider {
 describe('repeated agent handoff lifecycle', () => {
   test('recovers one pending handoff while another chat remains fenced', async () => {
     await withIntegrationFixture('isolated-agent-handoff-recovery', async (fixture) => {
+      const settings = await fixture.client.updateSettings({
+        features: { transcriptSearch: { enabled: true } },
+      });
+      expect(settings.settings.features.transcriptSearch.enabled).toBe(true);
       const blockedChatId = fixture.newChatId();
       const recoverableChatId = fixture.newChatId();
       const sourceAgent = fixture.directAgents.openAi;
@@ -112,6 +116,17 @@ describe('repeated agent handoff lifecycle', () => {
         status: 409,
         body: { errorCode: 'OWNERSHIP_TRANSFER_PENDING' },
       });
+      const blockedHistory = await fixture.client.getMessages(blockedChatId);
+      expect(blockedHistory).toEqual(histories[0]);
+      const blockedListing = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === blockedChatId,
+      );
+      expect(blockedListing?.preview).toEqual(blockedSource.preview);
+      const blockedSearch = await fixture.client.waitForChatSearch(
+        { query: 'blocked-handoff-source', chatIds: [blockedChatId], limit: 10 },
+        (response) => response.index.pendingChatCount === 0,
+      );
+      expect(blockedSearch.results.map((result) => result.chatId)).toEqual([blockedChatId]);
 
       const request = await runWithAnswer({
         fixture,
