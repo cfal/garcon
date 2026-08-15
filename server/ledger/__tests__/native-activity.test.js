@@ -41,6 +41,27 @@ describe('NativeTranscriptActivityService', () => {
     });
   });
 
+  it('coalesces requested checks per chat and releases the slot after settlement', async () => {
+    await withFixture(async ({ ledger, activity, lastActivity, setNativeAt, setResult }) => {
+      ledger.initializeChat('chat-1', baseRows());
+      const pending = deferred();
+      setResult(pending.promise);
+
+      activity.requestCheck('chat-1', 'open');
+      activity.requestCheck('chat-1', 'pre-resume');
+
+      expect(lastActivity).toHaveBeenCalledTimes(1);
+      pending.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+      await waitFor(() => ledger.currentRows('chat-1').some((row) => row.kind === 'notice'));
+
+      setNativeAt('2026-08-12T00:00:04.000Z');
+      activity.requestCheck('chat-1', 'open');
+      await waitFor(() => lastActivity.mock.calls.length === 2);
+
+      expect(lastActivity).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('does not let later core-authored rows hide missed native output', async () => {
     await withFixture(async ({ ledger, activity }) => {
       ledger.initializeChat('chat-1', [
@@ -219,6 +240,14 @@ function deferred() {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });
   return { promise, resolve };
+}
+
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  throw new Error('Condition did not settle within the microtask budget.');
 }
 
 function baseRows() {
