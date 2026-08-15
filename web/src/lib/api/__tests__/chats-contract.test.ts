@@ -1063,6 +1063,31 @@ describe('chats API contract', () => {
 		}
 	});
 
+	it('accepts the server-clamped effective page limit', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({
+				historyState: { kind: 'complete' },
+				chatId: 'c-1',
+				messages: [],
+				transcriptViewId: 'view-1',
+				lastOrdinal: 0,
+				pageOldestOrdinal: 0,
+				pageNewestOrdinal: 0,
+				resendCandidates: [],
+				hasMore: false,
+				limit: 200,
+			}),
+		);
+
+		await expect(getChatMessages({ chatId: 'c-1', limit: 999_999 })).resolves.toMatchObject({
+			chatId: 'c-1',
+			limit: 200,
+		});
+		expect(fetchMock.mock.calls[0][0]).toBe(
+			'/api/v1/chats/messages?chatId=c-1&limit=999999',
+		);
+	});
+
 	it('accepts degraded history only without sequence metadata', async () => {
 		fetchMock.mockResolvedValueOnce(
 			jsonResponse({
