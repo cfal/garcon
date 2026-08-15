@@ -841,6 +841,74 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
+  it('contains a closed publisher and keeps the native session reusable', async () => {
+    const warnings: Array<{ message: string; context: Record<string, unknown> }> = [];
+    const runtime = createRuntime({
+      logger: {
+        ...testLogger,
+        warn(message, context) {
+          warnings.push({ message, context });
+        },
+      },
+    });
+    const started = await runtime.startSession(baseStartRequest({
+      operation: {
+        runId: 'run-stale',
+        publish() {
+          throw new Error('Transcript producer sink is closed');
+        },
+      },
+    }));
+    const fake = fakes[0];
+
+    fake.pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'rejected stale output' }],
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    });
+    fake.pushEvent({ type: 'agent_settled' });
+    await settleIo();
+
+    expect(warnings.map(({ message, context }) => [message, context.eventType, context.error]))
+      .toEqual([
+        ['Pi publisher rejected an event', 'messages', 'Transcript producer sink is closed'],
+        ['Pi publisher rejected an event', 'run-ended', 'Transcript producer sink is closed'],
+      ]);
+
+    await fs.writeFile(started.nativePath, '');
+    const current = collectOperation('run-current');
+    const currentTurn = runtime.runTurn(baseResumeRequest({
+      agentSessionId: started.agentSessionId,
+      chatId: 'chat-1',
+      nativePath: started.nativePath,
+      operation: current.operation,
+    }));
+    await waitForActive(runtime, started.agentSessionId);
+    fake.pushEvent({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'accepted current output' }],
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    });
+    fake.pushEvent({ type: 'agent_settled' });
+    await currentTurn;
+
+    expect(current.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(current.events[0]).toMatchObject({
+      type: 'messages',
+      runId: 'run-current',
+      rows: [{ message: { type: 'assistant-message', content: 'accepted current output' } }],
+    });
+    await runtime.shutdown();
+  });
+
   it('settles a tool-only turn without waiting for native persistence', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
