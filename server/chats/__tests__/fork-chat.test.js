@@ -249,6 +249,44 @@ describe('forkChatFileCopy', () => {
     });
   });
 
+  it('does not silently substitute a handoff fork for an unmaterialized whole-chat fork', async () => {
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      allowHandoffFork: false,
+      ...deps,
+    })).rejects.toBeDefined();
+
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('uses an unmaterialized whole-chat fork only after handoff-fork consent', async () => {
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
+    });
+
+    const result = await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      allowHandoffFork: true,
+      ...deps,
+    });
+
+    expect(result.agentSessionId).toBeNull();
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'user-input' }),
+      expect.objectContaining({ kind: 'provider-row' }),
+      expect.objectContaining({ kind: 'user-input' }),
+    ]);
+  });
+
   it('seeds a native fork from the forked session instead of the source rows', async () => {
     const imported = [
       { kind: 'user-input', at: '2026-08-07T12:00:00.000Z', detail: { clientMessageId: null, message: {}, attachments: [], steer: false }, providerMeta: { native: 'imported' } },
