@@ -1487,9 +1487,9 @@ describe('PiRpcRuntime', () => {
     await turn;
     await settleIo();
 
-    expect(info.mock.calls.map((call) => call[1].line)).toEqual([
-      'first line',
-      'partial line',
+    expect(info.mock.calls.map((call) => call[1])).toEqual([
+      { sessionId: 'pi-session-1', lineLength: 10 },
+      { sessionId: 'pi-session-1', lineLength: 12 },
     ]);
     await runtime.shutdown();
   });

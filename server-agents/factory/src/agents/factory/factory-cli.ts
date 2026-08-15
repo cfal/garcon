@@ -469,7 +469,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.trim()) {
-            this.#logger.info('Factory stderr output.', { sessionId, line });
+            this.#logger.info('Factory stderr output.', { sessionId });
           }
         }
       }
@@ -608,7 +608,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
           } catch {
             this.#logger.warn('Factory emitted invalid JSON.', {
               sessionId: session.id,
-              line: line.slice(0, 120),
             });
           }
         }

@@ -225,7 +225,7 @@ async function readFactorySessionEvents(
       if (throwOnError) throw error;
       logger.warn('Factory transcript contains invalid JSON.', {
         sessionPath,
-        line: entry.line.slice(0, 120),
+        lineNumber: entry.lineNumber ?? null,
       });
     }
   }

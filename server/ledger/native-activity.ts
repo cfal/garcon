@@ -41,7 +41,7 @@ export class NativeTranscriptActivityService {
     const clear = () => {
       if (this.#pendingChecks.get(chatId) === token) this.#pendingChecks.delete(chatId);
     };
-    void this.#runRequestedCheck(chatId, clear).catch((error) => {
+    void this.#runRequestedCheck(chatId, reason, clear).catch((error) => {
       logger.warn('Native transcript activity check failed', {
         chatId,
         reason,
@@ -61,6 +61,7 @@ export class NativeTranscriptActivityService {
     chatId: string,
     signal: AbortSignal,
     settled: () => void,
+    reason?: NativeActivityCheckReason,
   ): Promise<boolean> {
     try {
       signal.throwIfAborted();
@@ -82,7 +83,8 @@ export class NativeTranscriptActivityService {
         logger.warn('Native transcript activity probe failed', {
           chatId,
           agentId: entry.agentId,
-          reason: error instanceof Error ? error.message : String(error),
+          ...(reason ? { reason } : {}),
+          code: errorCode(error),
         });
         return false;
       }
@@ -122,7 +124,11 @@ export class NativeTranscriptActivityService {
     }
   }
 
-  async #runRequestedCheck(chatId: string, clear: () => void): Promise<void> {
+  async #runRequestedCheck(
+    chatId: string,
+    reason: NativeActivityCheckReason,
+    clear: () => void,
+  ): Promise<void> {
     const controller = new AbortController();
     let resolveTimeout!: () => void;
     const timeoutReached = new Promise<void>((resolve) => {
@@ -131,12 +137,17 @@ export class NativeTranscriptActivityService {
     const timeout = setTimeout(() => {
       controller.abort();
       clear();
+      logger.warn('Native transcript activity check timed out', {
+        chatId,
+        reason,
+        code: 'NATIVE_ACTIVITY_CHECK_TIMEOUT',
+      });
       resolveTimeout();
     }, this.#probeTimeoutMs);
     timeout.unref?.();
     try {
       await Promise.race([
-        this.#check(chatId, controller.signal, clear).then(() => undefined),
+        this.#check(chatId, controller.signal, clear, reason).then(() => undefined),
         timeoutReached,
       ]);
     } finally {

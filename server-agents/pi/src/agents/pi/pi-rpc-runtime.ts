@@ -470,9 +470,8 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
           });
         }
       },
-      onMalformed: (line) => this.#logger.warn('Pi emitted malformed RPC JSON', {
+      onMalformed: () => this.#logger.warn('Pi emitted malformed RPC JSON', {
         sessionId: session.id,
-        line: line.slice(0, 120),
       }),
     });
     session.client = client;

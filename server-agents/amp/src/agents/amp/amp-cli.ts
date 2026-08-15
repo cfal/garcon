@@ -473,7 +473,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
           try {
             msg = JSON.parse(line) as AmpCliMessage;
           } catch {
-            this.#logger.warn('Amp emitted invalid JSON.', { sessionId: session.id, line: line.slice(0, 120) });
+            this.#logger.warn('Amp emitted invalid JSON.', { sessionId: session.id });
             continue;
           }
           this.#routeMessage(session, turn, msg);
@@ -531,7 +531,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.trim()) {
-            this.#logger.info('Amp stderr output.', { sessionId, line });
+            this.#logger.info('Amp stderr output.', { sessionId });
           }
         }
       }

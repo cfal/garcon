@@ -126,11 +126,11 @@ export async function pipePiStderr(
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
       for (const line of lines) {
-        if (line.trim()) logger.info('Pi stderr output', { sessionId, line });
+        if (line.trim()) logger.info('Pi stderr output', { sessionId, lineLength: line.length });
       }
     }
     buffer += decoder.decode();
-    if (buffer.trim()) logger.info('Pi stderr output', { sessionId, line: buffer });
+    if (buffer.trim()) logger.info('Pi stderr output', { sessionId, lineLength: buffer.length });
   } catch {
     // Stream closed.
   }

@@ -1201,7 +1201,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       }
       this.#handleServerRequest(client, request);
     });
-    client.on('stderr', (line: string) => this.#logger.warn('Codex app-server stderr', { line }));
+    client.on('stderr', () => this.#logger.warn('Codex app-server stderr'));
     client.on('warning', (message: string) => this.#logger.warn(message));
     client.on('metric', (metric: unknown) => this.emit('metric', metric));
     client.on('exit', (code: number) => this.#handleClientExit(client, code));
