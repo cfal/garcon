@@ -50,6 +50,9 @@ interface ReplayPage {
   readonly frameBytes: number;
 }
 
+const REPLAY_BYTE_STRESS_ROW_COUNT = 24;
+const REPLAY_BYTE_STRESS_TEXT = 'x'.repeat(64 * 1024);
+
 function exactTranscriptRow(entry: TranscriptMessage): ExactTranscriptRow {
   return {
     ordinal: entry.ordinal,
@@ -103,11 +106,14 @@ function mixedReplayRows(
 
     const occurrence = index - hiddenPrefixLength;
     const toolId = `replay-tool-${occurrence}`;
+    const byteStress = occurrence < REPLAY_BYTE_STRESS_ROW_COUNT
+      ? `-${REPLAY_BYTE_STRESS_TEXT}`
+      : '';
     let message: ChatMessage;
     let draft: LedgerRowDraft;
     switch (occurrence % 6) {
       case 0:
-        message = new UserMessage(timestamp, `replay-user-${occurrence}`);
+        message = new UserMessage(timestamp, `replay-user-${occurrence}${byteStress}`);
         draft = {
           kind: 'user-input',
           at: timestamp,
@@ -121,28 +127,39 @@ function mixedReplayRows(
         };
         break;
       case 1:
-        message = new AssistantMessage(timestamp, `replay-assistant-${occurrence}`);
+        message = new AssistantMessage(timestamp, `replay-assistant-${occurrence}${byteStress}`);
         draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
         break;
       case 2:
-        message = new BashToolUseMessage(timestamp, toolId, `printf replay-${occurrence}`);
+        message = new BashToolUseMessage(
+          timestamp,
+          toolId,
+          `printf replay-${occurrence}${byteStress}`,
+        );
         draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
         break;
       case 3:
         message = new ToolResultMessage(
           timestamp,
           `replay-tool-${occurrence - 1}`,
-          { raw: `replay-result-${occurrence}` },
+          { raw: `replay-result-${occurrence}${byteStress}` },
           false,
         );
         draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
         break;
       case 4:
-        message = new CompactionMessage(timestamp, 'auto', `replay-compaction-${occurrence}`);
+        message = new CompactionMessage(
+          timestamp,
+          'auto',
+          `replay-compaction-${occurrence}${byteStress}`,
+        );
         draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
         break;
       default:
-        message = new AssistantMessage(timestamp, 'repeated-equal-assistant-content');
+        message = new AssistantMessage(
+          timestamp,
+          `repeated-equal-assistant-content${byteStress}`,
+        );
         draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
         break;
     }
@@ -417,6 +434,7 @@ describe('reconnect and transcript stability', () => {
       let throughOrdinal: number | undefined;
       let pageCount = 0;
       let sawHiddenOnlyPage = false;
+      let sawByteLimitedPage = false;
       const replayed: ExactTranscriptRow[] = [];
 
       while (true) {
@@ -437,6 +455,13 @@ describe('reconnect and transcript stability', () => {
         expect(page.frameBytes).toBeLessThanOrEqual(1_048_576);
         expect(page.messages.length).toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
         if (page.messages.length === 0) sawHiddenOnlyPage = true;
+        if (
+          page.hasMore
+          && page.messages.length > 0
+          && page.nextAfterOrdinal - afterOrdinal < CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT
+        ) {
+          sawByteLimitedPage = true;
+        }
         for (const message of page.messages) {
           expect(message.ordinal).toBeGreaterThan(afterOrdinal);
           expect(message.ordinal).toBeLessThanOrEqual(page.nextAfterOrdinal);
@@ -460,6 +485,7 @@ describe('reconnect and transcript stability', () => {
       expect(afterOrdinal).toBe(throughOrdinal);
       expect(pageCount).toBeGreaterThan(1);
       expect(sawHiddenOnlyPage).toBe(true);
+      expect(sawByteLimitedPage).toBe(true);
       expect(replayed).toEqual(expectedBeforeLive);
       expect(new Set(replayed.map((row) => row.ordinal)).size).toBe(replayed.length);
 
