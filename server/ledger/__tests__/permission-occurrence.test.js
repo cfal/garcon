@@ -117,6 +117,56 @@ describe('transcript permission occurrences', () => {
     });
   });
 
+  it('invalidates an in-flight permission claim when its occurrence is cancelled', async () => {
+    await withLedger((ledger) => {
+      const lease = startRun(ledger);
+      publishRequest(
+        lease.sink,
+        'incarnation-1',
+        permissionDecision('incarnation-1'),
+      );
+      const claim = ledger.claimPermissionResolution(permissionControl('incarnation-1'));
+
+      lease.sink.publish({
+        type: 'permission',
+        runId: RUN_ID,
+        lifecycle: {
+          kind: 'cancelled',
+          requestId: REQUEST_ID,
+          incarnation: 'incarnation-1',
+          reason: 'provider cancelled',
+        },
+      });
+
+      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
+        'permission-requested',
+        'permission-cancelled',
+      ]);
+    });
+  });
+
+  it('invalidates an in-flight permission claim when control moves to another run', async () => {
+    await withLedger((ledger) => {
+      const lease = startRun(ledger);
+      publishRequest(
+        lease.sink,
+        'incarnation-1',
+        permissionDecision('incarnation-1'),
+      );
+      const claim = ledger.claimPermissionResolution(permissionControl('incarnation-1'));
+
+      ledger.handoffRun(CHAT_ID, RUN_ID, 'run-2');
+
+      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
+        'permission-requested',
+      ]);
+    });
+  });
+
   it('keeps permission history but restores no actionability after restart', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-restart-'));
     try {
