@@ -1394,7 +1394,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
     const aborted = params.turn.status === 'interrupted' || session.status === 'interrupting';
     for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item);
-    if (aborted) await session.turnItems.reconcileInterrupted(params.turn.id, session.nativePath);
     session.capacityRetryCount = 0;
     session.pendingCapacityFailure = null;
     session.status = 'completing';

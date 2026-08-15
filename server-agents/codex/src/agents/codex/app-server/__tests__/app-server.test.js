@@ -1992,38 +1992,11 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
 
-  it('recovers interrupted items persisted without an item completion notification', async () => {
-    const nativePath = path.join(tmpDir, 'interrupted-recovery.jsonl');
-    await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
-    const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
-    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath }));
-    await expect(provider.abort('thread-1')).resolves.toBe(true);
-    await writeJsonl(nativePath, [
-      ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
-      ...commandHistoryEntries('persisted-command', 'printf recovered', 'recovered').slice(2),
-    ]);
-    const terminal = new Promise((resolve) => provider.onFinished(resolve));
-    fake.emit('notification', {
-      method: 'turn/completed',
-      params: { threadId: 'thread-1', turn: makeTurn({ status: 'interrupted' }) },
-    });
-    await terminal;
 
-    expect(emitted).toHaveLength(2);
-    expect(emitted[0]).toMatchObject({ type: 'bash-tool-use', toolId: 'persisted-command' });
-    expect(emitted[1]).toMatchObject({
-      type: 'tool-result',
-      toolId: 'persisted-command',
-      content: { raw: 'recovered' },
-      isError: false,
-    });
-  });
-
-  it('reconciles once when a completed terminal notification wins the interrupt response race', async () => {
+  // The terminal can arrive inside interruptTurn(). The turn must still settle exactly once,
+  // and the native rows this races against are never recovered into the live tail.
+  it('settles once when a completed terminal notification wins the interrupt response race', async () => {
     const nativePath = path.join(tmpDir, 'interrupt-response-race.jsonl');
     await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
     let fake;
@@ -2059,9 +2032,7 @@ describe('CodexAppServerRuntime', () => {
     await expect(provider.abort('thread-1')).resolves.toBe(true);
     await terminal;
 
-    expect(emitted).toHaveLength(2);
-    expect(emitted[0]).toMatchObject({ type: 'bash-tool-use', toolId: 'race-command' });
-    expect(emitted[1]).toMatchObject({ type: 'tool-result', toolId: 'race-command' });
+    expect(emitted.filter((message) => message.toolId === 'race-command')).toEqual([]);
     expect(finished).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
     expect(processing).toEqual([true, false]);
     expect(provider.isRunning('thread-1')).toBe(false);
