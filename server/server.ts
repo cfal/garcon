@@ -781,6 +781,7 @@ export async function startServer(): Promise<void> {
       shuttingDown = true;
       logger.info('server: shutting down...');
       const reservedChatIds = queue.beginShutdown();
+      handoffs.shutdown();
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {

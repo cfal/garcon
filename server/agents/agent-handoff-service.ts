@@ -39,6 +39,7 @@ export class AgentHandoffService {
   readonly #recoveries = new Map<string, PendingHandoffRecovery>();
   readonly #activeRecoveryAttempts = new Map<string, Promise<void>>();
   readonly #recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  readonly #shutdownController = new AbortController();
 
   constructor(private readonly deps: {
     readonly registry: IChatRegistry;
@@ -52,6 +53,13 @@ export class AgentHandoffService {
     readonly reopenProducer: (chatId: string) => void;
     readonly onCommitted?: (chatId: string) => void | Promise<void>;
   }) {}
+
+  shutdown(): void {
+    if (this.#shutdownController.signal.aborted) return;
+    this.#shutdownController.abort(new Error('Agent handoff service shut down'));
+    for (const timer of this.#recoveryTimers.values()) clearTimeout(timer);
+    this.#recoveryTimers.clear();
+  }
 
   seedContinuationLedger(input: {
     readonly sourceChatId: string;
@@ -206,6 +214,7 @@ export class AgentHandoffService {
     return {
       operation: 'agent-handoff',
       prepare: async (context) => {
+        this.#shutdownController.signal.throwIfAborted();
         let decisionAttempted = false;
         let producerClosed = false;
         try {
@@ -269,6 +278,7 @@ export class AgentHandoffService {
   }
 
   async recoverPendingHandoffs(): Promise<void> {
+    if (this.#shutdownController.signal.aborted) return;
     await Promise.all(
       this.deps.ownership.pendingHandoffs().map((intent) => {
         let recovery = this.#recoveries.get(intent.operationId);
@@ -286,20 +296,24 @@ export class AgentHandoffService {
     await retryHandoffStep(
       'ledger boundary recovery',
       () => this.#applyLedgerBoundary(intent),
+      this.#shutdownController.signal,
     );
     await retryHandoffStep(
       'registry recovery',
       () => this.deps.ownership.applyHandoffDecision(intent.operationId),
+      this.#shutdownController.signal,
     );
     // The journal entry is the pending-ownership fence, and reopening the producer is a
     // publication. Discharging the intent first keeps roll-forward from fencing itself.
     await retryHandoffStep(
       'journal recovery',
       () => this.deps.ownership.completeHandoff(intent.operationId),
+      this.#shutdownController.signal,
     );
     await retryHandoffStep(
       'producer recovery',
       () => this.deps.reopenProducer(intent.chatId),
+      this.#shutdownController.signal,
     );
   }
 
@@ -327,6 +341,7 @@ export class AgentHandoffService {
   }
 
   #recoverHandoff(recovery: PendingHandoffRecovery, retryAttempt: number): Promise<void> {
+    if (this.#shutdownController.signal.aborted) return Promise.resolve();
     const operationId = recovery.intent.operationId;
     const active = this.#activeRecoveryAttempts.get(operationId);
     if (active) return active;
@@ -351,6 +366,7 @@ export class AgentHandoffService {
     const { intent } = recovery;
     try {
       while (recovery.step !== 'fenced') {
+        if (this.#shutdownController.signal.aborted) return;
         switch (recovery.step) {
           case 'ledger-boundary':
             this.deps.ledger.closeProducer(intent.chatId);
@@ -385,21 +401,22 @@ export class AgentHandoffService {
         recovery.step = 'fenced';
         return;
       }
+      if (this.#shutdownController.signal.aborted) return;
       this.#scheduleHandoffRecovery(recovery, retryAttempt);
     }
   }
 
   #scheduleHandoffRecovery(recovery: PendingHandoffRecovery, retryAttempt: number): void {
     const operationId = recovery.intent.operationId;
-    if (this.#recoveryTimers.has(operationId)) return;
+    if (this.#shutdownController.signal.aborted || this.#recoveryTimers.has(operationId)) return;
     const delay = Math.min(
       MAX_RECOVERY_RETRY_DELAY_MS,
       INITIAL_RECOVERY_RETRY_DELAY_MS * 2 ** retryAttempt,
     );
     const timer = setTimeout(() => {
-      if (this.#recoveryTimers.get(operationId) === timer) {
-        this.#recoveryTimers.delete(operationId);
-      }
+      if (this.#recoveryTimers.get(operationId) !== timer) return;
+      this.#recoveryTimers.delete(operationId);
+      if (this.#shutdownController.signal.aborted) return;
       const retry = () => {
         void this.#recoverHandoff(recovery, retryAttempt + 1);
       };
@@ -464,20 +481,40 @@ function matchesSwitchMarker(
 async function retryHandoffStep<T>(
   label: string,
   operation: () => T | Promise<T>,
+  signal: AbortSignal,
 ): Promise<T> {
   for (let attempts = 0; ; attempts += 1) {
+    signal.throwIfAborted();
     try {
       return await operation();
     } catch (error) {
+      signal.throwIfAborted();
       if (error instanceof HandoffBoundaryCorruptionError) throw error;
       logger.warn('Decided handoff step will be retried', {
         label,
         attempts: attempts + 1,
         reason: error instanceof Error ? error.message : String(error),
       });
-      await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, 25 * 2 ** attempts)));
+      await waitForHandoffRetry(Math.min(1_000, 25 * 2 ** attempts), signal);
     }
   }
+}
+
+function waitForHandoffRetry(delay: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, delay);
+    timer.unref?.();
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+  });
 }
 
 interface OwnershipFence {
