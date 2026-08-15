@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, BashToolUseMessage, UserMessage } from '../../../common/chat-types.ts';
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+  ToolResultMessage,
+  UserMessage,
+} from '../../../common/chat-types.ts';
 import { transcriptViewId } from '../contracts.ts';
 import { PermissionNotActionableError } from '../errors.ts';
 import { TranscriptLedgerService, TranscriptSinkClosedError } from '../service.ts';
@@ -27,6 +32,49 @@ describe('TranscriptLedgerService', () => {
       expect(notifications).toEqual([]);
       await tick();
       expect(notifications).toHaveLength(1);
+    });
+  });
+
+  it('snapshots producer payloads at synchronous acceptance', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      const notifications = [];
+      ledger.subscribe((event) => notifications.push(event));
+      const message = new ToolResultMessage(
+        TS,
+        'tool-1',
+        { raw: 'accepted tool output' },
+        false,
+      );
+      const providerMeta = { nativeIdentity: { itemId: 'accepted-item' } };
+
+      lease.sink.publish({
+        type: 'rows',
+        rows: [{ message, providerMeta }],
+      });
+      message.content.raw = 'mutated after publish';
+      providerMeta.nativeIdentity.itemId = 'mutated-after-publish';
+      await tick();
+
+      const row = ledger.currentRows('chat-1')[0];
+      expect(row).toMatchObject({
+        kind: 'provider-row',
+        message: {
+          type: 'tool-result',
+          content: { raw: 'accepted tool output' },
+        },
+        providerMeta: { nativeIdentity: { itemId: 'accepted-item' } },
+      });
+      expect(row.message).not.toBe(message);
+      expect(row.providerMeta).not.toBe(providerMeta);
+      expect(notifications).toMatchObject([{
+        type: 'rows',
+        rows: [{
+          message: { content: { raw: 'accepted tool output' } },
+          providerMeta: { nativeIdentity: { itemId: 'accepted-item' } },
+        }],
+      }]);
     });
   });
 
