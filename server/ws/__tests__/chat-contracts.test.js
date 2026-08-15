@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 mock.module('../utils.js', () => ({
-  sendWebSocketJson: mock(() => undefined),
+  sendWebSocketJson: mock(() => true),
 }));
 
 import { ChatHandler } from '../chat.js';
@@ -127,6 +127,7 @@ describe('chat WebSocket handler', () => {
   beforeEach(() => {
     injectedMocks.forEach((fn) => fn.mockClear());
     moduleMocks.forEach((fn) => fn.mockClear());
+    sendWebSocketJson.mockImplementation(() => true);
     mockProcessing.snapshot.mockReturnValue([{ chatId: 'chat-running', phase: 'running' }]);
     mockProcessing.phase.mockReturnValue(null);
     mockRegistry.getChat.mockReturnValue({
@@ -456,6 +457,27 @@ describe('chat WebSocket handler', () => {
       throughOrdinal: 600,
       hasMore: true,
     });
+  });
+
+  it('rejects a replay request when its response is dropped by the socket', async () => {
+    sendWebSocketJson.mockImplementation(() => false);
+
+    await expect(chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-dropped',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 10,
+    })).rejects.toThrow();
+
+    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 10);
+    expect(sendWebSocketJson).toHaveBeenCalledWith(
+      ws,
+      expect.objectContaining({
+        type: 'chat-subscribed',
+        clientRequestId: 'req-sub-dropped',
+      }),
+    );
   });
 
   it('repeats the captured replay watermark on continuation requests', async () => {
