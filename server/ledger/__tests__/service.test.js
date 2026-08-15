@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import {
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { transcriptViewId } from '../contracts.ts';
-import { PermissionNotActionableError } from '../errors.ts';
+import { LedgerFencedError, PermissionNotActionableError } from '../errors.ts';
 import { TranscriptLedgerService, TranscriptSinkClosedError } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 
@@ -32,6 +33,51 @@ describe('TranscriptLedgerService', () => {
       expect(notifications).toEqual([]);
       await tick();
       expect(notifications).toHaveLength(1);
+    });
+  });
+
+  it('fences an ambiguous commit without broadcasting it', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('failed-chat');
+      ledger.initializeChat('healthy-chat');
+      const failed = ledger.openProducer('failed-chat', 'test');
+      const healthy = ledger.openProducer('healthy-chat', 'test');
+      const notifications = [];
+      ledger.subscribe((event) => notifications.push(event));
+      const exec = Database.prototype.exec;
+      let commitBecameAmbiguous = false;
+      Database.prototype.exec = function (sql) {
+        const result = exec.call(this, sql);
+        if (!commitBecameAmbiguous && sql === 'COMMIT') {
+          commitBecameAmbiguous = true;
+          throw new Error('injected unknown transcript commit outcome');
+        }
+        return result;
+      };
+      try {
+        expect(() => failed.sink.publish({
+          type: 'rows',
+          rows: [{ message: new AssistantMessage(TS, 'ambiguous answer') }],
+        })).toThrow(LedgerFencedError);
+      } finally {
+        Database.prototype.exec = exec;
+      }
+
+      expect(commitBecameAmbiguous).toBe(true);
+      expect(() => ledger.currentRows('failed-chat')).toThrow(LedgerFencedError);
+      await tick();
+      expect(notifications).toEqual([]);
+
+      healthy.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'healthy answer') }],
+      });
+      await tick();
+      expect(notifications).toHaveLength(1);
+      expect(ledger.currentRows('healthy-chat')[0]).toMatchObject({
+        kind: 'provider-row',
+        message: { content: 'healthy answer' },
+      });
     });
   });
 
