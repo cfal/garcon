@@ -9,6 +9,10 @@ import {
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import ReconnectCoordinatorTestHost from './ReconnectCoordinatorTestHost.svelte';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { createChatMessagesAccumulator } from '$lib/events/router.svelte.js';
+import { AssistantMessage } from '$shared/chat-types';
+import { ChatMessagesMessage } from '$shared/ws-events';
 import type { WsMessageConsumer } from '../connection.svelte.js';
 import type { TranscriptMessage } from '$shared/chat-view';
 
@@ -956,6 +960,103 @@ describe('ChatReconnectCoordinator', () => {
 		]);
 		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledOnce();
+	});
+
+	it('preserves live rows that arrive beyond the fixed watermark during selected replay', async () => {
+		const activeTranscript = new ActiveTranscriptState();
+		activeTranscript.replaceGeneration(
+			'chat-1',
+			'generation-selected',
+			[
+				{ ordinal: 1, message: new AssistantMessage(TS, 'initial-one') },
+				{ ordinal: 2, message: new AssistantMessage(TS, 'initial-two') },
+			],
+			{
+				lastOrdinal: 2,
+				pageOldestOrdinal: 1,
+				pageNewestOrdinal: 2,
+				hasMore: false,
+			},
+		);
+		const heldContinuation = deferred<Record<string, unknown>>();
+		const baseDeps = createReconnectDeps();
+		let subscribeCount = 0;
+		baseDeps.ws.sendRequest.mockImplementation(async (request: Record<string, unknown>) => {
+			if (request.type === 'reconnect-state-query') {
+				return reconnectStateResponse([], ['chat-1']);
+			}
+			if (request.type !== 'chat-subscribe') {
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			}
+			subscribeCount += 1;
+			if (subscribeCount === 1) {
+				return boundedReplayResponse({
+					afterOrdinal: 2,
+					nextAfterOrdinal: 4,
+					throughOrdinal: 6,
+					hasMore: true,
+					messages: [messageJson(3, 'replay-three'), messageJson(4, 'equal-content')],
+				});
+			}
+			if (subscribeCount === 2) return heldContinuation.promise;
+			throw new Error('The coordinator requested beyond the fixed watermark.');
+		});
+		const loadMessages = vi.fn(async () => []);
+		const markStale = vi.spyOn(activeTranscript.transcriptCache, 'markStale');
+		const markValidated = vi.spyOn(activeTranscript.transcriptCache, 'markValidated');
+		const chatState = {
+			getCursor: () => activeTranscript.getCursor(),
+			applyMessages: activeTranscript.applyMessages.bind(activeTranscript),
+			setResendCandidates: activeTranscript.setResendCandidates.bind(activeTranscript),
+			loadMessages,
+			transcriptCache: activeTranscript.transcriptCache,
+		} satisfies ReconnectTranscriptState;
+		const deps = { ...baseDeps, chatState } satisfies ChatReconnectCoordinatorOptions;
+		const reloadChatTranscript = vi.fn();
+		const liveMessages = createChatMessagesAccumulator({
+			applyChatMessages: chatState.applyMessages,
+			reloadChatTranscript,
+		});
+		const coordinator = new ChatReconnectCoordinator(deps);
+
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+		await flushUntil(() => subscribeCount === 2);
+
+		liveMessages.enqueue(new ChatMessagesMessage(
+			'chat-1',
+			'generation-selected',
+			[{ ordinal: 7, message: new AssistantMessage(TS, 'live-seven') }],
+			7,
+			7,
+			[],
+		));
+		liveMessages.flush();
+		heldContinuation.resolve(boundedReplayResponse({
+			afterOrdinal: 4,
+			nextAfterOrdinal: 6,
+			throughOrdinal: 6,
+			hasMore: false,
+			messages: [messageJson(5, 'replay-five'), messageJson(6, 'equal-content')],
+		}));
+		await reconnect;
+
+		expect(reloadChatTranscript).not.toHaveBeenCalled();
+		expect(loadMessages).not.toHaveBeenCalled();
+		expect(markValidated).toHaveBeenCalledOnce();
+		expect(activeTranscript.entries.map((entry) => ({
+			ordinal: entry.ordinal,
+			content: 'content' in entry.message ? entry.message.content : entry.message.type,
+		}))).toEqual([
+			{ ordinal: 1, content: 'initial-one' },
+			{ ordinal: 2, content: 'initial-two' },
+			{ ordinal: 3, content: 'replay-three' },
+			{ ordinal: 4, content: 'equal-content' },
+			{ ordinal: 5, content: 'replay-five' },
+			{ ordinal: 6, content: 'equal-content' },
+			{ ordinal: 7, content: 'live-seven' },
+		]);
 	});
 
 	it('abandons a partial replay on disconnect and restarts with a fresh watermark', async () => {
