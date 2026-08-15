@@ -106,14 +106,18 @@ function deltaResponse(
 }
 
 function boundedReplayResponse(options: {
+	chatId?: string;
+	transcriptViewId?: string;
 	afterOrdinal: number;
 	nextAfterOrdinal: number;
 	throughOrdinal: number;
 	hasMore: boolean;
 	messages?: unknown[];
 }) {
+	const chatId = options.chatId ?? 'chat-1';
+	const transcriptViewId = options.transcriptViewId ?? 'generation-selected';
 	return {
-		...deltaResponse('chat-1', 'generation-selected', options.messages ?? []),
+		...deltaResponse(chatId, transcriptViewId, options.messages ?? []),
 		firstOrdinal: options.afterOrdinal + 1,
 		lastOrdinal: options.nextAfterOrdinal,
 		nextAfterOrdinal: options.nextAfterOrdinal,
@@ -1057,6 +1061,136 @@ describe('ChatReconnectCoordinator', () => {
 			{ ordinal: 6, content: 'equal-content' },
 			{ ordinal: 7, content: 'live-seven' },
 		]);
+	});
+
+	it('applies every bounded replay page to a visible transcript', async () => {
+		const deps = createReconnectDeps({
+			visibleChatIds: ['chat-visible'],
+			visibleCursors: {
+				'chat-visible': {
+					chatId: 'chat-visible',
+					transcriptViewId: 'generation-visible',
+					lastOrdinal: 2,
+				},
+			},
+		});
+		let visiblePage = 0;
+		deps.ws.sendRequest.mockImplementation(async (request: Record<string, unknown>) => {
+			if (request.type === 'reconnect-state-query') {
+				return reconnectStateResponse([], ['chat-1']);
+			}
+			if (request.type !== 'chat-subscribe') {
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			}
+			if (request.chatId === 'chat-1') return deltaResponse('chat-1');
+			visiblePage += 1;
+			if (visiblePage === 1) {
+				return boundedReplayResponse({
+					chatId: 'chat-visible',
+					transcriptViewId: 'generation-visible',
+					afterOrdinal: 2,
+					nextAfterOrdinal: 4,
+					throughOrdinal: 6,
+					hasMore: true,
+					messages: [messageJson(3, 'visible-three')],
+				});
+			}
+			if (visiblePage === 2) {
+				expect(deps.onVisibleChatMessages).toHaveBeenCalledOnce();
+				return boundedReplayResponse({
+					chatId: 'chat-visible',
+					transcriptViewId: 'generation-visible',
+					afterOrdinal: 4,
+					nextAfterOrdinal: 6,
+					throughOrdinal: 6,
+					hasMore: false,
+					messages: [messageJson(6, 'visible-six')],
+				});
+			}
+			throw new Error('The visible replay requested beyond the fixed watermark.');
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		const requests = deps.ws.sendRequest.mock.calls
+			.map(([request]) => request as Record<string, unknown>)
+			.filter((request) => request.type === 'chat-subscribe' && request.chatId === 'chat-visible');
+		expect(requests).toHaveLength(2);
+		expect(requests[0]).toMatchObject({ afterOrdinal: 2 });
+		expect(requests[0]).not.toHaveProperty('throughOrdinal');
+		expect(requests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 6 });
+		expect(deps.onVisibleChatMessages.mock.calls.map((call) => ({
+			ordinals: call[2].map((entry) => entry.ordinal),
+			firstOrdinal: call[3],
+			lastOrdinal: call[4],
+		}))).toEqual([
+			{ ordinals: [3], firstOrdinal: 3, lastOrdinal: 4 },
+			{ ordinals: [6], firstOrdinal: 5, lastOrdinal: 6 },
+		]);
+		expect(deps.loadVisibleChatSnapshot).not.toHaveBeenCalled();
+	});
+
+	it('applies every bounded replay page to a cached background transcript', async () => {
+		const deps = createReconnectDeps({
+			selectedChatId: '',
+			backgroundCursors: [{
+				chatId: 'chat-background',
+				transcriptViewId: 'generation-background',
+				lastOrdinal: 2,
+			}],
+		});
+		let backgroundPage = 0;
+		deps.ws.sendRequest.mockImplementation(async (request: Record<string, unknown>) => {
+			if (request.type === 'reconnect-state-query') return reconnectStateResponse();
+			if (request.type !== 'chat-subscribe') {
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			}
+			backgroundPage += 1;
+			if (backgroundPage === 1) {
+				return boundedReplayResponse({
+					chatId: 'chat-background',
+					transcriptViewId: 'generation-background',
+					afterOrdinal: 2,
+					nextAfterOrdinal: 4,
+					throughOrdinal: 5,
+					hasMore: true,
+				});
+			}
+			if (backgroundPage === 2) {
+				expect(deps.onBackgroundMessages).toHaveBeenCalledOnce();
+				return boundedReplayResponse({
+					chatId: 'chat-background',
+					transcriptViewId: 'generation-background',
+					afterOrdinal: 4,
+					nextAfterOrdinal: 5,
+					throughOrdinal: 5,
+					hasMore: false,
+					messages: [messageJson(5, 'background-five')],
+				});
+			}
+			throw new Error('The background replay requested beyond the fixed watermark.');
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		const requests = deps.ws.sendRequest.mock.calls
+			.map(([request]) => request as Record<string, unknown>)
+			.filter((request) => (
+				request.type === 'chat-subscribe' && request.chatId === 'chat-background'
+			));
+		expect(requests).toHaveLength(2);
+		expect(requests[0]).toMatchObject({ afterOrdinal: 2 });
+		expect(requests[0]).not.toHaveProperty('throughOrdinal');
+		expect(requests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 5 });
+		expect(deps.onBackgroundMessages.mock.calls.map((call) => ({
+			ordinals: call[2].map((entry) => entry.ordinal),
+			firstOrdinal: call[3],
+			lastOrdinal: call[4],
+		}))).toEqual([
+			{ ordinals: [], firstOrdinal: 3, lastOrdinal: 4 },
+			{ ordinals: [5], firstOrdinal: 5, lastOrdinal: 5 },
+		]);
+		expect(deps.markBackgroundStale).not.toHaveBeenCalled();
 	});
 
 	it('abandons a partial replay on disconnect and restarts with a fresh watermark', async () => {
