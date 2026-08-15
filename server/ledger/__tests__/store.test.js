@@ -231,6 +231,120 @@ describe('TranscriptLedgerStore', () => {
     expect(steer.prompt.map((row) => row.detail.message.content)).toEqual(['steer']);
   });
 
+  it('composes unanswered inputs through non-engagement ledger rows', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('a', 'A'),
+    });
+    store.append('chat-one', view.viewId, [
+      {
+        kind: 'notice',
+        at,
+        message: 'advisory',
+        detail: { action: 'reload-native-history' },
+      },
+      session('session-one'),
+      {
+        kind: 'permission-resolved',
+        at,
+        lifecycle: {
+          kind: 'resolved',
+          requestId: 'permission-one',
+          incarnation: 'incarnation-one',
+          decision: { allow: true },
+        },
+      },
+      {
+        kind: 'permission-cancelled',
+        at,
+        lifecycle: {
+          kind: 'cancelled',
+          requestId: 'permission-two',
+          incarnation: 'incarnation-two',
+          reason: 'cancelled',
+        },
+      },
+      {
+        kind: 'permission-expired',
+        at,
+        lifecycle: {
+          kind: 'expired',
+          requestId: 'permission-three',
+          incarnation: 'incarnation-three',
+        },
+      },
+      {
+        kind: 'agent-switch',
+        at,
+        detail: {
+          fromAgentId: 'claude',
+          toAgentId: 'codex',
+          fromModel: 'haiku',
+          toModel: 'gpt',
+        },
+      },
+      runEnded('interrupted'),
+    ]);
+
+    const composed = store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('b', 'B'),
+    });
+
+    expect(composed.prompt.map((row) => row.detail.message.content)).toEqual(['A', 'B']);
+  });
+
+  for (const outcome of ['finished', 'failed']) {
+    it(`stops the resend scan at a ${outcome} run`, () => {
+      const view = store.initializeCurrentView('chat-one', {
+        viewId: transcriptViewId('view-one'),
+        contentStartOrdinal: 1,
+      });
+      store.appendInputAndCompose('chat-one', {
+        viewId: view.viewId,
+        at,
+        detail: inputDetail('a', 'A'),
+      });
+      store.append('chat-one', view.viewId, [runEnded(outcome)]);
+
+      const composed = store.appendInputAndCompose('chat-one', {
+        viewId: view.viewId,
+        at,
+        detail: inputDetail('b', 'B'),
+      });
+
+      expect(composed.prompt.map((row) => row.detail.message.content)).toEqual(['B']);
+    });
+  }
+
+  it('collects a prior steer in the next turn after sending it alone', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+      rows: [provider('earlier answer')],
+    });
+    const steer = store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: { ...inputDetail('steer', 'steer'), steer: true },
+    });
+    expect(steer.prompt.map((row) => row.detail.message.content)).toEqual(['steer']);
+
+    const composed = store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('next', 'next'),
+    });
+
+    expect(composed.prompt.map((row) => row.detail.message.content)).toEqual(['steer', 'next']);
+  });
+
   it('does not materialize unbounded resend scans', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),

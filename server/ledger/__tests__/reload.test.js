@@ -71,6 +71,27 @@ describe('TranscriptReloadService', () => {
         .toBe('output after failed reload');
     });
   });
+
+  it('collects an imported history tail that ends with an unanswered user row', async () => {
+    await withReload(async ({ ledger, reload, integration }) => {
+      integration.nativeHistoryImport.load = async function* load() {
+        yield [{ message: new UserMessage(TS, 'native unanswered prompt') }];
+      };
+
+      await reload.reload('chat-1');
+
+      expect(ledger.conversationMessages('chat-1').map((message) => message.content)).toEqual([
+        'frozen prompt',
+        'frozen answer',
+        'native unanswered prompt',
+      ]);
+      expect(ledger.resendCandidates('chat-1')).toEqual([{
+        ordinal: 4,
+        content: 'native unanswered prompt',
+        attachmentNames: [],
+      }]);
+    });
+  });
 });
 
 async function withReload(run) {
