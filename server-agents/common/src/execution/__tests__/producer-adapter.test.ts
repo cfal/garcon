@@ -13,9 +13,9 @@ import type {
   AgentStartRequestV5,
 } from '@garcon/server-agent-interface';
 import {
-  AgentRuntimeEventChannel,
   runtimeRows,
   type AgentRuntimeExecution,
+  type AgentRuntimePublisher,
 } from '../runtime-events.js';
 import { createAgentProducerAdapter } from '../producer-adapter.js';
 
@@ -46,11 +46,10 @@ describe('createAgentProducerAdapter', () => {
   });
 
   it('turns permission messages into typed lifecycle events and drops provider resolutions', async () => {
-    const fixture = createFixture(({ channel, runId }) => {
+    const fixture = createFixture(({ publish, runId }) => {
       const tool = new BashToolUseMessage(TS, 'tool-1', 'pwd');
-      channel.emit({
+      publish({
         type: 'messages',
-        chatId: 'chat-1',
         runId,
         rows: runtimeRows([
           new AssistantMessage(TS, 'before'),
@@ -86,10 +85,9 @@ describe('createAgentProducerAdapter', () => {
   });
 
   it('keeps uncorrelated permission facts typed instead of leaking them into rows', async () => {
-    const fixture = createFixture(({ channel }) => {
-      channel.emit({
+    const fixture = createFixture(({ publish }) => {
+      publish({
         type: 'messages',
-        chatId: 'chat-1',
         runId: null,
         rows: runtimeRows([
           new PermissionRequestMessage(TS, 'permission-1', new BashToolUseMessage(TS, 'tool-1', 'pwd')),
@@ -115,17 +113,15 @@ describe('createAgentProducerAdapter', () => {
   });
 
   it('drops provider events for an unavailable sink without failing its event stream', async () => {
-    const fixture = createFixture(({ channel }) => {
+    const fixture = createFixture(({ publish }) => {
       fixture.closeSink();
-      channel.emit({
+      publish({
         type: 'messages',
-        chatId: 'chat-1',
         runId: 'run-1',
         rows: runtimeRows([new AssistantMessage(TS, 'after close')]),
       });
-      channel.emit({
+      publish({
         type: 'run-ended',
-        chatId: 'chat-1',
         runId: 'run-1',
         outcome: 'finished',
         exitCode: 0,
@@ -186,37 +182,33 @@ describe('createAgentProducerAdapter', () => {
 
 function createFixture(
   afterSession?: (input: {
-    readonly channel: AgentRuntimeEventChannel;
+    readonly publish: AgentRuntimePublisher;
     readonly runId: string;
   }) => void,
   startError?: Error,
 ) {
   const events: AgentProducerEvent[] = [];
-  const channel = new AgentRuntimeEventChannel();
   const runtime: AgentRuntimeExecution = {
-    async start(request) {
+    async start(request, publish) {
       if (startError) throw startError;
       const session = {
         agentSessionId: 'session-1',
         nativeSession: null,
         nativeSeedReceipt: null,
       };
-      channel.emit({
+      publish({
         type: 'session',
-        chatId: request.chatId,
         session,
       });
-      if (afterSession) afterSession({ channel, runId: request.runId });
+      if (afterSession) afterSession({ publish, runId: request.runId });
       else {
-        channel.emit({
+        publish({
           type: 'messages',
-          chatId: request.chatId,
           runId: request.runId,
           rows: runtimeRows([new AssistantMessage(TS, 'answer')]),
         });
-        channel.emit({
+        publish({
           type: 'run-ended',
-          chatId: request.chatId,
           runId: request.runId,
           outcome: 'finished',
           exitCode: 0,
@@ -227,7 +219,6 @@ function createFixture(
     async resume() {},
     async abort() { return true; },
     runningSessions() { return []; },
-    subscribeRuntimeEvents: listener => channel.subscribe(listener),
   };
   let sinkClosed = false;
   const sink: AgentProducerSink = {

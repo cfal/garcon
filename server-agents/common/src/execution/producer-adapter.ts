@@ -17,6 +17,7 @@ import {
 } from '@garcon/common/chat-types';
 import type {
   AgentRuntimeEvent,
+  AgentRuntimePublisher,
   AgentRuntimeExecution,
 } from './runtime-events.js';
 
@@ -38,7 +39,7 @@ export interface AgentProducerAdapter {
     readonly sink: AgentProducerSink;
   }, R>(
     request: T,
-    operation: (request: Omit<T, 'sink'>) => Promise<R>,
+    operation: (request: Omit<T, 'sink'>, publish: AgentRuntimePublisher) => Promise<R>,
   ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }>;
 }
 
@@ -46,40 +47,49 @@ export function createAgentProducerAdapter(
   runtime: AgentRuntimeExecution,
   logger: AgentLogger,
 ): AgentProducerAdapter {
-  const bindings = new Map<string, ProducerBinding>();
+  // Keyed by the sink itself so state that outlives a single operation, like the session
+  // already published, follows the transcript it belongs to. Nothing routes through this map:
+  // it is read when a publisher is built, never when an event arrives. A binding becomes
+  // collectible once the runtime releases the last publisher holding it.
+  const bindings = new WeakMap<AgentProducerSink, ProducerBinding>();
 
-  function bindProducer(chatId: string, sink: AgentProducerSink): ProducerBinding {
-    const binding: ProducerBinding = {
-      sink,
-      permissions: new Map(),
-      publishedSession: null,
-    };
-    bindings.set(chatId, binding);
-    return binding;
+  function bindingFor(sink: AgentProducerSink): ProducerBinding {
+    const existing = bindings.get(sink);
+    if (existing) return existing;
+    const created: ProducerBinding = { sink, permissions: new Map(), publishedSession: null };
+    bindings.set(sink, created);
+    return created;
   }
 
-  runtime.subscribeRuntimeEvents((event) => {
-    const binding = bindings.get(event.chatId);
-    if (!binding) return;
-    try {
-      publishRuntimeEvent(binding, event);
-    } catch (error) {
-      // A closed or fenced sink rejects synchronously, and this listener runs inside the
-      // provider's own event dispatch - which several runtimes share across every chat.
-      // Letting the rejection escape would tear that stream down for unrelated chats, so
-      // the event is dropped here under the accepted at-most-once loss.
-      logger.warn('Dropped a provider event for an unavailable transcript sink', {
-        chatId: event.chatId,
-        eventType: event.type,
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
+  // The capability a runtime publishes through. It closes over one binding, so an operation that
+  // outlives its transcript keeps publishing at its own closed sink and has no way to reach a
+  // replacement.
+  function publisherFor(sink: AgentProducerSink, chatId: string): AgentRuntimePublisher {
+    const binding = bindingFor(sink);
+    return (event) => {
+      try {
+        publishRuntimeEvent(binding, event);
+      } catch (error) {
+        // A closed or fenced sink rejects synchronously, and this runs inside the provider's own
+        // event dispatch - which several runtimes share across every chat. Letting the rejection
+        // escape would tear that stream down for unrelated chats, so the event is dropped here
+        // under the accepted at-most-once loss.
+        logger.warn('Dropped a provider event for an unavailable transcript sink', {
+          chatId,
+          eventType: event.type,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+  }
 
   const execution: AgentExecutionV5 = {
     async start(request) {
-      const binding = bindProducer(request.chatId, request.sink);
-      const session = await runtime.start(withoutSink(request));
+      const binding = bindingFor(request.sink);
+      const session = await runtime.start(
+        withoutSink(request),
+        publisherFor(request.sink, request.chatId),
+      );
       if (!sameSession(binding.publishedSession, session)) {
         binding.sink.publish({ type: 'session', session });
         binding.publishedSession = session;
@@ -88,8 +98,11 @@ export function createAgentProducerAdapter(
     },
 
     async resume(request) {
-      const binding = bindProducer(request.chatId, request.sink);
-      const completion = runtime.resume(withoutSink(request));
+      const binding = bindingFor(request.sink);
+      const completion = runtime.resume(
+        withoutSink(request),
+        publisherFor(request.sink, request.chatId),
+      );
       void completion.catch((error) => {
         try {
           binding.sink.publish({
@@ -118,10 +131,12 @@ export function createAgentProducerAdapter(
     readonly sink: AgentProducerSink;
   }, R>(
     request: T,
-    operation: (request: Omit<T, 'sink'>) => Promise<R>,
+    operation: (request: Omit<T, 'sink'>, publish: AgentRuntimePublisher) => Promise<R>,
   ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }> {
-    bindProducer(request.chatId, request.sink);
-    const value = await operation(withoutSink(request));
+    const value = await operation(
+      withoutSink(request),
+      publisherFor(request.sink, request.chatId),
+    );
     return { handle: handle(request.agentSessionId), value };
   }
 

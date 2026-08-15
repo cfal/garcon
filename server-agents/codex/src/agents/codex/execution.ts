@@ -6,9 +6,9 @@ import {
   type AgentHost,
 } from '@garcon/server-agent-interface';
 import {
-  AgentRuntimeEventChannel,
   runtimeRows,
   type AgentRuntimeExecution,
+  type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
   type AgentRuntimeResumeRequest,
   type AgentRuntimeStartRequest,
@@ -37,7 +37,6 @@ interface CodexRuntimeConfiguration {
 type CodexGoalControlRuntimeRequest = Omit<AgentGoalControlRequest, 'sink'>;
 
 export class CodexExecution implements AgentRuntimeExecution {
-  readonly #events = new AgentRuntimeEventChannel();
   readonly #runs = new AgentRunTracker();
 
   constructor(
@@ -46,36 +45,35 @@ export class CodexExecution implements AgentRuntimeExecution {
     private readonly nativeSessions: PathNativeSessionCodec,
     private readonly config: CodexConfig,
   ) {
+    // The app-server multiplexes every chat over one process-wide stream, so each event is
+    // matched to the turn that produced it by the turn id Codex itself assigns. Content it
+    // flushes after a turn ends carries no turn id and follows that session's last turn.
     runtime.onMessages((chatId, messages, metadata) => {
-      this.#events.emit({
-        type: 'messages',
-        chatId,
-        rows: runtimeRows(messages),
-        runId: this.#runs.correlate(chatId, metadata),
-      });
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({ type: 'messages', rows: runtimeRows(messages), runId: run.runId });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const runId = this.#runs.correlate(chatId, metadata);
-      if (!runId) return;
-      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
-      this.#runs.finish(chatId, runId);
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({ type: 'run-ended', runId: run.runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, run.runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const runId = this.#runs.correlate(chatId, metadata);
-      if (!runId) return;
-      this.#events.emit({
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({
         type: 'run-ended',
-        chatId,
-        runId,
+        runId: run.runId,
         outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#runs.finish(chatId, runId);
+      this.#runs.finish(chatId, run.runId);
     });
   }
 
-  async start(request: AgentRuntimeStartRequest) {
-    this.#runs.register(request.chatId, request.runId);
+  async start(request: AgentRuntimeStartRequest, publish: AgentRuntimePublisher) {
+    this.#runs.register(request.chatId, request.runId, publish);
     try {
       const configuration = await this.#runtimeConfiguration(request);
       const runtimeRequest = prepareStartRequest(request, configuration);
@@ -98,11 +96,7 @@ export class CodexExecution implements AgentRuntimeExecution {
             runtimeRequest.codexGoalCommand ? 'provider-context' : 'user-prefix',
           ),
         };
-        this.#events.emit({
-          type: 'session',
-          chatId: request.chatId,
-          session: holder.session,
-        });
+        publish({ type: 'session', session: holder.session });
         return holder.session;
       };
       const started = await this.runtime.startSession({
@@ -128,12 +122,13 @@ export class CodexExecution implements AgentRuntimeExecution {
     }
   }
 
-  async resume(request: AgentRuntimeResumeRequest): Promise<void> {
-    return this.#resume(request, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
+  async resume(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
+    return this.#resume(request, publish, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
   }
 
   async submitGoalControl(
     request: CodexGoalControlRuntimeRequest,
+    publish: AgentRuntimePublisher,
   ): Promise<boolean> {
     const predecessor = this.#runs.current(request.chatId);
     const runtimeRequest = prepareResumeRequest(
@@ -147,13 +142,14 @@ export class CodexExecution implements AgentRuntimeExecution {
         request.chatId,
         predecessor,
         request.runId,
+        publish,
         handoff,
       )),
     );
   }
 
-  async compact(request: AgentRuntimeResumeRequest): Promise<void> {
-    return this.#resume(request, (runtimeRequest) => this.runtime.compact(runtimeRequest));
+  async compact(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
+    return this.#resume(request, publish, (runtimeRequest) => this.runtime.compact(runtimeRequest));
   }
 
   async abort(agentSessionId: string): Promise<boolean> {
@@ -188,17 +184,13 @@ export class CodexExecution implements AgentRuntimeExecution {
     await this.runtime.resolvePermission(permissionRequestId, decision);
   }
 
-  subscribeRuntimeEvents(
-    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
-  ): () => void {
-    return this.#events.subscribe(listener);
-  }
 
   async #resume(
     request: AgentRuntimeResumeRequest,
+    publish: AgentRuntimePublisher,
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,
   ): Promise<void> {
-    this.#runs.register(request.chatId, request.runId);
+    this.#runs.register(request.chatId, request.runId, publish);
     try {
       await action(prepareResumeRequest(
         request,

@@ -144,7 +144,10 @@ export default class CodexAgentIntegration implements AgentIntegration {
     // the call, the facet advertises that it exists.
     this.compaction = {
       compact: async (request) => (
-        await producer.runExisting(request, (runtimeRequest) => execution.compact(runtimeRequest))
+        await producer.runExisting(
+          request,
+          (runtimeRequest, publish) => execution.compact(runtimeRequest, publish),
+        )
       ).handle,
     };
     this.steering = {
@@ -155,7 +158,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       submitControl: async (request) => (
         await producer.runExisting(
           request,
-          (runtimeRequest) => execution.submitGoalControl(runtimeRequest),
+          (runtimeRequest, publish) => execution.submitGoalControl(runtimeRequest, publish),
         )
       ).value,
     };

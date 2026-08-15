@@ -8,9 +8,9 @@ import {
   type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
 import {
-  AgentRuntimeEventChannel,
   runtimeRows,
   type AgentRuntimeExecution,
+  type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import { AgentRunTracker } from '@garcon/server-agent-common/execution/run-tracker';
@@ -29,7 +29,6 @@ import type { ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeConfig } from '../../config.js';
 
 export class ClaudeExecution implements AgentRuntimeExecution {
-  readonly #events = new AgentRuntimeEventChannel();
   readonly #runs = new AgentRunTracker();
 
   constructor(
@@ -40,35 +39,34 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     private readonly config: ClaudeConfig,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
-      this.#events.emit({
-        type: 'messages',
-        chatId,
-        rows: runtimeRows(messages),
-        runId: this.#runs.correlate(chatId, metadata),
-      });
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({ type: 'messages', rows: runtimeRows(messages), runId: run.runId });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const runId = this.#runs.correlate(chatId, metadata);
-      if (!runId) return;
-      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
-      this.#runs.finish(chatId, runId);
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({ type: 'run-ended', runId: run.runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, run.runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const runId = this.#runs.correlate(chatId, metadata);
-      if (!runId) return;
-      this.#events.emit({
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({
         type: 'run-ended',
-        chatId,
-        runId,
+        runId: run.runId,
         outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#runs.finish(chatId, runId);
+      this.#runs.finish(chatId, run.runId);
     });
   }
 
-  async start(request: Parameters<AgentRuntimeExecution['start']>[0]) {
-    this.#runs.register(request.chatId, request.runId);
+  async start(
+    request: Parameters<AgentRuntimeExecution['start']>[0],
+    publish: AgentRuntimePublisher,
+  ) {
+    this.#runs.register(request.chatId, request.runId, publish);
     try {
       request.admission.signal.throwIfAborted();
       const envOverrides = await this.#endpointEnvironment(request);
@@ -114,8 +112,11 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     }
   }
 
-  async resume(request: Parameters<AgentRuntimeExecution['resume']>[0]): Promise<void> {
-    this.#runs.register(request.chatId, request.runId);
+  async resume(
+    request: Parameters<AgentRuntimeExecution['resume']>[0],
+    publish: AgentRuntimePublisher,
+  ): Promise<void> {
+    this.#runs.register(request.chatId, request.runId, publish);
     try {
       await this.runtime.runClaudeTurn({
         ...executionFields(request),
@@ -203,11 +204,6 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     };
   }
 
-  subscribeRuntimeEvents(
-    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
-  ): () => void {
-    return this.#events.subscribe(listener);
-  }
 
   async #endpointEnvironment(request: AgentRuntimeExecutionContext) {
     const endpoint = await resolveAgentEndpoint(

@@ -90,7 +90,7 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     const events = [];
-    execution.subscribeRuntimeEvents((event) => events.push(event));
+    const publish = (event) => events.push(event);
     const request = startRequest({
       endpoint: {
         apiProviderId: 'provider-1',
@@ -110,7 +110,7 @@ describe('CodexExecution', () => {
       },
     });
 
-    await expect(execution.start(request)).resolves.toEqual({
+    await expect(execution.start(request, publish)).resolves.toEqual({
       agentSessionId: 'thread-1',
       nativeSession: {
         ownerId: 'codex',
@@ -138,12 +138,10 @@ describe('CodexExecution', () => {
     ], { clientRequestId: 'run-1', turnId: 'run-1' });
     expect(events).toContainEqual(expect.objectContaining({
       type: 'messages',
-      chatId: 'chat-1',
       runId: 'run-1',
     }));
     expect(events).toContainEqual(expect.objectContaining({
       type: 'session',
-      chatId: 'chat-1',
       session: expect.objectContaining({ agentSessionId: 'thread-1' }),
     }));
   });
@@ -160,13 +158,14 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     const events = [];
-    execution.subscribeRuntimeEvents((event) => events.push(event));
+    const publish = (event) => events.push(event);
 
-    await expect(execution.start(startRequest())).rejects.toThrow('did not materialize');
+    await expect(execution.start(startRequest(), publish)).rejects.toThrow('did not materialize');
     expect(events.some((event) => event.type === 'session')).toBe(false);
   });
 
   it('keeps carried context separate when starting a Codex goal', async () => {
+    const publish = () => {};
     const runtime = createRuntime();
     const execution = new CodexExecution(
       createHost(),
@@ -181,7 +180,7 @@ describe('CodexExecution', () => {
     const started = await execution.start(startRequest({
       prompt: '/goal ship the migration',
       carriedContext: { prefix },
-    }));
+    }), publish);
 
     expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
       command: 'ship the migration',
@@ -197,6 +196,7 @@ describe('CodexExecution', () => {
   });
 
   it('rejects goal controls that cannot start a new thread', async () => {
+    const publish = () => {};
     const execution = new CodexExecution(
       createHost(),
       createRuntime(),
@@ -204,7 +204,7 @@ describe('CodexExecution', () => {
       createConfig(),
     );
 
-    await expect(execution.start(startRequest({ prompt: '/goal clear' })))
+    await expect(execution.start(startRequest({ prompt: '/goal clear' }), publish))
       .rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
   });
 
@@ -218,8 +218,8 @@ describe('CodexExecution', () => {
         createConfig(),
       );
       const events = [];
-      execution.subscribeRuntimeEvents((event) => events.push(event));
-      await execution.start(startRequest());
+      const publish = (event) => events.push(event);
+      await execution.start(startRequest(), publish);
       runtime.submitGoalControl.mockImplementation(async () => {
         runtime.emitFinished('chat-1', 0, {
           clientRequestId: 'run-1',
@@ -229,7 +229,7 @@ describe('CodexExecution', () => {
         return false;
       });
 
-      const activeInput = execution.submitGoalControl(goalControlRequest('run-2'));
+      const activeInput = execution.submitGoalControl(goalControlRequest('run-2'), publish);
       if (outcome === 'failure') await expect(activeInput).rejects.toThrow('failed before delivery boundary');
       else await expect(activeInput).resolves.toBe(false);
       expect(events).toContainEqual(expect.objectContaining({
@@ -238,7 +238,7 @@ describe('CodexExecution', () => {
         outcome: 'finished',
       }));
 
-      await execution.resume(goalControlRequest('run-3'));
+      await execution.resume(goalControlRequest('run-3'), publish);
       expect(runtime.runTurn).toHaveBeenCalledOnce();
     });
   }
@@ -252,8 +252,8 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     const events = [];
-    execution.subscribeRuntimeEvents((event) => events.push(event));
-    await execution.start(startRequest());
+    const publish = (event) => events.push(event);
+    await execution.start(startRequest(), publish);
     runtime.submitGoalControl.mockImplementation(async (_request, beforeDelivery) => {
       await beforeDelivery({
         validate: () => undefined,
@@ -262,7 +262,7 @@ describe('CodexExecution', () => {
       throw new Error('delivery outcome unknown');
     });
 
-    await expect(execution.submitGoalControl(goalControlRequest('run-2')))
+    await expect(execution.submitGoalControl(goalControlRequest('run-2'), publish))
       .rejects.toThrow('delivery outcome unknown');
     runtime.emitFailed('chat-1', 'delivery failed', {
       clientRequestId: 'run-2',
@@ -277,6 +277,13 @@ describe('CodexExecution', () => {
   });
 
   it('changes runtime event correlation only when the goal handoff commits', async () => {
+    const messages = [];
+    // The publisher is the route, so a goal-control successor inheriting its predecessor's
+    // route is observable as the run id its content carries.
+    const publish = (event) => {
+      if (event.type !== 'messages') return;
+      messages.push({ content: event.rows[0].message.content, runId: event.runId });
+    };
     const runtime = createRuntime();
     const execution = new CodexExecution(
       createHost(),
@@ -284,12 +291,7 @@ describe('CodexExecution', () => {
       createPathNativeSessionCodec('codex'),
       createConfig(),
     );
-    const messages = [];
-    execution.subscribeRuntimeEvents((event) => {
-      if (event.type !== 'messages') return;
-      messages.push({ content: event.rows[0].message.content, runId: event.runId });
-    });
-    await execution.start(startRequest());
+    await execution.start(startRequest(), publish);
     const emitOutput = (content) => runtime.emitMessages(
       'chat-1',
       [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
@@ -308,7 +310,7 @@ describe('CodexExecution', () => {
       handoff.validate();
       emitOutput('while rejected handoff validates');
       throw new Error('persistence failed');
-    }))).rejects.toThrow('persistence failed');
+    }), publish)).rejects.toThrow('persistence failed');
     emitOutput('after rejected handoff');
 
     await expect(execution.submitGoalControl({
@@ -321,7 +323,7 @@ describe('CodexExecution', () => {
         signal: new AbortController().signal,
         markStarted: mock(() => undefined),
       },
-    })).resolves.toBe(true);
+    }, publish)).resolves.toBe(true);
 
     expect(messages).toEqual([
       { content: 'before delivery', runId: 'run-1' },

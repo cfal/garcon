@@ -1,8 +1,8 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
-  AgentRuntimeEventChannel,
   runtimeRows,
   type AgentRuntimeExecution,
+  type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import { AgentRunTracker } from '@garcon/server-agent-common/execution/run-tracker';
@@ -10,7 +10,6 @@ import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-
 import type { AcpAgentRuntime } from '../shared/acp-agent-runtime.js';
 
 export class CursorExecution implements AgentRuntimeExecution {
-  readonly #events = new AgentRuntimeEventChannel();
   readonly #runs = new AgentRunTracker();
 
   constructor(
@@ -18,35 +17,34 @@ export class CursorExecution implements AgentRuntimeExecution {
     private readonly nativeSessions: PathNativeSessionCodec,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
-      this.#events.emit({
-        type: 'messages',
-        chatId,
-        rows: runtimeRows(messages),
-        runId: this.#runs.correlate(chatId, metadata),
-      });
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({ type: 'messages', rows: runtimeRows(messages), runId: run.runId });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const runId = this.#runs.correlate(chatId, metadata);
-      if (!runId) return;
-      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
-      this.#runs.finish(chatId, runId);
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({ type: 'run-ended', runId: run.runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, run.runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const runId = this.#runs.correlate(chatId, metadata);
-      if (!runId) return;
-      this.#events.emit({
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({
         type: 'run-ended',
-        chatId,
-        runId,
+        runId: run.runId,
         outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#runs.finish(chatId, runId);
+      this.#runs.finish(chatId, run.runId);
     });
   }
 
-  async start(request: Parameters<AgentRuntimeExecution['start']>[0]) {
-    this.#runs.register(request.chatId, request.runId);
+  async start(
+    request: Parameters<AgentRuntimeExecution['start']>[0],
+    publish: AgentRuntimePublisher,
+  ) {
+    this.#runs.register(request.chatId, request.runId, publish);
     const seed = request.carriedContext?.prefix ?? '';
     try {
       const result = await this.runtime.startSession({
@@ -70,8 +68,11 @@ export class CursorExecution implements AgentRuntimeExecution {
     }
   }
 
-  async resume(request: Parameters<AgentRuntimeExecution['resume']>[0]): Promise<void> {
-    this.#runs.register(request.chatId, request.runId);
+  async resume(
+    request: Parameters<AgentRuntimeExecution['resume']>[0],
+    publish: AgentRuntimePublisher,
+  ): Promise<void> {
+    this.#runs.register(request.chatId, request.runId, publish);
     try {
       await this.runtime.runTurn({
         ...executionFields(request),
@@ -132,11 +133,6 @@ export class CursorExecution implements AgentRuntimeExecution {
     });
   }
 
-  subscribeRuntimeEvents(
-    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
-  ): () => void {
-    return this.#events.subscribe(listener);
-  }
 }
 
 function executionFields(request: AgentRuntimeExecutionContext) {

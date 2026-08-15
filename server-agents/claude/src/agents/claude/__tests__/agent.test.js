@@ -78,13 +78,13 @@ describe('ClaudeExecution', () => {
       const startError = new Error('missing claude binary');
       const claude = createClaudeStub(startError);
       const execution = createExecution(claude, projectPath);
-      const failed = new Promise((resolve) => {
-        execution.subscribeRuntimeEvents((event) => {
-          if (event.type === 'run-ended' && event.outcome === 'failed') resolve(event);
-        });
-      });
+      let resolveFailed;
+      const failed = new Promise((resolve) => { resolveFailed = resolve; });
+      const publish = (event) => {
+        if (event.type === 'run-ended' && event.outcome === 'failed') resolveFailed(event);
+      };
 
-      const started = await execution.start(startRequest(projectPath));
+      const started = await execution.start(startRequest(projectPath), publish);
       const failure = await failed;
 
       expect(claude.startClaudeCliSession).toHaveBeenCalledWith(expect.objectContaining({
@@ -103,7 +103,6 @@ describe('ClaudeExecution', () => {
       );
       expect(failure).toMatchObject({
         type: 'run-ended',
-        chatId: 'chat-1',
         runId: 'run-1',
         outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message: 'missing claude binary' },
@@ -123,20 +122,19 @@ describe('ClaudeExecution', () => {
       }));
       const execution = createExecution(claude, projectPath);
       const controller = new AbortController();
-      const failed = new Promise((resolve) => {
-        execution.subscribeRuntimeEvents((event) => {
-          if (event.type === 'run-ended' && event.outcome === 'failed') resolve(event);
-        });
-      });
+      let resolveFailed;
+      const failed = new Promise((resolve) => { resolveFailed = resolve; });
+      const publish = (event) => {
+        if (event.type === 'run-ended' && event.outcome === 'failed') resolveFailed(event);
+      };
 
-      await execution.start(startRequest(projectPath, controller.signal));
+      await execution.start(startRequest(projectPath, controller.signal), publish);
       const reason = new Error('server is shutting down');
       controller.abort(reason);
       rejectStart(reason);
 
       await expect(failed).resolves.toMatchObject({
         type: 'run-ended',
-        chatId: 'chat-1',
         runId: 'run-1',
         outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message: 'server is shutting down' },

@@ -3,9 +3,9 @@ import {
   type AgentHost,
 } from '@garcon/server-agent-interface';
 import {
-  AgentRuntimeEventChannel,
   runtimeRows,
   type AgentRuntimeExecution,
+  type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
 } from '../execution/runtime-events.js';
 import { AgentRunTracker } from '../execution/run-tracker.js';
@@ -14,7 +14,6 @@ import type { DirectEndpointRouterRuntime, DirectCompatibleRuntime } from './rou
 
 export class DirectExecution<TRuntime extends DirectCompatibleRuntime>
 implements AgentRuntimeExecution {
-  readonly #events = new AgentRuntimeEventChannel();
   readonly #runs = new AgentRunTracker();
 
   constructor(
@@ -22,36 +21,35 @@ implements AgentRuntimeExecution {
     private readonly runtime: DirectEndpointRouterRuntime<TRuntime>,
   ) {
     runtime.onMessages((chatId, messages, metadata) => {
-      this.#events.emit({
-        type: 'messages',
-        chatId,
-        rows: runtimeRows(messages),
-        runId: this.#runs.correlate(chatId, metadata),
-      });
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({ type: 'messages', rows: runtimeRows(messages), runId: run.runId });
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      const runId = this.#runs.correlate(chatId, metadata);
-      if (!runId) return;
-      this.#events.emit({ type: 'run-ended', chatId, runId, outcome: 'finished', exitCode });
-      this.#runs.finish(chatId, runId);
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({ type: 'run-ended', runId: run.runId, outcome: 'finished', exitCode });
+      this.#runs.finish(chatId, run.runId);
     });
     runtime.onFailed((chatId, message, metadata) => {
-      const runId = this.#runs.correlate(chatId, metadata);
-      if (!runId) return;
-      this.#events.emit({
+      const run = this.#runs.correlate(chatId, metadata);
+      if (!run) return;
+      run.publish({
         type: 'run-ended',
-        chatId,
-        runId,
+        runId: run.runId,
         outcome: 'failed',
         error: { code: 'PROVIDER_FAILURE', message },
       });
-      this.#runs.finish(chatId, runId);
+      this.#runs.finish(chatId, run.runId);
     });
   }
 
-  async start(request: Parameters<AgentRuntimeExecution['start']>[0]) {
+  async start(
+    request: Parameters<AgentRuntimeExecution['start']>[0],
+    publish: AgentRuntimePublisher,
+  ) {
     const endpoint = await this.#endpoint(request);
-    this.#runs.register(request.chatId, request.runId);
+    this.#runs.register(request.chatId, request.runId, publish);
     try {
       const result = await this.runtime.startSession({
         ...executionFields(request),
@@ -71,9 +69,12 @@ implements AgentRuntimeExecution {
     }
   }
 
-  async resume(request: Parameters<AgentRuntimeExecution['resume']>[0]): Promise<void> {
+  async resume(
+    request: Parameters<AgentRuntimeExecution['resume']>[0],
+    publish: AgentRuntimePublisher,
+  ): Promise<void> {
     const endpoint = await this.#endpoint(request);
-    this.#runs.register(request.chatId, request.runId);
+    this.#runs.register(request.chatId, request.runId, publish);
     try {
       await this.runtime.runTurn({
         ...executionFields(request),
@@ -110,11 +111,6 @@ implements AgentRuntimeExecution {
     request.signal.throwIfAborted();
   }
 
-  subscribeRuntimeEvents(
-    listener: Parameters<AgentRuntimeEventChannel['subscribe']>[0],
-  ): () => void {
-    return this.#events.subscribe(listener);
-  }
 
   async #endpoint(request: AgentRuntimeExecutionContext) {
     const endpoint = await resolveAgentEndpoint(
