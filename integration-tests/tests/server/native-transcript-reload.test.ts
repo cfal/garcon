@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { appendFile, chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT } from '../../../common/chat-snapshot.js';
+import { AssistantMessage } from '../../../common/chat-types.js';
 import type {
   GetSharedChatResponse,
   ShareChatResponse,
 } from '../../../common/share-types.js';
+import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
   assistantContents,
   messagesOfType,
@@ -228,6 +231,113 @@ describe('native transcript reload', () => {
         environment.ANTHROPIC_API_KEY = 'integration-fake-claude-key';
         environment.CLAUDE_TEST_RELEASE_PATH = releasePath;
         environment.CLAUDE_TEST_STREAM_PROMPT = HELD_PROMPT;
+      },
+    });
+  }, 30_000);
+
+  test('rejects a fixed-watermark replay continuation after native reload replaces its view', async () => {
+    const environment: Record<string, string> = {};
+
+    await withIntegrationFixture('native-reload-replay-fence', async (fixture) => {
+      const claude = (await fixture.client.listAgentCatalog()).agents.find(
+        (agent) => agent.id === 'claude',
+      );
+      if (!claude) throw new Error('Claude integration is missing from the agent catalog.');
+
+      const chatId = fixture.newChatId();
+      const initial = await fixture.client.startChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        agentId: claude.id,
+        projectPath: fixture.dirs.project,
+        model: claude.defaultModel,
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        agentSettings: claude.defaultSettings,
+        command: 'native-reload-replay-baseline',
+      });
+      await fixture.client.waitForTurnTerminal(chatId, initial.turnId);
+      const beforeInjection = await fixture.client.getMessages(chatId);
+
+      await fixture.restartGarcon({
+        beforeStart: async () => {
+          const store = new TranscriptLedgerStore(
+            join(fixture.dirs.workspace, 'transcript-ledgers'),
+          );
+          try {
+            const view = store.currentView(chatId);
+            if (view?.viewId !== beforeInjection.transcriptViewId) {
+              throw new Error('The replay fixture opened a different transcript view.');
+            }
+            store.append(
+              chatId,
+              view.viewId,
+              Array.from({ length: CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT + 20 }, (_, index) => ({
+                kind: 'provider-row' as const,
+                at: new Date(Date.UTC(2026, 7, 15, 0, 0, index)).toISOString(),
+                message: new AssistantMessage(
+                  new Date(Date.UTC(2026, 7, 15, 0, 0, index)).toISOString(),
+                  `old-view-replay-${index}`,
+                ),
+                providerMeta: null,
+              })),
+            );
+          } finally {
+            store.close();
+          }
+        },
+      });
+
+      const firstPage = await fixture.client.subscribe(
+        chatId,
+        beforeInjection.transcriptViewId,
+        0,
+      );
+      expect(firstPage).toMatchObject({
+        transcriptViewId: beforeInjection.transcriptViewId,
+        hasMore: true,
+      });
+      const replay = firstPage as typeof firstPage & {
+        readonly nextAfterOrdinal: number;
+        readonly throughOrdinal: number;
+      };
+      expect(replay.nextAfterOrdinal).toBeGreaterThan(0);
+      expect(replay.nextAfterOrdinal).toBeLessThan(replay.throughOrdinal);
+
+      await reloadFromNativeHistory(fixture, chatId);
+      const reloaded = await fixture.client.getMessages(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(beforeInjection.transcriptViewId);
+      await expect(fixture.client.subscribe(
+        chatId,
+        beforeInjection.transcriptViewId,
+        replay.nextAfterOrdinal,
+        replay.throughOrdinal,
+      )).rejects.toMatchObject({
+        response: {
+          requestType: 'chat-subscribe',
+          code: 'STALE_TRANSCRIPT_VIEW',
+          retryable: false,
+          chatId,
+        },
+      });
+      expect(JSON.stringify((await fixture.client.getMessages(chatId)).messages))
+        .not.toContain('old-view-replay-');
+    }, {
+      serverEnvironment: environment,
+      async prepareWorkspace(directories) {
+        const fakeModule = fileURLToPath(
+          new URL('../../support/fake-claude-cli.ts', import.meta.url),
+        );
+        const binaryPath = join(directories.root, 'claude');
+        await writeFile(
+          binaryPath,
+          `#!${process.execPath}\nimport ${JSON.stringify(pathToFileURL(fakeModule).href)};\n`,
+        );
+        await chmod(binaryPath, 0o755);
+        environment.CLAUDE_BINARY = binaryPath;
+        environment.CLAUDE_CONFIG_DIR = join(directories.home, '.claude-integration');
+        environment.ANTHROPIC_API_KEY = 'integration-fake-claude-key';
       },
     });
   }, 30_000);
