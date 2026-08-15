@@ -94,6 +94,19 @@ describe('agent architecture boundaries', () => {
     }
   });
 
+  test('stops handoff recovery before graceful shutdown drains dependencies', () => {
+    const source = readFileSync('server/server.ts', 'utf8');
+    const shutdownStart = source.indexOf('const shutdown = async () =>');
+    const handoffStop = source.indexOf('handoffs.shutdown()', shutdownStart);
+    const executionAbort = source.indexOf('abortRunningSessionsWithTimeout({', shutdownStart);
+    const ledgerClose = source.indexOf('transcriptLedger.close()', shutdownStart);
+
+    expect(shutdownStart).toBeGreaterThanOrEqual(0);
+    expect(handoffStop).toBeGreaterThan(shutdownStart);
+    expect(handoffStop).toBeLessThan(executionAbort);
+    expect(handoffStop).toBeLessThan(ledgerClose);
+  });
+
   test('forwards canonical controls through every single-query integration', () => {
     for (const providerId of providerIds) {
       const source = readFileSync(`server-agents/${providerId}/src/index.ts`, 'utf8');

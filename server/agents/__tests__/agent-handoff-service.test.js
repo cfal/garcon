@@ -392,6 +392,68 @@ describe('AgentHandoffService', () => {
     }
   });
 
+  it('stops decided handoff roll-forward retries during shutdown', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    let registryAttempts = 0;
+    let allowRecovery = false;
+    state.ownership.applyHandoffDecision = mock(async () => {
+      registryAttempts += 1;
+      if (!allowRecovery) throw new Error('injected decided handoff failure');
+    });
+    const timer = { unref: mock(() => undefined) };
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let fireRetry = null;
+    globalThis.setTimeout = mock((callback) => {
+      fireRetry = callback;
+      return timer;
+    });
+    globalThis.clearTimeout = mock(() => undefined);
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger: ledgerState(calls),
+    });
+    const preparation = service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-1',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+    }).prepare(context());
+    let outcome = null;
+    void preparation.then(
+      () => { outcome = 'resolved'; },
+      () => { outcome = 'rejected'; },
+    );
+
+    try {
+      for (let tick = 0; tick < 20 && fireRetry === null; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(fireRetry).toBeFunction();
+
+      service.shutdown();
+
+      for (let tick = 0; tick < 20 && outcome === null; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(globalThis.clearTimeout).toHaveBeenCalledWith(timer);
+      expect(outcome).toBe('rejected');
+      fireRetry();
+      for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+      expect(registryAttempts).toBe(1);
+    } finally {
+      allowRecovery = true;
+      fireRetry?.();
+      await preparation.catch(() => undefined);
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
   it('adopts an existing switch marker after unrelated post-watermark rows', async () => {
     const current = sourceChat();
     const calls = [];
