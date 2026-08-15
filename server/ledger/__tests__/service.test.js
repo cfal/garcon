@@ -247,6 +247,71 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('keeps a deleted chat sink fenced when the same chat id is recreated', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const deleted = ledger.openProducer('chat-1', 'test');
+      deleted.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'deleted view output') }],
+      });
+
+      ledger.deleteChat('chat-1');
+      ledger.initializeChat('chat-1');
+      const replacement = ledger.openProducer('chat-1', 'test');
+
+      expect(() => deleted.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'stale deleted output') }],
+      })).toThrow(TranscriptSinkClosedError);
+      replacement.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'replacement output') }],
+      });
+      expect(ledger.conversationMessages('chat-1').map((message) => message.content))
+        .toEqual(['replacement output']);
+    });
+  });
+
+  it('commits named late output after an accepted run terminal', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'before terminal') }],
+      });
+      lease.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'finished' });
+
+      lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'after terminal') }],
+      });
+      lease.sink.publish({
+        type: 'session',
+        session: {
+          agentSessionId: 'late-session',
+          nativeSession: null,
+          nativeSeedReceipt: null,
+        },
+      });
+
+      expect(ledger.activeRunId('chat-1')).toBeNull();
+      expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
+        'provider-row',
+        'run-ended',
+        'provider-row',
+        'session',
+      ]);
+      expect(ledger.conversationMessages('chat-1').map((message) => message.content)).toEqual([
+        'before terminal',
+        'after terminal',
+      ]);
+      expect(ledger.currentSession('chat-1')?.detail.agentSessionId).toBe('late-session');
+    });
+  });
+
   it('ignores stale terminals while retaining late content and session facts', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
