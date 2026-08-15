@@ -69,6 +69,20 @@ interface TranscriptGeometry {
   horizontalOverflow: Array<{ key: string; left: number; right: number }>;
 }
 
+interface TranscriptRowObservation {
+  itemIndex: number;
+  messageType: string;
+  rowId: string;
+  text: string;
+}
+
+interface TranscriptViewportScan {
+  duplicateMountedRowIds: string[];
+  indexChanges: Array<{ rowId: string; previous: number; current: number }>;
+  rows: TranscriptRowObservation[];
+  visualOrderViolations: Array<{ previous: string; next: string }>;
+}
+
 interface TranscriptLayoutSnapshot {
   anchor: ReadingAnchor;
   anchorTransform: string;
@@ -192,6 +206,94 @@ async function transcriptEntryCount(page: Page): Promise<number> {
   return page
     .locator(SIZER_SELECTOR)
     .evaluate((sizer) => Number((sizer as HTMLElement).dataset.chatTranscriptEntryCount ?? 0));
+}
+
+async function scanLoadedTranscript(page: Page): Promise<TranscriptViewportScan> {
+  return page.locator(FEED_SELECTOR).evaluate(async (feedElement, itemSelector) => {
+    const feed = feedElement as HTMLElement;
+    const rows = new Map<string, TranscriptRowObservation>();
+    const duplicateMountedRowIds = new Set<string>();
+    const indexChanges: TranscriptViewportScan['indexChanges'] = [];
+    const visualOrderViolations: TranscriptViewportScan['visualOrderViolations'] = [];
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const capture = () => {
+      const mounted = [...feed.querySelectorAll<HTMLElement>(itemSelector)]
+        .flatMap((item) => {
+          const row = item.querySelector<HTMLElement>('[data-chat-row-id]');
+          const itemIndex = Number(item.dataset.index);
+          if (!row?.dataset.chatRowId || !Number.isFinite(itemIndex)) return [];
+          return [
+            {
+              itemIndex,
+              messageType: row.dataset.chatMessageType ?? '',
+              rect: item.getBoundingClientRect(),
+              rowId: row.dataset.chatRowId,
+              text: row.innerText.trim(),
+            },
+          ];
+        })
+        .sort((left, right) => left.itemIndex - right.itemIndex);
+      const mountedIds = new Set<string>();
+      for (const row of mounted) {
+        if (mountedIds.has(row.rowId)) duplicateMountedRowIds.add(row.rowId);
+        mountedIds.add(row.rowId);
+        const previous = rows.get(row.rowId);
+        if (previous && previous.itemIndex !== row.itemIndex) {
+          indexChanges.push({
+            rowId: row.rowId,
+            previous: previous.itemIndex,
+            current: row.itemIndex,
+          });
+        }
+        rows.set(row.rowId, {
+          itemIndex: row.itemIndex,
+          messageType: row.messageType,
+          rowId: row.rowId,
+          text: row.text,
+        });
+      }
+      for (let index = 1; index < mounted.length; index += 1) {
+        const previous = mounted[index - 1];
+        const next = mounted[index];
+        if (previous && next && next.rect.top < previous.rect.top) {
+          visualOrderViolations.push({ previous: previous.rowId, next: next.rowId });
+        }
+      }
+    };
+
+    feed.scrollTop = 0;
+    feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+    for (let settledFrame = 0; settledFrame < 4; settledFrame += 1) await frame();
+    capture();
+
+    for (let attempt = 0; attempt < 512; attempt += 1) {
+      const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+      if (feed.scrollTop >= maximum - 1) break;
+      const previousTop = feed.scrollTop;
+      feed.scrollTop = Math.min(maximum, previousTop + Math.max(1, feed.clientHeight * 0.6));
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await frame();
+      await frame();
+      capture();
+      if (feed.scrollTop <= previousTop + 0.5) {
+        throw new Error('The transcript viewport stopped before reaching its loaded later edge.');
+      }
+    }
+
+    const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+    if (feed.scrollTop < maximum - 1) {
+      throw new Error('The transcript viewport scan exceeded its bounded iteration count.');
+    }
+    for (let settledFrame = 0; settledFrame < 4; settledFrame += 1) await frame();
+    capture();
+
+    return {
+      duplicateMountedRowIds: [...duplicateMountedRowIds],
+      indexChanges,
+      rows: [...rows.values()].sort((left, right) => left.itemIndex - right.itemIndex),
+      visualOrderViolations,
+    };
+  }, ITEM_SELECTOR);
 }
 
 async function waitForTranscriptEntryCount(page: Page, minimum: number): Promise<number> {
@@ -2682,43 +2784,85 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyBoundedWindowLaterPage(fixture: ChromiumFixture): Promise<void> {
-  const chatId = await seedTranscript(fixture.integration, 110, 'chromium-bounded-window');
+async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<void> {
+  const promptPrefix = 'chromium-retained-window';
+  const turnCount = 110;
+  const expectedEntryCount = turnCount * 2;
+  const chatId = await seedTranscript(fixture.integration, turnCount, promptPrefix);
   await prepareTranscript(fixture, chatId);
   let entryCount = await transcriptEntryCount(fixture.page);
-  for (let pageIndex = 0; pageIndex < 4 && entryCount < 200; pageIndex += 1) {
+  for (let pageIndex = 0; pageIndex < 5 && entryCount < expectedEntryCount; pageIndex += 1) {
+    const previousEntryCount = entryCount;
     const previousRevision = await virtualDataRevision(fixture.page);
     await scrollToPosition(fixture.page, 'start');
     await waitForVirtualDataRevisionAfter(fixture.page, previousRevision);
     entryCount = await transcriptEntryCount(fixture.page);
-    expect(entryCount).toBeLessThanOrEqual(200);
+    expect(entryCount).toBeGreaterThan(previousEntryCount);
+    expect(entryCount).toBeLessThanOrEqual(expectedEntryCount);
   }
-  expect(entryCount).toBe(200);
+  expect(entryCount).toBe(expectedEntryCount);
 
-  const earlierRevision = await virtualDataRevision(fixture.page);
-  await scrollToPosition(fixture.page, 'start');
-  await waitForVirtualDataRevisionAfter(fixture.page, earlierRevision);
-  expect(await transcriptEntryCount(fixture.page)).toBe(200);
+  const scan = await scanLoadedTranscript(fixture.page);
+  expect(scan.duplicateMountedRowIds).toEqual([]);
+  expect(scan.indexChanges).toEqual([]);
+  expect(scan.visualOrderViolations).toEqual([]);
+  expect(scan.rows).toHaveLength(expectedEntryCount);
+  const ordinals = scan.rows.map((row) => Number(row.rowId.slice(row.rowId.lastIndexOf(':') + 1)));
+  expect(ordinals.every(Number.isFinite)).toBe(true);
+  expect(ordinals).toEqual([...ordinals].sort((left, right) => left - right));
+  for (let turnIndex = 0; turnIndex < turnCount; turnIndex += 1) {
+    const user = scan.rows[turnIndex * 2];
+    const assistant = scan.rows[turnIndex * 2 + 1];
+    const prompt = `${promptPrefix}-${turnIndex}`;
+    expect(user).toMatchObject({ messageType: 'user', text: prompt });
+    expect(assistant).toMatchObject({ messageType: 'assistant', text: `echo:${prompt}` });
+    expect(user?.itemIndex).toBeLessThan(assistant?.itemIndex ?? -1);
+    if (turnIndex + 1 < turnCount) {
+      expect(assistant?.itemIndex).toBeLessThan(scan.rows[(turnIndex + 1) * 2]?.itemIndex ?? -1);
+    }
+  }
 
-  const prefetchPosition = await positionNearLaterPageBoundary(fixture.page);
-  expect(prefetchPosition.distanceFromEnd).toBeGreaterThan(50);
-  expect(prefetchPosition.distanceFromEnd).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
-  const anchor = await readingAnchor(fixture.page);
-  const laterRevision = await virtualDataRevision(fixture.page);
-  await signalScrollIntent(fixture.page, 'later');
-  await fixture.page.locator(FEED_SELECTOR).dispatchEvent('scroll');
-  await waitForVirtualDataRevisionAfter(fixture.page, laterRevision);
-  expect(await transcriptEntryCount(fixture.page)).toBe(200);
-  const restored = await anchorByKey(fixture.page, anchor.key);
-  expect(
-    Math.abs(restored.offset - anchor.offset),
-    JSON.stringify({ anchor, restored }),
-  ).toBeLessThanOrEqual(1);
+  await scrollToPosition(fixture.page, 'end');
+  await fixture.page.evaluate(async () => {
+    for (let frame = 0; frame < 8; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  });
+  expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount);
 
-  const boundedGeometry = await transcriptGeometry(fixture.page);
-  expect(boundedGeometry.itemCount).toBeGreaterThan(2);
-  expect(boundedGeometry.transcriptItemCount).toBeGreaterThan(1);
-  expect(boundedGeometry.overlaps).toEqual([]);
+  const livePrompt = `${promptPrefix}-live`;
+  await appendTurn(fixture.integration, chatId, livePrompt);
+  await fixture.page
+    .locator(FEED_SELECTOR)
+    .getByText(`echo:${livePrompt}`, { exact: true })
+    .waitFor();
+  expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount + 2);
+  const tail = await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement, input) =>
+    [...feedElement.querySelectorAll<HTMLElement>('[data-chat-row-id]')]
+      .flatMap((row) => {
+        const text = row.innerText.trim();
+        if (text !== input.user && text !== input.assistant) return [];
+        return [
+          {
+            itemIndex: Number(row.closest<HTMLElement>('[data-chat-virtual-item]')?.dataset.index),
+            messageType: row.dataset.chatMessageType ?? '',
+            rowId: row.dataset.chatRowId ?? '',
+            text,
+          },
+        ];
+      })
+      .sort((left, right) => left.itemIndex - right.itemIndex),
+    { user: livePrompt, assistant: `echo:${livePrompt}` },
+  );
+  expect(tail).toHaveLength(2);
+  expect(tail[0]).toMatchObject({ messageType: 'user', text: livePrompt });
+  expect(tail[1]).toMatchObject({ messageType: 'assistant', text: `echo:${livePrompt}` });
+  expect(tail[0]?.itemIndex).toBeLessThan(tail[1]?.itemIndex ?? -1);
+
+  const retainedGeometry = await transcriptGeometry(fixture.page);
+  expect(retainedGeometry.itemCount).toBeGreaterThan(2);
+  expect(retainedGeometry.transcriptItemCount).toBeGreaterThan(1);
+  expect(retainedGeometry.overlaps).toEqual([]);
   expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
   fixture.assertNoBrowserErrors();
 }
@@ -2985,13 +3129,13 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 120_000);
 
-  test('bounds the retained transcript while preserving later-page geometry', async () => {
+  test('retains the complete detached transcript through paging and live following', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
-      'transcript-bounded-window-later-page',
+      'transcript-detached-window-retention',
       async (fixture, markPhase) => {
-        markPhase('paging across the bounded transcript window');
-        await verifyBoundedWindowLaterPage(fixture);
+        markPhase('paging and scanning the complete retained transcript');
+        await verifyDetachedWindowRetention(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
