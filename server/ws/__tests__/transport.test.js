@@ -26,6 +26,17 @@ describe('primary WebSocket transport', () => {
     expect(publisher.publish).toHaveBeenCalledWith('chat', 'published', true);
   });
 
+  it('reports closed and dropped direct JSON sends as undelivered', () => {
+    const closed = { readyState: 3, send: mock(() => 1) };
+    const dropped = { readyState: 1, send: mock(() => 0) };
+    const sent = { readyState: 1, send: mock(() => 17) };
+
+    expect(sendWebSocketJson(closed, { type: 'closed' })).toBe(false);
+    expect(closed.send).not.toHaveBeenCalled();
+    expect(sendWebSocketJson(dropped, { type: 'dropped' })).toBe(false);
+    expect(sendWebSocketJson(sent, { type: 'sent' })).toBe(true);
+  });
+
   it('negotiates permessage-deflate and emits a compressed data frame', async () => {
     const payload = 'compressible'.repeat(1_024);
     server = Bun.serve({
