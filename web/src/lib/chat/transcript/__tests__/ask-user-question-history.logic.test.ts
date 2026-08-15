@@ -35,6 +35,7 @@ describe('historicalAskUserQuestion', () => {
 		expect(reconstructed.terminal).toEqual({
 			state: 'resolved',
 			allowed: true,
+			incarnation: 'ask-user-question-question-1',
 			selectedQuestionOptions: { mode: ['careful'] },
 		});
 	});
@@ -56,6 +57,7 @@ describe('historicalAskUserQuestion', () => {
 		expect(reconstructed.terminal).toEqual({
 			state: 'resolved',
 			allowed: false,
+			incarnation: 'ask-user-question-question-1',
 			reason: 'The user did not answer the questions.',
 		});
 	});
