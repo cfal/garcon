@@ -169,6 +169,46 @@ describe('TranscriptLedgerStore', () => {
     expect(store.append('chat-one', view.viewId, [provider('healthy')])).toHaveLength(1);
   });
 
+  it('qualifies submission retries by canonical attachment identity', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const attachment = {
+      kind: 'image',
+      data: 'data:image/png;base64,YQ==',
+      name: 'diagram.png',
+      mimeType: 'image/png',
+    };
+    store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'same text', [attachment]),
+    });
+
+    const retry = store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'same text', [{
+        mimeType: 'image/png',
+        name: 'diagram.png',
+        data: 'data:image/png;base64,YQ==',
+        kind: 'image',
+      }]),
+    });
+    expect(retry).toMatchObject({ inserted: false, prompt: [] });
+
+    expect(() => store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'same text', [{
+        ...attachment,
+        data: 'data:image/png;base64,Yg==',
+      }]),
+    })).toThrow(SubmissionConflictError);
+    expect(store.currentRows('chat-one')).toHaveLength(1);
+  });
+
   it('reads assistant receipt output between the submitted input and terminal row', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
@@ -853,11 +893,11 @@ describe('TranscriptLedgerStore', () => {
   });
 });
 
-function inputDetail(clientMessageId, content) {
+function inputDetail(clientMessageId, content, attachments = []) {
   return {
     clientMessageId,
     message: new UserMessage(at, content),
-    attachments: [],
+    attachments,
     steer: false,
   };
 }

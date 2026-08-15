@@ -382,6 +382,66 @@ describe('chat lifecycle', () => {
     });
   }, 15_000);
 
+  test('qualifies committed submission identity by exact attachment content', async () => {
+    await withIntegrationFixture('message-idempotency-attachments', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const clientMessageId = crypto.randomUUID();
+      const image = {
+        data: 'data:image/png;base64,YQ==',
+        name: 'diagram.png',
+        mimeType: 'image/png',
+      };
+      const firstRequest = {
+        ...fixture.client.directStartRequest({
+          chatId,
+          content: 'same-text-with-attachment',
+          projectPath: fixture.dirs.project,
+          agent: fixture.directAgents.anthropic,
+          clientMessageId,
+        }),
+        images: [image],
+      };
+      const first = await fixture.client.startChat(firstRequest);
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId);
+      const beforeRetry = await fixture.client.getMessages(chatId);
+      const requestCount = fixture.fakeProviders.anthropic.requests().length;
+
+      await fixture.client.runChat({
+        ...fixture.client.directRunRequest({
+          chatId,
+          content: 'same-text-with-attachment',
+          agent: fixture.directAgents.anthropic,
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId,
+        }),
+        images: [{
+          mimeType: image.mimeType,
+          data: image.data,
+          name: image.name,
+        }],
+      });
+      await fixture.client.ping();
+      expect(await fixture.client.getMessages(chatId)).toEqual(beforeRetry);
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(requestCount);
+
+      await expect(fixture.client.runChat({
+        ...fixture.client.directRunRequest({
+          chatId,
+          content: 'same-text-with-attachment',
+          agent: fixture.directAgents.anthropic,
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId,
+        }),
+        images: [{ ...image, data: 'data:image/png;base64,Yg==' }],
+      })).rejects.toMatchObject({
+        status: 409,
+        body: { errorCode: 'IDEMPOTENCY_CONFLICT' },
+      });
+      expect(await fixture.client.getMessages(chatId)).toEqual(beforeRetry);
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(requestCount);
+    });
+  });
+
   test('rejects a concurrent direct turn before mutating transcript state', async () => {
     await withIntegrationFixture('same-chat-direct-admission', async (fixture) => {
       const chatId = fixture.newChatId();
