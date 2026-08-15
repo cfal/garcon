@@ -2289,6 +2289,90 @@ async function verifyScrollbarDragPrepend(
   }
 }
 
+async function verifyKeyboardPrepend(
+  fixture: ChromiumFixture,
+  viewport: { height: number; width: number },
+): Promise<void> {
+  await fixture.page.setViewportSize(viewport);
+  const chatId = await seedTranscript(
+    fixture.integration,
+    90,
+    `chromium-keyboard-${viewport.width}`,
+  );
+  let releaseEarlierPage!: () => void;
+  const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
+  let resolveEarlierRequest!: () => void;
+  const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
+  let earlierRequestCount = 0;
+
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
+      earlierRequestCount += 1;
+      if (earlierRequestCount === 1) {
+        resolveEarlierRequest();
+        await earlierPageGate;
+      }
+    }
+    await route.continue();
+  });
+
+  try {
+    const { initialModelCount } = await prepareTranscript(fixture, chatId);
+    await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+      const feed = feedElement as HTMLElement;
+      const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+      feed.scrollTop = Math.min(maximum, feed.clientHeight * 2.5);
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      feed.focus({ preventScroll: true });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    for (let press = 0; press < 24 && earlierRequestCount === 0; press += 1) {
+      await fixture.page.keyboard.press('PageUp');
+      await fixture.page.evaluate(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+    }
+    await withDiagnosticTimeout('the held keyboard earlier page', earlierRequest);
+    expect(
+      await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
+    ).toBe(0);
+
+    const anchor = await readingAnchor(fixture.page);
+    await startReadingAnchorFrameSampler(fixture.page, anchor);
+    releaseEarlierPage();
+    await waitForStableModelCount(fixture.page, initialModelCount + 50);
+    const frames = await finishReadingAnchorFrameSampler(fixture.page);
+    expect(
+      frames.filter(
+        (frame) =>
+          !frame.connected ||
+          !frame.sameNode ||
+          frame.offset === null ||
+          frame.rowId !== anchor.rowId ||
+          frame.text !== anchor.text,
+      ),
+      JSON.stringify({ anchor, frames }, null, 2),
+    ).toEqual([]);
+    expect(
+      Math.max(
+        ...frames.map((frame) =>
+          frame.offset === null
+            ? Number.POSITIVE_INFINITY
+            : Math.abs(frame.offset - anchor.offset),
+        ),
+      ),
+      JSON.stringify({ anchor, frames }, null, 2),
+    ).toBeLessThanOrEqual(1);
+    expect(earlierRequestCount).toBe(1);
+    fixture.assertNoBrowserErrors();
+  } finally {
+    releaseEarlierPage();
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
 async function prepareTranscript(
   fixture: ChromiumFixture,
   chatId: string,
@@ -3824,6 +3908,22 @@ describe('Chromium transcript virtualization', () => {
         async (fixture, markPhase) => {
           markPhase(`reversing a ${viewport.label} scrollbar drag during a held prepend`);
           await verifyScrollbarDragPrepend(fixture, viewport);
+        },
+        diagnostics,
+        { serverEnvironment: environment.serverEnvironment },
+        browser,
+      );
+    }, 180_000);
+  }
+
+  for (const viewport of TRANSCRIPT_VIEWPORTS) {
+    test(`keeps a ${viewport.label} keyboard page stable through an earlier-page prepend`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      await withChromiumFixture(
+        `transcript-keyboard-prepend-${viewport.label}`,
+        async (fixture, markPhase) => {
+          markPhase(`paging a ${viewport.label} feed by keyboard during a held prepend`);
+          await verifyKeyboardPrepend(fixture, viewport);
         },
         diagnostics,
         { serverEnvironment: environment.serverEnvironment },
