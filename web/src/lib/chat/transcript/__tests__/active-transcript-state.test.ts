@@ -1125,6 +1125,59 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.displayMessages.map(contentOf)).toEqual(['durable']);
 	});
 
+	it('applies buffered reconnect metadata with its exact live batch', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			hasMore: false,
+		});
+		chat.appendLocalNotice('warning', 'notice before replay');
+		const replayCandidate = { ordinal: 2, content: 'replay candidate', attachmentNames: [] };
+		const liveCandidate = { ordinal: 3, content: 'live candidate', attachmentNames: ['live.txt'] };
+		const token = chat.beginReconnectReplay('chat-1', 'generation-1');
+
+		expect(
+			chat.applyReconnectReplayPage(
+				token,
+				'chat-1',
+				'generation-1',
+				[entry(2, assistant('replayed'))],
+				2,
+				2,
+				[replayCandidate],
+			),
+		).toBe('applied');
+		chat.appendLocalNotice('warning', 'notice before live batch');
+		expect(
+			chat.applyMessages('chat-1', 'generation-1', [entry(3, assistant('live'))], 3, 3, [
+				liveCandidate,
+			]),
+		).toBe('applied');
+		chat.appendLocalNotice('error', 'notice after live batch');
+
+		expect(chat.entries.map((message) => message.ordinal)).toEqual([1, 2]);
+		expect(chat.resendCandidates).toEqual([replayCandidate]);
+		expect(chat.localNotices.map((notice) => notice.content)).toEqual([
+			'notice before live batch',
+			'notice after live batch',
+		]);
+
+		expect(chat.finishReconnectReplay(token, 'chat-1')).toBe('applied');
+		expect(
+			chat.entries.map((message) => ({
+				ordinal: message.ordinal,
+				content: contentOf(message.message),
+			})),
+		).toEqual([
+			{ ordinal: 1, content: 'initial' },
+			{ ordinal: 2, content: 'replayed' },
+			{ ordinal: 3, content: 'live' },
+		]);
+		expect(chat.resendCandidates).toEqual([liveCandidate]);
+		expect(chat.localNotices.map((notice) => notice.content)).toEqual(['notice after live batch']);
+	});
+
 	it('clears optimistic rows when a transcript view is replaced', () => {
 		const chat = new ActiveTranscriptState();
 		chat.upsertOptimisticUserInput(optimisticInput());
