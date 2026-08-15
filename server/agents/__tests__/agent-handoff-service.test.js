@@ -517,6 +517,39 @@ describe('AgentHandoffService', () => {
     });
   });
 
+  it('fences duplicate matching switch markers instead of choosing one', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    const ledger = ledgerState(calls);
+    const detail = {
+      fromAgentId: 'source-agent',
+      toAgentId: 'target-agent',
+      toModel: 'target-model',
+    };
+    ledger.rowsAfter.mockReturnValue([
+      { kind: 'agent-switch', ordinal: 8, detail },
+      { kind: 'agent-switch', ordinal: 9, detail },
+    ]);
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger,
+    });
+
+    await service.recoverPendingHandoffs();
+
+    expect(ledger.appendAgentSwitch).not.toHaveBeenCalled();
+    expect(ledger.advanceContentStart).not.toHaveBeenCalled();
+    expect(state.ownership.applyHandoffDecision).not.toHaveBeenCalled();
+    expect(state.ownership.completeHandoff).not.toHaveBeenCalled();
+    expect(current).toMatchObject({
+      agentId: 'source-agent',
+      agentOwnershipEpoch: 'source-epoch',
+    });
+  });
+
   it('rejects a resumed request whose target differs from the durable decision', async () => {
     const current = sourceChat();
     const state = handoffState(current, []);
