@@ -235,17 +235,20 @@ describe('AgentRuntimeRouter producer boundary', () => {
     }));
   });
 
-  it('checks native activity immediately before resuming', async () => {
+  it('schedules native activity immediately before resuming without waiting for it', async () => {
     const order = [];
     const nativeActivity = {
-      check: mock(async () => { order.push('probe'); }),
+      requestCheck: mock(() => {
+        order.push('probe');
+        return new Promise(() => {});
+      }),
     };
     const resume = mock(async (request) => {
       order.push('resume');
       request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'resume-handle' };
     });
-    const { router } = makeRouter({
+    const { router, transcript } = makeRouter({
       entry: {
         agentSessionId: 'native-1',
         nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
@@ -253,10 +256,16 @@ describe('AgentRuntimeRouter producer boundary', () => {
       nativeActivity,
       resume,
     });
+    const beginRun = transcript.ledger.beginRun.bind(transcript.ledger);
+    transcript.ledger.beginRun = (...args) => {
+      order.push('begin');
+      return beginRun(...args);
+    };
 
     await router.runAgentTurn('chat-1', 'resume', { turnId: 'turn-1' });
 
-    expect(order).toEqual(['probe', 'resume']);
+    expect(order).toEqual(['probe', 'begin', 'resume']);
+    expect(nativeActivity.requestCheck).toHaveBeenCalledWith('chat-1', 'pre-resume');
   });
 
   it('rejects a local-to-cloud override before provider dispatch', async () => {
