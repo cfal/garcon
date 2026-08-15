@@ -8,6 +8,8 @@ import type { ConversationFeedMutationClock } from '../conversation-feed-mutatio
 import type { ConversationViewportPort } from '../conversation-viewport-port';
 import { mountInitialBottomRestoreEffect } from './conversation-scroll-controller-effect-harness.svelte';
 
+const LIVE_EDGE_PRUNE_IDLE_MS = 180_000;
+
 function mutationClock(
 	dataRevision = 0,
 	historyEarlierRevision = 0,
@@ -226,7 +228,9 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(true);
 		expect(compactToRecentMessages).not.toHaveBeenCalled();
 
-		await vi.advanceTimersByTimeAsync(120_000);
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS - 1);
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
 
 		expect(compactToRecentMessages).toHaveBeenCalledOnce();
 	});
@@ -250,7 +254,7 @@ describe('ConversationScrollController', () => {
 		fixture.scroller.scrollTop -= 100;
 		fixture.controller.noteUserScrollIntent('earlier');
 		fixture.controller.handleScroll();
-		await vi.advanceTimersByTimeAsync(120_000);
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
 
 		expect(fixture.controller.isPinnedToBottom).toBe(false);
 		expect(compactToRecentMessages).not.toHaveBeenCalled();
@@ -269,14 +273,14 @@ describe('ConversationScrollController', () => {
 		controller.noteUserScrollIntent('later');
 		controller.handleScroll();
 
-		await vi.advanceTimersByTimeAsync(60_000);
+		await vi.advanceTimersByTimeAsync(120_000);
 		controller.noteUserScrollIntent('later');
 		controller.handleScroll();
-		await vi.advanceTimersByTimeAsync(60_000);
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS - 1);
 
 		expect(compactToRecentMessages).not.toHaveBeenCalled();
 
-		await vi.advanceTimersByTimeAsync(60_000);
+		await vi.advanceTimersByTimeAsync(1);
 
 		expect(compactToRecentMessages).toHaveBeenCalledOnce();
 	});
@@ -295,7 +299,136 @@ describe('ConversationScrollController', () => {
 		fixture.controller.handleScroll();
 
 		fixture.sessions.selectedChatId = 'chat-2';
-		await vi.advanceTimersByTimeAsync(120_000);
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+	});
+
+	it('does not prune while a page request is active', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		const compactToRecentMessages = vi.fn(() => true);
+		let resolvePage!: () => void;
+		const loadEarlierPage = vi.fn(
+			() => new Promise<'loaded'>((resolve) => {
+				resolvePage = () => resolve('loaded');
+			}),
+		);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: {
+				canLoadEarlier: true,
+				compactToRecentMessages,
+				isUserScrolledUp: true,
+				loadEarlierPage,
+			},
+		});
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+
+		const pageRequest = fixture.controller.requestPage('earlier', 'button');
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+		resolvePage();
+		await pageRequest;
+	});
+
+	it('does not prune while the viewport owns a programmatic scroll', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		let ownsScrollPosition = false;
+		const compactToRecentMessages = vi.fn(() => true);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({
+				isAtEnd: vi.fn(() => true),
+				ownsScrollPosition: vi.fn(() => ownsScrollPosition),
+			}),
+			state: { compactToRecentMessages, isUserScrolledUp: true },
+		});
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+		ownsScrollPosition = true;
+
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+	});
+
+	it('cancels delayed live-edge pruning when the transcript becomes hidden', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		const compactToRecentMessages = vi.fn(() => true);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: { compactToRecentMessages, isUserScrolledUp: true },
+		});
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+
+		fixture.controller.setViewportVisible(false);
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+	});
+
+	it('cancels delayed live-edge pruning when view replacement begins', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		const compactToRecentMessages = vi.fn(() => true);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: { compactToRecentMessages, isUserScrolledUp: true },
+		});
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+
+		fixture.controller.prepareInitialBottomRestore('chat-1');
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+	});
+
+	it('cancels delayed live-edge pruning when explicit navigation begins', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		const compactToRecentMessages = vi.fn(() => true);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: { compactToRecentMessages, isUserScrolledUp: true },
+		});
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+
+		await fixture.controller.scrollToTop();
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+	});
+
+	it('cancels delayed live-edge pruning when the controller is destroyed', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		const compactToRecentMessages = vi.fn(() => true);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: { compactToRecentMessages, isUserScrolledUp: true },
+		});
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+		const destroyable = fixture.controller as ConversationScrollController & {
+			destroy?: () => void;
+		};
+
+		expect(destroyable.destroy).toBeTypeOf('function');
+		destroyable.destroy?.();
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
 
 		expect(compactToRecentMessages).not.toHaveBeenCalled();
 	});
@@ -1278,7 +1411,9 @@ describe('ConversationScrollController', () => {
 		expect(fixture.viewport.scrollToStart).toHaveBeenCalledOnce();
 	});
 
-	it('navigates to latest and compacts expanded history', async () => {
+	it('navigates to latest and schedules the same idle compaction delay', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
 		const compactToRecentMessages = vi.fn(() => true);
 		const navigateToWindow = vi.fn(async () => 'loaded' as const);
 		const { controller, viewport } = controllerFixture({
@@ -1287,6 +1422,30 @@ describe('ConversationScrollController', () => {
 		await controller.scrollToLatest();
 		expect(navigateToWindow).toHaveBeenCalledWith('chat-1', 'latest');
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS - 1);
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(compactToRecentMessages).toHaveBeenCalledOnce();
+	});
+
+	it('debounces compaction when latest history is already loaded', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		const compactToRecentMessages = vi.fn(() => true);
+		const navigateToWindow = vi.fn(async () => 'loaded' as const);
+		const { controller, viewport } = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: { compactToRecentMessages, navigateToWindow },
+		});
+
+		await controller.scrollToLatest();
+
+		expect(navigateToWindow).not.toHaveBeenCalled();
+		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
 		expect(compactToRecentMessages).toHaveBeenCalledOnce();
 	});
 

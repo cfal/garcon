@@ -220,7 +220,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 3 });
 	});
 
-	it('bounds a bottom-pinned live transcript to the recent message window', () => {
+	it('retains a bottom-pinned live transcript until explicit compaction', () => {
 		const chat = new ActiveTranscriptState();
 		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 51;
 
@@ -232,12 +232,18 @@ describe('ActiveTranscriptState', () => {
 			),
 		);
 
-		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		expect(contentOf(chat.chatMessages[0])).toBe('message-52');
+		expect(chat.chatMessages).toHaveLength(messageCount);
+		expect(contentOf(chat.chatMessages[0])).toBe('message-1');
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: messageCount });
-		expect(chat.oldestOrdinal).toBe(52);
-		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.oldestOrdinal).toBe(1);
+		expect(chat.hasEarlierMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
+
+		expect(chat.compactToRecentMessages()).toBe(true);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) => index + 52),
+		);
 	});
 
 	it('bounds oversized generation replacements to the recent message window', () => {
@@ -282,7 +288,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
 
-	it('bounds expanded history while retaining the live edge', () => {
+	it('retains expanded live-edge history until explicit compaction', () => {
 		const chat = new ActiveTranscriptState();
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -306,15 +312,18 @@ describe('ActiveTranscriptState', () => {
 			),
 		);
 
-		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		expect(contentOf(chat.chatMessages[0])).toBe('message-51');
+		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
+		expect(contentOf(chat.chatMessages[0])).toBe('message-1');
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 50);
-		expect(chat.oldestOrdinal).toBe(51);
-		expect(chat.hasEarlierMessages).toBe(true);
-		expect(chat.compactToRecentMessages()).toBe(false);
+		expect(chat.oldestOrdinal).toBe(1);
+		expect(chat.hasEarlierMessages).toBe(false);
+
+		expect(chat.compactToRecentMessages()).toBe(true);
+		expect(chat.entries[0]?.ordinal).toBe(51);
+		expect(chat.entries.at(-1)?.ordinal).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
 	});
 
-	it('detaches a scrolled-up window when live growth reaches the retention limit', () => {
+	it('preserves both loaded edges while detached live history grows', () => {
 		const chat = new ActiveTranscriptState();
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -338,14 +347,42 @@ describe('ActiveTranscriptState', () => {
 		);
 
 		expect(chat.entries.map((message) => message.ordinal)).toEqual(
-			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) => index + 1),
+			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50 }, (_, index) => index + 1),
 		);
 		expect(chat.lastOrdinal).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
+		expect(chat.loadedThroughOrdinal).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
 		expect(chat.hasEarlierMessages).toBe(false);
-		expect(chat.hasLaterMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(false);
 	});
 
-	it('deduplicates overlapping earlier pages before extending the loaded window', async () => {
+	it.each([
+		{
+			name: 'descending ordinals',
+			messages: [entry(50, assistant('message-50')), entry(49, assistant('message-49'))],
+			pageOldestOrdinal: 49,
+			pageNewestOrdinal: 50,
+		},
+		{
+			name: 'duplicate ordinals',
+			messages: [
+				entry(49, assistant('message-49')),
+				entry(49, assistant('duplicate-49')),
+				entry(50, assistant('message-50')),
+			],
+			pageOldestOrdinal: 49,
+			pageNewestOrdinal: 50,
+		},
+		{
+			name: 'overlap with the loaded interval',
+			messages: [entry(50, assistant('message-50')), entry(51, assistant('overlap-51'))],
+			pageOldestOrdinal: 50,
+			pageNewestOrdinal: 51,
+		},
+	])('rejects an earlier page with $name before mutating the window', async ({
+		messages,
+		pageOldestOrdinal,
+		pageNewestOrdinal,
+	}) => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration(
 			'chat-1',
@@ -359,35 +396,38 @@ describe('ActiveTranscriptState', () => {
 			chatId: 'chat-1',
 			limit: 50,
 			...page({
-				messages: [
-					entry(50, assistant('message-50')),
-					entry(50, assistant('duplicate-50')),
-					entry(51, assistant('overlap-51')),
-				],
+				messages,
 				lastOrdinal: 100,
-				pageOldestOrdinal: 50,
+				pageOldestOrdinal,
+				pageNewestOrdinal,
 				hasMore: false,
 			}),
 		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const entriesBeforePage = chat.entries;
+		const revisionBeforePage = chat.feedMutationClock.dataRevision;
 
-		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
+		expect(chat.entries).toBe(entriesBeforePage);
 		expect(chat.entries.map((message) => message.ordinal)).toEqual(
-			Array.from({ length: 51 }, (_, index) => index + 50),
+			Array.from({ length: 50 }, (_, index) => index + 51),
 		);
-		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 1);
+		expect(chat.feedMutationClock.dataRevision).toBe(revisionBeforePage);
+		expect(chat.pageStates.earlier.status).toBe('error');
 	});
 
-	it('keeps repeated bidirectional paging within the retained entry window', async () => {
+	it('grows one loaded interval across repeated bidirectional paging', async () => {
 		const chat = new ActiveTranscriptState();
 		const total = 400;
 		chat.replaceGeneration(
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
-				entry(index + 351, assistant(`message-${index + 351}`)),
+				entry(index + 151, assistant(`message-${index + 151}`)),
 			),
-			{ lastOrdinal: total, pageOldestOrdinal: 351, hasMore: true },
+			{ lastOrdinal: total, pageOldestOrdinal: 151, pageNewestOrdinal: 200, hasMore: true },
 		);
+		chat.hasLaterMessages = true;
 		vi.mocked(getChatMessages).mockImplementation(async (request) => {
 			const limit = request.limit ?? 50;
 			const end = Math.min(total, (request.beforeOrdinal ?? total + 1) - 1);
@@ -407,24 +447,25 @@ describe('ActiveTranscriptState', () => {
 			};
 		});
 
-		for (let pageIndex = 0; pageIndex < 7; pageIndex += 1) {
+		for (let pageIndex = 0; pageIndex < 3; pageIndex += 1) {
 			await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
-			expect(chat.entries.length).toBeLessThanOrEqual(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		}
 		expect(chat.entries[0]?.ordinal).toBe(1);
-		expect(chat.entries.at(-1)?.ordinal).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(chat.entries.at(-1)?.ordinal).toBe(200);
 		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.hasLaterMessages).toBe(true);
 
 		for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
 			await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
-			expect(chat.entries.length).toBeLessThanOrEqual(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		}
-		expect(chat.entries[0]?.ordinal).toBe(201);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: total }, (_, index) => index + 1),
+		);
+		expect(chat.entries[0]?.ordinal).toBe(1);
 		expect(chat.entries.at(-1)?.ordinal).toBe(total);
-		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.hasLaterMessages).toBe(false);
-		expect(chat.visibleMessageCount).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(chat.visibleMessageCount).toBe(total);
 	});
 
 	it('keeps the loaded later edge when earlier paging expands a detached window', async () => {
