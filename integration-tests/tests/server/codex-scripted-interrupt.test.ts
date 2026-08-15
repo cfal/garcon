@@ -1,5 +1,5 @@
 import type { ServerWsMessage } from '../../../common/ws-events.js';
-import { access } from 'node:fs/promises';
+import { access, appendFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { assistantContents, messagesOfType } from '../../support/chat-assertions.js';
@@ -42,6 +42,7 @@ describe('scripted Codex interrupt lifecycle', () => {
     const stoppedPrompt = marker('STOPPED_PROMPT');
     const recoveryPrompt = marker('RECOVERY_PROMPT');
     const startedFile = '.codex-scripted-stop-started';
+    const nativeOnlyTool = marker('NATIVE_ONLY_TOOL');
     const command = `touch ${startedFile} && sleep 30`;
     testEnvironment.model.scriptTurn([codexExecCommandCall('call_stopped', command)]);
 
@@ -55,6 +56,8 @@ describe('scripted Codex interrupt lifecycle', () => {
       }));
       if (!active.turnId) throw new Error('Codex start response omitted its turn id.');
       await waitForFile(join(fixture.dirs.project, startedFile));
+      const nativePath = await waitForNativeSessionPath(fixture.dirs.workspace, chatId);
+      await appendNativeOnlyTool(nativePath, nativeOnlyTool);
 
       const stopCursor = fixture.client.markEvents();
       const stopped = await fixture.client.stopChat({
@@ -116,6 +119,8 @@ describe('scripted Codex interrupt lifecycle', () => {
       ).toHaveLength(1);
 
       const messages = (await fixture.client.getMessages(chatId)).messages;
+      expect(JSON.stringify(fixture.client.eventsSince(stopCursor))).not.toContain(nativeOnlyTool);
+      expect(JSON.stringify(messages)).not.toContain(nativeOnlyTool);
       expect(assistantContents(messages).filter((content) => content === recoveryReply))
         .toEqual([recoveryReply]);
       const recoveryCommands = messagesOfType(messages, 'bash-tool-use')
@@ -148,4 +153,47 @@ async function waitForFile(path: string): Promise<void> {
     }
   }
   throw new Error(`Codex never created ${path}.`);
+}
+
+async function waitForNativeSessionPath(
+  workspace: string,
+  chatId: string,
+): Promise<string> {
+  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const registry = JSON.parse(await readFile(join(workspace, 'chats.json'), 'utf8')) as {
+        sessions?: Record<string, { nativeSession?: { value?: { path?: unknown } } }>;
+      };
+      const nativePath = registry.sessions?.[chatId]?.nativeSession?.value?.path;
+      if (typeof nativePath === 'string' && nativePath) return nativePath;
+    } catch {
+      // Session metadata is persisted asynchronously after activation.
+    }
+    await Bun.sleep(25);
+  }
+  throw new Error(`Codex never persisted a native path for ${chatId}.`);
+}
+
+async function appendNativeOnlyTool(nativePath: string, markerText: string): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const callId = `native-only-${crypto.randomUUID()}`;
+  await appendFile(nativePath, [
+    JSON.stringify({
+      timestamp,
+      type: 'response_item',
+      payload: {
+        type: 'function_call',
+        name: 'shell',
+        call_id: callId,
+        arguments: JSON.stringify({ command: ['printf', markerText] }),
+      },
+    }),
+    JSON.stringify({
+      timestamp,
+      type: 'response_item',
+      payload: { type: 'function_call_output', call_id: callId, output: markerText },
+    }),
+    '',
+  ].join('\n'));
 }
