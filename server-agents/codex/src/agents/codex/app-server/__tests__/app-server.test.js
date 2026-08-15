@@ -6315,6 +6315,19 @@ describe('CodexAppServerRuntime', () => {
 
   it('does not append native-only interrupted tools behind live assistant output', async () => {
     const nativePath = path.join(tmpDir, 'interrupted-native-tail.jsonl');
+    const liveCommand = {
+      type: 'commandExecution',
+      id: 'live-command',
+      command: 'printf observed-before-answer',
+      cwd: '/repo',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: 'observed command output',
+      exitCode: 0,
+      durationMs: 12,
+    };
     const liveItem = {
       type: 'agentMessage',
       id: 'live-assistant',
@@ -6361,6 +6374,10 @@ describe('CodexAppServerRuntime', () => {
     await provider.startSession(makeRequest());
     fake.emit('notification', {
       method: 'item/completed',
+      params: { threadId: 'thread-1', turnId: 'turn-1', item: liveCommand },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
       params: { threadId: 'thread-1', turnId: 'turn-1', item: liveItem },
     });
     fake.emit('notification', {
@@ -6370,14 +6387,24 @@ describe('CodexAppServerRuntime', () => {
         turn: makeTurn({
           id: 'turn-1',
           status: 'interrupted',
-          items: [liveItem],
+          items: [liveCommand, liveItem],
           itemsView: 'summary',
         }),
       },
     });
     await finished;
 
-    expect(emitted.map((message) => [message.type, message.content])).toEqual([
+    expect(emitted.map((message) => {
+      if (message.type === 'bash-tool-use') {
+        return [message.type, message.toolId, message.command];
+      }
+      if (message.type === 'tool-result') {
+        return [message.type, message.toolId, message.content];
+      }
+      return [message.type, message.content];
+    })).toEqual([
+      ['bash-tool-use', 'live-command', 'printf observed-before-answer'],
+      ['tool-result', 'live-command', { raw: 'observed command output' }],
       ['assistant-message', 'The live answer is already visible'],
     ]);
   });

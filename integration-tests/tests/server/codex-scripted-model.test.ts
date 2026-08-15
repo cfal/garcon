@@ -67,6 +67,22 @@ describe('Codex against a scripted model', () => {
       expect(result?.isError).toBe(false);
       expect(JSON.stringify(result?.content)).toContain(marker);
 
+      const commandIndex = transcript.messages.findIndex((entry) => (
+        entry.message.type === 'bash-tool-use' && entry.message.toolId === bash.toolId
+      ));
+      expect(commandIndex).toBeGreaterThanOrEqual(0);
+      const observedTail = transcript.messages.slice(commandIndex);
+      const commandOrdinal = observedTail[0]!.ordinal;
+      expect(observedTail.map((entry) => [entry.ordinal, entry.message.type])).toEqual([
+        [commandOrdinal, 'bash-tool-use'],
+        [commandOrdinal + 1, 'tool-result'],
+        [commandOrdinal + 2, 'assistant-message'],
+      ]);
+      expect(observedTail.at(-1)!.message).toMatchObject({
+        type: 'assistant-message',
+        content: reply,
+      });
+
       const requests = testEnvironment.model.requests();
       expect(requests).toHaveLength(2);
       expect(requests[0].lastUserText).toContain('Run the scripted command.');
