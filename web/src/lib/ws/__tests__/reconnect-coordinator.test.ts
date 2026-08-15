@@ -1028,7 +1028,8 @@ describe('ChatReconnectCoordinator', () => {
 		const heldContinuation = deferred<Record<string, unknown>>();
 		const baseDeps = createReconnectDeps();
 		let subscribeCount = 0;
-		baseDeps.ws.sendRequest.mockImplementation(async (request: Record<string, unknown>) => {
+		baseDeps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
+			const request = rawRequest as Record<string, unknown>;
 			if (request.type === 'reconnect-state-query') {
 				return reconnectStateResponse([], ['chat-1']);
 			}
@@ -1118,7 +1119,8 @@ describe('ChatReconnectCoordinator', () => {
 			},
 		});
 		let visiblePage = 0;
-		deps.ws.sendRequest.mockImplementation(async (request: Record<string, unknown>) => {
+		deps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
+			const request = rawRequest as Record<string, unknown>;
 			if (request.type === 'reconnect-state-query') {
 				return reconnectStateResponse([], ['chat-1']);
 			}
@@ -1163,7 +1165,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(requests[0]).not.toHaveProperty('throughOrdinal');
 		expect(requests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 6 });
 		expect(deps.onVisibleChatMessages.mock.calls.map((call) => ({
-			ordinals: call[2].map((entry) => entry.ordinal),
+			ordinals: call[2].map((entry: TranscriptMessage) => entry.ordinal),
 			firstOrdinal: call[3],
 			lastOrdinal: call[4],
 		}))).toEqual([
@@ -1183,7 +1185,8 @@ describe('ChatReconnectCoordinator', () => {
 			}],
 		});
 		let backgroundPage = 0;
-		deps.ws.sendRequest.mockImplementation(async (request: Record<string, unknown>) => {
+		deps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
+			const request = rawRequest as Record<string, unknown>;
 			if (request.type === 'reconnect-state-query') return reconnectStateResponse();
 			if (request.type !== 'chat-subscribe') {
 				throw new Error(`Unexpected request: ${String(request.type)}`);
@@ -1226,7 +1229,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(requests[0]).not.toHaveProperty('throughOrdinal');
 		expect(requests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 5 });
 		expect(deps.onBackgroundMessages.mock.calls.map((call) => ({
-			ordinals: call[2].map((entry) => entry.ordinal),
+			ordinals: call[2].map((entry: TranscriptMessage) => entry.ordinal),
 			firstOrdinal: call[3],
 			lastOrdinal: call[4],
 		}))).toEqual([
