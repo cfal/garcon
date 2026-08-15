@@ -159,6 +159,155 @@ describe('Codex producer routing', () => {
     });
   }, 30_000);
 
+  test('keeps reused native approval ids bound to their exact occurrences', async () => {
+    let controlDirectory = '';
+    let turnReleasePath = '';
+    await withIntegrationFixture('codex-reused-approval-routing', async (fixture) => {
+      const codex = await codexAgent(fixture);
+      const chatId = fixture.newChatId();
+      const prompt = `reused-approval-${randomUUID()}`;
+      const turnCursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(startRequest(fixture, codex, chatId, prompt));
+      await waitForAssistant(fixture, chatId, `codex-live2-${prompt}`);
+
+      const nativeRequestId = 7_101;
+      const firstCommand = `echo first-${randomUUID()}`;
+      const firstControl = 'reused-approval-first.request.json';
+      const firstResponse = join(controlDirectory, `${firstControl}.response.json`);
+      const firstCursor = fixture.client.markEvents();
+      await writeFile(join(controlDirectory, firstControl), JSON.stringify({
+        target: 'started',
+        requestId: nativeRequestId,
+        command: firstCommand,
+      }));
+      const first = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => JSON.stringify(row.message).includes(firstCommand),
+        { afterIndex: firstCursor },
+      );
+      if (first.message.type !== 'permission-request') {
+        throw new Error('The first reused Codex approval was not published.');
+      }
+      const serverInstanceId = (await fixture.client.getChatSnapshot(chatId, 0))
+        .transientFeed.serverInstanceId;
+      const firstDecision = await fixture.client.sendPermissionDecision({
+        clientRequestId: randomUUID(),
+        chatId,
+        permissionRequestId: first.message.permissionRequestId,
+        allow: true,
+        alwaysAllow: false,
+        control: transientPermissionControl(serverInstanceId, chatId, first),
+      });
+      expect(firstDecision.status).toBe('accepted');
+      expect(await waitForJson(firstResponse)).toEqual({
+        result: { decision: 'accept' },
+        error: null,
+      });
+
+      const secondCommand = `echo second-${randomUUID()}`;
+      const secondControl = 'reused-approval-second.request.json';
+      const secondResponse = join(controlDirectory, `${secondControl}.response.json`);
+      const secondCursor = fixture.client.markEvents();
+      await writeFile(join(controlDirectory, secondControl), JSON.stringify({
+        target: 'started',
+        requestId: nativeRequestId,
+        command: secondCommand,
+      }));
+      const second = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => JSON.stringify(row.message).includes(secondCommand),
+        { afterIndex: secondCursor },
+      );
+      if (second.message.type !== 'permission-request') {
+        throw new Error('The second reused Codex approval was not published.');
+      }
+      expect(second.message.permissionRequestId).not.toBe(first.message.permissionRequestId);
+      expect(second.incarnation).not.toBe(first.incarnation);
+
+      await expect(fixture.client.sendPermissionDecision({
+        clientRequestId: randomUUID(),
+        chatId,
+        permissionRequestId: first.message.permissionRequestId,
+        allow: false,
+        alwaysAllow: false,
+        control: transientPermissionControl(serverInstanceId, chatId, first),
+      })).rejects.toMatchObject({
+        status: 409,
+        body: {
+          errorCode: 'VALIDATION_FAILED',
+          retryable: false,
+        },
+      });
+      expect(await pathExists(secondResponse)).toBe(false);
+
+      const secondDecision = await fixture.client.sendPermissionDecision({
+        clientRequestId: randomUUID(),
+        chatId,
+        permissionRequestId: second.message.permissionRequestId,
+        allow: false,
+        alwaysAllow: false,
+        control: transientPermissionControl(serverInstanceId, chatId, second),
+      });
+      expect(secondDecision.status).toBe('accepted');
+      expect(await waitForJson(secondResponse)).toEqual({
+        result: { decision: 'decline' },
+        error: null,
+      });
+
+      const permissionRows = (await fixture.client.getMessages(chatId)).messages.flatMap((entry) => {
+        const message = entry.message;
+        if (message.type !== 'permission-request' && message.type !== 'permission-resolved') {
+          return [];
+        }
+        return [{
+          type: message.type,
+          requestId: message.permissionRequestId,
+          incarnation: message.incarnation,
+        }];
+      });
+      expect(permissionRows).toEqual([
+        {
+          type: 'permission-request',
+          requestId: first.message.permissionRequestId,
+          incarnation: first.incarnation,
+        },
+        {
+          type: 'permission-resolved',
+          requestId: first.message.permissionRequestId,
+          incarnation: first.incarnation,
+        },
+        {
+          type: 'permission-request',
+          requestId: second.message.permissionRequestId,
+          incarnation: second.incarnation,
+        },
+        {
+          type: 'permission-resolved',
+          requestId: second.message.permissionRequestId,
+          incarnation: second.incarnation,
+        },
+      ]);
+
+      await writeFile(turnReleasePath, 'release');
+      await fixture.client.waitForTurnTerminal(chatId, turn.turnId, { afterIndex: turnCursor });
+    }, {
+      resolveServerEnvironment(directories) {
+        controlDirectory = join(directories.root, 'codex-reused-approval-controls');
+        turnReleasePath = join(directories.root, 'codex-reused-approval-release');
+        return {
+          GARCON_CODEX_CLI: FAKE_CODEX,
+          PATH: SYSTEM_PATH,
+          INTEGRATION_CODEX_ROUTING_CONTROL_DIR: controlDirectory,
+          INTEGRATION_CODEX_STREAMING_TURN: '1',
+          INTEGRATION_CODEX_TURN_RELEASE: turnReleasePath,
+        };
+      },
+      async prepareWorkspace() {
+        await mkdir(controlDirectory, { recursive: true });
+      },
+    });
+  }, 30_000);
+
   test('drops content emitted by the old native client after transcript replacement', async () => {
     let controlDirectory = '';
     let turnReleasePath = '';
@@ -349,6 +498,38 @@ async function waitForPath(path: string): Promise<void> {
     }
   }
   throw new Error(`Timed out waiting for ${path}`);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForJson(path: string): Promise<unknown> {
+  await waitForPath(path);
+  return JSON.parse(await readFile(path, 'utf8')) as unknown;
+}
+
+function transientPermissionControl(
+  serverInstanceId: string,
+  chatId: string,
+  row: {
+    readonly runId: string;
+    readonly id: string;
+    readonly incarnation: string;
+  },
+) {
+  return {
+    serverInstanceId,
+    chatId,
+    runId: row.runId,
+    id: row.id,
+    incarnation: row.incarnation,
+  };
 }
 
 function chatRows(events: readonly ServerWsMessage[], chatId: string) {

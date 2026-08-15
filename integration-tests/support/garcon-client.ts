@@ -651,11 +651,16 @@ export class GarconTestClient {
     permissionRequestId: string,
   ): Promise<PermissionDecisionCommandRequest['control']> {
     const snapshot = await this.getChatSnapshot(chatId, 0);
-    const row = snapshot.transientFeed.rows.find((candidate) => (
+    const rows = snapshot.transientFeed.rows.filter((candidate) => (
       candidate.id === permissionRequestId
       && candidate.message.type === 'permission-request'
     ));
-    if (!row) throw new Error(`Transient permission not found: ${permissionRequestId}`);
+    if (rows.length !== 1) {
+      throw new Error(
+        `Expected one transient permission for ${permissionRequestId}, found ${rows.length}`,
+      );
+    }
+    const row = rows[0]!;
     return {
       serverInstanceId: snapshot.transientFeed.serverInstanceId,
       chatId,
