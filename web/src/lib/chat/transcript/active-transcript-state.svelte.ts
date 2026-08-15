@@ -203,11 +203,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	get canAutoFillEarlier(): boolean {
-		return (
-			this.hasEarlierRowsToReveal ||
-			(this.hasEarlierMessages &&
-				this.entries.length + MESSAGES_PER_PAGE <= ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
-		);
+		return this.hasEarlierRowsToReveal || this.hasEarlierMessages;
 	}
 
 	get canLoadLater(): boolean {
@@ -289,30 +285,22 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.setResendCandidates(resendCandidates);
 			return 'applied';
 		}
+		const previousEntryCount = this.entries.length;
 		const applied = applyTranscriptAppend(this.entries, append, this.lastOrdinal);
 		let entriesChanged = applied.status === 'applied' && applied.changed;
 		if (applied.status === 'applied') {
-			const exceedsRetentionLimit = applied.messages.length > ACTIVE_TRANSCRIPT_RETENTION_LIMIT;
-			const detachedFromLatest = exceedsRetentionLimit && this.isUserScrolledUp;
-			const nextEntries = exceedsRetentionLimit
-				? this.isUserScrolledUp
-					? applied.messages.slice(0, ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
-					: applied.messages.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
-				: applied.messages;
 			this.transcriptViewId = transcriptViewId;
-			if (nextEntries !== this.entries) this.entries = nextEntries;
+			if (applied.messages !== this.entries) this.entries = applied.messages;
 			this.lastOrdinal = applied.lastOrdinal;
-			if (!detachedFromLatest) this.loadedThroughOrdinal = applied.lastOrdinal;
+			this.loadedThroughOrdinal = applied.lastOrdinal;
 			this.oldestOrdinal = this.entries[0]?.ordinal ?? 0;
-			if (detachedFromLatest) {
-				this.hasLaterMessages = true;
-			} else if (exceedsRetentionLimit) {
-				this.hasEarlierMessages = true;
+			if (entriesChanged && this.isUserScrolledUp) {
+				const appendedCount = Math.max(0, this.entries.length - previousEntryCount);
+				this.visibleMessageCount = Math.min(
+					this.displayMessageCount,
+					this.visibleMessageCount + appendedCount,
+				);
 			}
-			this.visibleMessageCount = Math.min(
-				this.visibleMessageCount,
-				ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
-			);
 		} else {
 			const restored = this.transcriptCache.get(chatId);
 			if (!restored || restored.transcriptViewId !== transcriptViewId) return 'gap-detected';
@@ -637,20 +625,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'exhausted';
 		}
 		const mergedEntries = [...addedMessages, ...this.entries];
-		const trimmedLater = mergedEntries.length > ACTIVE_TRANSCRIPT_RETENTION_LIMIT;
-		this.entries = retainTranscriptEntries(mergedEntries, 'earlier');
+		this.entries = mergedEntries;
 		this.oldestOrdinal = addedMessages[0].ordinal;
 		this.lastOrdinal = Math.max(this.lastOrdinal, page.lastOrdinal);
 		this.hasEarlierMessages = page.hasMore;
-		if (trimmedLater) {
-			this.loadedThroughOrdinal = this.entries.at(-1)?.ordinal ?? 0;
-			this.hasLaterMessages = true;
-		}
 		this.totalMessages = this.entries.length;
-		this.visibleMessageCount = Math.min(
-			this.visibleMessageCount + addedMessages.length,
-			ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
-		);
+		this.visibleMessageCount += addedMessages.length;
 		this.#rememberExpandedVisibleWindow();
 		this.#recordFeedMutation('history-earlier');
 		return 'loaded';
@@ -672,18 +652,16 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		}
 
 		const merged = [...this.entries, ...addedMessages];
-		const trimmedEarlier = merged.length > ACTIVE_TRANSCRIPT_RETENTION_LIMIT;
-		this.entries = retainTranscriptEntries(merged, 'later');
+		this.entries = merged;
 		this.lastOrdinal = Math.max(this.lastOrdinal, page.lastOrdinal);
 		this.loadedThroughOrdinal = page.pageNewestOrdinal;
 		this.oldestOrdinal = this.entries[0]?.ordinal ?? 0;
-		if (trimmedEarlier) this.hasEarlierMessages = true;
 		this.hasLaterMessages = !reachesLatest;
 		this.totalMessages = this.entries.length;
-		this.visibleMessageCount = Math.min(
-			this.visibleMessageCount + addedMessages.length,
-			ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
-		);
+		this.visibleMessageCount += addedMessages.length;
+		if (reachesLatest) {
+			this.visibleMessageCount = Math.min(this.visibleMessageCount, this.displayMessageCount);
+		}
 		this.#rememberExpandedVisibleWindow();
 		this.#recordFeedMutation('history-later');
 		return 'loaded';
