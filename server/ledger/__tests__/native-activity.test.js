@@ -128,7 +128,30 @@ describe('NativeTranscriptActivityService', () => {
       expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
     });
   });
+
+  it('drops a pending native result when execution starts before the probe settles', async () => {
+    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
+      ledger.initializeChat('chat-1', baseRows());
+      const pending = deferred();
+      setResult(pending.promise);
+
+      const check = activity.check('chat-1');
+      expect(lastActivity).toHaveBeenCalledTimes(1);
+      ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      pending.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+
+      expect(await check).toBe(false);
+      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
+    });
+  });
 });
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 function baseRows() {
   return [
