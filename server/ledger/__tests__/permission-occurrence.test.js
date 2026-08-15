@@ -92,6 +92,51 @@ describe('transcript permission occurrences', () => {
     });
   });
 
+  it('invalidates an in-flight permission claim when the producer closes', async () => {
+    await withLedger((ledger) => {
+      const { claim } = claimPermission(ledger);
+
+      ledger.closeProducer(CHAT_ID);
+
+      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
+        'permission-requested',
+      ]);
+    });
+  });
+
+  it('invalidates an in-flight permission claim when its view is replaced', async () => {
+    await withLedger((ledger) => {
+      const { claim } = claimPermission(ledger);
+      const current = ledger.currentView(CHAT_ID);
+      const staging = ledger.stageView(
+        CHAT_ID,
+        [],
+        1,
+        transcriptViewId('view-2'),
+      );
+
+      ledger.replaceCurrentView(CHAT_ID, current.viewId, staging.viewId);
+
+      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.currentRows(CHAT_ID)).toEqual([]);
+    });
+  });
+
+  it('invalidates an in-flight permission claim when its chat is deleted', async () => {
+    await withLedger((ledger) => {
+      const { claim } = claimPermission(ledger);
+
+      ledger.deleteChat(CHAT_ID);
+
+      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.currentView(CHAT_ID)).toBeNull();
+    });
+  });
+
   it('invalidates an in-flight permission claim when its run ends', async () => {
     await withLedger((ledger) => {
       const lease = startRun(ledger);
@@ -143,6 +188,29 @@ describe('transcript permission occurrences', () => {
       expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
         'permission-requested',
         'permission-cancelled',
+      ]);
+    });
+  });
+
+  it('invalidates an in-flight permission claim when its occurrence expires', async () => {
+    await withLedger((ledger) => {
+      const { lease, claim } = claimPermission(ledger);
+
+      lease.sink.publish({
+        type: 'permission',
+        runId: RUN_ID,
+        lifecycle: {
+          kind: 'expired',
+          requestId: REQUEST_ID,
+          incarnation: 'incarnation-1',
+        },
+      });
+
+      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
+        'permission-requested',
+        'permission-expired',
       ]);
     });
   });
@@ -269,6 +337,17 @@ function publishRequest(sink, incarnation, decision, runId = RUN_ID) {
     lifecycle: permissionRequest(incarnation),
     decision,
   });
+}
+
+function claimPermission(ledger) {
+  const lease = startRun(ledger);
+  publishRequest(
+    lease.sink,
+    'incarnation-1',
+    permissionDecision('incarnation-1'),
+  );
+  const claim = ledger.claimPermissionResolution(permissionControl('incarnation-1'));
+  return { lease, claim };
 }
 
 function permissionRequest(incarnation) {
