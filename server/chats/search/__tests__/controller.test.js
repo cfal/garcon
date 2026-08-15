@@ -151,6 +151,64 @@ describe('TranscriptSearchController', () => {
     expect(test.service.replaceChat).not.toHaveBeenCalled();
   });
 
+  it('advances the search watermark across non-searchable ledger rows', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.appendRows.mockClear();
+    const session = {
+      kind: 'session',
+      viewId: 'view-1',
+      ordinal: 3,
+      at: '2026-08-10T10:00:02.000Z',
+      detail: {
+        agentSessionId: 'session-1',
+        nativeSession: null,
+        nativeSeedReceipt: null,
+      },
+      providerMeta: null,
+    };
+    const terminal = {
+      kind: 'run-ended',
+      viewId: 'view-1',
+      ordinal: 4,
+      at: '2026-08-10T10:00:03.000Z',
+      outcome: 'finished',
+      origin: 'provider',
+      providerMeta: null,
+    };
+    const visible = providerRow('view-1', 5, 'after hidden rows');
+
+    test.listener()({
+      type: 'session',
+      chatId: 'chat-1',
+      viewId: 'view-1',
+      row: session,
+    });
+    test.listener()({
+      type: 'run-ended',
+      chatId: 'chat-1',
+      viewId: 'view-1',
+      runId: 'run-1',
+      row: terminal,
+    });
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [visible] });
+    await settle();
+
+    expect(test.service.appendRows.mock.calls.map(([input]) => ({
+      expectedAfterOrdinal: input.expectedAfterOrdinal,
+      throughOrdinal: input.throughOrdinal,
+      rows: input.rows,
+    }))).toEqual([
+      { expectedAfterOrdinal: 2, throughOrdinal: 3, rows: [] },
+      { expectedAfterOrdinal: 3, throughOrdinal: 4, rows: [] },
+      {
+        expectedAfterOrdinal: 4,
+        throughOrdinal: 5,
+        rows: [expect.objectContaining({ ordinal: 5, body: 'after hidden rows' })],
+      },
+    ]);
+  });
+
   it('keeps long append series linear without rereading the transcript', async () => {
     const test = harness();
     await test.controller.initialize(true);
