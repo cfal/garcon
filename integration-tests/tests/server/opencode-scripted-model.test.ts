@@ -18,6 +18,7 @@ import {
 import {
   expectFinished,
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
@@ -313,6 +314,62 @@ describeOnLinux('OpenCode against a scripted model', () => {
         (entry) => entry.id === chatId,
       )?.preview.lastMessage;
       expect(preview).toContain(secondReply);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('resumes the same native session through the publisher issued after transcript reload', async () => {
+    const testEnvironment = requireEnvironment();
+    const firstPrompt = marker('RELOAD_FIRST_PROMPT');
+    const firstReply = marker('RELOAD_FIRST_REPLY');
+    const secondPrompt = marker('RELOAD_SECOND_PROMPT');
+    const secondReply = marker('RELOAD_SECOND_REPLY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(firstReply)]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(secondReply)]);
+
+    await withIntegrationFixture('opencode-scripted-reload-routing', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const firstCursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: firstPrompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: first.turnId,
+        marker: firstReply,
+        afterIndex: firstCursor,
+      });
+      const sessionBeforeReload = await openCodeNativeSession(fixture, chatId);
+      const viewBeforeReload = (await fixture.client.getMessages(chatId)).transcriptViewId;
+
+      await reloadUntilNativeContains(fixture, chatId, firstReply);
+      const reloaded = await fixture.client.getMessages(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(viewBeforeReload);
+      expect(userContents(reloaded.messages)).toEqual([firstPrompt]);
+      expect(assistantContents(reloaded.messages)).toEqual([firstReply]);
+
+      const secondCursor = fixture.client.markEvents();
+      const second = await fixture.client.runChat(scriptedOpenCodeRunRequest({
+        chatId,
+        command: secondPrompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: second.turnId,
+        marker: secondReply,
+        afterIndex: secondCursor,
+      });
+
+      const finalPage = await fixture.client.getMessages(chatId);
+      expect(finalPage.transcriptViewId).toBe(reloaded.transcriptViewId);
+      expect(userContents(finalPage.messages)).toEqual([firstPrompt, secondPrompt]);
+      expect(assistantContents(finalPage.messages)).toEqual([firstReply, secondReply]);
+      const sessionAfterReload = await openCodeNativeSession(fixture, chatId);
+      expect(sessionAfterReload.agentSessionId).toBe(sessionBeforeReload.agentSessionId);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);

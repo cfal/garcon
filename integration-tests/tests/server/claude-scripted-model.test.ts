@@ -1,14 +1,25 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
 import { INTEGRATION_ANTHROPIC_API_KEY } from '../../support/anthropic-test-contract.js';
-import { messagesOfType } from '../../support/chat-assertions.js';
+import {
+  assistantContents,
+  messagesOfType,
+  userContents,
+} from '../../support/chat-assertions.js';
 import {
   claudeText,
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { waitForVisibleResponse } from '../../support/live-agent.js';
-import { liveClaudeStartRequest } from '../../support/live-claude.js';
+import {
+  reloadUntilNativeContains,
+  waitForVisibleResponse,
+} from '../../support/live-agent.js';
+import {
+  liveClaudeRunRequest,
+  liveClaudeStartRequest,
+} from '../../support/live-claude.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import {
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
@@ -182,6 +193,75 @@ describe('Claude against a scripted model', () => {
       serverEnvironment: testEnvironment.serverEnvironment,
     });
   });
+
+  test('resumes the same native session through the publisher issued after transcript reload', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const firstPrompt = `SCRIPTED_RELOAD_FIRST_PROMPT_${crypto.randomUUID()}`;
+    const firstReply = `SCRIPTED_RELOAD_FIRST_REPLY_${crypto.randomUUID()}`;
+    const secondPrompt = `SCRIPTED_RELOAD_SECOND_PROMPT_${crypto.randomUUID()}`;
+    const secondReply = `SCRIPTED_RELOAD_SECOND_REPLY_${crypto.randomUUID()}`;
+    testEnvironment.model.scriptTurn([claudeText(firstReply)]);
+    testEnvironment.model.scriptTurn([claudeText(secondReply)]);
+
+    await withIntegrationFixture('claude-scripted-reload-routing', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const firstCursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: firstPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: first.turnId,
+        marker: firstReply,
+        afterIndex: firstCursor,
+      });
+      const sessionBeforeReload = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: 'claude',
+      });
+      const viewBeforeReload = (await fixture.client.getMessages(chatId)).transcriptViewId;
+
+      await reloadUntilNativeContains(fixture, chatId, firstReply);
+      const reloaded = await fixture.client.getMessages(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(viewBeforeReload);
+      expect(userContents(reloaded.messages)).toEqual([firstPrompt]);
+      expect(assistantContents(reloaded.messages)).toEqual([firstReply]);
+
+      const secondCursor = fixture.client.markEvents();
+      const second = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId,
+        command: secondPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: second.turnId,
+        marker: secondReply,
+        afterIndex: secondCursor,
+      });
+
+      const finalPage = await fixture.client.getMessages(chatId);
+      expect(finalPage.transcriptViewId).toBe(reloaded.transcriptViewId);
+      expect(userContents(finalPage.messages)).toEqual([firstPrompt, secondPrompt]);
+      expect(assistantContents(finalPage.messages)).toEqual([firstReply, secondReply]);
+      const sessionAfterReload = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: 'claude',
+      });
+      expect(sessionAfterReload.agentSessionId).toBe(sessionBeforeReload.agentSessionId);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
 
   test('retries a transient HTTP error', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
