@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { TranscriptMessage } from '../../../../common/chat-view.js';
 import {
   assistantContents,
   countUserContent,
@@ -19,7 +18,6 @@ import {
   expectFinished,
   liveMarker,
   LIVE_TURN_TIMEOUT_MS,
-  POLL_INTERVAL_MS,
   waitForVisibleResponse,
 } from '../../../support/live-agent.js';
 import {
@@ -372,11 +370,6 @@ describe('live Codex lifecycle', () => {
         'Do not perform other work before the command finishes.',
         'After it finishes, reply with exactly CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE.',
       ].join(' ');
-      const beforeStoppedTranscript = await fixture.client.getMessages(chatId);
-      const priorBashToolIds = new Set(
-        messagesOfType(beforeStoppedTranscript.messages, 'bash-tool-use')
-          .map((message) => message.toolId),
-      );
       const stoppedCursor = fixture.client.markEvents();
       const stoppedTurn = await fixture.client.runChat(liveCodexRunRequest({
         chatId,
@@ -443,30 +436,38 @@ describe('live Codex lifecycle', () => {
         chats: [],
       });
 
-      // Codex can append the interrupted command to its rollout after the abort lands, so the
-      // chat is settled before either side is sampled. Reading the ledger and the event log at
-      // different instants is what makes this comparison race.
-      const stoppedTranscript = await settledTranscript(fixture, chatId);
+      const stoppedTranscript = await fixture.client.getMessages(chatId);
       expectNoCompletionReply(
         assistantContents(stoppedTranscript.messages),
         'CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE',
       );
-      // A tool result that lands after the run is already terminal carries no run correlation,
-      // so the stopped turn's rows arrive untagged. Parity is against everything the chat
-      // broadcast since the turn began, not against what kept its turn id.
       const liveStoppedMessages = fixture.client.eventsSince(stoppedCursor).flatMap((event) =>
-        event.type === 'chat-messages' && event.chatId === chatId ? event.messages : []);
-      // Codex may omit an interrupted command item entirely, so only cross-source parity is stable.
-      const liveStoppedExecutions = toolExecutionProjections(liveStoppedMessages);
-      expect(toolExecutionProjections(stoppedTranscript.messages, priorBashToolIds))
-        .toEqual(liveStoppedExecutions);
+        event.type === 'chat-messages' && event.chatId === chatId
+          ? event.messages.filter((message) => message.ordinal <= stoppedTranscript.lastOrdinal)
+          : []);
+      const stoppedRowsByOrdinal = new Map(
+        stoppedTranscript.messages.map((message) => [message.ordinal, message]),
+      );
+      expect(new Set(liveStoppedMessages.map((message) => message.ordinal)).size)
+        .toBe(liveStoppedMessages.length);
+      expect(liveStoppedMessages.filter((entry) =>
+        entry.message.type === 'user-message'
+        && entry.message.content === stoppedPrompt)).toHaveLength(1);
+      for (const message of liveStoppedMessages) {
+        expect(stoppedRowsByOrdinal.get(message.ordinal)).toEqual(message);
+      }
       expect(countUserContent(stoppedTranscript.messages, stoppedPrompt)).toBe(1);
 
       await fixture.restartGarcon();
-      // Restart reopens the ledger and replays nothing, so the transcript is what it was.
       const restoredTranscript = await fixture.client.getMessages(chatId);
-      expect(toolExecutionProjections(restoredTranscript.messages, priorBashToolIds))
-        .toEqual(toolExecutionProjections(stoppedTranscript.messages, priorBashToolIds));
+      expect(restoredTranscript.transcriptViewId).toBe(stoppedTranscript.transcriptViewId);
+      expect(restoredTranscript.messages.filter(
+        (message) => message.ordinal <= stoppedTranscript.lastOrdinal,
+      )).toEqual(stoppedTranscript.messages);
+      expectNoCompletionReply(
+        assistantContents(restoredTranscript.messages),
+        'CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE',
+      );
       expect(countUserContent(restoredTranscript.messages, stoppedPrompt)).toBe(1);
 
       const recoveryMarker = liveMarker('CODEX_POST_INTERRUPT');
@@ -519,50 +520,6 @@ function expectPersistedCommand(
   const resultSeq = transcript.messages.find((entry) =>
     entry.message.type === 'tool-result' && entry.message.toolId === succeeded.toolId)?.ordinal;
   expect(resultSeq).toBeGreaterThan(bashSeq ?? Number.MAX_SAFE_INTEGER);
-}
-
-// A provider that keeps writing after a turn ends leaves the transcript briefly in motion, so
-// callers that compare it against another source wait for two identical reads first.
-async function settledTranscript(
-  fixture: IntegrationFixture,
-  chatId: string,
-): Promise<Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>> {
-  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
-  let previous = await fixture.client.getMessages(chatId);
-  while (Date.now() < deadline) {
-    await Bun.sleep(POLL_INTERVAL_MS);
-    const next = await fixture.client.getMessages(chatId);
-    if (next.lastOrdinal === previous.lastOrdinal
-      && next.messages.length === previous.messages.length) return next;
-    previous = next;
-  }
-  throw new Error(`Live Codex chat ${chatId} never settled.`);
-}
-
-function toolExecutionProjections(
-  messages: readonly TranscriptMessage[],
-  excludedToolIds: ReadonlySet<string> = new Set(),
-): Array<{
-  bash: { toolId: string; command: string; description?: string };
-  result: { toolId: string; content: Record<string, unknown>; isError: boolean } | null;
-}> {
-  const results = messagesOfType(messages, 'tool-result');
-  return messagesOfType(messages, 'bash-tool-use')
-    .filter((bash) => !excludedToolIds.has(bash.toolId))
-    .map((bash) => {
-      const result = results.find((message) => message.toolId === bash.toolId);
-      return {
-        bash: {
-          toolId: bash.toolId,
-          command: bash.command,
-          description: bash.description,
-        },
-        result: result
-          ? { toolId: result.toolId, content: result.content, isError: result.isError }
-          : null,
-      };
-    })
-    .sort((left, right) => left.bash.toolId.localeCompare(right.bash.toolId));
 }
 
 async function waitForFile(path: string): Promise<void> {
