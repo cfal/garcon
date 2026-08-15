@@ -310,6 +310,52 @@ describe('server event wiring', () => {
     })]);
   });
 
+  it('broadcasts a view replacement before rows from the replacement producer', async () => {
+    const fixture = createFixture();
+
+    fixture.agent.transcript({
+      type: 'view-replaced',
+      chatId: 'chat-1',
+      previousViewId: 'view-1',
+      view: {
+        viewId: 'view-2',
+        status: 'current',
+        createdAt: at,
+        contentStartOrdinal: 1,
+      },
+    });
+    fixture.agent.transcript({
+      ...providerCommit('replacement live row'),
+      viewId: 'view-2',
+      rows: [{
+        kind: 'provider-row',
+        ordinal: 1,
+        at,
+        providerMeta: null,
+        message: new AssistantMessage(at, 'replacement live row'),
+      }],
+    });
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toEqual([
+      expect.objectContaining({
+        type: 'chat-transcript-replaced',
+        previousTranscriptViewId: 'view-1',
+        transcriptViewId: 'view-2',
+      }),
+      expect.objectContaining({
+        type: 'chat-messages',
+        transcriptViewId: 'view-2',
+        firstOrdinal: 1,
+        lastOrdinal: 1,
+        messages: [{
+          ordinal: 1,
+          message: expect.objectContaining({ content: 'replacement live row' }),
+        }],
+      }),
+    ]);
+  });
+
   it('broadcasts session facts through the same per-chat task queue', async () => {
     const fixture = createFixture();
 
