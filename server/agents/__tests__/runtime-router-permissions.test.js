@@ -1,7 +1,16 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
+import { BashToolUseMessage } from '../../../common/chat-types.ts';
+import { PermissionNotActionableError } from '../../ledger/errors.ts';
+import { TranscriptLedgerService } from '../../ledger/service.ts';
+import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+
+const AT = '2026-08-15T00:00:00.000Z';
 
 function makeRouter(transcript = createRuntimeTranscriptFixture({
     rows: [{
@@ -131,19 +140,76 @@ describe('AgentRuntimeRouter permission replies', () => {
 
     expect(exactRespond).not.toHaveBeenCalled();
   });
+
+  it('does not resolve a permission whose run ends while the provider response is pending', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-response-race-'));
+    const store = new TranscriptLedgerStore(root, {
+      createViewId: () => 'view-1',
+      now: () => AT,
+    });
+    const ledger = new TranscriptLedgerService(store, {
+      now: () => AT,
+      serverInstanceId: 'server-1',
+    });
+    const responseStarted = deferred();
+    const releaseResponse = deferred();
+    const respond = mock(async () => {
+      responseStarted.resolve();
+      await releaseResponse.promise;
+    });
+    try {
+      const view = ledger.initializeChat('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      producer.sink.publish({
+        type: 'permission',
+        runId: 'run-1',
+        lifecycle: {
+          kind: 'requested',
+          requestId: 'permission-1',
+          incarnation: 'incarnation-1',
+          requestedTool: new BashToolUseMessage(AT, 'tool-1', 'pwd'),
+          options: [],
+        },
+        decision: {
+          requestId: 'permission-1',
+          incarnation: 'incarnation-1',
+          respond,
+        },
+      });
+      const router = makeRouter({
+        ledger,
+        adoption: { ensure: async () => view },
+      });
+
+      const resolution = router.resolvePermission(
+        'chat-1',
+        'permission-1',
+        { allow: true },
+        permissionControl(),
+      );
+      await responseStarted.promise;
+      expect(ledger.interruptRun('chat-1')).toMatchObject({ outcome: 'interrupted' });
+      releaseResponse.resolve();
+
+      await expect(resolution).rejects.toBeInstanceOf(PermissionNotActionableError);
+      expect(respond).toHaveBeenCalledTimes(1);
+      expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
+        'permission-requested',
+        'run-ended',
+      ]);
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 function permissionControl(overrides = {}) {
   return {
     serverInstanceId: 'server-1',
     chatId: 'chat-1',
-    agentOwnershipEpoch: 'ownership-1',
-    turnOwner: {
-      agentOwnershipEpoch: 'ownership-1',
-      commandType: 'agent-run',
-      clientRequestId: 'run-1',
-      turnId: 'run-1',
-    },
+    runId: 'run-1',
     id: 'permission-1',
     incarnation: 'incarnation-1',
     ...overrides,
@@ -164,4 +230,10 @@ function permissionClaim(incarnation, respond) {
       respond,
     },
   };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((settle) => { resolve = settle; });
+  return { promise, resolve };
 }
