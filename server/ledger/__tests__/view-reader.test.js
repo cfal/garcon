@@ -109,6 +109,26 @@ describe('TranscriptViewReader', () => {
     });
   });
 
+  it('serves the newest page without waiting for the advisory native probe', async () => {
+    await withReader(async ({ reader, nativeActivity }) => {
+      let releaseProbe;
+      const blockedProbe = new Promise((resolve) => {
+        releaseProbe = resolve;
+      });
+      nativeActivity.check.mockImplementation(() => blockedProbe);
+
+      const page = reader.page('chat-1', 20);
+      const firstSettled = await Promise.race([
+        page.then(() => 'page'),
+        Bun.sleep(25).then(() => 'probe'),
+      ]);
+      releaseProbe(false);
+      await page;
+
+      expect(firstSettled).toBe('page');
+    });
+  });
+
   it('presents a fenced ledger as typed degraded history', async () => {
     await withReader(async ({ ledger }) => {
       const reader = new TranscriptViewReader(ledger, {

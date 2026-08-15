@@ -116,6 +116,18 @@ describe('NativeTranscriptActivityService', () => {
       expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
     });
   });
+
+  it('does not probe native history while the chat has an active run', async () => {
+    await withFixture(async ({ ledger, activity, lastActivity }) => {
+      ledger.initializeChat('chat-1', baseRows());
+      ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+
+      expect(await activity.check('chat-1')).toBe(false);
+      expect(lastActivity).not.toHaveBeenCalled();
+      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
+    });
+  });
 });
 
 function baseRows() {
