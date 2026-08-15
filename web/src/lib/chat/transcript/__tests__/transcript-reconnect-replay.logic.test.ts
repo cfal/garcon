@@ -53,8 +53,7 @@ describe('transcript reconnect replay state', () => {
 
 	it('does not re-buffer a replay page while applying it', () => {
 		const applied: TranscriptBufferedBatch[] = [];
-		let replay!: TranscriptReconnectReplayState;
-		replay = new TranscriptReconnectReplayState((_chatId, appliedBatch) => {
+		const replay = new TranscriptReconnectReplayState((_chatId, appliedBatch) => {
 			expect(replay.buffer('chat-1', appliedBatch)).toBe(false);
 			applied.push(appliedBatch);
 			return 'applied';
