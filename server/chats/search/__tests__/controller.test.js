@@ -151,6 +151,32 @@ describe('TranscriptSearchController', () => {
     expect(test.service.replaceChat).not.toHaveBeenCalled();
   });
 
+  it('keeps long append series linear without rereading the transcript', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.ledger.currentRows.mockClear();
+    test.service.appendRows.mockClear();
+    test.service.replaceChat.mockClear();
+    const appendCount = 2_000;
+
+    for (let ordinal = 3; ordinal < 3 + appendCount; ordinal += 1) {
+      const row = providerRow('view-1', ordinal, `linear-suffix-${ordinal}`);
+      test.rows.get('chat-1').push(row);
+      test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [row] });
+    }
+    await settle();
+
+    expect(test.ledger.currentRows).not.toHaveBeenCalled();
+    expect(test.service.replaceChat).not.toHaveBeenCalled();
+    expect(test.service.appendRows).toHaveBeenCalledTimes(appendCount);
+    expect(test.service.appendRows.mock.calls.every(([input]) => input.rows.length === 1)).toBe(true);
+    expect(test.service.appendRows.mock.calls.at(-1)?.[0]).toMatchObject({
+      expectedAfterOrdinal: appendCount + 1,
+      throughOrdinal: appendCount + 2,
+      rows: [expect.objectContaining({ body: `linear-suffix-${appendCount + 2}` })],
+    });
+  });
+
   it('resyncs a watermark gap without converting ordinary worker failures into replacements', async () => {
     const test = harness();
     await test.controller.initialize(true);
