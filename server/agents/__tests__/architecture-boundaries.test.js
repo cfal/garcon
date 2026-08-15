@@ -75,6 +75,25 @@ describe('agent architecture boundaries', () => {
     }
   });
 
+  test('routes transcript events through concrete operation publishers', () => {
+    expect(existsSync('server-agents/common/src/execution/run-tracker.ts')).toBe(false);
+
+    const productionSources = walk('server-agents').filter((file) => !file.includes('__tests__'));
+    for (const file of productionSources) {
+      const source = readFileSync(file, 'utf8');
+      expect(source, file).not.toMatch(/\bAgentRunTracker\b|execution\/run-tracker|subscribeRuntimeEvents/);
+    }
+
+    const executionAdapters = productionSources.filter((file) =>
+      readFileSync(file, 'utf8').includes('implements AgentRuntimeExecution'));
+    expect(executionAdapters.length).toBeGreaterThan(0);
+    for (const file of executionAdapters) {
+      const source = readFileSync(file, 'utf8');
+      expect(source, file).toContain('AgentRuntimePublisher');
+      expect(source, file).not.toMatch(/\.on(?:Messages|Finished|Failed)\s*\(/);
+    }
+  });
+
   test('forwards canonical controls through every single-query integration', () => {
     for (const providerId of providerIds) {
       const source = readFileSync(`server-agents/${providerId}/src/index.ts`, 'utf8');
