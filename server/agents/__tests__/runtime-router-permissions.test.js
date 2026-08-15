@@ -3,8 +3,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
-function makeRouter(permissionDecisions) {
-  const transcript = createRuntimeTranscriptFixture({
+function makeRouter(permissionDecisions, transcript = createRuntimeTranscriptFixture({
     rows: [{
       kind: 'permission-requested',
       lifecycle: {
@@ -13,7 +12,7 @@ function makeRouter(permissionDecisions) {
         incarnation: 'incarnation-1',
       },
     }],
-  });
+  })) {
   const integration = {
     descriptor: { id: 'test' },
     permissionDecisions,
@@ -87,9 +86,67 @@ describe('AgentRuntimeRouter permission replies', () => {
     )).rejects.toThrow('provider rejected permission');
     expect(abandoned).toHaveBeenCalledTimes(1);
   });
+
+  it('responds through the exact claimed permission occurrence capability', async () => {
+    const legacyRespond = mock(async () => undefined);
+    const firstRespond = mock(async () => undefined);
+    const secondRespond = mock(async () => undefined);
+    const transcript = createRuntimeTranscriptFixture();
+    const claims = new Map([
+      ['incarnation-1', permissionClaim('incarnation-1', firstRespond)],
+      ['incarnation-2', permissionClaim('incarnation-2', secondRespond)],
+    ]);
+    transcript.ledger.claimPermissionResolution = mock((control) => {
+      const claim = claims.get(control.incarnation);
+      if (!claim) throw new Error('Permission occurrence is not actionable');
+      return claim;
+    });
+    const router = makeRouter({ respond: legacyRespond }, transcript);
+    const firstDecision = { allow: true };
+    const secondDecision = { allow: false };
+
+    await router.resolvePermission(
+      'chat-1',
+      'permission-1',
+      firstDecision,
+      permissionControl({ incarnation: 'incarnation-1' }),
+    );
+    await router.resolvePermission(
+      'chat-1',
+      'permission-1',
+      secondDecision,
+      permissionControl({ incarnation: 'incarnation-2' }),
+    );
+
+    expect(firstRespond).toHaveBeenCalledWith(firstDecision);
+    expect(secondRespond).toHaveBeenCalledWith(secondDecision);
+    expect(legacyRespond).not.toHaveBeenCalled();
+  });
+
+  it('rejects a mismatched permission incarnation before provider code executes', async () => {
+    const legacyRespond = mock(async () => undefined);
+    const exactRespond = mock(async () => undefined);
+    const transcript = createRuntimeTranscriptFixture();
+    const activeClaim = permissionClaim('incarnation-1', exactRespond);
+    transcript.ledger.claimPermissionResolution = mock((control) => {
+      if (control.incarnation === activeClaim.incarnation) return activeClaim;
+      throw new Error('Permission occurrence is not actionable');
+    });
+    const router = makeRouter({ respond: legacyRespond }, transcript);
+
+    await expect(router.resolvePermission(
+      'chat-1',
+      'permission-1',
+      { allow: true },
+      permissionControl({ incarnation: 'wrong-incarnation' }),
+    )).rejects.toThrow('Permission occurrence is not actionable');
+
+    expect(exactRespond).not.toHaveBeenCalled();
+    expect(legacyRespond).not.toHaveBeenCalled();
+  });
 });
 
-function permissionControl() {
+function permissionControl(overrides = {}) {
   return {
     serverInstanceId: 'server-1',
     chatId: 'chat-1',
@@ -102,5 +159,22 @@ function permissionControl() {
     },
     id: 'permission-1',
     incarnation: 'incarnation-1',
+    ...overrides,
+  };
+}
+
+function permissionClaim(incarnation, respond) {
+  return {
+    chatId: 'chat-1',
+    viewId: 'view-1',
+    runId: 'run-1',
+    requestId: 'permission-1',
+    incarnation,
+    claimId: `claim-${incarnation}`,
+    decision: {
+      requestId: 'permission-1',
+      incarnation,
+      respond,
+    },
   };
 }

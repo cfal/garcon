@@ -208,15 +208,19 @@ describe('TranscriptLedgerService', () => {
       ledger.initializeChat('chat-1');
       const lease = ledger.openProducer('chat-1', 'test');
       ledger.beginRun('chat-1', 'run-1');
+      const firstDecision = permissionDecision('permission-1', 'incarnation-1');
+      const secondDecision = permissionDecision('permission-1', 'incarnation-2');
       lease.sink.publish({
         type: 'permission',
         runId: 'run-1',
         lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+        decision: firstDecision,
       });
       lease.sink.publish({
         type: 'permission',
         runId: 'run-1',
         lifecycle: permissionRequest('permission-1', 'incarnation-2'),
+        decision: secondDecision,
       });
 
       const first = ledger.claimPermissionResolution(permissionControl({
@@ -228,7 +232,9 @@ describe('TranscriptLedgerService', () => {
       }));
 
       expect(first.incarnation).toBe('incarnation-1');
+      expect(first.decision).toBe(firstDecision);
       expect(second.incarnation).toBe('incarnation-2');
+      expect(second.decision).toBe(secondDecision);
     }, { serverInstanceId: 'server-1' });
   });
 
@@ -399,6 +405,14 @@ function permissionRequest(requestId, incarnation) {
     incarnation,
     requestedTool: new BashToolUseMessage(TS, 'tool-1', 'pwd'),
     options: [],
+  };
+}
+
+function permissionDecision(requestId, incarnation) {
+  return {
+    requestId,
+    incarnation,
+    respond: async () => undefined,
   };
 }
 
