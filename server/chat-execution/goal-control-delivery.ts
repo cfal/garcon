@@ -18,8 +18,11 @@ interface GoalControlDeliveryOptions {
     chatId: string,
     content: string,
     options: UserInputAdmissionOptions,
-  ): Promise<void>;
+  ): Promise<boolean>;
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void;
 }
+
+export class DuplicateGoalControlInputError extends Error {}
 
 export class GoalControlDelivery {
   constructor(private readonly options: GoalControlDeliveryOptions) {}
@@ -43,6 +46,7 @@ export class GoalControlDelivery {
     const predecessor = activeAttempt?.identity();
     const successor = executionTurnIdentity(activeOptions)!;
     let deliveryMayHaveStarted = false;
+    let inputInserted = false;
     try {
       const handled = await this.options.turnRunner.submitGoalControl!(
         chatId,
@@ -61,7 +65,8 @@ export class GoalControlDelivery {
             ? activeAttempt.handoffTurn(predecessor, successor, handoff)
             : handoff;
           committedHandoff.validate();
-          await this.options.admitInput(chatId, content, activeOptions);
+          inputInserted = await this.options.admitInput(chatId, content, activeOptions);
+          if (!inputInserted) throw new DuplicateGoalControlInputError();
           await afterPendingRegistered?.();
           validateOwner();
           committedHandoff.validate();
@@ -74,7 +79,12 @@ export class GoalControlDelivery {
       }
       return handled;
     } catch (error) {
+      if (error instanceof DuplicateGoalControlInputError) throw error;
       throw new GoalControlDeliveryError(error, deliveryMayHaveStarted);
+    } finally {
+      if (inputInserted) {
+        this.options.discardPreparedInput(chatId, activeOptions.clientMessageId);
+      }
     }
   }
 }

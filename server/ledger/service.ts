@@ -252,7 +252,9 @@ export class TranscriptLedgerService {
       });
     }
     if (input.clientMessageId) {
-      this.#preparedInputs.set(inputKey(input.chatId, input.clientMessageId), composition);
+      const key = inputKey(input.chatId, input.clientMessageId);
+      if (composition.inserted) this.#preparedInputs.set(key, composition);
+      else this.#preparedInputs.delete(key);
     }
     return composition;
   }
@@ -263,6 +265,11 @@ export class TranscriptLedgerService {
     const composition = this.#preparedInputs.get(key) ?? null;
     this.#preparedInputs.delete(key);
     return composition;
+  }
+
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void {
+    if (!clientMessageId) return;
+    this.#preparedInputs.delete(inputKey(chatId, clientMessageId));
   }
 
   claimPermissionResolution(action: ChatTransientControlAction): PermissionResolutionClaim {

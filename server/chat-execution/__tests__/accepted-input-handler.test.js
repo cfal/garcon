@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { AcceptedInputHandler } from '../accepted-input-handler.ts';
+import { DuplicateGoalControlInputError } from '../goal-control-delivery.ts';
 import {
   DomainError,
   GoalControlDeliveryError,
@@ -108,6 +109,7 @@ function scaffold(overrides = {}) {
     reserveDirect: mock(() => reservation),
     checkpoint: mock(() => undefined),
     admitInput: mock(async () => true),
+    discardPreparedInput: mock(() => undefined),
     releaseDirect: mock(async () => undefined),
     runDirect: mock(async () => undefined),
     trackDispatch: mock(() => undefined),
@@ -132,6 +134,7 @@ function scaffold(overrides = {}) {
       reserveDirect: m.reserveDirect,
       checkpoint: m.checkpoint,
       admitInput: m.admitInput,
+      discardPreparedInput: m.discardPreparedInput,
       releaseDirect: m.releaseDirect,
       runDirect: m.runDirect,
       trackDispatch: m.trackDispatch,
@@ -240,13 +243,18 @@ describe('AcceptedInputHandler', () => {
     });
     const { handler } = scaffold({
       admitInput: mock(async () => { throw registrationError; }),
+      discardPreparedInput: mock(() => { events.push('discarded'); }),
       releaseDirect: mock(async () => { events.push('released'); }),
     });
 
     await expect(handler.schedule({
       command: command(),
       content: 'direct',
-      options: { clientRequestId: 'request-1', turnId: 'turn-1' },
+      options: {
+        clientRequestId: 'request-1',
+        clientMessageId: 'message-1',
+        turnId: 'turn-1',
+      },
       settlement: settle,
       preparation: {
         operation: 'fork-run',
@@ -255,7 +263,7 @@ describe('AcceptedInputHandler', () => {
       },
     })).rejects.toBe(registrationError);
 
-    expect(events).toEqual(['prepared', 'compensated', 'released', 'settled']);
+    expect(events).toEqual(['prepared', 'compensated', 'discarded', 'released', 'settled']);
     expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
       error: registrationError,
       retryable: true,
@@ -345,6 +353,27 @@ describe('AcceptedInputHandler', () => {
     })).resolves.toMatchObject({ delivery: 'active' });
 
     expect(events).toEqual(['scheduled', 'delivered', 'settled']);
+    expect(m.create).not.toHaveBeenCalled();
+  });
+
+  test('settles duplicate goal control without queueing or native redelivery', async () => {
+    const settle = settlement();
+    const { handler, m } = scaffold({
+      deliverGoalControl: mock(async () => {
+        throw new DuplicateGoalControlInputError();
+      }),
+    });
+
+    await expect(handler.deliverGoalControl({
+      command: command(),
+      content: 'already committed',
+      clientMessageId: 'message-goal',
+      transcriptViewId: 'view-1',
+      settlement: settle,
+    })).resolves.toMatchObject({ delivery: 'active' });
+
+    expect(settle.settleDuplicateInput).toHaveBeenCalledWith(command());
+    expect(settle.settleGoalControlFailure).not.toHaveBeenCalled();
     expect(m.create).not.toHaveBeenCalled();
   });
 

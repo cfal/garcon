@@ -37,6 +37,7 @@ import type {
   QueueCommandMutationResult,
 } from './types.ts';
 import type { StoredChatExecutionControlState } from './control-state.ts';
+import { DuplicateGoalControlInputError } from './goal-control-delivery.ts';
 
 const logger = createLogger('accepted-input');
 
@@ -50,6 +51,7 @@ export interface AcceptedInputCoordinator {
     content: string,
     options: UserInputAdmissionOptions,
   ): Promise<boolean>;
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void;
   releaseDirect(reservation: DirectTurnReservation): Promise<void>;
   runDirect(
     reservation: DirectTurnReservation,
@@ -267,6 +269,13 @@ export class AcceptedInputHandler {
         return { delivery: 'active', control: await this.#controls.read(input.command.chatId) };
       }
     } catch (error) {
+      if (error instanceof DuplicateGoalControlInputError) {
+        await input.settlement.settleDuplicateInput(input.command);
+        return {
+          delivery: 'active',
+          control: await this.#controls.read(input.command.chatId),
+        };
+      }
       deliveryAccepted ||= error instanceof GoalControlDeliveryError && error.deliveryAccepted;
       await input.settlement.settleGoalControlFailure(input.command, error, deliveryAccepted);
       throw error;
@@ -584,6 +593,10 @@ export class AcceptedInputHandler {
         }
       }
       try {
+        this.#coordinator.discardPreparedInput(
+          input.command.chatId,
+          input.options.clientMessageId,
+        );
         await this.#coordinator.releaseDirect(reservation);
       } catch (releaseError) {
         failure = aggregateFailure(

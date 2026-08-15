@@ -21,6 +21,7 @@ interface SteerInputDeliveryOptions {
     content: string,
     options: UserInputAdmissionOptions,
   ): Promise<boolean>;
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void;
 }
 
 export class SteerInputDelivery {
@@ -49,10 +50,11 @@ export class SteerInputDelivery {
     afterPendingRegistered: (turnId: string) => Promise<void>,
   ): Promise<AcceptedSteerOutcome> {
     let deliveryPrepared = false;
+    let inserted = false;
     let result: AgentSteerResult;
     try {
       this.#assertTarget(chatId, target);
-      const inserted = await this.options.admitInput(chatId, content, {
+      inserted = await this.options.admitInput(chatId, content, {
         clientRequestId: options.clientRequestId,
         clientMessageId: options.clientMessageId,
         transcriptViewId: options.transcriptViewId,
@@ -74,6 +76,8 @@ export class SteerInputDelivery {
     } catch (error) {
       if (error instanceof DomainError) throw error;
       throw new SteerDeliveryError(error, deliveryPrepared ? 'unknown' : 'not-sent');
+    } finally {
+      if (inserted) this.options.discardPreparedInput(chatId, options.clientMessageId);
     }
 
     if (result.kind === 'accepted') {

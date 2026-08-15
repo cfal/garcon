@@ -36,6 +36,7 @@ function createFixture(overrides = {}) {
       events.push('transcript');
       return queuedAdmission(...args);
     }),
+    discardPreparedInput: mock(() => undefined),
   };
   const turnRunner = {
     runAgentTurn: mock(async () => undefined),
@@ -191,9 +192,15 @@ describe('ChatExecutionCoordinator', () => {
     });
     coordinator = fixture.coordinator;
     const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
-    const run = coordinator.runReservedTurn(reservation, 'work', { turnId: 'turn-1' });
+    const run = coordinator.runReservedTurn(reservation, 'work', {
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    });
     provider.resolve();
     await run;
+
+    expect(fixture.projection.discardPreparedInput).toHaveBeenCalledOnce();
+    expect(fixture.projection.discardPreparedInput).toHaveBeenCalledWith('chat-1', 'message-1');
 
     expect(coordinator.ownsExecution('chat-1')).toBe(true);
     await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'other-turn' });

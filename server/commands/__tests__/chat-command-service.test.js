@@ -696,6 +696,7 @@ function makeInputProjection(overrides = {}) {
   return {
     admitInput: mock(async () => ({ inserted: true })),
     admitQueuedInput: mock(() => ({ inserted: true })),
+    discardPreparedInput: mock(() => undefined),
     ...overrides,
   };
 }

@@ -22,6 +22,7 @@ export interface AcceptedInputTranscriptPort {
     message: UserMessage,
     options: UserInputAdmissionOptions & { readonly clientRequestId: string },
   ): AcceptedInputTranscriptResult;
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void;
 }
 
 export class AcceptedInputTranscript {
@@ -61,6 +62,10 @@ export class AcceptedInputTranscript {
       { ...options, clientRequestId: options.clientRequestId },
     );
     return result.inserted !== false;
+  }
+
+  discard(chatId: string, clientMessageId: string | null | undefined): void {
+    this.transcript.discardPreparedInput(chatId, clientMessageId);
   }
 }
 

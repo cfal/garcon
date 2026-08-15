@@ -16,6 +16,7 @@ const logger = createLogger('queue-dispatch');
 export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
   registerQueued(chatId: string, content: string, options: RunAgentTurnOptions): boolean;
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void;
   publishIdle(chatId: string): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
   retireAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
@@ -82,24 +83,27 @@ export class QueueDrainer {
       }
       if (!options) throw new Error('Queued input admission did not produce dispatch options');
       if (!result.inserted) continue;
+      try {
+        const turn = executionTurnIdentity(options)!;
+        const attempt = new QueueExecutionAttempt(turn, result.entry.id);
+        const dispatchOptions = {
+          ...options,
+          executionAdmission: ownership.installAttempt(chatId, attempt),
+        };
+        ownership.beginFinalization(chatId, turn.turnId!).settle('committed');
+        ownership.setActiveDrainEntry(chatId, result.entry.id);
 
-      const turn = executionTurnIdentity(options)!;
-      const attempt = new QueueExecutionAttempt(turn, result.entry.id);
-      const dispatchOptions = {
-        ...options,
-        executionAdmission: ownership.installAttempt(chatId, attempt),
-      };
-      ownership.beginFinalization(chatId, turn.turnId!).settle('committed');
-      ownership.setActiveDrainEntry(chatId, result.entry.id);
+        if (callbacks.isShuttingDown()) {
+          callbacks.retireAttempt(chatId, attempt);
+          return;
+        }
 
-      if (callbacks.isShuttingDown()) {
-        callbacks.retireAttempt(chatId, attempt);
-        return;
+        attempt.markLaunching();
+        const shouldContinue = await this.#runEntry(chatId, result.entry, dispatchOptions, attempt);
+        if (!shouldContinue) return;
+      } finally {
+        callbacks.discardPreparedInput(chatId, options.clientMessageId);
       }
-
-      attempt.markLaunching();
-      const shouldContinue = await this.#runEntry(chatId, result.entry, dispatchOptions, attempt);
-      if (!shouldContinue) return;
     }
   }
 

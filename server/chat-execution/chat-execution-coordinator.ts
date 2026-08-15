@@ -135,7 +135,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         chatId: string,
         content: string,
         options: UserInputAdmissionOptions,
-      ) => this.admitUserInput(chatId, content, options).then(() => undefined),
+      ) => this.admitUserInput(chatId, content, options),
+      discardPreparedInput: (chatId: string, clientMessageId: string | null | undefined) => {
+        this.#acceptedInputTranscript.discard(chatId, clientMessageId);
+      },
     };
     this.#goalControlDelivery = new GoalControlDelivery({
       ...inputDeliveryOptions,
@@ -143,11 +146,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       readControl: (chatId) => this.readChatExecutionControl(chatId),
     });
     this.#steerInputDelivery = new SteerInputDelivery({
-      turnRunner: this.#turnRunner,
-      ownership: this.#ownership,
-      admitInput: (chatId, content, options) => (
-        this.admitUserInput(chatId, content, options)
-      ),
+      ...inputDeliveryOptions,
       isShuttingDown: () => this.#shuttingDown,
     });
     this.#acceptedInputHandler = new AcceptedInputHandler({
@@ -162,6 +161,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         admitInput: (chatId, content, options) => (
           this.admitUserInput(chatId, content, options)
         ),
+        discardPreparedInput: (chatId, clientMessageId) => {
+          this.#acceptedInputTranscript.discard(chatId, clientMessageId);
+        },
         releaseDirect: (reservation) => this.#finishDirect(reservation, 'released'),
         runDirect: (reservation, content, options, dispatch, beforeFailureRelease) => (
           this.#runDirect(reservation, content, options, dispatch, beforeFailureRelease)
@@ -183,6 +185,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         registerQueued: (chatId, content, options) => (
           this.#acceptedInputTranscript.registerQueued(chatId, content, options)
         ),
+        discardPreparedInput: (chatId, clientMessageId) => {
+          this.#acceptedInputTranscript.discard(chatId, clientMessageId);
+        },
         publishIdle: (chatId) => { this.emit('chat-idle', chatId); },
         publishTurnFailed: (chatId, message, options) => {
           this.emit('turn-failed', chatId, message, options);
@@ -671,6 +676,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       }
       throw failure;
     } finally {
+      this.#acceptedInputTranscript.discard(reservation.chatId, options.clientMessageId);
       await this.#finishDirect(reservation, outcome);
     }
   }

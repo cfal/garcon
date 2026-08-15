@@ -458,6 +458,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#ledger.resendCandidates(chatId);
   }
 
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void {
+    this.#ledger.discardPreparedInput(chatId, clientMessageId);
+  }
+
   async admitInput(
     chatId: string,
     message: UserMessage,
