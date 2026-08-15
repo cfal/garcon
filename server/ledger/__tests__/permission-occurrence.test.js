@@ -275,6 +275,45 @@ describe('transcript permission occurrences', () => {
     });
   });
 
+  for (const [coordinate, staleControl] of [
+    ['server instance', { serverInstanceId: 'server-2' }],
+    ['chat', { chatId: 'chat-2' }],
+    ['run', { runId: 'run-2' }],
+    ['request', { id: 'permission-2' }],
+    ['incarnation', { incarnation: 'incarnation-2' }],
+  ]) {
+    it(`rejects a stale permission ${coordinate} without consuming the live occurrence`, async () => {
+      await withLedger((ledger) => {
+        const lease = startRun(ledger);
+        const decision = permissionDecision('incarnation-1');
+        publishRequest(lease.sink, 'incarnation-1', decision);
+        const exactControl = permissionControl('incarnation-1');
+
+        expect(() => ledger.claimPermissionResolution({
+          ...exactControl,
+          ...staleControl,
+        })).toThrow(PermissionNotActionableError);
+        expect(ledger.claimPermissionResolution(exactControl).decision).toBe(decision);
+      });
+    });
+  }
+
+  it('invalidates an in-flight permission claim when the ledger service closes', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-shutdown-'));
+    const { ledger } = createLedger(root);
+    try {
+      const { claim } = claimPermission(ledger);
+
+      ledger.close();
+
+      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps permission history but restores no actionability after restart', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-restart-'));
     try {
