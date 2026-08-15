@@ -221,6 +221,21 @@ describe('buildConversationFeedRenderItems', () => {
 		});
 	});
 
+	it('keeps terminal state separate when a permission request id is reused', () => {
+		const first = Object.assign(new PermissionCancelledMessage(TS, 'shared', 'cancelled'), {
+			incarnation: 'first-occurrence',
+		});
+		const second = Object.assign(new PermissionResolvedMessage(TS, 'shared', true), {
+			incarnation: 'second-occurrence',
+		});
+		const model = buildConversationFeedRenderModel(rows([first, second]));
+
+		expect(model.permissionTerminalById.size).toBe(2);
+		expect([...model.permissionTerminalById.values()].map((terminal) => (
+			(terminal as { incarnation?: string }).incarnation
+		))).toEqual(['first-occurrence', 'second-occurrence']);
+	});
+
 	it('pairs interleaved results to individual tool rows in source order', () => {
 		const first = new GlobToolUseMessage(TS, 'glob-1', 'src/**/*.ts');
 		const second = new GlobToolUseMessage(TS, 'glob-2', 'test/**/*.ts');
@@ -442,5 +457,23 @@ describe('visiblePendingPermissionRequests', () => {
 		const visibleRows = rows([new PermissionResolvedMessage(TS, 'perm-2', true)]);
 
 		expect(visiblePendingPermissionRequests(visibleRows, [first, replay, second])).toEqual([first]);
+	});
+
+	it('does not let an old terminal suppress a reused permission id', () => {
+		const terminal = Object.assign(new PermissionCancelledMessage(TS, 'shared', 'cancelled'), {
+			incarnation: 'old-occurrence',
+		});
+		const current = {
+			...pendingPermission('shared'),
+			control: {
+				serverInstanceId: 'server-1',
+				chatId: 'chat-1',
+				runId: 'run-2',
+				id: 'shared',
+				incarnation: 'current-occurrence',
+			},
+		};
+
+		expect(visiblePendingPermissionRequests(rows([terminal]), [current])).toEqual([current]);
 	});
 });

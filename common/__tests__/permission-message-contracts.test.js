@@ -1,0 +1,60 @@
+import { describe, expect, it } from 'bun:test';
+import { parseChatMessage } from '../chat-types.ts';
+
+const AT = '2026-08-15T00:00:00.000Z';
+
+describe('permission message contracts', () => {
+  it('round-trips the occurrence incarnation for every permission lifecycle message', () => {
+    const messages = [
+      {
+        type: 'permission-request',
+        timestamp: AT,
+        permissionRequestId: 'shared-request',
+        incarnation: 'requested-occurrence',
+        requestedTool: {
+          type: 'bash-tool-use',
+          timestamp: AT,
+          toolId: 'tool-1',
+          command: 'bun test',
+        },
+      },
+      {
+        type: 'permission-resolved',
+        timestamp: AT,
+        permissionRequestId: 'shared-request',
+        incarnation: 'resolved-occurrence',
+        allowed: true,
+      },
+      {
+        type: 'permission-cancelled',
+        timestamp: AT,
+        permissionRequestId: 'shared-request',
+        incarnation: 'cancelled-occurrence',
+        reason: 'aborted',
+      },
+      {
+        type: 'permission-expired',
+        timestamp: AT,
+        permissionRequestId: 'shared-request',
+        incarnation: 'expired-occurrence',
+      },
+    ];
+
+    expect(messages.map((message) => parseChatMessage(message)?.incarnation)).toEqual([
+      'requested-occurrence',
+      'resolved-occurrence',
+      'cancelled-occurrence',
+      'expired-occurrence',
+    ]);
+    expect(messages.map((message) => JSON.parse(JSON.stringify(parseChatMessage(message))))).toEqual(messages);
+  });
+
+  it('rejects a permission lifecycle message without occurrence identity', () => {
+    expect(parseChatMessage({
+      type: 'permission-cancelled',
+      timestamp: AT,
+      permissionRequestId: 'shared-request',
+      reason: 'aborted',
+    })).toBeNull();
+  });
+});

@@ -84,6 +84,38 @@ describe('createAgentProducerAdapter', () => {
     });
   });
 
+  it('preserves the exact permission occurrence when a request id is reused', async () => {
+    const firstRequest = Object.assign(
+      new PermissionRequestMessage(TS, 'shared-request', new BashToolUseMessage(TS, 'tool-1', 'first')),
+      { incarnation: 'first-occurrence' },
+    );
+    const secondRequest = Object.assign(
+      new PermissionRequestMessage(TS, 'shared-request', new BashToolUseMessage(TS, 'tool-2', 'second')),
+      { incarnation: 'second-occurrence' },
+    );
+    const firstCancellation = Object.assign(
+      new PermissionCancelledMessage(TS, 'shared-request', 'aborted'),
+      { incarnation: 'first-occurrence' },
+    );
+    const fixture = createFixture(({ publish, runId }) => {
+      publish({
+        type: 'messages',
+        runId,
+        rows: runtimeRows([firstRequest, secondRequest, firstCancellation]),
+      });
+    });
+
+    await fixture.adapter.execution.start(fixture.request);
+
+    expect(fixture.events.flatMap((event) => (
+      event.type === 'permission' ? [event.lifecycle.incarnation] : []
+    ))).toEqual([
+      'first-occurrence',
+      'second-occurrence',
+      'first-occurrence',
+    ]);
+  });
+
   it('keeps uncorrelated permission facts typed instead of leaking them into rows', async () => {
     const fixture = createFixture(({ publish }) => {
       publish({

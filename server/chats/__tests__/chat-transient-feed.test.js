@@ -119,6 +119,27 @@ describe('ChatTransientFeedStore', () => {
     expect(feed.apply(runEndedEvent('unknown', 6))).toEqual({ kind: 'unchanged' });
   });
 
+  it('keeps reused request ids as separate actionable occurrences', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+    feed.apply(permissionEvent());
+    feed.apply(permissionEvent({ incarnation: 'two', ordinal: 4 }));
+
+    expect(feed.currentSnapshot(CHAT_ID)?.rows).toMatchObject([
+      { id: 'permission-1', incarnation: 'one' },
+      { id: 'permission-1', incarnation: 'two' },
+    ]);
+    expect(feed.validateAction(action())).toMatchObject({ incarnation: 'one' });
+    expect(feed.validateAction(action({ incarnation: 'two' }))).toMatchObject({ incarnation: 'two' });
+
+    expect(feed.apply(permissionEvent({ kind: 'cancelled', ordinal: 5 }))).toMatchObject({
+      kind: 'mutation',
+      value: { mutation: { kind: 'remove', id: 'permission-1', incarnation: 'one' } },
+    });
+    expect(feed.currentSnapshot(CHAT_ID)?.rows).toMatchObject([
+      { id: 'permission-1', incarnation: 'two' },
+    ]);
+  });
+
   it('resets ephemeral controls when the transcript view is replaced', () => {
     const feed = new ChatTransientFeedStore('server-1');
     feed.apply(permissionEvent());

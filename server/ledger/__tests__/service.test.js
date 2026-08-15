@@ -203,6 +203,35 @@ describe('TranscriptLedgerService', () => {
     }, { serverInstanceId: 'server-1' });
   });
 
+  it('keeps reused permission request ids actionable as separate occurrences', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      lease.sink.publish({
+        type: 'permission',
+        runId: 'run-1',
+        lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+      });
+      lease.sink.publish({
+        type: 'permission',
+        runId: 'run-1',
+        lifecycle: permissionRequest('permission-1', 'incarnation-2'),
+      });
+
+      const first = ledger.claimPermissionResolution(permissionControl({
+        incarnation: 'incarnation-1',
+      }));
+      ledger.completePermissionResolution(first, { allow: false });
+      const second = ledger.claimPermissionResolution(permissionControl({
+        incarnation: 'incarnation-2',
+      }));
+
+      expect(first.incarnation).toBe('incarnation-1');
+      expect(second.incarnation).toBe('incarnation-2');
+    }, { serverInstanceId: 'server-1' });
+  });
+
   it('commits late permission facts without making them actionable', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
@@ -353,13 +382,14 @@ function permissionRequest(requestId, incarnation) {
   };
 }
 
-function permissionControl() {
+function permissionControl(overrides = {}) {
   return {
     serverInstanceId: 'server-1',
     chatId: 'chat-1',
     runId: 'run-1',
     id: 'permission-1',
     incarnation: 'incarnation-1',
+    ...overrides,
   };
 }
 

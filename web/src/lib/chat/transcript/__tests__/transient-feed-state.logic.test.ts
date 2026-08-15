@@ -125,4 +125,26 @@ describe('transient feed browser reducer', () => {
 			snapshot: { rows: [{ id: 'permission-2', runId: 'run-2' }] },
 		});
 	});
+
+	it('removes only the named occurrence when a request id is reused', () => {
+		const first = row();
+		const second = row({
+			incarnation: 'incarnation-2',
+			displayOrder: 1,
+			message: new PermissionRequestMessage(
+				'2026-08-11T00:00:00.000Z',
+				'permission-1',
+				new BashToolUseMessage('2026-08-11T00:00:00.000Z', 'tool-2', 'bun test --watch'),
+			),
+		});
+		const applied = applyTransientFeedMutation(
+			snapshot({ rows: [first, second] }),
+			mutation({ kind: 'remove', id: 'permission-1', incarnation: 'incarnation-1' }),
+		);
+
+		expect(applied).toMatchObject({
+			kind: 'applied',
+			snapshot: { rows: [{ id: 'permission-1', incarnation: 'incarnation-2' }] },
+		});
+	});
 });

@@ -8,16 +8,19 @@ import {
 const CHAT_ID = '1785337200123456';
 
 function row(overrides = {}) {
+  const id = overrides.id ?? 'permission-1';
+  const incarnation = overrides.incarnation ?? 'incarnation-1';
   return {
-    id: 'permission-1',
-    incarnation: 'incarnation-1',
+    id,
+    incarnation,
     runId: 'run-1',
     transcript: { transcriptViewId: 'view-1', afterOrdinal: 3 },
     displayOrder: 0,
     message: {
       type: 'permission-request',
       timestamp: '2026-08-11T00:00:00.000Z',
-      permissionRequestId: 'permission-1',
+      permissionRequestId: id,
+      incarnation,
       requestedTool: {
         type: 'bash-tool-use',
         timestamp: '2026-08-11T00:00:00.000Z',
@@ -69,9 +72,17 @@ describe('chat transient feed contracts', () => {
     });
   });
 
-  it('rejects duplicate slots even when their incarnations differ', () => {
+  it('treats reused request ids as distinct occurrence slots', () => {
     expect(parseChatTransientFeedSnapshot(snapshot({
       rows: [row(), row({ incarnation: 'incarnation-2' })],
+    }))).toMatchObject({
+      rows: [
+        { id: 'permission-1', incarnation: 'incarnation-1' },
+        { id: 'permission-1', incarnation: 'incarnation-2' },
+      ],
+    });
+    expect(parseChatTransientFeedSnapshot(snapshot({
+      rows: [row(), row()],
     }))).toBeNull();
   });
 
