@@ -162,8 +162,7 @@ export class TranscriptLedgerService {
     }, () => {
       if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
       this.#activeRuns.delete(chatId);
-      this.#activePermissions.delete(chatId);
-      this.#deletePermissionClaims(chatId);
+      this.#clearChatPermissions(chatId);
     });
     this.#leases.set(chatId, lease);
     return lease;
@@ -179,7 +178,7 @@ export class TranscriptLedgerService {
     if (this.#activeRuns.has(chatId)) {
       throw new TypeError(`Transcript run is already active for ${chatId}`);
     }
-    this.#activePermissions.delete(chatId);
+    this.#clearChatPermissions(chatId);
     this.#activeRuns.set(chatId, runId);
     return runId;
   }
@@ -189,7 +188,7 @@ export class TranscriptLedgerService {
     if (this.#activeRuns.get(chatId) !== expectedRunId) {
       throw new TypeError(`Transcript run changed before handoff for ${chatId}`);
     }
-    this.#activePermissions.delete(chatId);
+    this.#clearChatPermissions(chatId);
     this.#activeRuns.set(chatId, nextRunId);
   }
 
@@ -311,7 +310,18 @@ export class TranscriptLedgerService {
     claim: PermissionResolutionClaim,
     decision: Extract<AgentPermissionLifecycle, { readonly kind: 'resolved' }>['decision'],
   ): LedgerPermissionRow {
-    if (this.#permissionClaims.get(claim.claimId) !== claim) {
+    const active = this.#activePermissions
+      .get(claim.chatId)
+      ?.get(claim.requestId)
+      ?.get(claim.incarnation);
+    const view = this.#store.currentView(claim.chatId);
+    if (
+      this.#permissionClaims.get(claim.claimId) !== claim
+      || active?.claimId !== claim.claimId
+      || active.runId !== claim.runId
+      || this.#activeRuns.get(claim.chatId) !== claim.runId
+      || view?.viewId !== claim.viewId
+    ) {
       throw new PermissionNotActionableError();
     }
     this.#permissionClaims.delete(claim.claimId);
@@ -328,8 +338,7 @@ export class TranscriptLedgerService {
     }]);
     const permission = row as LedgerPermissionRow;
     const occurrences = this.#activePermissions.get(claim.chatId)?.get(claim.requestId);
-    const active = occurrences?.get(claim.incarnation);
-    if (active?.claimId === claim.claimId) {
+    if (occurrences?.get(claim.incarnation)?.claimId === claim.claimId) {
       occurrences!.delete(claim.incarnation);
       this.#deleteEmptyPermissionMaps(claim.chatId, claim.requestId);
     }
@@ -491,8 +500,7 @@ export class TranscriptLedgerService {
   ): TranscriptView {
     this.closeProducer(chatId);
     const view = this.#store.replaceCurrentView(chatId, expectedViewId, stagingViewId);
-    this.#activePermissions.delete(chatId);
-    this.#deletePermissionClaims(chatId);
+    this.#clearChatPermissions(chatId);
     this.#deletePreparedInputs(chatId);
     this.#notify({
       type: 'view-replaced',
@@ -547,8 +555,7 @@ export class TranscriptLedgerService {
   #clearChatState(chatId: string): void {
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
-    this.#activePermissions.delete(chatId);
-    this.#deletePermissionClaims(chatId);
+    this.#clearChatPermissions(chatId);
     this.#deletePreparedInputs(chatId);
   }
 
@@ -689,6 +696,7 @@ export class TranscriptLedgerService {
     const permissions = this.#activePermissions.get(chatId);
     const active = permissions?.get(lifecycle.requestId)?.get(lifecycle.incarnation);
     if (active?.runId === runId && active.incarnation === lifecycle.incarnation) {
+      if (active.claimId) this.#permissionClaims.delete(active.claimId);
       permissions!.get(lifecycle.requestId)!.delete(lifecycle.incarnation);
       this.#deleteEmptyPermissionMaps(chatId, lifecycle.requestId);
     }
@@ -699,7 +707,9 @@ export class TranscriptLedgerService {
     if (!permissions) return;
     for (const [requestId, occurrences] of permissions) {
       for (const [incarnation, permission] of occurrences) {
-        if (permission.runId === runId) occurrences.delete(incarnation);
+        if (permission.runId !== runId) continue;
+        if (permission.claimId) this.#permissionClaims.delete(permission.claimId);
+        occurrences.delete(incarnation);
       }
       if (occurrences.size === 0) permissions.delete(requestId);
     }
@@ -717,6 +727,11 @@ export class TranscriptLedgerService {
     for (const [claimId, claim] of this.#permissionClaims) {
       if (claim.chatId === chatId) this.#permissionClaims.delete(claimId);
     }
+  }
+
+  #clearChatPermissions(chatId: string): void {
+    this.#activePermissions.delete(chatId);
+    this.#deletePermissionClaims(chatId);
   }
 
   #notify(event: TranscriptCommitEvent): void {
