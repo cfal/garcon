@@ -1,5 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import type { Browser, CDPSession, Page } from 'playwright';
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+  CompactionMessage,
+  ToolResultMessage,
+  UserMessage,
+  type ChatMessage,
+} from '../../../common/chat-types.js';
+import type { TranscriptMessage } from '../../../common/chat-view.js';
+import type { LedgerRowDraft } from '../../../server/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
   closeChromiumBrowser,
@@ -70,9 +82,20 @@ interface TranscriptGeometry {
 }
 
 interface TranscriptRowObservation {
+  bashCommand: {
+    buttonCount: number;
+    tagName: string;
+    text: string;
+  } | null;
   itemIndex: number;
   messageType: string;
   rowId: string;
+  text: string;
+}
+
+interface ExactTranscriptRow {
+  ordinal: number;
+  type: ChatMessage['type'];
   text: string;
 }
 
@@ -157,6 +180,134 @@ async function seedTranscript(
   return chatId;
 }
 
+function exactTranscriptText(message: ChatMessage): string {
+  switch (message.type) {
+    case 'user-message':
+    case 'assistant-message':
+      return message.content;
+    case 'bash-tool-use':
+      return `$ ${message.command}`;
+    case 'tool-result':
+      return typeof message.content.raw === 'string'
+        ? message.content.raw
+        : JSON.stringify(message.content);
+    case 'compaction':
+      return message.summary;
+    default:
+      throw new Error(`The exact transcript fixture does not support ${message.type}.`);
+  }
+}
+
+function exactTranscriptRow(entry: TranscriptMessage): ExactTranscriptRow {
+  return {
+    ordinal: entry.ordinal,
+    type: entry.message.type,
+    text: exactTranscriptText(entry.message),
+  };
+}
+
+function mixedOrderingRows(firstOrdinal: number): {
+  drafts: LedgerRowDraft[];
+  expected: ExactTranscriptRow[];
+} {
+  const drafts: LedgerRowDraft[] = [];
+  const expected: ExactTranscriptRow[] = [];
+  let ordinal = firstOrdinal;
+
+  const addMessage = (message: ChatMessage, clientMessageId?: string): void => {
+    const draft: LedgerRowDraft = message instanceof UserMessage
+      ? {
+          kind: 'user-input',
+          at: message.timestamp,
+          detail: {
+            clientMessageId: clientMessageId ?? `mixed-client-${ordinal}`,
+            message,
+            attachments: [],
+            steer: false,
+          },
+          providerMeta: null,
+        }
+      : {
+          kind: 'provider-row',
+          at: message.timestamp,
+          message,
+          providerMeta: null,
+        };
+    drafts.push(draft);
+    expected.push({ ordinal, type: message.type, text: exactTranscriptText(message) });
+    ordinal += 1;
+  };
+  const timestamp = () => new Date(Date.UTC(2026, 7, 15) + ordinal).toISOString();
+
+  for (let turn = 0; turn < 24; turn += 1) {
+    addMessage(new UserMessage(timestamp(), `mixed-user-${turn}`));
+    addMessage(new AssistantMessage(timestamp(), `mixed-assistant-${turn}`));
+  }
+
+  for (let commandIndex = 0; commandIndex < 30; commandIndex += 1) {
+    const toolId = `mixed-bash-${commandIndex}`;
+    addMessage(
+      new BashToolUseMessage(timestamp(), toolId, `printf 'mixed-command-${commandIndex}\\n'`),
+    );
+    addMessage(
+      new ToolResultMessage(timestamp(), toolId, { raw: `mixed-result-${commandIndex}` }, false),
+    );
+    if ((commandIndex + 1) % 5 === 0) {
+      addMessage(
+        new CompactionMessage(
+          timestamp(),
+          'auto',
+          `mixed-compaction-${(commandIndex + 1) / 5}`,
+        ),
+      );
+      addMessage(new AssistantMessage(timestamp(), 'repeated-equal-assistant-content'));
+    }
+  }
+
+  for (let turn = 24; turn < 34; turn += 1) {
+    addMessage(new UserMessage(timestamp(), `mixed-user-${turn}`));
+    addMessage(new AssistantMessage(timestamp(), `mixed-assistant-${turn}`));
+  }
+
+  addMessage(new CompactionMessage(timestamp(), 'manual', 'mixed-tail-compaction'));
+  for (let commandIndex = 30; commandIndex < 42; commandIndex += 1) {
+    const toolId = `mixed-bash-${commandIndex}`;
+    addMessage(
+      new BashToolUseMessage(timestamp(), toolId, `printf 'mixed-command-${commandIndex}\\n'`),
+    );
+    addMessage(
+      new ToolResultMessage(timestamp(), toolId, { raw: `mixed-result-${commandIndex}` }, false),
+    );
+  }
+  addMessage(new AssistantMessage(timestamp(), 'mixed-final-assistant-after-all-tools'));
+
+  return { drafts, expected };
+}
+
+async function appendLedgerRows(
+  fixture: ChromiumFixture,
+  chatId: string,
+  transcriptViewId: string,
+  drafts: readonly LedgerRowDraft[],
+): Promise<void> {
+  await fixture.integration.restartGarcon({
+    beforeStart: async () => {
+      const store = new TranscriptLedgerStore(
+        join(fixture.integration.dirs.workspace, 'transcript-ledgers'),
+      );
+      try {
+        const view = store.currentView(chatId);
+        if (view?.viewId !== transcriptViewId) {
+          throw new Error('The mixed transcript fixture opened a different transcript view.');
+        }
+        store.append(chatId, view.viewId, drafts);
+      } finally {
+        store.close();
+      }
+    },
+  });
+}
+
 async function selectSidebarChat(page: Page, chatId: string, marker: string): Promise<void> {
   await page.evaluate((expected) => {
     const summary = [
@@ -222,8 +373,16 @@ async function scanLoadedTranscript(page: Page): Promise<TranscriptViewportScan>
           const row = item.querySelector<HTMLElement>('[data-chat-row-id]');
           const itemIndex = Number(item.dataset.index);
           if (!row?.dataset.chatRowId || !Number.isFinite(itemIndex)) return [];
+          const bashCommand = row.querySelector<HTMLElement>('[data-chat-bash-command]');
           return [
             {
+              bashCommand: bashCommand
+                ? {
+                    buttonCount: row.querySelectorAll('button').length,
+                    tagName: bashCommand.tagName,
+                    text: bashCommand.innerText.trim(),
+                  }
+                : null,
               itemIndex,
               messageType: row.dataset.chatMessageType ?? '',
               rect: item.getBoundingClientRect(),
@@ -246,6 +405,7 @@ async function scanLoadedTranscript(page: Page): Promise<TranscriptViewportScan>
           });
         }
         rows.set(row.rowId, {
+          bashCommand: row.bashCommand,
           itemIndex: row.itemIndex,
           messageType: row.messageType,
           rowId: row.rowId,
@@ -2784,23 +2944,35 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   fixture.assertNoBrowserErrors();
 }
 
+async function loadCompleteTranscript(page: Page, expectedEntryCount: number): Promise<void> {
+  let entryCount = await transcriptEntryCount(page);
+  const attempts: Array<{ before: number; after: number }> = [];
+  const maximumPageCount = Math.ceil(expectedEntryCount / 50) + 2;
+  for (
+    let pageIndex = 0;
+    pageIndex < maximumPageCount && entryCount < expectedEntryCount;
+    pageIndex += 1
+  ) {
+    const previousEntryCount = entryCount;
+    const previousRevision = await virtualDataRevision(page);
+    await scrollToPosition(page, 'start');
+    await waitForVirtualDataRevisionAfter(page, previousRevision);
+    entryCount = await transcriptEntryCount(page);
+    attempts.push({ before: previousEntryCount, after: entryCount });
+    expect(entryCount, JSON.stringify({ expectedEntryCount, attempts })).toBeGreaterThan(
+      previousEntryCount,
+    );
+  }
+  expect(entryCount, JSON.stringify({ expectedEntryCount, attempts })).toBe(expectedEntryCount);
+}
+
 async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<void> {
   const promptPrefix = 'chromium-retained-window';
   const turnCount = 110;
   const expectedEntryCount = turnCount * 2;
   const chatId = await seedTranscript(fixture.integration, turnCount, promptPrefix);
   await prepareTranscript(fixture, chatId);
-  let entryCount = await transcriptEntryCount(fixture.page);
-  for (let pageIndex = 0; pageIndex < 5 && entryCount < expectedEntryCount; pageIndex += 1) {
-    const previousEntryCount = entryCount;
-    const previousRevision = await virtualDataRevision(fixture.page);
-    await scrollToPosition(fixture.page, 'start');
-    await waitForVirtualDataRevisionAfter(fixture.page, previousRevision);
-    entryCount = await transcriptEntryCount(fixture.page);
-    expect(entryCount).toBeGreaterThan(previousEntryCount);
-    expect(entryCount).toBeLessThanOrEqual(expectedEntryCount);
-  }
-  expect(entryCount).toBe(expectedEntryCount);
+  await loadCompleteTranscript(fixture.page, expectedEntryCount);
 
   const scan = await scanLoadedTranscript(fixture.page);
   expect(scan.duplicateMountedRowIds).toEqual([]);
@@ -2814,8 +2986,8 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
     const user = scan.rows[turnIndex * 2];
     const assistant = scan.rows[turnIndex * 2 + 1];
     const prompt = `${promptPrefix}-${turnIndex}`;
-    expect(user).toMatchObject({ messageType: 'user', text: prompt });
-    expect(assistant).toMatchObject({ messageType: 'assistant', text: `echo:${prompt}` });
+    expect(user).toMatchObject({ messageType: 'user-message', text: prompt });
+    expect(assistant).toMatchObject({ messageType: 'assistant-message', text: `echo:${prompt}` });
     expect(user?.itemIndex).toBeLessThan(assistant?.itemIndex ?? -1);
     if (turnIndex + 1 < turnCount) {
       expect(assistant?.itemIndex).toBeLessThan(scan.rows[(turnIndex + 1) * 2]?.itemIndex ?? -1);
@@ -2855,8 +3027,8 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
     { user: livePrompt, assistant: `echo:${livePrompt}` },
   );
   expect(tail).toHaveLength(2);
-  expect(tail[0]).toMatchObject({ messageType: 'user', text: livePrompt });
-  expect(tail[1]).toMatchObject({ messageType: 'assistant', text: `echo:${livePrompt}` });
+  expect(tail[0]).toMatchObject({ messageType: 'user-message', text: livePrompt });
+  expect(tail[1]).toMatchObject({ messageType: 'assistant-message', text: `echo:${livePrompt}` });
   expect(tail[0]?.itemIndex).toBeLessThan(tail[1]?.itemIndex ?? -1);
 
   const retainedGeometry = await transcriptGeometry(fixture.page);
@@ -2864,6 +3036,102 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
   expect(retainedGeometry.transcriptItemCount).toBeGreaterThan(1);
   expect(retainedGeometry.overlaps).toEqual([]);
   expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
+  fixture.assertNoBrowserErrors();
+}
+
+async function verifyMixedTranscriptOrdering(fixture: ChromiumFixture): Promise<void> {
+  const chatId = await seedTranscript(
+    fixture.integration,
+    1,
+    'mixed-ordering-ledger-baseline',
+  );
+  const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const generated = mixedOrderingRows(initial.lastOrdinal + 1);
+  const expected = [...initial.messages.map(exactTranscriptRow), ...generated.expected];
+  expect(expected).toHaveLength(168);
+  await appendLedgerRows(
+    fixture,
+    chatId,
+    initial.transcriptViewId,
+    generated.drafts,
+  );
+
+  const canonical = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  expect(canonical.hasMore).toBe(false);
+  expect(canonical.messages.map(exactTranscriptRow)).toEqual(expected);
+  expect(canonical.messages.at(-1)).toMatchObject({
+    ordinal: expected.at(-1)?.ordinal,
+    message: {
+      type: 'assistant-message',
+      content: 'mixed-final-assistant-after-all-tools',
+    },
+  });
+  const renderedExpected = expected.filter((row) => row.type !== 'tool-result');
+
+  for (const viewport of [
+    { label: 'compact', height: 700, width: 390 },
+    { label: 'wide', height: 900, width: 1280 },
+  ]) {
+    await fixture.page.setViewportSize(viewport);
+    await prepareTranscript(fixture, chatId, 1);
+    await loadCompleteTranscript(fixture.page, expected.length);
+    const scan = await scanLoadedTranscript(fixture.page);
+    const diagnostic = JSON.stringify({ viewport, scan }, null, 2);
+    expect(scan.duplicateMountedRowIds, diagnostic).toEqual([]);
+    expect(scan.indexChanges, diagnostic).toEqual([]);
+    expect(scan.visualOrderViolations, diagnostic).toEqual([]);
+    expect(scan.rows, diagnostic).toHaveLength(renderedExpected.length);
+    expect(scan.rows.map((row) => row.rowId), diagnostic).toEqual(
+      renderedExpected.map((row) => `${initial.transcriptViewId}:${row.ordinal}`),
+    );
+    expect(scan.rows.map((row) => row.messageType), diagnostic).toEqual(
+      renderedExpected.map((row) => row.type),
+    );
+
+    for (const [index, expectedRow] of renderedExpected.entries()) {
+      const rendered = scan.rows[index];
+      expect(rendered, diagnostic).toBeDefined();
+      if (!rendered) continue;
+      if (
+        expectedRow.type === 'user-message' ||
+        expectedRow.type === 'assistant-message' ||
+        expectedRow.type === 'bash-tool-use'
+      ) {
+        expect(rendered.text, diagnostic).toBe(expectedRow.text);
+      } else if (expectedRow.type === 'compaction') {
+        expect(rendered.text, diagnostic).toContain('Context compacted');
+      }
+    }
+
+    const bashRows = scan.rows.filter((row) => row.messageType === 'bash-tool-use');
+    expect(bashRows, diagnostic).toHaveLength(42);
+    for (const row of bashRows) {
+      expect(row.bashCommand, diagnostic).toEqual({
+        buttonCount: 0,
+        tagName: 'CODE',
+        text: row.text,
+      });
+    }
+    expect(
+      scan.rows.filter(
+        (row) =>
+          row.messageType === 'assistant-message' &&
+          row.text === 'repeated-equal-assistant-content',
+      ),
+      diagnostic,
+    ).toHaveLength(6);
+    expect(scan.rows.at(-1), diagnostic).toMatchObject({
+      messageType: 'assistant-message',
+      rowId: `${initial.transcriptViewId}:${expected.at(-1)?.ordinal}`,
+      text: 'mixed-final-assistant-after-all-tools',
+    });
+    expect(
+      await fixture.page
+        .locator(FEED_SELECTOR)
+        .getByText('mixed-final-assistant-after-all-tools', { exact: true })
+        .isVisible(),
+    ).toBe(true);
+  }
   fixture.assertNoBrowserErrors();
 }
 
@@ -3128,6 +3396,20 @@ describe('Chromium transcript virtualization', () => {
       browser,
     );
   }, 120_000);
+
+  test('renders mixed paged transcripts in exact ledger order on compact and wide layouts', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-mixed-ordering',
+      async (fixture, markPhase) => {
+        markPhase('verifying exact mixed-row and final-assistant order');
+        await verifyMixedTranscriptOrdering(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
 
   test('retains the complete detached transcript through paging and live following', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
