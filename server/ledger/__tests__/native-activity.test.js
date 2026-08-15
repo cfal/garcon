@@ -223,6 +223,41 @@ describe('NativeTranscriptActivityService', () => {
     }, { ownsExecution: () => true });
   });
 
+  it('probes a native session fact that arrives after interruption', async () => {
+    await withFixture(async ({ ledger, activity, lastActivity, setNativeAt }) => {
+      ledger.initializeChat('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      ledger.interruptRun('chat-1');
+      producer.sink.publish({
+        type: 'session',
+        session: {
+          agentSessionId: 'native-late',
+          nativeSession: {
+            ownerId: 'test',
+            schemaVersion: 1,
+            value: { path: '/tmp/native-late.jsonl' },
+          },
+          nativeSeedReceipt: null,
+        },
+      });
+      setNativeAt('2026-08-12T00:00:21.000Z');
+
+      expect(await activity.check('chat-1')).toBe(true);
+      expect(lastActivity).toHaveBeenCalledTimes(1);
+      expect(lastActivity.mock.calls[0][0]).toEqual({
+        ownerId: 'test',
+        schemaVersion: 1,
+        value: { path: '/tmp/native-late.jsonl' },
+      });
+      expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
+        'run-ended',
+        'session',
+        'notice',
+      ]);
+    });
+  });
+
   it('drops a pending native result when execution starts before the probe settles', async () => {
     await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
       ledger.initializeChat('chat-1', baseRows());

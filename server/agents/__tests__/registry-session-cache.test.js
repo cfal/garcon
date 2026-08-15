@@ -46,24 +46,27 @@ describe('AgentRegistry session cache', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it('updates the execution cache before an accepted session publish returns', () => {
-    const integrations = {
-      has: () => false,
-      get: () => null,
-      require: () => { throw new Error('unused'); },
-      list: () => [],
-    };
-    const endpointResolver = {};
-    const adoption = { ensure: () => Promise.reject(new Error('unused')) };
-    const registry = new AgentRegistry({
+  function createRegistry(adoption = {
+    ensure: () => Promise.reject(new Error('unused')),
+  }) {
+    return new AgentRegistry({
       registry: chats,
-      integrations,
-      endpointResolver,
+      integrations: {
+        has: () => false,
+        get: () => null,
+        require: () => { throw new Error('unused'); },
+        list: () => [],
+      },
+      endpointResolver: {},
       getCarryOverRevision: () => 'carry-1',
       ledger,
       adoption,
       hasPendingOwnershipTransfer: () => false,
     });
+  }
+
+  it('updates the execution cache before an accepted session publish returns', () => {
+    const registry = createRegistry();
     expect(registry).toBeDefined();
 
     registry.publishSessionFact(CHAT_ID, {
@@ -84,6 +87,41 @@ describe('AgentRegistry session cache', () => {
       },
     });
     expect(chats.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('caches a session fact that arrives after interruption for future resume', async () => {
+    const producer = ledger.openProducer(CHAT_ID, 'test');
+    ledger.beginRun(CHAT_ID, 'run-1');
+    expect(ledger.interruptRun(CHAT_ID)).toMatchObject({ outcome: 'interrupted' });
+    await Promise.resolve();
+    const registry = createRegistry();
+    expect(registry).toBeDefined();
+
+    producer.sink.publish({
+      type: 'session',
+      session: {
+        agentSessionId: 'native-late',
+        nativeSession: {
+          ownerId: 'test',
+          schemaVersion: 1,
+          value: { path: '/tmp/native-late.jsonl' },
+        },
+        nativeSeedReceipt: null,
+      },
+    });
+
+    expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
+      'run-ended',
+      'session',
+    ]);
+    expect(chats.getChat(CHAT_ID)).toMatchObject({
+      agentSessionId: 'native-late',
+      nativeSession: {
+        ownerId: 'test',
+        value: { path: '/tmp/native-late.jsonl' },
+      },
+    });
+    expect(chats.getChatByAgentSessionId('native-late')?.[0]).toBe(CHAT_ID);
   });
 
   it('selects preview text only from the conversational ledger fold', async () => {
@@ -148,19 +186,8 @@ describe('AgentRegistry session cache', () => {
       detail: { action: 'reload-native-history' },
     });
     await Promise.resolve();
-    const registry = new AgentRegistry({
-      registry: chats,
-      integrations: {
-        has: () => false,
-        get: () => null,
-        require: () => { throw new Error('unused'); },
-        list: () => [],
-      },
-      endpointResolver: {},
-      getCarryOverRevision: () => 'carry-1',
-      ledger,
-      adoption: { ensure: async () => ledger.currentView(CHAT_ID) },
-      hasPendingOwnershipTransfer: () => false,
+    const registry = createRegistry({
+      ensure: async () => ledger.currentView(CHAT_ID),
     });
 
     await expect(registry.getPreview(chats.getChat(CHAT_ID), CHAT_ID)).resolves.toEqual({

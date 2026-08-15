@@ -92,6 +92,47 @@ describe('TranscriptReloadService', () => {
       }]);
     });
   });
+
+  it('reloads from a native session fact that arrives after interruption', async () => {
+    await withReload(async ({ ledger, reload, lease, integration }) => {
+      ledger.beginRun('chat-1', 'run-1');
+      ledger.interruptRun('chat-1');
+      lease.sink.publish({
+        type: 'session',
+        session: {
+          agentSessionId: 'session-late',
+          nativeSession: {
+            ownerId: 'test',
+            schemaVersion: 1,
+            value: { id: 'native-late' },
+          },
+          nativeSeedReceipt: null,
+        },
+      });
+      let importedChat = null;
+      integration.nativeHistoryImport.load = async function* load({ chat }) {
+        importedChat = chat;
+        yield [];
+      };
+
+      const replacement = await reload.reload('chat-1');
+
+      expect(importedChat).toMatchObject({
+        agentSessionId: 'session-late',
+        nativeSession: {
+          ownerId: 'test',
+          value: { id: 'native-late' },
+        },
+      });
+      expect(replacement.contentStartOrdinal).toBe(3);
+      expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
+        'user-input',
+        'provider-row',
+        'session',
+      ]);
+      expect(ledger.currentSession('chat-1')?.detail.agentSessionId).toBe('session-late');
+    });
+  });
 });
 
 async function withReload(run) {
