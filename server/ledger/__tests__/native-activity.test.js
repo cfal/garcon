@@ -162,16 +162,14 @@ describe('NativeTranscriptActivityService', () => {
     });
   });
 
-  it('does not probe native history while the chat has an active run', async () => {
+  it('does not probe native history while the execution coordinator owns the chat', async () => {
     await withFixture(async ({ ledger, activity, lastActivity }) => {
       ledger.initializeChat('chat-1', baseRows());
-      ledger.openProducer('chat-1', 'test');
-      ledger.beginRun('chat-1', 'run-1');
 
       expect(await activity.check('chat-1')).toBe(false);
       expect(lastActivity).not.toHaveBeenCalled();
       expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
-    });
+    }, { ownsExecution: () => true });
   });
 
   it('drops a pending native result when execution starts before the probe settles', async () => {
@@ -323,6 +321,7 @@ async function withFixture(run, options = {}) {
     integrations: {
       get: () => ({ nativeActivity: { lastActivity } }),
     },
+    ownsExecution: (chatId) => ledger.isRunActive(chatId),
     ...options,
   });
   try {

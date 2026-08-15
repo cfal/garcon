@@ -2,6 +2,7 @@ export * from './adoption.js';
 export * from './contracts.js';
 export * from './errors.js';
 export * from './native-activity.js';
+export * from './native-activity-page-reader.js';
 export * from './native-history-seed.js';
 export * from './presentation.js';
 export * from './projection.js';

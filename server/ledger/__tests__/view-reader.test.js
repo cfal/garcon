@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -96,39 +96,6 @@ describe('TranscriptViewReader', () => {
     });
   });
 
-  it('checks native activity for a newest-page open but not older paging', async () => {
-    await withReader(async ({ reader, nativeActivity }) => {
-      await reader.page('chat-1', 20);
-      await reader.page('chat-1', 20, 1);
-
-      expect(nativeActivity.check).toHaveBeenCalledTimes(1);
-      expect(nativeActivity.check).toHaveBeenCalledWith(
-        'chat-1',
-        expect.any(AbortSignal),
-      );
-    });
-  });
-
-  it('serves the newest page without waiting for the advisory native probe', async () => {
-    await withReader(async ({ reader, nativeActivity }) => {
-      let releaseProbe;
-      const blockedProbe = new Promise((resolve) => {
-        releaseProbe = resolve;
-      });
-      nativeActivity.check.mockImplementation(() => blockedProbe);
-
-      const page = reader.page('chat-1', 20);
-      const firstSettled = await Promise.race([
-        page.then(() => 'page'),
-        Bun.sleep(25).then(() => 'probe'),
-      ]);
-      releaseProbe(false);
-      await page;
-
-      expect(firstSettled).toBe('page');
-    });
-  });
-
   it('presents a fenced ledger as typed degraded history', async () => {
     await withReader(async ({ ledger }) => {
       const reader = new TranscriptViewReader(ledger, {
@@ -163,12 +130,11 @@ async function withReader(run) {
   const store = new TranscriptLedgerStore(root, { createViewId: () => viewId, now: () => TS });
   const ledger = new TranscriptLedgerService(store, { now: () => TS });
   ledger.initializeChat('chat-1');
-  const nativeActivity = { check: mock(async () => false) };
   const reader = new TranscriptViewReader(ledger, {
     ensure: async () => ledger.currentView('chat-1'),
-  }, nativeActivity);
+  });
   try {
-    await run({ ledger, nativeActivity, reader, viewId });
+    await run({ ledger, reader, viewId });
   } finally {
     ledger.close();
     await rm(root, { recursive: true, force: true });

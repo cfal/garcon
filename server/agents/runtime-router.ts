@@ -247,11 +247,7 @@ export class AgentRuntimeRouter {
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     assertExecutionAdmissionOpen(opts);
-    await this.#nativeActivity?.check(
-      chatId,
-      opts.executionAdmission?.signal ?? new AbortController().signal,
-    );
-    assertExecutionAdmissionOpen(opts);
+    this.#nativeActivity?.requestCheck(chatId, 'pre-resume');
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
     this.#events.trackTurn(chatId, operationMetadata(operation));
     const producer = this.#producer(chatId);

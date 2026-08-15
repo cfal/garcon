@@ -103,6 +103,7 @@ import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
   TranscriptLedgerService,
+  NativeActivityPageReader,
   NativeTranscriptActivityService,
   TranscriptLedgerStore,
   TranscriptReloadService,
@@ -296,6 +297,7 @@ export async function startServer(): Promise<void> {
     let carryOverCompaction: CarryOverCompactionService | null = null;
     let carryOverWarnings: ((chatId: string, message: string) => void) | null = null;
     let agentRegistry!: AgentRegistry;
+    let executionQueries: Pick<ChatExecutionCoordinator, 'ownsExecution'> | null = null;
     const transcriptAdoption = new TranscriptAdoptionService({
       ledger: transcriptLedger,
       registry: chatRegistry,
@@ -316,11 +318,14 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       registry: chatRegistry,
       integrations: integrationRegistry,
+      ownsExecution(chatId) {
+        if (!executionQueries) throw new Error('Chat execution coordinator is not initialized');
+        return executionQueries.ownsExecution(chatId);
+      },
     });
     const transcriptReader = new TranscriptViewReader(
       transcriptLedger,
       transcriptAdoption,
-      nativeTranscriptActivity,
     );
     agentRegistry = new AgentRegistry({
       registry: chatRegistry,
@@ -403,11 +408,10 @@ export async function startServer(): Promise<void> {
           : null;
       },
     };
-    const chatViewPages = {
-      page(chatId: string, limit: number, beforeOrdinal?: number) {
-        return transcriptReader.page(chatId, limit, beforeOrdinal);
-      },
-    };
+    const chatViewPages = new NativeActivityPageReader(
+      transcriptReader,
+      nativeTranscriptActivity,
+    );
     const handoffs = new AgentHandoffService({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -437,6 +441,7 @@ export async function startServer(): Promise<void> {
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
+    executionQueries = queue;
     const transcriptReload = new TranscriptReloadService({
       ledger: transcriptLedger,
       adoption: transcriptAdoption,

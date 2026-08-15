@@ -10,23 +10,19 @@ import type { TranscriptViewId } from './contracts.js';
 import { LedgerFencedError } from './errors.js';
 import { ledgerRowsToMessages, ledgerRowsToTranscriptMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
-import type { NativeTranscriptActivityService } from './native-activity.js';
 
 const RAW_PAGE_SIZE = 256;
 
 export class TranscriptViewReader {
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
-  readonly #nativeActivity: NativeTranscriptActivityService | null;
 
   constructor(
     ledger: TranscriptLedgerService,
     adoption: TranscriptAdoptionService,
-    nativeActivity: NativeTranscriptActivityService | null = null,
   ) {
     this.#ledger = ledger;
     this.#adoption = adoption;
-    this.#nativeActivity = nativeActivity;
   }
 
   async page(
@@ -57,7 +53,6 @@ export class TranscriptViewReader {
   ): Promise<PresentedTranscriptPage> {
     validatePageRequest(limit, beforeOrdinal);
     const view = await this.#adoption.ensure(chatId, signal);
-    if (beforeOrdinal === undefined) await this.#nativeActivity?.check(chatId, signal);
     const highWatermark = this.#ledger.highWatermark(chatId).ordinal;
     let before = beforeOrdinal === undefined
       ? highWatermark + 1
