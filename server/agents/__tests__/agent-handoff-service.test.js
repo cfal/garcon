@@ -308,6 +308,90 @@ describe('AgentHandoffService', () => {
     }
   });
 
+  it('cancels scheduled recovery retries during shutdown', async () => {
+    const intent = persistedIntent();
+    let attempts = 0;
+    const ownership = {
+      pendingHandoffs: () => [intent],
+      applyHandoffDecision: mock(async () => {
+        attempts += 1;
+        throw new Error('injected recovery failure');
+      }),
+      completeHandoff: mock(async () => {}),
+    };
+    const timer = { unref: mock(() => undefined) };
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let fireRetry = null;
+    globalThis.setTimeout = mock((callback) => {
+      fireRetry = callback;
+      return timer;
+    });
+    globalThis.clearTimeout = mock(() => undefined);
+    const service = createService({ ownership, ledger: ledgerState([]) });
+
+    try {
+      await service.recoverPendingHandoffs();
+      expect(fireRetry).toBeFunction();
+      expect(timer.unref).toHaveBeenCalledTimes(1);
+
+      service.shutdown();
+
+      expect(globalThis.clearTimeout).toHaveBeenCalledWith(timer);
+      fireRetry();
+      for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+      expect(attempts).toBe(1);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
+  it('does not schedule a retry when an active recovery fails after shutdown', async () => {
+    const intent = persistedIntent();
+    let attempts = 0;
+    let markAttemptStarted;
+    const attemptStarted = new Promise((resolve) => {
+      markAttemptStarted = resolve;
+    });
+    let rejectAttempt;
+    const heldAttempt = new Promise((_, reject) => {
+      rejectAttempt = reject;
+    });
+    const ownership = {
+      pendingHandoffs: () => [intent],
+      applyHandoffDecision: mock(async () => {
+        attempts += 1;
+        markAttemptStarted();
+        await heldAttempt;
+      }),
+      completeHandoff: mock(async () => {}),
+    };
+    const timer = { unref: mock(() => undefined) };
+    const originalSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = mock(() => timer);
+    const service = createService({ ownership, ledger: ledgerState([]) });
+    const recovery = service.recoverPendingHandoffs();
+    let attemptReleased = false;
+
+    try {
+      await attemptStarted;
+      service.shutdown();
+      rejectAttempt(new Error('injected post-shutdown recovery failure'));
+      attemptReleased = true;
+      await recovery;
+
+      expect(globalThis.setTimeout).not.toHaveBeenCalled();
+      expect(attempts).toBe(1);
+    } finally {
+      if (!attemptReleased) {
+        rejectAttempt(new Error('test cleanup'));
+      }
+      await recovery.catch(() => undefined);
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
   it('adopts an existing switch marker after unrelated post-watermark rows', async () => {
     const current = sourceChat();
     const calls = [];
