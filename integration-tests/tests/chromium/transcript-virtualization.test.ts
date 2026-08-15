@@ -2335,6 +2335,20 @@ async function verifyKeyboardPrepend(
       });
     }
     await withDiagnosticTimeout('the held keyboard earlier page', earlierRequest);
+    await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+      const feed = feedElement as HTMLElement;
+      const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      let previous = feed.scrollTop;
+      let stableFrames = 0;
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        await frame();
+        const current = feed.scrollTop;
+        stableFrames = Math.abs(current - previous) <= 0.5 ? stableFrames + 1 : 0;
+        previous = current;
+        if (stableFrames >= 7) return;
+      }
+      throw new Error('Keyboard transcript paging did not settle before publication.');
+    });
     expect(
       await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
     ).toBe(0);
