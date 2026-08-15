@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 import { UserMessage, AssistantMessage } from '../../../../common/chat-types.js';
 import { LedgerFencedError } from '../../../ledger/errors.js';
 import { TranscriptSearchController } from '../controller.js';
@@ -121,6 +122,39 @@ describe('TranscriptSearchController', () => {
       throughOrdinal: 3,
       rows: [expect.objectContaining({ ordinal: 3, body: 'later' })],
     });
+  });
+
+  it('does not rebuild a whole chat after its committed suffix is already queued', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.appendRows.mockClear();
+    test.service.replaceChat.mockClear();
+    const row = providerRow('view-1', 3, 'later');
+    test.rows.get('chat-1').push(row);
+
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [row] });
+    test.controller.sourceMayHaveChanged('chat-1');
+    await settle();
+
+    expect(test.service.appendRows).toHaveBeenCalledTimes(1);
+    expect(test.service.replaceChat).not.toHaveBeenCalled();
+  });
+
+  it('absorbs a rejected fire-and-forget indexing job', async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/rejected-index-job.ts', import.meta.url));
+    const child = Bun.spawn([process.execPath, fixture], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+
+    expect({ exitCode, stdout, stderr }).toEqual({ exitCode: 0, stdout: '', stderr: '' });
   });
 
   it('replaces old-view entries before accepting new-view navigation', async () => {
