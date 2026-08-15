@@ -72,10 +72,18 @@ export class QueueDrainer {
       }
 
       let options: RunAgentTurnOptions | undefined;
-      const result = await controls.dequeue(chatId, (entry) => {
-        options = optionsForQueuedTurn(this.deps.getDrainOptions(chatId), entry);
-        return callbacks.registerQueued(chatId, entry.content, options);
-      });
+      let inputInserted = false;
+      let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeue']>>;
+      try {
+        result = await controls.dequeue(chatId, (entry) => {
+          options = optionsForQueuedTurn(this.deps.getDrainOptions(chatId), entry);
+          inputInserted = callbacks.registerQueued(chatId, entry.content, options);
+          return inputInserted;
+        });
+      } catch (error) {
+        if (inputInserted) callbacks.discardPreparedInput(chatId, options?.clientMessageId);
+        throw error;
+      }
       if (!result) {
         const control = await controls.read(chatId);
         if (control.entries.length === 0) callbacks.publishIdle(chatId);
