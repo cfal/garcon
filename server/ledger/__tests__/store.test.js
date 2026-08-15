@@ -337,6 +337,81 @@ describe('TranscriptLedgerStore', () => {
     db.close();
   });
 
+  it('reopens the complete old view when cutover fails before commit', () => {
+    const current = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('old-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('old one'), provider('old two')],
+    });
+    const staged = store.stageView('chat-one', {
+      viewId: transcriptViewId('new-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('new one'), provider('new two')],
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        throw new Error('injected pre-commit cutover failure');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      expect(() => store.replaceCurrentView('chat-one', current.viewId, staged.viewId))
+        .toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(() => store.currentRows('chat-one')).toThrow(LedgerFencedError);
+
+    store.close();
+    store = new TranscriptLedgerStore(root);
+    expect(store.currentView('chat-one').viewId).toBe(current.viewId);
+    expect(store.currentRows('chat-one').map(renderedContent)).toEqual(['old one', 'old two']);
+    expect(currentViewCount(root, 'chat-one')).toBe(1);
+  });
+
+  it('reopens the complete new view when cutover commit outcome is ambiguous', () => {
+    const current = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('old-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('old one'), provider('old two')],
+    });
+    const staged = store.stageView('chat-one', {
+      viewId: transcriptViewId('new-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('new one'), provider('new two')],
+    });
+    const exec = Database.prototype.exec;
+    let commitBecameAmbiguous = false;
+    Database.prototype.exec = function (sql) {
+      const result = exec.call(this, sql);
+      if (!commitBecameAmbiguous && sql === 'COMMIT') {
+        commitBecameAmbiguous = true;
+        throw new Error('injected ambiguous cutover commit');
+      }
+      return result;
+    };
+    try {
+      expect(() => store.replaceCurrentView('chat-one', current.viewId, staged.viewId))
+        .toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitBecameAmbiguous).toBe(true);
+    expect(() => store.currentRows('chat-one')).toThrow(LedgerFencedError);
+
+    store.close();
+    store = new TranscriptLedgerStore(root);
+    expect(store.currentView('chat-one').viewId).toBe(staged.viewId);
+    expect(store.currentRows('chat-one').map(renderedContent)).toEqual(['new one', 'new two']);
+    expect(currentViewCount(root, 'chat-one')).toBe(1);
+  });
+
   it('deletes stale staging views lazily when reopening a chat', () => {
     store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('current-view'),
@@ -638,4 +713,17 @@ function permissionRequested() {
 
 function renderedContent(row) {
   return row.kind === 'provider-row' ? row.message.content : null;
+}
+
+function currentViewCount(ledgerRoot, chatId) {
+  const db = new Database(path.join(ledgerRoot, chatId, 'ledger.sqlite'), {
+    readonly: true,
+    create: false,
+  });
+  try {
+    return db.query("SELECT count(*) AS count FROM transcript_views WHERE status = 'current'")
+      .get().count;
+  } finally {
+    db.close();
+  }
 }
