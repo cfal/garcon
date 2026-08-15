@@ -151,7 +151,8 @@ describe('GET /api/v1/chats/messages', () => {
   it('clamps view-qualified pagination before reading the ledger', async () => {
     const { agents, chatViews, routes } = createRoutesFixture();
     const url = new URL(
-      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}&limit=999999&beforeOrdinal=10`,
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`
+      + '&limit=999999&beforeOrdinal=10&transcriptViewId=view-1',
     );
 
     const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
@@ -171,6 +172,21 @@ describe('GET /api/v1/chats/messages', () => {
     });
     expect(chatViews.page).toHaveBeenCalledWith(CHAT_ID, 200, 10);
     expect(agents.resendCandidates).toHaveBeenCalledWith(CHAT_ID);
+  });
+
+  it('requires a transcript view for every earlier-page cursor', async () => {
+    const { chatViews, routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}&beforeOrdinal=10`,
+    );
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      errorCode: 'VALIDATION_FAILED',
+    });
+    expect(chatViews.page).not.toHaveBeenCalled();
   });
 
   it('suppresses resend candidates while the chat is processing', async () => {
