@@ -71,6 +71,22 @@ function deferred() {
   return { promise, resolve };
 }
 
+function capturingOperation(runId) {
+  const events = [];
+  const terminal = deferred();
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+        if (event.type === 'run-ended') terminal.resolve();
+      },
+    },
+    terminal: terminal.promise,
+  };
+}
+
 function startRequest(overrides = {}) {
   return {
     chatId: 'chat-1',
@@ -223,5 +239,41 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
       'second response',
       'late first response',
     ]);
+  });
+
+  it('publishes a delayed response through the request that started it', async () => {
+    const runtime = new CapturingDirectRuntime(await tempDir());
+    const firstResponse = deferred();
+    runtime.responses.push(firstResponse.promise, 'second response');
+    const first = capturingOperation('run-1');
+    const second = capturingOperation('run-2');
+
+    const started = await runtime.startSession(startRequest({
+      clientRequestId: 'run-1',
+      turnId: 'run-1',
+      operation: first.operation,
+    }));
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      clientRequestId: 'run-2',
+      turnId: 'run-2',
+      command: 'second message',
+      operation: second.operation,
+    }));
+    await second.terminal;
+
+    firstResponse.resolve('late first response');
+    await first.terminal;
+
+    expect(first.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(first.events[0].rows.map((row) => row.message.content)).toEqual([
+      'late first response',
+    ]);
+    expect(first.events[1]).toMatchObject({ type: 'run-ended', runId: 'run-1' });
+    expect(second.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(second.events[0].rows.map((row) => row.message.content)).toEqual([
+      'second response',
+    ]);
+    expect(second.events[1]).toMatchObject({ type: 'run-ended', runId: 'run-2' });
   });
 });
