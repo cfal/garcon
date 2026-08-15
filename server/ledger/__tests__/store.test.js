@@ -448,6 +448,37 @@ describe('TranscriptLedgerStore', () => {
     }
   });
 
+  it('fences a requested chat open failure without fencing the cached chat', () => {
+    store.close();
+    store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
+    store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+
+    const exec = Database.prototype.exec;
+    let openFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!openFailed && sql === 'PRAGMA journal_mode = WAL') {
+        openFailed = true;
+        throw new Error('injected requested-chat open failure');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      expect(() => store.initializeCurrentView('chat-two', {
+        viewId: transcriptViewId('view-two'),
+        contentStartOrdinal: 1,
+      })).toThrow(LedgerFencedError);
+
+      expect(openFailed).toBe(true);
+      expect(store.currentView('chat-one').viewId).toBe('view-one');
+      expect(() => store.currentView('chat-two')).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+  });
+
   it('removes only unregistered target ledgers during startup cleanup', async () => {
     store.initializeCurrentView('registered-chat', {
       viewId: transcriptViewId('registered-view'),
