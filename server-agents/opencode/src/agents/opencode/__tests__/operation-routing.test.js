@@ -28,7 +28,7 @@ function createEventStream() {
   };
 }
 
-function createRuntime(sessionIds) {
+function createRuntime(sessionIds, options = {}) {
   const eventStream = createEventStream();
   const promptAsync = mock(() => Promise.resolve({}));
   const create = mock(() => Promise.resolve({ data: { id: sessionIds.shift() } }));
@@ -46,8 +46,9 @@ function createRuntime(sessionIds) {
       },
       server: { close: mock(() => undefined) },
     })),
+    ...options,
   });
-  return { eventStream, permissionReply, promptAsync, runtime };
+  return { create, eventStream, permissionReply, promptAsync, runtime };
 }
 
 function operation(runId, events) {
@@ -117,6 +118,91 @@ async function waitFor(predicate) {
 }
 
 describe('OpenCode operation routing', () => {
+  it('preserves an established operation when a replacement start fails', async () => {
+    const { create, eventStream, promptAsync, runtime } = createRuntime(['session-1']);
+    const establishedEvents = [];
+    const replacementEvents = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', establishedEvents),
+    });
+    create.mockRejectedValueOnce(new Error('replacement start failed'));
+
+    await expect(runtime.startSession({
+      command: 'replacement',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-b', replacementEvents),
+    })).rejects.toThrow('replacement start failed');
+
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'established reply',
+    });
+    pushIdle(eventStream, 'session-1', 'event-04');
+    await waitFor(() => establishedEvents.some((event) => event.type === 'run-ended'));
+
+    expect(JSON.stringify(establishedEvents)).toContain('established reply');
+    expect(replacementEvents).toEqual([]);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('logs and drops output without an operation identity', async () => {
+    const diagnostics = [];
+    const { eventStream, runtime } = createRuntime(['session-1'], {
+      logger: {
+        debug(...args) { diagnostics.push(args); },
+        info(...args) { diagnostics.push(args); },
+        warn(...args) { diagnostics.push(args); },
+        error(...args) { diagnostics.push(args); },
+      },
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+
+    eventStream.push({
+      id: 'event-orphan',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-orphan',
+          messageID: 'message-orphan',
+          type: 'text',
+          text: 'orphan output',
+        },
+      },
+    });
+    await waitFor(() => diagnostics.some((entry) => (
+      entry[0] === 'Ignoring an OpenCode event without an operation identity'
+    )));
+
+    expect(events).toEqual([]);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
   it('publishes late named rows and permissions through the operation that produced them', async () => {
     const { eventStream, permissionReply, promptAsync, runtime } = createRuntime(['session-1']);
     const firstEvents = [];
