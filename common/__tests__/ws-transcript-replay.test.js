@@ -54,6 +54,31 @@ describe('bounded transcript replay WebSocket contract', () => {
     })).toBeNull();
   });
 
+  it('rejects malformed replay cursors instead of restarting from ordinal zero', () => {
+    for (const afterOrdinal of [undefined, null, '220', -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(parseClientWsMessage({
+        type: 'chat-subscribe',
+        clientRequestId: 'request-2',
+        chatId: 'chat-1',
+        transcriptViewId: 'view-1',
+        afterOrdinal,
+      })).toBeNull();
+    }
+  });
+
+  it('rejects malformed continuation watermarks', () => {
+    for (const throughOrdinal of [null, '500', -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(parseClientWsMessage({
+        type: 'chat-subscribe',
+        clientRequestId: 'request-2',
+        chatId: 'chat-1',
+        transcriptViewId: 'view-1',
+        afterOrdinal: 220,
+        throughOrdinal,
+      })).toBeNull();
+    }
+  });
+
   it('preserves the fixed watermark and next cursor on replay responses', () => {
     expect(parseServerWsMessage(replayResponse())).toMatchObject({
       nextAfterOrdinal: 220,
