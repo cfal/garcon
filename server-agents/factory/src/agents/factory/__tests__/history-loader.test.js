@@ -134,6 +134,29 @@ describe('factory history loader', () => {
     });
   });
 
+  it('keeps malformed native transcript content out of diagnostics', async () => {
+    const privateContent = 'private-factory-history-content';
+    const sessionPath = path.join(tmpDir, 'malformed-session.jsonl');
+    const diagnostics = [];
+    await writeJsonl(sessionPath, [
+      `{${privateContent}`,
+      {
+        type: 'message',
+        timestamp: '2026-03-29T01:00:00.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'visible response' }] },
+      },
+    ]);
+
+    await loadFactoryChatMessages(sessionPath, {
+      debug(...args) { diagnostics.push(args); },
+      info(...args) { diagnostics.push(args); },
+      warn(...args) { diagnostics.push(args); },
+      error(...args) { diagnostics.push(args); },
+    });
+
+    expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
+  });
+
   it('finds Factory session files under FACTORY_HOME_OVERRIDE', async () => {
     process.env.FACTORY_HOME_OVERRIDE = tmpDir;
     const sessionPath = path.join(tmpDir, '.factory', 'sessions', '-garcon', 'sess-2.jsonl');

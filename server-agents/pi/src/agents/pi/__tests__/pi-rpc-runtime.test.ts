@@ -207,6 +207,10 @@ function createFakePiProcess(options = {}) {
       if (closed) return;
       stdoutController.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
     },
+    pushRaw(line) {
+      if (closed) return;
+      stdoutController.enqueue(encoder.encode(`${line}\n`));
+    },
     pushStderr(text) {
       if (closed) return;
       stderrController.enqueue(encoder.encode(text));
@@ -839,6 +843,28 @@ describe('PiRpcRuntime', () => {
       message: 'Ignoring Pi message without an active turn',
     }));
     await runtime.shutdown();
+  });
+
+  it('keeps malformed output and stderr content out of diagnostics', async () => {
+    const privateContent = 'private-pi-transcript-content';
+    const diagnostics: unknown[][] = [];
+    const runtime = createRuntime({
+      logger: {
+        debug(...args) { diagnostics.push(args); },
+        info(...args) { diagnostics.push(args); },
+        warn(...args) { diagnostics.push(args); },
+        error(...args) { diagnostics.push(args); },
+      },
+    });
+
+    await runtime.startSession(baseStartRequest());
+    fakes[0].pushRaw(`{${privateContent}`);
+    fakes[0].pushStderr(`${privateContent}\n`);
+    fakes[0].pushEvent({ type: 'agent_settled' });
+    await settleIo();
+    await runtime.shutdown();
+
+    expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
   });
 
   it('contains a closed publisher and keeps the native session reusable', async () => {

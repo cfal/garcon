@@ -17,6 +17,7 @@ function collectOperation(runId) {
 function createFakeProc() {
   const encoder = new TextEncoder();
   let stdoutController;
+  let stderrController;
   let resolveExited;
   let closed = false;
 
@@ -28,7 +29,7 @@ function createFakeProc() {
 
   const stderr = new ReadableStream({
     start(controller) {
-      controller.close();
+      stderrController = controller;
     },
   });
 
@@ -46,10 +47,17 @@ function createFakeProc() {
     pushJson(message) {
       stdoutController.enqueue(encoder.encode(JSON.stringify(message) + '\n'));
     },
+    pushRaw(line) {
+      stdoutController.enqueue(encoder.encode(`${line}\n`));
+    },
+    pushStderr(line) {
+      stderrController.enqueue(encoder.encode(`${line}\n`));
+    },
     close(exitCode = 0) {
       if (closed) return;
       closed = true;
       stdoutController.close();
+      stderrController.close();
       resolveExited(exitCode);
     },
     kill() {
@@ -150,6 +158,42 @@ describe('AmpCliRuntime lifecycle', () => {
     await finished;
 
     expect(runningWhenFinished).toBe(false);
+  });
+
+  it('keeps malformed output and stderr content out of diagnostics', async () => {
+    const privateContent = 'private-amp-transcript-content';
+    const diagnostics = [];
+    const provider = new AmpCliRuntime({
+      logger: {
+        debug(...args) { diagnostics.push(args); },
+        info(...args) { diagnostics.push(args); },
+        warn(...args) { diagnostics.push(args); },
+        error(...args) { diagnostics.push(args); },
+      },
+    });
+    const threadId = 'T-51515151-5151-5151-5151-515151515151';
+    const proc = createFakeProc();
+    spawnMock
+      .mockReturnValueOnce(createFakeCommandProc(`${threadId}\n`))
+      .mockReturnValueOnce(proc);
+
+    await provider.startSession({
+      command: 'hello',
+      chatId: 'chat-private-diagnostics',
+      projectPath: '/proj',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: noopOperation('run-private-diagnostics'),
+    });
+    proc.pushRaw(`{${privateContent}`);
+    proc.pushStderr(privateContent);
+    proc.pushJson({ type: 'result', is_error: false });
+    proc.close(0);
+    await proc.exited;
+    await Bun.sleep(10);
+
+    expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
   });
 
   it('kills and rolls back a process whose prompt write fails synchronously', async () => {

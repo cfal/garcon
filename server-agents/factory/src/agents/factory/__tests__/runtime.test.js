@@ -35,6 +35,7 @@ function collectOperation(runId) {
 function createFakeProc() {
   const encoder = new TextEncoder();
   let stdoutController;
+  let stderrController;
   let resolveExited;
   let closed = false;
 
@@ -46,7 +47,7 @@ function createFakeProc() {
 
   const stderr = new ReadableStream({
     start(controller) {
-      controller.close();
+      stderrController = controller;
     },
   });
 
@@ -64,10 +65,17 @@ function createFakeProc() {
     pushJson(message) {
       stdoutController.enqueue(encoder.encode(JSON.stringify(message) + '\n'));
     },
+    pushRaw(line) {
+      stdoutController.enqueue(encoder.encode(`${line}\n`));
+    },
+    pushStderr(line) {
+      stderrController.enqueue(encoder.encode(`${line}\n`));
+    },
     close(exitCode = 0) {
       if (closed) return;
       closed = true;
       stdoutController.close();
+      stderrController.close();
       resolveExited(exitCode);
     },
     kill() {
@@ -500,6 +508,44 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(messages.mock.calls[0][1][0].content).toBe('factory reply');
     expect(runningWhenFinished).toBe(false);
     expect(spawnMock.mock.calls[0][1].env.FACTORY_AIRGAP_ENABLED).toBeUndefined();
+  });
+
+  it('keeps malformed output and stderr content out of diagnostics', async () => {
+    const privateContent = 'private-factory-transcript-content';
+    const diagnostics = [];
+    const provider = new FactoryCliRuntime({
+      logger: {
+        debug(...args) { diagnostics.push(args); },
+        info(...args) { diagnostics.push(args); },
+        warn(...args) { diagnostics.push(args); },
+        error(...args) { diagnostics.push(args); },
+      },
+    });
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const turn = provider.runTurn({
+      command: 'continue',
+      agentSessionId: 'factory-private-diagnostics',
+      chatId: 'chat-private-diagnostics',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: noopOperation('run-private-diagnostics'),
+    });
+    while (spawnMock.mock.calls.length === 0) await Promise.resolve();
+    proc.pushRaw(`{${privateContent}`);
+    proc.pushStderr(privateContent);
+    proc.pushJson({
+      type: 'completion',
+      session_id: 'factory-private-diagnostics',
+    });
+    proc.close(0);
+    await turn;
+    await Bun.sleep(10);
+
+    expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
   });
 
   it('keeps a prior process bound to its publisher until that source closes', async () => {

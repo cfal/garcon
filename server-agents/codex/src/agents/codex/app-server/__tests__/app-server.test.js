@@ -1641,6 +1641,40 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
   });
 
+  it('keeps app-server stderr content out of diagnostics', async () => {
+    const privateContent = 'private-codex-transcript-content';
+    const diagnostics = [];
+    const nativePath = path.join(tmpDir, 'private-diagnostics.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-private-diagnostics', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-private-diagnostics', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      logger: {
+        debug(...args) { diagnostics.push(args); },
+        info(...args) { diagnostics.push(args); },
+        warn(...args) { diagnostics.push(args); },
+        error(...args) { diagnostics.push(args); },
+      },
+    });
+
+    await provider.startSession(makeRequest());
+    fake.emit('stderr', privateContent);
+
+    expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
+  });
+
   it('steers an ordinary active turn once with its expected native identity', async () => {
     const nativePath = path.join(tmpDir, 'strict-steer-thread.jsonl');
     const prepared = mock(async () => undefined);
