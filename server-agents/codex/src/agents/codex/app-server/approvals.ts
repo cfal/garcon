@@ -142,12 +142,12 @@ function stringField(value: unknown): string | undefined {
 // through that operation rather than batched behind whichever one happens to be current.
 export function cancelPendingApprovals(
   logger: AgentLogger,
-  pending: Map<string, CodexPendingApproval & { operation: CodexOperation }>,
-  chatId: string,
+  pending: Map<string, CodexPendingApproval & { client: object; operation: CodexOperation }>,
+  client: object,
   reason: 'cancelled' | 'session-complete' | 'aborted',
 ): void {
   for (const [permissionRequestId, approval] of [...pending.entries()]) {
-    if (approval.chatId !== chatId) continue;
+    if (approval.client !== client) continue;
     pending.delete(permissionRequestId);
     publishRows(
       logger,

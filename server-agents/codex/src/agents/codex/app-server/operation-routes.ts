@@ -72,7 +72,7 @@ function publish(
   if (!operation || operation.chatId !== chatId) {
     logger.warn('Dropped a Codex provider event with no owning operation', {
       chatId,
-      turnId: operation?.runId ?? null,
+      runId: operation?.runId ?? null,
       eventType: build('').type,
     });
     return;
@@ -83,7 +83,7 @@ function publish(
   } catch (error) {
     logger.warn('Dropped a Codex provider event at an unavailable sink', {
       chatId,
-      turnId: operation.runId,
+      runId: operation.runId,
       eventType: event.type,
       reason: error instanceof Error ? error.message : String(error),
     });

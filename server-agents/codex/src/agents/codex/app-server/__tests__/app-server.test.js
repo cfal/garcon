@@ -6513,7 +6513,7 @@ describe('CodexAppServerRuntime', () => {
       { permissionRequestId: message.permissionRequestId, metadata },
     ]));
     expect(requestByCommand.get('command-a')?.metadata).toMatchObject({ turnId: 'run-a' });
-    expect(requestByCommand.get('command-b')?.metadata).toMatchObject({ turnId: 'run-b' });
+    expect(requestByCommand.get('command-b')?.metadata).toMatchObject({ turnId: 'run-a' });
 
     const cancelled = emissions.filter(({ message }) => message instanceof PermissionCancelledMessage);
     const cancellationMetadata = new Map(cancelled.map(({ message, metadata }) => [
@@ -6523,7 +6523,212 @@ describe('CodexAppServerRuntime', () => {
     expect(cancellationMetadata.get(requestByCommand.get('command-a').permissionRequestId))
       .toMatchObject({ turnId: 'run-a' });
     expect(cancellationMetadata.get(requestByCommand.get('command-b').permissionRequestId))
-      .toMatchObject({ turnId: 'run-b' });
+      .toMatchObject({ turnId: 'run-a' });
+  });
+
+  it('binds each native turn once across later operations and delayed starts', async () => {
+    const nativePath = path.join(tmpDir, 'immutable-turn-routes.jsonl');
+    let goal = null;
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      getThreadGoal: async () => ({ goal }),
+      setThreadGoal: async (threadId, params) => {
+        goal = makeGoal(threadId, params.objective, 'active');
+        await fs.writeFile(nativePath, '{}\n');
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'turn-a', status: 'inProgress' }) },
+        });
+        return { goal };
+      },
+      setThreadGoalStatus: async (threadId) => {
+        goal = makeGoal(threadId, 'Keep working', 'active');
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'turn-b', status: 'inProgress' }) },
+        });
+        return { goal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const emissions = [];
+    const finished = [];
+    provider.onMessages((chatId, messages, metadata) => {
+      emissions.push(...messages.map((message) => ({ chatId, message, metadata })));
+    });
+    provider.onFinished((_chatId, _exitCode, metadata) => finished.push(metadata));
+
+    await provider.startSession(makeRequest({
+      clientRequestId: 'run-a',
+      turnId: 'run-a',
+      codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+    }));
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath,
+      clientRequestId: 'run-b',
+      turnId: 'run-b',
+      codexGoalCommand: { kind: 'resume' },
+    }));
+
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a', status: 'inProgress' }) },
+    });
+    for (const [turnId, itemId, text] of [
+      ['turn-a', 'item-a', 'late from turn A'],
+      ['turn-b', 'item-b', 'current from turn B'],
+    ]) {
+      fake.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: 'thread-1',
+          turnId,
+          item: { type: 'agentMessage', id: itemId, text, phase: null, memoryCitation: null },
+        },
+      });
+    }
+    for (const [id, turnId, command] of [
+      [81, 'turn-a', 'approval-a'],
+      [82, 'turn-b', 'approval-b'],
+    ]) {
+      fake.emit('serverRequest', {
+        id,
+        method: 'item/commandExecution/requestApproval',
+        params: { threadId: 'thread-1', turnId, itemId: `cmd-${id}`, command },
+      });
+    }
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a' }) },
+    });
+
+    const operationForContent = (content) => emissions.find(({ message }) => (
+      message.content === content
+    ))?.metadata;
+    expect(operationForContent('late from turn A')).toMatchObject({ turnId: 'run-a' });
+    expect(operationForContent('current from turn B')).toMatchObject({ turnId: 'run-b' });
+    const operationForApproval = (command) => emissions.find(({ message }) => (
+      message instanceof PermissionRequestMessage && message.requestedTool.command === command
+    ))?.metadata;
+    expect(operationForApproval('approval-a')).toMatchObject({ turnId: 'run-a' });
+    expect(operationForApproval('approval-b')).toMatchObject({ turnId: 'run-b' });
+    expect(finished).toContainEqual(expect.objectContaining({ turnId: 'run-a' }));
+    expect(finished).not.toContainEqual(expect.objectContaining({ turnId: 'run-b' }));
+    expect(provider.captureSteerTarget('thread-1')).toBeTruthy();
+  });
+
+  it('retains named turn routes through terminal publication until source retirement', async () => {
+    const nativePath = path.join(tmpDir, 'post-terminal-route.jsonl');
+    const sourceClosed = createDeferred();
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-a', status: 'inProgress' }) };
+      },
+      shutdown: () => sourceClosed.promise,
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const emissions = [];
+    provider.onMessages((_chatId, messages, metadata) => {
+      emissions.push(...messages.map((message) => ({ message, metadata })));
+    });
+    await provider.startSession(makeRequest({ clientRequestId: 'run-a', turnId: 'run-a' }));
+
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a' }) },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-a',
+        item: { type: 'agentMessage', id: 'late-item', text: 'after terminal', phase: null, memoryCitation: null },
+      },
+    });
+
+    expect(emissions.find(({ message }) => message.content === 'after terminal')?.metadata)
+      .toMatchObject({ turnId: 'run-a' });
+
+    sourceClosed.resolve();
+    await Promise.resolve();
+    fake.emit('exit', 0);
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-a',
+        item: { type: 'agentMessage', id: 'retired-item', text: 'after retirement', phase: null, memoryCitation: null },
+      },
+    });
+    expect(emissions.some(({ message }) => message.content === 'after retirement')).toBe(false);
+  });
+
+  it('keeps identical native turn ids isolated by client and thread', async () => {
+    const nativePaths = [
+      path.join(tmpDir, 'shared-turn-a.jsonl'),
+      path.join(tmpDir, 'shared-turn-b.jsonl'),
+    ];
+    const clients = nativePaths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: `thread-${index}`, path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'shared-turn', status: 'inProgress' }) };
+      },
+    }));
+    let clientIndex = 0;
+    const provider = createRuntime({ createClient: () => clients[clientIndex++] });
+    const emissions = [];
+    provider.onMessages((chatId, messages, metadata) => {
+      emissions.push(...messages.map((message) => ({ chatId, message, metadata })));
+    });
+    await provider.startSession(makeRequest({
+      chatId: 'chat-a',
+      clientRequestId: 'run-a',
+      turnId: 'run-a',
+    }));
+    await provider.startSession(makeRequest({
+      chatId: 'chat-b',
+      clientRequestId: 'run-b',
+      turnId: 'run-b',
+    }));
+
+    for (const [index, text] of ['from chat A', 'from chat B'].entries()) {
+      clients[index].emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: `thread-${index}`,
+          turnId: 'shared-turn',
+          item: { type: 'agentMessage', id: `item-${index}`, text, phase: null, memoryCitation: null },
+        },
+      });
+    }
+
+    expect(emissions.find(({ message }) => message.content === 'from chat A'))
+      .toMatchObject({ chatId: 'chat-a', metadata: { turnId: 'run-a' } });
+    expect(emissions.find(({ message }) => message.content === 'from chat B'))
+      .toMatchObject({ chatId: 'chat-b', metadata: { turnId: 'run-b' } });
   });
 
   it('keeps a native turn with the run that started it after a later operation takes the session', async () => {
