@@ -1000,10 +1000,18 @@ describe('chats API contract', () => {
 	});
 
 	it('qualifies transcript page requests by view and validates the response against the request', async () => {
+		const message = (ordinal: number, content: string) => ({
+			ordinal,
+			message: {
+				type: 'assistant-message',
+				timestamp: '2026-08-15T00:00:00.000Z',
+				content,
+			},
+		});
 		const validPage = {
 			historyState: { kind: 'complete' },
 			chatId: 'c-1',
-			messages: [],
+			messages: [message(40, 'earlier'), message(49, 'later')],
 			transcriptViewId: 'view-1',
 			lastOrdinal: 100,
 			pageOldestOrdinal: 40,
@@ -1033,6 +1041,12 @@ describe('chats API contract', () => {
 			{ ...validPage, pageNewestOrdinal: 50 },
 			{ ...validPage, pageOldestOrdinal: 51, pageNewestOrdinal: 49 },
 			{ ...validPage, lastOrdinal: 48 },
+			{ ...validPage, messages: [message(49, 'later'), message(40, 'earlier')] },
+			{ ...validPage, messages: [message(40, 'first'), message(40, 'duplicate')] },
+			{ ...validPage, messages: [message(40, 'earlier'), message(50, 'outside range')] },
+			{ ...validPage, messages: [message(41, 'wrong lower bound'), message(49, 'later')] },
+			{ ...validPage, pageOldestOrdinal: 0 },
+			{ ...validPage, messages: [], pageOldestOrdinal: 40 },
 		];
 		for (const response of invalidResponses) {
 			fetchMock.mockResolvedValueOnce(jsonResponse(response));
