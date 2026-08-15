@@ -95,6 +95,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
     const transcriptReader = createCursorTranscriptSource(requestIdentities);
     const runtime = new AcpAgentRuntime(createCursorAcpPolicy(config, logger), {
       converter: new CursorAcpEventConverter(),
+      logger,
     });
 
     this.settings = createVersionedSettings({

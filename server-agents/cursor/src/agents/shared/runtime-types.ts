@@ -1,5 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface AcpExecutionAdmission {
@@ -16,6 +17,7 @@ export interface AcpExecutionRequest {
   readonly clientRequestId?: string;
   readonly clientMessageId?: string;
   readonly turnId?: string;
+  readonly operation: AgentRuntimeOperation;
   readonly executionAdmission?: AcpExecutionAdmission;
   readonly command: string;
   readonly images?: readonly AgentAttachment[];

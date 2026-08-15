@@ -78,8 +78,8 @@ export class AcpClient {
     sessionId: string;
     prompt: Array<{ type: string; text?: string; [key: string]: unknown }>;
     config?: Record<string, unknown>;
-  }): Promise<AcpSessionPromptResult> {
-    return this.#transport.request<AcpSessionPromptResult>('session/prompt', params);
+  }, onSent?: () => void): Promise<AcpSessionPromptResult> {
+    return this.#transport.request<AcpSessionPromptResult>('session/prompt', params, onSent);
   }
 
   async setSessionConfigOption(params: {
@@ -105,16 +105,16 @@ export class AcpClient {
     };
   }
 
-  onRpcMessage(cb: Parameters<AcpTransport['onRpcMessage']>[0]): void {
-    this.#transport.onRpcMessage(cb);
+  onRpcMessage(cb: Parameters<AcpTransport['onRpcMessage']>[0]): () => void {
+    return this.#transport.onRpcMessage(cb);
   }
 
-  onStderr(cb: Parameters<AcpTransport['onStderr']>[0]): void {
-    this.#transport.onStderr(cb);
+  onStderr(cb: Parameters<AcpTransport['onStderr']>[0]): () => void {
+    return this.#transport.onStderr(cb);
   }
 
-  onExit(cb: Parameters<AcpTransport['onExit']>[0]): void {
-    this.#transport.onExit(cb);
+  onExit(cb: Parameters<AcpTransport['onExit']>[0]): () => void {
+    return this.#transport.onExit(cb);
   }
 
   respond(id: AcpJsonRpcId, result: unknown): void {

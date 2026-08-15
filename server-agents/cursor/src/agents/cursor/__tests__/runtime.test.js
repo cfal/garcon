@@ -26,6 +26,35 @@ function deferred() {
   return { promise, resolve };
 }
 
+function noopOperation(runId = 'run-default') {
+  return { runId, publish() {} };
+}
+
+function collectOperation(runId) {
+  const events = [];
+  const waiters = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+        for (let i = waiters.length - 1; i >= 0; i -= 1) {
+          const waiter = waiters[i];
+          if (!waiter.predicate(event)) continue;
+          waiters.splice(i, 1);
+          waiter.resolve(event);
+        }
+      },
+    },
+    waitForEvent(predicate) {
+      const existing = events.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve) => waiters.push({ predicate, resolve }));
+    },
+  };
+}
+
 function option(id, currentValue, values, extra = {}) {
   return {
     id,
@@ -71,6 +100,8 @@ function createAcpHarness(options = {}) {
   const instanceWaiters = [];
 
   function createInstance() {
+    const instanceIndex = instances.length;
+    const sessionId = options.sessionIds?.[instanceIndex] ?? 'cursor-session';
     let stdoutController;
     let exitResolve;
     let promptRequestId = null;
@@ -136,7 +167,7 @@ function createAcpHarness(options = {}) {
         emit({
           jsonrpc: '2.0',
           id: message.id,
-          result: { sessionId: 'cursor-session', configOptions: configOptionsFromState(configState) },
+          result: { sessionId, configOptions: configOptionsFromState(configState) },
         });
         return;
       }
@@ -148,7 +179,9 @@ function createAcpHarness(options = {}) {
 
       if (message.method === 'session/set_config_option') {
         configState[message.params.configId] = message.params.value;
-        const mismatch = options.configMismatch?.configId === message.params.configId
+        const mismatchApplies = options.configMismatch?.instanceIndex === undefined
+          || options.configMismatch.instanceIndex === instanceIndex;
+        const mismatch = mismatchApplies && options.configMismatch?.configId === message.params.configId
           ? { [message.params.configId]: options.configMismatch.currentValue }
           : {};
         emit({
@@ -207,7 +240,7 @@ function createAcpHarness(options = {}) {
         emit({
           jsonrpc: '2.0',
           method: 'session/update',
-          params: { sessionId: 'cursor-session', update },
+          params: { sessionId, update },
         });
       },
       finishPrompt() {
@@ -301,6 +334,7 @@ function startRequest(overrides = {}) {
     model: 'default',
     permissionMode: 'default',
     thinkingMode: 'none',
+    operation: noopOperation(),
     ...overrides,
   };
 }
@@ -310,6 +344,7 @@ function createRuntimeHarness(options = {}) {
   const runtime = new AcpAgentRuntime(createCursorAcpPolicy(TEST_CURSOR_CONFIG), {
     converter: new CursorAcpEventConverter(),
     createTransport: acp.createTransport,
+    logger: options.logger,
   });
   const messages = [];
   const messageWaiters = [];
@@ -390,6 +425,147 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('keeps an established publisher when a fresh session fails before prompting', async () => {
+    const first = collectOperation('run-established');
+    const replacement = collectOperation('run-failed-replacement');
+    const { acp, runtime } = createRuntimeHarness({
+      sessionIds: ['cursor-established', 'cursor-replacement'],
+      configMismatch: {
+        instanceIndex: 1,
+        configId: 'reasoning',
+        currentValue: 'medium',
+      },
+    });
+    await runtime.startSession(startRequest({ operation: first.operation }));
+    const established = acp.instance(0);
+    await established.waitForClientMethod('session/prompt');
+    established.finishPrompt();
+    await first.waitForEvent((event) => event.type === 'run-ended');
+
+    await expect(runtime.startSession(startRequest({
+      model: 'gpt-5.5-extra-high',
+      operation: replacement.operation,
+    }))).rejects.toThrow('Cursor did not apply requested model gpt-5.5-extra-high');
+
+    established.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'still belongs to the established source' },
+    });
+    const late = await first.waitForEvent((event) => (
+      event.type === 'messages'
+      && JSON.stringify(event).includes('still belongs to the established source')
+    ));
+    expect(JSON.stringify(late)).toContain('still belongs to the established source');
+    expect(JSON.stringify(replacement.events)).not.toContain('still belongs to the established source');
+    runtime.shutdown();
+  });
+
+  it('binds each sequential prompt to its concrete publisher through source retirement', async () => {
+    const first = collectOperation('run-a');
+    const second = collectOperation('run-b');
+    const { acp, runtime } = createRuntimeHarness();
+    const started = await runtime.startSession(startRequest({ operation: first.operation }));
+    const client = acp.instance(0);
+    await client.waitForClientMethod('session/prompt');
+    client.finishPrompt();
+    await first.waitForEvent((event) => event.type === 'run-ended');
+
+    client.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'late A output' },
+    });
+    await first.waitForEvent((event) => (
+      event.type === 'messages' && JSON.stringify(event).includes('late A output')
+    ));
+
+    const nextTurn = runtime.runTurn(startRequest({
+      agentSessionId: started.agentSessionId,
+      command: 'next prompt',
+      operation: second.operation,
+    }));
+    await client.waitForWrite((message) => (
+      message.method === 'session/prompt'
+      && message.params.prompt[0]?.text === 'next prompt'
+    ));
+    client.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'B output' },
+    });
+    client.finishPrompt();
+    await nextTurn;
+
+    expect(first.events.map((event) => event.type)).toEqual(['run-ended', 'messages']);
+    expect(JSON.stringify(first.events)).not.toContain('B output');
+    expect(second.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(JSON.stringify(second.events)).not.toContain('late A output');
+    runtime.shutdown();
+  });
+
+  it('rejects cross-chat native session collisions without rebinding the original source', async () => {
+    const first = collectOperation('run-chat-a');
+    const colliding = collectOperation('run-chat-b');
+    const { acp, runtime } = createRuntimeHarness({
+      sessionIds: ['shared-cursor-session', 'shared-cursor-session'],
+    });
+    await runtime.startSession(startRequest({
+      chatId: 'chat-a',
+      operation: first.operation,
+    }));
+    const original = acp.instance(0);
+    await original.waitForClientMethod('session/prompt');
+    original.finishPrompt();
+    await first.waitForEvent((event) => event.type === 'run-ended');
+
+    await expect(runtime.startSession(startRequest({
+      chatId: 'chat-b',
+      operation: colliding.operation,
+    }))).rejects.toThrow('already bound to another chat');
+
+    original.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'only chat A receives this' },
+    });
+    await first.waitForEvent((event) => (
+      event.type === 'messages' && JSON.stringify(event).includes('only chat A receives this')
+    ));
+    expect(colliding.events).toEqual([]);
+    runtime.shutdown();
+  });
+
+  it('logs and drops session updates without a native session identity', async () => {
+    const logger = {
+      debug: mock(),
+      info: mock(),
+      warn: mock(),
+      error: mock(),
+    };
+    const operation = collectOperation('run-named');
+    const { acp, runtime, messages } = createRuntimeHarness({ logger });
+    await runtime.startSession(startRequest({ operation: operation.operation }));
+    await acp.waitForClientMethod('session/prompt');
+
+    acp.serverRequest({
+      method: 'session/update',
+      params: {
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { text: 'must be dropped' },
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(messages.some((message) => message.content === 'must be dropped')).toBe(false);
+    expect(operation.events).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Dropped an ACP session update without its owning native session.',
+      { agentId: 'cursor', sessionId: 'cursor-session' },
+    );
+    acp.finishPrompt();
+    await operation.waitForEvent((event) => event.type === 'run-ended');
+    runtime.shutdown();
+  });
+
   it('rejects a start cancelled during configuration without sending a prompt', async () => {
     const acp = createAcpHarness();
     const configurationStarted = deferred();
@@ -466,10 +642,13 @@ describe('Cursor ACP runtime', () => {
 
   it('ignores buffered updates from a retired ACP client after reconnect', async () => {
     const { acp, runtime, messages } = createRuntimeHarness({ keepKilledStreamOpen: true });
+    const first = collectOperation('run-a');
+    const second = collectOperation('run-b');
     const started = await runtime.startSession(startRequest({
       command: 'first message',
       clientRequestId: 'req-a',
       turnId: 'turn-a',
+      operation: first.operation,
     }));
     await acp.waitForClientMethod('session/prompt');
     const retired = acp.instance(0);
@@ -480,6 +659,7 @@ describe('Cursor ACP runtime', () => {
       command: 'second message',
       clientRequestId: 'req-b',
       turnId: 'turn-b',
+      operation: second.operation,
     }));
     const restarted = await acp.waitForInstance(1);
     await restarted.waitForClientMethod('session/prompt');
@@ -501,9 +681,12 @@ describe('Cursor ACP runtime', () => {
 
     expect(messages.some((message) => message.content === 'late output from A')).toBe(false);
     expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(first.events).toEqual([]);
+    expect(second.events).toEqual([]);
 
     restarted.finishPrompt();
     await nextTurn;
+    expect(second.events.map((event) => event.type)).toEqual(['run-ended']);
     retired.close(143);
     runtime.shutdown();
   });

@@ -8,6 +8,11 @@ import {
 } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
+import {
+  runtimeRows,
+  type AgentRuntimeEvent,
+  type AgentRuntimeOperation,
+} from '@garcon/server-agent-common/execution/runtime-events';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { normalizeToolInput } from '@garcon/server-agent-common/shared/normalize-util';
 import {
@@ -21,6 +26,7 @@ import {
   type AcpStartRequest,
 } from './runtime-types.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
@@ -41,11 +47,13 @@ import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-sessi
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
 interface PendingPermissionRequest {
-  chatId: string;
-  requestId: AcpJsonRpcId;
-  sessionId: string;
-  responseForDecision(decision: PermissionDecisionPayload): Record<string, unknown>;
-  responseForCancellation(reason: 'cancelled' | 'session-complete' | 'aborted'): Record<string, unknown>;
+  readonly session: AcpAgentRuntimeSession;
+  readonly turn: AcpTurnContext;
+  readonly requestId: AcpJsonRpcId;
+  readonly responseForDecision: (decision: PermissionDecisionPayload) => Record<string, unknown>;
+  readonly responseForCancellation: (
+    reason: 'cancelled' | 'session-complete' | 'aborted',
+  ) => Record<string, unknown>;
 }
 
 interface AcpAgentRuntimeSession {
@@ -56,18 +64,29 @@ interface AcpAgentRuntimeSession {
   client: AcpClient;
   capabilities: AcpAdvertisedCapabilities;
   state: RuntimeSessionState;
-  running: boolean;
-  aborted: boolean;
   retired: boolean;
-  turnGeneration: number;
+  activeTurn: AcpTurnContext | null;
+  sourceTurn: AcpTurnContext | null;
   permissionMode: PermissionMode;
-  pendingPermissionIds: Set<string>;
   configOptions?: AcpSessionConfigOption[];
   startedAt: string;
   lastActivityAt: number;
-  lastUpdateAt: number;
+}
+
+interface AcpTurnContext {
+  readonly session: AcpAgentRuntimeSession;
+  readonly operation: AgentRuntimeOperation;
+  readonly eventMetadata: RuntimeEventMetadata;
+  readonly pendingPermissionIds: Set<string>;
+  readonly detachSourceListeners: Array<() => void>;
+  permissionMode: PermissionMode;
+  running: boolean;
+  completed: boolean;
+  aborted: boolean;
+  processingStarted: boolean;
+  sourceActive: boolean;
+  sourceRetired: boolean;
   upstreamRequestId?: string;
-  eventMetadata: RuntimeEventMetadata;
 }
 
 export type AcpAbortStrategy = 'cancel' | 'process-restart';
@@ -104,7 +123,15 @@ export interface AcpAgentRuntimeOptions {
   converter: AcpEventConverter;
   capabilityCache?: AcpCapabilityCache;
   createTransport?: () => AcpTransport;
+  logger?: AgentLogger;
 }
+
+const SILENT_LOGGER: AgentLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -173,17 +200,14 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
   #converter: AcpEventConverter;
   #capabilityCache: AcpCapabilityCache;
   #createTransport: () => AcpTransport;
+  #logger: AgentLogger;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #pendingPermissions = new Map<string, PendingPermissionRequest>();
   #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
     sessions: () => this.#sessions.entries(),
-    isRunning: (session) => session.running,
+    isRunning: (session) => session.activeTurn?.running === true,
     lastActivityAt: (session) => session.lastActivityAt,
-    purge: (sessionId, session) => {
-      session.client.close();
-      this.#sessions.delete(sessionId);
-      this.#cancelPermissionsForSession(session, 'session-complete');
-    },
+    purge: (_sessionId, session) => this.#retireSession(session, 'session-complete'),
   });
 
   constructor(policy: AcpAgentPolicy, options: AcpAgentRuntimeOptions) {
@@ -192,6 +216,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     this.#converter = options.converter;
     this.#capabilityCache = options.capabilityCache ?? new AcpCapabilityCache();
     this.#createTransport = options.createTransport ?? (() => new AcpTransport());
+    this.#logger = options.logger ?? SILENT_LOGGER;
   }
 
   async startSession(request: AcpStartRequest): Promise<AcpStartedSession> {
@@ -212,6 +237,14 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     }
 
     const sessionId = created.sessionId;
+    const existing = this.#sessions.get(sessionId);
+    if (existing) {
+      client.close();
+      if (existing.chatId !== request.chatId) {
+        throw new Error(`ACP session ${sessionId} is already bound to another chat`);
+      }
+      throw new Error(`ACP session ${sessionId} is already active`);
+    }
     const now = new Date().toISOString();
     const capabilities = client.getAdvertisedCapabilities();
     const session: AcpAgentRuntimeSession = {
@@ -222,20 +255,15 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       client,
       capabilities,
       state: 'idle',
-      running: false,
-      aborted: false,
       retired: false,
-      turnGeneration: 0,
+      activeTurn: null,
+      sourceTurn: null,
       permissionMode: request.permissionMode,
-      pendingPermissionIds: new Set(),
       configOptions: created.configOptions,
       startedAt: now,
       lastActivityAt: Date.now(),
-      lastUpdateAt: 0,
-      eventMetadata: acpEventMetadata(request, 'chat-start'),
     };
     this.#sessions.set(sessionId, session);
-    this.#bindClientEvents(session);
     this.emitSessionCreated(request.chatId);
     let resolveStarted!: () => void;
     let rejectStarted!: (error: unknown) => void;
@@ -245,6 +273,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       rejectStarted = reject;
     });
     const promptTask = this.#runPrompt(session, request, () => {
+      this.#retireSupersededChatSessions(session);
       if (executionStarted) return;
       executionStarted = true;
       resolveStarted();
@@ -257,9 +286,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     try {
       await started;
     } catch (error) {
-      if (this.#sessions.get(sessionId) === session) this.#sessions.delete(sessionId);
-      session.retired = true;
-      client.close();
+      this.#retireSession(session, 'cancelled');
       throw error;
     }
 
@@ -272,7 +299,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
   async runTurn(request: AcpResumeRequest): Promise<void> {
     assertAcpExecutionOpen(request);
     const session = await this.#sessionForTurn(request);
-    if (session.running) {
+    if (session.activeTurn?.running) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
     }
     await this.#runPrompt(session, request);
@@ -287,43 +314,43 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     if (session.chatId !== request.chatId) {
       throw new Error('Chat ID mismatch');
     }
-    if (session.running) {
+    if (session.activeTurn?.running) {
       throw new Error(`Session ${agentSessionId} is already running`);
     }
-    if (session.pendingPermissionIds.size > 0) {
+    if ((session.sourceTurn?.pendingPermissionIds.size ?? 0) > 0) {
       throw new Error(`Session ${agentSessionId} is waiting for permission`);
     }
 
-    session.retired = true;
-    session.state = 'idle';
-    session.lastActivityAt = Date.now();
-    this.#sessions.delete(agentSessionId);
-    session.client.close();
+    this.#retireSession(session, 'session-complete');
   }
 
   abort(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
-    if (!session || !session.running) return false;
+    const turn = session?.activeTurn;
+    if (!session || !turn?.running) return false;
 
     if (abortStrategy(this.#policy) === 'process-restart') {
-      this.#retireSessionForAbort(session);
+      turn.aborted = true;
+      session.state = 'aborted';
+      this.#completeTurn(turn);
+      this.#retireSession(session, 'aborted');
       return true;
     }
 
-    session.aborted = true;
+    turn.aborted = true;
     session.state = 'aborted';
-    this.#cancelPermissionsForSession(session, 'aborted');
+    this.#cancelPermissionsForTurn(turn, 'aborted');
     void session.client.cancelSession({ sessionId: session.remoteSessionId }).catch(() => {});
     return true;
   }
 
   isRunning(agentSessionId: string): boolean {
-    return this.#sessions.get(agentSessionId)?.running === true;
+    return this.#sessions.get(agentSessionId)?.activeTurn?.running === true;
   }
 
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
     return Array.from(this.#sessions.values())
-      .filter((session) => session.running)
+      .filter((session) => session.activeTurn?.running)
       .map((session) => ({
         id: session.id,
         status: session.state,
@@ -335,29 +362,31 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     const pending = this.#pendingPermissions.get(permissionRequestId);
     if (!pending) return;
     this.#pendingPermissions.delete(permissionRequestId);
-    const session = this.#sessions.get(pending.sessionId);
-    session?.pendingPermissionIds.delete(permissionRequestId);
-    if (!session) return;
+    pending.turn.pendingPermissionIds.delete(permissionRequestId);
+    if (pending.turn.sourceRetired) return;
 
-    session.client.respond(
+    pending.session.client.respond(
       pending.requestId,
       decision.response ?? pending.responseForDecision(decision),
     );
-    this.emitMessages(session.chatId, [
+    this.#publishMessages(pending.turn, [
       new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow)),
-    ], session.eventMetadata);
+    ]);
   }
 
   updateSessionSettings(agentSessionId: string, patch: AcpSessionSettingsPatch): void {
     const session = this.#sessions.get(agentSessionId);
     if (!session) return;
-    if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
+    if (patch.permissionMode !== undefined) {
+      session.permissionMode = patch.permissionMode;
+      if (session.sourceTurn) session.sourceTurn.permissionMode = patch.permissionMode;
+    }
   }
 
   shutdown(): void {
     this.#idlePurger.stop();
-    for (const session of this.#sessions.values()) {
-      session.client.close();
+    for (const session of [...this.#sessions.values()]) {
+      this.#retireSession(session, 'session-complete');
     }
     this.#sessions.clear();
     this.#pendingPermissions.clear();
@@ -396,7 +425,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
 
   async #sessionForTurn(request: AcpResumeRequest): Promise<AcpAgentRuntimeSession> {
     const existing = this.#sessions.get(request.agentSessionId);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.chatId !== request.chatId) {
+        throw new Error(`ACP session ${request.agentSessionId} is already bound to another chat`);
+      }
+      return existing;
+    }
 
     const client = await this.#connectClient(request);
     const capabilities = client.getAdvertisedCapabilities();
@@ -409,24 +443,18 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       client,
       capabilities,
       state: 'idle',
-      running: false,
-      aborted: false,
       retired: false,
-      turnGeneration: 0,
+      activeTurn: null,
+      sourceTurn: null,
       permissionMode: request.permissionMode,
-      pendingPermissionIds: new Set(),
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
-      lastUpdateAt: 0,
-      eventMetadata: acpEventMetadata(request),
     };
     this.#sessions.set(request.agentSessionId, baseSession);
-    this.#bindClientEvents(baseSession);
 
     const connected = await this.#reconnectSession(baseSession, request, order);
     if (!connected) {
-      this.#sessions.delete(request.agentSessionId);
-      client.close();
+      this.#retireSession(baseSession, 'cancelled');
       throw new Error(`Unable to restore ${this.#policy.agentId} session ${request.agentSessionId}. Start a new chat session.`);
     }
     return baseSession;
@@ -489,21 +517,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     onExecutionStarted?: () => void,
   ): Promise<void> {
     assertAcpExecutionOpen(request);
-    const turnGeneration = ++session.turnGeneration;
-    session.retired = false;
-    session.running = false;
-    session.state = 'idle';
-    session.aborted = false;
-    session.permissionMode = request.permissionMode;
-    session.chatId = request.chatId;
-    session.projectPath = request.projectPath;
-    session.lastActivityAt = Date.now();
-    session.lastUpdateAt = Date.now();
-    session.upstreamRequestId = undefined;
-    session.eventMetadata = acpEventMetadata(
-      request,
-      'agentSessionId' in request ? undefined : 'chat-start',
-    );
+    const turn = this.#createTurn(session, request);
+    this.#bindTurnSource(turn);
     this.#converter.beginTurn?.(session.id);
 
     let success = false;
@@ -517,61 +532,70 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
       if (request.executionAdmission) await markAcpExecutionStarted(request);
-      executionStarted = true;
-      session.running = true;
-      session.state = 'running';
-      this.emitProcessing(session.chatId, true);
-      onExecutionStarted?.();
       const promptRequest = session.client.promptSession({
         sessionId: session.remoteSessionId,
         prompt,
         ...(promptConfig ? { config: promptConfig } : {}),
+      }, () => {
+        if (!this.#activateTurnSource(turn, request.projectPath)) return;
+        executionStarted = true;
+        onExecutionStarted?.();
+        this.emitProcessing(session.chatId, true);
       });
       const result = await promptRequest;
       if (typeof result.requestId === 'string' && result.requestId) {
-        session.upstreamRequestId = result.requestId;
+        turn.upstreamRequestId = result.requestId;
       }
-      await this.#waitForUpdateQuietPeriod(session);
-      success = !session.aborted;
+      success = !turn.aborted;
     } catch (error) {
       admissionClosed = request.executionAdmission?.signal.aborted === true;
-      if (session.aborted) {
+      if (turn.aborted) {
         success = false;
       } else {
         shouldThrow = true;
         failureMessage = humanizeError(error);
       }
     } finally {
-      if (session.retired || this.#sessions.get(session.id) !== session || session.turnGeneration !== turnGeneration) {
-        return;
-      }
-
       if (executionStarted) {
-        this.#emitFlushedMessages(session);
-        this.emitProcessing(session.chatId, false);
+        this.#emitFlushedMessages(turn);
       }
-      session.running = false;
-      session.state = session.aborted
-        ? 'aborted'
-        : admissionClosed
-          ? 'idle'
-          : (failureMessage ? 'failed' : 'idle');
+      if (turn.aborted) {
+        session.state = 'aborted';
+      } else if (admissionClosed) {
+        session.state = 'idle';
+      } else {
+        session.state = failureMessage ? 'failed' : 'idle';
+      }
       session.lastActivityAt = Date.now();
+      this.#completeTurn(turn);
 
-      if (success) {
+      if (success && !turn.sourceRetired) {
         const metadata = {
-          ...session.eventMetadata,
-          ...(session.upstreamRequestId ? { upstreamRequestId: session.upstreamRequestId } : {}),
+          ...turn.eventMetadata,
+          ...(turn.upstreamRequestId ? { upstreamRequestId: turn.upstreamRequestId } : {}),
         } satisfies RuntimeEventMetadata;
+        this.#publishTurnEvent(turn, {
+          type: 'run-ended',
+          runId: turn.operation.runId,
+          outcome: 'finished',
+          exitCode: 0,
+        });
         this.emitFinished(session.chatId, 0, metadata);
-      } else if (!session.aborted && !admissionClosed && failureMessage) {
-        this.emitMessages(session.chatId, [
+      } else if (!turn.aborted && !admissionClosed && failureMessage && !turn.sourceRetired) {
+        this.#publishMessages(turn, [
           new ErrorMessage(new Date().toISOString(), failureMessage),
-        ], session.eventMetadata);
-        this.emitFailed(session.chatId, failureMessage, session.eventMetadata);
+        ]);
+        this.#publishTurnEvent(turn, {
+          type: 'run-ended',
+          runId: turn.operation.runId,
+          outcome: 'failed',
+          error: { code: 'PROVIDER_FAILURE', message: failureMessage },
+        });
+        this.emitFailed(session.chatId, failureMessage, turn.eventMetadata);
       }
 
-      this.#cancelPermissionsForSession(session, session.aborted ? 'aborted' : 'session-complete');
+      this.#cancelPermissionsForTurn(turn, turn.aborted ? 'aborted' : 'session-complete');
+      if (!executionStarted) this.#retireTurnSource(turn, 'cancelled');
     }
 
     if (shouldThrow) {
@@ -579,116 +603,141 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  #retireSessionForAbort(session: AcpAgentRuntimeSession): void {
-    session.aborted = true;
-    session.retired = true;
-    session.running = false;
-    session.state = 'aborted';
-    session.turnGeneration += 1;
+  #createTurn(
+    session: AcpAgentRuntimeSession,
+    request: AcpStartRequest | AcpResumeRequest,
+  ): AcpTurnContext {
+    return {
+      session,
+      operation: request.operation,
+      eventMetadata: acpEventMetadata(
+        request,
+        'agentSessionId' in request ? undefined : 'chat-start',
+      ),
+      pendingPermissionIds: new Set(),
+      detachSourceListeners: [],
+      permissionMode: request.permissionMode,
+      running: false,
+      completed: false,
+      aborted: false,
+      processingStarted: false,
+      sourceActive: false,
+      sourceRetired: false,
+    };
+  }
+
+  #activateTurnSource(turn: AcpTurnContext, projectPath: string): boolean {
+    const session = turn.session;
+    if (session.retired) return false;
+    const previous = session.sourceTurn;
+    if (previous && previous !== turn) {
+      this.#retireTurnSource(previous, 'session-complete');
+    }
+    turn.sourceActive = true;
+    turn.running = true;
+    turn.processingStarted = true;
+    session.sourceTurn = turn;
+    session.activeTurn = turn;
+    session.permissionMode = turn.permissionMode;
+    session.projectPath = projectPath;
+    session.state = 'running';
     session.lastActivityAt = Date.now();
-
-    this.#cancelPermissionsForSession(session, 'aborted');
-    this.emitProcessing(session.chatId, false);
-    this.#sessions.delete(session.id);
-
-    void session.client.cancelSession({ sessionId: session.remoteSessionId }).catch(() => {});
-    session.client.close();
+    return true;
   }
 
-  #emitFlushedMessages(session: AcpAgentRuntimeSession): void {
-    const context = this.#sessionUpdateContext(session);
-    const messages = this.#converter.endTurn?.(session.id, context) ?? [];
-    this.emitMessages(session.chatId, messages, session.eventMetadata);
-  }
-
-  #bindClientEvents(session: AcpAgentRuntimeSession): void {
-    session.client.onRpcMessage((message) => {
+  #bindTurnSource(turn: AcpTurnContext): void {
+    const session = turn.session;
+    turn.detachSourceListeners.push(session.client.onRpcMessage((message) => {
+      if (!this.#canRouteSource(turn)) return;
       if (message.method === 'session/update') {
-        this.#onSessionUpdate(session, message.params);
+        this.#onSessionUpdate(turn, message.params);
         return;
       }
       if (message.method === 'session/request_permission' && isJsonRpcId(message.id)) {
-        this.#onPermissionRequest(session, message.id, message.params);
+        this.#onPermissionRequest(turn, message.id, message.params);
         return;
       }
       if (typeof message.method === 'string' && isJsonRpcId(message.id)) {
-        if (!this.#onCustomBlockingRequest(session, message.id, message.method, message.params)) {
+        if (!this.#onCustomBlockingRequest(turn, message.id, message.method, message.params)) {
           session.client.respondError(message.id, -32601, `Unsupported ACP request method: ${message.method}`);
         }
       }
-    });
+    }));
 
-    session.client.onExit((exitCode) => {
-      if (!this.#isCurrentSession(session) || !session.running) return;
-      if (session.aborted) return;
-      const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
-      this.emitMessages(
-        session.chatId,
-        [new ErrorMessage(new Date().toISOString(), message)],
-        session.eventMetadata,
-      );
-      this.emitProcessing(session.chatId, false);
-      session.running = false;
-      session.state = 'failed';
-      session.lastActivityAt = Date.now();
-      this.emitFailed(session.chatId, message, session.eventMetadata);
-      this.#cancelPermissionsForSession(session, 'cancelled');
-    });
+    turn.detachSourceListeners.push(session.client.onExit((exitCode) => {
+      if (!this.#canRouteSource(turn)) return;
+      if (turn.running && !turn.aborted) {
+        const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
+        this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), message)]);
+        session.state = 'failed';
+        session.lastActivityAt = Date.now();
+        this.#completeTurn(turn);
+        this.#publishTurnEvent(turn, {
+          type: 'run-ended',
+          runId: turn.operation.runId,
+          outcome: 'failed',
+          error: { code: 'PROVIDER_FAILURE', message },
+        });
+        this.emitFailed(session.chatId, message, turn.eventMetadata);
+      }
+      this.#retireSession(session, 'cancelled');
+    }));
 
-    session.client.onStderr((line) => {
-      if (!this.#isCurrentSession(session) || !session.running) return;
+    turn.detachSourceListeners.push(session.client.onStderr((line) => {
+      if (!this.#canRouteSource(turn)) return;
       if (!line.trim()) return;
-      this.emitMessages(
-        session.chatId,
-        [new ErrorMessage(new Date().toISOString(), line)],
-        session.eventMetadata,
-      );
-    });
+      this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), line)]);
+    }));
   }
 
-  #onSessionUpdate(boundSession: AcpAgentRuntimeSession, rawParams: unknown): void {
+  #onSessionUpdate(turn: AcpTurnContext, rawParams: unknown): void {
     const params = asObject(rawParams) as AcpSessionUpdateNotification;
     const remoteSessionId = asString(params.sessionId);
-    if (
-      !remoteSessionId
-      || remoteSessionId !== boundSession.remoteSessionId
-      || !this.#isCurrentSession(boundSession)
-      || !boundSession.running
-    ) return;
-    const session = boundSession;
+    const session = turn.session;
+    if (!remoteSessionId || remoteSessionId !== session.remoteSessionId) {
+      this.#logger.warn('Dropped an ACP session update without its owning native session.', {
+        agentId: this.#policy.agentId,
+        sessionId: session.id,
+      });
+      return;
+    }
 
-    session.lastUpdateAt = Date.now();
     session.lastActivityAt = Date.now();
     const upstreamRequestId = upstreamRequestIdFromUpdate(params);
     if (upstreamRequestId) {
-      session.upstreamRequestId = upstreamRequestId;
+      turn.upstreamRequestId = upstreamRequestId;
     }
-    const context = this.#sessionUpdateContext(session);
+    const context = this.#sessionUpdateContext(turn);
     const converted = this.#converter.fromSessionUpdate(params, context);
+    if (turn.completed) {
+      converted.push(...(this.#converter.endTurn?.(session.id, context) ?? []));
+    }
     const metadata = {
-      ...session.eventMetadata,
+      ...turn.eventMetadata,
       ...(upstreamRequestId ? { upstreamRequestId } : {}),
     } satisfies RuntimeEventMetadata;
-    this.emitMessages(session.chatId, converted, metadata);
+    this.#publishMessages(turn, converted, metadata);
   }
 
-  #onPermissionRequest(boundSession: AcpAgentRuntimeSession, requestId: AcpJsonRpcId, rawParams: unknown): void {
+  #onPermissionRequest(turn: AcpTurnContext, requestId: AcpJsonRpcId, rawParams: unknown): void {
     const params = asObject(rawParams) as AcpSessionRequestPermission;
     const remoteSessionId = asString(params.sessionId);
-    if (
-      (remoteSessionId && remoteSessionId !== boundSession.remoteSessionId)
-      || !this.#isCurrentSession(boundSession)
-      || !boundSession.running
-    ) return;
-    const session = boundSession;
+    const session = turn.session;
+    if (!remoteSessionId || remoteSessionId !== session.remoteSessionId) {
+      this.#logger.warn('Dropped an ACP permission request without its owning native session.', {
+        agentId: this.#policy.agentId,
+        sessionId: session.id,
+      });
+      return;
+    }
 
     const options = (Array.isArray(params.options) ? params.options : [])
       .map((option) => asObject(option));
 
-    if (isAutoApproveMode(session.permissionMode)) {
+    if (isAutoApproveMode(turn.permissionMode)) {
       session.client.respond(
         requestId,
-        permissionOutcome(permissionOptionId(options, autoApproveOptionId(session.permissionMode))),
+        permissionOutcome(permissionOptionId(options, autoApproveOptionId(turn.permissionMode))),
       );
       return;
     }
@@ -696,7 +745,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     const permissionRequestId = `${this.#policy.agentId}-${session.id}-${String(requestId)}`;
     const toolCall = asObject(params.toolCall);
     const toolId = asString(toolCall.toolCallId ?? toolCall.callId ?? toolCall.id) ?? permissionRequestId;
-    const context = this.#sessionUpdateContext(session);
+    const context = this.#sessionUpdateContext(turn);
     const convertedRequestedTool = this.#converter.permissionToolUse?.(toolCall, context) ?? null;
     const rawName = asString(toolCall.toolName ?? toolCall.tool_name ?? toolCall.kind ?? toolCall.title ?? toolCall.name) ?? 'Permission';
     const rawInput = toolCall.rawInput ?? toolCall.raw_input ?? toolCall.input ?? toolCall.args;
@@ -719,11 +768,11 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
         fallbackInput,
       );
 
-    session.pendingPermissionIds.add(permissionRequestId);
+    turn.pendingPermissionIds.add(permissionRequestId);
     this.#pendingPermissions.set(permissionRequestId, {
-      chatId: session.chatId,
+      session,
+      turn,
       requestId,
-      sessionId: session.id,
       responseForDecision: (decision) => {
         const fallback = decision.allow
           ? (decision.alwaysAllow ? 'allow-always' : 'allow-once')
@@ -732,19 +781,19 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       },
       responseForCancellation: permissionCancelledOutcome,
     });
-    this.emitMessages(session.chatId, [
+    this.#publishMessages(turn, [
       new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, requestedTool),
-    ], session.eventMetadata);
+    ]);
   }
 
   #onCustomBlockingRequest(
-    session: AcpAgentRuntimeSession,
+    turn: AcpTurnContext,
     requestId: AcpJsonRpcId,
     method: string,
     params: unknown,
   ): boolean {
-    if (!this.#isCurrentSession(session) || !session.running) return false;
-    const context = this.#sessionUpdateContext(session);
+    const session = turn.session;
+    const context = this.#sessionUpdateContext(turn);
     const converted = this.#converter.customRequestToolUse?.({
       method,
       requestId,
@@ -753,52 +802,135 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     if (!converted) return false;
 
     const permissionRequestId = `${this.#policy.agentId}-${session.id}-${String(requestId)}`;
-    this.#registerBlockingRequest(session, permissionRequestId, requestId, converted);
-    this.emitMessages(session.chatId, [
+    this.#registerBlockingRequest(turn, permissionRequestId, requestId, converted);
+    this.#publishMessages(turn, [
       new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, converted.tool),
-    ], session.eventMetadata);
+    ]);
     return true;
   }
 
   #registerBlockingRequest(
-    session: AcpAgentRuntimeSession,
+    turn: AcpTurnContext,
     permissionRequestId: string,
     requestId: AcpJsonRpcId,
     converted: AcpBlockingRequestToolUse,
   ): void {
-    session.pendingPermissionIds.add(permissionRequestId);
+    turn.pendingPermissionIds.add(permissionRequestId);
     this.#pendingPermissions.set(permissionRequestId, {
-      chatId: session.chatId,
+      session: turn.session,
+      turn,
       requestId,
-      sessionId: session.id,
       responseForDecision: converted.responseForDecision,
       responseForCancellation: converted.responseForCancellation,
     });
   }
 
-  #cancelPermissionsForSession(session: AcpAgentRuntimeSession, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
-    for (const permissionRequestId of session.pendingPermissionIds) {
+  #cancelPermissionsForTurn(
+    turn: AcpTurnContext,
+    reason: 'cancelled' | 'session-complete' | 'aborted',
+  ): void {
+    for (const permissionRequestId of turn.pendingPermissionIds) {
       const pending = this.#pendingPermissions.get(permissionRequestId);
-      if (!pending) continue;
+      if (!pending || pending.turn !== turn) continue;
       this.#pendingPermissions.delete(permissionRequestId);
       try {
-        session.client.respond(pending.requestId, pending.responseForCancellation(reason));
+        pending.session.client.respond(pending.requestId, pending.responseForCancellation(reason));
       } catch {}
-      this.emitMessages(session.chatId, [
+      this.#publishMessages(turn, [
         new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason),
-      ], session.eventMetadata);
+      ]);
     }
-    session.pendingPermissionIds.clear();
+    turn.pendingPermissionIds.clear();
   }
 
-  async #waitForUpdateQuietPeriod(session: AcpAgentRuntimeSession): Promise<void> {
-    const quietMs = 125;
-    const timeoutMs = 1_500;
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      if (Date.now() - session.lastUpdateAt >= quietMs) return;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+  #completeTurn(turn: AcpTurnContext): void {
+    if (turn.completed) return;
+    turn.completed = true;
+    turn.running = false;
+    const session = turn.session;
+    if (session.activeTurn === turn) session.activeTurn = null;
+    if (turn.processingStarted) {
+      turn.processingStarted = false;
+      this.emitProcessing(session.chatId, false);
     }
+  }
+
+  #emitFlushedMessages(turn: AcpTurnContext): void {
+    const messages = this.#converter.endTurn?.(
+      turn.session.id,
+      this.#sessionUpdateContext(turn),
+    ) ?? [];
+    this.#publishMessages(turn, messages);
+  }
+
+  #publishMessages(
+    turn: AcpTurnContext,
+    messages: ChatMessage[],
+    metadata: RuntimeEventMetadata = turn.eventMetadata,
+  ): void {
+    if (messages.length === 0 || turn.sourceRetired) return;
+    this.#publishTurnEvent(turn, {
+      type: 'messages',
+      rows: runtimeRows(messages),
+      runId: turn.operation.runId,
+    });
+    this.emitMessages(turn.session.chatId, messages, metadata);
+  }
+
+  #publishTurnEvent(turn: AcpTurnContext, event: AgentRuntimeEvent): void {
+    if (turn.sourceRetired) return;
+    try {
+      turn.operation.publish(event);
+    } catch (error) {
+      this.#logger.warn('ACP publisher rejected an event.', {
+        agentId: this.#policy.agentId,
+        sessionId: turn.session.id,
+        eventType: event.type,
+        error: humanizeError(error),
+      });
+    }
+  }
+
+  #canRouteSource(turn: AcpTurnContext): boolean {
+    return turn.sourceActive && !turn.sourceRetired;
+  }
+
+  #retireSupersededChatSessions(current: AcpAgentRuntimeSession): void {
+    for (const session of [...this.#sessions.values()]) {
+      if (session === current || session.chatId !== current.chatId) continue;
+      this.#retireSession(session, 'session-complete');
+    }
+  }
+
+  #retireTurnSource(
+    turn: AcpTurnContext,
+    reason: 'cancelled' | 'session-complete' | 'aborted',
+  ): void {
+    if (turn.sourceRetired) return;
+    this.#cancelPermissionsForTurn(turn, reason);
+    turn.sourceActive = false;
+    turn.sourceRetired = true;
+    for (const detach of turn.detachSourceListeners.splice(0)) detach();
+    if (turn.session.sourceTurn === turn) turn.session.sourceTurn = null;
+  }
+
+  #retireSession(
+    session: AcpAgentRuntimeSession,
+    reason: 'cancelled' | 'session-complete' | 'aborted',
+  ): void {
+    if (session.retired) return;
+    session.retired = true;
+    session.lastActivityAt = Date.now();
+    const turns = new Set([session.activeTurn, session.sourceTurn].filter(
+      (turn): turn is AcpTurnContext => turn !== null,
+    ));
+    for (const turn of turns) {
+      if (reason === 'aborted') turn.aborted = true;
+      this.#completeTurn(turn);
+      this.#retireTurnSource(turn, reason);
+    }
+    if (this.#sessions.get(session.id) === session) this.#sessions.delete(session.id);
+    session.client.close();
   }
 
   #mappedModel(model: string): string | undefined {
@@ -859,14 +991,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     return createArtificialNativePath(this.#policy.agentId, sessionId);
   }
 
-  #isCurrentSession(session: AcpAgentRuntimeSession): boolean {
-    return this.#sessions.get(session.id) === session;
-  }
-
-  #sessionUpdateContext(session: AcpAgentRuntimeSession): AcpSessionUpdateContext {
+  #sessionUpdateContext(turn: AcpTurnContext): AcpSessionUpdateContext {
     return {
-      chatId: session.chatId,
-      sessionId: session.id,
+      chatId: turn.session.chatId,
+      sessionId: turn.session.id,
       timestamp: new Date().toISOString(),
     };
   }
