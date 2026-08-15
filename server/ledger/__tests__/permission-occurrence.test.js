@@ -92,6 +92,31 @@ describe('transcript permission occurrences', () => {
     });
   });
 
+  it('invalidates an in-flight permission claim when its run ends', async () => {
+    await withLedger((ledger) => {
+      const lease = startRun(ledger);
+      publishRequest(
+        lease.sink,
+        'incarnation-1',
+        permissionDecision('incarnation-1'),
+      );
+      const claim = ledger.claimPermissionResolution(permissionControl('incarnation-1'));
+
+      lease.sink.publish({
+        type: 'run-ended',
+        runId: RUN_ID,
+        outcome: 'finished',
+      });
+
+      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
+        'permission-requested',
+        'run-ended',
+      ]);
+    });
+  });
+
   it('keeps permission history but restores no actionability after restart', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-restart-'));
     try {
