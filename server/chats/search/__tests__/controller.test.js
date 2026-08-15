@@ -124,6 +124,61 @@ describe('TranscriptSearchController', () => {
     });
   });
 
+  it('indexes repeated ordinary commits only as ordered suffixes', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.appendRows.mockClear();
+    test.service.replaceChat.mockClear();
+
+    for (let ordinal = 3; ordinal <= 5; ordinal += 1) {
+      const row = providerRow('view-1', ordinal, `suffix-${ordinal}`);
+      test.rows.get('chat-1').push(row);
+      test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [row] });
+    }
+    await settle();
+
+    expect(test.service.appendRows.mock.calls.map(([input]) => ({
+      expectedAfterOrdinal: input.expectedAfterOrdinal,
+      throughOrdinal: input.throughOrdinal,
+      body: input.rows[0]?.body,
+    }))).toEqual([
+      { expectedAfterOrdinal: 2, throughOrdinal: 3, body: 'suffix-3' },
+      { expectedAfterOrdinal: 3, throughOrdinal: 4, body: 'suffix-4' },
+      { expectedAfterOrdinal: 4, throughOrdinal: 5, body: 'suffix-5' },
+    ]);
+    expect(test.service.replaceChat).not.toHaveBeenCalled();
+  });
+
+  it('resyncs a watermark gap without converting ordinary worker failures into replacements', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.appendRows.mockClear();
+    test.service.replaceChat.mockClear();
+
+    const gapRow = providerRow('view-1', 3, 'gap');
+    test.rows.get('chat-1').push(gapRow);
+    test.service.appendRows.mockRejectedValueOnce(new Error('SEARCH_INDEX_GAP'));
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [gapRow] });
+    await settle();
+
+    expect(test.service.replaceChat).toHaveBeenCalledTimes(1);
+    test.service.replaceChat.mockClear();
+
+    const failedRow = providerRow('view-1', 4, 'worker-failure');
+    const continuedRow = providerRow('view-1', 5, 'continued');
+    test.rows.get('chat-1').push(failedRow, continuedRow);
+    test.service.appendRows.mockRejectedValueOnce(new Error('disk unavailable'));
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [failedRow] });
+    test.listener()({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [continuedRow] });
+    await settle();
+
+    expect(test.service.replaceChat).not.toHaveBeenCalled();
+    expect(test.service.appendRows).toHaveBeenCalledWith(expect.objectContaining({
+      expectedAfterOrdinal: 4,
+      throughOrdinal: 5,
+    }));
+  });
+
   it('does not rebuild a whole chat after its committed suffix is already queued', async () => {
     const test = harness();
     await test.controller.initialize(true);
@@ -228,6 +283,37 @@ describe('TranscriptSearchController', () => {
     expect(result.results).toEqual([
       expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'view-1' }),
     ]);
+  });
+
+  it('does not admit an old-view result when the transcript is replaced during the query', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    const pending = deferred();
+    test.service.search.mockImplementation(() => pending.promise);
+
+    const result = test.controller.search({
+      query: 'hello',
+      allowedChatIds: ['chat-1'],
+    });
+    await settle();
+    test.views.set('chat-1', { viewId: 'view-2', contentStartOrdinal: 1 });
+    pending.resolve({
+      results: [{
+        chatId: 'chat-1',
+        transcriptViewId: 'view-1',
+        score: 1,
+        matchedMessageCount: 1,
+        snippets: [],
+      }],
+      index: {
+        indexedChatCount: 1,
+        pendingChatCount: 0,
+        failedChatCount: 0,
+        unsupportedChatCount: 0,
+      },
+    });
+
+    expect((await result).results).toEqual([]);
   });
 
   it('keeps healthy chats searchable when another ledger is fenced', async () => {
