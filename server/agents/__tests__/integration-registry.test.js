@@ -27,6 +27,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       abort: async () => false,
       runningSessions: () => [],
     },
+    legacyHistoryImport: null,
     nativeHistoryImport: null,
     nativeActivity: null,
     nativeSessions: null,
