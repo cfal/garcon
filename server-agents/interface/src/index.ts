@@ -6,7 +6,6 @@ export * from './contracts/native-fork.js';
 export * from './contracts/native-history.js';
 export * from './contracts/producer.js';
 export * from './contracts/services.js';
-export * from './contracts/transcript-index.js';
 export * from './contracts/transcript.js';
 export * from './errors.js';
 export * from './native-message-source.js';

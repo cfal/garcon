@@ -15,10 +15,10 @@ describe('standalone entrypoint resolution', () => {
       indexer: indexerSourceUrl.href,
       reader: readerSourceUrl.href,
     });
-    const sourceUrl = new URL('../../search/__tests__/fixture-index-source.ts', import.meta.url);
+    const sourceUrl = new URL('../../../opencode/operation-identity-plugin.js', import.meta.url);
     expect(resolveAgentStandaloneEntrypoint({
-      integrationId: 'fixture',
-      name: 'transcript-index-source',
+      integrationId: 'opencode',
+      name: 'operation-identity-plugin',
       sourceUrl,
     })).toBe(sourceUrl.href);
   });
@@ -30,7 +30,7 @@ describe('standalone entrypoint resolution', () => {
       globalThis[Symbol.for('garcon.embedded-search-manifest.v1')] = {
         mode: 'compiled', apiVersion: 1,
         workers: { indexer: '/tmp/indexer.js', reader: 'relative-reader.js' },
-        integrations: { fixture: { 'transcript-index-source': '/tmp/source.js' } },
+        integrations: { opencode: { 'operation-identity-plugin': '/tmp/plugin.js' } },
       };
       const resolver = await import(${JSON.stringify(moduleUrl)});
       resolver.resolveSearchWorkerEntrypoints({

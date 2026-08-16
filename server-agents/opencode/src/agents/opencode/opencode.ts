@@ -214,8 +214,6 @@ export class OpenCodeRuntime {
     this.#endpointCoordinator = new OpenCodeEndpointCoordinator({
       assertAvailable: () => this.#assertCanUseOpenCode(),
       ensureUnlocked: () => this.#ensureOpenCodeServerUnlocked(),
-      closeInstance: () => this.#closeInstance(),
-      hasRunningSessions: () => this.#hasRunningSessions(),
       logger: this.#logger,
     });
     this.#globalEventListener = new OpenCodeGlobalEventListener({
@@ -856,13 +854,6 @@ export class OpenCodeRuntime {
   withClientLease<T>(operation: (client: any) => Promise<T>): Promise<T> {
     return this.#endpointCoordinator.withClientLease(operation);
   }
-  getTranscriptIndexEndpoint(signal: AbortSignal): Promise<string> {
-    return this.#endpointCoordinator.getTranscriptEndpoint(signal);
-  }
-  refreshTranscriptIndexEndpoint(failedBaseUrl: string, signal: AbortSignal): Promise<string> {
-    return this.#endpointCoordinator.refreshTranscriptEndpoint(failedBaseUrl, signal);
-  }
-
   getClientIfInitialized(): any | null {
     return this.#instance?.client ?? null;
   }
