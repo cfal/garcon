@@ -1,7 +1,6 @@
 // OpenCode SDK integration. Each provider operation owns its transcript publisher.
 
 import crypto from 'crypto';
-import { spawn, type ChildProcess } from 'node:child_process';
 import { isRecord } from '@garcon/common/json';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
@@ -69,6 +68,18 @@ import {
   OpenCodeOperationRoutes,
   type OpenCodeOperationRoute,
 } from './operation-routes.js';
+import {
+  extractPermissionRequest,
+  mapPermissionDecision,
+  mapPermissionMode,
+} from './permissions.js';
+import { createOpenCodeInstance } from './server-instance.js';
+import {
+  configuredProvidersFromResult,
+  connectedProvidersFromListResult,
+  modelsFromProviders,
+  type OpenCodeModelOption,
+} from './model-catalog.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -88,83 +99,6 @@ const DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS = 3_000;
 const DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS = 30_000;
 const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
 const DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS = 100;
-const OPENCODE_SERVER_CONFIG_CONTENT = JSON.stringify({});
-
-// Source of OpenCode permission keys:
-// - https://github.com/anomalyco/opencode/blob/f5eade1d2b95562c7fb58e3041e662a8b2b611b6/packages/web/src/content/docs/permissions.mdx
-// - https://github.com/anomalyco/opencode/blob/f5eade1d2b95562c7fb58e3041e662a8b2b611b6/packages/opencode/src/agent/agent.ts
-export const OPENCODE_PERMISSION_KEYS = Object.freeze([
-  'read',
-  'edit',
-  'glob',
-  'grep',
-  'list',
-  'bash',
-  'task',
-  'skill',
-  'lsp',
-  'todoread',
-  'todowrite',
-  'webfetch',
-  'websearch',
-  'codesearch',
-  'external_directory',
-  'doom_loop',
-  'question',
-  'plan_enter',
-  'plan_exit',
-] as const);
-
-export function mapPermissionMode(mode: string): Array<{ permission: string; pattern: string; action: string }> {
-  const map: Record<string, Record<string, string>> = {
-    acceptEdits: { edit: 'allow', bash: 'ask', webfetch: 'allow' },
-    bypassPermissions: Object.fromEntries(OPENCODE_PERMISSION_KEYS.map((permission) => [permission, 'allow'])),
-    manualBypass: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
-    default: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
-  };
-
-  const selected = map[mode] || map.default;
-
-  return Object.entries(selected).map(([permission, action]) => ({
-    permission,
-    pattern: '*',
-    action,
-  }));
-}
-
-// Maps a permission decision to V2 reply value.
-export function mapPermissionDecision(decision: { allow?: boolean; alwaysAllow?: boolean } | null | undefined): string {
-  const allow = Boolean(decision?.allow);
-  const alwaysAllow = Boolean(decision?.alwaysAllow);
-  return allow ? (alwaysAllow ? 'always' : 'once') : 'reject';
-}
-
-// Extracts a normalized permission request from a V2 permission.asked event.
-export function extractPermissionRequest(event: SSEEvent): {
-  requestId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  sessionID: string | null;
-} | null {
-  if (event.type !== 'permission.asked') return null;
-
-  const props = event.properties || {};
-  const requestId = props.requestID || props.id;
-  if (!requestId) return null;
-
-  return {
-    requestId: String(requestId),
-    toolName: props.permission || 'Unknown',
-    toolInput: {
-      permission: props.permission || null,
-      patterns: Array.isArray(props.patterns) ? props.patterns : [],
-      metadata: props.metadata || {},
-      always: Array.isArray(props.always) ? props.always : [],
-      tool: props.tool || null,
-    },
-    sessionID: props.sessionID || null,
-  };
-}
 
 interface PendingTurnWaiter {
   promise: Promise<Error | null>;
@@ -215,11 +149,6 @@ interface NormalizedOpenCodeRuntimeOptions {
   }) => Promise<OpenCodeInstance>;
 }
 
-interface OpenCodeModelOption {
-  value: string;
-  label: string;
-}
-
 interface OpenCodeModelCache {
   models: OpenCodeModelOption[];
   fetchedAt: number;
@@ -240,143 +169,6 @@ function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRu
     now: options.now ?? (() => Date.now()),
     requiresExecutable: options.createInstance === undefined,
     createInstance: options.createInstance ?? createOpenCodeInstance,
-  };
-}
-
-export function buildOpenCodeServerEnv(
-  baseEnv: Record<string, string | undefined> = process.env,
-): Record<string, string | undefined> {
-  return {
-    ...baseEnv,
-    OPENCODE_CONFIG_CONTENT: OPENCODE_SERVER_CONFIG_CONTENT,
-    OPENCODE_DISABLE_AUTOUPDATE: '1',
-  };
-}
-
-function configuredProvidersFromResult(result: any): any[] {
-  const providers = result?.data?.providers;
-  return Array.isArray(providers) ? providers : [];
-}
-
-function connectedProvidersFromListResult(result: any): any[] {
-  const data = result?.data;
-  const allProviders: any[] = Array.isArray(data?.all) ? data.all : [];
-  const connected = new Set<string>(Array.isArray(data?.connected) ? data.connected : []);
-  return allProviders.filter((provider) => connected.has(provider.id || provider.name));
-}
-
-function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
-  const models: OpenCodeModelOption[] = [];
-  for (const provider of providers) {
-    const providerId = provider.id || provider.name;
-    const providerName = provider.name || providerId;
-    const agentModelsObj = provider.models || {};
-    for (const [modelKey, model] of Object.entries(agentModelsObj)) {
-      if (!isRecord(model)) continue;
-      const modelId = typeof model.id === 'string' ? model.id : modelKey;
-      models.push({
-        value: `${providerId}/${modelId}`,
-        label: `${providerName}: ${typeof model.name === 'string' ? model.name : modelId}`,
-      });
-    }
-  }
-  return models;
-}
-
-function stopOpenCodeProcess(proc: ChildProcess): void {
-  if (proc.exitCode !== null || proc.signalCode !== null) return;
-
-  proc.kill();
-  proc.stdout?.destroy();
-  proc.stderr?.destroy();
-
-  const killTimer = setTimeout(() => {
-    if (proc.exitCode === null && proc.signalCode === null) {
-      proc.kill('SIGKILL');
-    }
-  }, 500);
-  killTimer.unref?.();
-  proc.once('exit', () => clearTimeout(killTimer));
-}
-
-async function createOpenCodeInstance(input: {
-  port: number;
-  signal: AbortSignal;
-}): Promise<OpenCodeInstance> {
-  const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
-  const proc = spawn('opencode', ['serve', '--hostname=127.0.0.1', `--port=${input.port}`], {
-    env: buildOpenCodeServerEnv(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  const url = await new Promise<string>((resolve, reject) => {
-    let output = '';
-    let resolved = false;
-
-    const cleanup = () => {
-      input.signal.removeEventListener('abort', abort);
-      proc.off('exit', onExit);
-      proc.off('error', onError);
-      proc.stdout.off('data', onStdout);
-      proc.stderr.off('data', onStderr);
-    };
-
-    const fail = (error: unknown) => {
-      if (resolved) return;
-      cleanup();
-      stopOpenCodeProcess(proc);
-      reject(error);
-    };
-
-    const abort = () => {
-      fail(input.signal.reason ?? new Error('OpenCode startup aborted'));
-    };
-
-    const onStdout = (chunk: Buffer) => {
-      if (resolved) return;
-      output += chunk.toString();
-      const lines = output.split('\n');
-      for (const line of lines) {
-        if (!line.startsWith('opencode server listening')) continue;
-        const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-        if (!match) {
-          fail(new Error(`Failed to parse OpenCode server URL from output: ${line}`));
-          return;
-        }
-        resolved = true;
-        cleanup();
-        resolve(match[1]);
-        return;
-      }
-    };
-
-    const onStderr = (chunk: Buffer) => {
-      output += chunk.toString();
-    };
-
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-      const detail = output.trim() ? `\nServer output: ${output.trim()}` : '';
-      fail(new Error(`OpenCode server exited before startup with code ${code ?? signal}${detail}`));
-    };
-
-    const onError = (error: Error) => {
-      fail(error);
-    };
-
-    input.signal.addEventListener('abort', abort, { once: true });
-    proc.stdout.on('data', onStdout);
-    proc.stderr.on('data', onStderr);
-    proc.on('exit', onExit);
-    proc.on('error', onError);
-
-    if (input.signal.aborted) abort();
-  });
-
-  const close = () => stopOpenCodeProcess(proc);
-  return {
-    client: createOpencodeClient({ baseUrl: url }),
-    baseUrl: url,
-    server: { close },
   };
 }
 
@@ -953,10 +745,6 @@ export class OpenCodeRuntime {
     }
   }
 
-  #extractPermissionRequestFromEvent(event: SSEEvent) {
-    return extractPermissionRequest(event);
-  }
-
   #handleGlobalSSEEvent(client: any, event: SSEEvent): void {
     const sessionId = extractSessionId(event);
     if (!sessionId) {
@@ -968,11 +756,28 @@ export class OpenCodeRuntime {
 
     const route = this.#operationRoutes.resolve(sessionId, event);
     if (!route) {
-      this.#logger.debug('Ignoring an OpenCode event without an operation identity', {
+      const part = event.properties?.part;
+      const info = event.properties?.info;
+      const tool = event.properties?.tool;
+      const partMessageId = typeof part?.messageID === 'string' ? part.messageID : null;
+      const eventMessageId = typeof event.properties?.messageID === 'string'
+        ? event.properties.messageID
+        : null;
+      const details = {
         eventId: event.id ?? null,
         eventType: event.type,
         sessionId,
-      });
+        partId: typeof part?.id === 'string' ? part.id : null,
+        messageId: partMessageId ?? eventMessageId,
+        parentId: typeof info?.parentID === 'string' ? info.parentID : null,
+        infoId: typeof info?.id === 'string' ? info.id : null,
+        toolMessageId: typeof tool?.messageID === 'string' ? tool.messageID : null,
+      };
+      if (shouldWarnForUnroutedOpenCodeEvent(event.type)) {
+        this.#logger.warn('Ignoring an OpenCode event without an operation identity', details);
+      } else {
+        this.#logger.debug('Ignoring an OpenCode event without an operation identity', details);
+      }
       return;
     }
     if (!acceptUniqueOpenCodeTurnEvent(route.turn, event, this.#logger)) return;
@@ -1002,7 +807,7 @@ export class OpenCodeRuntime {
       typeof toolMessageId === 'string'
       && !route.turn.assistantMessageIds.has(toolMessageId)
     ) return;
-    const permission = this.#extractPermissionRequestFromEvent(event);
+    const permission = extractPermissionRequest(event);
     if (!permission) return;
     if (route.permissionMode === 'manualBypass') {
       this.#replyManualBypassPermission(client, route, permission.requestId);
@@ -1703,4 +1508,12 @@ function lastValue<T>(values: Iterable<T>): T | null {
   let last: T | null = null;
   for (const value of values) last = value;
   return last;
+}
+
+function shouldWarnForUnroutedOpenCodeEvent(eventType: string): boolean {
+  return eventType === 'message.updated'
+    || eventType === 'message.part.updated'
+    || eventType === 'message.part.delta'
+    || eventType === 'permission.asked'
+    || eventType === 'session.error';
 }

@@ -95,12 +95,7 @@ function createEventStream({ connected = true } = {}) {
     if (event?.type === 'message.part.updated') {
       const part = event.properties?.part;
       const operationPartId = part?.metadata?.garcon_operation_part_id ?? part?.id;
-      let request = promptRequestsByPart.get(operationPartId);
-      if (!request && (part?.type === 'compaction' || part?.synthetic === true)) {
-        const candidates = [...promptRequestsByPart.values()]
-          .filter((candidate) => candidate.sessionId === event.properties?.sessionID);
-        if (candidates.length === 1) [request] = candidates;
-      }
+      const request = promptRequestsByPart.get(operationPartId);
       if (request && typeof part?.messageID === 'string') {
         promptRequestsByMessage.set(part.messageID, request);
       }
@@ -1128,6 +1123,9 @@ describe('OpenCodeRuntime abort', () => {
           type: 'text',
           text: 'Continue',
           synthetic: true,
+          metadata: {
+            garcon_operation_part_id: promptAsync.mock.calls[0][0].parts[0].id,
+          },
         },
       },
     }));

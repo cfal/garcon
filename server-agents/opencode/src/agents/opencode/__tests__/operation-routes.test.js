@@ -13,10 +13,7 @@ function createFixture() {
 }
 
 function createTurn(runId) {
-  return createOpenCodeTurnContext(
-    { clientRequestId: runId, turnId: runId },
-    { runId, publish: mock(() => undefined) },
-  );
+  return createOpenCodeTurnContext({ runId, publish: mock(() => undefined) });
 }
 
 function register(routes, {
@@ -177,7 +174,7 @@ describe('OpenCodeOperationRoutes', () => {
     })).toBeNull();
   });
 
-  it('[TLV5-L07.09-OPENCODE-UNIT-01] binds provider-generated compaction continuations to their sole request source', () => {
+  it('[TLV5-L07.09-OPENCODE-UNIT-01] binds provider-generated continuations through inherited operation identity', () => {
     const { routes } = createFixture();
     const operation = register(routes, {
       sessionId: 'session-1',
@@ -185,28 +182,6 @@ describe('OpenCodeOperationRoutes', () => {
       runId: 'run-a',
     });
     routes.observe(operation.route, promptEvent(operation.turn, 'user-a', 'event-a'));
-    const compaction = {
-      id: 'event-compaction',
-      type: 'message.part.updated',
-      properties: {
-        sessionID: 'session-1',
-        part: {
-          id: 'part-compaction',
-          messageID: 'user-compaction',
-          type: 'compaction',
-          auto: true,
-        },
-      },
-    };
-
-    expect(routes.resolve('session-1', compaction)).toBe(operation.route);
-    expect(routes.resolveNamed('session-1', assistantEvent(
-      'session-1',
-      'assistant-compaction',
-      'user-compaction',
-      'event-assistant-compaction',
-    ))).toBe(operation.route);
-
     const continuation = {
       id: 'event-continuation',
       type: 'message.part.updated',
@@ -217,6 +192,7 @@ describe('OpenCodeOperationRoutes', () => {
           messageID: 'user-continuation',
           type: 'text',
           synthetic: true,
+          metadata: { garcon_operation_part_id: operation.turn.providerPromptPartId },
         },
       },
     };
@@ -227,6 +203,30 @@ describe('OpenCodeOperationRoutes', () => {
       'user-continuation',
       'event-assistant-continuation',
     ))).toBe(operation.route);
+  });
+
+  it('drops an unqualified provider continuation even when one session route exists', () => {
+    const { routes } = createFixture();
+    const operation = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-a',
+    });
+    routes.observe(operation.route, promptEvent(operation.turn, 'user-a', 'event-a'));
+
+    expect(routes.resolve('session-1', {
+      id: 'event-unqualified-compaction',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-unqualified-compaction',
+          messageID: 'user-unqualified-compaction',
+          type: 'compaction',
+          auto: true,
+        },
+      },
+    })).toBeNull();
   });
 
   it('uses inherited operation metadata without guessing between concurrent request sources', () => {

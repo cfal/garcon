@@ -55,15 +55,17 @@ async function importProvider() {
 
 describe('OpenCodeRuntime model discovery', () => {
   it('disables OpenCode autoupdate in the spawned server environment', async () => {
-    const { buildOpenCodeServerEnv } = await import('../opencode.js');
+    const { buildOpenCodeServerEnv } = await import('../server-instance.js');
 
     expect(buildOpenCodeServerEnv({
       KEEP_ME: 'yes',
       OPENCODE_CONFIG_CONTENT: '{"mode":"user"}',
       OPENCODE_DISABLE_AUTOUPDATE: '0',
-    })).toEqual({
+      OPENCODE_PURE: '1',
+    }, 'file:///tmp/garcon-opencode-plugin.js')).toEqual({
       KEEP_ME: 'yes',
-      OPENCODE_CONFIG_CONTENT: '{}',
+      OPENCODE_CONFIG_CONTENT:
+        '{"plugin":["file:///tmp/garcon-opencode-plugin.js"]}',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
     });
   });

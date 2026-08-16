@@ -10,7 +10,9 @@
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "opencode",
-    "standaloneEntrypoints": {},
+    "standaloneEntrypoints": {
+      "operation-identity-plugin": "./src/agents/opencode/operation-identity-plugin.js"
+    },
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }

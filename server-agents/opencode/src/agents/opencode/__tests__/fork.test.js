@@ -31,6 +31,10 @@ async function waitForMockCall(fn) {
   throw new Error('Timed out waiting for mock call');
 }
 
+function operation(runId) {
+  return { runId, publish: mock(() => undefined) };
+}
+
 describe('OpenCodeRuntime fork', () => {
   it('creates a native OpenCode fork through the SDK', async () => {
     const fork = mock(() => Promise.resolve({ data: { id: ' forked-session ' } }));
@@ -122,6 +126,7 @@ describe('OpenCodeRuntime fork', () => {
       chatId: 'chat-1',
       projectPath: '/repo',
       permissionMode: 'default',
+      operation: operation('run-start'),
     })).resolves.toBe('session-1');
 
     await waitForMockCall(prompt);
@@ -157,6 +162,7 @@ describe('OpenCodeRuntime fork', () => {
       chatId: 'chat-1',
       projectPath: '/repo',
       permissionMode: 'default',
+      operation: operation('run-missing'),
     })).rejects.toThrow('Session not found: missing-session');
 
     expect(prompt.mock.calls[0][0]).toMatchObject({

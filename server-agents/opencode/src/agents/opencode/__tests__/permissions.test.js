@@ -8,7 +8,7 @@ import {
   extractPermissionRequest,
   mapPermissionMode,
   OPENCODE_PERMISSION_KEYS,
-} from '../opencode.js';
+} from '../permissions.js';
 import { convertOpencodePermissionTool } from '../permission-tool-converter.js';
 import { EnterPlanModeToolUseMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '@garcon/common/chat-types';
 
@@ -172,7 +172,6 @@ describe('extractPermissionRequest', () => {
     const result = extractPermissionRequest(event);
     expect(result).toEqual({
       requestId: 'req-abc',
-      toolName: 'bash',
       toolInput: {
         permission: 'bash',
         patterns: ['*.sh'],
@@ -180,7 +179,6 @@ describe('extractPermissionRequest', () => {
         always: ['/bin/bash'],
         tool: { name: 'bash' },
       },
-      sessionID: 'sess-1',
     });
   });
 
@@ -225,7 +223,6 @@ describe('extractPermissionRequest', () => {
     const result = extractPermissionRequest(event);
     expect(result).toEqual({
       requestId: 'req-2',
-      toolName: 'Unknown',
       toolInput: {
         permission: null,
         patterns: [],
@@ -233,7 +230,6 @@ describe('extractPermissionRequest', () => {
         always: [],
         tool: null,
       },
-      sessionID: null,
     });
   });
 

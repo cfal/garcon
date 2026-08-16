@@ -17,12 +17,7 @@ function createEventStream() {
     if (event.type === 'message.part.updated') {
       const part = event.properties?.part;
       const operationPartId = part?.metadata?.garcon_operation_part_id ?? part?.id;
-      let request = promptRequestsByPart.get(operationPartId);
-      if (!request && (part?.type === 'compaction' || part?.synthetic === true)) {
-        const candidates = [...promptRequestsByPart.values()]
-          .filter((candidate) => candidate.sessionId === event.properties?.sessionID);
-        if (candidates.length === 1) [request] = candidates;
-      }
+      const request = promptRequestsByPart.get(operationPartId);
       if (request && typeof part?.messageID === 'string') {
         promptRequestsByMessage.set(part.messageID, request);
       }
@@ -388,14 +383,14 @@ describe('OpenCode operation routing', () => {
 
     await expect(successor).resolves.toBeUndefined();
     const firstMessages = firstEvents
-      .filter((event) => event.type === 'messages')
+      .filter((event) => event.type === 'rows')
       .flatMap((event) => event.rows.map((row) => row.message));
     const secondMessages = secondEvents
-      .filter((event) => event.type === 'messages')
+      .filter((event) => event.type === 'rows')
       .flatMap((event) => event.rows.map((row) => row.message));
     expect(firstEvents.map((event) => event.type)).toEqual([
-      'messages',
-      'messages',
+      'rows',
+      'rows',
       'permission',
       'run-ended',
     ]);
@@ -426,9 +421,9 @@ describe('OpenCode operation routing', () => {
     const diagnostics = [];
     const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
       logger: {
-        debug(...args) { diagnostics.push(args); },
+        debug(...args) { diagnostics.push(['debug', ...args]); },
         info() {},
-        warn() {},
+        warn(...args) { diagnostics.push(['warn', ...args]); },
         error() {},
       },
     });
@@ -493,10 +488,15 @@ describe('OpenCode operation routing', () => {
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     });
-    await waitFor(() => diagnostics.filter((entry) => (
-      entry[0] === 'Ignoring an OpenCode event without an operation identity'
-      && (entry[1]?.eventId === 'event-old-error' || entry[1]?.eventId === 'event-old-idle')
-    )).length === 2);
+    await waitFor(() => diagnostics.some((entry) => (
+      entry[0] === 'warn'
+      && entry[1] === 'Ignoring an OpenCode event without an operation identity'
+      && entry[2]?.eventId === 'event-old-error'
+    )) && diagnostics.some((entry) => (
+      entry[0] === 'debug'
+      && entry[1] === 'Ignoring an OpenCode event without an operation identity'
+      && entry[2]?.eventId === 'event-old-idle'
+    )));
 
     expect(firstEvents).toHaveLength(firstEventCount);
     expect(secondEvents).toEqual([]);
@@ -516,7 +516,7 @@ describe('OpenCode operation routing', () => {
     });
     await expect(successor).resolves.toBeUndefined();
     expect(secondEvents).toEqual([
-      expect.objectContaining({ type: 'messages' }),
+      expect.objectContaining({ type: 'rows' }),
       expect.objectContaining({ type: 'run-ended', runId: 'run-b', outcome: 'finished' }),
     ]);
 

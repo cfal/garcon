@@ -19,7 +19,6 @@ export class OpenCodeOperationRoutes {
   readonly #byPart = new Map<string, OpenCodeOperationRoute>();
   readonly #byMessage = new Map<string, OpenCodeOperationRoute>();
   readonly #byTurn = new Map<OpenCodeTurnContext, OpenCodeOperationRoute>();
-  readonly #requestSourcesBySession = new Map<string, Set<OpenCodeOperationRoute>>();
   readonly #latestBoundOrdinalBySession = new Map<string, number>();
   #nextRegistrationOrdinal = 1;
 
@@ -50,9 +49,6 @@ export class OpenCodeOperationRoutes {
     }
     this.#byPart.set(key, route);
     this.#byTurn.set(turn, route);
-    const requestSources = this.#requestSourcesBySession.get(sessionId) ?? new Set();
-    requestSources.add(route);
-    this.#requestSourcesBySession.set(sessionId, requestSources);
     return route;
   }
 
@@ -103,8 +99,7 @@ export class OpenCodeOperationRoutes {
     const inheritedRoute = inheritedOperationPartId
       ? this.#byPart.get(routeKey(sessionId, inheritedOperationPartId))
       : undefined;
-    const route = inheritedRoute
-      ?? (isProviderContinuationPart(part) ? this.#soleRequestSource(sessionId) : undefined);
+    const route = inheritedRoute;
     if (!route || !this.#bindContinuation(route, partId, messageId)) return null;
 
     route.turn.observedUserMessageIds.add(messageId);
@@ -159,7 +154,6 @@ export class OpenCodeOperationRoutes {
     this.#byPart.clear();
     this.#byMessage.clear();
     this.#byTurn.clear();
-    this.#requestSourcesBySession.clear();
     this.#latestBoundOrdinalBySession.clear();
   }
 
@@ -238,18 +232,9 @@ export class OpenCodeOperationRoutes {
       if (candidate === route) this.#byMessage.delete(key);
     }
     this.#byTurn.delete(route.turn);
-    const requestSources = this.#requestSourcesBySession.get(route.sessionId);
-    requestSources?.delete(route);
-    if (requestSources?.size === 0) this.#requestSourcesBySession.delete(route.sessionId);
     const sessionStillRouted = [...this.#byTurn.values()]
       .some((candidate) => candidate.sessionId === route.sessionId);
     if (!sessionStillRouted) this.#latestBoundOrdinalBySession.delete(route.sessionId);
-  }
-
-  #soleRequestSource(sessionId: string): OpenCodeOperationRoute | undefined {
-    const requestSources = this.#requestSourcesBySession.get(sessionId);
-    if (requestSources?.size !== 1) return undefined;
-    return requestSources.values().next().value;
   }
 }
 
@@ -258,17 +243,6 @@ function partOperationIdentity(part: Record<string, unknown>): string | null {
   if (!metadata || typeof metadata !== 'object') return null;
   const operationPartId = (metadata as Record<string, unknown>)[GARCON_OPERATION_PART_METADATA_KEY];
   return typeof operationPartId === 'string' && operationPartId ? operationPartId : null;
-}
-
-function isProviderContinuationPart(part: Record<string, unknown>): boolean {
-  if (part.type === 'compaction' && part.auto === true) return true;
-  if (part.synthetic === true) return true;
-  const metadata = part.metadata;
-  return Boolean(
-    metadata
-    && typeof metadata === 'object'
-    && (metadata as Record<string, unknown>).compaction_continue === true,
-  );
 }
 
 function routeKey(sessionId: string, providerId: string): string {
