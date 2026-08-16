@@ -154,6 +154,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		entries: this.entries,
 		transcriptViewId: this.transcriptViewId,
 		optimisticInputs: this.visibleOptimisticInputs,
+		optimisticAfterOrdinals: this.#optimisticInputs.afterOrdinalByClientMessageId,
 		notices: this.#displayLocalNotices,
 	}));
 
@@ -161,6 +162,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		entries: this.entries,
 		transcriptViewId: this.transcriptViewId,
 		optimisticInputs: this.visibleOptimisticInputs,
+		optimisticAfterOrdinals: this.#optimisticInputs.afterOrdinalByClientMessageId,
 		notices: this.#displayLocalNotices,
 		visibleCount: this.visibleMessageCount,
 	}));
@@ -270,18 +272,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'gap-detected';
 		}
 		const previousLastOrdinal = this.lastOrdinal;
-		this.#optimisticInputs.clearMany(echoedClientMessageIds(messages));
 		const append = { firstOrdinal, lastOrdinal, messages };
-		if (
-			this.#reconnectReplay.buffer(chatId, {
-				transcriptViewId,
-				...append,
-				noticeRevision,
-				resendCandidates,
-			})
-		) {
-			return 'applied';
-		}
 		if (this.#snapshotBuffer) {
 			this.transcriptCache.applyMessages(chatId, transcriptViewId, append);
 			this.#snapshotBuffer.push({
@@ -290,6 +281,16 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				noticeRevision,
 				resendCandidates,
 			});
+			return 'applied';
+		}
+		if (
+			this.#reconnectReplay.buffer(chatId, {
+				transcriptViewId,
+				...append,
+				noticeRevision,
+				resendCandidates,
+			})
+		) {
 			return 'applied';
 		}
 		if (this.transcriptViewId && transcriptViewId !== this.transcriptViewId) {
@@ -327,6 +328,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (result.changed || cursorAdvanced) {
 				this.#feedMutations.record('live-append', responseMessageTypes);
 			}
+			this.#optimisticInputs.clearMany(echoedClientMessageIds(messages));
 			this.setResendCandidates(resendCandidates);
 			return 'applied';
 		}
@@ -369,6 +371,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (entriesChanged) {
 			this.#feedMutations.record('live-append', responseMessageTypes);
 		}
+		this.#optimisticInputs.clearMany(echoedClientMessageIds(messages));
 		this.setResendCandidates(resendCandidates);
 		return 'applied';
 	}
@@ -483,11 +486,14 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'view-changed';
 		}
 
+		this.#reconnectReplay.reset();
 		this.#invalidatePageLoad();
 		this.historyState = { kind: 'complete' };
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.windowRevision += 1;
-		if (page.transcriptViewId !== this.transcriptViewId) {
+		const replacesTranscriptView = this.transcriptViewId !== ''
+			&& page.transcriptViewId !== this.transcriptViewId;
+		if (replacesTranscriptView) {
 			this.#preserveExpandedVisibleWindow = false;
 			this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		}
@@ -500,6 +506,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasEarlierMessages = page.hasMore || retainedMessages.length < page.messages.length;
 		this.hasLaterMessages = false;
 		this.totalMessages = retainedMessages.length;
+		if (replacesTranscriptView) this.#optimisticInputs.clearAll();
+		else this.#optimisticInputs.clearMany(echoedClientMessageIds(page.messages));
 		this.setResendCandidates(page.resendCandidates ?? []);
 		this.clearLocalNotices(this.#notices.revisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
@@ -762,7 +770,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	upsertOptimisticUserInput(input: OptimisticUserInput): void {
 		this.clearLocalNotices();
 		if (this.#echoedClientMessageIds.has(input.clientMessageId)) return;
-		this.#optimisticInputs.upsert(input);
+		this.#optimisticInputs.upsert(input, this.lastOrdinal);
 	}
 
 	markOptimisticUserInputDelivered(clientMessageId: string): void {
@@ -860,7 +868,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 							beforeOrdinal: Math.min(latestLastOrdinal + 1, MESSAGES_PER_PAGE + 1),
 							transcriptViewId,
 						}
-					: { chatId, limit: MESSAGES_PER_PAGE },
+					: { chatId, limit: MESSAGES_PER_PAGE, transcriptViewId },
 			);
 			if (
 				windowNavigationEpoch !== this.#windowNavigationEpoch ||
@@ -892,6 +900,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 								lastOrdinal: cached.lastOrdinal,
 								pageOldestOrdinal: cached.oldestOrdinal,
 								pageNewestOrdinal: cached.lastOrdinal,
+								resendCandidates: [...this.#resend.all],
 							}
 						: page;
 				return this.setFromPage(chatId, latestPage, loadEpoch) === 'applied'

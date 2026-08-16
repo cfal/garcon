@@ -470,10 +470,10 @@ export class ChatReconnectCoordinator {
 				throw new Error('Transcript replay page did not advance its requested cursor');
 			}
 
-			this.options.conversationUi.setTransientFeedFromSnapshot(message.transientFeed);
 			const applied = await input.apply(message);
 			if (applied === false) throw new Error('Transcript replay page could not be applied');
 			if (!input.isCurrent()) return null;
+			this.options.conversationUi.setTransientFeedFromSnapshot(message.transientFeed);
 			if (!message.hasMore) return message;
 			afterOrdinal = message.nextAfterOrdinal;
 		}

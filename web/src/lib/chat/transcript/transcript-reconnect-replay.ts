@@ -56,7 +56,12 @@ export class TranscriptReconnectReplayState {
 
 	buffer(chatId: string, batch: TranscriptBufferedBatch): boolean {
 		const replay = this.#active;
-		if (!replay || replay.token === this.#applyingToken || replay.chatId !== chatId) {
+		if (
+			!replay
+			|| replay.token === this.#applyingToken
+			|| replay.chatId !== chatId
+			|| replay.transcriptViewId !== batch.transcriptViewId
+		) {
 			return false;
 		}
 		replay.buffered.push(batch);

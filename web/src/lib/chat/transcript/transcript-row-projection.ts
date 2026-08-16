@@ -28,10 +28,14 @@ function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
 export function mergeRowsWithOptimisticInputs(
 	rows: readonly ChatTranscriptRow[],
 	optimisticInputs: readonly OptimisticUserInput[],
+	afterOrdinalByClientMessageId: ReadonlyMap<string, number>,
 ): ChatTranscriptRow[] {
 	if (rows.length === 0) return optimisticInputs.map(optimisticInputToRow);
 
-	const optimisticRows = optimisticInputs.map(optimisticInputToRow);
+	const optimisticRows = optimisticInputs.map((input) => ({
+		row: optimisticInputToRow(input),
+		afterOrdinal: afterOrdinalByClientMessageId.get(input.clientMessageId),
+	}));
 	const merged: ChatTranscriptRow[] = [];
 	let messageIndex = 0;
 	let optimisticIndex = 0;
@@ -39,17 +43,23 @@ export function mergeRowsWithOptimisticInputs(
 	while (messageIndex < rows.length && optimisticIndex < optimisticRows.length) {
 		const row = rows[messageIndex];
 		const optimistic = optimisticRows[optimisticIndex];
-		if (row.message.timestamp.localeCompare(optimistic.message.timestamp) < 0) {
+		const timestampOrder = row.message.timestamp.localeCompare(optimistic.row.message.timestamp);
+		const rowPrecedesEqualTimestamp = optimistic.afterOrdinal !== undefined
+			&& row.ordinal !== undefined
+			&& row.ordinal <= optimistic.afterOrdinal;
+		if (timestampOrder < 0 || (timestampOrder === 0 && rowPrecedesEqualTimestamp)) {
 			merged.push(row);
 			messageIndex += 1;
 		} else {
-			merged.push(optimistic);
+			merged.push(optimistic.row);
 			optimisticIndex += 1;
 		}
 	}
 
 	if (messageIndex < rows.length) merged.push(...rows.slice(messageIndex));
-	if (optimisticIndex < optimisticRows.length) merged.push(...optimisticRows.slice(optimisticIndex));
+	if (optimisticIndex < optimisticRows.length) {
+		merged.push(...optimisticRows.slice(optimisticIndex).map(({ row }) => row));
+	}
 	return merged;
 }
 
@@ -99,12 +109,17 @@ export function transcriptDisplayRows(input: {
 	readonly entries: readonly TranscriptMessage[];
 	readonly transcriptViewId: string;
 	readonly optimisticInputs: OptimisticUserInput[];
+	readonly optimisticAfterOrdinals: ReadonlyMap<string, number>;
 	readonly notices: readonly LocalNoticeRow[];
 }): ChatDisplayRow[] {
 	const durableRows = durableRowsFor(input.entries, input.transcriptViewId);
 	const messages = input.optimisticInputs.length === 0
 		? durableRows
-		: mergeRowsWithOptimisticInputs(durableRows, input.optimisticInputs);
+		: mergeRowsWithOptimisticInputs(
+			durableRows,
+			input.optimisticInputs,
+			input.optimisticAfterOrdinals,
+		);
 	return input.notices.length === 0 ? messages : [...messages, ...input.notices];
 }
 
@@ -112,6 +127,7 @@ export function visibleTranscriptRows(input: {
 	readonly entries: readonly TranscriptMessage[];
 	readonly transcriptViewId: string;
 	readonly optimisticInputs: OptimisticUserInput[];
+	readonly optimisticAfterOrdinals: ReadonlyMap<string, number>;
 	readonly notices: readonly LocalNoticeRow[];
 	readonly visibleCount: number;
 }): ChatDisplayRow[] {
@@ -123,7 +139,11 @@ export function visibleTranscriptRows(input: {
 	const durableRows = durableRowsFor(input.entries.slice(-messageLimit), input.transcriptViewId);
 	const messageRows = input.optimisticInputs.length === 0
 		? durableRows
-		: mergeRowsWithOptimisticInputs(durableRows, input.optimisticInputs).slice(-messageLimit);
+		: mergeRowsWithOptimisticInputs(
+			durableRows,
+			input.optimisticInputs,
+			input.optimisticAfterOrdinals,
+		).slice(-messageLimit);
 	return [...messageRows, ...visibleNotices];
 }
 

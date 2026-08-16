@@ -1364,6 +1364,26 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(['native']);
 	});
 
+	it('clears optimistic rows when a snapshot replaces the transcript view', () => {
+		const chat = new ActiveTranscriptState();
+		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, assistant('current'))]);
+		chat.upsertOptimisticUserInput(optimisticInput());
+		const epoch = chat.beginSnapshotLoad();
+
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-2',
+				messages: [entry(1, assistant('reloaded'))],
+				lastOrdinal: 1,
+			}),
+			epoch,
+		)).toBe('applied');
+
+		expect(chat.optimisticUserInputs).toEqual([]);
+		expect(chat.chatMessages.map(contentOf)).toEqual(['reloaded']);
+	});
+
 	it('persists and activates generation-scoped transcript windows', () => {
 		const chat = new ActiveTranscriptState();
 		applyMessages(chat, 'chat-1', 'generation-1', [
