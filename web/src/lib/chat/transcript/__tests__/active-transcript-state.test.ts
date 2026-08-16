@@ -718,7 +718,7 @@ describe('ActiveTranscriptState', () => {
 					hasMore: true,
 				}),
 			})
-			.mockImplementationOnce((request) => {
+			.mockImplementationOnce(() => {
 				markHeldRequest();
 				return new Promise((resolve) => {
 					releaseHeldPage = resolve;
