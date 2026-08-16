@@ -194,6 +194,19 @@ describe('scripted Codex interrupt lifecycle', () => {
         ordinal: expect.any(Number),
         message: { type: 'assistant-message', content: finalReply },
       });
+      const snapshot = await fixture.client.getChatSnapshot(chatId, 50);
+      expect(snapshot.transcript.availability).toBe('available');
+      if (snapshot.transcript.availability !== 'available') {
+        throw new Error('The reloaded Codex transcript is unavailable.');
+      }
+      expect(snapshot.transcript.messages.at(-1)).toMatchObject({
+        ordinal: page.messages.at(-1)?.ordinal,
+        message: { type: 'assistant-message', content: finalReply },
+      });
+      const listed = (await fixture.client.listChats()).sessions.find(
+        (session) => session.id === chatId,
+      );
+      expect(listed?.preview.lastMessage).toBe(finalReply);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
