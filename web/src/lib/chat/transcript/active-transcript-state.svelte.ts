@@ -24,6 +24,7 @@ import type {
 import {
 	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 	idlePageState,
+	mergeTranscriptEntriesByOrdinal,
 	retainTranscriptEntries,
 	validateEarlierTranscriptPage,
 	type TranscriptPageDirection,
@@ -61,6 +62,8 @@ const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
 type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
+type ActiveTranscriptSnapshot = TranscriptPage & { resendCandidates?: ResendCandidate[] };
+type SnapshotInstallMode = 'merge' | 'preserve-window' | 'replace';
 export type MessageApplyResult = TranscriptReplayApplyResult;
 type PageApplyResult = MessageApplyResult | 'stale';
 
@@ -110,7 +113,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#loadingPageDirection: TranscriptPageDirection | null = null;
 	#pageLoadOperationEpoch = 0;
 	#windowNavigationEpoch = 0;
-	#preserveExpandedVisibleWindow = false;
+	#expandedVisibleStartOrdinal: number | null = null;
 	#feedMutations = new ConversationFeedMutationState();
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
@@ -352,9 +355,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.clearLocalNotices(noticeRevision);
 		}
 		this.totalMessages = this.entries.length;
-		if (entriesChanged && this.#preserveExpandedVisibleWindow) {
-			this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
-		}
+		if (entriesChanged) this.#growExpandedVisibleWindow();
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
 			this.loadStatus = 'loaded';
 		}
@@ -417,7 +418,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const retainedMessages = retainTranscriptEntries(messages, 'later');
 		const pageNewestOrdinal = options.pageNewestOrdinal ?? options.lastOrdinal;
 		this.#invalidatePageLoad();
-		this.#preserveExpandedVisibleWindow = false;
+		this.#expandedVisibleStartOrdinal = null;
 		this.historyState = { kind: 'complete' };
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
@@ -452,16 +453,25 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	setFromPage(
 		chatId: string,
-		page: {
-			transcriptViewId: string;
-			messages: TranscriptMessage[];
-			lastOrdinal: number;
-			pageOldestOrdinal: number;
-			pageNewestOrdinal: number;
-			hasMore: boolean;
-			resendCandidates?: ResendCandidate[];
-		},
+		page: ActiveTranscriptSnapshot,
 		epoch: number,
+	): PageApplyResult {
+		return this.#installSnapshotPage(chatId, page, epoch);
+	}
+
+	#replaceFromNavigationPage(
+		chatId: string,
+		page: ActiveTranscriptSnapshot,
+		epoch: number,
+	): PageApplyResult {
+		return this.#installSnapshotPage(chatId, page, epoch, 'replace');
+	}
+
+	#installSnapshotPage(
+		chatId: string,
+		page: ActiveTranscriptSnapshot,
+		epoch: number,
+		requiredInstallMode?: SnapshotInstallMode,
 	): PageApplyResult {
 		if (epoch !== this.#loadEpoch) return 'stale';
 
@@ -479,31 +489,15 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#reconnectReplay.reset();
 		this.#invalidatePageLoad();
 		this.historyState = { kind: 'complete' };
-		this.transcriptCache.replaceFromPage(chatId, page);
-		this.windowRevision += 1;
-		const replacesTranscriptView = this.transcriptViewId !== ''
-			&& page.transcriptViewId !== this.transcriptViewId;
-		if (replacesTranscriptView) {
-			this.#preserveExpandedVisibleWindow = false;
-			this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
-		}
-		const retainedMessages = retainTranscriptEntries(page.messages, 'later');
-		this.transcriptViewId = page.transcriptViewId;
-		this.entries = retainedMessages;
-		this.lastOrdinal = page.lastOrdinal;
-		this.loadedThroughOrdinal = page.pageNewestOrdinal;
-		this.oldestOrdinal = retainedMessages[0]?.ordinal ?? 0;
-		this.hasEarlierMessages = page.hasMore || retainedMessages.length < page.messages.length;
-		this.hasLaterMessages = false;
-		this.totalMessages = retainedMessages.length;
-		if (replacesTranscriptView) this.#optimisticInputs.clearAll();
-		else this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+		const installMode = requiredInstallMode ?? this.#snapshotInstallMode(chatId, page);
+		if (installMode === 'merge') this.#mergeSnapshot(chatId, page);
+		else if (installMode === 'preserve-window') this.#preserveWindowFromSnapshot(chatId, page);
+		else this.#replaceFromSnapshot(chatId, page);
 		this.setResendCandidates(page.resendCandidates ?? []);
 		this.clearLocalNotices(this.#notices.revisionAtLoadStart);
-		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
+		this.loadStatus = this.entries.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
-		this.#feedMutations.record('replacement');
 		for (const batch of buffered) {
 			const result = this.applyMessages(
 				chatId,
@@ -517,6 +511,101 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (result !== 'applied') return result;
 		}
 		return 'applied';
+	}
+
+	#snapshotInstallMode(chatId: string, page: ActiveTranscriptSnapshot): SnapshotInstallMode {
+		if (
+			this.activeChatId !== chatId
+			|| this.transcriptViewId === ''
+			|| this.transcriptViewId !== page.transcriptViewId
+			|| this.entries.length === 0
+		) {
+			return 'replace';
+		}
+		const intervalsTouch = page.pageOldestOrdinal <= this.loadedThroughOrdinal + 1
+			&& this.oldestOrdinal <= page.pageNewestOrdinal + 1;
+		return intervalsTouch ? 'merge' : 'preserve-window';
+	}
+
+	#mergeSnapshot(chatId: string, page: ActiveTranscriptSnapshot): void {
+		const previousEntries = this.entries;
+		const previousLastOrdinal = this.lastOrdinal;
+		const previousLoadedThroughOrdinal = this.loadedThroughOrdinal;
+		const previousOldestOrdinal = this.oldestOrdinal;
+		const mergedEntries = mergeTranscriptEntriesByOrdinal(previousEntries, page.messages);
+		const mergedLastOrdinal = Math.max(previousLastOrdinal, page.lastOrdinal);
+		const mergedLoadedThroughOrdinal = Math.max(
+			previousLoadedThroughOrdinal,
+			page.pageNewestOrdinal,
+		);
+		const pageExtendsEarlier = page.pageOldestOrdinal <= previousOldestOrdinal;
+		const hasEarlierMessages = pageExtendsEarlier ? page.hasMore : this.hasEarlierMessages;
+		this.transcriptCache.replaceFromPage(chatId, {
+			...page,
+			messages: mergedEntries,
+			lastOrdinal: mergedLastOrdinal,
+			pageOldestOrdinal: mergedEntries[0]?.ordinal ?? 0,
+			pageNewestOrdinal: mergedLoadedThroughOrdinal,
+			hasMore: hasEarlierMessages,
+		});
+		this.entries = mergedEntries;
+		this.lastOrdinal = mergedLastOrdinal;
+		this.loadedThroughOrdinal = mergedLoadedThroughOrdinal;
+		this.oldestOrdinal = mergedEntries[0]?.ordinal ?? 0;
+		this.hasEarlierMessages = hasEarlierMessages;
+		this.hasLaterMessages = mergedLoadedThroughOrdinal < mergedLastOrdinal;
+		this.totalMessages = mergedEntries.length;
+		this.#growExpandedVisibleWindow();
+		this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+
+		const cursorAdvanced = mergedLastOrdinal > previousLastOrdinal;
+		if (mergedEntries === previousEntries && !cursorAdvanced) return;
+		const preservesExistingPrefix = previousEntries.every(
+			(entry, index) => mergedEntries[index] === entry,
+		);
+		if (preservesExistingPrefix) {
+			this.#feedMutations.record(
+				'live-append',
+				responseMessageTypesAfter(page.messages, previousLastOrdinal),
+			);
+		} else {
+			this.#feedMutations.record('presentation-structure');
+		}
+	}
+
+	#preserveWindowFromSnapshot(chatId: string, page: ActiveTranscriptSnapshot): void {
+		const previouslyHadLaterMessages = this.hasLaterMessages;
+		this.transcriptCache.replaceFromPage(chatId, page);
+		this.lastOrdinal = Math.max(this.lastOrdinal, page.lastOrdinal);
+		this.hasLaterMessages = this.loadedThroughOrdinal < this.lastOrdinal;
+		this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+		this.#growExpandedVisibleWindow();
+		if (this.hasLaterMessages !== previouslyHadLaterMessages) {
+			this.#feedMutations.record('presentation-structure');
+		}
+	}
+
+	#replaceFromSnapshot(chatId: string, page: ActiveTranscriptSnapshot): void {
+		const replacesTranscriptView = this.transcriptViewId !== ''
+			&& page.transcriptViewId !== this.transcriptViewId;
+		this.transcriptCache.replaceFromPage(chatId, page);
+		this.windowRevision += 1;
+		if (replacesTranscriptView) {
+			this.#expandedVisibleStartOrdinal = null;
+			this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+		}
+		const retainedMessages = retainTranscriptEntries(page.messages, 'later');
+		this.transcriptViewId = page.transcriptViewId;
+		this.entries = retainedMessages;
+		this.lastOrdinal = page.lastOrdinal;
+		this.loadedThroughOrdinal = page.pageNewestOrdinal;
+		this.oldestOrdinal = retainedMessages[0]?.ordinal ?? 0;
+		this.hasEarlierMessages = page.hasMore || retainedMessages.length < page.messages.length;
+		this.hasLaterMessages = false;
+		this.totalMessages = retainedMessages.length;
+		if (replacesTranscriptView) this.#optimisticInputs.clearAll();
+		else this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+		this.#feedMutations.record('replacement');
 	}
 
 	async loadMessages(
@@ -754,6 +843,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	clearLocalNotices(throughRevision?: number): void {
 		if (!this.#notices.clearThrough(throughRevision)) return;
+		this.#growExpandedVisibleWindow();
 		this.#feedMutations.record('presentation-structure');
 	}
 
@@ -780,7 +870,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	#resetToEmptyTranscript(): void {
 		this.#invalidatePageLoad();
-		this.#preserveExpandedVisibleWindow = false;
+		this.#expandedVisibleStartOrdinal = null;
 		this.#loadEpoch += 1;
 		this.windowRevision += 1;
 		this.entries = [];
@@ -807,7 +897,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = this.entries.length;
 		this.hasEarlierMessages = true;
 		this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
-		this.#preserveExpandedVisibleWindow = false;
+		this.#expandedVisibleStartOrdinal = null;
 		this.#feedMutations.record('history-pruned');
 		return true;
 	}
@@ -893,12 +983,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 								resendCandidates: [...this.#resend.all],
 							}
 						: page;
-				return this.setFromPage(chatId, latestPage, loadEpoch) === 'applied'
+				return this.#replaceFromNavigationPage(chatId, latestPage, loadEpoch) === 'applied'
 					? 'loaded'
 					: 'invalidated';
 			}
 
-			this.#preserveExpandedVisibleWindow = false;
+			this.#expandedVisibleStartOrdinal = null;
 			this.windowRevision += 1;
 			const retainedMessages = retainTranscriptEntries(page.messages, 'earlier');
 			this.entries = retainedMessages;
@@ -981,17 +1071,27 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	#rememberExpandedVisibleWindow(): void {
-		if (
-			this.entries.length > INITIAL_VISIBLE_MESSAGES &&
-			this.visibleMessageCount >= this.entries.length
-		) {
-			this.#preserveExpandedVisibleWindow = true;
-			this.#growExpandedVisibleWindow();
+		if (this.entries.length <= INITIAL_VISIBLE_MESSAGES) return;
+		let firstVisibleOrdinal: number | undefined;
+		for (const row of this.#visibleRows) {
+			if (row.kind !== 'message' || row.ordinal === undefined) continue;
+			firstVisibleOrdinal = row.ordinal;
+			break;
 		}
+		if (firstVisibleOrdinal === undefined) return;
+		this.#expandedVisibleStartOrdinal = firstVisibleOrdinal;
+		this.#growExpandedVisibleWindow();
 	}
 
 	#growExpandedVisibleWindow(): void {
-		if (!this.#preserveExpandedVisibleWindow) return;
-		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
+		if (this.#expandedVisibleStartOrdinal === null) return;
+		const firstVisibleIndex = this.#displayRows.findIndex(
+			(row) => row.kind === 'message' && row.ordinal === this.#expandedVisibleStartOrdinal,
+		);
+		if (firstVisibleIndex === -1) {
+			this.#expandedVisibleStartOrdinal = null;
+			return;
+		}
+		this.visibleMessageCount = this.#displayRows.length - firstVisibleIndex;
 	}
 }

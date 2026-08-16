@@ -25,6 +25,43 @@ export function retainTranscriptEntries(
 		: entries.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 }
 
+export function mergeTranscriptEntriesByOrdinal(
+	current: TranscriptMessage[],
+	incoming: TranscriptMessage[],
+): TranscriptMessage[] {
+	if (incoming.length === 0) return current;
+
+	const merged: TranscriptMessage[] = [];
+	let currentIndex = 0;
+	let incomingIndex = 0;
+	let changed = false;
+	while (currentIndex < current.length || incomingIndex < incoming.length) {
+		const currentEntry = current[currentIndex];
+		const incomingEntry = incoming[incomingIndex];
+		if (!currentEntry) {
+			merged.push(incomingEntry!);
+			incomingIndex += 1;
+			changed = true;
+			continue;
+		}
+		if (!incomingEntry) {
+			merged.push(currentEntry);
+			currentIndex += 1;
+			continue;
+		}
+		if (currentEntry.ordinal <= incomingEntry.ordinal) {
+			merged.push(currentEntry);
+			currentIndex += 1;
+			if (currentEntry.ordinal === incomingEntry.ordinal) incomingIndex += 1;
+			continue;
+		}
+		merged.push(incomingEntry);
+		incomingIndex += 1;
+		changed = true;
+	}
+	return changed ? merged : current;
+}
+
 export function validateEarlierTranscriptPage(
 	page: Pick<
 		TranscriptPage,
