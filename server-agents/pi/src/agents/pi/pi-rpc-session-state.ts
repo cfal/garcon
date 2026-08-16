@@ -11,7 +11,6 @@ export interface PiSteerSubmission {
 }
 
 export interface PiActiveTurn {
-  readonly turnId: string;
   readonly operation: AgentRuntimeOperation;
   stopRequested: boolean;
   settleObserved: boolean;

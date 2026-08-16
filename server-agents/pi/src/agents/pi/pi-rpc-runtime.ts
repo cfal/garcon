@@ -322,7 +322,7 @@ export class PiRpcRuntime {
       }
       this.#logger.debug('Pi steering accepted', {
         chatId: captured.session.chatId,
-        turnId: captured.turn.turnId ?? null,
+        runId: captured.turn.operation.runId,
         sessionId: captured.session.id.slice(0, 8),
       });
       return { kind: 'accepted' };
@@ -579,7 +579,6 @@ export class PiRpcRuntime {
       resolveSettle = resolve;
     });
     const turn: PiActiveTurn = {
-      turnId: request.operation.runId,
       operation: request.operation,
       stopRequested: false,
       settleObserved: false,
