@@ -11,7 +11,6 @@ import type {
 import {
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
-  CHAT_SEARCH_MIN_PREFIX_CHARS,
 } from '@garcon/common/chat-search';
 
 const DEFAULT_RESULT_LIMIT = 20;
@@ -139,66 +138,6 @@ function snippetWindow(body: string, tokens: SnippetToken[], firstTokenIndex: nu
   return `${startToken > 0 ? '... ' : ''}${text}${hasSuffix ? ' ...' : ''}`;
 }
 
-function quotedValues(query: string): Map<string, number> {
-  const values = new Map<string, number>();
-  for (const match of query.matchAll(/"([^"]+)"|'([^']+)'/g)) {
-    const value = (match[1] ?? match[2] ?? '').toLowerCase();
-    values.set(value, (values.get(value) ?? 0) + 1);
-  }
-  return values;
-}
-
-function rawTerms(query: string, textTokens?: string[]): Array<{ text: string; quoted: boolean }> {
-  if (textTokens?.length) {
-    const quoted = quotedValues(query);
-    return textTokens.map((text) => {
-      const key = text.toLowerCase();
-      const quotedCount = quoted.get(key) ?? 0;
-      if (quotedCount > 0) quoted.set(key, quotedCount - 1);
-      return { text, quoted: /\s/u.test(text) || quotedCount > 0 };
-    });
-  }
-  const terms: Array<{ text: string; quoted: boolean }> = [];
-  const matcher = /"([^"]+)"|'([^']+)'|(\S+)/g;
-  for (const match of query.matchAll(matcher)) {
-    terms.push({
-      text: match[1] ?? match[2] ?? match[3] ?? '',
-      quoted: match[1] !== undefined || match[2] !== undefined,
-    });
-  }
-  return terms;
-}
-
-export function compileSearchTerms(query: string, textTokens?: string[]): CompiledTerm[] {
-  const sourceTerms = rawTerms(query, textTokens);
-  if (sourceTerms.length > CHAT_SEARCH_MAX_TERMS) {
-    throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_TERMS} terms`);
-  }
-  const terms: CompiledTerm[] = [];
-  let wordCount = 0;
-  for (const raw of sourceTerms) {
-    const words = wordsIn(raw.text);
-    if (words.length === 0) continue;
-    if (wordCount + words.length > CHAT_SEARCH_MAX_WORDS) {
-      throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_WORDS} words`);
-    }
-    wordCount += words.length;
-    const compiled = raw.quoted
-      ? `"${words.join(' ').replaceAll('"', '""')}"`
-      : words.map((word) => [...word].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
-        ? `${escapeFtsWord(word)}*`
-        : escapeFtsWord(word)).join(' AND ');
-    terms.push({
-      query: compiled,
-      words,
-      normalizedWords: words.map(normalizeFtsToken),
-      exactPhrase: raw.quoted,
-      prefixWords: words.map((word) => !raw.quoted && [...word].length >= CHAT_SEARCH_MIN_PREFIX_CHARS),
-    });
-  }
-  return terms;
-}
-
 function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
   if (query.version !== 1 || !Array.isArray(query.clauses)
       || query.clauses.length > CHAT_SEARCH_MAX_TERMS) {
@@ -299,13 +238,6 @@ function searchIndexStatusForPreparedAllowed(
   };
 }
 
-export function searchIndexStatus(
-  db: Database,
-  allowedChats: readonly TranscriptSearchAllowedChat[],
-): ChatSearchIndexStatus {
-  return searchIndexStatusForPreparedAllowed(db, prepareAllowed(allowedChats));
-}
-
 function collectSnippets(
   db: Database,
   resultRows: ResultRow[],
@@ -394,49 +326,6 @@ function collectSingleTermResults(
     ORDER BY rank ASC, chatId ASC, transcriptViewId ASC
     LIMIT ?
   `).all(JSON.stringify(allowed), `body:(${term.query})`, limit);
-}
-
-export function searchTranscriptIndex(
-  db: Database,
-  options: {
-    query: string;
-    textTokens?: string[];
-    allowedChatIds: string[];
-    limit?: number;
-  },
-): { results: ChatSearchResult[]; index: ChatSearchIndexStatus } {
-  const allowed = prepareAllowed(options.allowedChatIds.flatMap((chatId) => {
-    const state = db.query<{ transcriptViewId: string | null }, [string]>(`
-      SELECT transcript_view_id AS transcriptViewId
-      FROM search_chat_state WHERE chat_id = ?
-    `).get(chatId);
-    return state?.transcriptViewId
-      ? [{ chatId, transcriptViewId: state.transcriptViewId }]
-      : [];
-  }));
-  const index = searchIndexStatusForPreparedAllowed(db, allowed);
-  const terms = compileSearchTerms(options.query, options.textTokens);
-  if (allowed.length === 0 || terms.length === 0) return { results: [], index };
-
-  const limit = clampLimit(options.limit);
-  const resultRows = terms.length === 1
-    ? collectSingleTermResults(db, terms[0], allowed, limit)
-    : collectMultiTermResults(db, terms, allowed, limit);
-  const snippetByChat = collectSnippets(db, resultRows, terms);
-  return {
-    results: resultRows.map((row) => {
-      const snippets = snippetByChat.get(resultKey(row.chatId, row.transcriptViewId))
-        ?? { matchedMessageCount: 0, snippets: [] };
-      return {
-        chatId: row.chatId,
-        transcriptViewId: row.transcriptViewId,
-        score: -Number(row.rank || 0),
-        matchedMessageCount: snippets.matchedMessageCount,
-        snippets: snippets.snippets,
-      };
-    }),
-    index,
-  };
 }
 
 export function searchTranscriptIndexV1(

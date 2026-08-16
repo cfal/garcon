@@ -280,21 +280,6 @@ export function appendChatRows(
   });
 }
 
-export function markChatFailed(
-  db: Database,
-  chatId: string,
-  transcriptViewId: string,
-  errorCode: string,
-): void {
-  db.query(`
-    INSERT INTO search_chat_state(
-      chat_id, transcript_view_id, indexed_through, status, last_error_code, updated_at
-    ) VALUES (?, ?, 0, 'failed', ?, ?)
-    ON CONFLICT(chat_id) DO UPDATE SET status = 'failed',
-      last_error_code = excluded.last_error_code, updated_at = excluded.updated_at
-  `).run(chatId, transcriptViewId, errorCode, new Date().toISOString());
-}
-
 export function deleteChatRows(db: Database, chatId: string): void {
   db.query('DELETE FROM search_chat_state WHERE chat_id = ?').run(chatId);
 }

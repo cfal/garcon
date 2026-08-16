@@ -76,15 +76,6 @@ export function buildOpenAiCompatibleUserContent(
   return parts;
 }
 
-export function extractOpenAiCompatibleTextContent(content: ConversationMessage['content']): string {
-  if (typeof content === 'string') return content;
-
-  return content
-    .filter((part) => part.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text!)
-    .join('\n');
-}
-
 async function readOpenAiCompatibleTextStream(
   response: Response,
   runtimeLabel: string,

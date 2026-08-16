@@ -99,14 +99,6 @@ export function buildAnthropicCompatibleUserContent(
   return blocks;
 }
 
-export function extractAnthropicTextContent(content: AnthropicContent): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((part): part is AnthropicTextContentBlock => part.type === 'text')
-    .map((part) => part.text)
-    .join('\n');
-}
-
 interface AnthropicStreamState {
   text: string;
   errorMessage: string | null;

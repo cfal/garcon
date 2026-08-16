@@ -10,8 +10,6 @@ const MAX_RECURSIVE_CHARS = 4_000;
 const MAX_RECURSIVE_DEPTH = 8;
 const MAX_RECURSIVE_NODES = 512;
 
-export const TRANSCRIPT_SEARCH_PROJECTOR_VERSION = 1;
-
 interface ExtractionBudget {
   remaining: number;
   remainingNodes: number;
