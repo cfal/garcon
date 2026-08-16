@@ -169,6 +169,7 @@ export class ConversationScrollController {
 		this.#lastObservedTranscriptViewId = transcriptViewId;
 		this.#lastObservedFeedDataRevision = dataRevision;
 		this.deps.chatState.isUserScrolledUp = !this.isPinnedToBottom;
+		if (this.deps.chatState.hasLaterMessages) this.#cancelLiveEdgePrune();
 		const deferredIntent = this.#deferredLiveEdgeIntent;
 		const viewport = this.deps.getViewport();
 		if (
@@ -811,8 +812,10 @@ export class ConversationScrollController {
 			this.#destroyed ||
 			!this.#isViewportVisible ||
 			this.deps.sessions.selectedChatId !== chatId ||
+			this.deps.chatState.hasLaterMessages ||
 			this.deps.chatState.isUserScrolledUp ||
 			!this.isPinnedToBottom ||
+			!this.isNearBottom() ||
 			this.#isPageMutationInProgress ||
 			this.#activeTargetNavigations > 0 ||
 			viewport?.ownsScrollPosition()
