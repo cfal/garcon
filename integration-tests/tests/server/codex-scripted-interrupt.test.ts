@@ -12,6 +12,7 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectStoppedTurnEventOrder,
   LIVE_TURN_TIMEOUT_MS,
+  reloadFromNativeHistory,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
@@ -136,6 +137,69 @@ describe('scripted Codex interrupt lifecycle', () => {
       prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   });
+
+  test('imports a long native tool tail before exactly one final assistant message', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = marker('NATIVE_TAIL_PROMPT');
+    const baselineReply = marker('NATIVE_TAIL_BASELINE');
+    const toolMarker = marker('NATIVE_TAIL_TOOL');
+    const finalReply = marker('NATIVE_TAIL_FINAL');
+    const toolCount = 30;
+    testEnvironment.model.scriptTurn([codexAssistantMessage(baselineReply)]);
+
+    await withIntegrationFixture('codex-native-tail-final-message', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveCodexStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: baselineReply,
+        afterIndex: cursor,
+      });
+
+      const nativePath = await waitForNativeSessionPath(fixture.dirs.workspace, chatId);
+      await appendNativeToolTail(nativePath, { finalReply, toolMarker, toolCount });
+      await reloadFromNativeHistory(fixture, chatId);
+
+      const page = await fixture.client.getMessages(chatId, { limit: 200 });
+      const compactionIndex = page.messages.findLastIndex(
+        (entry) => entry.message.type === 'compaction',
+      );
+      expect(compactionIndex).toBeGreaterThanOrEqual(0);
+      const importedTail = page.messages.slice(compactionIndex);
+      const expectedToolTypes = Array.from(
+        { length: toolCount },
+        () => ['bash-tool-use', 'tool-result'] as const,
+      ).flat();
+      expect(importedTail.map((entry) => entry.message.type)).toEqual([
+        'compaction',
+        ...expectedToolTypes,
+        'assistant-message',
+      ]);
+      expect(messagesOfType(importedTail, 'bash-tool-use').map((message) => message.command))
+        .toEqual(Array.from({ length: toolCount }, (_, index) => `printf ${toolMarker}-${index}`));
+      expect(messagesOfType(importedTail, 'tool-result').map((message) => message.content))
+        .toEqual(Array.from({ length: toolCount }, (_, index) => ({ raw: `${toolMarker}-result-${index}` })));
+      expect(assistantContents(page.messages).filter((content) => content === finalReply))
+        .toEqual([finalReply]);
+      expect(page.messages.at(-1)).toMatchObject({
+        ordinal: expect.any(Number),
+        message: { type: 'assistant-message', content: finalReply },
+      });
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      prepareWorkspace: testEnvironment.prepareWorkspace,
+    });
+  }, 120_000);
 });
 
 function marker(label: string): string {
@@ -196,4 +260,56 @@ async function appendNativeOnlyTool(nativePath: string, markerText: string): Pro
     }),
     '',
   ].join('\n'));
+}
+
+async function appendNativeToolTail(
+  nativePath: string,
+  input: { finalReply: string; toolCount: number; toolMarker: string },
+): Promise<void> {
+  const entries: unknown[] = [{
+    timestamp: '2026-08-15T12:00:00.000Z',
+    type: 'event_msg',
+    payload: { type: 'context_compacted' },
+  }];
+  for (let index = 0; index < input.toolCount; index += 1) {
+    const callId = `native-tail-${index}`;
+    entries.push(
+      {
+        timestamp: new Date(Date.UTC(2026, 7, 15, 12, 0, index + 1)).toISOString(),
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'exec_command',
+          call_id: callId,
+          arguments: JSON.stringify({ command: `printf ${input.toolMarker}-${index}` }),
+        },
+      },
+      {
+        timestamp: new Date(Date.UTC(2026, 7, 15, 12, 1, index + 1)).toISOString(),
+        type: 'response_item',
+        payload: {
+          type: 'function_call_output',
+          call_id: callId,
+          output: `${input.toolMarker}-result-${index}`,
+        },
+      },
+    );
+  }
+  entries.push(
+    {
+      timestamp: '2026-08-15T12:02:00.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: input.finalReply }],
+      },
+    },
+    {
+      timestamp: '2026-08-15T12:02:01.000Z',
+      type: 'event_msg',
+      payload: { type: 'task_complete', last_agent_message: input.finalReply },
+    },
+  );
+  await appendFile(nativePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
 }
