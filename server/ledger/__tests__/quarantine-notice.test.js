@@ -33,7 +33,11 @@ describe('carryover migration quarantine notice', () => {
 
       expect(frozenConversationDrafts(rows).map(frozenRowOracle)).toEqual([
         ['user-input', 'before quarantine', null],
-        ['notice', null, QUARANTINE_DETAIL],
+        [
+          'notice',
+          'Some earlier chat history could not be migrated. Quarantine reference: artifact-1.',
+          QUARANTINE_DETAIL,
+        ],
         ['provider-row', 'after quarantine', null],
       ]);
 
@@ -110,7 +114,7 @@ function fixtureDrafts() {
 function frozenRowOracle(row) {
   if (row.kind === 'user-input') return [row.kind, row.detail.message.content, null];
   if (row.kind === 'provider-row') return [row.kind, row.message.content, null];
-  return [row.kind, null, row.detail];
+  return [row.kind, row.message, row.detail];
 }
 
 async function collectSearchRows(ledger, rows) {
