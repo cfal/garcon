@@ -157,6 +157,7 @@ export interface ChatMessagesPage {
   lastOrdinal: number;
   pageOldestOrdinal: number;
   pageNewestOrdinal: number;
+  nextBeforeOrdinal: number | null;
   resendCandidates: ResendCandidate[];
   hasMore: boolean;
   limit: number;
@@ -817,6 +818,12 @@ export class GarconTestClient {
       throw new Error(`Invalid resend candidates response: ${JSON.stringify(response)}`);
     }
     if (typeof response.hasMore !== 'boolean') throw new Error('Invalid messages response: hasMore');
+    const nextBeforeOrdinal = response.nextBeforeOrdinal === null
+      ? null
+      : positiveInteger(response.nextBeforeOrdinal, 'nextBeforeOrdinal');
+    if (response.hasMore !== (nextBeforeOrdinal !== null)) {
+      throw new Error('Invalid messages response: hasMore/nextBeforeOrdinal');
+    }
     return {
       chatId: requiredString(response.chatId, 'chatId'),
       messages,
@@ -824,6 +831,7 @@ export class GarconTestClient {
       lastOrdinal: nonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
       pageOldestOrdinal: nonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
       pageNewestOrdinal: nonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
+      nextBeforeOrdinal,
       resendCandidates,
       hasMore: response.hasMore,
       limit: positiveInteger(response.limit, 'limit'),

@@ -97,10 +97,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await held.requested;
       const forkChatId = fixture.newChatId();
       try {
-        await fixture.client.forkChat({
-          sourceChatId,
-          chatId: forkChatId,
-        });
+        await forkWhenTranscriptPersists(fixture, sourceChatId, forkChatId);
         const forkedWhileRunning = await fixture.client.getMessages(forkChatId);
         expect(userContents(forkedWhileRunning.messages)).toEqual([prompt]);
         expect(assistantContents(forkedWhileRunning.messages)).toEqual([]);

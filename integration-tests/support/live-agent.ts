@@ -129,7 +129,16 @@ export async function reloadUntilNativeContains(
 ): Promise<void> {
   const deadline = Date.now() + RELOAD_SETTLE_TIMEOUT_MS;
   for (;;) {
-    await reloadFromNativeHistory(fixture, chatId);
+    try {
+      await reloadFromNativeHistory(fixture, chatId);
+    } catch (error) {
+      const providerHistoryStillFlushing = error instanceof GarconWsRequestError
+        && error.response.code === 'HISTORY_LOAD_FAILED'
+        && error.response.retryable === true;
+      if (!providerHistoryStillFlushing || Date.now() >= deadline) throw error;
+      await Bun.sleep(POLL_INTERVAL_MS);
+      continue;
+    }
     const page = await fixture.client.getMessages(chatId);
     if (assistantContents(page.messages).some((content) => content.includes(marker))) return;
     if (Date.now() >= deadline) {

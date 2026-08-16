@@ -629,11 +629,12 @@ describe('reconnect and transcript stability', () => {
       });
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
       const latest = await fixture.client.getMessages(chatId, { limit: 1 });
+      expect(typeof latest.nextBeforeOrdinal).toBe('number');
       const query = new URLSearchParams({
         chatId,
         transcriptViewId: crypto.randomUUID(),
         limit: '1',
-        beforeOrdinal: String(latest.pageOldestOrdinal),
+        beforeOrdinal: String(latest.nextBeforeOrdinal),
       });
 
       const response = await fetch(`${fixture.client.baseUrl}/api/v1/chats/messages?${query}`);
