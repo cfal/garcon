@@ -1509,6 +1509,65 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 500 });
 	});
 
+	it('merges an expanded prefix, overlapping snapshot, and buffered live suffix by ordinal', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+			lastOrdinal: 400,
+			pageOldestOrdinal: 201,
+			hasMore: true,
+		});
+		chat.isUserScrolledUp = true;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(151, 200, (ordinal) =>
+					ordinal === 175 ? 'repeated-across-snapshot' : `message-${ordinal}`,
+				),
+				lastOrdinal: 400,
+				pageOldestOrdinal: 151,
+				pageNewestOrdinal: 200,
+				hasMore: true,
+			}),
+		});
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		chat.revealAllLoadedMessages();
+
+		const snapshotEpoch = chat.beginSnapshotLoad();
+		expect(applyMessages(
+			chat,
+			'chat-1',
+			'generation-1',
+			assistantEntries(501, 502, (ordinal) =>
+				ordinal === 501 ? 'repeated-across-snapshot' : `message-${ordinal}`,
+			),
+		)).toBe('applied');
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-1',
+				messages: assistantEntries(301, 500),
+				lastOrdinal: 500,
+				pageOldestOrdinal: 301,
+				pageNewestOrdinal: 500,
+				hasMore: true,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 352 }, (_, index) => index + 151),
+		);
+		expect(chat.entries.filter(
+			(message) => contentOf(message.message) === 'repeated-across-snapshot',
+		)).toEqual([
+			expect.objectContaining({ ordinal: 175 }),
+			expect.objectContaining({ ordinal: 501 }),
+		]);
+		expect(chat.visibleRows).toHaveLength(352);
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 502 });
+	});
+
 	it('retires an obsolete reconnect replay when a replacement snapshot installs', () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
