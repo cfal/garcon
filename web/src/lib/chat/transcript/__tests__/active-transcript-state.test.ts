@@ -674,6 +674,23 @@ describe('ActiveTranscriptState', () => {
 		},
 	);
 
+	it('places a new optimistic input after the durable tail despite timestamp skew', () => {
+		const chat = new ActiveTranscriptState();
+		applyMessages(chat, 'chat-1', 'generation-1', [
+			entry(1, new AssistantMessage('2099-01-01T00:00:00.000Z', 'durable tail')),
+		]);
+
+		chat.upsertOptimisticUserInput(optimisticInput({
+			createdAt: '2000-01-01T00:00:00.000Z',
+		}));
+
+		expect(chat.displayMessages.map(contentOf)).toEqual(['durable tail', 'optimistic']);
+		expect(chat.visibleRows.map((row) => row.id)).toEqual([
+			'generation-1:1',
+			'optimistic:msg-1',
+		]);
+	});
+
 	it('renders local messages as transient display-only rows', () => {
 		const chat = new ActiveTranscriptState();
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, user('server'))]);
