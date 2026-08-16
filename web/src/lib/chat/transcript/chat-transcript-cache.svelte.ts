@@ -28,6 +28,12 @@ export interface ChatTranscriptCursor {
 	lastOrdinal: number;
 }
 
+export interface ChatTranscriptAppliedCursor {
+	transcriptViewId: string;
+	lastOrdinal: number;
+	stale: boolean;
+}
+
 export interface ChatTranscriptSnapshot {
 	chatId: string;
 	transcriptViewId: string;
@@ -160,6 +166,17 @@ export class ChatTranscriptCache {
 			return snapshotFromEntry(entry);
 		}
 		return this.hydrate(chatId);
+	}
+
+	readAppliedCursor(chatId: string): ChatTranscriptAppliedCursor | null {
+		const entry = this.#entries.get(chatId);
+		return entry
+			? {
+					transcriptViewId: entry.transcriptViewId,
+					lastOrdinal: entry.lastOrdinal,
+					stale: entry.stale,
+				}
+			: null;
 	}
 
 	hydrate(chatId: string): ChatTranscriptSnapshot | null {

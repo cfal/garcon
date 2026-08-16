@@ -34,8 +34,13 @@ import { TranscriptPageLoader } from './transcript-page-loader.js';
 import {
 	collapseBackwardTranscriptDemand,
 	loadTranscriptPageDemand,
-	type CompleteTranscriptPageDemand,
 } from './transcript-page-demand.js';
+import {
+	loadTranscriptWindowPage,
+	preferCachedLatestTranscriptPage,
+	transcriptSnapshotInstallMode,
+	type TranscriptSnapshotInstallMode,
+} from './transcript-window-loader.js';
 import {
 	TranscriptReconnectReplayState,
 	type TranscriptBufferedBatch,
@@ -64,7 +69,6 @@ export type { ChatDisplayRow, ChatTranscriptRow } from './transcript-row-project
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 type ActiveTranscriptSnapshot = TranscriptPage & { resendCandidates?: ResendCandidate[] };
-type SnapshotInstallMode = 'merge' | 'preserve-window' | 'replace';
 export type MessageApplyResult = TranscriptReplayApplyResult;
 type PageApplyResult = MessageApplyResult | 'stale';
 
@@ -247,7 +251,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	getCursor(): ChatCursor {
-		const cached = this.activeChatId ? this.transcriptCache.get(this.activeChatId) : null;
+		const cached = this.activeChatId
+			? this.transcriptCache.readAppliedCursor(this.activeChatId)
+			: null;
 		const lastOrdinal = cached
 			&& !cached.stale
 			&& cached.transcriptViewId === this.transcriptViewId
@@ -508,7 +514,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		chatId: string,
 		page: ActiveTranscriptSnapshot,
 		epoch: number,
-		requiredInstallMode?: SnapshotInstallMode,
+		requiredInstallMode?: TranscriptSnapshotInstallMode,
 	): PageApplyResult {
 		if (epoch !== this.#loadEpoch) return 'stale';
 
@@ -526,7 +532,15 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#reconnectReplay.reset();
 		this.#invalidatePageLoad();
 		this.historyState = { kind: 'complete' };
-		const installMode = requiredInstallMode ?? this.#snapshotInstallMode(chatId, page);
+		const installMode = requiredInstallMode ?? transcriptSnapshotInstallMode({
+			activeChatId: this.activeChatId,
+			chatId,
+			transcriptViewId: this.transcriptViewId,
+			entryCount: this.entries.length,
+			loadedThroughOrdinal: this.loadedThroughOrdinal,
+			nextBeforeOrdinal: this.nextBeforeOrdinal,
+			page,
+		});
 		if (installMode === 'merge') this.#mergeSnapshot(chatId, page);
 		else if (installMode === 'preserve-window') this.#preserveWindowFromSnapshot(chatId, page);
 		else this.#replaceFromSnapshot(chatId, page);
@@ -548,28 +562,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (result !== 'applied') return result;
 		}
 		return 'applied';
-	}
-
-	#snapshotInstallMode(chatId: string, page: ActiveTranscriptSnapshot): SnapshotInstallMode {
-		if (
-			this.activeChatId !== chatId
-			|| this.transcriptViewId === ''
-			|| this.transcriptViewId !== page.transcriptViewId
-			|| this.entries.length === 0
-		) {
-			return 'replace';
-		}
-		const pageRawStartOrdinal = page.pageNewestOrdinal === 0
-			? 0
-			: page.nextBeforeOrdinal ?? 1;
-		const currentRawStartOrdinal = this.loadedThroughOrdinal === 0
-			? 0
-			: this.nextBeforeOrdinal ?? 1;
-		const intervalsTouch = page.pageNewestOrdinal === 0 || this.loadedThroughOrdinal === 0
-			? page.pageNewestOrdinal === this.loadedThroughOrdinal
-			: pageRawStartOrdinal <= this.loadedThroughOrdinal + 1
-				&& currentRawStartOrdinal <= page.pageNewestOrdinal + 1;
-		return intervalsTouch ? 'merge' : 'preserve-window';
 	}
 
 	#mergeSnapshot(chatId: string, page: ActiveTranscriptSnapshot): void {
@@ -861,56 +853,31 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				&& this.activeChatId === chatId
 				&& this.transcriptViewId === transcriptViewId
 			);
-			const demand = await loadTranscriptPageDemand(
-				target === 'initial'
-					? {
-							direction: 'later',
-							chatId,
-							transcriptViewId,
-							afterOrdinal: 0,
-							throughOrdinal: latestLastOrdinal,
-							visibleLimit: MESSAGES_PER_PAGE,
-							isCurrent,
-						}
-					: {
-							direction: 'backward',
-							chatId,
-							transcriptViewId,
-							visibleLimit: MESSAGES_PER_PAGE,
-							isCurrent,
-						},
-			);
-			if (demand.kind === 'invalidated') return 'invalidated';
-			if (demand.kind === 'unavailable') {
-				this.#setUnavailableHistory(chatId, demand.response.historyState);
+			const result = await loadTranscriptWindowPage({
+				chatId,
+				target,
+				transcriptViewId,
+				lastOrdinal: latestLastOrdinal,
+				visibleLimit: MESSAGES_PER_PAGE,
+				isCurrent,
+			});
+			if (result.kind === 'invalidated') return 'invalidated';
+			if (result.kind === 'unavailable') {
+				this.#setUnavailableHistory(chatId, result.response.historyState);
 				return 'loaded';
 			}
-			if (demand.kind === 'view-changed') {
+			if (result.kind === 'view-changed') {
 				this.transcriptCache.markStale(chatId);
 				return 'invalidated';
 			}
-			const page = target === 'latest'
-				? collapseBackwardTranscriptDemand(demand)
-				: this.#initialWindowFromDemand(transcriptViewId, latestLastOrdinal, demand);
+			const page = result.page;
 
 			if (target === 'latest') {
-				const cached = this.transcriptCache.get(chatId);
-				const latestPage =
-					cached &&
-					!cached.stale &&
-					cached.transcriptViewId === page.transcriptViewId &&
-					cached.lastOrdinal > page.lastOrdinal
-						? {
-								...page,
-								messages: cached.messages,
-								lastOrdinal: cached.lastOrdinal,
-								pageOldestOrdinal: cached.oldestOrdinal,
-								pageNewestOrdinal: cached.lastOrdinal,
-								nextBeforeOrdinal: cached.nextBeforeOrdinal,
-								hasMore: cached.nextBeforeOrdinal !== null,
-								resendCandidates: [...this.#resend.all],
-							}
-						: page;
+				const latestPage = preferCachedLatestTranscriptPage(
+					page,
+					this.transcriptCache.get(chatId),
+					this.#resend.all,
+				);
 				return this.#replaceFromNavigationPage(chatId, latestPage, loadEpoch) === 'applied'
 					? 'loaded'
 					: 'invalidated';
@@ -952,28 +919,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			console.error(`Error loading ${target} messages:`, error);
 			return 'failed';
 		}
-	}
-
-	#initialWindowFromDemand(
-		transcriptViewId: string,
-		lastOrdinal: number,
-		demand: CompleteTranscriptPageDemand,
-	): ActiveTranscriptSnapshot {
-		const firstPage = demand.pages[0];
-		const finalPage = demand.pages.at(-1);
-		if (!firstPage || !finalPage) {
-			throw new Error('Initial transcript demand completed without a page');
-		}
-		return {
-			transcriptViewId,
-			messages: demand.messages,
-			lastOrdinal: Math.max(lastOrdinal, demand.lastOrdinal),
-			pageOldestOrdinal: demand.messages[0]?.ordinal ?? 0,
-			pageNewestOrdinal: finalPage.pageNewestOrdinal,
-			nextBeforeOrdinal: null,
-			hasMore: false,
-			resendCandidates: firstPage.resendCandidates,
-		};
 	}
 
 	#beginLoadEpoch(): number {
