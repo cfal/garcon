@@ -16,7 +16,7 @@ const PROVIDER_AT = '2026-08-12T00:00:02.000Z';
 const EXTERNAL_AT = '2026-08-12T00:00:03.000Z';
 
 describe('NativeTranscriptActivityService', () => {
-  it('warns from the integration watermark and deduplicates the observed native tail', async () => {
+  it('[TLV5-L09.05-CORE-UNIT-01] warns from the integration watermark and deduplicates the observed native tail', async () => {
     await withFixture(async ({ ledger, activity, setNativeAt }) => {
       ledger.initializeChat('chat-1', baseRows());
 
@@ -275,7 +275,7 @@ describe('NativeTranscriptActivityService', () => {
     });
   });
 
-  it('drops a pending native result when the transcript view is replaced', async () => {
+  it('[TLV5-L09.04-CORE-UNIT-01] drops a pending native result when the transcript view is replaced', async () => {
     await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
       const current = ledger.initializeChat('chat-1', baseRows());
       const pending = deferred();

@@ -2,7 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { NativeActivityPageReader } from '../native-activity-page-reader.ts';
 
 describe('NativeActivityPageReader', () => {
-  it('serves a newest page before scheduling its advisory native check', async () => {
+  it('[TLV5-L09.03-CORE-UNIT-01] serves a newest page before scheduling its advisory native check', async () => {
     const page = deferred();
     const nativeActivity = { requestCheck: mock(() => new Promise(() => {})) };
     const reader = new NativeActivityPageReader({ page: () => page.promise }, nativeActivity);

@@ -11,7 +11,7 @@ import { TranscriptLedgerStore } from '../store.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptReloadService', () => {
-  it('atomically repeats replacement while preserving one frozen conversation prefix', async () => {
+  it('[TLV5-L10.02-CORE-UNIT-01] atomically repeats replacement while preserving one frozen conversation prefix', async () => {
     await withReload(async ({ ledger, reload, lease, replacementLease, oldViewId }) => {
       const firstReplacement = await reload.reload('chat-1');
       const firstReplacementLease = replacementLease.current;

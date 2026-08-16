@@ -29,7 +29,7 @@ function replayResponse(overrides = {}) {
 }
 
 describe('bounded transcript replay WebSocket contract', () => {
-  it('preserves a continuation watermark on subscribe requests', () => {
+  it('[TLV5-L08.01-CONTRACT-01] preserves a continuation watermark on subscribe requests', () => {
     expect(parseClientWsMessage({
       type: 'chat-subscribe',
       clientRequestId: 'request-2',

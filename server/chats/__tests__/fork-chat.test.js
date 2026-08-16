@@ -108,7 +108,7 @@ function makeDeps(overrides = {}) {
 }
 
 describe('forkChatFileCopy', () => {
-  it('builds the frozen target ledger before registering the chat', async () => {
+  it('[TLV5-FORK.05-CORE-UNIT-01] builds the frozen target ledger before registering the chat', async () => {
     const deps = makeDeps({ source: sourceSession({ agentSessionId: null, nativeSession: null }) });
     const order = [];
     deps.ledger.initializeChat.mockImplementation((...args) => {
@@ -229,7 +229,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(3);
   });
 
-  it('hands the facet an uncorrelated provider row rather than an older settled one', async () => {
+  it('[TLV5-FORK.01-CORE-UNIT-01] hands the facet an uncorrelated provider row rather than an older settled one', async () => {
     const streamed = { ...providerRow(3, 'streaming'), providerMeta: null };
     const deps = makeDeps({ rows: [userRow(1, 'first'), providerRow(2, 'answer'), streamed] });
 
@@ -249,7 +249,7 @@ describe('forkChatFileCopy', () => {
     });
   });
 
-  it('does not silently substitute a handoff fork for an unmaterialized whole-chat fork', async () => {
+  it('[TLV5-FORK.02-CORE-UNIT-01] does not silently substitute a handoff fork for an unmaterialized whole-chat fork', async () => {
     const deps = makeDeps({
       forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
     });
@@ -270,7 +270,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
-  it('uses an unmaterialized whole-chat fork only after handoff-fork consent', async () => {
+  it('[TLV5-FORK.04-CORE-UNIT-01] uses an unmaterialized whole-chat fork only after handoff-fork consent', async () => {
     const deps = makeDeps({
       forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
     });
@@ -334,7 +334,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.registry.addChat).toHaveBeenCalledOnce();
   });
 
-  it('seeds a native fork from the forked session instead of the source rows', async () => {
+  it('[TLV5-FORK.03-CORE-UNIT-01] seeds a native fork from the forked session instead of the source rows', async () => {
     const imported = [
       { kind: 'user-input', at: '2026-08-07T12:00:00.000Z', detail: { clientMessageId: null, message: {}, attachments: [], steer: false }, providerMeta: { native: 'imported' } },
       { kind: 'provider-row', at: '2026-08-07T12:00:01.000Z', message: {}, providerMeta: { native: 'imported' } },

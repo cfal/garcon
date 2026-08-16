@@ -87,7 +87,7 @@ describe('AgentHandoffService', () => {
     ], 3);
   });
 
-  it('closes, checkpoints, decides, and rolls ownership forward in order', async () => {
+  it('[TLV5-HANDOFF.01-CORE-UNIT-01] closes, checkpoints, decides, and rolls ownership forward in order', async () => {
     const current = sourceChat();
     const calls = [];
     const state = handoffState(current, calls);
@@ -157,7 +157,7 @@ describe('AgentHandoffService', () => {
     expect(current).toMatchObject({ agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch' });
   });
 
-  it('rolls a persisted decision forward without recapturing or checkpointing', async () => {
+  it('[TLV5-HANDOFF.03-CORE-UNIT-01] rolls a persisted decision forward without recapturing or checkpointing', async () => {
     const current = sourceChat();
     const calls = [];
     const state = handoffState(current, calls);
@@ -454,7 +454,7 @@ describe('AgentHandoffService', () => {
     }
   });
 
-  it('adopts an existing switch marker after unrelated post-watermark rows', async () => {
+  it('[TLV5-HANDOFF.06-CORE-UNIT-01] adopts an existing switch marker after unrelated post-watermark rows', async () => {
     const current = sourceChat();
     const calls = [];
     const state = handoffState(current, calls);

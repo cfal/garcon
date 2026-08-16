@@ -58,7 +58,7 @@ function makeRouter(hasPendingOwnershipTransfer) {
 }
 
 describe('AgentRuntimeRouter ownership fence', () => {
-  it('refuses to publish while a decided handoff has not rolled forward', async () => {
+  it('[TLV5-HANDOFF.02-CORE-UNIT-01] refuses to publish while a decided handoff has not rolled forward', async () => {
     const { router, execution } = makeRouter(() => true);
 
     await expect(router.runAgentTurn('chat-1', 'hello', {
@@ -69,7 +69,7 @@ describe('AgentRuntimeRouter ownership fence', () => {
     expect(execution.resume).not.toHaveBeenCalled();
   });
 
-  it('resumes publishing once roll-forward discharges the decision', async () => {
+  it('[TLV5-HANDOFF.04-CORE-UNIT-01] resumes publishing once roll-forward discharges the decision', async () => {
     let pending = true;
     const { router, execution } = makeRouter(() => pending);
 

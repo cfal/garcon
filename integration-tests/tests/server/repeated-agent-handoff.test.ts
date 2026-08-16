@@ -31,7 +31,7 @@ interface HoldableProvider {
 }
 
 describe('repeated agent handoff lifecycle', () => {
-  test('recovers one pending handoff while another chat remains fenced', async () => {
+  test('[TLV5-HANDOFF.05-SERVER-01] recovers one pending handoff while another chat remains fenced', async () => {
     await withIntegrationFixture('isolated-agent-handoff-recovery', async (fixture) => {
       const settings = await fixture.client.updateSettings({
         features: { transcriptSearch: { enabled: true } },

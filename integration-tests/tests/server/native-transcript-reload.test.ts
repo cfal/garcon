@@ -32,7 +32,7 @@ interface ClaudeNativeSession {
 }
 
 describe('native transcript reload', () => {
-  test('warns about native drift and keeps queued entries intact while blocking reload', async () => {
+  test('[TLV5-L08.04-SERVER-01] warns about native drift, preserves queued entries, and leaves shares unchanged', async () => {
     const environment: Record<string, string> = {};
     let releasePath = '';
 
@@ -266,7 +266,7 @@ describe('native transcript reload', () => {
     });
   }, 30_000);
 
-  test('rejects a fixed-watermark replay continuation after native reload replaces its view', async () => {
+  test('[TLV5-L08.03-SERVER-01] rejects a fixed-watermark replay continuation after native reload replaces its view', async () => {
     const environment: Record<string, string> = {};
 
     await withIntegrationFixture('native-reload-replay-fence', async (fixture) => {

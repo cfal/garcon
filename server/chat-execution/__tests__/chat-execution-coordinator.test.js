@@ -105,7 +105,7 @@ describe('ChatExecutionCoordinator', () => {
     await release;
   });
 
-  it('keeps future-turn inputs out of the transcript until dequeue', async () => {
+  it('[TLV5-L04.03-CORE-UNIT-01] keeps future-turn inputs out of the transcript until dequeue', async () => {
     const provider = deferred();
     const fixture = createFixture({
       turnRunner: {

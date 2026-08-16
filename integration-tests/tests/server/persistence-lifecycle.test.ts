@@ -180,7 +180,7 @@ describe('persistence lifecycle', () => {
     });
   }, 20_000);
 
-  test('deduplicates committed submissions after a crash restart', async () => {
+  test('[TLV5-L04.04-SERVER-RESTART-01] deduplicates committed submissions after a crash restart', async () => {
     await withIntegrationFixture('committed-submission-restart', async (fixture) => {
       const chatId = fixture.newChatId();
       const initial = await fixture.client.startDirectChat({
@@ -228,7 +228,7 @@ describe('persistence lifecycle', () => {
     });
   });
 
-  test('drops queue control and pending input state on restart', async () => {
+  test('[TLV5-L03.04-SERVER-RESTART-01] drops queue control and pending input state on restart', async () => {
     await withIntegrationFixture('ephemeral-queue-restart', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'ephemeral-active' });

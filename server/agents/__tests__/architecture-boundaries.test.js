@@ -67,7 +67,7 @@ describe('agent architecture boundaries', () => {
     }
   });
 
-  test('keeps the common toolkit independent of providers and core', () => {
+  test('[TLV5-L12.02-STATIC-01] keeps the common toolkit independent of providers and core', () => {
     for (const file of walk('server-agents/common/src')) {
       const source = readFileSync(file, 'utf8');
       for (const packageName of providerPackages) expect(source, file).not.toContain(packageName);
@@ -118,7 +118,7 @@ describe('agent architecture boundaries', () => {
     }
   });
 
-  test('keeps generic server modules out of provider implementation paths', () => {
+  test('[TLV5-L12.01-STATIC-01] keeps generic server modules out of provider implementation paths', () => {
     for (const root of ['server/chats', 'server/routes', 'server/ws']) {
       for (const file of walk(root)) {
         if (file.includes('__tests__')) continue;

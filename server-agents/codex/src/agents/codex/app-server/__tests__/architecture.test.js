@@ -7,7 +7,7 @@ const LIVE_APP_SERVER_FILES = [
 ];
 
 describe('Codex live app-server architecture', () => {
-  test('does not load complete native history during live execution', () => {
+  test('[TLV5-L10.01-CODEX-STATIC-01] does not load complete native history during live execution', () => {
     for (const file of LIVE_APP_SERVER_FILES) {
       const source = readFileSync(file, 'utf8');
       expect(source, file).not.toMatch(/from ['"][^'"]*history-loader/);

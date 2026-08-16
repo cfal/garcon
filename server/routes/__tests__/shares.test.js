@@ -89,7 +89,7 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = 
 }
 
 describe('share creation route', () => {
-  it('creates the share from one pinned durable snapshot and records its origin', async () => {
+  it('[TLV5-L01.03-CORE-UNIT-01] creates the share from one pinned durable snapshot and records its origin', async () => {
     const created = [];
     const { routes, transcripts } = createRoutes(createSnapshot(), null, {
       session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },

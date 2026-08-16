@@ -13,7 +13,7 @@ import { TranscriptViewReader } from '../view-reader.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptViewReader', () => {
-  it('pages visible messages by durable ordinal across hidden lifecycle rows', async () => {
+  it('[TLV5-L01.01-CORE-UNIT-01] pages visible messages by durable ordinal across hidden lifecycle rows', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       const lease = ledger.openProducer('chat-1', 'test');
       ledger.appendInputAndCompose({
@@ -91,7 +91,7 @@ describe('TranscriptViewReader', () => {
     });
   });
 
-  it('rejects a fixed-watermark continuation after the transcript view is replaced', async () => {
+  it('[TLV5-L08.02-CORE-UNIT-01] rejects a fixed-watermark continuation after the transcript view is replaced', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       const producer = ledger.openProducer('chat-1', 'test');
       producer.sink.publish({

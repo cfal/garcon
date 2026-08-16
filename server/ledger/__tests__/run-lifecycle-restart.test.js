@@ -13,7 +13,7 @@ const RUN_ID = 'run-1';
 const TS = '2026-08-15T00:00:00.000Z';
 
 describe('transcript run lifecycle across restart', () => {
-  it('does not synthesize a run-ended row for a run lost with the process', async () => {
+  it('[TLV5-L05.05-CORE-RESTART-01] does not synthesize a run-ended row for a run lost with the process', async () => {
     await withLedgerRoot(async (root) => {
       const first = createLedger(root);
       const view = first.ledger.initializeChat(CHAT_ID);

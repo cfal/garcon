@@ -126,7 +126,7 @@ describe('TranscriptSearchController', () => {
     });
   });
 
-  it('indexes repeated ordinary commits only as ordered suffixes', async () => {
+  it('[TLV5-SEARCH.01-CORE-UNIT-01] indexes repeated ordinary commits only as ordered suffixes', async () => {
     const test = harness();
     await test.controller.initialize(true);
     test.service.appendRows.mockClear();
@@ -209,7 +209,7 @@ describe('TranscriptSearchController', () => {
     ]);
   });
 
-  it('keeps long append series linear without rereading the transcript', async () => {
+  it('[TLV5-SEARCH.04-CORE-PERF-01] keeps long append series linear without rereading the transcript', async () => {
     const test = harness();
     await test.controller.initialize(true);
     test.ledger.currentRows.mockClear();
@@ -287,7 +287,7 @@ describe('TranscriptSearchController', () => {
     expect(test.service.replaceChat).not.toHaveBeenCalled();
   });
 
-  it('absorbs a rejected indexing job and continues same-chat and cross-chat queues', async () => {
+  it('[TLV5-SEARCH.02-CORE-UNIT-01] absorbs a rejected indexing job and continues same-chat and cross-chat queues', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/rejected-index-job.ts', import.meta.url));
     const child = Bun.spawn([process.execPath, fixture], {
       cwd: process.cwd(),
@@ -332,7 +332,7 @@ describe('TranscriptSearchController', () => {
     expect(started).toEqual(['chat-1:3', 'chat-2:1', 'chat-1:4']);
   });
 
-  it('replaces old-view entries before accepting new-view navigation', async () => {
+  it('[TLV5-SEARCH.03-CORE-UNIT-01] replaces old-view entries before accepting new-view navigation', async () => {
     const test = harness();
     await test.controller.initialize(true);
     test.service.replaceChat.mockClear();

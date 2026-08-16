@@ -4,7 +4,7 @@ import { parseChatMessage } from '../chat-types.ts';
 const AT = '2026-08-15T00:00:00.000Z';
 
 describe('permission message contracts', () => {
-  it('round-trips the occurrence incarnation for every permission lifecycle message', () => {
+  it('[TLV5-PERM.03-CONTRACT-01] round-trips the occurrence incarnation for every permission lifecycle message', () => {
     const messages = [
       {
         type: 'permission-request',

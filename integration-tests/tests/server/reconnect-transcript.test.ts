@@ -305,7 +305,7 @@ describe('reconnect and transcript stability', () => {
     });
   });
 
-  test('repeated reads preserve one view and one committed user row', async () => {
+  test('[TLV5-L02.04-SERVER-01] repeated reads preserve one view and one committed user row', async () => {
     await withIntegrationFixture('repeated-messages-while-processing', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'repeated-read' });
@@ -337,7 +337,7 @@ describe('reconnect and transcript stability', () => {
     });
   });
 
-  test('replays missed rows after a socket disconnect', async () => {
+  test('[TLV5-L03.03-SERVER-01] replays missed rows after a socket disconnect', async () => {
     await withIntegrationFixture('reconnect-replay-delta', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'missed-delta' });

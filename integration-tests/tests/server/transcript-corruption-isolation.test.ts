@@ -6,7 +6,7 @@ import { UnavailableChatHistoryError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('transcript corruption isolation', () => {
-  test('fences only the chat whose SQLite ledger is corrupt', async () => {
+  test('[TLV5-L11.01-SERVER-01] fences only the chat whose SQLite ledger is corrupt', async () => {
     await withIntegrationFixture('transcript-corruption-isolation', async (fixture) => {
       const corruptChatId = fixture.newChatId();
       const healthyChatId = fixture.newChatId();

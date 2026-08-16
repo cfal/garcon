@@ -149,7 +149,7 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentRows('chat-one')).toHaveLength(1);
   });
 
-  it('rejects a mismatched submission retry without fencing the ledger', () => {
+  it('[TLV5-L04.05-STORE-UNIT-01] rejects a mismatched submission retry without fencing the ledger', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
       contentStartOrdinal: 1,
@@ -464,7 +464,7 @@ describe('TranscriptLedgerStore', () => {
     expect(oldest.nextBefore).toBeNull();
   });
 
-  it('atomically deletes the replaced view when promoting staging', () => {
+  it('[TLV5-L02.05-STORE-UNIT-01] atomically deletes the replaced view when promoting staging', () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,

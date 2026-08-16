@@ -273,7 +273,7 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
-  it('commits named late output after an accepted run terminal', async () => {
+  it('[TLV5-L05.03-CORE-UNIT-01] commits named late output after an accepted run terminal', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
       const lease = ledger.openProducer('chat-1', 'test');
@@ -312,7 +312,7 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
-  it('ignores stale terminals while retaining late content and session facts', async () => {
+  it('[TLV5-L05.04-CORE-UNIT-01] ignores stale terminals while retaining late content and session facts', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
       const lease = ledger.openProducer('chat-1', 'test');
@@ -385,7 +385,7 @@ describe('TranscriptLedgerService', () => {
     }, { serverInstanceId: 'server-1' });
   });
 
-  it('keeps reused permission request ids actionable as separate occurrences', async () => {
+  it('[TLV5-PERM.04-CORE-UNIT-01] keeps reused permission request ids actionable as separate occurrences', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
       const lease = ledger.openProducer('chat-1', 'test');

@@ -46,7 +46,7 @@ describe('transcript permission occurrences', () => {
     });
   });
 
-  it('rejects a mismatched response capability before appending history', async () => {
+  it('[TLV5-PERM.06-CORE-UNIT-01] rejects a mismatched response capability before appending history', async () => {
     await withLedger((ledger) => {
       const lease = startRun(ledger);
       const lifecycle = permissionRequest('incarnation-1');
@@ -314,7 +314,7 @@ describe('transcript permission occurrences', () => {
     }
   });
 
-  it('keeps permission history but restores no actionability after restart', async () => {
+  it('[TLV5-PERM.07-CORE-RESTART-01] keeps permission history but restores no actionability after restart', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-restart-'));
     try {
       const first = createLedger(root);

@@ -18,7 +18,7 @@ describe('default agent integration conformance', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('runs the required contract suite for every shipped integration', async () => {
+  it('[TLV5-L12.03-CORE-UNIT-01] runs the required contract suite for every shipped integration', async () => {
     const hostFactory = new IntegrationHostFactory({
       workspaceDir,
       resolveCredential: async () => null,
