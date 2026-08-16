@@ -11,13 +11,13 @@ afterEach(async () => {
 });
 
 describe('Factory history import', () => {
-  it('[TLV5-ADOPT.07-FACTORY-UNIT-01] retries the same source after malformed provider history', async () => {
+  it('[TLV5-ADOPT.07-FACTORY-UNIT-01] retries the same source after an invalid provider event', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-factory-legacy-import-'));
     roots.push(root);
     const integration = new FactoryAgentIntegration(createHost(root));
-    const malformedPath = join(root, 'sessions', 'malformed.jsonl');
-    await mkdir(dirname(malformedPath), { recursive: true });
-    await writeFile(malformedPath, '{"type":\n', 'utf8');
+    const invalidPath = join(root, 'sessions', 'invalid.jsonl');
+    await mkdir(dirname(invalidPath), { recursive: true });
+    await writeFile(invalidPath, '{"type":"message"}\n', 'utf8');
 
     try {
       expect(integration.legacyHistoryImport).toBeDefined();
@@ -25,16 +25,16 @@ describe('Factory history import', () => {
       await expect(importedRows(integration.legacyHistoryImport, chat(integration))).resolves
         .toEqual([]);
       const reference = chat(integration, {
-        agentSessionId: 'factory-malformed',
+        agentSessionId: 'factory-invalid',
         nativeSession: {
           ownerId: 'factory',
           schemaVersion: 1,
-          value: { path: malformedPath, agentSessionId: 'factory-malformed' },
+          value: { path: invalidPath, agentSessionId: 'factory-invalid' },
         },
       });
       await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
 
-      await writeFile(malformedPath, '', 'utf8');
+      await writeFile(invalidPath, '', 'utf8');
       await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
     } finally {
       await integration.lifecycle.stop();
