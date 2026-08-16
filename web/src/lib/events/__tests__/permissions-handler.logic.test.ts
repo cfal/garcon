@@ -196,6 +196,52 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		expect(read()).toEqual([current]);
 	});
 
+	it.each([
+		[
+			'resolution',
+			new PermissionResolvedMessage(
+				'2026-08-15T00:00:00.000Z',
+				'shared',
+				'incarnation-old',
+				true,
+			),
+		],
+		[
+			'cancellation',
+			new PermissionCancelledMessage(
+				'2026-08-15T00:00:00.000Z',
+				'shared',
+				'incarnation-old',
+				'cancelled',
+			),
+		],
+		[
+			'expiry',
+			new PermissionExpiredMessage(
+				'2026-08-15T00:00:00.000Z',
+				'shared',
+				'incarnation-old',
+			),
+		],
+	])('does not pop current permission status for a stale %s', (_label, terminal) => {
+		const current = {
+			permissionRequestId: 'shared',
+			incarnation: 'incarnation-current',
+			requestedTool: new BashToolUseMessage(
+				'2026-08-15T00:00:00.000Z',
+				'tool-current',
+				'pwd',
+			),
+			chatId: 'chat-1',
+		};
+		const { ctx, read, popLoadingStatus } = makeContext([current]);
+
+		handlePermissionLifecycleFromBatch(makeBatch('chat-1', [terminal]), ctx);
+
+		expect(read()).toEqual([current]);
+		expect(popLoadingStatus).not.toHaveBeenCalled();
+	});
+
 	it('handles request then resolved in same batch', () => {
 		const { ctx, read, pushLoadingStatus, popLoadingStatus } = makeContext();
 
