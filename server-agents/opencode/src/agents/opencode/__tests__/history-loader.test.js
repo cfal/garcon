@@ -375,31 +375,6 @@ describe('OpenCode history loader', () => {
     expect(messages).toHaveBeenCalledWith({ sessionID: 'session-1', directory: '/repo' });
   });
 
-  it('retries transcript loading without directory for legacy unscoped sessions', async () => {
-    const messages = mock((args) => Promise.resolve(
-      args.directory
-        ? { error: { name: 'NotFoundError', data: { message: 'Session not found: session-1' } } }
-        : {
-            data: [{
-              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
-              parts: [{ type: 'text', text: 'legacy' }],
-            }],
-          },
-    ));
-    const getClient = mock(() => Promise.resolve({
-      session: { messages },
-    }));
-
-    const loaded = await loadOpenCodeChatMessages('session-1', getClient, { directory: '/repo' });
-
-    expect(messages.mock.calls.map((call) => call[0])).toEqual([
-      { sessionID: 'session-1', directory: '/repo' },
-      { sessionID: 'session-1' },
-    ]);
-    expect(loaded[0]).toBeInstanceOf(UserMessage);
-    expect(loaded[0].content).toBe('legacy');
-  });
-
   it('loads preview metadata from session and tail messages', async () => {
     const messages = mock(() => Promise.resolve({
       data: [

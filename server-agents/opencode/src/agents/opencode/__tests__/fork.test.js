@@ -62,24 +62,6 @@ describe('OpenCodeRuntime fork', () => {
     expect(fork.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('retries native fork without directory for legacy unscoped sessions', async () => {
-    const fork = mock((args) => Promise.resolve(
-      args.directory
-        ? { error: { name: 'NotFoundError', data: { message: 'Session not found: source-session' } } }
-        : { data: { id: 'forked-session' } },
-    ));
-    const { runtime } = createRuntimeWithClient({
-      session: { fork },
-    });
-
-    await expect(runtime.forkSession('source-session', { projectPath: '/repo' })).resolves.toBe('forked-session');
-
-    expect(fork.mock.calls.map((call) => call[0])).toEqual([
-      { sessionID: 'source-session', directory: '/repo' },
-      { sessionID: 'source-session' },
-    ]);
-  });
-
   it('rejects missing source session ids before starting OpenCode', async () => {
     const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
     const { createInstance, runtime } = createRuntimeWithClient({
@@ -170,15 +152,8 @@ describe('OpenCodeRuntime fork', () => {
       parts: [{ type: 'text', text: 'continue' }],
       directory: '/repo',
     });
-    expect(prompt.mock.calls[1][0]).toMatchObject({
-      sessionID: 'missing-session',
-      parts: [{ type: 'text', text: 'continue' }],
-    });
     expect(prompt.mock.calls[0][0].messageID).toBeUndefined();
-    expect(prompt.mock.calls[1][0].messageID).toBeUndefined();
     expect(prompt.mock.calls[0][0].parts[0].id).toMatch(/^prt_[0-9a-f]{32}$/);
-    expect(prompt.mock.calls[1][0].parts[0].id).toBe(
-      prompt.mock.calls[0][0].parts[0].id,
-    );
+    expect(prompt).toHaveBeenCalledTimes(1);
   });
 });

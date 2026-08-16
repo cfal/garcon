@@ -25,7 +25,6 @@ import {
   isOpenCodeNotFoundResult,
   openCodeResultErrorMessage,
   withOpenCodeRequestScope,
-  type OpenCodeRequestScope,
 } from './sdk-result.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
@@ -99,26 +98,6 @@ function dateToIso(value: string | number | Date | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-async function callWithDirectoryFallback<T>(
-  label: string,
-  scope: OpenCodeRequestScope,
-  operation: (scope: OpenCodeRequestScope) => Promise<T>,
-  logger: AgentLogger,
-): Promise<{ result: T; scope: OpenCodeRequestScope }> {
-  const result = await operation(scope);
-  if (!scope.directory || !isOpenCodeNotFoundResult(result)) return { result, scope };
-
-  const fallbackScope: OpenCodeRequestScope = {};
-  const fallbackResult = await operation(fallbackScope);
-  if (!isOpenCodeNotFoundResult(fallbackResult)) {
-    logger.warn('OpenCode request missed the scoped directory; loaded without it', {
-      label,
-      directory: scope.directory,
-    });
-  }
-  return { result: fallbackResult, scope: fallbackScope };
-}
-
 // Returns preview metadata for a session (title, last message, etc.).
 export async function getOpenCodePreviewFromSessionId(
   sessionId: string | null | undefined,
@@ -132,12 +111,9 @@ export async function getOpenCodePreviewFromSessionId(
   }
   try {
     const client = await getClient();
-    const initialScope = createOpenCodeRequestScope(options.directory);
-    const { result, scope } = await callWithDirectoryFallback(
-      'preview fetch',
-      initialScope,
-      (requestScope) => client.session.get(withOpenCodeRequestScope({ sessionID: sessionId }, requestScope)),
-      logger,
+    const scope = createOpenCodeRequestScope(options.directory);
+    const result = await client.session.get(
+      withOpenCodeRequestScope({ sessionID: sessionId }, scope),
     );
     if (isOpenCodeNotFoundResult(result)) return null;
     if (hasOpenCodeResultError(result)) {
@@ -149,14 +125,11 @@ export async function getOpenCodePreviewFromSessionId(
     }
     const session = result.data;
     if (!session) return null;
-    const { result: messageResult } = await callWithDirectoryFallback(
-      'preview message fetch',
-      scope,
-      (requestScope) => client.session.messages(withOpenCodeRequestScope({
+    const messageResult = await client.session.messages(
+      withOpenCodeRequestScope({
         sessionID: sessionId,
         limit: PREVIEW_TAIL_MESSAGE_LIMIT,
-      }, requestScope)),
-      logger,
+      }, scope),
     );
     if (isOpenCodeNotFoundResult(messageResult)) return null;
     if (hasOpenCodeResultError(messageResult)) {
@@ -303,20 +276,13 @@ export async function fetchOpenCodeStoredMessages(
   if (!sessionId) return [];
   try {
     const client = await getClient();
-    const { result } = await callWithDirectoryFallback(
-      'message fetch',
-      createOpenCodeRequestScope(options.directory),
-      (scope) => {
-        const args = withOpenCodeRequestScope({
-          sessionID: sessionId,
-          ...(options.limit === undefined ? {} : { limit: options.limit }),
-        }, scope);
-        return options.signal
-          ? client.session.messages(args, { signal: options.signal })
-          : client.session.messages(args);
-      },
-      logger,
-    );
+    const args = withOpenCodeRequestScope({
+      sessionID: sessionId,
+      ...(options.limit === undefined ? {} : { limit: options.limit }),
+    }, createOpenCodeRequestScope(options.directory));
+    const result = options.signal
+      ? await client.session.messages(args, { signal: options.signal })
+      : await client.session.messages(args);
     if (isOpenCodeNotFoundResult(result)) return [];
     if (hasOpenCodeResultError(result)) {
       const message = openCodeResultErrorMessage(result, 'OpenCode message fetch failed');

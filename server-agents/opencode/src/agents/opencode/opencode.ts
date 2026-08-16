@@ -40,7 +40,6 @@ import {
 } from './runtime-types.js';
 import {
   createOpenCodeRequestScope,
-  isOpenCodeNotFoundResult,
   throwOpenCodeResultError,
   withOpenCodeRequestScope,
   type OpenCodeRequestScope,
@@ -947,18 +946,10 @@ export class OpenCodeRuntime {
     operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
     control: { signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<T> {
-    const result = await this.#runRequest<T>(label, (signal) => operation(signal, scope), control);
-    if (!scope.directory || !isOpenCodeNotFoundResult(result)) return result;
-
-    this.#logger.warn('OpenCode request missed the scoped directory; retrying without it', {
-      label,
-      directory: scope.directory,
-    });
-    return await this.#runRequest<T>(`${label} legacy`, (signal) => operation(signal, {}), control);
+    return this.#runRequest<T>(label, (signal) => operation(signal, scope), control);
   }
 
   async #runScopedTurnRequest<T>(
-    label: string,
     scope: OpenCodeRequestScope,
     signal: AbortSignal,
     operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
@@ -966,15 +957,7 @@ export class OpenCodeRuntime {
     this.#endpointCoordinator.requestStarted();
     try {
       signal.throwIfAborted();
-      const result = await operation(signal, scope);
-      if (!scope.directory || !isOpenCodeNotFoundResult(result)) return result;
-
-      this.#logger.warn('OpenCode request missed the scoped directory; retrying without it', {
-        label,
-        directory: scope.directory,
-      });
-      signal.throwIfAborted();
-      return await operation(signal, {});
+      return await operation(signal, scope);
     } finally {
       this.#endpointCoordinator.requestFinished();
     }
@@ -1168,7 +1151,6 @@ export class OpenCodeRuntime {
     const promptBody = buildPromptBody(command, model, turn.providerPromptPartId);
 
     const promptRequest = this.#runScopedTurnRequest(
-      'OpenCode prompt submit',
       scope,
       route.requestAbortController.signal,
       (signal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
@@ -1264,7 +1246,6 @@ export class OpenCodeRuntime {
       }
       if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
       const promptRequest = this.#runScopedTurnRequest(
-        'OpenCode prompt submit',
         scope,
         route.requestAbortController.signal,
         (signal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
