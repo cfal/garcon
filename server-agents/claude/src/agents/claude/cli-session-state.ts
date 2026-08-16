@@ -1,4 +1,5 @@
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   claudeBackgroundTaskCount,
   claudeProviderSessionState,
@@ -11,7 +12,7 @@ import type { ClaudeTurnSteeringState } from './steering.js';
 interface ClaudeProviderStateTurn {
   readonly protocol: ClaudeTurnState;
   readonly steering: ClaudeTurnSteeringState;
-  readonly turnId: string;
+  readonly operation: Pick<AgentRuntimeOperation, 'runId'>;
 }
 
 export interface ClaudeProviderStateSession {
@@ -57,7 +58,7 @@ function settleClaudeProviderIdle(
   steering.rememberProviderIdle();
   const details = {
     chatId: session.chatId,
-    turnId: activeTurn.turnId,
+    runId: activeTurn.operation.runId,
     sessionId: session.id.slice(0, 8),
     processId: session.process?.pid ?? null,
     inputId: protocol.inputUuid.slice(0, 8),
@@ -151,7 +152,7 @@ export function handleClaudeProviderLifecycleMessage(
     }
     handlers.logger.debug('Claude CLI background tasks changed', {
       chatId: session.chatId,
-      turnId: activeTurn?.turnId ?? null,
+      runId: activeTurn?.operation.runId ?? null,
       sessionId: session.id.slice(0, 8),
       processId: session.process?.pid ?? null,
       previousCount: previous,
@@ -169,7 +170,7 @@ export function handleClaudeProviderLifecycleMessage(
   const activeTurn = session.activeTurn;
   handlers.logger.debug('Claude CLI session state changed', {
     chatId: session.chatId,
-    turnId: activeTurn?.turnId ?? null,
+    runId: activeTurn?.operation.runId ?? null,
     sessionId: session.id.slice(0, 8),
     processId: session.process?.pid ?? null,
     previous,

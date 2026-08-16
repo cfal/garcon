@@ -18,7 +18,6 @@ export class ClaudeActiveTurn {
   #interruptRequestFailed = false;
 
   constructor(
-    readonly turnId: string,
     backgroundTaskCount: number,
     readonly operation: AgentRuntimeOperation,
   ) {

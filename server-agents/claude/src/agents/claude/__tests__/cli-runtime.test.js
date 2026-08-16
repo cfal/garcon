@@ -268,8 +268,6 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     try {
       const runtime = createRuntime();
       const first = runtime.startClaudeCliSession(startOptions({
-        clientRequestId: 'run-a',
-        turnId: 'run-a',
         operation: { runId: 'run-a', publish: (event) => firstEvents.push(event) },
       }));
       const firstInput = await enqueueInputStarted(fake);
@@ -279,8 +277,6 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
       const second = runtime.runClaudeTurn(startOptions({
         command: 'again',
-        clientRequestId: 'run-b',
-        turnId: 'run-b',
         operation: { runId: 'run-b', publish: (event) => secondEvents.push(event) },
       }));
       const secondInput = await enqueueInputStarted(fake);
@@ -326,7 +322,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         'Claude CLI input result received; awaiting provider idle',
         {
         chatId: 'chat-1',
-        turnId: 'run-default',
+        runId: 'run-default',
         sessionId: 'expected',
         processId: null,
         inputId: expect.any(String),
@@ -471,7 +467,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         'Claude CLI process exited during an active turn',
         {
           chatId: 'chat-1',
-          turnId: 'run-exit',
+          runId: 'run-exit',
           sessionId: 'expected',
           processId: null,
           exitCode: 137,
@@ -1357,7 +1353,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       await expect(start).resolves.toBe('expected-session');
       expect(logger.warn).toHaveBeenCalledWith('Claude API request is retrying', {
         chatId: 'chat-1',
-        turnId: 'run-api-retry',
+        runId: 'run-api-retry',
         sessionId: 'expected',
         processId: null,
         matchedUserInput: true,
@@ -2037,7 +2033,6 @@ describe('ClaudeCliRuntime steering', () => {
       const steeringMessageId = '019ff704-7b0c-70a1-b062-875461e5b579';
       runtime = createRuntime(logger);
       const run = runtime.startClaudeCliSession(startOptions({
-        turnId: 'turn-active',
         clientMessageId: initialMessageId,
       }));
       await waitForWrittenUserMessage(fake);
@@ -2124,7 +2119,6 @@ describe('ClaudeCliRuntime steering', () => {
       runtime = createRuntime();
       const published = collectOperation('run-deferred-idle');
       const run = runtime.startClaudeCliSession(startOptions({
-        turnId: 'turn-active',
         operation: published.operation,
       }));
       const original = await enqueueInputStarted(fake);
@@ -2182,7 +2176,6 @@ describe('ClaudeCliRuntime steering', () => {
       runtime = createRuntime();
       const published = collectOperation('run-steering-lifecycles');
       const run = runtime.startClaudeCliSession(startOptions({
-        turnId: 'turn-active',
         operation: published.operation,
       }));
       const original = await enqueueInputStarted(fake);
@@ -2260,7 +2253,6 @@ describe('ClaudeCliRuntime steering', () => {
       runtime = createRuntime(createLogger(), { steerIdleFenceTimeoutMs: 2 });
       const published = collectOperation('run-steering-timeout');
       const run = runtime.startClaudeCliSession(startOptions({
-        turnId: 'turn-active',
         operation: published.operation,
       }));
       const original = await enqueueInputStarted(fake);
@@ -2293,7 +2285,6 @@ describe('ClaudeCliRuntime steering', () => {
       runtime = createRuntime();
       const published = collectOperation('run-preparation-failure');
       const run = runtime.startClaudeCliSession(startOptions({
-        turnId: 'turn-active',
         operation: published.operation,
       }));
       const original = await enqueueInputStarted(fake);
@@ -2333,7 +2324,7 @@ describe('ClaudeCliRuntime steering', () => {
 
     try {
       runtime = createRuntime();
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const run = runtime.startClaudeCliSession(startOptions());
       await enqueueInputStarted(fake);
       fake.proc.stdin.write.mockImplementationOnce(() => {
         throw new Error('steering write failed');
@@ -2365,7 +2356,6 @@ describe('ClaudeCliRuntime steering', () => {
       runtime = createRuntime();
       const published = collectOperation('run-replayed-steer');
       const run = runtime.startClaudeCliSession(startOptions({
-        turnId: 'turn-active',
         operation: published.operation,
       }));
       const original = await enqueueInputStarted(fake);
@@ -2401,7 +2391,7 @@ describe('ClaudeCliRuntime steering', () => {
 
     try {
       runtime = createRuntime();
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const run = runtime.startClaudeCliSession(startOptions());
       const original = await enqueueInputStarted(fake);
       await expect(runtime.steer(steerRequest(
         runtime.captureSteerTarget('expected-session'),

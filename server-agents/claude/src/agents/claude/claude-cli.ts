@@ -130,7 +130,7 @@ class ClaudeCliRuntime {
     if (session.activeTurn) {
       throw new Error(`Claude session ${session.id} already has an active turn`);
     }
-    const activeTurn = new ClaudeActiveTurn(operation.runId, session.backgroundTaskCount, operation);
+    const activeTurn = new ClaudeActiveTurn(session.backgroundTaskCount, operation);
     session.unownedProviderActivity = false;
     session.activeTurn = activeTurn;
     session.lastActivityAt = activeTurn.startedAt;
@@ -165,7 +165,7 @@ class ClaudeCliRuntime {
     if (inputEvent?.type === 'started') {
       this.#dependencies.logger.debug('Claude CLI user input started', {
         chatId: session.chatId,
-        turnId: activeTurn?.turnId ?? null,
+        runId: activeTurn?.operation.runId ?? null,
         sessionId: session.id.slice(0, 8),
         processId: session.process?.pid ?? null,
         inputId: activeTurn?.protocol.inputUuid.slice(0, 8) ?? null,
@@ -192,7 +192,7 @@ class ClaudeCliRuntime {
         if (!turn.protocol.inputStarted) {
           this.#dependencies.logger.info('Claude CLI emitted assistant output for an internal turn', {
             chatId: session.chatId,
-            turnId: turn.turnId,
+            runId: turn.operation.runId,
             sessionId: session.id.slice(0, 8),
             processId: session.process?.pid ?? null,
           });
@@ -262,7 +262,7 @@ class ClaudeCliRuntime {
     if (msg.subtype === 'init') {
       this.#dependencies.logger.info('Claude CLI session initialized', {
         chatId: session.chatId,
-        turnId: activeTurn?.turnId ?? null,
+        runId: activeTurn?.operation.runId ?? null,
         sessionId: session.id.slice(0, 8),
         processId: session.process?.pid ?? null,
         providerSessionId: msg.session_id ?? '',
@@ -280,7 +280,7 @@ class ClaudeCliRuntime {
       const retry = activeTurn.protocol.recordApiRetry(msg);
       this.#dependencies.logger.warn('Claude API request is retrying', {
         chatId: session.chatId,
-        turnId: activeTurn.turnId,
+        runId: activeTurn.operation.runId,
         sessionId: session.id.slice(0, 8),
         processId: session.process?.pid ?? null,
         matchedUserInput: activeTurn.protocol.inputStarted,
@@ -382,7 +382,7 @@ class ClaudeCliRuntime {
     const protocol = activeTurn.protocol;
     const resultDetails = {
       chatId: session.chatId,
-      turnId: activeTurn.turnId,
+      runId: activeTurn.operation.runId,
       sessionId: session.id.slice(0, 8),
       processId: session.process?.pid ?? null,
       inputId: protocol.inputUuid.slice(0, 8),
@@ -450,7 +450,7 @@ class ClaudeCliRuntime {
     const abortRequested = activeTurn.protocol.abortRequested;
     const details = {
       chatId: session.chatId,
-      turnId: activeTurn.turnId,
+      runId: activeTurn.operation.runId,
       sessionId: session.id.slice(0, 8),
       processId: session.process?.pid ?? null,
       inputId: activeTurn.protocol.inputUuid.slice(0, 8),
@@ -829,7 +829,7 @@ class ClaudeCliRuntime {
     const activeTurn = session.activeTurn;
     this.#dependencies.logger.error('Claude CLI transport failed', {
       chatId: session.chatId,
-      turnId: activeTurn?.turnId ?? null,
+      runId: activeTurn?.operation.runId ?? null,
       sessionId: session.id.slice(0, 8),
       processId: proc.pid ?? null,
       failureKind: failure.kind,
@@ -854,7 +854,7 @@ class ClaudeCliRuntime {
     if (session.process !== proc || !session.activeTurn) return;
     this.#dependencies.logger.error('Claude CLI stdout ended during an active turn', {
       chatId: session.chatId,
-      turnId: session.activeTurn.turnId,
+      runId: session.activeTurn.operation.runId,
       sessionId: session.id.slice(0, 8),
       processId: proc.pid ?? null,
     });
@@ -954,7 +954,7 @@ class ClaudeCliRuntime {
         const activeTurn = session.activeTurn;
         const details = {
           chatId: session.chatId,
-          turnId: activeTurn?.turnId ?? null,
+          runId: activeTurn?.operation.runId ?? null,
           sessionId: session.id.slice(0, 8),
           processId: proc.pid ?? null,
           exitCode: exit.exitCode,

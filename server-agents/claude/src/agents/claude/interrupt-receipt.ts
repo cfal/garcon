@@ -46,7 +46,7 @@ export function handleClaudeInterruptReceipt(
   const inputUuid = activeTurn.protocol.inputUuid;
   const details = {
     chatId: session.chatId,
-    turnId: activeTurn.turnId,
+    runId: activeTurn.operation.runId,
     sessionId: session.id.slice(0, 8),
     processId: session.process?.pid ?? null,
     inputId: inputUuid.slice(0, 8),

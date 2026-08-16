@@ -711,8 +711,6 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const firstPublished = collectOperation('run-a');
 
     const first = runtime.startClaudeCliSession(startOptions({
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
       operation: firstPublished.operation,
     }));
     ctrl.push(INIT);
@@ -734,8 +732,6 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const secondPublished = collectOperation('run-b');
     const second = runtime.runClaudeTurn(startOptions({
       command: 'continue',
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
       operation: secondPublished.operation,
     }));
     await flush();

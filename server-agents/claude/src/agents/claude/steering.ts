@@ -5,6 +5,7 @@ import type {
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type { ClaudeProcessTransport } from './cli-process-transport.js';
 import type { ClaudeCLIMessage, ClaudeTurnState } from './cli-protocol.js';
 import {
@@ -210,7 +211,7 @@ export class ClaudeTurnSteeringState {
 export interface ClaudeSteerableTurn {
   readonly protocol: Pick<ClaudeTurnState, 'inputStarted' | 'abortRequested'>;
   readonly steering: ClaudeTurnSteeringState;
-  readonly turnId: string;
+  readonly operation: Pick<AgentRuntimeOperation, 'runId'>;
 }
 
 export interface ClaudeSteerableSession {
@@ -315,7 +316,7 @@ export class ClaudeSteeringController {
       }
       this.#options.logger.debug('Claude steering input accepted for native delivery', {
         chatId: captured.session.chatId,
-        turnId: captured.activeTurn.turnId,
+        runId: captured.activeTurn.operation.runId,
         sessionId: captured.session.id.slice(0, 8),
         inputId: nativeInputId.slice(0, 8),
         writeMs: Date.now() - writeStartedAt,
@@ -338,7 +339,7 @@ export class ClaudeSteeringController {
     if (observation.kind === 'started') {
       this.#options.logger.debug('Claude steering input started', {
         chatId: session.chatId,
-        turnId: activeTurn.turnId,
+        runId: activeTurn.operation.runId,
         sessionId: session.id.slice(0, 8),
         inputId: observation.uuid.slice(0, 8),
         source: observation.source,
@@ -369,7 +370,7 @@ export class ClaudeSteeringController {
     }
     this.#options.logger.warn('Claude steering input ended without normal completion', {
       chatId: session.chatId,
-      turnId: activeTurn.turnId,
+      runId: activeTurn.operation.runId,
       sessionId: session.id.slice(0, 8),
       inputId: observation.uuid.slice(0, 8),
       phase: observation.phase,

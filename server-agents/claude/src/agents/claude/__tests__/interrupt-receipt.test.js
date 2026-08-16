@@ -10,7 +10,10 @@ const logger = {
 };
 
 function createFixture({ settleOnFlush = false } = {}) {
-  const activeTurn = new ClaudeActiveTurn({ turnId: 'turn-1' }, 0);
+  const activeTurn = new ClaudeActiveTurn(0, {
+    runId: 'run-1',
+    publish() {},
+  });
   const session = {
     id: 'session-1',
     chatId: 'chat-1',
@@ -81,7 +84,10 @@ describe('handleClaudeInterruptReceipt', () => {
   it('does not mutate a replacement active turn', () => {
     const fixture = createFixture();
     startInput(fixture.activeTurn);
-    fixture.session.activeTurn = new ClaudeActiveTurn({ turnId: 'turn-2' }, 0);
+    fixture.session.activeTurn = new ClaudeActiveTurn(0, {
+      runId: 'run-2',
+      publish() {},
+    });
 
     expect(handleClaudeInterruptReceipt(
       fixture.session,

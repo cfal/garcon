@@ -20,7 +20,7 @@ export class ClaudeTurnPublisher {
     } catch (error) {
       this.logger.warn('Claude publisher rejected an event', {
         sessionId: session.id.slice(0, 8),
-        turnId: turn.turnId,
+        runId: turn.operation.runId,
         eventType: event.type,
         error: errorMessage(error),
       });
