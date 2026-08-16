@@ -103,22 +103,22 @@ describe('chat snapshot contract', () => {
     }))).toThrow('cannot be not-requested');
   });
 
-  test('accepts opaque producer cursor metadata', () => {
+  test('accepts a newest snapshot whose committed range contains only hidden rows', () => {
     expect(parseChatSnapshotResponse(snapshot({
       transcript: {
         availability: 'available',
 		transcriptViewId: 'view-2',
 		messages: [],
 		lastOrdinal: 42,
-		pageOldestOrdinal: 17,
+		pageOldestOrdinal: 0,
 		pageNewestOrdinal: 42,
-        hasMore: true,
+        hasMore: false,
       },
       transientFeed: {
         ...snapshot().transientFeed,
         transcriptViewId: 'view-2',
       },
-	})).transcript).toMatchObject({ lastOrdinal: 42, pageOldestOrdinal: 17, hasMore: true });
+	})).transcript).toMatchObject({ lastOrdinal: 42, pageOldestOrdinal: 0, hasMore: false });
   });
 
   test('requires transcript and transient state to share one transcript view', () => {
@@ -145,6 +145,26 @@ describe('chat snapshot contract', () => {
     ['message cursor', (value) => ({
       ...value,
         transcript: { ...value.transcript, lastOrdinal: 4 },
+    })],
+    ['message lower bound', (value) => ({
+      ...value,
+      transcript: { ...value.transcript, pageOldestOrdinal: 3 },
+    })],
+    ['message upper bound', (value) => ({
+      ...value,
+      transcript: { ...value.transcript, pageNewestOrdinal: 4 },
+    })],
+    ['newest page cursor', (value) => ({
+      ...value,
+      transcript: { ...value.transcript, pageNewestOrdinal: 6 },
+    })],
+    ['empty page metadata', (value) => ({
+      ...value,
+      transcript: {
+        ...value.transcript,
+        messages: [],
+        pageOldestOrdinal: 4,
+      },
     })],
     ['tags', (value) => ({ ...value, chat: { ...value.chat, tags: ['review', 'cli'] } })],
     ['protocol', (value) => ({

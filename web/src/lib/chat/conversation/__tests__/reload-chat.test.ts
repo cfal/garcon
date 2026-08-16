@@ -109,4 +109,38 @@ describe('reloadChatFromNative', () => {
 			'Unexpected chat reload response',
 		);
 	});
+
+	it('keeps the current transcript when replacement page metadata is malformed', async () => {
+		const ws = wsWithResponse({
+			type: 'chat-reloaded',
+			clientRequestId: 'req-1',
+			chatId: 'chat-1',
+			transcriptViewId: 'generation-2',
+			lastOrdinal: 2,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 2,
+			hasMore: false,
+			messages: [
+				{
+					ordinal: 2,
+					message: { type: 'assistant-message', timestamp: TS, content: 'replacement' },
+				},
+			],
+		});
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [
+			{ ordinal: 1, message: new AssistantMessage(TS, 'current') },
+		], {
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 1,
+			hasMore: false,
+		});
+
+		await expect(reloadChatFromNative(ws, chat, 'chat-1')).rejects.toThrow(
+			'Unexpected chat reload response',
+		);
+		expect(chat.transcriptViewId).toBe('generation-1');
+		expect(chat.chatMessages.map((message) => message.content)).toEqual(['current']);
+	});
 });

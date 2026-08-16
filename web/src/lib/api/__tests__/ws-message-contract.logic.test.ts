@@ -319,6 +319,27 @@ describe('parseServerWsMessage', () => {
 		expect((msg as ChatReloadedMessage).transcriptViewId).toBe('generation-2');
 	});
 
+	it.each([
+		['non-boolean hasMore', { hasMore: 'false' }],
+		['oldest ordinal that does not match the first message', { pageOldestOrdinal: 0 }],
+		['newest ordinal that does not match the current tail', { pageNewestOrdinal: 0 }],
+		['last ordinal behind the newest page', { lastOrdinal: 0 }],
+		['message outside the declared page', { pageOldestOrdinal: 2 }],
+	])('rejects chat-reloaded responses with invalid %s', (_name, patch) => {
+		expect(parseServerWsMessage({
+			type: 'chat-reloaded',
+			clientRequestId: 'req-reload',
+			chatId: 'c-1',
+			transcriptViewId: 'generation-2',
+			messages: [chatViewMessage],
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 1,
+			hasMore: false,
+			...patch,
+		})).toBeNull();
+	});
+
 	it('rejects legacy event-log payloads', () => {
 		expect(
 			parseServerWsMessage({ type: 'chat-events', chatId: 'c-1', logId: 'log-1', events: [] }),
