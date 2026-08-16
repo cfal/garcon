@@ -1509,6 +1509,97 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 500 });
 	});
 
+	it.each([
+		{
+			name: 'contained',
+			current: [101, 200] as const,
+			snapshot: [151, 200] as const,
+			expected: [101, 200] as const,
+			expectedLoadedThrough: 200,
+			hasLaterMessages: false,
+		},
+		{
+			name: 'earlier-extending',
+			current: [201, 300] as const,
+			snapshot: [101, 300] as const,
+			expected: [101, 300] as const,
+			expectedLoadedThrough: 300,
+			hasLaterMessages: false,
+		},
+		{
+			name: 'later-overlapping',
+			current: [101, 300] as const,
+			snapshot: [251, 350] as const,
+			expected: [101, 350] as const,
+			expectedLoadedThrough: 350,
+			hasLaterMessages: false,
+		},
+		{
+			name: 'later-touching',
+			current: [101, 200] as const,
+			snapshot: [201, 250] as const,
+			expected: [101, 250] as const,
+			expectedLoadedThrough: 250,
+			hasLaterMessages: false,
+		},
+		{
+			name: 'later-disjoint',
+			current: [101, 200] as const,
+			snapshot: [251, 300] as const,
+			expected: [101, 200] as const,
+			expectedLoadedThrough: 200,
+			hasLaterMessages: true,
+		},
+	])(
+		'preserves immutable ordinal occurrences across a $name same-view snapshot',
+		({ current, snapshot, expected, expectedLoadedThrough, hasLaterMessages }) => {
+			const chat = new ActiveTranscriptState();
+			chat.replaceGeneration(
+				'chat-1',
+				'generation-1',
+				assistantEntries(current[0], current[1], (ordinal) => `current-${ordinal}`),
+				{
+					lastOrdinal: current[1],
+					pageOldestOrdinal: current[0],
+					hasMore: current[0] > 1,
+				},
+			);
+
+			const snapshotEpoch = chat.beginSnapshotLoad();
+			expect(chat.setFromPage(
+				'chat-1',
+				page({
+					transcriptViewId: 'generation-1',
+					messages: assistantEntries(
+						snapshot[0],
+						snapshot[1],
+						(ordinal) => `snapshot-${ordinal}`,
+					),
+					lastOrdinal: snapshot[1],
+					pageOldestOrdinal: snapshot[0],
+					pageNewestOrdinal: snapshot[1],
+					hasMore: snapshot[0] > 1,
+				}),
+				snapshotEpoch,
+			)).toBe('applied');
+
+			const expectedOrdinals = Array.from(
+				{ length: expected[1] - expected[0] + 1 },
+				(_, index) => expected[0] + index,
+			);
+			expect(chat.entries.map((message) => message.ordinal)).toEqual(expectedOrdinals);
+			expect(chat.entries.map((message) => contentOf(message.message))).toEqual(
+				expectedOrdinals.map((ordinal) => (
+					ordinal >= current[0] && ordinal <= current[1]
+						? `current-${ordinal}`
+						: `snapshot-${ordinal}`
+				)),
+			);
+			expect(chat.loadedThroughOrdinal).toBe(expectedLoadedThrough);
+			expect(chat.hasLaterMessages).toBe(hasLaterMessages);
+		},
+	);
+
 	it('merges an expanded prefix, overlapping snapshot, and buffered live suffix by ordinal', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
