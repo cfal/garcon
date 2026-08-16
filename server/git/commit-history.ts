@@ -201,23 +201,6 @@ function commitFileFingerprint(
   ].join('\x1f'));
 }
 
-function commitDocumentId(
-  projectPath: string,
-  commit: string,
-  parent: string | null,
-  context: number,
-  files: GitCommitFileSummary[],
-): string {
-  return hashString([
-    'commit-document',
-    projectPath,
-    commit,
-    parent ?? EMPTY_TREE,
-    context,
-    ...files.map((file) => `${file.path}:${file.bodyFingerprint}`),
-  ].join('\x1f'));
-}
-
 function summarizeCommitFiles(
   commit: string,
   parent: string | null,

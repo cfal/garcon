@@ -5,7 +5,6 @@ import {
   resolvePathWithinProject,
   runGit,
 } from './run.js';
-import { parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef } from './ref-validation.js';
 import type {
   BlameOptions,
