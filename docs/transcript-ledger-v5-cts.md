@@ -565,12 +565,12 @@ row, and asserts exact addresses and provider callbacks throughout.
 
 | ID            | Current evidence                                                                                                  | State               |
 | ------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------- |
-| TLV5-ADOPT.01 | Core null/empty-source unit and static facet call-site separation.                                                | Covered oracle      |
-| TLV5-ADOPT.02 | Prefix and mid-iteration failure cases prove no view, unrelated-chat progress, and retry from the beginning.     | Covered oracle      |
-| TLV5-ADOPT.03 | Exact prefix, session-boundary, and legacy-row ordering unit.                                                     | Covered oracle      |
-| TLV5-ADOPT.04 | Exact typed notice round trip and usable recorded-quarantine adoption.                                            | Covered oracle      |
-| TLV5-ADOPT.05 | Frozen projection, model context, search, and preview matrix.                                                     | Covered oracle      |
-| TLV5-ADOPT.06 | Reload preserves only the quarantine notice while dropping ordinary notices.                                     | Covered oracle      |
+| TLV5-ADOPT.01 | Core null/empty-source unit and static facet call-site separation.                                                | Intentional red     |
+| TLV5-ADOPT.02 | Prefix and mid-iteration failure cases prove no view, unrelated-chat progress, and retry from the beginning.     | Intentional red     |
+| TLV5-ADOPT.03 | Exact prefix, session-boundary, and legacy-row ordering unit.                                                     | Intentional red     |
+| TLV5-ADOPT.04 | Exact typed notice round trip and usable recorded-quarantine adoption.                                            | Intentional red     |
+| TLV5-ADOPT.05 | Frozen projection, model context, search, and preview matrix.                                                     | Intentional red     |
+| TLV5-ADOPT.06 | Reload preserves only the quarantine notice while dropping ordinary notices.                                     | Intentional red     |
 | TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and Amp/Factory/Cursor provider oracles are locked. | Intentional red     |
 | TLV5-ADOPT.08 | Shared native-capability SACS, provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Intentional red |
 
