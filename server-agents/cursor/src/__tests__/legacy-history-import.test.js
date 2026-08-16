@@ -16,12 +16,11 @@ afterEach(async () => {
 });
 
 describe('Cursor history import', () => {
-  it('[TLV5-ADOPT.07-CURSOR-UNIT-01] retries the same store after an unreadable legacy source', async () => {
+  it('[TLV5-ADOPT.07-CURSOR-UNIT-01] retries the same store after an invalid user record', async () => {
     const cursorHome = await mkdtemp(join(tmpdir(), 'garcon-cursor-legacy-import-'));
     roots.push(cursorHome);
     const sessionId = `sacs-legacy-${crypto.randomUUID()}`;
     const storePath = cursorAcpStoreDbPath(sessionId, cursorHome);
-    const sessionDirectory = dirname(storePath);
     const transcriptSource = createCursorTranscriptSource({ cursorHome });
     const integration = new CursorAgentIntegration(createHost(cursorHome), { transcriptSource });
     try {
@@ -31,12 +30,14 @@ describe('Cursor history import', () => {
       const reference = chat(sessionId);
       await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
 
-      await mkdir(sessionDirectory, { recursive: true });
-      await writeFile(storePath, 'not a sqlite database', 'utf8');
+      await createEmptyCursorStore(storePath);
+      writeCursorBlob(storePath, {
+        role: 'user',
+        content: [{ type: 'text' }],
+      });
       await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
 
-      await rm(storePath, { force: true });
-      await createEmptyCursorStore(storePath);
+      clearCursorStore(storePath);
       await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
     } finally {
       await integration.lifecycle.stop();
@@ -78,6 +79,25 @@ async function createEmptyCursorStore(storePath) {
   const database = new Database(storePath);
   try {
     database.exec('CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)');
+  } finally {
+    database.close();
+  }
+}
+
+function writeCursorBlob(storePath, content) {
+  const database = new Database(storePath);
+  try {
+    database.query('INSERT INTO blobs (id, data) VALUES (?, ?)')
+      .run('invalid-message', Buffer.from(JSON.stringify(content)));
+  } finally {
+    database.close();
+  }
+}
+
+function clearCursorStore(storePath) {
+  const database = new Database(storePath);
+  try {
+    database.exec('DELETE FROM blobs');
   } finally {
     database.close();
   }

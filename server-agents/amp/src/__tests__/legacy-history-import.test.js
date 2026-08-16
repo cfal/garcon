@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe('Amp history import', () => {
-  it('[TLV5-ADOPT.07-AMP-UNIT-01] retries the same source after a provider read failure', async () => {
+  it('[TLV5-ADOPT.07-AMP-UNIT-01] retries the same source after an invalid user record', async () => {
     const root = await temporaryRoot();
     const binary = join(root, 'amp-legacy-fixture');
     const integration = new AmpAgentIntegration(createHost(root, binary));
@@ -21,6 +21,13 @@ describe('Amp history import', () => {
       await expect(importedRows(integration.legacyHistoryImport, chat(integration))).resolves
         .toEqual([]);
       const reference = chat(integration, { agentSessionId: 'repairable-amp-thread' });
+      await writeFile(binary, `#!${process.execPath}
+console.log(JSON.stringify({
+  created: '2026-08-16T00:00:00.000Z',
+  messages: [{ role: 'user', messageId: 1, content: [{ type: 'text' }] }],
+}));
+`, 'utf8');
+      await chmod(binary, 0o755);
       await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
 
       await writeFile(binary, `#!${process.execPath}

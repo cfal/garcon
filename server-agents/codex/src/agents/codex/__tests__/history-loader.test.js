@@ -18,6 +18,24 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('loadCodexChatMessages', () => {
+  it('[TLV5-ADOPT.07-CODEX-UNIT-01] rejects an incomplete assistant record and retries the repaired source', async () => {
+    const invalidEntry = JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      payload: { type: 'message', role: 'assistant' },
+    });
+    await withTempJsonl([invalidEntry], async (filePath) => {
+      await expect(loadCodexChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).rejects.toThrow();
+
+      await fs.writeFile(filePath, '', 'utf8');
+      await expect(loadCodexChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).resolves.toEqual([]);
+    });
+  });
+
   it('preserves literal entities in a captured Codex CLI user-message envelope', async () => {
     const fixturePath = fileURLToPath(new URL('./fixtures/codex-user-message-entities.jsonl', import.meta.url));
     const content = 'Fixture capture only. Preserve this marker as literal user input in the session transcript: &amp; &lt; &gt; &quot; &#39; <literal>. Reply only: acknowledged';

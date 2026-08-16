@@ -318,8 +318,11 @@ while dropping ordinary notices. Provider-capability SACS pins the exact driver
 and source-control roster, then applies the same adoption assertions to every
 integration advertising the facet. Direct's three drivers share the module and
 still advertise no native Reload; OpenCode remains directory-scoped and receives
-no unscoped fallback case. Amp, Factory, and Cursor repair and retry the same
-provider source after their provider-unit failure assertion.
+no unscoped fallback case. Strict Claude, Codex, OpenCode, Amp, Factory, and
+Cursor provider boundaries reject known content-bearing records with incomplete
+message or part structure, then repair and retry the same source. Provider
+housekeeping records remain ignorable, and preview/runtime readers remain
+lenient.
 
 Native-import occasion evidence is independently gated by the nullable
 `nativeHistoryImport` SACS capability rather than the native-session codec or

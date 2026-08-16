@@ -9,6 +9,7 @@ import {
 } from '@garcon/common/chat-types';
 import {
   getOpenCodePreviewFromSessionId,
+  loadLegacyOpenCodeChatMessages,
   loadOpenCodeChatMessages,
 } from '../history-loader.js';
 import { FILE_CONTEXT_SEPARATOR } from '@garcon/server-agent-common/shared/file-mention-context';
@@ -362,6 +363,27 @@ describe('OpenCode history loader', () => {
     }));
 
     await expect(loadOpenCodeChatMessages('session-1', getClient)).resolves.toEqual([]);
+  });
+
+  it('[TLV5-ADOPT.07-OPENCODE-UNIT-01] rejects an invalid stored part and retries the repaired source', async () => {
+    let storedMessages = [{
+      info: { id: 'message-1', role: 'user' },
+      parts: [{}],
+    }];
+    const get = mock(() => Promise.resolve({ data: { directory: '/tmp' } }));
+    const messages = mock(() => Promise.resolve({ data: storedMessages }));
+    const getClient = mock(() => Promise.resolve({ session: { get, messages } }));
+
+    await expect(loadLegacyOpenCodeChatMessages('session-1', getClient, {
+      directory: '/tmp',
+    })).rejects.toThrow();
+
+    storedMessages = [];
+    await expect(loadLegacyOpenCodeChatMessages('session-1', getClient, {
+      directory: '/tmp',
+    })).resolves.toEqual([]);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(messages).toHaveBeenCalledTimes(2);
   });
 
   it('passes directory when loading transcript messages', async () => {

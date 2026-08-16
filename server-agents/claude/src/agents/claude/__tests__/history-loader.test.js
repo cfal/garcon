@@ -18,6 +18,22 @@ async function withTempJsonl(lines, fn) {
   }
 }
 
+describe('Claude strict history import', () => {
+  it('[TLV5-ADOPT.07-CLAUDE-UNIT-01] rejects an incomplete user record and retries the repaired source', async () => {
+    const invalidEntry = JSON.stringify({ sessionId: 'session-1', type: 'user' });
+    await withTempJsonl([invalidEntry], async (filePath) => {
+      await expect(loadClaudeChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).rejects.toThrow();
+
+      await fs.writeFile(filePath, '', 'utf8');
+      await expect(loadClaudeChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).resolves.toEqual([]);
+    });
+  });
+});
+
 describe('Claude native user-input conversion', () => {
   it('preserves a captured CLI entity-bearing input with its native identity', async () => {
     const fixturePath = fileURLToPath(new URL('./fixtures/claude-user-message-entities.jsonl', import.meta.url));
