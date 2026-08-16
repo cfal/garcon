@@ -32,6 +32,11 @@ interface UserScrollIntent {
 	receivedAt: number;
 }
 
+interface DeferredLiveEdgeIntent {
+	chatId: string;
+	epoch: number;
+}
+
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
 	| 'compactToRecentMessages'
@@ -78,13 +83,21 @@ export class ConversationScrollController {
 	#followLiveRequiresIntentAfter = 0;
 	#previousScrollTop: number | null = null;
 	#viewportOperationEpoch = 0;
+	#deferredLiveEdgeIntent: DeferredLiveEdgeIntent | null = null;
 	#isPageMutationInProgress = false;
 	#activeTargetNavigations = $state(0);
 	#resumeAutoFillAfterTargets = false;
 	#liveEdgePruneTimer: ReturnType<typeof setTimeout> | null = null;
+	#lastObservedFeedChatId: string | null;
+	#lastObservedTranscriptViewId: string;
+	#lastObservedFeedDataRevision: number;
 	#destroyed = false;
 
-	constructor(private deps: ScrollControllerDeps) {}
+	constructor(private deps: ScrollControllerDeps) {
+		this.#lastObservedFeedChatId = deps.sessions.selectedChatId;
+		this.#lastObservedTranscriptViewId = deps.chatState.transcriptViewId;
+		this.#lastObservedFeedDataRevision = deps.chatState.feedMutationClock.dataRevision;
+	}
 
 	isNearBottom(): boolean {
 		return this.deps.getViewport()?.isAtEnd(LIVE_END_REPIN_THRESHOLD_PX) ?? false;
@@ -139,15 +152,58 @@ export class ConversationScrollController {
 	setPinnedToBottom(isPinned: boolean): void {
 		this.isPinnedToBottom = isPinned;
 		this.deps.chatState.isUserScrolledUp = !isPinned;
-		if (!isPinned) this.#cancelLiveEdgePrune();
+		if (!isPinned) {
+			this.#deferredLiveEdgeIntent = null;
+			this.#cancelLiveEdgePrune();
+		}
 	}
 
 	reconcilePinnedProjection(): void {
+		const chatId = this.deps.sessions.selectedChatId;
+		const transcriptViewId = this.deps.chatState.transcriptViewId;
+		const dataRevision = this.deps.chatState.feedMutationClock.dataRevision;
+		const feedChanged = chatId !== this.#lastObservedFeedChatId
+			|| transcriptViewId !== this.#lastObservedTranscriptViewId
+			|| dataRevision !== this.#lastObservedFeedDataRevision;
+		this.#lastObservedFeedChatId = chatId;
+		this.#lastObservedTranscriptViewId = transcriptViewId;
+		this.#lastObservedFeedDataRevision = dataRevision;
 		this.deps.chatState.isUserScrolledUp = !this.isPinnedToBottom;
+		const deferredIntent = this.#deferredLiveEdgeIntent;
+		const viewport = this.deps.getViewport();
+		if (
+			feedChanged
+			&& deferredIntent?.chatId === chatId
+			&& deferredIntent.epoch === this.#userScrollIntent.epoch
+			&& deferredIntent.epoch > this.#followLiveRequiresIntentAfter
+			&& !this.deps.chatState.hasLaterMessages
+			&& !viewport?.ownsScrollPosition()
+			&& this.isNearBottom()
+		) {
+			this.#deferredLiveEdgeIntent = null;
+			this.setPinnedToBottom(true);
+			this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
+			viewport?.scrollToEnd();
+		}
+		if (
+			!feedChanged
+			|| !chatId
+			|| this.#destroyed
+			|| !this.#isViewportVisible
+			|| !this.isPinnedToBottom
+			|| this.deps.chatState.isUserScrolledUp
+			|| this.deps.chatState.hasLaterMessages
+			|| this.#isPageMutationInProgress
+			|| this.#activeTargetNavigations > 0
+			|| this.#initialBottomRestoreChatId !== null
+			|| this.isScrollingToTop
+		) return;
+		this.#scheduleLiveEdgePrune(chatId);
 	}
 
 	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
 		this.#cancelLiveEdgePrune();
+		this.#deferredLiveEdgeIntent = null;
 		this.deps.getViewport()?.cancelForUserIntent(direction);
 		// Continued scrolling owns the page's viewport position without cancelling its
 		// data request. Explicit navigation still advances the shared operation epoch.
@@ -245,7 +301,24 @@ export class ConversationScrollController {
 			this.#preserveHistoryBrowsing();
 			return;
 		}
-		if (this.deps.getViewport()?.ownsScrollPosition()) return;
+		if (this.deps.getViewport()?.ownsScrollPosition()) {
+			const chatId = this.deps.sessions.selectedChatId;
+			if (
+				chatId
+				&& !this.deps.chatState.hasLaterMessages
+				&& this.#userScrollIntent.direction === 'later'
+				&& this.#userScrollIntent.epoch > this.#followLiveRequiresIntentAfter
+				&& this.#hasRecentUserScrollIntent()
+				&& this.isNearBottom()
+			) {
+				this.#deferredLiveEdgeIntent = {
+					chatId,
+					epoch: this.#userScrollIntent.epoch,
+				};
+			}
+			return;
+		}
+		this.#deferredLiveEdgeIntent = null;
 		this.#reconcileUserScroll(inferredDirection);
 	}
 
@@ -692,11 +765,13 @@ export class ConversationScrollController {
 
 	#beginViewportOperation(): number {
 		this.#cancelLiveEdgePrune();
+		this.#deferredLiveEdgeIntent = null;
 		this.deps.chatState.invalidatePendingWindowNavigation();
 		return ++this.#viewportOperationEpoch;
 	}
 
 	#cancelViewportOperations(): void {
+		this.#deferredLiveEdgeIntent = null;
 		this.deps.chatState.invalidatePendingWindowNavigation();
 		this.#viewportOperationEpoch += 1;
 	}
@@ -745,6 +820,7 @@ export class ConversationScrollController {
 			return;
 		}
 		if (!this.deps.chatState.compactToRecentMessages()) return;
+		this.#lastObservedFeedDataRevision = this.deps.chatState.feedMutationClock.dataRevision;
 		await tick();
 		if (
 			this.#destroyed ||
@@ -758,6 +834,7 @@ export class ConversationScrollController {
 
 	destroy(): void {
 		this.#destroyed = true;
+		this.#deferredLiveEdgeIntent = null;
 		this.#cancelLiveEdgePrune();
 	}
 
