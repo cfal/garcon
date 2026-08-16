@@ -568,23 +568,21 @@ row, and asserts exact addresses and provider callbacks throughout.
 
 | ID            | Current evidence                                                                                                  | State               |
 | ------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------- |
-| TLV5-ADOPT.01 | Core null/empty-source unit and static facet call-site separation.                                                | Intentional red     |
-| TLV5-ADOPT.02 | Prefix and mid-iteration failure cases prove no view, unrelated-chat progress, and retry from the beginning.     | Intentional red     |
-| TLV5-ADOPT.03 | Exact prefix, session-boundary, and legacy-row ordering unit.                                                     | Intentional red     |
-| TLV5-ADOPT.04 | Exact typed notice round trip and usable recorded-quarantine adoption.                                            | Intentional red     |
-| TLV5-ADOPT.05 | Frozen projection, model context, search, and preview matrix.                                                     | Intentional red     |
-| TLV5-ADOPT.06 | Reload preserves only the quarantine notice while dropping ordinary notices.                                     | Intentional red     |
-| TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and Amp/Factory/Cursor provider oracles are locked. | Intentional red     |
-| TLV5-ADOPT.08 | Shared native-capability SACS, provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Intentional red |
+| TLV5-ADOPT.01 | Core null/empty-source unit and static facet call-site separation.                                                | Covered             |
+| TLV5-ADOPT.02 | Prefix and mid-iteration failure cases prove no view, unrelated-chat progress, and retry from the beginning.     | Covered             |
+| TLV5-ADOPT.03 | Exact prefix, session-boundary, and legacy-row ordering unit.                                                     | Covered             |
+| TLV5-ADOPT.04 | Exact typed notice round trip and usable recorded-quarantine adoption.                                            | Covered             |
+| TLV5-ADOPT.05 | Frozen projection, model context, search, and preview matrix.                                                     | Covered             |
+| TLV5-ADOPT.06 | Reload preserves only the quarantine notice while dropping ordinary notices.                                     | Covered             |
+| TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and Amp/Factory/Cursor provider oracles are locked. | Covered             |
+| TLV5-ADOPT.08 | Shared native-capability SACS, provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Covered |
 | TLV5-ADOPT.09 | Small-cap source discrimination, lossless server wiring, frozen ownership-boundary mapping, and multi-segment black-box order are locked. | Covered |
-| TLV5-ADOPT.10 | Source warning, propagated integration error including its cause, route logging, and HTTP error surfaces are locked against transcript-content leakage. | Intentional red |
-| TLV5-ADOPT.11 | Direct relocation and Codex/Cursor source-selection ambiguity fail closed while true absence and repaired retry remain viable. | Intentional red |
+| TLV5-ADOPT.10 | Source warning, propagated integration error with no source-bearing cause, route logging, and HTTP error surfaces are locked against transcript-content leakage. | Covered |
+| TLV5-ADOPT.11 | Direct relocation and Codex/Cursor source-selection ambiguity fail closed while true absence and repaired retry remain viable. | Covered |
 
-The remaining intentional-red families cover genesis facet and initialization
-semantics, quarantine handling, strict provider-source conversion, selected
-native evidence, relocation/discovery ambiguity, and propagated-error cause
-hygiene. Each case records its own failure signature; a completed empty source
-remains a distinct green control.
+All registered genesis-adoption families are covered across their mapped SACS,
+provider, core, route, and black-box tiers. A completed empty source remains a
+distinct green control.
 
 ## Read-Fold Matrix
 
