@@ -6,12 +6,9 @@ import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/na
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { ClaudeCliVersionProbe } from "./cli-version.js";
 import {
-  runtimeRows,
-  type AgentRuntimeEvent,
   type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type {
-  AgentLogger,
   AgentSteerRequest,
   AgentSteerResult,
   AgentSteerTarget,
@@ -50,7 +47,6 @@ import {
   claudeResultFailureMessage,
   convertCLIMessageToChatMessages,
   type ClaudeCLIMessage,
-  type ClaudeProviderSessionState,
   type ClaudeTurnTerminalState,
 } from './cli-protocol.js';
 import {
@@ -64,6 +60,7 @@ import {
   buildClaudeUserInputFrame,
 } from './user-input.js';
 import { handleClaudeInterruptReceipt } from './interrupt-receipt.js';
+import { ClaudeTurnPublisher } from './turn-publisher.js';
 import { materializeClaudeVideoAttachments } from './video-attachments.js';
 import {
   CLAUDE_STEER_IDLE_FENCE_TIMEOUT_MS,
@@ -85,12 +82,14 @@ class ClaudeCliRuntime {
   #pendingPermissions = new Set<PendingPermission>();
   #controlBroker: ClaudeControlBroker;
   #steering: ClaudeSteeringController;
+  #turnPublisher: ClaudeTurnPublisher;
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
   #shuttingDown = false;
   readonly #dependencies: ClaudeCliDependencies;
 
   constructor(dependencies: ClaudeCliDependencies = defaultClaudeCliDependencies()) {
     this.#dependencies = dependencies;
+    this.#turnPublisher = new ClaudeTurnPublisher(dependencies.logger);
     this.#controlBroker = new ClaudeControlBroker(
       (agentSessionId, jsonl) => this.#writeToCLI(agentSessionId, jsonl),
     );
@@ -136,53 +135,6 @@ class ClaudeCliRuntime {
     session.activeTurn = activeTurn;
     session.lastActivityAt = activeTurn.startedAt;
     return activeTurn;
-  }
-
-  #publishTurnEvent(
-    session: ClaudeRunningSession,
-    turn: ClaudeActiveTurn,
-    event: AgentRuntimeEvent,
-  ): void {
-    try {
-      turn.operation.publish(event);
-    } catch (error) {
-      this.#dependencies.logger.warn('Claude publisher rejected an event', {
-        sessionId: session.id.slice(0, 8),
-        turnId: turn.turnId,
-        eventType: event.type,
-        error: errorMessage(error),
-      });
-    }
-  }
-
-  #publishMessages(
-    session: ClaudeRunningSession,
-    turn: ClaudeActiveTurn,
-    messages: Parameters<typeof runtimeRows>[0],
-  ): void {
-    if (messages.length === 0) return;
-    this.#publishTurnEvent(session, turn, { type: 'rows', rows: runtimeRows(messages) });
-  }
-
-  #publishFinished(session: ClaudeRunningSession, turn: ClaudeActiveTurn): void {
-    this.#publishTurnEvent(session, turn, {
-      type: 'run-ended',
-      runId: turn.operation.runId,
-      outcome: 'finished',
-    });
-  }
-
-  #publishFailed(
-    session: ClaudeRunningSession,
-    turn: ClaudeActiveTurn,
-    message: string,
-  ): void {
-    this.#publishTurnEvent(session, turn, {
-      type: 'run-ended',
-      runId: turn.operation.runId,
-      outcome: 'failed',
-      error: { code: 'PROVIDER_FAILURE', message },
-    });
   }
 
   async #writeToCLI(sessionId: string, jsonl: string): Promise<void> {
@@ -252,7 +204,7 @@ class ClaudeCliRuntime {
           chatMessages.some((message) => message.type === 'assistant-message'),
         );
         if (chatMessages.length > 0) {
-          this.#publishMessages(session, turn, chatMessages);
+          this.#turnPublisher.messages(session, turn, chatMessages);
         }
         break;
       }
@@ -342,7 +294,7 @@ class ClaudeCliRuntime {
       activeTurn.pendingCompaction = undefined;
       const reason = msg.compact_error || 'Compaction failed';
       activeTurn.protocol.addOutputMessages(1);
-      this.#publishMessages(
+      this.#turnPublisher.messages(
         session,
         activeTurn,
         [new ErrorMessage(new Date().toISOString(), reason)],
@@ -386,7 +338,7 @@ class ClaudeCliRuntime {
     const chatMessages = convertCLIMessageToChatMessages(msg);
     if (chatMessages.length > 0) {
       activeTurn.protocol.addOutputMessages(chatMessages.length);
-      this.#publishMessages(session, activeTurn, chatMessages);
+      this.#turnPublisher.messages(session, activeTurn, chatMessages);
     }
 
     if (!activeTurn.pendingCompaction) return;
@@ -411,7 +363,7 @@ class ClaudeCliRuntime {
     );
     // Match the JSONL loader's compaction identity: the summary uuid at ordinal 0.
     if (typeof msg.uuid === 'string' && msg.uuid) attachNativeMessageSource(compactionMessage, { entryId: msg.uuid, withinSourceOrdinal: 0 });
-    this.#publishMessages(session, activeTurn, [compactionMessage]);
+    this.#turnPublisher.messages(session, activeTurn, [compactionMessage]);
   }
 
   // Cancels the pending force-kill fallback armed by an abort. Safe to call
@@ -471,7 +423,7 @@ class ClaudeCliRuntime {
     const resultText = typeof msg.result === 'string' ? msg.result.trim() : '';
     if (!msg.is_error && !protocol.assistantContentSinceLastResult && resultText) {
       protocol.addOutputMessages(1, true);
-      this.#publishMessages(
+      this.#turnPublisher.messages(
         session,
         activeTurn,
         [new AssistantMessage(new Date().toISOString(), resultText)],
@@ -530,7 +482,7 @@ class ClaudeCliRuntime {
     for (const pending of [...this.#pendingPermissions]) {
       if (pending.agentSessionId !== session.id) continue;
       this.#pendingPermissions.delete(pending);
-      this.#publishTurnEvent(session, pending.turn, {
+      this.#turnPublisher.event(session, pending.turn, {
         type: 'permission',
         runId: pending.turn.operation.runId,
         lifecycle: {
@@ -611,7 +563,7 @@ class ClaudeCliRuntime {
       toolName,
       request.input,
     );
-    this.#publishTurnEvent(session, activeTurn, {
+    this.#turnPublisher.event(session, activeTurn, {
       type: 'permission',
       runId: activeTurn.operation.runId,
       lifecycle: {
@@ -636,7 +588,7 @@ class ClaudeCliRuntime {
     for (const pending of this.#pendingPermissions) {
       if (pending.agentSessionId !== session.id || pending.cliRequestId !== msg.request_id) continue;
       this.#pendingPermissions.delete(pending);
-      this.#publishTurnEvent(session, pending.turn, {
+      this.#turnPublisher.event(session, pending.turn, {
         type: 'permission',
         runId: pending.turn.operation.runId,
         lifecycle: {
@@ -712,7 +664,7 @@ class ClaudeCliRuntime {
     this.#controlBroker.rejectSession(session.id, 'Claude turn settled', 'interrupt');
     this.#cancelPendingPermissions(session);
     session.lastActivityAt = Date.now();
-    this.#publishFailed(session, activeTurn, message);
+    this.#turnPublisher.failed(session, activeTurn, message);
     activeTurn.finish();
   }
 
@@ -726,7 +678,7 @@ class ClaudeCliRuntime {
     }
     this.#cancelPendingPermissions(session);
     session.lastActivityAt = Date.now();
-    this.#publishFinished(session, activeTurn);
+    this.#turnPublisher.finished(session, activeTurn);
     activeTurn.finish();
   }
 
