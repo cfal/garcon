@@ -681,12 +681,10 @@ not merely that the final transcript matched.
 
 | ID                | Current evidence                                                                                                      | State          |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------- | -------------- |
-| TLV5-OPENCODE.01  | Pinned real-binary context exhaustion asserts one request, one visible error, a failed terminal, and no continuation. | Covered oracle |
-| TLV5-OPENCODE.02  | Static source guard requires the owned disable flag and absence of the plugin and session-latest route.              | Covered oracle |
+| TLV5-OPENCODE.01  | Pinned real-binary context exhaustion asserts one request, one visible error, a failed terminal, and no continuation. | Covered |
+| TLV5-OPENCODE.02  | Static source guard requires the owned disable flag and absence of the plugin and session-latest route.              | Covered |
 
-Both cases are intentional-red until production disables pinned V1 automatic
-compaction and removes the inference route. Parsing already stored compaction
-summaries remains supported.
+Parsing already stored compaction summaries remains supported.
 
 ## Accepted-Loss Negative Contracts
 
