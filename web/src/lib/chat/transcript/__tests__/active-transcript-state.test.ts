@@ -1850,6 +1850,88 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 500 });
 	});
 
+	it('keeps a fresh earlier request active after a snapshot invalidates its predecessor', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+			lastOrdinal: 400,
+			pageOldestOrdinal: 201,
+			hasMore: true,
+		});
+		let resolveStalePage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		let resolveFreshPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages)
+			.mockReturnValueOnce(new Promise((resolve) => {
+				resolveStalePage = resolve;
+			}))
+			.mockReturnValueOnce(new Promise((resolve) => {
+				resolveFreshPage = resolve;
+			}));
+
+		const staleLoad = chat.loadEarlierPage('chat-1');
+		expect(chat.pageStates.earlier.status).toBe('loading');
+		const snapshotEpoch = chat.beginSnapshotLoad();
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-1',
+				messages: assistantEntries(301, 500),
+				lastOrdinal: 500,
+				pageOldestOrdinal: 301,
+				pageNewestOrdinal: 500,
+				hasMore: true,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+
+		const freshLoad = chat.loadEarlierPage('chat-1');
+		expect(chat.pageStates.earlier.status).toBe('loading');
+		resolveStalePage({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(151, 200, (ordinal) => `stale-${ordinal}`),
+				lastOrdinal: 500,
+				pageOldestOrdinal: 151,
+				pageNewestOrdinal: 200,
+				hasMore: true,
+			}),
+		});
+		await expect(staleLoad).resolves.toBe('invalidated');
+		expect(chat.pageStates.earlier.status).toBe('loading');
+		expect(chat.entries.some((message) => contentOf(message.message).startsWith('stale-')))
+			.toBe(false);
+
+		resolveFreshPage({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(151, 200),
+				lastOrdinal: 500,
+				pageOldestOrdinal: 151,
+				pageNewestOrdinal: 200,
+				hasMore: true,
+			}),
+		});
+		await expect(freshLoad).resolves.toBe('loaded');
+
+		expect(vi.mocked(getChatMessages)).toHaveBeenNthCalledWith(1, {
+			chatId: 'chat-1',
+			beforeOrdinal: 201,
+			limit: 50,
+			transcriptViewId: 'generation-1',
+		});
+		expect(vi.mocked(getChatMessages)).toHaveBeenNthCalledWith(2, {
+			chatId: 'chat-1',
+			beforeOrdinal: 201,
+			limit: 50,
+			transcriptViewId: 'generation-1',
+		});
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 350 }, (_, index) => index + 151),
+		);
+		expect(chat.pageStates.earlier.status).toBe('idle');
+	});
+
 	it('retires an obsolete reconnect replay when a replacement snapshot installs', () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
