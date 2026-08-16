@@ -12,17 +12,12 @@ import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import type { ChatProcessingActivity } from './chats/chat-processing-activity.js';
-import {
-  attachNativeMessageSource,
-  getNativeMessageRevisionSource,
-} from './agents/shared/native-message-source.js';
 import { commandLedgerKey, type CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import type { SnippetService } from './snippets/service.js';
 import { createLogger } from './lib/log.js';
-import { matchesTurnIdentity } from './lib/turn-identity.js';
 import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import {

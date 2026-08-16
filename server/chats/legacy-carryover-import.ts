@@ -368,11 +368,6 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
-function stringValue(value: unknown, field: string): string {
-  if (typeof value !== 'string') throw new Error(`Invalid ${field}`);
-  return value;
-}
-
 function legacyRequiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || !value) throw new LegacyCarryOverDataError(`Invalid ${field}`);
   return value;

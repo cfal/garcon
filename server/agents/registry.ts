@@ -47,7 +47,6 @@ import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { NativeTranscriptActivityService } from '../ledger/native-activity.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
-import { ledgerRowsToMessages } from '../ledger/presentation.js';
 import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';

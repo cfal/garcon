@@ -1,5 +1,4 @@
 import type { AgentIntegration, AgentNativeHistoryImport } from '@garcon/server-agent-interface';
-import type { ChatMessage } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentChatEntry } from '../agents/session-types.js';

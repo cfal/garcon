@@ -1,13 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentIntegration } from '@garcon/server-agent-interface';
-import {
-  PermissionCancelledMessage,
-  PermissionRequestMessage,
-  PermissionResolvedMessage,
-  UserMessage,
-  type ChatMessage,
-} from '../../common/chat-types.js';
-import type { JsonObject } from '../../common/json.js';
+import type { ChatMessage } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';

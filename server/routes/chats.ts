@@ -1,5 +1,4 @@
-// /api/chats/* route handlers. Provides CRUD for the session registry
-// and dispatches message reads to the appropriate agent parser.
+// /api/chats/* route handlers for registry operations and ledger-backed transcripts.
 
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { promises as fs } from 'fs';
@@ -71,11 +70,6 @@ import {
 } from '../chats/carryover-segments.js';
 
 const logger = createLogger('routes:chats');
-const MAX_SEARCH_QUERY_CHARS = 4_096;
-const MAX_SEARCH_TEXT_TOKEN_CHARS = 1_024;
-const MAX_SEARCH_TEXT_CHARS = 8_192;
-const MAX_SEARCH_CHAT_IDS = 10_000;
-const MAX_SEARCH_CHAT_ID_CHARS = 512;
 import type {
   ExecutionSettingsPatchRequest,
   ModelPatchRequest,
@@ -272,41 +266,6 @@ function pathValidationError(error: string, errorCode: string, status = 200): Re
     },
     { status },
   );
-}
-
-function stringArrayOrNull(value: unknown): string[] | null {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null;
-}
-
-function optionalStringArrayField(body: Record<string, unknown>, field: string): string[] | undefined {
-  if (body[field] === undefined) return undefined;
-  const values = stringArrayOrNull(body[field]);
-  if (!values) throw new ValidationDomainError(`${field} must be an array of strings`);
-  return values.map((value) => value.trim()).filter(Boolean);
-}
-
-function optionalBoundedStringArrayField(
-  body: Record<string, unknown>,
-  field: string,
-  limits: { maxItems: number; maxItemChars: number; maxTotalChars: number },
-): string[] | undefined {
-  if (body[field] === undefined) return undefined;
-  const values = stringArrayOrNull(body[field]);
-  if (!values) throw new ValidationDomainError(`${field} must be an array of strings`);
-  if (values.length > limits.maxItems) {
-    throw new ValidationDomainError(`${field} must contain at most ${limits.maxItems} items`);
-  }
-  let totalChars = 0;
-  for (const value of values) {
-    if (value.length > limits.maxItemChars) {
-      throw new ValidationDomainError(`${field} entries must be at most ${limits.maxItemChars} characters`);
-    }
-    totalChars += value.length;
-    if (totalChars > limits.maxTotalChars) {
-      throw new ValidationDomainError(`${field} is too large`);
-    }
-  }
-  return values.map((value) => value.trim()).filter(Boolean);
 }
 
 interface ChatRouteDeps {
