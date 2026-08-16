@@ -36,6 +36,7 @@
 	interface Props {
 		request: PermissionRequestMessage;
 		terminal?: PermissionTerminalState;
+		actionable?: boolean;
 		onDecision: (
 			permissionRequestId: string,
 			incarnation: string,
@@ -56,6 +57,7 @@
 	let {
 		request,
 		terminal,
+		actionable = true,
 		onDecision,
 		onExitPlanMode,
 		chatContext = null,
@@ -76,7 +78,7 @@
 		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
 	});
 	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
-	const isPending = $derived(!terminal);
+	const isPending = $derived(!terminal && actionable);
 	const isResolved = $derived(terminal?.state === 'resolved');
 	const isCancelled = $derived(terminal?.state === 'cancelled');
 	const wasAllowed = $derived(isResolved && terminal?.allowed === true);

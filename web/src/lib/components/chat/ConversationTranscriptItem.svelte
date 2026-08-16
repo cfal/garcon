@@ -68,14 +68,33 @@
 		acquireTransientActivity,
 	}: Props = $props();
 
-	const pendingExitPlanIds = $derived(
+	const pendingPermissionOccurrences = $derived(
 		new Set(
 			pendingPermissionRequests
-				.filter((request) => request.requestedTool.type === 'exit-plan-mode-tool-use')
-				.map((request) => request.permissionRequestId),
+				.map((request) => permissionOccurrenceKey(
+					request.permissionRequestId,
+					request.incarnation,
+				)),
 		),
 	);
 	const disclosureState = $derived(itemState?.disclosurePort(item.id));
+
+	function permissionActionableFor(message: ChatMessage): boolean {
+		if (message instanceof PermissionRequestMessage) {
+			return pendingPermissionRequests.some((request) => (
+				request.permissionRequestId === message.permissionRequestId
+				&& request.incarnation === message.incarnation
+				&& request.control?.id === message.permissionRequestId
+				&& request.control.incarnation === message.incarnation
+			));
+		}
+		if (message.type !== 'exit-plan-mode-tool-use') return false;
+		const permissionRequestId = `plan-exit-${message.toolId}`;
+		return pendingPermissionOccurrences.has(permissionOccurrenceKey(
+			permissionRequestId,
+			permissionRequestId,
+		));
+	}
 
 	function permissionTerminalFor(message: ChatMessage): PermissionTerminalState | undefined {
 		if (message instanceof PermissionRequestMessage) {
@@ -86,7 +105,10 @@
 		}
 		if (message.type !== 'exit-plan-mode-tool-use') return undefined;
 		const permissionRequestId = `plan-exit-${message.toolId}`;
-		if (pendingExitPlanIds.has(permissionRequestId)) return undefined;
+		if (pendingPermissionOccurrences.has(permissionOccurrenceKey(
+			permissionRequestId,
+			permissionRequestId,
+		))) return undefined;
 		return { incarnation: permissionRequestId, state: 'resolved', allowed: true };
 	}
 </script>
@@ -120,6 +142,7 @@
 			{toolResultRowId}
 			{pairedToolUse}
 			permissionTerminal={permTerminal}
+			permissionActionable={permissionActionableFor(message)}
 			{onPermissionDecision}
 			{onExitPlanMode}
 			{agentId}

@@ -67,6 +67,7 @@
 		toolResultRowId?: string;
 		pairedToolUse?: ToolUseChatMessage;
 		permissionTerminal?: PermissionTerminalState;
+		permissionActionable?: boolean;
 		onPermissionDecision?: (
 			permissionRequestId: string,
 			incarnation: string,
@@ -109,6 +110,7 @@
 		toolResultRowId,
 		pairedToolUse,
 		permissionTerminal,
+		permissionActionable = false,
 		onPermissionDecision,
 		onExitPlanMode,
 		agentId,
@@ -577,6 +579,7 @@
 						<PermissionRequestRow
 							request={exitPlanPermissionRequest}
 							terminal={permissionTerminal}
+							actionable={permissionActionable}
 							onDecision={onPermissionDecision ?? ignorePermissionDecision}
 							{onExitPlanMode}
 							{chatContext}
@@ -714,11 +717,12 @@
 						/>
 					{:else if asAgentSwitch}
 						<AgentSwitchRow message={asAgentSwitch} />
-					{:else if asPermissionRequest && onPermissionDecision}
+					{:else if asPermissionRequest}
 						<PermissionRequestRow
 							request={asPermissionRequest}
 							terminal={permissionTerminal}
-							onDecision={onPermissionDecision}
+							actionable={permissionActionable}
+							onDecision={onPermissionDecision ?? ignorePermissionDecision}
 							{onExitPlanMode}
 							{chatContext}
 							draft={permissionDraft?.(
