@@ -1220,6 +1220,7 @@ describe('ChatReconnectCoordinator', () => {
 			[],
 		));
 		liveMessages.flush();
+		baseDeps.conversationUi.setTransientFeedFromSnapshot.mockClear();
 		heldContinuation.resolve(boundedReplayResponse({
 			afterOrdinal: 4,
 			nextAfterOrdinal: 6,
@@ -1233,6 +1234,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(loadMessages).toHaveBeenCalledOnce();
 		expect(loadMessages).toHaveBeenCalledWith('chat-1');
 		expect(markValidated).toHaveBeenCalledOnce();
+		expect(baseDeps.conversationUi.setTransientFeedFromSnapshot).not.toHaveBeenCalled();
 		expect(activeTranscript.entries.map((entry) => ({
 			ordinal: entry.ordinal,
 			content: 'content' in entry.message ? entry.message.content : entry.message.type,
