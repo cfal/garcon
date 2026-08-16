@@ -189,11 +189,13 @@ function assertImportableAmpThreadExport(value: unknown): asserts value is AmpTh
       throw new Error('Amp thread export contains an invalid message ID');
     }
     for (const part of record.content) {
+      const rawPart = part as Record<string, unknown>;
       if (
         !part
         || typeof part !== 'object'
         || Array.isArray(part)
-        || typeof (part as Record<string, unknown>).type !== 'string'
+        || typeof rawPart.type !== 'string'
+        || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
       ) {
         throw new Error('Amp thread export contains an invalid content part');
       }

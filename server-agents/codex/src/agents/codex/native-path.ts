@@ -1,7 +1,7 @@
 import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
 import { inspectCodexSessionIdentity } from './history-profile.js';
 
-const MISSING_PATH_CODES = new Set(['ENOENT', 'ENOTDIR']);
+const MISSING_PATH_CODES = new Set(['ENOENT']);
 
 export interface CodexNativePathSession {
   readonly agentSessionId: string | null;
@@ -110,7 +110,10 @@ async function matchesCodexSession(
           ...(causeCode ? { causeCode } : {}),
         },
       );
-      return false;
+      if (reason === 'read-failed' && causeCode && MISSING_PATH_CODES.has(causeCode)) {
+        return false;
+      }
+      throw error;
     }
     throw error;
   }

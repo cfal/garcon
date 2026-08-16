@@ -335,11 +335,30 @@ function parseStrictClaudeJsonlEntryWithSource(
   }
   const entry = asRecord(parsed.value);
   if (!entry.sessionId) return null;
+  assertImportableClaudeEntry(entry, lineNumber);
   const entryId = asString(entry.uuid) || asString(entry.id) || asString(entry.messageId);
   return attachNativeMessageSource(entry, {
     lineNumber,
     ...(entryId ? { entryId } : {}),
   });
+}
+
+function assertImportableClaudeEntry(
+  entry: Record<string, unknown>,
+  lineNumber: number,
+): void {
+  if (entry.type !== 'user' && entry.type !== 'assistant') return;
+  if (!entry.message || typeof entry.message !== 'object' || Array.isArray(entry.message)) {
+    throw new Error(`Claude transcript record ${lineNumber} has an invalid message`);
+  }
+  const message = entry.message as Record<string, unknown>;
+  if (
+    message.role !== entry.type
+    || !('content' in message)
+    || (typeof message.content !== 'string' && !Array.isArray(message.content))
+  ) {
+    throw new Error(`Claude transcript record ${lineNumber} has an invalid message`);
+  }
 }
 
 // Reads a Claude JSONL file and returns ChatMessage[].

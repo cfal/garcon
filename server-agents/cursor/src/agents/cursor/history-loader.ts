@@ -121,12 +121,22 @@ export function cursorAcpStoreDbPath(sessionId: string, cursorHome = cursorHomeP
 
 export function cursorStoreDbPath(sessionId: string, projectPath: string, cursorHome = cursorHomePath()): string {
   const acpStoreDbPath = cursorAcpStoreDbPath(sessionId, cursorHome);
-  if (fs.existsSync(acpStoreDbPath)) return acpStoreDbPath;
+  if (cursorSourcePathExists(acpStoreDbPath)) return acpStoreDbPath;
 
   const streamJsonStoreDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
-  if (fs.existsSync(streamJsonStoreDbPath)) return streamJsonStoreDbPath;
+  if (cursorSourcePathExists(streamJsonStoreDbPath)) return streamJsonStoreDbPath;
 
   return acpStoreDbPath;
+}
+
+function cursorSourcePathExists(sourcePath: string): boolean {
+  try {
+    fs.lstatSync(sourcePath);
+    return true;
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return false;
+    throw error;
+  }
 }
 
 function isInternalCursorText(value: unknown): boolean {
@@ -465,11 +475,41 @@ export function normalizeCursorBlobs(blobs: CursorMessageBlob[]): ChatMessage[] 
   return messages;
 }
 
-export async function loadCursorChatMessagesBySessionId(
+function assertImportableCursorBlobs(blobs: readonly CursorMessageBlob[]): void {
+  for (const blob of blobs) {
+    const nestedMessage = asObject(blob.content.message);
+    const rawRole = blob.content.role ?? nestedMessage.role;
+    if (rawRole === undefined || rawRole === 'system') continue;
+    if (typeof rawRole !== 'string') {
+      throw new Error('Cursor transcript message has an invalid role');
+    }
+    const content = blob.content.content ?? nestedMessage.content;
+    if (typeof content === 'string') continue;
+    if (!Array.isArray(content)) {
+      throw new Error('Cursor transcript message has invalid content');
+    }
+    for (const part of content) {
+      if (typeof part === 'string') continue;
+      if (!part || typeof part !== 'object' || Array.isArray(part)) {
+        throw new Error('Cursor transcript message has an invalid content part');
+      }
+      const rawPart = part as Record<string, unknown>;
+      if (
+        typeof rawPart.type !== 'string'
+        || !rawPart.type
+        || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
+      ) {
+        throw new Error('Cursor transcript message has an invalid content part');
+      }
+    }
+  }
+}
+
+function readCursorSessionBlobs(
   sessionId: string,
   projectPath: string,
   cursorHome?: string,
-): Promise<ChatMessage[]> {
+): CursorMessageBlob[] {
   if (!sessionId) return [];
   const storeDbPath = cursorStoreDbPath(sessionId, projectPath, cursorHome);
   let stats: fs.Stats;
@@ -482,7 +522,25 @@ export async function loadCursorChatMessagesBySessionId(
   if (!stats.isFile() || stats.isSymbolicLink()) {
     throw new Error('Cursor transcript source is not a regular file');
   }
-  return normalizeCursorBlobs(readCursorBlobs(storeDbPath));
+  return readCursorBlobs(storeDbPath);
+}
+
+export async function loadCursorChatMessagesBySessionId(
+  sessionId: string,
+  projectPath: string,
+  cursorHome?: string,
+): Promise<ChatMessage[]> {
+  return normalizeCursorBlobs(readCursorSessionBlobs(sessionId, projectPath, cursorHome));
+}
+
+export async function loadImportableCursorChatMessagesBySessionId(
+  sessionId: string,
+  projectPath: string,
+  cursorHome?: string,
+): Promise<ChatMessage[]> {
+  const blobs = readCursorSessionBlobs(sessionId, projectPath, cursorHome);
+  assertImportableCursorBlobs(blobs);
+  return normalizeCursorBlobs(blobs);
 }
 
 function hasNodeErrorCode(error: unknown, code: string): boolean {

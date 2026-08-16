@@ -329,6 +329,7 @@ async function readFactorySessionEvents(
         if (throwOnError) throw new Error('Factory transcript record is invalid');
         continue;
       }
+      if (throwOnError) assertImportableFactoryEvent(event);
       events.push({
         event,
         source: {
@@ -347,6 +348,31 @@ async function readFactorySessionEvents(
   }
 
   return events;
+}
+
+function assertImportableFactoryEvent(event: FactoryStoredEvent): void {
+  if (event.type !== 'message') return;
+  const message = event.message;
+  if (
+    !message
+    || typeof message !== 'object'
+    || Array.isArray(message)
+    || typeof message.role !== 'string'
+    || !Array.isArray(message.content)
+  ) {
+    throw new Error('Factory transcript message is invalid');
+  }
+  for (const part of message.content) {
+    if (
+      !part
+      || typeof part !== 'object'
+      || Array.isArray(part)
+      || typeof part.type !== 'string'
+      || !part.type
+    ) {
+      throw new Error('Factory transcript message part is invalid');
+    }
+  }
 }
 
 function isFactoryStoredEventWithSource(input: FactoryStoredEventInput): input is FactoryStoredEventWithSource {

@@ -26,8 +26,9 @@ export class AgentIntegrationError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly details?: JsonObject,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = 'AgentIntegrationError';
   }
 }

@@ -1,5 +1,6 @@
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { HttpErrorResponse } from '../../common/http-error.ts';
-import { isDomainError } from './domain-error.js';
+import { isDomainError, transcriptUnavailableMessage } from './domain-error.js';
 
 export const DEFAULT_VALIDATION_ERROR_CODE = 'VALIDATION_FAILED';
 export const DEFAULT_INTERNAL_ERROR_CODE = 'INTERNAL_ERROR';
@@ -36,6 +37,14 @@ export function jsonErrorFromUnknown(
   errorCode = defaultErrorCodeForStatus(status),
   retryable = defaultRetryableForStatus(status),
 ): Response {
+  if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
+    return jsonError(
+      transcriptUnavailableMessage(error.retryable),
+      503,
+      error.code,
+      error.retryable,
+    );
+  }
   if (isDomainError(error)) {
     return jsonError(error.message, error.status, error.code, error.retryable);
   }

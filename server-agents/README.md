@@ -159,10 +159,11 @@ provider tool name.
 
 ## Native History and Search
 
-`nativeHistoryImport` is nullable. When present, it performs the full native
-read used by first-open adoption, native-fidelity fork seeding, or explicit
-reload. Ordinary serving, paging, resume, interruption, and search read the
-core ledger instead.
+`legacyHistoryImport` is nullable and is used only for one-time genesis
+adoption of a supported pre-V5 source. `nativeHistoryImport` is independently
+nullable and reads one selected native session only for native-fidelity fork
+seeding or explicit Reload. Ordinary serving, paging, resume, interruption,
+and search read the core ledger instead.
 `nativeActivity` is bounded, advisory, and never delays serving or dispatch.
 
 Transcript search is provider-neutral. Core projects committed ledger suffixes

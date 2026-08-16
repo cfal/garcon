@@ -1,4 +1,8 @@
-import type { ChatMessage } from '../../common/chat-types.js';
+import {
+  isCarryoverMigrationQuarantineNoticeDetail,
+  isToolUseMessage,
+  type ChatMessage,
+} from '../../common/chat-types.js';
 import type { JsonObject } from '../../common/json.js';
 import type { LedgerRowDraft } from './contracts.js';
 
@@ -13,7 +17,7 @@ export function importedDrafts(
   rows: readonly ImportedRow[],
   now: () => string,
 ): LedgerRowDraft[] {
-  return rows.flatMap(({ message, providerMeta }) => draftFor(message, providerMeta, null, now));
+  return rows.flatMap(({ message, providerMeta }) => importedDraftFor(message, providerMeta, now));
 }
 
 // Turns conversation carried over from an earlier agent into frozen drafts. No provider ever
@@ -23,19 +27,13 @@ export function frozenDrafts(
   messages: readonly ChatMessage[],
   now: () => string = () => new Date().toISOString(),
 ): LedgerRowDraft[] {
-  return messages.flatMap((message) => draftFor(
-    message,
-    null,
-    message.type === 'user-message' ? message.metadata?.upstreamRequestId ?? null : null,
-    now,
-  ));
+  return messages.flatMap((message) => frozenDraftFor(message, now));
 }
 
 // Permission lifecycle is reconstructed from its own durable rows, never from imported history.
-function draftFor(
+function importedDraftFor(
   message: ChatMessage,
   providerMeta: JsonObject | null,
-  clientMessageId: string | null,
   now: () => string,
 ): LedgerRowDraft[] {
   if (message.type === 'permission-request'
@@ -48,7 +46,7 @@ function draftFor(
       kind: 'user-input',
       at,
       detail: {
-        clientMessageId,
+        clientMessageId: null,
         message,
         attachments: (message.images ?? []).map((image) => ({
           kind: 'image',
@@ -62,4 +60,67 @@ function draftFor(
     }];
   }
   return [{ kind: 'provider-row', at, message, providerMeta }];
+}
+
+function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft[] {
+  const at = message.timestamp || now();
+  if (isToolUseMessage(message)) {
+    return [{ kind: 'provider-row', at, message, providerMeta: null }];
+  }
+
+  switch (message.type) {
+    case 'user-message':
+      return [{
+        kind: 'user-input',
+        at,
+        detail: {
+          clientMessageId: message.metadata?.upstreamRequestId ?? null,
+          message,
+          attachments: (message.images ?? []).map((image) => ({
+            kind: 'image',
+            data: image.data,
+            name: image.name || null,
+            mimeType: image.mimeType ?? 'application/octet-stream',
+          })),
+          steer: false,
+        },
+        providerMeta: null,
+      }];
+    case 'assistant-message':
+    case 'thinking':
+    case 'tool-result':
+    case 'error':
+    case 'compaction':
+      return [{ kind: 'provider-row', at, message, providerMeta: null }];
+    case 'agent-switch':
+      return [{
+        kind: 'agent-switch',
+        at,
+        detail: {
+          fromAgentId: message.fromAgentId,
+          toAgentId: message.toAgentId,
+          fromModel: message.fromModel ?? null,
+          toModel: message.toModel ?? null,
+        },
+        providerMeta: null,
+      }];
+    case 'transcript-notice':
+      if (!isCarryoverMigrationQuarantineNoticeDetail(message.detail)) return [];
+      return [{
+        kind: 'notice',
+        at,
+        message: message.content,
+        detail: {
+          type: message.detail.type,
+          artifactId: message.detail.artifactId,
+          errorCode: message.detail.errorCode,
+        },
+        providerMeta: null,
+      }];
+    case 'permission-request':
+    case 'permission-resolved':
+    case 'permission-cancelled':
+    case 'permission-expired':
+      return [];
+  }
 }

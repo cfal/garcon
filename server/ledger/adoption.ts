@@ -153,18 +153,12 @@ export class TranscriptAdoptionService {
       phase,
       reason: sourceFailureReason(error),
     });
-    if (
-      error instanceof AgentIntegrationError
-      && error.code === 'TRANSCRIPT_UNAVAILABLE'
-      && error.retryable
-    ) {
-      throw error;
-    }
     throw new AgentIntegrationError(
       'TRANSCRIPT_UNAVAILABLE',
-      error instanceof Error ? error.message : 'Transcript adoption source failed',
+      'Transcript adoption source failed',
       true,
       { provider, phase },
+      { cause: error },
     );
   }
 }

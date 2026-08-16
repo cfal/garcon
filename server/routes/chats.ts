@@ -1,6 +1,5 @@
 // /api/chats/* route handlers for registry operations and ledger-backed transcripts.
 
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { promises as fs } from 'fs';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -42,7 +41,6 @@ import {
   GoalControlDeliveryError,
   DomainError,
   QueueEntrySteerError,
-  transcriptUnavailableMessage,
   ValidationDomainError,
 } from '../lib/domain-error.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
@@ -242,14 +240,6 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
 }
 
 function chatSettingsPatchErrorResponse(error: unknown): Response {
-  if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-    return jsonError(
-      transcriptUnavailableMessage(error.retryable),
-      503,
-      error.code,
-      error.retryable,
-    );
-  }
   if (error instanceof ModelSelectionError) {
     return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
   }
@@ -538,14 +528,6 @@ export default function createChatRoutes({
           chatId,
           messages: [],
         } satisfies UnavailableChatHistoryResponse);
-      }
-      if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-        return jsonError(
-          transcriptUnavailableMessage(error.retryable),
-          503,
-          error.code,
-          error.retryable,
-        );
       }
       return jsonErrorFromUnknown(error);
     }

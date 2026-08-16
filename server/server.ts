@@ -79,10 +79,7 @@ import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
-import {
-  CarryOverHistoryUnavailableError,
-  CarryOverTranscriptStore,
-} from './chats/carryover-transcript-store.js';
+import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
 import {
   finalizeCarryOverMigrationValidation,
   markCarryOverMigrationRollbackUnsafe,
@@ -308,11 +305,7 @@ export async function startServer(): Promise<void> {
         entry.carryOverMigrationQuarantine ?? null,
       ),
       async loadFrozenPrefix(_chatId, entry, signal) {
-        if (entry.carryOverMigrationQuarantine) throw new CarryOverHistoryUnavailableError();
-        return carryOver.loadProjectionSource({
-          refs: entry.carryOverSegments ?? [],
-          signal,
-        });
+        return carryOver.loadAll(entry.carryOverSegments ?? [], signal);
       },
     });
     const nativeTranscriptActivity = new NativeTranscriptActivityService({

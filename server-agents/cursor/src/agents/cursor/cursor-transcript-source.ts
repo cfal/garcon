@@ -3,7 +3,7 @@ import { getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
 import {
   cursorStoreDbPath,
   getCursorPreviewFromSessionId,
-  loadCursorChatMessagesBySessionId,
+  loadImportableCursorChatMessagesBySessionId,
 } from './history-loader.js';
 
 export interface CursorTranscriptReference {
@@ -29,7 +29,7 @@ export function createCursorTranscriptSource(
   );
   return {
     async loadMessages(session): Promise<ChatMessage[]> {
-      return loadCursorChatMessagesBySessionId(
+      return loadImportableCursorChatMessagesBySessionId(
         sessionId(session),
         session.projectPath,
         options.cursorHome,

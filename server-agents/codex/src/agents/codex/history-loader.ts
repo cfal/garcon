@@ -127,7 +127,23 @@ function parseStrictCodexJsonlEntry(line: string): Record<string, unknown> | nul
   ) {
     throw new Error('Codex transcript record is invalid');
   }
+  assertImportableCodexJsonlEntry(parsed.value);
   return parsed.value;
+}
+
+function assertImportableCodexJsonlEntry(entry: Record<string, unknown>): void {
+  if (entry.type !== 'response_item') return;
+  if (!entry.payload || typeof entry.payload !== 'object' || Array.isArray(entry.payload)) {
+    throw new Error('Codex response item is invalid');
+  }
+  const payload = entry.payload as Record<string, unknown>;
+  if (payload.type !== 'message') return;
+  if (
+    (payload.role !== 'user' && payload.role !== 'assistant' && payload.role !== 'developer')
+    || !Array.isArray(payload.content)
+  ) {
+    throw new Error('Codex response message is invalid');
+  }
 }
 
 function codexResponseItemIdentity(entry: Record<string, unknown>): {

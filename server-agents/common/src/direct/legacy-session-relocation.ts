@@ -18,6 +18,9 @@ export async function relocateLegacySessionDirectory(
       skipped: claim.skipped,
     });
   }
+  if (claim.skipped > 0) {
+    throw new Error('Direct legacy transcript relocation was incomplete');
+  }
   await store.commit({
     expectedVersion: version,
     nextVersion: RELOCATION_VERSION,
