@@ -383,7 +383,7 @@ legacy facet:
 | `TLV5-ADOPT.10-RUN-ROUTE-UNIT-01` | Retryable adoption failure maps to the typed retryable POST `/chats/run` response |
 | `TLV5-ADOPT.10-SOURCE-FAILURE-ROUTE-UNIT-01` | Adoption source content is absent from structured warnings, propagated errors, route logs, and HTTP errors |
 | `TLV5-ADOPT.11-CODEX-DISCOVERED-UNIT-01` | Codex rejects a mismatched discovered rollout and retries the repaired candidate |
-| `TLV5-ADOPT.11-CODEX-STORED-UNIT-01` | Codex distinguishes ENOENT/ENOTDIR stored rollouts from present invalid metadata and retries repair |
+| `TLV5-ADOPT.11-CODEX-STORED-UNIT-01` | Codex accepts only ENOENT plus discovery miss as absence; ENOTDIR and invalid stored metadata fail and retry from the same repaired reference |
 | `TLV5-ADOPT.11-CURSOR-PREFERRED-UNIT-01` | Cursor rejects an invalid preferred ACP candidate without falling back, then retries after repair |
 | `TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01` | Direct skipped relocation leaves version/source intact and repaired retry commits exactly once |
 

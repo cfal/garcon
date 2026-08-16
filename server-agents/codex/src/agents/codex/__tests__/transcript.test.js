@@ -252,7 +252,7 @@ describe('createCodexNativeEvidence', () => {
     });
   });
 
-  it('[TLV5-ADOPT.11-CODEX-STORED-UNIT-01] distinguishes a missing stored rollout from invalid metadata and retries after repair', async () => {
+  it('[TLV5-ADOPT.11-CODEX-STORED-UNIT-01] distinguishes a missing stored rollout from invalid sources and retries after repair', async () => {
     await withDirectory(async (directory) => {
       const nativePath = path.join(directory, 'stored.jsonl');
       const codec = createPathNativeSessionCodec('codex');
@@ -281,7 +281,14 @@ describe('createCodexNativeEvidence', () => {
       );
       await expect(
         enotdirFixture.transcript.loadLegacy({ chat: enotdirFixture.chat, signal }),
-      ).resolves.toEqual({ messages: [] });
+      ).rejects.toThrow();
+
+      await fs.rm(nonDirectoryPath);
+      await fs.mkdir(nonDirectoryPath);
+      await writeTranscript(nonDirectoryPath, 'rollout.jsonl', 'thread-1');
+      await expect(
+        enotdirFixture.transcript.loadLegacy({ chat: enotdirFixture.chat, signal }),
+      ).resolves.toMatchObject({ messages: [{ content: 'native message' }] });
 
       await fs.writeFile(nativePath, `${JSON.stringify({
         type: 'session_meta',
