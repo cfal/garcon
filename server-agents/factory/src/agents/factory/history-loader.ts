@@ -363,12 +363,15 @@ function assertImportableFactoryEvent(event: FactoryStoredEvent): void {
     throw new Error('Factory transcript message is invalid');
   }
   for (const part of message.content) {
+    const rawPart = part as unknown as Record<string, unknown>;
     if (
       !part
       || typeof part !== 'object'
       || Array.isArray(part)
       || typeof part.type !== 'string'
       || !part.type
+      || (part.type === 'text' && typeof rawPart.text !== 'string')
+      || (part.type === 'thinking' && typeof rawPart.thinking !== 'string')
     ) {
       throw new Error('Factory transcript message part is invalid');
     }
@@ -500,7 +503,9 @@ export async function loadFactoryChatMessages(
 ): Promise<ChatMessage[]> {
   try {
     const events = await readFactorySessionEvents(sessionPath, logger, options.throwOnError);
-    return loadFactoryChatMessagesFromEvents(events);
+    const messages = loadFactoryChatMessagesFromEvents(events);
+    if (!options.throwOnError) return messages;
+    return messages.filter((message) => message.type !== 'thinking' || message.content.length > 0);
   } catch (error) {
     if (options.throwOnError) throw error;
     logger.warn('Factory transcript loading failed.', {

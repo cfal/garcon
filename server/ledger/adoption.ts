@@ -158,7 +158,6 @@ export class TranscriptAdoptionService {
       'Transcript adoption source failed',
       true,
       { provider, phase },
-      { cause: error },
     );
   }
 }

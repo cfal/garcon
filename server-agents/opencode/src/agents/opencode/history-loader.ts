@@ -470,12 +470,19 @@ function convertImportableOpenCodeStoredMessages(
       throw new Error('OpenCode stored transcript message is invalid');
     }
     for (const part of message.parts) {
+      const rawPart = part as Record<string, unknown>;
       if (
         !part
         || typeof part !== 'object'
         || Array.isArray(part)
-        || typeof (part as Record<string, unknown>).type !== 'string'
-        || !(part as Record<string, unknown>).type
+        || typeof rawPart.type !== 'string'
+        || !rawPart.type
+        || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
+        || (
+          rawPart.type === 'reasoning'
+          && typeof rawPart.reasoning !== 'string'
+          && typeof rawPart.text !== 'string'
+        )
       ) {
         throw new Error('OpenCode stored transcript part is invalid');
       }

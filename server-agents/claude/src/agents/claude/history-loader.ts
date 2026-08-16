@@ -359,6 +359,17 @@ function assertImportableClaudeEntry(
   ) {
     throw new Error(`Claude transcript record ${lineNumber} has an invalid message`);
   }
+  if (!Array.isArray(message.content)) return;
+  for (const rawPart of message.content) {
+    if (!rawPart || typeof rawPart !== 'object' || Array.isArray(rawPart)) continue;
+    const part = rawPart as Record<string, unknown>;
+    if (
+      (part.type === 'text' && typeof part.text !== 'string')
+      || (part.type === 'thinking' && typeof part.thinking !== 'string')
+    ) {
+      throw new Error(`Claude transcript record ${lineNumber} has an invalid message part`);
+    }
+  }
 }
 
 // Reads a Claude JSONL file and returns ChatMessage[].
