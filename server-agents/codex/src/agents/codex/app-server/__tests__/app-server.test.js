@@ -4323,8 +4323,9 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
-  it('settles goal-turn waiters immediately when sessions terminate', async () => {
-    for (const termination of ['finish', 'abort', 'exit']) {
+  it.each(['finish', 'abort', 'exit'])(
+    'settles goal-turn waiters immediately when sessions terminate via %s',
+    async (termination) => {
       let setCalled;
       const ready = new Promise((resolve) => { setCalled = resolve; });
       const fake = new FakeClient({
@@ -4356,8 +4357,8 @@ describe('CodexAppServerRuntime', () => {
 
       expect(provider.isRunning('thread-1')).toBe(false);
       expect(emitted.some((message) => String(message.content).includes('timed out waiting'))).toBe(false);
-    }
-  });
+    },
+  );
 
   it('edits a paused goal while preserving its status and token budget', async () => {
     const existing = {
