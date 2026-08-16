@@ -1525,9 +1525,10 @@ describe('ConversationScrollController', () => {
 		vi.useFakeTimers();
 		await vi.advanceTimersByTimeAsync(1);
 		const compactToRecentMessages = vi.fn(() => true);
-		let state!: MutableConversationScrollState;
+		const observed: { state: MutableConversationScrollState | null } = { state: null };
 		const navigateToWindow = vi.fn(async () => {
-			state.hasLaterMessages = false;
+			if (!observed.state) throw new Error('Fixture is not ready.');
+			observed.state.hasLaterMessages = false;
 			return 'loaded' as const;
 		});
 		const fixture = controllerFixture({
@@ -1535,7 +1536,7 @@ describe('ConversationScrollController', () => {
 			state: { hasLaterMessages: true, compactToRecentMessages, navigateToWindow },
 		});
 		const { controller, viewport } = fixture;
-		state = fixture.state;
+		observed.state = fixture.state;
 		await controller.scrollToLatest();
 		expect(navigateToWindow).toHaveBeenCalledWith('chat-1', 'latest');
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
