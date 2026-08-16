@@ -11,6 +11,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import {
   runtimeRows,
+  type AgentRuntimeEvent,
   type AgentRuntimeExecution,
   type AgentRuntimePublisher,
 } from '../runtime-events.js';
@@ -144,7 +145,7 @@ describe('createAgentProducerAdapter', () => {
     expect(fixture.events[2]).toMatchObject({ decision: secondDecision });
   });
 
-  it('keeps uncorrelated permission facts typed instead of leaking them into rows', async () => {
+  it('[TLV5-PERM.09-ADAPTER-UNIT-01] drops an unnamed permission event with one content-free warning', async () => {
     const decision = permissionDecision('permission-1', 'incarnation-1');
     const fixture = createFixture(({ publish }) => {
       publish({
@@ -153,40 +154,27 @@ describe('createAgentProducerAdapter', () => {
         lifecycle: permissionRequest(
           'permission-1',
           'incarnation-1',
-          new BashToolUseMessage(TS, 'tool-1', 'pwd'),
+          new BashToolUseMessage(TS, 'tool-1', 'sensitive-command-must-not-be-logged'),
         ),
         decision,
-      });
-      publish({
-        type: 'permission',
-        runId: null,
-        lifecycle: permissionCancellation('permission-1', 'incarnation-1'),
-      });
+      } as unknown as AgentRuntimeEvent);
     });
 
     await fixture.adapter.execution.start(fixture.request);
 
-    const permissions = fixture.events.filter((event) => event.type === 'permission');
-    expect(fixture.events.map((event) => event.type)).toEqual(['session', 'permission', 'permission']);
-    expect(permissions[0]).toMatchObject({
-      lifecycle: {
-        kind: 'requested',
-        requestId: 'permission-1',
-        incarnation: 'incarnation-1',
+    expect(fixture.events.map((event) => event.type)).toEqual(['session']);
+    expect(fixture.warnings).toEqual([{
+      message: 'Dropped an unnamed provider permission event',
+      fields: {
+        chatId: 'chat-1',
+        eventType: 'permission',
+        reason: expect.any(String),
       },
-      decision,
-    });
-    expect(permissions[1]).toMatchObject({
-      lifecycle: {
-        kind: 'cancelled',
-        requestId: 'permission-1',
-        incarnation: 'incarnation-1',
-      },
-    });
-    const correlations = permissions.map((event) => (
-      event.type === 'permission' ? event.runId : null
-    ));
-    expect(correlations.every((runId) => typeof runId === 'string' && runId !== 'run-1')).toBeTrue();
+    }]);
+    expect(JSON.stringify(fixture.warnings)).not.toContain('permission-1');
+    expect(JSON.stringify(fixture.warnings)).not.toContain('sensitive-command-must-not-be-logged');
+    expect(JSON.stringify(fixture.events)).not.toContain('permission-1');
+    expect(JSON.stringify(fixture.events)).not.toContain('sensitive-command-must-not-be-logged');
   });
 
   it('[TLV5-L07.08-ADAPTER-UNIT-01] drops provider events for an unavailable sink without failing its event stream', async () => {
@@ -385,11 +373,11 @@ function createFixture(
       events.push(event);
     },
   };
-  const warnings: string[] = [];
+  const warnings: Array<{ message: string; fields: unknown }> = [];
   const logger = {
     debug() {},
     info() {},
-    warn: (message: string) => { warnings.push(message); },
+    warn: (message: string, fields?: unknown) => { warnings.push({ message, fields }); },
     error() {},
   } satisfies AgentLogger;
   const adapter = createAgentProducerAdapter(runtime, logger);

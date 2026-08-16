@@ -141,6 +141,77 @@ describe('AgentRuntimeRouter permission replies', () => {
     expect(exactRespond).not.toHaveBeenCalled();
   });
 
+  it('[TLV5-PERM.05-CORE-UNIT-02] routes a response only to the occurrence left live by a delayed terminal', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-delayed-terminal-'));
+    const store = new TranscriptLedgerStore(root, {
+      createViewId: () => 'view-1',
+      now: () => AT,
+    });
+    const ledger = new TranscriptLedgerService(store, {
+      now: () => AT,
+      serverInstanceId: 'server-1',
+    });
+    const legacyRequestId = 'legacy-public-id';
+    const firstOccurrence = '11111111-1111-4111-8111-111111111111';
+    const secondOccurrence = '22222222-2222-4222-8222-222222222222';
+    const firstRespond = mock(async () => undefined);
+    const secondRespond = mock(async () => undefined);
+    try {
+      const view = ledger.initializeChat('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      for (const [incarnation, command, respond] of [
+        [firstOccurrence, 'first', firstRespond],
+        [secondOccurrence, 'second', secondRespond],
+      ]) {
+        producer.sink.publish({
+          type: 'permission',
+          runId: 'run-1',
+          lifecycle: {
+            kind: 'requested',
+            requestId: legacyRequestId,
+            incarnation,
+            requestedTool: new BashToolUseMessage(AT, `tool-${command}`, command),
+            options: [],
+          },
+          decision: { requestId: legacyRequestId, incarnation, respond },
+        });
+      }
+      producer.sink.publish({
+        type: 'permission',
+        runId: 'run-1',
+        lifecycle: {
+          kind: 'cancelled',
+          requestId: legacyRequestId,
+          incarnation: firstOccurrence,
+          reason: 'delayed terminal',
+        },
+      });
+      const router = makeRouter({ ledger, adoption: { ensure: async () => view } });
+      const decision = { allow: true };
+
+      await router.resolvePermission(
+        'chat-1',
+        legacyRequestId,
+        decision,
+        permissionControl({ id: legacyRequestId, incarnation: secondOccurrence }),
+      );
+
+      expect(firstRespond).not.toHaveBeenCalled();
+      expect(secondRespond).toHaveBeenCalledTimes(1);
+      expect(secondRespond).toHaveBeenCalledWith(decision);
+      expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
+        'permission-requested',
+        'permission-requested',
+        'permission-cancelled',
+        'permission-resolved',
+      ]);
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('does not resolve a permission whose run ends while the provider response is pending', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-response-race-'));
     const store = new TranscriptLedgerStore(root, {

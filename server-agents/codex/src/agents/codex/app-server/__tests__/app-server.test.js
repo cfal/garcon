@@ -6645,6 +6645,51 @@ describe('CodexAppServerRuntime', () => {
     expect(permissionEvents(published.events)).toHaveLength(1);
   });
 
+  it('[TLV5-PERM.09-CODEX-UNIT-01] denies and logs an approval without a concrete turn route', async () => {
+    const nativePath = path.join(tmpDir, 'unowned-approval-thread.jsonl');
+    const logger = {
+      debug: mock(() => undefined),
+      info: mock(() => undefined),
+      warn: mock(() => undefined),
+      error: mock(() => undefined),
+    };
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake, logger });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+
+    fake.emit('serverRequest', {
+      id: 91,
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'missing-turn',
+        itemId: 'sensitive-item-id',
+        command: 'sensitive-command-must-not-be-logged',
+      },
+    });
+
+    expect(permissionEvents(published.events)).toEqual([]);
+    expect(fake.respond).toHaveBeenCalledWith(91, { decision: 'decline' });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0]).toEqual([
+      'Dropped an unowned Codex approval request',
+      {
+        threadId: 'thread-1',
+        nativeTurnId: 'missing-turn',
+        method: 'item/commandExecution/requestApproval',
+      },
+    ]);
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('sensitive-item-id');
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('sensitive-command-must-not-be-logged');
+  });
+
   it('cancels approvals for one native turn through its captured turn operation', async () => {
     const nativePath = path.join(tmpDir, 'approval-routing-thread.jsonl');
     let goal = null;

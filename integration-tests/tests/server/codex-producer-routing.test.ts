@@ -15,6 +15,7 @@ const FAKE_CODEX = fileURLToPath(new URL(
   import.meta.url,
 ));
 const SYSTEM_PATH = `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe('Codex producer routing', () => {
   test('persists a goal status response once and broadcasts it before the turn terminal', async () => {
@@ -159,7 +160,7 @@ describe('Codex producer routing', () => {
     });
   }, 30_000);
 
-  test('[TLV5-PERM.04-CODEX-SCRIPTED-01] keeps reused native approval ids bound to their exact occurrences', async () => {
+  test('[TLV5-PERM.01-CODEX-SCRIPTED-01] [TLV5-PERM.04-CODEX-SCRIPTED-01] keeps reused native approval ids bound to their exact occurrences', async () => {
     let controlDirectory = '';
     let turnReleasePath = '';
     await withIntegrationFixture('codex-reused-approval-routing', async (fixture) => {
@@ -221,7 +222,9 @@ describe('Codex producer routing', () => {
       if (second.message.type !== 'permission-request') {
         throw new Error('The second reused Codex approval was not published.');
       }
-      expect(second.message.permissionRequestId).not.toBe(first.message.permissionRequestId);
+      expect(first.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(second.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(first.incarnation).not.toBe(String(nativeRequestId));
       expect(second.incarnation).not.toBe(first.incarnation);
 
       await expect(fixture.client.sendPermissionDecision({

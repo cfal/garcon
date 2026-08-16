@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeRuntime } from '../opencode.js';
 
+const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function createEventStream() {
   const events = [{
     payload: { id: 'event-connected', type: 'server.connected', properties: {} },
@@ -258,6 +260,53 @@ describe('OpenCode operation routing', () => {
     )));
 
     expect(events).toEqual([]);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('[TLV5-PERM.09-OPENCODE-UNIT-01] logs and drops a permission without an operation identity', async () => {
+    const warnings = [];
+    const { eventStream, runtime } = createRuntime(['session-1'], {
+      logger: {
+        debug() {},
+        info() {},
+        warn(...args) { warnings.push(args); },
+        error() {},
+      },
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+
+    eventStream.push({
+      id: 'unowned-permission-event',
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'session-1',
+        requestID: 'sensitive-native-request-id',
+        permission: 'bash',
+        metadata: { command: 'sensitive-command-must-not-be-logged' },
+        tool: { messageID: 'unowned-provider-message' },
+      },
+    });
+    await waitFor(() => warnings.length === 1);
+
+    expect(events).toEqual([]);
+    expect(warnings).toEqual([[
+      'Ignoring an OpenCode event without an operation identity',
+      expect.objectContaining({
+        eventId: 'unowned-permission-event',
+        eventType: 'permission.asked',
+        sessionId: 'session-1',
+      }),
+    ]]);
+    expect(JSON.stringify(warnings)).not.toContain('sensitive-native-request-id');
+    expect(JSON.stringify(warnings)).not.toContain('sensitive-command-must-not-be-logged');
     eventStream.close();
     await runtime.shutdown();
   });
@@ -580,7 +629,7 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
-  it('[TLV5-PERM.04-OPENCODE-UNIT-01] keeps reused provider permission ids bound to separate decision capabilities', async () => {
+  it('[TLV5-PERM.01-OPENCODE-UNIT-01] [TLV5-PERM.04-OPENCODE-UNIT-01] keeps reused provider permission ids bound to separate decision capabilities', async () => {
     const { eventStream, permissionReply, promptAsync, runtime } = createRuntime(['session-1']);
     const events = [];
     await runtime.startSession({
@@ -618,14 +667,16 @@ describe('OpenCode operation routing', () => {
     request('event-04');
     await waitFor(() => events.some((event) => event.type === 'permission'));
     const first = events.find((event) => event.type === 'permission');
-    await first.decision.respond({ allow: true });
 
     request('event-05');
     await waitFor(() => events.filter((event) => event.type === 'permission').length === 2);
     const permissions = events.filter((event) => event.type === 'permission');
     const second = permissions[1];
-    expect(second.lifecycle.requestId).not.toBe(first.lifecycle.requestId);
+    expect(first.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(second.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(first.lifecycle.incarnation).not.toBe('permission-reused');
     expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+    await first.decision.respond({ allow: true });
     await expect(first.decision.respond({ allow: false }))
       .rejects.toThrow('no longer pending');
     await second.decision.respond({ allow: false });

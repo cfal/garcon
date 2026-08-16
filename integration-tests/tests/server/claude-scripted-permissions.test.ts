@@ -15,6 +15,8 @@ import {
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
 
+const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 describe('scripted Claude permissions', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;
 
@@ -140,7 +142,7 @@ describe('scripted Claude permissions', () => {
     });
   }, 60_000);
 
-  test('keeps permission history inert after a server restart', async () => {
+  test('[TLV5-PERM.07-CLAUDE-SCRIPTED-01] keeps permission history inert after a server restart', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const prompt = marker('STALE_PERMISSION_PROMPT');
@@ -175,6 +177,7 @@ describe('scripted Claude permissions', () => {
       if (permission.message.type !== 'permission-request') {
         throw new Error('Scripted stale permission request was not found.');
       }
+      expect(permission.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
       const beforeRestart = await fixture.client.getChatSnapshot(chatId, 0);
       const staleControl = {
         serverInstanceId: beforeRestart.transientFeed.serverInstanceId,

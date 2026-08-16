@@ -16,6 +16,7 @@ const TEST_CURSOR_CONFIG = {
   binary: () => 'cursor-agent',
   apiKey: () => null,
 };
+const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function deferred() {
   let resolve;
@@ -721,7 +722,7 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('[TLV5-PERM.04-CURSOR-UNIT-01] keeps reused ACP request ids bound to separate permission capabilities', async () => {
+  it('[TLV5-PERM.01-CURSOR-UNIT-01] [TLV5-PERM.04-CURSOR-UNIT-01] keeps reused ACP request ids bound to separate permission capabilities', async () => {
     const { acp, runtime } = createRuntimeHarness();
     const operation = collectOperation('run-1');
     await runtime.startSession(startRequest({ operation: operation.operation }));
@@ -742,15 +743,17 @@ describe('Cursor ACP runtime', () => {
 
     request();
     const first = await operation.waitForEvent((event) => event.type === 'permission');
-    await first.decision.respond({ allow: true });
     request();
     const second = await operation.waitForEvent((event) => (
       event.type === 'permission'
       && event.lifecycle.incarnation !== first.lifecycle.incarnation
     ));
 
-    expect(second.lifecycle.requestId).toBe(first.lifecycle.requestId);
+    expect(first.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(second.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(first.lifecycle.incarnation).not.toBe('permission-reused');
     expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+    await first.decision.respond({ allow: true });
     await expect(first.decision.respond({ allow: false }))
       .rejects.toThrow('no longer pending');
     await second.decision.respond({ allow: false });

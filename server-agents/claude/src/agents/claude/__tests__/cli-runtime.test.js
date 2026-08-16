@@ -3,6 +3,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { ClaudeCliRuntime } from '../claude-cli.js';
 
 const encoder = new TextEncoder();
+const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function createLogger() {
   return {
@@ -1011,6 +1012,58 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('[TLV5-PERM.09-CLAUDE-UNIT-01] rejects and logs a permission without an active operation', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const logger = createLogger();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime(logger);
+      const published = collectOperation('run-1');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
+      await enqueueResult(fake);
+      await start;
+      const writesBeforePermission = fake.proc.stdin.write.mock.calls.length;
+
+      fake.stdout.enqueue(encoder.encode(`${JSON.stringify({
+        type: 'control_request',
+        request_id: 'sensitive-native-request-id',
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'Bash',
+          input: { command: 'sensitive-command-must-not-be-logged' },
+          tool_use_id: 'sensitive-tool-id',
+        },
+      })}\n`));
+      for (
+        let attempt = 0;
+        attempt < 100 && fake.proc.stdin.write.mock.calls.length === writesBeforePermission;
+        attempt += 1
+      ) {
+        await Promise.resolve();
+      }
+
+      expect(permissionEvents(published.events)).toEqual([]);
+      const warnings = logger.warn.mock.calls.filter(([message]) => (
+        message.includes('permission')
+      ));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0][1]).toMatchObject({
+        chatId: 'chat-1',
+        eventType: 'permission',
+      });
+      expect(JSON.stringify(warnings)).not.toContain('sensitive-native-request-id');
+      expect(JSON.stringify(warnings)).not.toContain('sensitive-tool-id');
+      expect(JSON.stringify(warnings)).not.toContain('sensitive-command-must-not-be-logged');
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('fails closed when Claude becomes idle after input start without a result', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
@@ -1432,7 +1485,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
-  it('[TLV5-PERM.04-CLAUDE-UNIT-01] keeps reused CLI permission ids bound to separate decision capabilities', async () => {
+  it('[TLV5-PERM.01-CLAUDE-UNIT-01] [TLV5-PERM.04-CLAUDE-UNIT-01] keeps reused CLI permission ids bound to separate decision capabilities', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
     Bun.spawn = mock(() => fake.proc);
@@ -1461,7 +1514,6 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       }
       const first = events.find((event) => event.type === 'permission');
       expect(first).toBeDefined();
-      await first.decision.respond({ allow: true, alwaysAllow: false });
 
       request();
       for (let attempt = 0; attempt < 100 && events.filter(
@@ -1472,8 +1524,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       const permissions = events.filter((event) => event.type === 'permission');
       const second = permissions[1];
       expect(second).toBeDefined();
-      expect(second.lifecycle.requestId).not.toBe(first.lifecycle.requestId);
+      expect(first.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(second.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(first.lifecycle.incarnation).not.toBe('cli-permission-reused');
       expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+      await first.decision.respond({ allow: true, alwaysAllow: false });
       await expect(first.decision.respond({ allow: false }))
         .rejects.toThrow('no longer pending');
       await second.decision.respond({ allow: false });
