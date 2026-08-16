@@ -2,6 +2,7 @@ import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type {
+  ChatMessagesMessage,
   ChatSessionStoppedMessage,
   ServerWsMessage,
 } from '../../../common/ws-events.js';
@@ -198,6 +199,16 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       );
       await waitForAbortedAssistant(fixture, chatId);
       await waitForProcessesExit(processIdentities);
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'bash-tool-use'
+            && entry.message.command === command),
+        'OpenCode aborted tool publication',
+        { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
       // Both the command shell and its active child died before the completion marker.
       await expect(access(join(fixture.dirs.project, 'stop-completed.marker')))
         .rejects.toMatchObject({ code: 'ENOENT' });
