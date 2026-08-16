@@ -4,7 +4,10 @@ import type { BrowserContext, Page } from 'playwright';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type { LedgerRowDraft } from '../../../server/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
-import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import {
+  type ChromiumFixture,
+  withChromiumFixture,
+} from '../../support/chromium-fixture.js';
 
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const MESSAGE_SELECTOR = '[data-chat-message-type]';
@@ -19,10 +22,13 @@ const EXPECTED_RECONNECT_BROWSER_ERRORS = [
 interface ReplayGate {
   armed: boolean;
   events: unknown[];
+  forcedStaleView: boolean;
   held: boolean;
+  matchingRequests: Record<string, unknown>[];
+  mode: 'force-stale-first' | 'hold-continuation' | null;
   openCount: number;
   release: (() => void) | null;
-  subscribeCount: number;
+  targetChatId: string | null;
 }
 
 interface DetachedReplayAnchor {
@@ -57,10 +63,13 @@ async function installReplayGate(context: BrowserContext): Promise<void> {
     const gate: ReplayGate = {
       armed: false,
       events: [],
+      forcedStaleView: false,
       held: false,
+      matchingRequests: [],
+      mode: null,
       openCount: 0,
       release: null,
-      subscribeCount: 0,
+      targetChatId: null,
     };
     scope.__garconReplayGate = gate;
     const NativeWebSocket = globalThis.WebSocket;
@@ -92,9 +101,21 @@ async function installReplayGate(context: BrowserContext): Promise<void> {
               request = null;
             }
           }
-          if (gate.armed && request?.type === 'chat-subscribe') {
-            gate.subscribeCount += 1;
-            if (gate.subscribeCount === 2) {
+          if (
+            gate.armed
+            && request?.type === 'chat-subscribe'
+            && request.chatId === gate.targetChatId
+          ) {
+            gate.matchingRequests.push(request);
+            if (gate.mode === 'force-stale-first' && gate.matchingRequests.length === 1) {
+              gate.forcedStaleView = true;
+              send(JSON.stringify({
+                ...request,
+                transcriptViewId: `${String(request.transcriptViewId)}:forced-stale`,
+              }));
+              return;
+            }
+            if (gate.mode === 'hold-continuation' && gate.matchingRequests.length === 2) {
               gate.held = true;
               gate.release = () => {
                 gate.release = null;
@@ -115,26 +136,68 @@ async function replayGateOpenCount(page: Page): Promise<number> {
   return page.evaluate(() => (globalThis as ReplayGateScope).__garconReplayGate?.openCount ?? 0);
 }
 
-async function armReplayGate(page: Page): Promise<void> {
-  await page.evaluate(() => {
+async function armReplayGate(
+  page: Page,
+  options: {
+    chatId: string;
+    mode: 'force-stale-first' | 'hold-continuation';
+  },
+): Promise<void> {
+  await page.evaluate(({ chatId, mode }) => {
     const gate = (globalThis as ReplayGateScope).__garconReplayGate;
     if (!gate) throw new Error('Reconnect replay gate is unavailable.');
     gate.armed = true;
     gate.events = [];
+    gate.forcedStaleView = false;
     gate.held = false;
+    gate.matchingRequests = [];
+    gate.mode = mode;
     gate.release = null;
-    gate.subscribeCount = 0;
-  });
+    gate.targetChatId = chatId;
+  }, options);
 }
 
-async function waitForHeldContinuation(page: Page, previousConnections: number): Promise<void> {
+async function waitForReplayGate(
+  page: Page,
+  previousConnections: number,
+  predicate: 'forcedStaleView' | 'held',
+): Promise<void> {
   await page.waitForFunction(
     (previous) => ((globalThis as ReplayGateScope).__garconReplayGate?.openCount ?? 0) > previous,
     previousConnections,
   );
-  await page.waitForFunction(
-    () => (globalThis as ReplayGateScope).__garconReplayGate?.held === true,
-  );
+  try {
+    await page.waitForFunction(
+      (field) => (globalThis as ReplayGateScope).__garconReplayGate?.[field] === true,
+      predicate,
+    );
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => {
+      const gate = (globalThis as ReplayGateScope).__garconReplayGate;
+      return gate
+        ? {
+            forcedStaleView: gate.forcedStaleView,
+            held: gate.held,
+            matchingRequests: gate.matchingRequests,
+            mode: gate.mode,
+            openCount: gate.openCount,
+            targetChatId: gate.targetChatId,
+          }
+        : null;
+    });
+    throw new Error(
+      `Reconnect replay gate did not reach ${predicate}: ${JSON.stringify(diagnostic)}`,
+      { cause: error },
+    );
+  }
+}
+
+async function waitForHeldContinuation(page: Page, previousConnections: number): Promise<void> {
+  await waitForReplayGate(page, previousConnections, 'held');
+}
+
+async function waitForForcedStaleView(page: Page, previousConnections: number): Promise<void> {
+  await waitForReplayGate(page, previousConnections, 'forcedStaleView');
 }
 
 async function waitForLiveEvent(page: Page, content: string): Promise<void> {
@@ -188,6 +251,29 @@ function appendLedgerRows(
   } finally {
     store.close();
   }
+}
+
+async function createLongDirectTranscript(
+  fixture: ChromiumFixture,
+  promptPrefix: string,
+): Promise<string> {
+  const chatId = fixture.integration.newChatId();
+  const initial = await fixture.integration.client.startDirectChat({
+    chatId,
+    content: `${promptPrefix}-0`,
+    projectPath: fixture.integration.dirs.project,
+    agent: fixture.integration.directAgents.openAi,
+  });
+  await fixture.integration.client.waitForTurnTerminal(chatId, initial.turnId);
+  for (let index = 1; index < 75; index += 1) {
+    const turn = await fixture.integration.client.runDirectChat({
+      chatId,
+      content: `${promptPrefix}-${index}`,
+      agent: fixture.integration.directAgents.openAi,
+    });
+    await fixture.integration.client.waitForTurnTerminal(chatId, turn.turnId);
+  }
+  return chatId;
 }
 
 function assertNoUnexpectedReconnectBrowserErrors(errors: readonly string[]): void {
@@ -248,6 +334,17 @@ async function revealEarlierRows(page: Page): Promise<{
     (sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0),
   );
   return { expandedModelCount, initialModelCount };
+}
+
+async function positionAtLoadedStart(page: Page): Promise<void> {
+  await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+    feed.scrollTop = 1;
+    feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+    for (let index = 0; index < 6; index += 1) await frame();
+  });
 }
 
 async function captureDetachedAnchor(page: Page): Promise<DetachedReplayAnchor> {
@@ -321,6 +418,26 @@ async function finishDetachedReplaySampler(page: Page): Promise<DetachedReplayFr
   );
 }
 
+function expectStableDetachedFrames(
+  frames: readonly DetachedReplayFrame[],
+  anchor: DetachedReplayAnchor,
+): void {
+  const diagnostic = JSON.stringify({ anchor, frames }, null, 2);
+  expect(frames.length, diagnostic).toBeGreaterThan(2);
+  expect(frames.filter((frame) => (
+    !frame.connected
+    || !frame.sameNode
+    || frame.offset === null
+    || frame.rowId !== anchor.rowId
+    || frame.text !== anchor.text
+  )), diagnostic).toEqual([]);
+  expect(Math.max(...frames.map((frame) => (
+    frame.offset === null
+      ? Number.POSITIVE_INFINITY
+      : Math.abs(frame.offset - anchor.offset)
+  ))), diagnostic).toBeLessThanOrEqual(1);
+}
+
 describe('Chromium reconnect transcript replay', () => {
   test('finishes a fixed replay before applying live rows without a snapshot fallback', async () => {
     await withChromiumFixture('reconnect-live-replay-order', async (fixture, markPhase) => {
@@ -355,7 +472,7 @@ describe('Chromium reconnect transcript replay', () => {
         if (url.pathname === '/api/v1/chats/messages') transcriptReads.push(url.toString());
       });
       const connectionCount = await replayGateOpenCount(fixture.page);
-      await armReplayGate(fixture.page);
+      await armReplayGate(fixture.page, { chatId, mode: 'hold-continuation' });
 
       const replayMarker = 'reconnect-replay-marker-450';
       markPhase('restarting with a multi-page missed range');
@@ -430,22 +547,7 @@ describe('Chromium reconnect transcript replay', () => {
       await fixture.page.setViewportSize({ width: 390, height: 700 });
 
       markPhase('creating history beyond the bounded initial window');
-      const chatId = fixture.integration.newChatId();
-      const initial = await fixture.integration.client.startDirectChat({
-        chatId,
-        content: 'detached-reconnect-initial',
-        projectPath: fixture.integration.dirs.project,
-        agent: fixture.integration.directAgents.openAi,
-      });
-      await fixture.integration.client.waitForTurnTerminal(chatId, initial.turnId);
-      for (let index = 1; index < 75; index += 1) {
-        const turn = await fixture.integration.client.runDirectChat({
-          chatId,
-          content: `detached-reconnect-history-${index}`,
-          agent: fixture.integration.directAgents.openAi,
-        });
-        await fixture.integration.client.waitForTurnTerminal(chatId, turn.turnId);
-      }
+      const chatId = await createLongDirectTranscript(fixture, 'detached-reconnect-history');
 
       markPhase('expanding and detaching the visible interval');
       await fixture.page.goto(
@@ -461,7 +563,7 @@ describe('Chromium reconnect transcript replay', () => {
       await startDetachedReplaySampler(fixture.page, anchor);
 
       const connectionCount = await replayGateOpenCount(fixture.page);
-      await armReplayGate(fixture.page);
+      await armReplayGate(fixture.page, { chatId, mode: 'hold-continuation' });
       const replayMarker = 'detached-reconnect-final-marker';
       markPhase('replaying a multi-page missed range while detached');
       await fixture.integration.crashAndRestartGarcon({
@@ -485,19 +587,7 @@ describe('Chromium reconnect transcript replay', () => {
       await fixture.page.locator(`${FEED_SELECTOR}[aria-busy="false"]`).waitFor();
 
       const frames = await finishDetachedReplaySampler(fixture.page);
-      expect(frames.length).toBeGreaterThan(2);
-      expect(frames.filter((frame) => (
-        !frame.connected
-        || !frame.sameNode
-        || frame.offset === null
-        || frame.rowId !== anchor.rowId
-        || frame.text !== anchor.text
-      ))).toEqual([]);
-      expect(Math.max(...frames.map((frame) => (
-        frame.offset === null
-          ? Number.POSITIVE_INFINITY
-          : Math.abs(frame.offset - anchor.offset)
-      )))).toBeLessThanOrEqual(1);
+      expectStableDetachedFrames(frames, anchor);
 
       const retainedAnchor = await captureDetachedAnchor(fixture.page);
       expect(retainedAnchor).toEqual(expect.objectContaining({
@@ -527,6 +617,68 @@ describe('Chromium reconnect transcript replay', () => {
         type: 'assistant-message',
         content: replayMarker,
       });
+      assertNoUnexpectedReconnectBrowserErrors(fixture.browserErrors);
+    });
+  }, 180_000);
+
+  test('keeps an expanded detached prefix through same-view snapshot fallback', async () => {
+    await withChromiumFixture('reconnect-detached-snapshot-fallback', async (fixture, markPhase) => {
+      await installReplayGate(fixture.context);
+      await fixture.page.setViewportSize({ width: 1280, height: 900 });
+
+      markPhase('creating and expanding the transcript');
+      const chatId = await createLongDirectTranscript(fixture, 'snapshot-fallback-history');
+      await fixture.page.goto(
+        `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+      );
+      await fixture.page.locator(FEED_SELECTOR).waitFor();
+      await fixture.page.waitForFunction(
+        () => ((globalThis as ReplayGateScope).__garconReplayGate?.openCount ?? 0) > 0,
+      );
+      const { expandedModelCount, initialModelCount } = await revealEarlierRows(fixture.page);
+      expect(expandedModelCount).toBeGreaterThan(initialModelCount);
+      await positionAtLoadedStart(fixture.page);
+
+      const newestPage = await fixture.integration.client.getMessages(chatId, { limit: 50 });
+      const anchor = await captureDetachedAnchor(fixture.page);
+      const anchorOrdinal = Number(anchor.rowId.slice(anchor.rowId.lastIndexOf(':') + 1));
+      expect(anchorOrdinal).toBeLessThan(newestPage.pageOldestOrdinal);
+      await startDetachedReplaySampler(fixture.page, anchor);
+
+      const snapshotRequest = fixture.page.waitForRequest((request) => {
+        if (request.method() !== 'GET') return false;
+        const url = new URL(request.url());
+        return url.pathname === '/api/v1/chats/messages'
+          && url.searchParams.get('chatId') === chatId
+          && !url.searchParams.has('beforeOrdinal');
+      });
+      const connectionCount = await replayGateOpenCount(fixture.page);
+      await armReplayGate(fixture.page, { chatId, mode: 'force-stale-first' });
+
+      markPhase('forcing reconnect replay into a same-view snapshot fallback');
+      await fixture.integration.crashAndRestartGarcon({ reusePort: true });
+      await waitForForcedStaleView(fixture.page, connectionCount);
+      await snapshotRequest;
+      await fixture.page.locator(`${FEED_SELECTOR}[aria-busy="false"]`).waitFor();
+      await fixture.page.evaluate(async () => {
+        for (let index = 0; index < 4; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      });
+
+      const frames = await finishDetachedReplaySampler(fixture.page);
+      expectStableDetachedFrames(frames, anchor);
+      const retainedModelCount = await fixture.page.locator(SIZER_SELECTOR).evaluate(
+        (sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0),
+      );
+      expect(retainedModelCount).toBe(expandedModelCount);
+      const retainedAnchor = await captureDetachedAnchor(fixture.page);
+      expect(retainedAnchor).toEqual(expect.objectContaining({
+        key: anchor.key,
+        rowId: anchor.rowId,
+        text: anchor.text,
+      }));
+      expect(Math.abs(retainedAnchor.offset - anchor.offset)).toBeLessThanOrEqual(1);
       assertNoUnexpectedReconnectBrowserErrors(fixture.browserErrors);
     });
   }, 180_000);
