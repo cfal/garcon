@@ -1,10 +1,8 @@
 import crypto from 'node:crypto';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
-import {
-  AgentIntegrationError,
-  orderedTranscriptDigest,
-} from '@garcon/server-agent-interface';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { orderedTranscriptDigest } from '@garcon/server-agent-common/forking/transcript-digest';
 import type {
   ForkTranscriptEntryContext,
   ForkTranscriptTransformInput,

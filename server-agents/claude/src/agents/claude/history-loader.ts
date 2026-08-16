@@ -18,7 +18,6 @@ import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/sha
 import { attachNativeMessageSource, getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import { attachCompactionRevisionSource } from '@garcon/server-agent-common/lib/transcript-revision';
 import { deterministicTranscriptTimestamp } from '@garcon/server-agent-common/shared/transcript-timestamp';
 import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
 import { claudeSteeringInputsFromNativeContent } from './user-input.js';
@@ -197,13 +196,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
   // pair it FIFO with the summaries rather than relying on boundary-before-summary order.
   const compactions = entries
     .filter((entry) => entry.type === 'system' && entry.subtype === 'compact_boundary')
-    .map((entry) => ({
-      info: parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata),
-      source: {
-        ...getNativeMessageSource(entry),
-        pairingTimestamp: timestampMs(entry.timestamp),
-      },
-    }));
+    .map((entry) => parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata));
   let compactionIndex = 0;
 
   for (const entry of entries) {
@@ -233,8 +226,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
     if (entry.isCompactSummary) {
       const summaryText = getMessageText(message.content);
       if (summaryText) {
-        const compaction = compactions[compactionIndex++];
-        const info = compaction?.info ?? { trigger: 'manual' as const };
+        const info = compactions[compactionIndex++] ?? { trigger: 'manual' as const };
         const compactionMessage = new CompactionMessage(
           ts,
           info.trigger,
@@ -242,10 +234,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
           info.preTokens,
           info.postTokens,
         );
-        pushMessage(
-          entry,
-          attachCompactionRevisionSource(compactionMessage, compaction?.source),
-        );
+        pushMessage(entry, compactionMessage);
       }
       continue;
     }
