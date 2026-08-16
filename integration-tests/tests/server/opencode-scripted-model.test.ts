@@ -260,7 +260,7 @@ describeOnLinux('OpenCode against a scripted model', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  test('accumulates transcript and preview across a second turn', async () => {
+  test('[TLV5-L07.03-OPENCODE-SCRIPTED-01] accumulates transcript and preview across a second turn', async () => {
     const testEnvironment = requireEnvironment();
     const firstPrompt = marker('RESUME_FIRST_PROMPT');
     const firstReply = marker('RESUME_FIRST_REPLY');

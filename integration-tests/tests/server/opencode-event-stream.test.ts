@@ -98,7 +98,7 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  test('fails an active turn before reconnect and ignores late events from the retired turn', async () => {
+  test('[TLV5-L07.08-OPENCODE-SCRIPTED-01] fails an active turn before reconnect and ignores late events from the retired turn', async () => {
     const testEnvironment = requireEnvironment();
     const heldReply = marker('RESET_HELD_REPLY');
     const successorReply = marker('RESET_SUCCESSOR_REPLY');

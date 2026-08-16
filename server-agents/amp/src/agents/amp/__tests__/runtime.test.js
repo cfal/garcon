@@ -234,7 +234,7 @@ describe('AmpCliRuntime lifecycle', () => {
     }]);
   });
 
-  it('retires an established source only after a fresh session starts successfully', async () => {
+  it('[TLV5-L07.07-AMP-UNIT-01] retires an established source only after a fresh session starts successfully', async () => {
     const provider = new AmpCliRuntime();
     const firstThreadId = 'T-13131313-1313-1313-1313-131313131313';
     const failedThreadId = 'T-14141414-1414-1414-1414-141414141414';
@@ -412,7 +412,7 @@ describe('AmpCliRuntime lifecycle', () => {
     expect(messages.mock.calls[0][1][0].content).toBe('resumed output');
   });
 
-  it('routes trailing output from a prior process through its original operation', async () => {
+  it('[TLV5-L07.06-AMP-UNIT-01] routes trailing output from a prior process through its original operation', async () => {
     const provider = new AmpCliRuntime();
     const messages = mock();
     provider.onMessages(messages);
@@ -515,7 +515,7 @@ describe('AmpCliRuntime lifecycle', () => {
     ]);
   });
 
-  it('contains a closed prior publisher without disturbing the current turn', async () => {
+  it('[TLV5-L07.08-AMP-UNIT-01] contains a closed prior publisher without disturbing the current turn', async () => {
     const warnings = [];
     let resolveWarning;
     const warningObserved = new Promise((resolve) => { resolveWarning = resolve; });

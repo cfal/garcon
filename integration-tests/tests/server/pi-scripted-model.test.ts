@@ -174,7 +174,7 @@ describe('Pi against a scripted model', () => {
     }, withScriptedPi());
   }, 120_000);
 
-  test('accumulates transcript and preview across a second turn on the same session', async () => {
+  test('[TLV5-L07.03-PI-SCRIPTED-01] accumulates transcript and preview across a second turn on the same session', async () => {
     const testEnvironment = requireEnvironment();
     const firstPrompt = marker('RESUME_FIRST_PROMPT');
     const firstReply = marker('RESUME_FIRST_REPLY');

@@ -159,7 +159,7 @@ describe('Codex producer routing', () => {
     });
   }, 30_000);
 
-  test('keeps reused native approval ids bound to their exact occurrences', async () => {
+  test('[TLV5-PERM.04-CODEX-SCRIPTED-01] keeps reused native approval ids bound to their exact occurrences', async () => {
     let controlDirectory = '';
     let turnReleasePath = '';
     await withIntegrationFixture('codex-reused-approval-routing', async (fixture) => {
@@ -308,7 +308,7 @@ describe('Codex producer routing', () => {
     });
   }, 30_000);
 
-  test('drops content emitted by the old native client after transcript replacement', async () => {
+  test('[TLV5-L07.03-CODEX-SCRIPTED-01] drops content emitted by the old native client after transcript replacement', async () => {
     let controlDirectory = '';
     let turnReleasePath = '';
     await withIntegrationFixture('codex-stale-content-routing', async (fixture) => {

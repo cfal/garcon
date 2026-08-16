@@ -145,7 +145,7 @@ describe('ClaudeExecution', () => {
     }
   });
 
-  it('keeps a delayed failed start on the publisher that created it', async () => {
+  it('[TLV5-L07.07-CLAUDE-UNIT-01] keeps a delayed failed start on the publisher that created it', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-agent-routing-'));
     try {
       let rejectFirst;
@@ -184,7 +184,7 @@ describe('ClaudeExecution', () => {
     }
   });
 
-  it('does not infer a publisher for an unnamed runtime observation', async () => {
+  it('[TLV5-L07.05-CLAUDE-UNIT-01] does not infer a publisher for an unnamed runtime observation', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-agent-unnamed-'));
     try {
       const claude = createClaudeStub(new Error('unused'));

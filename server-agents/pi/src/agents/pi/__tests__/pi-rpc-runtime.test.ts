@@ -730,7 +730,7 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('publishes sequential turns through the concrete operation that started each turn', async () => {
+  it('[TLV5-L07.03-PI-UNIT-01] publishes sequential turns through the concrete operation that started each turn', async () => {
     const runtime = createRuntime();
     const first = collectOperation('run-a');
     const started = await runtime.startSession(baseStartRequest({ operation: first.operation }));
@@ -779,7 +779,7 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('keeps an active turn route when another chat collides on the same native session', async () => {
+  it('[TLV5-L07.04-PI-UNIT-01] keeps an active turn route when another chat collides on the same native session', async () => {
     const runtime = createRuntime();
     const first = collectOperation('run-a');
     const started = await runtime.startSession(baseStartRequest({
@@ -812,7 +812,7 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('logs and drops a message emitted without an active turn', async () => {
+  it('[TLV5-L07.05-PI-UNIT-01] logs and drops a message emitted without an active turn', async () => {
     const warnings: Array<{ message: string; context: unknown }> = [];
     const runtime = createRuntime({
       logger: {
@@ -867,7 +867,7 @@ describe('PiRpcRuntime', () => {
     expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
   });
 
-  it('contains a closed publisher and keeps the native session reusable', async () => {
+  it('[TLV5-L07.08-PI-UNIT-01] contains a closed publisher and keeps the native session reusable', async () => {
     const warnings: Array<{ message: string; context: Record<string, unknown> }> = [];
     const runtime = createRuntime({
       logger: {

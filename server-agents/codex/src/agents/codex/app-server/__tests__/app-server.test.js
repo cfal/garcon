@@ -6722,7 +6722,7 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.captureSteerTarget('thread-1')).toBeTruthy();
   });
 
-  it('retains named turn routes through terminal publication until source retirement', async () => {
+  it('[TLV5-L07.06-CODEX-UNIT-01] retains named turn routes through terminal publication until source retirement', async () => {
     const nativePath = path.join(tmpDir, 'post-terminal-route.jsonl');
     const sourceClosed = createDeferred();
     const fake = new FakeClient({
@@ -6776,7 +6776,7 @@ describe('CodexAppServerRuntime', () => {
     expect(emissions.some(({ message }) => message.content === 'after retirement')).toBe(false);
   });
 
-  it('keeps identical native turn ids isolated by client and thread', async () => {
+  it('[TLV5-L07.04-CODEX-UNIT-01] keeps identical native turn ids isolated by client and thread', async () => {
     const nativePaths = [
       path.join(tmpDir, 'shared-turn-a.jsonl'),
       path.join(tmpDir, 'shared-turn-b.jsonl'),
@@ -6890,7 +6890,7 @@ describe('CodexAppServerRuntime', () => {
     expect(statusReply?.metadata).toMatchObject({ turnId: 'run-b' });
   });
 
-  it('publishes compaction through the operation that requested it', async () => {
+  it('[TLV5-L07.09-CODEX-UNIT-01] publishes compaction through the operation that requested it', async () => {
     const fake = new FakeClient();
     const provider = createRuntime({ createClient: () => fake });
     const emissions = [];

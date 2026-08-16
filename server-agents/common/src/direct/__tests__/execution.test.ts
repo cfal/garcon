@@ -112,7 +112,7 @@ describe('DirectExecution', () => {
     }));
   });
 
-  test('keeps each concrete request bound to the publisher that created it', async () => {
+	test('[TLV5-L07.03-DIRECT-UNIT-01] keeps each concrete request bound to the publisher that created it', async () => {
     const operations: AgentRuntimeOperation[] = [];
     const runtime = {
       startSession: mock(async (input: { operation: AgentRuntimeOperation }) => {
@@ -142,7 +142,7 @@ describe('DirectExecution', () => {
     expect(replacementEvents).toEqual([]);
   });
 
-  test('does not route an unnamed runtime emission through a current request', async () => {
+	test('[TLV5-L07.05-DIRECT-UNIT-01] does not route an unnamed runtime emission through a current request', async () => {
     const emitted: AgentRuntimeEvent[] = [];
     const runtime = new AgentEventEmitterRuntime() as AgentEventEmitterRuntime & {
       startSession: () => Promise<{ agentSessionId: string; nativePath: string }>;

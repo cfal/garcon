@@ -177,7 +177,7 @@ async function waitFor(predicate) {
 }
 
 describe('OpenCode operation routing', () => {
-  it('preserves an established operation when a replacement start fails', async () => {
+  it('[TLV5-L07.07-OPENCODE-UNIT-01] preserves an established operation when a replacement start fails', async () => {
     const { create, eventStream, promptAsync, runtime } = createRuntime(['session-1']);
     const establishedEvents = [];
     const replacementEvents = [];
@@ -226,7 +226,7 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
-  it('logs and drops output without an operation identity', async () => {
+  it('[TLV5-L07.05-OPENCODE-UNIT-01] logs and drops output without an operation identity', async () => {
     const diagnostics = [];
     const { eventStream, runtime } = createRuntime(['session-1'], {
       logger: {
@@ -267,7 +267,7 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
-  it('publishes late named rows and permissions through the operation that produced them', async () => {
+  it('[TLV5-L07.03-OPENCODE-UNIT-01] publishes late named rows and permissions through the operation that produced them', async () => {
     const { eventStream, permissionReply, promptAsync, runtime } = createRuntime(['session-1']);
     const firstEvents = [];
     const secondEvents = [];
@@ -580,7 +580,7 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
-  it('keeps reused provider permission ids bound to separate decision capabilities', async () => {
+  it('[TLV5-PERM.04-OPENCODE-UNIT-01] keeps reused provider permission ids bound to separate decision capabilities', async () => {
     const { eventStream, permissionReply, promptAsync, runtime } = createRuntime(['session-1']);
     const events = [];
     await runtime.startSession({
@@ -648,7 +648,7 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
-  it('does not cross-route equal provider message identities from different sessions', async () => {
+  it('[TLV5-L07.04-OPENCODE-UNIT-01] does not cross-route equal provider message identities from different sessions', async () => {
     const { eventStream, promptAsync, runtime } = createRuntime(['session-a', 'session-b']);
     const firstEvents = [];
     const secondEvents = [];

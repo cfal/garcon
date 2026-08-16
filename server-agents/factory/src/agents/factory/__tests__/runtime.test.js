@@ -260,7 +260,7 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(proc.killed).toBe(true);
   });
 
-  it('preserves an established source when a fresh session fails to spawn', async () => {
+  it('[TLV5-L07.07-FACTORY-UNIT-01] preserves an established source when a fresh session fails to spawn', async () => {
     const provider = new FactoryCliRuntime();
     const establishedProc = createFakeProc();
     spawnMock
@@ -548,7 +548,7 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
   });
 
-  it('keeps a prior process bound to its publisher until that source closes', async () => {
+  it('[TLV5-L07.06-FACTORY-UNIT-01] keeps a prior process bound to its publisher until that source closes', async () => {
     const provider = new FactoryCliRuntime();
     const firstProc = createFakeProc();
     const secondProc = createFakeProc();
@@ -621,7 +621,7 @@ describe('FactoryCliRuntime lifecycle', () => {
     ]);
   });
 
-  it('contains a closed prior publisher without disturbing the current turn', async () => {
+  it('[TLV5-L07.08-FACTORY-UNIT-01] contains a closed prior publisher without disturbing the current turn', async () => {
     const warnings = [];
     let resolveWarning;
     const warningObserved = new Promise((resolve) => { resolveWarning = resolve; });

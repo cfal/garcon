@@ -177,7 +177,7 @@ describe('OpenCodeOperationRoutes', () => {
     })).toBeNull();
   });
 
-  it('binds provider-generated compaction continuations to their sole request source', () => {
+  it('[TLV5-L07.09-OPENCODE-UNIT-01] binds provider-generated compaction continuations to their sole request source', () => {
     const { routes } = createFixture();
     const operation = register(routes, {
       sessionId: 'session-1',
@@ -349,7 +349,7 @@ describe('OpenCodeOperationRoutes', () => {
     ))).toBeNull();
   });
 
-  it('retires every route when the provider event source closes', () => {
+  it('[TLV5-L07.10-OPENCODE-UNIT-01] retires every route when the provider event source closes', () => {
     const { routes } = createFixture();
     const established = register(routes, {
       sessionId: 'session-1',

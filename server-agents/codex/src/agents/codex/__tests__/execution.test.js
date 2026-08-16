@@ -399,7 +399,7 @@ describe('CodexExecution', () => {
     ]);
   });
 
-  it('keeps the prior source route when a replacement start fails before activation', async () => {
+  it('[TLV5-L07.07-CODEX-UNIT-01] keeps the prior source route when a replacement start fails before activation', async () => {
     const host = createHost();
     const runtime = createRuntime(host);
     const execution = new CodexExecution(
@@ -452,7 +452,7 @@ describe('CodexExecution', () => {
     expect(replacementEvents).toEqual([]);
   });
 
-  it('drops a delayed provider event at its closed originating sink after view replacement', async () => {
+  it('[TLV5-L07.08-CODEX-UNIT-01] drops a delayed provider event at its closed originating sink after view replacement', async () => {
     const host = createHost();
     const runtime = createRuntime(host);
     const execution = new CodexExecution(

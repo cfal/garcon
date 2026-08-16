@@ -224,7 +224,7 @@ function startOptions(overrides = {}) {
 }
 
 describe('ClaudeCliRuntime stdout protocol handling', () => {
-  it('publishes two turns on one native session through their concrete operations', async () => {
+  it('[TLV5-L07.03-CLAUDE-UNIT-01] publishes two turns on one native session through their concrete operations', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
     Bun.spawn = mock(() => fake.proc);
@@ -704,7 +704,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
-  it('keeps routing continuation output until Claude reports provider idle', async () => {
+  it('[TLV5-L07.06-CLAUDE-UNIT-01] keeps routing continuation output until Claude reports provider idle', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
     Bun.spawn = mock(() => fake.proc);
@@ -1374,7 +1374,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
-  it('keeps reused CLI permission ids bound to separate decision capabilities', async () => {
+  it('[TLV5-PERM.04-CLAUDE-UNIT-01] keeps reused CLI permission ids bound to separate decision capabilities', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
     Bun.spawn = mock(() => fake.proc);

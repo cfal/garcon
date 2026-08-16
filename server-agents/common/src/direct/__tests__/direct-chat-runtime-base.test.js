@@ -222,7 +222,7 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     expect(runtime.captured[0].thinkingMode).toBe('none');
   });
 
-  it('admits a successor immediately after best-effort abort and preserves late output', async () => {
+  it('[TLV5-L05.03-DIRECT-UNIT-01] admits a successor immediately after best-effort abort and preserves late output', async () => {
     const runtime = new CapturingDirectRuntime(await tempDir());
     const firstResponse = deferred();
     runtime.responses.push(firstResponse.promise, 'second response');

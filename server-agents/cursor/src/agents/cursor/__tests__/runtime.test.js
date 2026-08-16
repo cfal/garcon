@@ -425,7 +425,7 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('keeps an established publisher when a fresh session fails before prompting', async () => {
+  it('[TLV5-L07.07-CURSOR-UNIT-01] keeps an established publisher when a fresh session fails before prompting', async () => {
     const first = collectOperation('run-established');
     const replacement = collectOperation('run-failed-replacement');
     const { acp, runtime } = createRuntimeHarness({
@@ -460,7 +460,7 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('binds each sequential prompt to its concrete publisher through source retirement', async () => {
+  it('[TLV5-L07.03-CURSOR-UNIT-01] binds each sequential prompt to its concrete publisher through source retirement', async () => {
     const first = collectOperation('run-a');
     const second = collectOperation('run-b');
     const { acp, runtime } = createRuntimeHarness();
@@ -501,7 +501,7 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('rejects cross-chat native session collisions without rebinding the original source', async () => {
+  it('[TLV5-L07.04-CURSOR-UNIT-01] rejects cross-chat native session collisions without rebinding the original source', async () => {
     const first = collectOperation('run-chat-a');
     const colliding = collectOperation('run-chat-b');
     const { acp, runtime } = createRuntimeHarness({
@@ -532,7 +532,7 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('logs and drops session updates without a native session identity', async () => {
+  it('[TLV5-L07.05-CURSOR-UNIT-01] logs and drops session updates without a native session identity', async () => {
     const logger = {
       debug: mock(),
       info: mock(),
@@ -640,7 +640,7 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('ignores buffered updates from a retired ACP client after reconnect', async () => {
+  it('[TLV5-L07.08-CURSOR-UNIT-01] ignores buffered updates from a retired ACP client after reconnect', async () => {
     const { acp, runtime, messages } = createRuntimeHarness({ keepKilledStreamOpen: true });
     const first = collectOperation('run-a');
     const second = collectOperation('run-b');
@@ -739,7 +739,7 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('keeps reused ACP request ids bound to separate permission capabilities', async () => {
+  it('[TLV5-PERM.04-CURSOR-UNIT-01] keeps reused ACP request ids bound to separate permission capabilities', async () => {
     const { acp, runtime } = createRuntimeHarness();
     const operation = collectOperation('run-1');
     await runtime.startSession(startRequest({ operation: operation.operation }));
