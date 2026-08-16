@@ -489,7 +489,7 @@ The status below describes test coverage, not implementation completion.
 | R1 publisher routing                          | TLV5-L07.03 through TLV5-L07.10                       | Broad provider units; Codex stale-event black-box cases                                             | Partial |
 | R2 permission occurrence identity             | TLV5-PERM.01 through TLV5-PERM.11                     | Core occurrence suite, shared round trips, provider units                                           | Partial |
 | R3 Codex native tail reconciliation           | TLV5-L02.02, TLV5-L05.02, TLV5-L10.01                 | Codex architecture guard, app-server unit, scripted interrupt                                       | Covered |
-| R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state, controller, static, and strict Chromium cases; timer deletion pending                  | Intentional red |
+| R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state, controller, static, and strict Chromium cases; timer machinery deleted                 | Covered |
 | R5 search full replacement on append          | TLV5-SEARCH.01                                        | Search controller suffix and linearity tests                                                        | Covered |
 | R6 detached search rejection                  | TLV5-SEARCH.02                                        | Same-chat and cross-chat rejection tests                                                            | Covered |
 | R7 blocking native probe                      | TLV5-L09.03 through TLV5-L09.05                       | Core timeout, coalescing, identity-change units                                                     | Partial |
@@ -497,7 +497,7 @@ The status below describes test coverage, not implementation completion.
 | R9 duplicate handoff marker                   | TLV5-HANDOFF.06                                       | Matching, conflicting, and duplicate marker units                                                   | Covered |
 | R10 silent handoff fork fallback              | TLV5-FORK.01 through TLV5-FORK.04                     | Core fork units; no complete browser consent workflow                                               | Partial |
 | R11 unbounded reconnect replay                | TLV5-REPLAY.01 through TLV5-REPLAY.07                 | Contract, 50,000-row server, and Chromium replay cases; no exact mid-replay browser disconnect case | Partial |
-| R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Bounded server, contract, multi-budget state, cache, and held-page browser cases                     | Intentional red |
+| R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Bounded server, contract, multi-budget state, cache, and held-page browser cases                     | Covered |
 | R13 LRU failure attribution                   | TLV5-L11.04                                           | Store and close-recovery units                                                                      | Covered |
 | R14 duplicate prepared input                  | TLV5-L04.04                                           | Ledger, coordinator, and handler units                                                              | Covered |
 | R15 temporary diagnostics and weak quiescence | TLV5-OBS.01 through TLV5-OBS.04                       | Static diagnostic guard and scattered privacy tests                                                 | Partial |
@@ -662,9 +662,9 @@ becomes a separate environment requirement rather than another semantic test.
 | TLV5-PAGE.05   | Active-state invalidation plus held-page switch, reload, and navigation cases.                   | Covered |
 | TLV5-PAGE.06   | Explicit error retry and no-tight-loop controller cases.                                         | Covered |
 | TLV5-PAGE.07   | Component error retry plus Lightpanda and Chromium absence assertions.                           | Covered |
-| TLV5-PAGE.08   | One-query static, bounded server, ordinal-one, and clamped web-contract cases are locked. | Intentional red |
-| TLV5-PAGE.09   | Hidden server/contract, multi-budget delivery, switch-resume, and cache-hydration cases are locked. | Intentional red |
-| TLV5-PAGE.10   | Shared relation, web rejection, and state-level stalled-cursor cases are locked. | Intentional red |
+| TLV5-PAGE.08   | One-query static, bounded server, ordinal-one, and clamped web-contract cases are green. | Covered |
+| TLV5-PAGE.09   | Hidden server/contract, multi-budget delivery, switch-resume, and cache-hydration cases are green. | Covered |
+| TLV5-PAGE.10   | Shared relation, web rejection, and state-level stalled-cursor cases are green. | Covered |
 | TLV5-REPLAY.01 | Shared contract, server WebSocket, and 50,000-row integration case.                              | Covered |
 | TLV5-REPLAY.02 | Shared continuation validation and server integration case.                                      | Covered |
 | TLV5-REPLAY.03 | Server row/byte bounds and oversized-row rejection cases.                                        | Covered |

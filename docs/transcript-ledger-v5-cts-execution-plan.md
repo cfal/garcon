@@ -449,8 +449,8 @@ The section 5.4 test-first checkpoint registers these coordinates:
 | `TLV5-PAGE.10-WEB-CONTRACT-01` | Malformed, stalled, and hasMore-inconsistent continuations reject at the API boundary |
 | `TLV5-PAGE.10-WEB-UNIT-01` | A stalled hidden continuation fails before active-state mutation or retry looping |
 
-These cases are intentional red until the section 5.4 server, shared/client,
-state, and cache changes land.
+These cases are covered by the section 5.4 server, shared/client, state, and
+cache implementation.
 
 Replay cases cover fixed high watermark, row and byte bounds, hidden-only
 ranges, live append beyond the watermark, stale view, dropped send, disconnect
@@ -500,8 +500,8 @@ controller coordinates are:
 | `TLV5-UX.17-WEB-UNIT-04` | Switch discards expansion and return restores the exact bounded tail with earlier paging available |
 
 The static timer-absence case is supplementary; the four behavioral cases are
-primary and remain intentional red only where the production timer still
-trims the selected transcript.
+primary. Section 5.4 removes the production timer, and all five cases are
+covered.
 
 Every strict geometry case uses the same expected row-model helper and
 address-keyed frame sampler. Helpers expose any paging, publication,
