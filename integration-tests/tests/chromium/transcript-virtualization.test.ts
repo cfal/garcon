@@ -32,8 +32,7 @@ import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
 const ITEM_SELECTOR = '[data-chat-virtual-item]';
-const ACTIVE_TRANSCRIPT_PRUNE_TARGET = 200;
-const LIVE_EDGE_PRUNE_IDLE_MS = 180_000;
+const RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS = 180_000;
 const TRANSCRIPT_VIEWPORTS = [
   { label: 'compact', height: 700, width: 390 },
   { label: 'wide', height: 900, width: 1280 },
@@ -3694,19 +3693,19 @@ async function dispatchClockedTranscriptPosition(
   expect(geometry.maximum).toBeGreaterThan(geometry.clientHeight * 2);
 }
 
-async function verifyLiveEdgePruning(
+async function verifyLiveEdgeRetention(
   fixture: ChromiumFixture,
   viewport: { height: number; width: number },
 ): Promise<void> {
-  const promptPrefix = `chromium-live-edge-prune-${viewport.width}`;
+  const promptPrefix = `chromium-live-edge-retention-${viewport.width}`;
   const turnCount = 110;
   const expectedEntryCount = turnCount * 2;
   const chatId = await seedTranscript(fixture.integration, turnCount, promptPrefix);
   await fixture.page.setViewportSize(viewport);
   await prepareTranscript(fixture, chatId);
   await loadCompleteTranscript(fixture.page, expectedEntryCount);
-  const canonicalBeforePrune = await readCompleteCanonicalTranscript(fixture, chatId);
-  expect(canonicalBeforePrune.messages).toHaveLength(expectedEntryCount);
+  const canonicalBeforeIdle = await readCompleteCanonicalTranscript(fixture, chatId);
+  expect(canonicalBeforeIdle.messages).toHaveLength(expectedEntryCount);
 
   const clockStart = Date.now();
   await fixture.page.clock.install({ time: clockStart });
@@ -3723,26 +3722,16 @@ async function verifyLiveEdgePruning(
   await dispatchClockedTranscriptPosition(fixture.page, 'end');
   await fixture.page.clock.runFor(100);
   expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
-  await fixture.page.clock.runFor(LIVE_EDGE_PRUNE_IDLE_MS - 101);
+  await fixture.page.clock.runFor(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
   expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount);
-
-  await dispatchClockedTranscriptPosition(fixture.page, 'away');
-  await fixture.page.clock.runFor(100);
-  expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount);
-  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: false, userScrolledUp: true });
-
-  await dispatchClockedTranscriptPosition(fixture.page, 'end');
-  await fixture.page.clock.runFor(100);
   expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
-  await fixture.page.clock.runFor(LIVE_EDGE_PRUNE_IDLE_MS);
-  expect(await transcriptEntryCount(fixture.page)).toBe(ACTIVE_TRANSCRIPT_PRUNE_TARGET);
 
-  const canonicalAfterPrune = await readCompleteCanonicalTranscript(fixture, chatId);
-  expect(canonicalAfterPrune.transcriptViewId).toBe(canonicalBeforePrune.transcriptViewId);
-  expect(canonicalAfterPrune.messages.map(exactTranscriptRow)).toEqual(
-    canonicalBeforePrune.messages.map(exactTranscriptRow),
+  const canonicalAfterIdle = await readCompleteCanonicalTranscript(fixture, chatId);
+  expect(canonicalAfterIdle.transcriptViewId).toBe(canonicalBeforeIdle.transcriptViewId);
+  expect(canonicalAfterIdle.messages.map(exactTranscriptRow)).toEqual(
+    canonicalBeforeIdle.messages.map(exactTranscriptRow),
   );
-  const finalEntry = canonicalAfterPrune.messages.at(-1);
+  const finalEntry = canonicalAfterIdle.messages.at(-1);
   expect(finalEntry).toMatchObject({
     message: {
       content: `echo:${promptPrefix}-${turnCount - 1}`,
@@ -3750,32 +3739,31 @@ async function verifyLiveEdgePruning(
     },
   });
   const finalRow = fixture.page.locator(
-    `[data-chat-row-id="${canonicalAfterPrune.transcriptViewId}:${finalEntry?.ordinal}"]`,
+    `[data-chat-row-id="${canonicalAfterIdle.transcriptViewId}:${finalEntry?.ordinal}"]`,
   );
   await finalRow.waitFor({ state: 'visible' });
   expect((await finalRow.innerText()).trim()).toBe(`echo:${promptPrefix}-${turnCount - 1}`);
 
   const laterPrompts = Array.from(
     { length: 3 },
-    (_, index) => `${promptPrefix}-after-prune-${index}`,
+    (_, index) => `${promptPrefix}-after-idle-${index}`,
   );
   for (const prompt of laterPrompts) {
     await appendTurn(fixture.integration, chatId, prompt);
   }
   await fixture.page.clock.runFor(100);
   expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
-  expect(await transcriptEntryCount(fixture.page)).toBe(
-    ACTIVE_TRANSCRIPT_PRUNE_TARGET + laterPrompts.length * 2,
-  );
+  const expectedAfterGrowth = expectedEntryCount + laterPrompts.length * 2;
+  expect(await transcriptEntryCount(fixture.page)).toBe(expectedAfterGrowth);
 
-  await fixture.page.clock.runFor(LIVE_EDGE_PRUNE_IDLE_MS);
-  expect(await transcriptEntryCount(fixture.page)).toBe(ACTIVE_TRANSCRIPT_PRUNE_TARGET);
+  await fixture.page.clock.runFor(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
+  expect(await transcriptEntryCount(fixture.page)).toBe(expectedAfterGrowth);
 
   const canonicalAfterGrowth = await readCompleteCanonicalTranscript(fixture, chatId);
-  expect(canonicalAfterGrowth.transcriptViewId).toBe(canonicalBeforePrune.transcriptViewId);
-  expect(canonicalAfterGrowth.messages.slice(0, canonicalBeforePrune.messages.length).map(
+  expect(canonicalAfterGrowth.transcriptViewId).toBe(canonicalBeforeIdle.transcriptViewId);
+  expect(canonicalAfterGrowth.messages.slice(0, canonicalBeforeIdle.messages.length).map(
     exactTranscriptRow,
-  )).toEqual(canonicalBeforePrune.messages.map(exactTranscriptRow));
+  )).toEqual(canonicalBeforeIdle.messages.map(exactTranscriptRow));
   expect(canonicalAfterGrowth.messages.slice(-laterPrompts.length * 2).map(exactTranscriptRow))
     .toEqual(laterPrompts.flatMap((prompt) => [
       expect.objectContaining({ type: 'user-message', text: prompt }),
@@ -4161,8 +4149,7 @@ async function verifyHistoricalPermissionIsInertAfterRestart(
   if (permission.message.type !== 'permission-request') {
     throw new Error('The scripted historical permission request was not published.');
   }
-  const permissionRequestId = permission.message.permissionRequestId;
-  const permissionIncarnation = permission.message.incarnation;
+  const permissionOccurrenceId = permission.message.permissionOccurrenceId;
 
   await fixture.integration.restartGarcon();
   const response = await fixture.page.goto(
@@ -4180,8 +4167,7 @@ async function verifyHistoricalPermissionIsInertAfterRestart(
   }
   expect(snapshot.transcript.messages.some((entry) => (
     entry.message.type === 'permission-request'
-    && entry.message.permissionRequestId === permissionRequestId
-    && entry.message.incarnation === permissionIncarnation
+    && entry.message.permissionOccurrenceId === permissionOccurrenceId
   ))).toBe(true);
 
   const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
@@ -4554,22 +4540,22 @@ describe('Chromium transcript virtualization', () => {
 
   for (const scenario of [
     {
-      caseId: '[TLV5-UX.10-COMPACT-CHROMIUM-01]',
+      caseId: '[TLV5-UX.17-COMPACT-CHROMIUM-01]',
       viewport: TRANSCRIPT_VIEWPORTS[0],
     },
     {
-      caseId: '[TLV5-UX.10-WIDE-CHROMIUM-01]',
+      caseId: '[TLV5-UX.17-WIDE-CHROMIUM-01]',
       viewport: TRANSCRIPT_VIEWPORTS[1],
     },
   ] as const) {
     const { viewport } = scenario;
-    test(`${scenario.caseId} prunes a ${viewport.label} expanded transcript only after live-edge idle`, async () => {
+    test(`${scenario.caseId} retains a ${viewport.label} expanded transcript beyond the retired live-edge delay`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       await withChromiumFixture(
-        `transcript-live-edge-prune-${viewport.label}`,
+        `transcript-live-edge-retention-${viewport.label}`,
         async (fixture, markPhase) => {
-          markPhase(`verifying delayed ${viewport.label} live-edge pruning`);
-          await verifyLiveEdgePruning(fixture, viewport);
+          markPhase(`verifying durable ${viewport.label} live-edge retention`);
+          await verifyLiveEdgeRetention(fixture, viewport);
         },
         diagnostics,
         { serverEnvironment: environment.serverEnvironment },
