@@ -40,14 +40,28 @@ export class TranscriptOptimisticInputs {
 		this.onChanged();
 	}
 
-	clearMany(clientMessageIds: ReadonlySet<string>): void {
-		if (clientMessageIds.size === 0) return;
-		const next = this.rows.filter((input) => !clientMessageIds.has(input.clientMessageId));
-		if (next.length === this.rows.length) return;
-		for (const clientMessageId of clientMessageIds) {
-			this.#afterOrdinalByClientMessageId.delete(clientMessageId);
+	clearEchoed(echoedOrdinals: ReadonlyMap<string, number>): void {
+		if (echoedOrdinals.size === 0) return;
+		const remaining: OptimisticUserInput[] = [];
+		let latestPriorEchoOrdinal: number | undefined;
+		for (const input of this.rows) {
+			const echoOrdinal = echoedOrdinals.get(input.clientMessageId);
+			if (echoOrdinal !== undefined) {
+				latestPriorEchoOrdinal = Math.max(latestPriorEchoOrdinal ?? 0, echoOrdinal);
+				this.#afterOrdinalByClientMessageId.delete(input.clientMessageId);
+				continue;
+			}
+			if (latestPriorEchoOrdinal !== undefined) {
+				const currentOrdinal = this.#afterOrdinalByClientMessageId.get(input.clientMessageId) ?? 0;
+				this.#afterOrdinalByClientMessageId.set(
+					input.clientMessageId,
+					Math.max(currentOrdinal, latestPriorEchoOrdinal),
+				);
+			}
+			remaining.push(input);
 		}
-		this.rows = next;
+		if (remaining.length === this.rows.length) return;
+		this.rows = remaining;
 		this.onChanged();
 	}
 

@@ -39,6 +39,7 @@ import {
 } from './transcript-reconnect-replay.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import {
+	echoedClientMessageOrdinals,
 	echoedClientMessageIds,
 	hasEarlierTranscriptRowsToReveal,
 	messagesFromDisplayRows,
@@ -317,7 +318,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (result.changed || cursorAdvanced) {
 				this.#feedMutations.record('live-append', responseMessageTypes);
 			}
-			this.#optimisticInputs.clearMany(echoedClientMessageIds(messages));
+			this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
 			this.setResendCandidates(resendCandidates);
 			return 'applied';
 		}
@@ -360,7 +361,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (entriesChanged) {
 			this.#feedMutations.record('live-append', responseMessageTypes);
 		}
-		this.#optimisticInputs.clearMany(echoedClientMessageIds(messages));
+		this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
 		this.setResendCandidates(resendCandidates);
 		return 'applied';
 	}
@@ -496,7 +497,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasLaterMessages = false;
 		this.totalMessages = retainedMessages.length;
 		if (replacesTranscriptView) this.#optimisticInputs.clearAll();
-		else this.#optimisticInputs.clearMany(echoedClientMessageIds(page.messages));
+		else this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
 		this.setResendCandidates(page.resendCandidates ?? []);
 		this.clearLocalNotices(this.#notices.revisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';

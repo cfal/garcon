@@ -73,6 +73,19 @@ export function echoedClientMessageIds(entries: readonly TranscriptMessage[]): S
 	return ids;
 }
 
+export function echoedClientMessageOrdinals(
+	entries: readonly TranscriptMessage[],
+): Map<string, number> {
+	const ordinals = new Map<string, number>();
+	for (const entry of entries) {
+		const message = entry.message;
+		if (message instanceof UserMessage && message.metadata?.clientMessageId) {
+			ordinals.set(message.metadata.clientMessageId, entry.ordinal);
+		}
+	}
+	return ordinals;
+}
+
 export function visibleOptimisticTranscriptInputs(
 	hasLaterMessages: boolean,
 	inputs: readonly OptimisticUserInput[],
