@@ -198,7 +198,7 @@ export class OpenCodeRuntime {
       session.status === 'running' || session.providerWorkRequiresQuiescence
     ),
     lastActivityAt: (session) => session.lastActivityAt,
-    purge: (sessionId, session) => {
+    purge: (sessionId) => {
       this.#sessions.delete(sessionId);
     },
   });

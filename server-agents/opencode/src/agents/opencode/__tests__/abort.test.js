@@ -412,10 +412,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
     );
-    const firstPublished = await start(runtime, {
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
-    });
+    const firstPublished = await start(runtime);
     await expect(runtime.abort('session-1')).resolves.toBe(true);
 
     const successorPublished = collectOperation('run-successor');
@@ -425,8 +422,6 @@ describe('OpenCodeRuntime abort', () => {
       chatId: 'chat-1',
       projectPath: '/repo',
       permissionMode: 'default',
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
       operation: successorPublished.operation,
     });
     const successorOutcome = successor.then(
@@ -458,8 +453,6 @@ describe('OpenCodeRuntime abort', () => {
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const firstPublished = await start(runtime, {
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
       runId: 'run-a',
     });
     eventStream.push(envelope({
@@ -505,8 +498,6 @@ describe('OpenCodeRuntime abort', () => {
       chatId: 'chat-1',
       projectPath: '/repo',
       permissionMode: 'default',
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
       operation: successorPublished.operation,
     });
     await waitFor(() => promptAsync.mock.calls.length === 2);
@@ -939,8 +930,6 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
     );
     const published = await start(runtime, {
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
       runId: 'run-a',
     });
     eventStream.close();
@@ -971,8 +960,6 @@ describe('OpenCodeRuntime abort', () => {
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const published = await start(runtime, {
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
       runId: 'run-a',
     });
     eventStream.push(envelope({
@@ -1359,8 +1346,6 @@ describe('OpenCodeRuntime abort', () => {
       },
     );
     const firstPublished = await start(runtime, {
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
       runId: 'run-a',
     });
     firstStream.close();
@@ -1391,8 +1376,6 @@ describe('OpenCodeRuntime abort', () => {
       chatId: 'chat-1',
       projectPath: '/repo',
       permissionMode: 'default',
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
       operation: successorPublished.operation,
     });
     await waitFor(() => abort.mock.calls.length === 1);
@@ -1541,8 +1524,6 @@ describe('OpenCodeRuntime abort', () => {
       chatId: 'chat-1',
       projectPath: '/repo',
       permissionMode: 'default',
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
       operation: successorPublished.operation,
     });
     await waitFor(() => promptAsync.mock.calls.length === 2);

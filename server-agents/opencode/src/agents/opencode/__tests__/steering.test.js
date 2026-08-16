@@ -161,8 +161,6 @@ async function start(runtime, overrides = {}) {
     projectPath: '/repo',
     model: 'provider/model',
     permissionMode: 'default',
-    clientRequestId: 'request-1',
-    turnId: 'turn-1',
     operation: published.operation,
     ...overrides,
   });
@@ -422,8 +420,6 @@ describe('OpenCodeRuntime steering', () => {
       projectPath: '/repo',
       model: 'provider/model',
       permissionMode: 'default',
-      clientRequestId: 'request-2',
-      turnId: 'turn-2',
       operation: successorOperation.operation,
     });
     const successorOutcome = successor.catch((error) => error);
@@ -473,8 +469,6 @@ describe('OpenCodeRuntime steering', () => {
       projectPath: '/repo',
       model: 'provider/model',
       permissionMode: 'default',
-      clientRequestId: 'request-2',
-      turnId: 'turn-2',
       operation: recoveryOperation.operation,
     });
     await waitFor(() => promptAsync.mock.calls.length === 3);
@@ -553,8 +547,6 @@ describe('OpenCodeRuntime steering', () => {
       projectPath: '/repo',
       model: 'provider/model',
       permissionMode: 'default',
-      clientRequestId: 'request-2',
-      turnId: 'turn-2',
       operation: recoveryOperation.operation,
     });
     await waitFor(() => abort.mock.calls.length === 1);
