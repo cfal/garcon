@@ -2211,7 +2211,9 @@ describe('ActiveTranscriptState', () => {
 			entry(index + 1, assistant(`initial-${index + 1}`)),
 		);
 		chat.oldestOrdinal = 1;
+		chat.loadedThroughOrdinal = 50;
 		chat.hasEarlierMessages = false;
+		chat.hasLaterMessages = true;
 		chat.visibleMessageCount = 50;
 		let resolveLatest!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages).mockReturnValueOnce(
@@ -2241,6 +2243,71 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.entries.at(-1)).toMatchObject({ ordinal: 101, message: { content: 'live' } });
 		expect(chat.transcriptCache.get('chat-1')?.messages.at(-1)).toMatchObject({ ordinal: 101 });
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 101 });
+	});
+
+	it('keeps the newest resend candidates when live rows overtake a latest-window response', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 50 }, (_, index) =>
+				entry(index + 51, assistant(`latest-${index + 51}`)),
+			),
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+		);
+		chat.entries = Array.from({ length: 50 }, (_, index) =>
+			entry(index + 1, assistant(`initial-${index + 1}`)),
+		);
+		chat.oldestOrdinal = 1;
+		chat.loadedThroughOrdinal = 50;
+		chat.hasEarlierMessages = false;
+		chat.hasLaterMessages = true;
+		chat.visibleMessageCount = 50;
+		const responseCandidate = {
+			ordinal: 45,
+			content: 'candidate captured with the response',
+			attachmentNames: [],
+		};
+		const liveCandidate = {
+			ordinal: 101,
+			content: 'candidate published with the live row',
+			attachmentNames: ['live.txt'],
+		};
+		let resolveLatest!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveLatest = resolve;
+			}),
+		);
+
+		const latest = chat.navigateToWindow('chat-1', 'latest');
+		expect(
+			chat.applyMessages(
+				'chat-1',
+				'generation-1',
+				[entry(101, assistant('live'))],
+				101,
+				101,
+				[liveCandidate],
+			),
+		).toBe('applied');
+		resolveLatest({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 51, assistant(`latest-${index + 51}`)),
+				),
+				lastOrdinal: 100,
+				pageOldestOrdinal: 51,
+				hasMore: true,
+				resendCandidates: [responseCandidate],
+			}),
+		});
+
+		await expect(latest).resolves.toBe('loaded');
+		expect(chat.entries.at(-1)).toMatchObject({ ordinal: 101, message: { content: 'live' } });
+		expect(chat.resendCandidates).toEqual([liveCandidate]);
 	});
 
 	it.each([
