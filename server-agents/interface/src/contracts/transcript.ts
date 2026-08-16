@@ -6,13 +6,6 @@ export type AgentTranscriptSourceLocation =
   | { readonly kind: 'filesystem-path'; readonly value: string }
   | { readonly kind: 'provider-reference'; readonly value: string };
 
-export interface AgentTranscriptPreview {
-  readonly firstMessage: string;
-  readonly lastMessage: string;
-  readonly createdAt: string | null;
-  readonly lastActivity: string | null;
-}
-
 export interface AgentNativeSessionRef {
   readonly ownerId: string;
   readonly schemaVersion: number;

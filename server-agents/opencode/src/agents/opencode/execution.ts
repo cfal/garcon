@@ -7,7 +7,7 @@ import {
   type AgentRuntimeExecutionContext,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import type { AgentStartedSession } from '@garcon/server-agent-interface';
+import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
 import type { OpenCodeRuntime } from './opencode.js';
 
 export class OpenCodeExecution implements AgentRuntimeExecution {
@@ -21,7 +21,7 @@ export class OpenCodeExecution implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
   ) {
     const seed = request.carriedContext?.prefix ?? '';
-    let established: AgentStartedSession | null = null;
+    let established: AgentEstablishedSession | null = null;
     const establish = (agentSessionId: string) => {
       if (established) return established;
       established = {

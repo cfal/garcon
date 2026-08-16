@@ -8,7 +8,7 @@ import {
   type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
 } from '../execution/runtime-events.js';
-import type { AgentStartedSession } from '@garcon/server-agent-interface';
+import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
 import { resolveAgentEndpoint } from '../execution/resolve-endpoint.js';
 import type { DirectEndpointRouterRuntime, DirectCompatibleRuntime } from './router.js';
 
@@ -24,7 +24,7 @@ implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
   ) {
     const endpoint = await this.#endpoint(request);
-    let established: AgentStartedSession | null = null;
+    let established: AgentEstablishedSession | null = null;
     const establish = (result: { readonly agentSessionId: string }) => {
       if (established) return established;
       established = {

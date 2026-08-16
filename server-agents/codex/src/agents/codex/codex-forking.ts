@@ -2,7 +2,7 @@ import {
   AgentIntegrationError,
   type AgentNativeFork,
   type AgentNativeForkRequest,
-  type AgentStartedSession,
+  type AgentEstablishedSession,
 } from '@garcon/server-agent-interface';
 import { CodexAppServerRpcError } from './app-server/client.js';
 import type { CodexHistoryProfile } from './history-profile.js';
@@ -18,7 +18,7 @@ export interface CodexForkingOptions {
   }) => Promise<CodexHistoryProfile | null>;
   readonly forkPaginatedWhole: (
     request: AgentNativeForkRequest,
-  ) => Promise<AgentStartedSession | null>;
+  ) => Promise<AgentEstablishedSession | null>;
 }
 
 export function createCodexForking(options: CodexForkingOptions): AgentNativeFork {

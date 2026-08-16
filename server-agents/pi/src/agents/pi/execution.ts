@@ -6,7 +6,7 @@ import {
   type AgentRuntimeExecutionContext,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import type { AgentStartedSession } from '@garcon/server-agent-interface';
+import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
 import type { LazyPiRuntime } from './lazy-runtime.js';
 
 export class PiExecution implements AgentRuntimeExecution {
@@ -20,7 +20,7 @@ export class PiExecution implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
   ) {
     const seed = request.carriedContext?.prefix ?? '';
-    let established: AgentStartedSession | null = null;
+    let established: AgentEstablishedSession | null = null;
     const establish = (result: { readonly agentSessionId: string; readonly nativePath: string | null }) => {
       if (established) return established;
       established = {

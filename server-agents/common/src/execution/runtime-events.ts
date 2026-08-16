@@ -5,7 +5,7 @@ import type {
   AgentProducedRow,
   AgentResumeRequestV5,
   AgentRunningSession,
-  AgentStartedSession,
+  AgentEstablishedSession,
   AgentStartRequestV5,
 } from '@garcon/server-agent-interface';
 import { providerMetadata } from '../native-session/provider-metadata.js';
@@ -47,7 +47,7 @@ export interface AgentRuntimeExecution {
   start(
     request: AgentRuntimeStartRequest,
     publish: AgentRuntimePublisher,
-  ): Promise<AgentStartedSession>;
+  ): Promise<AgentEstablishedSession>;
   resume(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void>;
   abort(agentSessionId: string): Promise<boolean>;
   runningSessions(): readonly AgentRunningSession[];

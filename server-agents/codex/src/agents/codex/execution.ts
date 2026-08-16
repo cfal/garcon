@@ -1,7 +1,7 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentStartedSession,
+  type AgentEstablishedSession,
   type AgentGoalControlRequest,
   type AgentHost,
 } from '@garcon/server-agent-interface';
@@ -47,7 +47,7 @@ export class CodexExecution implements AgentRuntimeExecution {
     const configuration = await this.#runtimeConfiguration(request);
     const runtimeRequest = prepareStartRequest(request, configuration, publish);
     // A blocking runtime can settle the first turn inside startSession.
-    const holder: { session: AgentStartedSession | null } = { session: null };
+    const holder: { session: AgentEstablishedSession | null } = { session: null };
     const emitStarted = (started: { agentSessionId: string; nativePath: string | null }) => {
       if (holder.session) return holder.session;
       holder.session = {

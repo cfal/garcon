@@ -1,4 +1,3 @@
-import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import type { ChatMessage, ToolUseChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
@@ -91,9 +90,4 @@ export type AgentProducerEvent =
 
 export interface AgentProducerSink {
   publish(event: AgentProducerEvent): void;
-}
-
-export interface AgentOutboundPrompt {
-  readonly content: string;
-  readonly attachments: readonly AgentAttachment[];
 }

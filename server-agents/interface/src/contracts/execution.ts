@@ -1,7 +1,6 @@
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
-import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentChatReference, AgentNativeSessionRef } from './transcript.js';
 
 export interface AgentSessionConfiguration {
@@ -27,12 +26,6 @@ export interface AgentProjectPathUpdatePreparation {
 export interface AgentExecutionAdmission {
   readonly signal: AbortSignal;
   markStarted(): Promise<void>;
-}
-
-export interface AgentStartedSession {
-  readonly agentSessionId: string;
-  readonly nativeSession: AgentNativeSessionRef | null;
-  readonly nativeSeedReceipt: NativeSeedReceipt | null;
 }
 
 export interface AgentRunningSession {

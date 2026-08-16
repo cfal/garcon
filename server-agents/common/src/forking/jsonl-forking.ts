@@ -8,7 +8,7 @@ import {
   type AgentNativeFork,
   type AgentNativeForkOutcome,
   type AgentNativeForkRequest,
-  type AgentStartedSession,
+  type AgentEstablishedSession,
   type NativeMessageSource,
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '../native-session/evidence-source.js';
@@ -30,7 +30,7 @@ export interface JsonlNativeForkingOptions {
   ) => unknown;
   readonly forkWholeSession?: (
     request: AgentNativeForkRequest,
-  ) => Promise<AgentStartedSession | null>;
+  ) => Promise<AgentEstablishedSession | null>;
   readonly transformEntries?: ForkJsonlRequest['transformEntries'];
   readonly createTargetPath?: ForkJsonlRequest['createTargetPath'];
   readonly allowUnmaterializedWholeSession?: boolean;

@@ -2,7 +2,8 @@ import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
-import type { AgentExecutionAdmission, AgentStartedSession } from './execution.js';
+import type { AgentExecutionAdmission } from './execution.js';
+import type { AgentEstablishedSession } from './producer.js';
 import type { AgentChatReference } from './transcript.js';
 
 export interface AgentNativeForkRequest {
@@ -19,10 +20,10 @@ export interface AgentNativeForkRequest {
 }
 
 export type AgentNativeForkOutcome =
-  | { readonly kind: 'materialized'; readonly session: AgentStartedSession }
+  | { readonly kind: 'materialized'; readonly session: AgentEstablishedSession }
   | { readonly kind: 'unmaterialized' };
 
 export interface AgentNativeFork {
   fork(request: AgentNativeForkRequest): Promise<AgentNativeForkOutcome>;
-  discard(session: AgentStartedSession, signal: AbortSignal): Promise<void>;
+  discard(session: AgentEstablishedSession, signal: AbortSignal): Promise<void>;
 }
