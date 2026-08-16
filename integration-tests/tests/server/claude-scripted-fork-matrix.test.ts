@@ -22,6 +22,7 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import {
+  expectTranscriptNotYetPersisted,
   forkAfterSourceSettles,
   forkWhenTranscriptPersists,
 } from '../../support/fork-test-support.js';
@@ -479,6 +480,36 @@ describe('scripted Claude fork lifecycle matrix', () => {
     });
   });
 
+  test('requires consent before substituting an unmaterialized whole-chat fork', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const sourceChatId = String(Date.now() * 1_000 + 902);
+
+    await withIntegrationFixture('claude-scripted-fork-unmaterialized', async (fixture) => {
+      const forkChatId = fixture.newChatId();
+      await expectTranscriptNotYetPersisted(fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+      }));
+
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        allowHandoffFork: true,
+      });
+
+      expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
+      expect(await readClaudeChatRecord(fixture.dirs.workspace, forkChatId)).toMatchObject({
+        agentSessionId: null,
+        nativeSession: null,
+      });
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      prepareWorkspace: (directories) => prepareUnmaterializedChat(directories, sourceChatId),
+    });
+  });
+
   test('does not inherit task notification state when forking an outstanding background task', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
@@ -577,6 +608,34 @@ async function prepareEmptyChat(
   agentId: string,
   model: string,
 ): Promise<void> {
+  await prepareChatRecord(directories, chatId, agentId, model, null);
+}
+
+async function prepareUnmaterializedChat(
+  directories: IntegrationDirectories,
+  chatId: string,
+): Promise<void> {
+  const agentSessionId = crypto.randomUUID();
+  const nativePath = join(directories.workspace, `${agentSessionId}.jsonl`);
+  await writeFile(nativePath, [
+    JSON.stringify({ type: 'mode', sessionId: agentSessionId }),
+    JSON.stringify({ type: 'queue-operation', sessionId: agentSessionId }),
+    JSON.stringify({ type: 'last-prompt', sessionId: agentSessionId }),
+    '',
+  ].join('\n'));
+  await prepareChatRecord(directories, chatId, 'claude', 'haiku', {
+    agentSessionId,
+    path: nativePath,
+  });
+}
+
+async function prepareChatRecord(
+  directories: IntegrationDirectories,
+  chatId: string,
+  agentId: string,
+  model: string,
+  native: { agentSessionId: string; path: string } | null,
+): Promise<void> {
   await writeFile(
     join(directories.workspace, 'workspace-version.json'),
     JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
@@ -586,12 +645,22 @@ async function prepareEmptyChat(
     sessions: {
       [chatId]: {
         agentId,
-        nativeSession: null,
+        nativeSession: native
+          ? {
+              ownerId: agentId,
+              schemaVersion: 1,
+              value: {
+                path: native.path,
+                agentSessionId: native.agentSessionId,
+                modelEndpointId: null,
+              },
+            }
+          : null,
         agentOwnershipEpoch: crypto.randomUUID(),
         agentSettingsById: {},
         projectPath: directories.project,
         tags: [],
-        agentSessionId: null,
+        agentSessionId: native?.agentSessionId ?? null,
         nextForkOrdinal: 1,
         model,
         apiProviderId: null,
