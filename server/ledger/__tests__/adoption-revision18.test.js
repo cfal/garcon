@@ -45,7 +45,8 @@ describe('TranscriptAdoptionService Revision 18 contract', () => {
         return [];
       },
     }, async ({ adoption, ledger }) => {
-      await expect(adoption.ensure('chat-1')).rejects.toThrow('frozen prefix unavailable');
+      await expect(adoption.ensure('chat-1'))
+        .rejects.toThrow('Transcript adoption source failed');
       expect(ledger.currentView('chat-1')).toBeNull();
       expect(legacyCalls).toEqual([]);
 
@@ -69,7 +70,8 @@ describe('TranscriptAdoptionService Revision 18 contract', () => {
       nativeHistoryImport: forbiddenReloadImport(),
       loadFrozenPrefix: async () => [],
     }, async ({ adoption, ledger }) => {
-      await expect(adoption.ensure('chat-1')).rejects.toThrow('legacy iteration failed');
+      await expect(adoption.ensure('chat-1'))
+        .rejects.toThrow('Transcript adoption source failed');
       expect(ledger.currentView('chat-1')).toBeNull();
       expect(() => ledger.currentRows('chat-1'))
         .toThrow('Transcript ledger has no current view for chat chat-1');

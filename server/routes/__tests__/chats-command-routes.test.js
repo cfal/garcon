@@ -510,6 +510,7 @@ function createRouteAgent(sessionOverrides = {}) {
     metadata,
     chatViews,
     agents,
+    commandLedger,
     routes,
   };
 }
@@ -613,7 +614,7 @@ describe('REST chat command routes', () => {
 
   it('[TLV5-ADOPT.10-RUN-ROUTE-UNIT-01] maps retryable transcript adoption failure to the typed run response', async () => {
     const agent = createRouteAgent();
-    agent.queue.scheduleDirectInput.mockRejectedValue(new AgentIntegrationError(
+    agent.agents.currentTranscriptViewId.mockRejectedValueOnce(new AgentIntegrationError(
       'TRANSCRIPT_UNAVAILABLE',
       'Transcript adoption source failed',
       true,
@@ -632,6 +633,22 @@ describe('REST chat command routes', () => {
       errorCode: 'TRANSCRIPT_UNAVAILABLE',
       retryable: true,
     });
+    expect(agent.queue.scheduleDirectInput).not.toHaveBeenCalled();
+    expect(agent.queue.reserveDirectTurn).not.toHaveBeenCalled();
+    expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(agent.queue.runReservedTurn).not.toHaveBeenCalled();
+    expect(await agent.commandLedger.getRecord(`agent-run:${CHAT_ID}:req-run-1`)).toBeNull();
+
+    const retry = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody(),
+    );
+    expect(retry.response.status).toBe(202);
+    expect(retry.body).toMatchObject({ success: true, status: 'accepted' });
+    expect(agent.queue.scheduleDirectInput).toHaveBeenCalledTimes(1);
+    expect(agent.queue.reserveDirectTurn).toHaveBeenCalledTimes(1);
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(agent.queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
   it('POST /run deduplicates same payload retries without re-running side effects', async () => {

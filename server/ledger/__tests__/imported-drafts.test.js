@@ -68,6 +68,8 @@ describe('frozen transcript drafts', () => {
     expect(frozenDrafts([
       new TranscriptNoticeMessage(AT, quarantineMessage, undefined, quarantineDetail),
       new TranscriptNoticeMessage(AT, 'The transcript may have changed.', 'reload-native-history'),
+      new TranscriptNoticeMessage(AT, 'Ordinary transcript notice.'),
+      new TranscriptNoticeMessage(AT, quarantineMessage),
       new PermissionRequestMessage(AT, 'permission-1', requestedTool),
       new PermissionResolvedMessage(AT, 'permission-1', true),
       new PermissionCancelledMessage(AT, 'permission-2', 'cancelled'),

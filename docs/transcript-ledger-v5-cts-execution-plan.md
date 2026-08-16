@@ -155,6 +155,11 @@ There is no typed manifest, source parser, wrapper API, custom runner, or result
 adapter. The implementation is limited to one dependency-free script, one
 plain-text inventory, and focused validator tests.
 
+Checkpoint validation compares the inventory with committed Git test objects
+in both directions. Protected or otherwise uncommitted cases enter the
+inventory only in the commit that lands their test occurrence; a shared dirty
+worktree is not release evidence.
+
 ## Migration Sequence
 
 Each phase ends in one or more scoped test commits. The phases describe test
@@ -309,7 +314,9 @@ The generic adoption matrix runs against the nullable `legacyHistoryImport`
 facet rather than naming providers in shared core. It covers null and explicit
 empty success, prefix failure, importer open and mid-iteration failure, no-view
 rollback, retry from the beginning, unrelated-chat isolation, and exact
-prefix/session/current-binding ordering.
+prefix/session/current-binding ordering. Source failures expose the fixed
+`Transcript adoption source failed` message; raw provider text is not a public
+error oracle.
 
 A recorded carryover quarantine is a separate positive branch. Contract tests
 round-trip `{type: 'carryover-migration-quarantine', artifactId, errorCode}`;
@@ -333,20 +340,24 @@ sources, static wiring rejects the projection loader, and a multi-segment
 pre-V5 black-box case preserves exact rendered order plus durable
 `agent-switch` row kinds. Frozen-draft units lock user identity, provider rows,
 ownership boundaries, the typed quarantine notice exception, ordinary notice
-and permission-lifecycle exclusion, and null provider metadata.
+and permission-lifecycle exclusion, and null provider metadata. The notice
+case includes actionless ordinary text and quarantine-like text without typed
+detail so content alone can never activate the exception.
 
 Source failures carry no transcript content through either diagnostic surface.
 One route-level sentinel case preserves the structured adoption warning's
 provider, phase, and safe reason while requiring a fixed retryable
 `TRANSCRIPT_UNAVAILABLE` message through the route logger and HTTP mapping. A
 separate POST `/chats/run` case requires the same typed retryable response when
-adoption fails during command admission.
+adoption fails at `currentTranscriptViewId` during command admission, asserts
+that no scheduling or command side effect occurred, then retries after repair.
 
 Legacy discovery also classifies absence explicitly. A shared Direct relocation
-case rejects every skipped claim without advancing its migration version, then
-retries the retained source after repair. Codex rejects invalid metadata on a
-stored or discovered rollout while keeping true missing-path plus discovery
-miss as positive legacy absence. Cursor rejects a present invalid preferred ACP
+case rejects a mixed moved/skipped claim without advancing its migration
+version, retains the skipped source, then retries after repair. Codex rejects
+invalid stored evidence without falling back to an available valid discovered
+rollout, while keeping true missing-path plus discovery miss as positive legacy
+absence. Cursor rejects a present invalid preferred ACP
 candidate before considering its valid stream-json fallback, then retries the
 fallback after the invalid preferred candidate is removed.
 
@@ -377,15 +388,15 @@ legacy facet:
 | `TLV5-ADOPT.09-CARRYOVER-UNIT-01` | A small injected cap proves the model projection differs from the complete frozen source |
 | `TLV5-ADOPT.09-FROZEN-CONVERSATION-UNIT-01` | Frozen users retain identity and provider-rendered rows retain exact payload with null provider metadata |
 | `TLV5-ADOPT.09-FROZEN-DRAFT-UNIT-01` | Frozen ownership boundaries map to durable `agent-switch` drafts |
-| `TLV5-ADOPT.09-FROZEN-NOTICE-UNIT-01` | Frozen projection preserves only the typed quarantine notice from core/lifecycle presentation |
+| `TLV5-ADOPT.09-FROZEN-NOTICE-UNIT-01` | Frozen projection preserves only typed quarantine detail and drops actionless or quarantine-like untyped notices |
 | `TLV5-ADOPT.09-SERVER-STATIC-01` | Genesis wiring selects the lossless carryover source, never model projection |
 | `TLV5-ADOPT.09-SERVER-MULTI-SEGMENT-01` | Multi-segment pre-V5 adoption preserves exact rendered and durable boundary order |
-| `TLV5-ADOPT.10-RUN-ROUTE-UNIT-01` | Retryable adoption failure maps to the typed retryable POST `/chats/run` response |
+| `TLV5-ADOPT.10-RUN-ROUTE-UNIT-01` | Admission-time adoption failure maps to typed retryable POST `/chats/run`, causes no scheduling side effect, and retries |
 | `TLV5-ADOPT.10-SOURCE-FAILURE-ROUTE-UNIT-01` | Adoption source content is absent from structured warnings, propagated errors, route logs, and HTTP errors |
 | `TLV5-ADOPT.11-CODEX-DISCOVERED-UNIT-01` | Codex rejects a mismatched discovered rollout and retries the repaired candidate |
-| `TLV5-ADOPT.11-CODEX-STORED-UNIT-01` | Codex accepts only ENOENT plus discovery miss as absence; ENOTDIR and invalid stored metadata fail and retry from the same repaired reference |
+| `TLV5-ADOPT.11-CODEX-STORED-UNIT-01` | Codex accepts only ENOENT plus discovery miss as absence; ENOTDIR and invalid stored metadata reject a valid discovered fallback and retry the same reference |
 | `TLV5-ADOPT.11-CURSOR-PREFERRED-UNIT-01` | Cursor rejects an invalid preferred ACP candidate without falling back, then retries after repair |
-| `TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01` | Direct skipped relocation leaves version/source intact and repaired retry commits exactly once |
+| `TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01` | Direct mixed moved/skipped relocation leaves version/skipped source intact and repaired retry commits exactly once |
 
 ### T7 HTTP Paging and WebSocket Replay
 

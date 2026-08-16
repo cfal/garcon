@@ -256,19 +256,19 @@ describe('createCodexNativeEvidence', () => {
     await withDirectory(async (directory) => {
       const nativePath = path.join(directory, 'stored.jsonl');
       const codec = createPathNativeSessionCodec('codex');
-      const fixture = createFixture(
-        directory,
-        codec.encode({
-          path: nativePath,
-          agentSessionId: 'thread-1',
-          modelEndpointId: null,
-        }),
-      );
+      const nativeSession = codec.encode({
+        path: nativePath,
+        agentSessionId: 'thread-1',
+        modelEndpointId: null,
+      });
+      const missingFixture = createFixture(directory, nativeSession);
 
       await expect(
-        fixture.transcript.loadLegacy({ chat: fixture.chat, signal }),
+        missingFixture.transcript.loadLegacy({ chat: missingFixture.chat, signal }),
       ).resolves.toEqual({ messages: [] });
+      expect(missingFixture.calls.discover).toBe(1);
 
+      const discoveredPath = await writeTranscript(directory, 'discovered.jsonl', 'thread-1');
       const nonDirectoryPath = path.join(directory, 'not-a-directory');
       await fs.writeFile(nonDirectoryPath, 'not a directory');
       const enotdirFixture = createFixture(
@@ -278,10 +278,12 @@ describe('createCodexNativeEvidence', () => {
           agentSessionId: 'thread-1',
           modelEndpointId: null,
         }),
+        { discoveredPath },
       );
       await expect(
         enotdirFixture.transcript.loadLegacy({ chat: enotdirFixture.chat, signal }),
       ).rejects.toThrow();
+      expect(enotdirFixture.calls.discover).toBe(0);
 
       await fs.rm(nonDirectoryPath);
       await fs.mkdir(nonDirectoryPath);
@@ -289,20 +291,34 @@ describe('createCodexNativeEvidence', () => {
       await expect(
         enotdirFixture.transcript.loadLegacy({ chat: enotdirFixture.chat, signal }),
       ).resolves.toMatchObject({ messages: [{ content: 'native message' }] });
+      expect(enotdirFixture.calls.discover).toBe(0);
 
       await fs.writeFile(nativePath, `${JSON.stringify({
         type: 'session_meta',
         timestamp: '2026-07-24T00:00:00.000Z',
         payload: {},
       })}\n`);
+      const invalidMetadataFixture = createFixture(
+        directory,
+        nativeSession,
+        { discoveredPath },
+      );
       await expect(
-        fixture.transcript.loadLegacy({ chat: fixture.chat, signal }),
+        invalidMetadataFixture.transcript.loadLegacy({
+          chat: invalidMetadataFixture.chat,
+          signal,
+        }),
       ).rejects.toThrow();
+      expect(invalidMetadataFixture.calls.discover).toBe(0);
 
       await writeTranscript(directory, 'stored.jsonl', 'thread-1');
       await expect(
-        fixture.transcript.loadLegacy({ chat: fixture.chat, signal }),
+        invalidMetadataFixture.transcript.loadLegacy({
+          chat: invalidMetadataFixture.chat,
+          signal,
+        }),
       ).resolves.toMatchObject({ messages: [{ content: 'native message' }] });
+      expect(invalidMetadataFixture.calls.discover).toBe(0);
     });
   });
 

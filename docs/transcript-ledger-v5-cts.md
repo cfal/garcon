@@ -496,7 +496,7 @@ The status below describes test coverage, not implementation completion.
 | R9 duplicate handoff marker                   | TLV5-HANDOFF.06                                       | Matching, conflicting, and duplicate marker units                                                   | Covered |
 | R10 silent handoff fork fallback              | TLV5-FORK.01 through TLV5-FORK.04                     | Core fork units; no complete browser consent workflow                                               | Partial |
 | R11 unbounded reconnect replay                | TLV5-REPLAY.01 through TLV5-REPLAY.07                 | Contract, 50,000-row server, and Chromium replay cases; no exact mid-replay browser disconnect case | Partial |
-| R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Contract, active-state, server, and held-page browser cases                                         | Covered |
+| R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Contract, active-state, server, and held-page browser cases                                         | Partial |
 | R13 LRU failure attribution                   | TLV5-L11.04                                           | Store and close-recovery units                                                                      | Covered |
 | R14 duplicate prepared input                  | TLV5-L04.04                                           | Ledger, coordinator, and handler units                                                              | Covered |
 | R15 temporary diagnostics and weak quiescence | TLV5-OBS.01 through TLV5-OBS.04                       | Static diagnostic guard and scattered privacy tests                                                 | Partial |
@@ -576,14 +576,14 @@ row, and asserts exact addresses and provider callbacks throughout.
 | TLV5-ADOPT.06 | Reload preserves only the quarantine notice while dropping ordinary notices.                                     | Intentional red     |
 | TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and Amp/Factory/Cursor provider oracles are locked. | Intentional red     |
 | TLV5-ADOPT.08 | Shared native-capability SACS, provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Intentional red |
-| TLV5-ADOPT.09 | Small-cap source discrimination, lossless server wiring, frozen ownership-boundary mapping, and multi-segment black-box order are locked. | Intentional red |
-| TLV5-ADOPT.10 | Source warning, propagated integration error, route logging, and HTTP error surfaces are locked against transcript-content leakage. | Intentional red |
+| TLV5-ADOPT.09 | Small-cap source discrimination, lossless server wiring, frozen ownership-boundary mapping, and multi-segment black-box order are locked. | Covered |
+| TLV5-ADOPT.10 | Source warning, propagated integration error, route logging, and HTTP error surfaces are locked against transcript-content leakage. | Covered |
 | TLV5-ADOPT.11 | Direct relocation and Codex/Cursor source-selection ambiguity fail closed while true absence and repaired retry remain viable. | Intentional red |
 
-Intentional-red adoption cases fail only where current production still calls
-the native facet, swallows unknown failures, omits legacy rows, or lacks the
-recorded-quarantine notice. A completed empty source remains a distinct green
-control.
+The remaining intentional-red families cover genesis facet and initialization
+semantics, quarantine handling, strict provider-source conversion, selected
+native evidence, and relocation/discovery ambiguity. Each case records its own
+failure signature; a completed empty source remains a distinct green control.
 
 ## Read-Fold Matrix
 
@@ -660,9 +660,9 @@ becomes a separate environment requirement rather than another semantic test.
 | TLV5-PAGE.05   | Active-state invalidation plus held-page switch, reload, and navigation cases.                   | Covered |
 | TLV5-PAGE.06   | Explicit error retry and no-tight-loop controller cases.                                         | Covered |
 | TLV5-PAGE.07   | Component error retry plus Lightpanda and Chromium absence assertions.                           | Covered |
-| TLV5-PAGE.08   | Exact bounded-page units, one-query static guard, and web clamped-ceiling contract.              | Covered oracle |
-| TLV5-PAGE.09   | Hidden-only server and contract cases, multi-budget continuation, and cache raw-cursor persistence. | Covered oracle |
-| TLV5-PAGE.10   | Shared/web malformed relation rejection and deterministic stalled-cursor termination.           | Covered oracle |
+| TLV5-PAGE.08   | Committed one-query static guard; bounded server and web contract cases remain protected section 5.4 WIP. | Partial |
+| TLV5-PAGE.09   | Committed shared hidden-page contract; server, multi-budget, and cache cursor cases remain protected section 5.4 WIP. | Partial |
+| TLV5-PAGE.10   | Committed shared relation contract; web rejection and stalled-cursor cases remain protected section 5.4 WIP. | Partial |
 | TLV5-REPLAY.01 | Shared contract, server WebSocket, and 50,000-row integration case.                              | Covered |
 | TLV5-REPLAY.02 | Shared continuation validation and server integration case.                                      | Covered |
 | TLV5-REPLAY.03 | Server row/byte bounds and oversized-row rejection cases.                                        | Covered |
@@ -800,15 +800,15 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.09-CARRYOVER-UNIT-01 | `server/chats/__tests__/carryover-transcript-store.test.js`: a small injected cap distinguishes the filtered model projection from the complete lossless frozen source | ADOPT.09 |
 | TLV5-ADOPT.09-FROZEN-CONVERSATION-UNIT-01 | `server/ledger/__tests__/imported-drafts.test.js`: frozen user identity and provider-rendered rows map exactly with null provider metadata | ADOPT.09 |
 | TLV5-ADOPT.09-FROZEN-DRAFT-UNIT-01 | `server/ledger/__tests__/imported-drafts.test.js`: `AgentSwitchMessage` maps to a durable `agent-switch` draft rather than `provider-row` | ADOPT.09 |
-| TLV5-ADOPT.09-FROZEN-NOTICE-UNIT-01 | `server/ledger/__tests__/imported-drafts.test.js`: frozen projection preserves the typed quarantine notice while dropping ordinary notices and permission lifecycle presentation | ADOPT.09 |
+| TLV5-ADOPT.09-FROZEN-NOTICE-UNIT-01 | `server/ledger/__tests__/imported-drafts.test.js`: frozen projection preserves only the typed quarantine notice while dropping action-bearing and actionless ordinary notices, quarantine-like untyped text, and permission lifecycle presentation | ADOPT.09 |
 | TLV5-ADOPT.09-SERVER-STATIC-01 | `server/ledger/__tests__/adoption-architecture.test.js`: server genesis wiring uses the lossless carryover source and never the capped model projection | ADOPT.09 |
 | TLV5-ADOPT.09-SERVER-MULTI-SEGMENT-01 | `integration-tests/tests/server/carryover-bootstrap-migration.test.ts`: pre-V5 multi-segment adoption preserves exact rendered order and durable ownership-boundary kinds | ADOPT.09 |
-| TLV5-ADOPT.10-RUN-ROUTE-UNIT-01 | `server/routes/__tests__/chats-command-routes.test.js`: retryable transcript adoption failure maps to the typed retryable POST `/chats/run` response | ADOPT.10 |
+| TLV5-ADOPT.10-RUN-ROUTE-UNIT-01 | `server/routes/__tests__/chats-command-routes.test.js`: command-admission adoption failure maps to typed retryable POST `/chats/run` without scheduling or command side effects, then retries | ADOPT.10 |
 | TLV5-ADOPT.10-SOURCE-FAILURE-ROUTE-UNIT-01 | `server/routes/__tests__/chats-messages.test.js`: a source-message sentinel reaches neither the structured adoption warning, propagated integration error, route logger, nor HTTP error | ADOPT.10 |
 | TLV5-ADOPT.11-CODEX-DISCOVERED-UNIT-01 | `server-agents/codex/src/agents/codex/__tests__/transcript.test.js`: a mismatched discovered rollout fails legacy import and the repaired candidate retries | ADOPT.11 |
-| TLV5-ADOPT.11-CODEX-STORED-UNIT-01 | `server-agents/codex/src/agents/codex/__tests__/transcript.test.js`: ENOENT plus discovery miss is positive absence; ENOTDIR and invalid stored metadata fail and retry from the same repaired reference | ADOPT.11 |
+| TLV5-ADOPT.11-CODEX-STORED-UNIT-01 | `server-agents/codex/src/agents/codex/__tests__/transcript.test.js`: ENOENT plus discovery miss is positive absence; ENOTDIR and invalid stored metadata reject a valid discovery fallback and retry from the same repaired reference | ADOPT.11 |
 | TLV5-ADOPT.11-CURSOR-PREFERRED-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: an invalid preferred ACP store blocks fallback until the preferred candidate is repaired or removed | ADOPT.11 |
-| TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01 | `server-agents/common/src/direct/__tests__/legacy-session-relocation.test.js`: skipped relocation commits no version, retains the source, and a repaired retry commits once | ADOPT.11 |
+| TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01 | `server-agents/common/src/direct/__tests__/legacy-session-relocation.test.js`: mixed moved/skipped relocation commits no version, retains the skipped source, and a repaired retry commits once | ADOPT.11 |
 | TLV5-L07.03-CODEX-SCRIPTED-01  | `integration-tests/tests/server/codex-producer-routing.test.ts`: `drops content emitted by the old native client after transcript replacement`            | L07.03, L07.08              |
 | TLV5-PERM.04-CODEX-SCRIPTED-01 | `integration-tests/tests/server/codex-producer-routing.test.ts`: `keeps reused native approval ids bound to their exact occurrences`                      | PERM.04, PERM.05            |
 | TLV5-L10.01-CODEX-STATIC-01    | `server-agents/codex/src/agents/codex/app-server/__tests__/architecture.test.js`: live runtime does not import the history loader                         | L10.01, R3                  |
@@ -824,16 +824,10 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-UX.06-COMPACT-TOUCH-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact touch prepend cases                                                         | R4                          |
 | TLV5-UX.06-WIDE-TOUCH-01       | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide touch prepend cases                                                            | R4                          |
 | TLV5-UX.08-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `renders mixed paged transcripts in exact ledger order on compact and wide layouts` | L02.03, final-row order     |
-| TLV5-UX.17-WEB-UNIT-01         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: active page request retains both loaded edges                             | R4 active mutation safety   |
-| TLV5-UX.17-WEB-UNIT-02         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: programmatic scroll ownership retains both loaded edges                   | R4 active mutation safety   |
-| TLV5-UX.17-WEB-UNIT-03         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: expanded live-edge state survives beyond 180 seconds                     | R4 timer absence, primary   |
-| TLV5-UX.17-WEB-UNIT-04         | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: chat switch restores only the bounded latest cache in exact order                | R4 bounded cache restore    |
+| TLV5-UX.10-WEB-UNIT-01         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: committed pre-section-5.4 timer baseline retained until the replacement cases land | Retiring baseline           |
 | TLV5-UX.17-WEB-STATIC-01       | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: timer and history-pruned machinery are absent                    | R4 timer architecture, supplementary |
 | TLV5-UX.17-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact switch restores bounded exact-order cache and earlier paging                | R4 compact geometry         |
 | TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide switch restores bounded exact-order cache and earlier paging                   | R4 wide geometry            |
-| TLV5-PAGE.08-SERVER-UNIT-01    | `server/ledger/__tests__/view-reader.test.js`: one bounded raw page with exact ceiling and continuation                                                    | PAGE.08                     |
-| TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: client crosses hidden raw budgets to visible rows                                | PAGE.09                     |
-| TLV5-PAGE.09-WEB-UNIT-02       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switch restores raw continuation independently of visible ordinal                | PAGE.09, UX.17              |
 | TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: context exhaustion fails visibly without continuation                             | OPENCODE.01                 |
 | TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: disable flag and route deletion                               | OPENCODE.02                 |
 | TLV5-PAGE.05-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |
