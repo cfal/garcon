@@ -14,9 +14,11 @@ export class TranscriptOptimisticInputs {
 		if (!this.#afterOrdinalByClientMessageId.has(input.clientMessageId)) {
 			this.#afterOrdinalByClientMessageId.set(input.clientMessageId, afterOrdinal);
 		}
-		const next = this.rows.filter((entry) => entry.clientMessageId !== input.clientMessageId);
-		next.push(input);
-		this.rows = next.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+		const existingIndex = this.rows.findIndex(
+			(entry) => entry.clientMessageId === input.clientMessageId,
+		);
+		if (existingIndex === -1) this.rows = [...this.rows, input];
+		else this.rows = this.rows.with(existingIndex, input);
 		this.onChanged();
 	}
 

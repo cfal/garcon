@@ -43,11 +43,10 @@ export function mergeRowsWithOptimisticInputs(
 	while (messageIndex < rows.length && optimisticIndex < optimisticRows.length) {
 		const row = rows[messageIndex];
 		const optimistic = optimisticRows[optimisticIndex];
-		const timestampOrder = row.message.timestamp.localeCompare(optimistic.row.message.timestamp);
-		const rowPrecedesEqualTimestamp = optimistic.afterOrdinal !== undefined
+		const rowPrecedesOptimistic = optimistic.afterOrdinal !== undefined
 			&& row.ordinal !== undefined
 			&& row.ordinal <= optimistic.afterOrdinal;
-		if (timestampOrder < 0 || (timestampOrder === 0 && rowPrecedesEqualTimestamp)) {
+		if (rowPrecedesOptimistic) {
 			merged.push(row);
 			messageIndex += 1;
 		} else {
