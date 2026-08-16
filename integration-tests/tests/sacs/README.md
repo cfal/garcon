@@ -29,8 +29,12 @@ The universal transcript module covers:
 Capability modules apply whenever the corresponding nullable facet or emitted
 event family is present:
 
-- permission occurrence identity and exact response capability;
-- native import, activity probe, and fork behavior;
+- one integration-generated permission occurrence UUID, provider-native ID
+  privacy, exact response capability, delayed-terminal isolation, and restart
+  inertness;
+- adoption-only `legacyHistoryImport`, including fail-closed reads and recorded
+  quarantine, independently of the Reload-only `nativeHistoryImport` facet;
+- native history import, activity probe, and fork behavior;
 - steering, goals, compaction, and project-path updates;
 - shared-stream routing and per-chat sink-rejection isolation;
 - source retirement and route/callback cleanup.
@@ -38,6 +42,10 @@ event family is present:
 An advertised capability may not skip its module. A null facet records an
 explicit not-applicable result. Provider-specific tests remain only for native
 translation, native storage formats, and behavior unique to that provider.
+When deterministic migration fixtures are registered, the three Direct drivers
+consume the same legacy-adoption module and advertise no native Reload.
+OpenCode supplies only directory-scoped fixtures; the shared module never
+invents a directoryless fallback.
 
 ## Driver Contract
 

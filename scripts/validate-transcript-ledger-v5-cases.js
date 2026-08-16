@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const CASE_ID_PATTERN = /\[(TLV5-[A-Z0-9]+(?:[.-][A-Z0-9]+)*)\]/g;
@@ -78,15 +78,18 @@ export function validateTranscriptConformanceInventory(inventoryContents, source
 }
 
 function trackedTestFiles() {
+  const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
   const result = spawnSync(
     'git',
     ['ls-files', '--cached', '--others', '--exclude-standard', '--', '*.test.js', '*.test.ts'],
-    { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' },
+    { cwd: repositoryRoot, encoding: 'utf8' },
   );
   if (result.status !== 0) {
     throw new Error(result.stderr.trim() || 'Unable to enumerate test files');
   }
-  return result.stdout.split(/\r?\n/u).filter((path) => path.length > 0);
+  return result.stdout
+    .split(/\r?\n/u)
+    .filter((path) => path.length > 0 && existsSync(`${repositoryRoot}/${path}`));
 }
 
 export function validateRepositoryTranscriptConformanceInventory() {
