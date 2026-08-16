@@ -1850,6 +1850,96 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 500 });
 	});
 
+	it('bridges a disjoint snapshot and live rows buffered behind the retained interval', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			assistantEntries(101, 300, (ordinal) => `retained-${ordinal}`),
+			{ lastOrdinal: 300, pageOldestOrdinal: 101, hasMore: true },
+		);
+		chat.isUserScrolledUp = true;
+		chat.revealAllLoadedMessages();
+
+		const snapshotEpoch = chat.beginSnapshotLoad();
+		expect(applyMessages(
+			chat,
+			'chat-1',
+			'generation-1',
+			assistantEntries(501, 502, (ordinal) => `live-${ordinal}`),
+		)).toBe('applied');
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-1',
+				messages: assistantEntries(451, 500, (ordinal) => `snapshot-${ordinal}`),
+				lastOrdinal: 500,
+				pageOldestOrdinal: 451,
+				pageNewestOrdinal: 500,
+				hasMore: true,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 200 }, (_, index) => index + 101),
+		);
+		expect(chat.loadedThroughOrdinal).toBe(300);
+		expect(chat.lastOrdinal).toBe(502);
+		expect(chat.hasLaterMessages).toBe(true);
+		expect(chat.visibleRows).toHaveLength(200);
+
+		const laterPages = [
+			[301, 350],
+			[351, 400],
+			[401, 450],
+			[451, 500],
+			[501, 502],
+		] as const;
+		for (const [firstOrdinal, lastOrdinal] of laterPages) {
+			vi.mocked(getChatMessages).mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: assistantEntries(
+						firstOrdinal,
+						lastOrdinal,
+						(ordinal) => ordinal > 500 ? `live-${ordinal}` : `page-${ordinal}`,
+					),
+					lastOrdinal: 502,
+					pageOldestOrdinal: firstOrdinal,
+					pageNewestOrdinal: lastOrdinal,
+					hasMore: true,
+				}),
+			});
+		}
+
+		for (let pageIndex = 0; pageIndex < laterPages.length; pageIndex += 1) {
+			await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
+		}
+
+		for (const [index, beforeOrdinal] of [351, 401, 451, 501, 503].entries()) {
+			expect(vi.mocked(getChatMessages)).toHaveBeenNthCalledWith(index + 1, {
+				chatId: 'chat-1',
+				beforeOrdinal,
+				limit: 50,
+				transcriptViewId: 'generation-1',
+			});
+		}
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 402 }, (_, index) => index + 101),
+		);
+		expect(chat.entries.slice(-2).map((message) => contentOf(message.message))).toEqual([
+			'live-501',
+			'live-502',
+		]);
+		expect(chat.loadedThroughOrdinal).toBe(502);
+		expect(chat.lastOrdinal).toBe(502);
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.visibleRows).toHaveLength(402);
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 502 });
+	});
+
 	it('keeps a fresh earlier request active after a snapshot invalidates its predecessor', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
