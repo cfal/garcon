@@ -6,20 +6,23 @@ const PACKAGE_ROOT = new URL('../../../../', import.meta.url);
 
 describe('OpenCode V1 automatic compaction architecture', () => {
   it('[TLV5-OPENCODE.02-UNIT-01] forces autocompaction off in the owned server environment', () => {
-    const environment = buildOpenCodeServerEnv({
-      KEEP_ME: 'yes',
-      OPENCODE_DISABLE_AUTOCOMPACT: '0',
-      OPENCODE_DISABLE_AUTOUPDATE: '0',
-      OPENCODE_PURE: '1',
-    });
+    const environment = buildOpenCodeServerEnv(
+      {
+        KEEP_ME: 'yes',
+        OPENCODE_DISABLE_AUTOCOMPACT: '0',
+        OPENCODE_DISABLE_AUTOUPDATE: '0',
+        OPENCODE_PURE: '1',
+      },
+      'https://example.test/operation-identity-plugin.js',
+    );
 
+    expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? '{}')).not.toHaveProperty('plugin');
     expect(environment).toMatchObject({
       KEEP_ME: 'yes',
       OPENCODE_DISABLE_AUTOCOMPACT: '1',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
     });
     expect(environment).not.toHaveProperty('OPENCODE_PURE');
-    expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? '{}')).not.toHaveProperty('plugin');
   });
 
   it('[TLV5-OPENCODE.02-STATIC-01] disables provider autocompaction and removes session-latest continuation support', () => {
