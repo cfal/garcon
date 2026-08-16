@@ -12,8 +12,43 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function pendingUntilAborted(signal) {
+  return new Promise((_, reject) => {
+    const abort = () => reject(signal.reason ?? new Error('OpenCode request aborted'));
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
 function envelope(event) {
   return { directory: '/repo', payload: event };
+}
+
+function completedAssistantEnvelope({
+  eventId,
+  messageId,
+  parentId,
+  error,
+  finish = 'stop',
+}) {
+  return envelope({
+    id: eventId,
+    type: 'message.updated',
+    properties: {
+      sessionID: 'session-1',
+      info: {
+        id: messageId,
+        role: 'assistant',
+        parentID: parentId,
+        finish,
+        time: { completed: Date.now() },
+        ...(error ? { error } : {}),
+      },
+    },
+  });
 }
 
 function connectedEnvelope() {
@@ -23,11 +58,49 @@ function connectedEnvelope() {
 function createEventStream({ connected = true } = {}) {
   const events = connected ? [connectedEnvelope()] : [];
   const waiters = [];
+  const promptRequestsByPart = new Map();
+  const promptRequestsByMessage = new Map();
   let closed = false;
+  const observe = (envelope) => {
+    const event = envelope.payload;
+    if (event?.type === 'message.part.updated') {
+      const part = event.properties?.part;
+      const operationPartId = part?.metadata?.garcon_operation_part_id ?? part?.id;
+      let request = promptRequestsByPart.get(operationPartId);
+      if (!request && (part?.type === 'compaction' || part?.synthetic === true)) {
+        const candidates = [...promptRequestsByPart.values()]
+          .filter((candidate) => candidate.sessionId === event.properties?.sessionID);
+        if (candidates.length === 1) [request] = candidates;
+      }
+      if (request && typeof part?.messageID === 'string') {
+        promptRequestsByMessage.set(part.messageID, request);
+      }
+      return;
+    }
+    const info = event?.type === 'message.updated' ? event.properties?.info : null;
+    if (typeof info?.time?.completed !== 'number') return;
+    const request = promptRequestsByMessage.get(info.parentID);
+    if (!request) return;
+    setImmediate(() => request.resolve({ data: { info, parts: [] } }));
+  };
   return {
     push(event) {
       events.push(event);
       for (const resolve of waiters.splice(0)) resolve();
+      observe(event);
+    },
+    prompt(input, options) {
+      const response = deferred();
+      const partId = input.parts[0].id;
+      const request = { resolve: response.resolve, sessionId: input.sessionID };
+      promptRequestsByPart.set(partId, request);
+      const abort = () => {
+        promptRequestsByPart.delete(partId);
+        response.reject(options.signal.reason ?? new Error('OpenCode prompt request aborted'));
+      };
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
+      return response.promise;
     },
     close() {
       closed = true;
@@ -64,16 +137,26 @@ function createRuntime(
   subscribe = mock(() => Promise.resolve({ stream: neverEndingStream() })),
   runtimeOptions = {},
 ) {
+  const {
+    turnPrompt,
+    permissionReply = mock(() => Promise.resolve({})),
+    ...options
+  } = runtimeOptions;
+  const prompt = turnPrompt ?? mock((...args) => {
+    void Promise.resolve(promptAsync(...args)).catch(() => undefined);
+    return pendingUntilAborted(args[1].signal);
+  });
   const runtime = new OpenCodeRuntime({
-    ...runtimeOptions,
+    ...options,
     createInstance: mock(() => Promise.resolve({
       client: {
-        permission: { reply: mock(() => Promise.resolve({})) },
+        permission: { reply: permissionReply },
         global: {
           event: subscribe,
         },
         session: {
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+          prompt,
           promptAsync,
           abort,
         },
@@ -82,6 +165,13 @@ function createRuntime(
     })),
   });
   return runtime;
+}
+
+function promptThrough(eventStream, promptAsync) {
+  return mock((...args) => {
+    void Promise.resolve(promptAsync(...args)).catch(() => undefined);
+    return eventStream.prompt(...args);
+  });
 }
 
 async function start(runtime, overrides = {}) {
@@ -107,6 +197,10 @@ describe('OpenCodeRuntime abort', () => {
           global: { event: subscribe },
           session: {
             create,
+            prompt: (...args) => {
+              void promptAsync(...args);
+              return new Promise(() => {});
+            },
             promptAsync,
             abort: mock(() => Promise.resolve({ data: true })),
           },
@@ -173,6 +267,7 @@ describe('OpenCodeRuntime abort', () => {
           global: { event: subscribe },
           session: {
             create,
+            prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
             promptAsync: mock(() => Promise.resolve({})),
             abort: mock(() => Promise.resolve({ data: true })),
           },
@@ -212,6 +307,7 @@ describe('OpenCodeRuntime abort', () => {
           global: { event: subscribe },
           session: {
             create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
             promptAsync: mock(() => Promise.resolve({})),
             abort: mock(() => Promise.resolve({ data: true })),
           },
@@ -330,6 +426,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const messages = [];
     const finishes = [];
@@ -366,10 +463,10 @@ describe('OpenCodeRuntime abort', () => {
         info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0004',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0004',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
     }));
     await waitFor(() => finishes.length === 1);
 
@@ -469,10 +566,10 @@ describe('OpenCodeRuntime abort', () => {
         part: { id: 'part-b', messageID: 'assistant-b', type: 'text', text: 'current' },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0011',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0011',
+      messageId: 'assistant-b',
+      parentId: 'user-b',
     }));
 
     await expect(successor).resolves.toBeUndefined();
@@ -495,6 +592,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const finishes = [];
     runtime.onFinished(() => finishes.push('finished'));
@@ -535,10 +633,10 @@ describe('OpenCodeRuntime abort', () => {
         info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0004',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0004',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
     }));
 
     await waitFor(() => finishes.length === 1);
@@ -555,6 +653,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const messages = [];
     const finishes = [];
@@ -641,10 +740,10 @@ describe('OpenCodeRuntime abort', () => {
         part: { id: 'part-new', messageID: 'assistant-new', type: 'text', text: 'current' },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0009',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0009',
+      messageId: 'assistant-new',
+      parentId: 'user-new',
     }));
 
     await waitFor(() => finishes.length === 1);
@@ -657,12 +756,13 @@ describe('OpenCodeRuntime abort', () => {
 
   it('does not leave a rejected turn waiter unhandled while prompt submission is pending', async () => {
     const eventStream = createEventStream();
-    const prompt = deferred();
-    const promptAsync = mock(() => prompt.promise);
+    const promptRequest = deferred();
+    const turnPrompt = mock(() => promptRequest.promise);
     const runtime = createRuntime(
       mock(() => Promise.resolve({ data: true })),
-      promptAsync,
+      mock(() => Promise.resolve({})),
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt },
     );
     const failures = [];
     const unhandled = [];
@@ -682,14 +782,14 @@ describe('OpenCodeRuntime abort', () => {
         () => null,
         (error) => error,
       );
-      await waitFor(() => promptAsync.mock.calls.length === 1);
+      await waitFor(() => turnPrompt.mock.calls.length === 1);
 
       eventStream.close();
       await waitFor(() => failures.length === 1);
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      prompt.reject(new Error('prompt submit failed after stream loss'));
-      expect(await outcome).toMatchObject({ message: 'prompt submit failed after stream loss' });
+      promptRequest.reject(new Error('prompt submit failed after stream loss'));
+      expect(await outcome).toMatchObject({ message: 'OpenCode event stream ended' });
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(unhandled).toEqual([]);
     } finally {
@@ -763,6 +863,7 @@ describe('OpenCodeRuntime abort', () => {
       global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
       session: {
         create: mock(() => Promise.resolve({ data: { id: 'replacement-session' } })),
+        prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
         promptAsync: mock(() => Promise.resolve({})),
         abort: mock(() => Promise.resolve({ data: true })),
       },
@@ -774,6 +875,7 @@ describe('OpenCodeRuntime abort', () => {
           global: { event: firstSubscribe },
           session: {
             create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
             promptAsync: mock(() => Promise.resolve({})),
             abort: mock(() => Promise.resolve({ data: true })),
           },
@@ -832,13 +934,14 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
-  it('fails a running turn on session.error before a later idle can claim success', async () => {
+  it('fails a running turn on its named assistant error', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
     const runtime = createRuntime(
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const messages = [];
     const failures = [];
@@ -861,13 +964,12 @@ describe('OpenCodeRuntime abort', () => {
         },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0002',
-      type: 'session.error',
-      properties: {
-        sessionID: 'session-1',
-        error: { name: 'ProviderError', data: { message: 'provider said no' } },
-      },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0002',
+      messageId: 'assistant-error',
+      parentId: 'user-a',
+      error: { name: 'ProviderError', data: { message: 'provider said no' } },
+      finish: 'error',
     }));
     await waitFor(() => failures.length === 1);
 
@@ -896,19 +998,32 @@ describe('OpenCodeRuntime abort', () => {
   it('continues through automatic compaction after a recoverable context overflow', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
+    const prompt = deferred();
+    const permissionReply = mock(() => Promise.resolve({}));
+    const turnPrompt = mock((...args) => {
+      void promptAsync(...args);
+      return prompt.promise;
+    });
     const runtime = createRuntime(
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { permissionReply, turnPrompt },
     );
     const messages = [];
+    const operationEvents = [];
     const failures = [];
     const finishes = [];
     runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
     runtime.onFailed((_chatId, message) => failures.push(message));
     runtime.onFinished(() => finishes.push('finished'));
 
-    await start(runtime);
+    await start(runtime, {
+      operation: {
+        runId: 'run-a',
+        publish: (event) => operationEvents.push(event),
+      },
+    });
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.updated',
@@ -957,6 +1072,33 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
+      id: 'evt_compaction_assistant',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'assistant-compaction',
+          role: 'assistant',
+          parentID: 'compaction-user',
+          mode: 'compaction',
+          summary: true,
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_compaction_part',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-compaction-summary',
+          messageID: 'assistant-compaction',
+          type: 'text',
+          text: 'provider-owned summary',
+        },
+      },
+    }));
+    eventStream.push(envelope({
       id: 'evt_0007',
       type: 'message.updated',
       properties: { sessionID: 'session-1', info: { id: 'continue-user', role: 'user' } },
@@ -990,22 +1132,57 @@ describe('OpenCodeRuntime abort', () => {
     }));
     eventStream.push(envelope({
       id: 'evt_0011',
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'session-1',
+        requestID: 'permission-after-compaction',
+        permission: 'bash',
+        tool: { messageID: 'assistant-b' },
+      },
+    }));
+    await waitFor(() => operationEvents.some((event) => event.type === 'permission'));
+    const permission = operationEvents.find((event) => event.type === 'permission');
+    await permission.decision.respond({ allow: true });
+    expect(permissionReply.mock.calls.at(-1)[0]).toMatchObject({
+      requestID: 'permission-after-compaction',
+      reply: 'once',
+    });
+    eventStream.push(envelope({
+      id: 'evt_0012',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
         part: { id: 'answer', messageID: 'assistant-b', type: 'text', text: 'recovered' },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0012',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    }));
+    prompt.resolve({
+      data: {
+        info: {
+          id: 'assistant-b',
+          role: 'assistant',
+          parentID: 'continue-user',
+          finish: 'stop',
+          time: { completed: Date.now() },
+        },
+        parts: [{
+          id: 'answer',
+          messageID: 'assistant-b',
+          type: 'text',
+          text: 'recovered',
+        }],
+      },
+    });
 
     await waitFor(() => finishes.length === 1);
-    expect(messages).toEqual([
-      expect.objectContaining({ type: 'assistant-message', content: 'recovered' }),
+    expect(messages.map((message) => message.type)).toEqual([
+      'permission-request',
+      'assistant-message',
     ]);
+    expect(messages.at(-1)).toMatchObject({
+      type: 'assistant-message',
+      content: 'recovered',
+    });
+    expect(operationEvents.filter((event) => event.type === 'messages')).toHaveLength(1);
     expect(failures).toEqual([]);
     eventStream.close();
     runtime.shutdown();
@@ -1018,6 +1195,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const failures = [];
     const finishes = [];
@@ -1051,18 +1229,12 @@ describe('OpenCodeRuntime abort', () => {
         info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0004',
-      type: 'session.error',
-      properties: {
-        sessionID: 'session-1',
-        error: { name: 'ContextOverflowError', data: { message: 'cannot compact' } },
-      },
-    }));
-    eventStream.push(envelope({
-      id: 'evt_0005',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0004',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      error: { name: 'ContextOverflowError', data: { message: 'cannot compact' } },
+      finish: 'error',
     }));
 
     await waitFor(() => failures.length === 1);
@@ -1079,6 +1251,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const failures = [];
     const unhandled = [];
@@ -1113,13 +1286,12 @@ describe('OpenCodeRuntime abort', () => {
           },
         },
       }));
-      eventStream.push(envelope({
-        id: 'evt_0002',
-        type: 'session.error',
-        properties: {
-          sessionID: 'session-1',
-          error: { name: 'ProviderError', data: { message: 'truncated stream' } },
-        },
+      eventStream.push(completedAssistantEnvelope({
+        eventId: 'evt_0002',
+        messageId: 'assistant-error',
+        parentId: 'user-a',
+        error: { name: 'ProviderError', data: { message: 'truncated stream' } },
+        finish: 'error',
       }));
 
       expect(await outcome).toMatchObject({ message: 'truncated stream' });
@@ -1171,12 +1343,16 @@ describe('OpenCodeRuntime abort', () => {
       return Promise.resolve({ stream: stream.stream() });
     });
     const promptAsync = mock(() => Promise.resolve({}));
-    const abort = mock(() => Promise.resolve({ data: true }));
+    const quiescence = deferred();
+    const abort = mock(() => quiescence.promise);
     const runtime = createRuntime(
       abort,
       promptAsync,
       subscribe,
-      { sseRetryDelayMs: 1 },
+      {
+        sseRetryDelayMs: 1,
+        turnPrompt: promptThrough(secondStream, promptAsync),
+      },
     );
     const messages = [];
     const failures = [];
@@ -1199,14 +1375,12 @@ describe('OpenCodeRuntime abort', () => {
       clientRequestId: 'req-b',
       turnId: 'turn-b',
     });
-    await waitFor(() => promptAsync.mock.calls.length === 2);
+    await waitFor(() => abort.mock.calls.length === 1);
     expect(abort).toHaveBeenCalledTimes(1);
-    expect(abort.mock.invocationCallOrder[0]).toBeLessThan(
-      promptAsync.mock.invocationCallOrder[1],
-    );
+    expect(promptAsync).toHaveBeenCalledTimes(1);
 
-    // The replacement stream belongs to the same provider process, so named late content
-    // retains the publisher captured by the original turn.
+    // The replacement stream belongs to the same provider process. Named content retains the
+    // original publisher until the held provider abort retires that operation source.
     secondStream.push(envelope({
       id: 'evt_0001',
       type: 'message.updated',
@@ -1259,11 +1433,17 @@ describe('OpenCodeRuntime abort', () => {
     }));
     await waitFor(() => messages.length === 1);
 
-    expect(runtime.isRunning('session-1')).toBe(true);
+    expect(runtime.isRunning('session-1')).toBe(false);
     expect(messages[0].emitted[0].content).toBe('stale');
     expect(messages[0].metadata).toMatchObject({ clientRequestId: 'req-a', turnId: 'turn-a' });
     expect(finishes).toEqual([]);
     expect(failures).toHaveLength(1);
+
+    quiescence.resolve({ data: true });
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+    expect(abort.mock.invocationCallOrder[0]).toBeLessThan(
+      promptAsync.mock.invocationCallOrder[1],
+    );
 
     secondStream.push(envelope({
       id: 'evt_0007',
@@ -1302,10 +1482,10 @@ describe('OpenCodeRuntime abort', () => {
         part: { id: 'part-b', messageID: 'assistant-b', type: 'text', text: 'current' },
       },
     }));
-    secondStream.push(envelope({
-      id: 'evt_0011',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    secondStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0011',
+      messageId: 'assistant-b',
+      parentId: 'user-b',
     }));
 
     await waitFor(() => messages.length === 2);
@@ -1329,6 +1509,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const failures = [];
     const finishes = [];
@@ -1400,10 +1581,10 @@ describe('OpenCodeRuntime abort', () => {
         part: { id: 'part-b', messageID: 'assistant-b', type: 'text', text: 'current' },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0006',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0006',
+      messageId: 'assistant-b',
+      parentId: 'user-b',
     }));
 
     await expect(successor).resolves.toBeUndefined();
@@ -1416,7 +1597,7 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
-  it('does not finish the turn when the abort unwind idle arrives before the abort resolves', async () => {
+  it('does not finish the turn when its named completion arrives before abort resolves', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
     const acknowledged = deferred();
@@ -1424,6 +1605,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => acknowledged.promise),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const finishes = [];
     runtime.onFinished(() => finishes.push('finished'));
@@ -1446,21 +1628,12 @@ describe('OpenCodeRuntime abort', () => {
 
     const aborting = runtime.abort('session-1');
     await Promise.resolve();
-    eventStream.push(envelope({
-      id: 'evt_0002',
-      type: 'message.updated',
-      properties: {
-        sessionID: 'session-1',
-        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
-      },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0002',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
     }));
-    eventStream.push(envelope({
-      id: 'evt_0003',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    }));
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(finishes).toEqual([]);
     expect(runtime.isRunning('session-1')).toBe(true);
@@ -1475,7 +1648,7 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
-  it('replays a skipped abort unwind idle when the provider rejects the abort', async () => {
+  it('replays a deferred named completion when the provider rejects the abort', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
     const acknowledged = deferred();
@@ -1483,6 +1656,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => acknowledged.promise),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const finishes = [];
     runtime.onFinished(() => finishes.push('finished'));
@@ -1505,21 +1679,12 @@ describe('OpenCodeRuntime abort', () => {
 
     const aborting = runtime.abort('session-1');
     await Promise.resolve();
-    eventStream.push(envelope({
-      id: 'evt_0002',
-      type: 'message.updated',
-      properties: {
-        sessionID: 'session-1',
-        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
-      },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0002',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
     }));
-    eventStream.push(envelope({
-      id: 'evt_0003',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    }));
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
     expect(finishes).toEqual([]);
 
     acknowledged.resolve({ error: { message: 'abort rejected' } });
@@ -1530,7 +1695,7 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
-  it('preserves a pending context-overflow failure when a rejected abort replays idle', async () => {
+  it('preserves a named provider failure when a rejected abort releases it', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
     const acknowledged = deferred();
@@ -1538,6 +1703,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => acknowledged.promise),
       promptAsync,
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
     const failures = [];
     const finishes = [];
@@ -1566,25 +1732,16 @@ describe('OpenCodeRuntime abort', () => {
         info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
       },
     }));
-    eventStream.push(envelope({
-      id: 'evt_0003',
-      type: 'session.error',
-      properties: {
-        sessionID: 'session-1',
-        error: { name: 'ContextOverflowError', data: { message: 'cannot compact' } },
-      },
-    }));
-    await Promise.resolve();
-
     const aborting = runtime.abort('session-1');
     await Promise.resolve();
-    eventStream.push(envelope({
-      id: 'evt_0004',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0003',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      error: { name: 'ContextOverflowError', data: { message: 'cannot compact' } },
+      finish: 'error',
     }));
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
     expect(failures).toEqual([]);
 
     acknowledged.resolve({ error: { message: 'abort rejected' } });

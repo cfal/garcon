@@ -88,7 +88,10 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
       const deliveryProbeIndex = requests.findIndex((request) =>
         request.method === 'POST' && request.path === '/tui/show-toast'
       );
-      const promptIndex = requests.findIndex((request) => request.path.endsWith('/prompt_async'));
+      const promptIndex = requests.findIndex((request) => (
+        request.method === 'POST'
+        && /\/session\/[^/]+\/message$/.test(request.path)
+      ));
       expect(deliveryProbeIndex).toBeGreaterThan(globalStreamIndex);
       expect(promptIndex).toBeGreaterThan(deliveryProbeIndex);
       testEnvironment.model.assertSettled();

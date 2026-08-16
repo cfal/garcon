@@ -128,7 +128,11 @@ describe('OpenCode history loader', () => {
 
     // Live conversion of the same parts yields identical identity tuples in
     // the same order, so audits match without type or content guessing.
-    const turn = { assistantPartTypes: new Map(), messageRoles: new Map() };
+    const turn = {
+      assistantPartTypes: new Map(),
+      messageRoles: new Map(),
+      publishedPartIds: new Set(),
+    };
     const logger = { debug() {}, info() {}, warn() {}, error() {} };
     const live = [
       { type: 'message.part.updated', properties: { part: { id: 'prt_think', messageID: 'msg_a', role: 'assistant', type: 'reasoning', text: 'why' } } },

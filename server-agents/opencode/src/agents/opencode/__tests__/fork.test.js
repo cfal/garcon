@@ -112,9 +112,9 @@ describe('OpenCodeRuntime fork', () => {
 
   it('creates new sessions and submits the first prompt in the project directory', async () => {
     const create = mock(() => Promise.resolve({ data: { id: 'session-1' } }));
-    const promptAsync = mock(() => Promise.resolve({}));
+    const prompt = mock(() => new Promise(() => {}));
     const { runtime } = createRuntimeWithClient({
-      session: { create, promptAsync },
+      session: { create, prompt },
     });
 
     await expect(runtime.startSession({
@@ -124,7 +124,7 @@ describe('OpenCodeRuntime fork', () => {
       permissionMode: 'default',
     })).resolves.toBe('session-1');
 
-    await waitForMockCall(promptAsync);
+    await waitForMockCall(prompt);
     expect(create.mock.calls[0][0]).toEqual({
       permission: [
         { permission: 'edit', pattern: '*', action: 'ask' },
@@ -133,22 +133,22 @@ describe('OpenCodeRuntime fork', () => {
       ],
       directory: '/repo',
     });
-    expect(promptAsync.mock.calls[0][0]).toMatchObject({
+    expect(prompt.mock.calls[0][0]).toMatchObject({
       sessionID: 'session-1',
       parts: [{ type: 'text', text: 'hello' }],
       directory: '/repo',
     });
     // OpenCode assigns ordered message IDs while preserving Garcon's prompt part ID.
-    expect(promptAsync.mock.calls[0][0].messageID).toBeUndefined();
-    expect(promptAsync.mock.calls[0][0].parts[0].id).toMatch(/^prt_[0-9a-f]{32}$/);
+    expect(prompt.mock.calls[0][0].messageID).toBeUndefined();
+    expect(prompt.mock.calls[0][0].parts[0].id).toMatch(/^prt_[0-9a-f]{32}$/);
   });
 
   it('fails resumed turns when OpenCode returns a missing session result', async () => {
-    const promptAsync = mock(() => Promise.resolve({
+    const prompt = mock(() => Promise.resolve({
       error: { name: 'NotFoundError', data: { message: 'Session not found: missing-session' } },
     }));
     const { runtime } = createRuntimeWithClient({
-      session: { promptAsync },
+      session: { prompt },
     });
 
     await expect(runtime.runTurn({
@@ -159,20 +159,20 @@ describe('OpenCodeRuntime fork', () => {
       permissionMode: 'default',
     })).rejects.toThrow('Session not found: missing-session');
 
-    expect(promptAsync.mock.calls[0][0]).toMatchObject({
+    expect(prompt.mock.calls[0][0]).toMatchObject({
       sessionID: 'missing-session',
       parts: [{ type: 'text', text: 'continue' }],
       directory: '/repo',
     });
-    expect(promptAsync.mock.calls[1][0]).toMatchObject({
+    expect(prompt.mock.calls[1][0]).toMatchObject({
       sessionID: 'missing-session',
       parts: [{ type: 'text', text: 'continue' }],
     });
-    expect(promptAsync.mock.calls[0][0].messageID).toBeUndefined();
-    expect(promptAsync.mock.calls[1][0].messageID).toBeUndefined();
-    expect(promptAsync.mock.calls[0][0].parts[0].id).toMatch(/^prt_[0-9a-f]{32}$/);
-    expect(promptAsync.mock.calls[1][0].parts[0].id).toBe(
-      promptAsync.mock.calls[0][0].parts[0].id,
+    expect(prompt.mock.calls[0][0].messageID).toBeUndefined();
+    expect(prompt.mock.calls[1][0].messageID).toBeUndefined();
+    expect(prompt.mock.calls[0][0].parts[0].id).toMatch(/^prt_[0-9a-f]{32}$/);
+    expect(prompt.mock.calls[1][0].parts[0].id).toBe(
+      prompt.mock.calls[0][0].parts[0].id,
     );
   });
 });

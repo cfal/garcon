@@ -15,7 +15,6 @@ function createFixture() {
 function createTurn(runId) {
   return createOpenCodeTurnContext(
     { clientRequestId: runId, turnId: runId },
-    `prompt-${runId}`,
     { runId, publish: mock(() => undefined) },
   );
 }
@@ -48,7 +47,7 @@ function promptEvent(turn, messageId, eventId) {
         id: turn.providerPromptPartId,
         messageID: messageId,
         type: 'text',
-        text: turn.providerPromptText,
+        text: `prompt-${turn.operation.runId}`,
       },
     },
   };
@@ -84,7 +83,11 @@ describe('OpenCodeOperationRoutes', () => {
 
     routes.observe(first.route, promptEvent(first.turn, 'user-a', 'event-a-delayed'));
 
-    expect(routes.source('session-1')).toBe(second.route);
+    expect(routes.resolveNamed('session-1', promptEvent(
+      first.turn,
+      'user-a',
+      'event-a-replayed',
+    ))).toBe(first.route);
     expect(routes.resolveNamed('session-1', promptEvent(
       second.turn,
       'user-b',
@@ -110,7 +113,11 @@ describe('OpenCodeOperationRoutes', () => {
     const lateFirst = assistantEvent('session-1', 'assistant-a', 'user-a', 'event-late-a');
 
     expect(routes.resolveNamed('session-1', lateFirst)).toBe(first.route);
-    expect(routes.source('session-1')).toBe(second.route);
+    expect(routes.resolveNamed('session-1', promptEvent(
+      second.turn,
+      'user-b',
+      'event-b-replayed',
+    ))).toBe(second.route);
   });
 
   it('lets the exact prompt echo claim a user message observed under the prior source', () => {
@@ -168,6 +175,102 @@ describe('OpenCodeOperationRoutes', () => {
       type: 'message.part.delta',
       properties: { sessionID: 'session-a', delta: 'text' },
     })).toBeNull();
+  });
+
+  it('binds provider-generated compaction continuations to their sole request source', () => {
+    const { routes } = createFixture();
+    const operation = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-a',
+    });
+    routes.observe(operation.route, promptEvent(operation.turn, 'user-a', 'event-a'));
+    const compaction = {
+      id: 'event-compaction',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-compaction',
+          messageID: 'user-compaction',
+          type: 'compaction',
+          auto: true,
+        },
+      },
+    };
+
+    expect(routes.resolve('session-1', compaction)).toBe(operation.route);
+    expect(routes.resolveNamed('session-1', assistantEvent(
+      'session-1',
+      'assistant-compaction',
+      'user-compaction',
+      'event-assistant-compaction',
+    ))).toBe(operation.route);
+
+    const continuation = {
+      id: 'event-continuation',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-continuation',
+          messageID: 'user-continuation',
+          type: 'text',
+          synthetic: true,
+        },
+      },
+    };
+    expect(routes.resolve('session-1', continuation)).toBe(operation.route);
+    expect(routes.resolveNamed('session-1', assistantEvent(
+      'session-1',
+      'assistant-continuation',
+      'user-continuation',
+      'event-assistant-continuation',
+    ))).toBe(operation.route);
+  });
+
+  it('uses inherited operation metadata without guessing between concurrent request sources', () => {
+    const { routes } = createFixture();
+    const first = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-a',
+    });
+    const second = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-b',
+    });
+    const replay = {
+      id: 'event-replay',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-replay',
+          messageID: 'user-replay',
+          type: 'text',
+          metadata: { garcon_operation_part_id: first.turn.providerPromptPartId },
+        },
+      },
+    };
+    const unqualifiedContinuation = {
+      id: 'event-ambiguous-continuation',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-ambiguous-continuation',
+          messageID: 'user-ambiguous-continuation',
+          type: 'compaction',
+          auto: true,
+        },
+      },
+    };
+
+    expect(routes.resolve('session-1', replay)).toBe(first.route);
+    expect(routes.resolve('session-1', unqualifiedContinuation)).toBeNull();
+    expect(routes.isRegistered(second.route)).toBe(true);
   });
 
   it('retires the prior chat source only after a fresh session binds', () => {
@@ -233,7 +336,6 @@ describe('OpenCodeOperationRoutes', () => {
 
     routes.unregister(failed.route);
 
-    expect(routes.source('session-1')).toBe(established.route);
     expect(routes.resolveNamed('session-1', assistantEvent(
       'session-1',
       'assistant-a',
@@ -259,7 +361,6 @@ describe('OpenCodeOperationRoutes', () => {
 
     routes.clear();
 
-    expect(routes.source('session-1')).toBeNull();
     expect(routes.bindPart(established.turn, 'steering-after-close')).toBe(false);
     expect(routes.resolveNamed('session-1', {
       id: 'event-steering-a',

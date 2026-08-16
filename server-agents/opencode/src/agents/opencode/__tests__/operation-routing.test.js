@@ -6,11 +6,50 @@ function createEventStream() {
     payload: { id: 'event-connected', type: 'server.connected', properties: {} },
   }];
   const waiters = [];
+  const promptRequestsByPart = new Map();
+  const promptRequestsByMessage = new Map();
   let closed = false;
+  const resolvePrompt = (info) => {
+    const request = promptRequestsByMessage.get(info.parentID);
+    if (request) setImmediate(() => request.resolve({ data: { info, parts: [] } }));
+  };
+  const observe = (event, completePrompt) => {
+    if (event.type === 'message.part.updated') {
+      const part = event.properties?.part;
+      const operationPartId = part?.metadata?.garcon_operation_part_id ?? part?.id;
+      let request = promptRequestsByPart.get(operationPartId);
+      if (!request && (part?.type === 'compaction' || part?.synthetic === true)) {
+        const candidates = [...promptRequestsByPart.values()]
+          .filter((candidate) => candidate.sessionId === event.properties?.sessionID);
+        if (candidates.length === 1) [request] = candidates;
+      }
+      if (request && typeof part?.messageID === 'string') {
+        promptRequestsByMessage.set(part.messageID, request);
+      }
+      return;
+    }
+    const info = event.type === 'message.updated' ? event.properties?.info : null;
+    if (completePrompt && typeof info?.time?.completed === 'number') resolvePrompt(info);
+  };
   return {
-    push(event) {
+    push(event, { completePrompt = true } = {}) {
       events.push({ directory: '/repo', payload: event });
       for (const resolve of waiters.splice(0)) resolve();
+      observe(event, completePrompt);
+    },
+    resolvePrompt,
+    prompt(input, options) {
+      return new Promise((resolve, reject) => {
+        const partId = input.parts[0].id;
+        const request = { resolve, sessionId: input.sessionID };
+        promptRequestsByPart.set(partId, request);
+        const abort = () => {
+          promptRequestsByPart.delete(partId);
+          reject(options.signal.reason ?? new Error('OpenCode prompt request aborted'));
+        };
+        if (options.signal.aborted) abort();
+        else options.signal.addEventListener('abort', abort, { once: true });
+      });
     },
     close() {
       closed = true;
@@ -31,6 +70,10 @@ function createEventStream() {
 function createRuntime(sessionIds, options = {}) {
   const eventStream = createEventStream();
   const promptAsync = mock(() => Promise.resolve({}));
+  const prompt = mock((...args) => {
+    void promptAsync(...args);
+    return eventStream.prompt(...args);
+  });
   const create = mock(() => Promise.resolve({ data: { id: sessionIds.shift() } }));
   const permissionReply = mock(() => Promise.resolve({}));
   const runtime = new OpenCodeRuntime({
@@ -40,6 +83,7 @@ function createRuntime(sessionIds, options = {}) {
         global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
         session: {
           create,
+          prompt,
           promptAsync,
           abort: mock(() => Promise.resolve({ data: true })),
         },
@@ -101,12 +145,27 @@ function pushAssistant(eventStream, {
   });
 }
 
-function pushIdle(eventStream, sessionId, eventId) {
+function pushTerminal(eventStream, {
+  eventId,
+  messageId,
+  parentId,
+  sessionId,
+  completePrompt = true,
+}) {
   eventStream.push({
     id: eventId,
-    type: 'session.status',
-    properties: { sessionID: sessionId, status: { type: 'idle' } },
-  });
+    type: 'message.updated',
+    properties: {
+      sessionID: sessionId,
+      info: {
+        id: messageId,
+        role: 'assistant',
+        parentID: parentId,
+        finish: 'stop',
+        time: { completed: 1 },
+      },
+    },
+  }, { completePrompt });
 }
 
 async function waitFor(predicate) {
@@ -153,7 +212,12 @@ describe('OpenCode operation routing', () => {
       sessionId: 'session-1',
       text: 'established reply',
     });
-    pushIdle(eventStream, 'session-1', 'event-04');
+    pushTerminal(eventStream, {
+      eventId: 'event-04',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
     await waitFor(() => establishedEvents.some((event) => event.type === 'run-ended'));
 
     expect(JSON.stringify(establishedEvents)).toContain('established reply');
@@ -229,41 +293,25 @@ describe('OpenCode operation routing', () => {
       sessionId: 'session-1',
       text: 'first reply',
     });
-    pushIdle(eventStream, 'session-1', 'event-04');
-    await waitFor(() => firstEvents.some((event) => event.type === 'run-ended'));
+    pushTerminal(eventStream, {
+      eventId: 'event-04',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      completePrompt: false,
+    });
+    await Promise.resolve();
+    expect(firstEvents.some((event) => event.type === 'run-ended')).toBe(false);
 
-    const successor = runtime.runTurn({
-      command: 'second',
-      agentSessionId: 'session-1',
-      chatId: 'chat-1',
-      projectPath: '/repo',
-      permissionMode: 'default',
-      operation: operation('run-b', secondEvents),
-    });
-    await waitFor(() => promptAsync.mock.calls.length === 2);
-    pushPrompt(eventStream, {
-      eventId: 'event-05',
-      messageId: 'user-b',
-      partId: promptPart(promptAsync, 1),
-      sessionId: 'session-1',
-      text: 'second',
-    });
-    pushPrompt(eventStream, {
-      eventId: 'event-06',
-      messageId: 'user-a',
-      partId: firstPromptPartId,
-      sessionId: 'session-1',
-      text: 'first',
-    });
     pushAssistant(eventStream, {
-      eventNumber: 7,
+      eventNumber: 5,
       messageId: 'assistant-a-late',
       parentId: 'user-a',
       sessionId: 'session-1',
       text: 'late first reply',
     });
     eventStream.push({
-      id: 'event-09',
+      id: 'event-07',
       type: 'permission.asked',
       properties: {
         sessionID: 'session-1',
@@ -283,14 +331,60 @@ describe('OpenCode operation routing', () => {
       requestID: 'permission-a',
       reply: 'once',
     });
+    eventStream.resolvePrompt({
+      id: 'assistant-a',
+      role: 'assistant',
+      parentID: 'user-a',
+      finish: 'stop',
+      time: { completed: 1 },
+    });
+    await waitFor(() => firstEvents.some((event) => event.type === 'run-ended'));
+    const retiredEventCount = firstEvents.length;
+    eventStream.push({
+      id: 'event-after-source-retirement',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-after-source-retirement',
+          messageID: 'assistant-a',
+          type: 'text',
+          text: 'too late for the retired source',
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(firstEvents).toHaveLength(retiredEventCount);
+
+    const successor = runtime.runTurn({
+      command: 'second',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-b', secondEvents),
+    });
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+    pushPrompt(eventStream, {
+      eventId: 'event-08',
+      messageId: 'user-b',
+      partId: promptPart(promptAsync, 1),
+      sessionId: 'session-1',
+      text: 'second',
+    });
     pushAssistant(eventStream, {
-      eventNumber: 10,
+      eventNumber: 9,
       messageId: 'assistant-b',
       parentId: 'user-b',
       sessionId: 'session-1',
       text: 'second reply',
     });
-    pushIdle(eventStream, 'session-1', 'event-12');
+    pushTerminal(eventStream, {
+      eventId: 'event-11',
+      messageId: 'assistant-b',
+      parentId: 'user-b',
+      sessionId: 'session-1',
+    });
 
     await expect(successor).resolves.toBeUndefined();
     const firstMessages = firstEvents
@@ -301,9 +395,9 @@ describe('OpenCode operation routing', () => {
       .flatMap((event) => event.rows.map((row) => row.message));
     expect(firstEvents.map((event) => event.type)).toEqual([
       'messages',
-      'run-ended',
       'messages',
       'permission',
+      'run-ended',
     ]);
     expect(firstMessages.slice(0, 2).map((message) => message.content)).toEqual([
       'first reply',
@@ -323,6 +417,108 @@ describe('OpenCode operation routing', () => {
       runId: 'run-b',
       outcome: 'finished',
     });
+
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('drops old session-scoped terminal events after a successor binds', async () => {
+    const diagnostics = [];
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
+      logger: {
+        debug(...args) { diagnostics.push(args); },
+        info() {},
+        warn() {},
+        error() {},
+      },
+    });
+    const firstEvents = [];
+    const secondEvents = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', firstEvents),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'first reply',
+    });
+    pushTerminal(eventStream, {
+      eventId: 'event-04',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => firstEvents.some((event) => event.type === 'run-ended'));
+
+    const successor = runtime.runTurn({
+      command: 'second',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-b', secondEvents),
+    });
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+    pushPrompt(eventStream, {
+      eventId: 'event-05',
+      messageId: 'user-b',
+      partId: promptPart(promptAsync, 1),
+      sessionId: 'session-1',
+      text: 'second',
+    });
+    const firstEventCount = firstEvents.length;
+    eventStream.push({
+      id: 'event-old-error',
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ProviderError', data: { message: 'old failure' } },
+      },
+    });
+    eventStream.push({
+      id: 'event-old-idle',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+    await waitFor(() => diagnostics.filter((entry) => (
+      entry[0] === 'Ignoring an OpenCode event without an operation identity'
+      && (entry[1]?.eventId === 'event-old-error' || entry[1]?.eventId === 'event-old-idle')
+    )).length === 2);
+
+    expect(firstEvents).toHaveLength(firstEventCount);
+    expect(secondEvents).toEqual([]);
+
+    pushAssistant(eventStream, {
+      eventNumber: 6,
+      messageId: 'assistant-b',
+      parentId: 'user-b',
+      sessionId: 'session-1',
+      text: 'second reply',
+    });
+    pushTerminal(eventStream, {
+      eventId: 'event-08',
+      messageId: 'assistant-b',
+      parentId: 'user-b',
+      sessionId: 'session-1',
+    });
+    await expect(successor).resolves.toBeUndefined();
+    expect(secondEvents).toEqual([
+      expect.objectContaining({ type: 'messages' }),
+      expect.objectContaining({ type: 'run-ended', runId: 'run-b', outcome: 'finished' }),
+    ]);
 
     eventStream.close();
     await runtime.shutdown();
@@ -373,7 +569,12 @@ describe('OpenCode operation routing', () => {
     await expect(permission.decision.respond({ allow: false })).resolves.toBeUndefined();
     expect(permissionReply).toHaveBeenCalledTimes(2);
 
-    pushIdle(eventStream, 'session-1', 'event-05');
+    pushTerminal(eventStream, {
+      eventId: 'event-05',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
     await waitFor(() => events.some((event) => event.type === 'run-ended'));
     eventStream.close();
     await runtime.shutdown();
@@ -436,7 +637,12 @@ describe('OpenCode operation routing', () => {
       { requestID: 'permission-reused', reply: 'reject' },
     ]);
 
-    pushIdle(eventStream, 'session-1', 'event-06');
+    pushTerminal(eventStream, {
+      eventId: 'event-06',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
     await waitFor(() => events.some((event) => event.type === 'run-ended'));
     eventStream.close();
     await runtime.shutdown();

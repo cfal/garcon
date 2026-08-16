@@ -86,6 +86,19 @@ it('waits for provider event delivery confirmation after server.connected', asyn
   await starting;
   expect(ready).toBe(true);
 
+  const abortController = new AbortController();
+  const cancelled = listener.waitForEvent(
+    (event) => event.type === 'test.barrier',
+    abortController.signal,
+  );
+  const survivor = listener.waitForEvent((event) => event.type === 'test.barrier');
+  abortController.abort(new Error('barrier cancelled'));
+  await expect(cancelled).rejects.toThrow('barrier cancelled');
+  eventStream.push({
+    payload: { id: 'evt_barrier', type: 'test.barrier', properties: {} },
+  });
+  await expect(survivor).resolves.toMatchObject({ type: 'test.barrier' });
+
   listener.close();
   eventStream.close();
 });

@@ -22,11 +22,55 @@ function envelope(event) {
 function createEventStream() {
   const events = [connectedEnvelope()];
   const waiters = [];
+  const promptRequestsByPart = new Map();
+  const promptRequestsByMessage = new Map();
+  const continuationParts = new Map();
   let closed = false;
+  const observe = (envelope) => {
+    const event = envelope.payload;
+    if (event?.type === 'message.part.updated') {
+      const part = event.properties?.part;
+      const operationPartId = part?.metadata?.garcon_operation_part_id ?? part?.id;
+      let request = promptRequestsByPart.get(operationPartId);
+      const continuationSessionId = continuationParts.get(part?.id);
+      if (!request && continuationSessionId === event.properties?.sessionID) {
+        const candidates = [...promptRequestsByPart.values()]
+          .filter((candidate) => candidate.sessionId === continuationSessionId);
+        if (candidates.length === 1) [request] = candidates;
+      }
+      if (request && typeof part?.messageID === 'string') {
+        promptRequestsByMessage.set(part.messageID, request);
+      }
+      return;
+    }
+    const info = event?.type === 'message.updated' ? event.properties?.info : null;
+    if (typeof info?.time?.completed !== 'number') return;
+    const request = promptRequestsByMessage.get(info.parentID);
+    if (request) setImmediate(() => request.resolve({ data: { info, parts: [] } }));
+  };
   return {
     push(event) {
       events.push(event);
       for (const resolve of waiters.splice(0)) resolve();
+      observe(event);
+    },
+    prompt(input, options) {
+      const response = deferred();
+      const partId = input.parts[0].id;
+      promptRequestsByPart.set(partId, {
+        resolve: response.resolve,
+        sessionId: input.sessionID,
+      });
+      const abort = () => {
+        promptRequestsByPart.delete(partId);
+        response.reject(options.signal.reason ?? new Error('OpenCode prompt request aborted'));
+      };
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
+      return response.promise;
+    },
+    registerContinuation(partId, sessionId) {
+      continuationParts.set(partId, sessionId);
     },
     close() {
       closed = true;
@@ -55,6 +99,15 @@ async function waitFor(predicate) {
 function createRuntime(overrides = {}) {
   const eventStream = createEventStream();
   const promptAsync = overrides.promptAsync ?? mock(() => Promise.resolve({}));
+  const prompt = mock((...args) => {
+    void Promise.resolve(promptAsync(...args)).catch(() => undefined);
+    return eventStream.prompt(...args);
+  });
+  const submitAsync = (...args) => {
+    const input = args[0];
+    eventStream.registerContinuation(input.parts[0].id, input.sessionID);
+    return promptAsync(...args);
+  };
   const abort = overrides.abort ?? mock(() => Promise.resolve({ data: true }));
   const revert = overrides.revert ?? mock(() => Promise.resolve({ data: {} }));
   const runtime = new OpenCodeRuntime({
@@ -65,7 +118,8 @@ function createRuntime(overrides = {}) {
         global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
         session: {
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
-          promptAsync,
+          prompt,
+          promptAsync: submitAsync,
           abort,
           revert,
         },
@@ -153,6 +207,22 @@ function pushAssistant(eventStream, {
       part: { id: `part-${messageId}`, messageID: messageId, type: 'text', text },
     },
   }));
+  if (finish) {
+    eventStream.push(envelope({
+      id: `evt_${String(eventNumber + 2).padStart(4, '0')}`,
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: messageId,
+          role: 'assistant',
+          parentID: parentId,
+          finish,
+          time: { completed: Date.now() },
+        },
+      },
+    }));
+  }
 }
 
 describe('OpenCodeRuntime steering', () => {
@@ -249,12 +319,6 @@ describe('OpenCodeRuntime steering', () => {
     await start(runtime);
     await bindPrompt(eventStream, promptAsync, 0, 'hello');
     const target = await waitForTarget(runtime);
-    pushAssistant(eventStream, {
-      messageId: 'assistant-initial',
-      parentId: 'user-1',
-      text: 'initial reply',
-      eventNumber: 3,
-    });
     const preparation = deferred();
     const preparationStarted = deferred();
     const steering = runtime.steering.steer(steerRequest(target, {
@@ -269,11 +333,13 @@ describe('OpenCodeRuntime steering', () => {
     );
     await preparationStarted.promise;
 
-    eventStream.push(envelope({
-      id: 'evt_0005',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    }));
+    pushAssistant(eventStream, {
+      messageId: 'assistant-initial',
+      parentId: 'user-1',
+      text: 'initial reply',
+      eventNumber: 3,
+      finish: 'stop',
+    });
     await Promise.resolve();
     await Promise.resolve();
     expect(finishes).toEqual([]);
@@ -322,12 +388,8 @@ describe('OpenCodeRuntime steering', () => {
       parentId: 'user-1',
       text: 'initial reply',
       eventNumber: 3,
+      finish: 'stop',
     });
-    eventStream.push(envelope({
-      id: 'evt_0005',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    }));
     await waitFor(() => !runtime.isRunning('session-1'));
 
     const successor = runtime.runTurn({
@@ -425,12 +487,72 @@ describe('OpenCodeRuntime steering', () => {
       parentId: 'user-recovery',
       text: 'recovered',
       eventNumber: 6,
+      finish: 'stop',
     });
+    await expect(recovery).resolves.toBeUndefined();
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('quiesces a stopped turn before its delayed abort handle reaches the runtime', async () => {
+    const abortAcknowledgement = deferred();
+    const fixture = createRuntime({ abort: mock(() => abortAcknowledgement.promise) });
+    const { runtime, eventStream, promptAsync, abort, revert } = fixture;
+    await start(runtime);
+    await bindPrompt(eventStream, promptAsync, 0, 'hello');
+    const target = await waitForTarget(runtime);
+    const steering = runtime.steering.steer(steerRequest(target));
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+    const steerPartId = promptAsync.mock.calls[1][0].parts[0].id;
     eventStream.push(envelope({
-      id: 'evt_0008',
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      id: 'evt_0003',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: steerPartId,
+          messageID: 'user-steer',
+          type: 'text',
+          text: '/review the current approach',
+        },
+      },
     }));
+    await expect(steering).resolves.toEqual({ kind: 'accepted' });
+
+    const recovery = runtime.runTurn({
+      command: 'recover',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      model: 'provider/model',
+      permissionMode: 'default',
+      clientRequestId: 'request-2',
+      turnId: 'turn-2',
+    });
+    await waitFor(() => abort.mock.calls.length === 1);
+    expect(promptAsync).toHaveBeenCalledTimes(2);
+    expect(revert).not.toHaveBeenCalled();
+
+    abortAcknowledgement.resolve({ data: true });
+    await waitFor(() => promptAsync.mock.calls.length === 3);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(revert).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'session-1',
+      messageID: 'user-steer',
+      directory: '/repo',
+    }), expect.any(Object));
+    expect(revert.mock.invocationCallOrder[0]).toBeLessThan(
+      promptAsync.mock.invocationCallOrder[2],
+    );
+
+    const recoveryMessageId = await bindPrompt(eventStream, promptAsync, 2, 'recover');
+    pushAssistant(eventStream, {
+      messageId: 'assistant-recovery',
+      parentId: recoveryMessageId,
+      text: 'recovered',
+      eventNumber: 8,
+      finish: 'stop',
+    });
     await expect(recovery).resolves.toBeUndefined();
     eventStream.close();
     await runtime.shutdown();

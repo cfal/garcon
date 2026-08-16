@@ -39,11 +39,7 @@ interface OpenCodeSteeringOptions {
     scope: OpenCodeRequestScope,
     operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
   ): Promise<T>;
-  settleIdle(
-    agentSessionId: string,
-    session: OpenCodeSession,
-    idleEventId: string | null,
-  ): void;
+  releaseDeferredTerminal(agentSessionId: string, session: OpenCodeSession): void;
   bindOperationPart(turn: OpenCodeTurnContext, partId: string): boolean;
   unbindOperationPart(turn: OpenCodeTurnContext, partId: string): void;
 }
@@ -176,13 +172,6 @@ export class OpenCodeSteeringController {
     pending.resolve();
   }
 
-  deferIdle(session: OpenCodeSession, idleEventId: string | null): void {
-    if (!idleEventId) return;
-    if (!session.deferredIdleEventId || idleEventId > session.deferredIdleEventId) {
-      session.deferredIdleEventId = idleEventId;
-    }
-  }
-
   stagePendingCleanup(session: OpenCodeSession): void {
     const earliest = [...session.turn.pendingSteeringMessageIds].sort()[0];
     if (
@@ -219,16 +208,7 @@ export class OpenCodeSteeringController {
   ): void {
     session.activeSteeringDeliveries = Math.max(0, session.activeSteeringDeliveries - 1);
     if (session.activeSteeringDeliveries > 0 || session.turn !== turn) return;
-    const deferredIdleEventId = session.deferredIdleEventId;
-    session.deferredIdleEventId = null;
-    if (session.aborting) {
-      if (
-        deferredIdleEventId
-        && (!session.skippedIdleEventId || deferredIdleEventId > session.skippedIdleEventId)
-      ) session.skippedIdleEventId = deferredIdleEventId;
-      return;
-    }
-    this.options.settleIdle(agentSessionId, session, deferredIdleEventId);
+    this.options.releaseDeferredTerminal(agentSessionId, session);
   }
 }
 

@@ -6,6 +6,11 @@ export interface SSEEvent {
   properties?: Record<string, any>;
 }
 
+export type OpenCodeAssistantTerminal =
+  | { readonly outcome: 'finished'; readonly messageId: string }
+  | { readonly outcome: 'failed'; readonly messageId: string; readonly error: string }
+  | { readonly outcome: 'aborted'; readonly messageId: string };
+
 interface OpenCodeGlobalEventClient {
   global: {
     event(options: {
@@ -99,6 +104,46 @@ export function isOpenCodeAbortError(event: SSEEvent): boolean {
   return error?.name === 'MessageAbortedError';
 }
 
+export function openCodeAssistantTerminal(event: SSEEvent): OpenCodeAssistantTerminal | null {
+  if (event.type !== 'message.updated') return null;
+  const info = isRecord(event.properties?.info) ? event.properties.info : null;
+  if (
+    info?.role !== 'assistant'
+    || typeof info.id !== 'string'
+    || !info.id
+    || !isRecord(info.time)
+    || typeof info.time.completed !== 'number'
+  ) return null;
+
+  const error = isRecord(info.error) ? info.error : null;
+  if (error?.name === 'MessageAbortedError') {
+    return { outcome: 'aborted', messageId: info.id };
+  }
+  if (error) {
+    return {
+      outcome: 'failed',
+      messageId: info.id,
+      error: openCodeErrorMessage(error),
+    };
+  }
+
+  if (info.finish === 'error') {
+    return { outcome: 'failed', messageId: info.id, error: 'OpenCode session failed' };
+  }
+  if (
+    typeof info.finish !== 'string'
+    || !info.finish
+    || info.finish === 'tool-calls'
+    || info.finish === 'unknown'
+  ) return null;
+  return { outcome: 'finished', messageId: info.id };
+}
+
+export function isOpenCodeCompactionAssistant(info: unknown): boolean {
+  if (!isRecord(info) || info.role !== 'assistant') return false;
+  return info.summary === true || info.mode === 'compaction' || info.agent === 'compaction';
+}
+
 export function extractSessionId(event: SSEEvent): string | undefined {
   const props = event.properties || {};
   return props.sessionID
@@ -115,4 +160,11 @@ export function extractTextParts(parts: unknown): string {
     .filter(Boolean)
     .join('\n')
     .trim();
+}
+
+function openCodeErrorMessage(error: Record<string, unknown>): string {
+  const data = isRecord(error.data) ? error.data : null;
+  if (typeof data?.message === 'string' && data.message.trim()) return data.message.trim();
+  if (typeof error.name === 'string' && error.name.trim()) return error.name.trim();
+  return 'OpenCode session failed';
 }

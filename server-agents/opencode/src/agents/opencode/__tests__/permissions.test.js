@@ -12,7 +12,7 @@ import {
 import { convertOpencodePermissionTool } from '../permission-tool-converter.js';
 import { EnterPlanModeToolUseMessage, PermissionRequestMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '@garcon/common/chat-types';
 
-function createAsyncEventStream() {
+function createAsyncEventStream(promptHarness) {
   const events = [{ payload: { id: 'evt_connected', type: 'server.connected', properties: {} } }];
   const waiters = [];
   let closed = false;
@@ -27,6 +27,7 @@ function createAsyncEventStream() {
     push(event) {
       events.push(event);
       flushWaiters();
+      promptHarness?.observe(event);
     },
     close() {
       closed = true;
@@ -55,6 +56,43 @@ function deferred() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function createPromptHarness(promptAsync) {
+  const requestsByPart = new Map();
+  const requestsByMessage = new Map();
+  return {
+    prompt(...args) {
+      void promptAsync(...args);
+      const [input, options] = args;
+      const response = deferred();
+      const partId = input.parts[0].id;
+      requestsByPart.set(partId, response);
+      const abort = () => {
+        requestsByPart.delete(partId);
+        response.reject(options.signal.reason ?? new Error('OpenCode prompt request aborted'));
+      };
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
+      return response.promise;
+    },
+    observe(envelope) {
+      const event = envelope.payload;
+      if (event?.type === 'message.part.updated') {
+        const part = event.properties?.part;
+        const operationPartId = part?.metadata?.garcon_operation_part_id ?? part?.id;
+        const request = requestsByPart.get(operationPartId);
+        if (request && typeof part?.messageID === 'string') {
+          requestsByMessage.set(part.messageID, request);
+        }
+        return;
+      }
+      const info = event?.type === 'message.updated' ? event.properties?.info : null;
+      if (typeof info?.time?.completed !== 'number') return;
+      const request = requestsByMessage.get(info.parentID);
+      if (request) setImmediate(() => request.resolve({ data: { info, parts: [] } }));
+    },
+  };
 }
 
 async function* neverEndingStream() {
@@ -270,15 +308,19 @@ describe('mapPermissionMode', () => {
 describe('OpenCodeRuntime permissions', () => {
   let provider;
   let client;
+  let promptHarness;
 
   beforeEach(async () => {
     const { OpenCodeRuntime } = await import('../opencode.js');
+    const promptAsync = mock(() => Promise.resolve());
+    promptHarness = createPromptHarness(promptAsync);
     client = {
       permission: { reply: mock(() => Promise.resolve({ data: true })) },
       global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
       session: {
         create: mock(() => Promise.resolve({ data: { id: 'sess-1' } })),
-        promptAsync: mock(() => Promise.resolve()),
+        prompt: (...args) => promptHarness.prompt(...args),
+        promptAsync,
         abort: mock(() => Promise.resolve()),
       },
       provider: {
@@ -313,7 +355,7 @@ describe('OpenCodeRuntime permissions', () => {
   });
 
   it('auto-replies once for manual bypass permission events without emitting a permission row', async () => {
-    const eventStream = createAsyncEventStream();
+    const eventStream = createAsyncEventStream(promptHarness);
     client.global.event.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
@@ -377,7 +419,7 @@ describe('OpenCodeRuntime permissions', () => {
   });
 
   it('isolates a failed manual bypass reply without stalling the global event stream', async () => {
-    const eventStream = createAsyncEventStream();
+    const eventStream = createAsyncEventStream(promptHarness);
     const reply = deferred();
     client.global.event.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
     client.session.create
@@ -481,8 +523,17 @@ describe('OpenCodeRuntime permissions', () => {
       directory: '/repo',
       payload: {
         id: 'evt_0005',
-        type: 'session.status',
-        properties: { sessionID: 'sess-2', status: { type: 'idle' } },
+        type: 'message.updated',
+        properties: {
+          sessionID: 'sess-2',
+          info: {
+            id: 'assistant-2',
+            role: 'assistant',
+            parentID: 'user-2',
+            finish: 'stop',
+            time: { completed: Date.now() },
+          },
+        },
       },
     });
     await waitFor(() => finishes.length === 1);

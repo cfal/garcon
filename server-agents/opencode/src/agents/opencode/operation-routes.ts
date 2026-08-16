@@ -1,5 +1,6 @@
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { PermissionMode } from '@garcon/common/chat-modes';
+import { GARCON_OPERATION_PART_METADATA_KEY } from './prompt.js';
 import type { SSEEvent } from './sse-events.js';
 import type { OpenCodeTurnContext } from './turn-events.js';
 
@@ -11,13 +12,15 @@ export interface OpenCodeOperationRoute {
   readonly permissionMode: PermissionMode;
   readonly directory: string | undefined;
   readonly registrationOrdinal: number;
+  readonly requestAbortController: AbortController;
 }
 
 export class OpenCodeOperationRoutes {
   readonly #byPart = new Map<string, OpenCodeOperationRoute>();
   readonly #byMessage = new Map<string, OpenCodeOperationRoute>();
   readonly #byTurn = new Map<OpenCodeTurnContext, OpenCodeOperationRoute>();
-  readonly #sourceBySession = new Map<string, OpenCodeOperationRoute>();
+  readonly #requestSourcesBySession = new Map<string, Set<OpenCodeOperationRoute>>();
+  readonly #latestBoundOrdinalBySession = new Map<string, number>();
   #nextRegistrationOrdinal = 1;
 
   constructor(private readonly logger: AgentLogger) {}
@@ -38,6 +41,7 @@ export class OpenCodeOperationRoutes {
       permissionMode,
       directory,
       registrationOrdinal: this.#nextRegistrationOrdinal,
+      requestAbortController: new AbortController(),
     };
     this.#nextRegistrationOrdinal += 1;
     const key = routeKey(sessionId, turn.providerPromptPartId);
@@ -46,6 +50,9 @@ export class OpenCodeOperationRoutes {
     }
     this.#byPart.set(key, route);
     this.#byTurn.set(turn, route);
+    const requestSources = this.#requestSourcesBySession.get(sessionId) ?? new Set();
+    requestSources.add(route);
+    this.#requestSourcesBySession.set(sessionId, requestSources);
     return route;
   }
 
@@ -83,8 +90,26 @@ export class OpenCodeOperationRoutes {
     return null;
   }
 
-  source(sessionId: string): OpenCodeOperationRoute | null {
-    return this.#sourceBySession.get(sessionId) ?? null;
+  resolve(sessionId: string, event: SSEEvent): OpenCodeOperationRoute | null {
+    const named = this.resolveNamed(sessionId, event);
+    if (named) return named;
+
+    const part = event.type === 'message.part.updated' ? event.properties?.part : null;
+    const partId = typeof part?.id === 'string' ? part.id : '';
+    const messageId = typeof part?.messageID === 'string' ? part.messageID : '';
+    if (!partId || !messageId) return null;
+
+    const inheritedOperationPartId = partOperationIdentity(part);
+    const inheritedRoute = inheritedOperationPartId
+      ? this.#byPart.get(routeKey(sessionId, inheritedOperationPartId))
+      : undefined;
+    const route = inheritedRoute
+      ?? (isProviderContinuationPart(part) ? this.#soleRequestSource(sessionId) : undefined);
+    if (!route || !this.#bindContinuation(route, partId, messageId)) return null;
+
+    route.turn.observedUserMessageIds.add(messageId);
+    route.turn.providerContinuationMessageIds.add(messageId);
+    return route;
   }
 
   observe(route: OpenCodeOperationRoute, event: SSEEvent): void {
@@ -108,20 +133,40 @@ export class OpenCodeOperationRoutes {
     this.#retireRoute(route);
   }
 
+  retireTurn(turn: OpenCodeTurnContext): void {
+    const route = this.#byTurn.get(turn);
+    if (route) this.#retireRoute(route);
+  }
+
+  cancelRequest(turn: OpenCodeTurnContext, reason: Error): void {
+    this.#byTurn.get(turn)?.requestAbortController.abort(reason);
+  }
+
+  isRegistered(route: OpenCodeOperationRoute): boolean {
+    return this.#byTurn.get(route.turn) === route;
+  }
+
+  activateFromResponse(route: OpenCodeOperationRoute, providerMessageId: string): boolean {
+    if (!this.isRegistered(route)) return false;
+    this.#activateSource(route, providerMessageId);
+    return true;
+  }
+
   clear(): void {
+    for (const route of new Set(this.#byTurn.values())) {
+      route.requestAbortController.abort(new Error('OpenCode provider event source retired'));
+    }
     this.#byPart.clear();
     this.#byMessage.clear();
     this.#byTurn.clear();
-    this.#sourceBySession.clear();
+    this.#requestSourcesBySession.clear();
+    this.#latestBoundOrdinalBySession.clear();
   }
 
   #activateSource(route: OpenCodeOperationRoute, providerMessageId: string): void {
     this.#bindMessage(route, providerMessageId);
-    const currentSource = this.#sourceBySession.get(route.sessionId);
-    if (
-      currentSource
-      && currentSource.registrationOrdinal > route.registrationOrdinal
-    ) return;
+    const latestBoundOrdinal = this.#latestBoundOrdinalBySession.get(route.sessionId) ?? 0;
+    if (latestBoundOrdinal > route.registrationOrdinal) return;
     if (route.supersedesChatSource) {
       for (const existing of new Set(this.#byPart.values())) {
         if (
@@ -130,7 +175,7 @@ export class OpenCodeOperationRoutes {
         ) this.#retireRoute(existing);
       }
     }
-    this.#sourceBySession.set(route.sessionId, route);
+    this.#latestBoundOrdinalBySession.set(route.sessionId, route.registrationOrdinal);
   }
 
   #bindPart(route: OpenCodeOperationRoute, partId: string): boolean {
@@ -145,6 +190,28 @@ export class OpenCodeOperationRoutes {
       return false;
     }
     this.#byPart.set(key, route);
+    return true;
+  }
+
+  #bindContinuation(
+    route: OpenCodeOperationRoute,
+    partId: string,
+    messageId: string,
+  ): boolean {
+    const partKey = routeKey(route.sessionId, partId);
+    const messageKey = routeKey(route.sessionId, messageId);
+    const partRoute = this.#byPart.get(partKey);
+    const messageRoute = this.#byMessage.get(messageKey);
+    if ((partRoute && partRoute !== route) || (messageRoute && messageRoute !== route)) {
+      this.logger.warn('Ignoring an OpenCode operation identity collision', {
+        sessionId: route.sessionId,
+        partId,
+        messageId,
+      });
+      return false;
+    }
+    this.#byPart.set(partKey, route);
+    this.#byMessage.set(messageKey, route);
     return true;
   }
 
@@ -163,17 +230,45 @@ export class OpenCodeOperationRoutes {
   }
 
   #retireRoute(route: OpenCodeOperationRoute): void {
+    route.requestAbortController.abort(new Error('OpenCode operation route retired'));
     for (const [key, candidate] of this.#byPart) {
       if (candidate === route) this.#byPart.delete(key);
     }
     for (const [key, candidate] of this.#byMessage) {
       if (candidate === route) this.#byMessage.delete(key);
     }
-    if (this.#sourceBySession.get(route.sessionId) === route) {
-      this.#sourceBySession.delete(route.sessionId);
-    }
     this.#byTurn.delete(route.turn);
+    const requestSources = this.#requestSourcesBySession.get(route.sessionId);
+    requestSources?.delete(route);
+    if (requestSources?.size === 0) this.#requestSourcesBySession.delete(route.sessionId);
+    const sessionStillRouted = [...this.#byTurn.values()]
+      .some((candidate) => candidate.sessionId === route.sessionId);
+    if (!sessionStillRouted) this.#latestBoundOrdinalBySession.delete(route.sessionId);
   }
+
+  #soleRequestSource(sessionId: string): OpenCodeOperationRoute | undefined {
+    const requestSources = this.#requestSourcesBySession.get(sessionId);
+    if (requestSources?.size !== 1) return undefined;
+    return requestSources.values().next().value;
+  }
+}
+
+function partOperationIdentity(part: Record<string, unknown>): string | null {
+  const metadata = part.metadata;
+  if (!metadata || typeof metadata !== 'object') return null;
+  const operationPartId = (metadata as Record<string, unknown>)[GARCON_OPERATION_PART_METADATA_KEY];
+  return typeof operationPartId === 'string' && operationPartId ? operationPartId : null;
+}
+
+function isProviderContinuationPart(part: Record<string, unknown>): boolean {
+  if (part.type === 'compaction' && part.auto === true) return true;
+  if (part.synthetic === true) return true;
+  const metadata = part.metadata;
+  return Boolean(
+    metadata
+    && typeof metadata === 'object'
+    && (metadata as Record<string, unknown>).compaction_continue === true,
+  );
 }
 
 function routeKey(sessionId: string, providerId: string): string {

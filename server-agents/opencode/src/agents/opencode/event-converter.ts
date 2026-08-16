@@ -27,7 +27,7 @@ export function convertOpenCodeEventToChatMessages(
     || null
   );
 
-  const { assistantPartTypes, messageRoles } = turn;
+  const { assistantPartTypes, messageRoles, publishedPartIds } = turn;
 
   switch (event.type) {
     case 'message.updated': {
@@ -48,6 +48,7 @@ export function convertOpenCodeEventToChatMessages(
         logger.warn('OpenCode event is missing a part ID', { eventType: event.type });
         return;
       }
+      if (publishedPartIds.has(part.id)) return;
 
       const messageId = part.messageID;
       if (!messageId) {
@@ -79,6 +80,7 @@ export function convertOpenCodeEventToChatMessages(
           ));
         }
         attachPartIdentity(chatMessages, part.id);
+        if (chatMessages.length > 0) publishedPartIds.add(part.id);
         break;
       }
 
@@ -102,6 +104,7 @@ export function convertOpenCodeEventToChatMessages(
           chatMessages.push(new ThinkingMessage(now, part.text));
         }
         attachPartIdentity(chatMessages, part.id);
+        publishedPartIds.add(part.id);
       }
       break;
     }

@@ -10,6 +10,8 @@ export function parseOpenCodeModel(
   };
 }
 
+export const GARCON_OPERATION_PART_METADATA_KEY = 'garcon_operation_part_id';
+
 // OpenCode compares monotonic user and assistant IDs when deciding whether a turn is complete.
 // Letting OpenCode assign both IDs preserves that ordering.
 // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/prompt.ts#L1111-L1116
@@ -19,7 +21,12 @@ export function buildPromptBody(
   partId: string,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    parts: [{ id: partId, type: 'text', text: command }],
+    parts: [{
+      id: partId,
+      type: 'text',
+      text: command,
+      metadata: { [GARCON_OPERATION_PART_METADATA_KEY]: partId },
+    }],
   };
   const parsedModel = parseOpenCodeModel(model);
   if (parsedModel) body.model = parsedModel;

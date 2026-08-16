@@ -19,7 +19,7 @@ interface OpenCodeGlobalEventListenerOptions {
     client: any;
     directory?: string;
     signal: AbortSignal;
-    waitForEvent(matches: (event: SSEEvent) => boolean): Promise<SSEEvent>;
+    waitForEvent(matches: (event: SSEEvent) => boolean, signal?: AbortSignal): Promise<SSEEvent>;
   }): Promise<void>;
   handleEvent(client: any, event: SSEEvent): void;
 }
@@ -41,6 +41,7 @@ export class OpenCodeGlobalEventListener {
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
   #heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   #readinessDirectory: string | undefined;
+  readonly #eventWaiters = new Set<EventWaiter>();
 
   constructor(options: OpenCodeGlobalEventListenerOptions) {
     this.#options = options;
@@ -58,6 +59,39 @@ export class OpenCodeGlobalEventListener {
     if (this.#heartbeatTimer) clearTimeout(this.#heartbeatTimer);
     this.#heartbeatTimer = null;
     this.#started = false;
+    this.#rejectEventWaiters(new Error('OpenCode event listener closed'));
+  }
+
+  waitForEvent(
+    matches: (event: SSEEvent) => boolean,
+    signal?: AbortSignal,
+  ): Promise<SSEEvent> {
+    if (!this.#started || this.#abortController?.signal.aborted) {
+      return Promise.reject(new Error('OpenCode event listener is not running'));
+    }
+    if (signal?.aborted) return Promise.reject(abortReason(signal));
+    return new Promise((resolve, reject) => {
+      let waiter!: EventWaiter;
+      const removeAbortListener = () => signal?.removeEventListener('abort', abort);
+      const abort = () => {
+        this.#eventWaiters.delete(waiter);
+        removeAbortListener();
+        reject(signal ? abortReason(signal) : new Error('OpenCode event wait aborted'));
+      };
+      waiter = {
+        matches,
+        resolve(event) {
+          removeAbortListener();
+          resolve(event);
+        },
+        reject(error) {
+          removeAbortListener();
+          reject(error);
+        },
+      };
+      this.#eventWaiters.add(waiter);
+      signal?.addEventListener('abort', abort, { once: true });
+    });
   }
 
   async start(directory?: string): Promise<void> {
@@ -159,19 +193,10 @@ export class OpenCodeGlobalEventListener {
     clearReadyTimer(): void;
     clearHeartbeatWatchdog(): void;
   }): Promise<void> {
-    const eventWaiters = new Set<EventWaiter>();
-    const rejectEventWaiters = (error: Error) => {
-      for (const waiter of eventWaiters) waiter.reject(error);
-      eventWaiters.clear();
-    };
-    const waitForEvent = (matches: (event: SSEEvent) => boolean): Promise<SSEEvent> =>
-      new Promise((resolve, reject) => {
-        if (input.abortController.signal.aborted) {
-          reject(input.abortController.signal.reason);
-          return;
-        }
-        eventWaiters.add({ matches, resolve, reject });
-      });
+    const waitForEvent = (
+      matches: (event: SSEEvent) => boolean,
+      signal?: AbortSignal,
+    ): Promise<SSEEvent> => this.waitForEvent(matches, signal);
     let confirmationStarted = false;
     try {
       const client = await this.#options.getClient();
@@ -201,9 +226,9 @@ export class OpenCodeGlobalEventListener {
       )) {
         if (input.generation !== this.#generation) return;
         input.armHeartbeatWatchdog();
-        for (const waiter of eventWaiters) {
+        for (const waiter of this.#eventWaiters) {
           if (!waiter.matches(event)) continue;
-          eventWaiters.delete(waiter);
+          this.#eventWaiters.delete(waiter);
           waiter.resolve(event);
         }
         this.#options.handleEvent(client, event);
@@ -250,10 +275,23 @@ export class OpenCodeGlobalEventListener {
       }, retryMs);
       this.#retryTimer.unref?.();
     } finally {
-      rejectEventWaiters(new Error('OpenCode event stream ended before event delivery confirmation'));
+      this.#rejectEventWaiters(
+        new Error('OpenCode event stream ended before event delivery confirmation'),
+      );
       input.clearReadyTimer();
       input.clearHeartbeatWatchdog();
       if (this.#abortController === input.abortController) this.#abortController = null;
     }
   }
+
+  #rejectEventWaiters(error: Error): void {
+    for (const waiter of this.#eventWaiters) waiter.reject(error);
+    this.#eventWaiters.clear();
+  }
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error('OpenCode event wait aborted');
 }
