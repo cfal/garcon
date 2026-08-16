@@ -143,6 +143,7 @@ non-live tier. Cursor remains unit-only by repository policy.
 | State              | Meaning                                                                        |
 | ------------------ | ------------------------------------------------------------------------------ |
 | Covered            | An explicit case exists at every required tier and dimension.                  |
+| Intentional red    | Required cases are locked but fail only on the pending production contract.     |
 | Partial            | Nearby evidence exists, but a tier, dimension, or oracle is absent.            |
 | Missing            | No case proves the obligation.                                                 |
 | Not applicable     | The integration lacks the capability by contract; the reason is recorded.      |
@@ -488,7 +489,7 @@ The status below describes test coverage, not implementation completion.
 | R1 publisher routing                          | TLV5-L07.03 through TLV5-L07.10                       | Broad provider units; Codex stale-event black-box cases                                             | Partial |
 | R2 permission occurrence identity             | TLV5-PERM.01 through TLV5-PERM.11                     | Core occurrence suite, shared round trips, provider units                                           | Partial |
 | R3 Codex native tail reconciliation           | TLV5-L02.02, TLV5-L05.02, TLV5-L10.01                 | Codex architecture guard, app-server unit, scripted interrupt                                       | Covered |
-| R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state units and strict Chromium cases                                                        | Partial |
+| R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state, controller, static, and strict Chromium cases; timer deletion pending                  | Intentional red |
 | R5 search full replacement on append          | TLV5-SEARCH.01                                        | Search controller suffix and linearity tests                                                        | Covered |
 | R6 detached search rejection                  | TLV5-SEARCH.02                                        | Same-chat and cross-chat rejection tests                                                            | Covered |
 | R7 blocking native probe                      | TLV5-L09.03 through TLV5-L09.05                       | Core timeout, coalescing, identity-change units                                                     | Partial |
@@ -496,7 +497,7 @@ The status below describes test coverage, not implementation completion.
 | R9 duplicate handoff marker                   | TLV5-HANDOFF.06                                       | Matching, conflicting, and duplicate marker units                                                   | Covered |
 | R10 silent handoff fork fallback              | TLV5-FORK.01 through TLV5-FORK.04                     | Core fork units; no complete browser consent workflow                                               | Partial |
 | R11 unbounded reconnect replay                | TLV5-REPLAY.01 through TLV5-REPLAY.07                 | Contract, 50,000-row server, and Chromium replay cases; no exact mid-replay browser disconnect case | Partial |
-| R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Contract, active-state, server, and held-page browser cases                                         | Partial |
+| R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Bounded server, contract, multi-budget state, cache, and held-page browser cases                     | Intentional red |
 | R13 LRU failure attribution                   | TLV5-L11.04                                           | Store and close-recovery units                                                                      | Covered |
 | R14 duplicate prepared input                  | TLV5-L04.04                                           | Ledger, coordinator, and handler units                                                              | Covered |
 | R15 temporary diagnostics and weak quiescence | TLV5-OBS.01 through TLV5-OBS.04                       | Static diagnostic guard and scattered privacy tests                                                 | Partial |
@@ -661,9 +662,9 @@ becomes a separate environment requirement rather than another semantic test.
 | TLV5-PAGE.05   | Active-state invalidation plus held-page switch, reload, and navigation cases.                   | Covered |
 | TLV5-PAGE.06   | Explicit error retry and no-tight-loop controller cases.                                         | Covered |
 | TLV5-PAGE.07   | Component error retry plus Lightpanda and Chromium absence assertions.                           | Covered |
-| TLV5-PAGE.08   | Committed one-query static guard; bounded server and web contract cases remain protected section 5.4 WIP. | Partial |
-| TLV5-PAGE.09   | Committed shared hidden-page contract; server, multi-budget, and cache cursor cases remain protected section 5.4 WIP. | Partial |
-| TLV5-PAGE.10   | Committed shared relation contract; web rejection and stalled-cursor cases remain protected section 5.4 WIP. | Partial |
+| TLV5-PAGE.08   | One-query static, bounded server, ordinal-one, and clamped web-contract cases are locked. | Intentional red |
+| TLV5-PAGE.09   | Hidden server/contract, multi-budget delivery, switch-resume, and cache-hydration cases are locked. | Intentional red |
+| TLV5-PAGE.10   | Shared relation, web rejection, and state-level stalled-cursor cases are locked. | Intentional red |
 | TLV5-REPLAY.01 | Shared contract, server WebSocket, and 50,000-row integration case.                              | Covered |
 | TLV5-REPLAY.02 | Shared continuation validation and server integration case.                                      | Covered |
 | TLV5-REPLAY.03 | Server row/byte bounds and oversized-row rejection cases.                                        | Covered |
@@ -821,14 +822,27 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-REPLAY.01-SERVER-01       | `integration-tests/tests/server/reconnect-transcript.test.ts`: `replays fifty thousand mixed rows in bounded fixed-watermark pages`                       | REPLAY.01 through REPLAY.05 |
 | TLV5-UX.11-CHROMIUM-REPLAY-01  | `integration-tests/tests/chromium/reconnect-transcript-replay.test.ts`: `keeps an expanded detached reading interval through bounded reconnect replay`    | REPLAY.05, UX.11            |
 | TLV5-REPLAY.06-WEB-UNIT-01     | `web/src/lib/ws/__tests__/reconnect-coordinator.test.ts`: `abandons a partial replay on disconnect and restarts with a fresh watermark`                   | REPLAY.06                   |
+| TLV5-PAGE.08-SERVER-UNIT-01    | `server/ledger/__tests__/view-reader.test.js`: one request performs one clamped raw scan and returns its visible fold plus raw continuation               | PAGE.08                     |
+| TLV5-PAGE.08-SERVER-UNIT-02    | `server/ledger/__tests__/view-reader.test.js`: an ordinal-one boundary performs one empty raw scan and reports ceiling zero with no continuation          | PAGE.08                     |
+| TLV5-PAGE.08-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: a request beyond the watermark accepts the clamped raw ceiling and exact continuation                 | PAGE.08                     |
+| TLV5-PAGE.09-SERVER-UNIT-01    | `server/ledger/__tests__/view-reader.test.js`: one hidden-only raw page returns no messages and advances without a presentation scan loop                 | PAGE.09                     |
+| TLV5-PAGE.09-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: the client contract accepts an empty presented page with a strict raw continuation                    | PAGE.09                     |
+| TLV5-PAGE.09-WEB-STORAGE-01    | `web/src/lib/chat/transcript/__tests__/chat-transcript-cache.test.ts`: cache hydration preserves the raw earlier continuation independently of visible rows | PAGE.09                  |
+| TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: several hidden raw budgets strictly advance before eventual visible delivery      | PAGE.09                     |
+| TLV5-PAGE.09-WEB-UNIT-02       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switch invalidation restores the bounded tail and resumes from its raw cursor      | PAGE.09, UX.17              |
+| TLV5-PAGE.10-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: null, zero, stalled, and hasMore-inconsistent raw continuations reject                               | PAGE.10                     |
+| TLV5-PAGE.10-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: a stalled hidden continuation fails before changing the loaded interval           | PAGE.10                     |
 | TLV5-UX.01-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `preserves virtual transcript geometry across paging, appends, and scale`           | R4                          |
 | TLV5-UX.06-COMPACT-TOUCH-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact touch prepend cases                                                         | R4                          |
 | TLV5-UX.06-WIDE-TOUCH-01       | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide touch prepend cases                                                            | R4                          |
 | TLV5-UX.08-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `renders mixed paged transcripts in exact ledger order on compact and wide layouts` | L02.03, final-row order     |
-| TLV5-UX.10-WEB-UNIT-01         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: committed pre-section-5.4 timer baseline retained until the replacement cases land | Retiring baseline           |
 | TLV5-UX.17-WEB-STATIC-01       | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: timer and history-pruned machinery are absent                    | R4 timer architecture, supplementary |
-| TLV5-UX.17-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact switch restores bounded exact-order cache and earlier paging                | R4 compact geometry         |
-| TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide switch restores bounded exact-order cache and earlier paging                   | R4 wide geometry            |
+| TLV5-UX.17-WEB-UNIT-01         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: an active earlier-page request retains both loaded edges beyond 180 seconds | R4 active reader            |
+| TLV5-UX.17-WEB-UNIT-02         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: viewport-owned programmatic scrolling retains both loaded edges           | R4 active reader            |
+| TLV5-UX.17-WEB-UNIT-03         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: a bottom-pinned expanded interval survives beyond the retired timer       | R4 timer discriminator      |
+| TLV5-UX.17-WEB-UNIT-04         | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switching discards expansion and restores the exact bounded tail with earlier paging available | R4 switch restoration |
+| TLV5-UX.17-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact live-edge expansion survives the retired delay and later growth in canonical order with the final row visible | R4 compact geometry |
+| TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide live-edge expansion survives the retired delay and later growth in canonical order with the final row visible    | R4 wide geometry    |
 | TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: context exhaustion fails visibly without continuation                             | OPENCODE.01                 |
 | TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: disable flag and route deletion                               | OPENCODE.02                 |
 | TLV5-PAGE.05-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |

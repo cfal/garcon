@@ -64,6 +64,35 @@ describe('ChatTranscriptCache', () => {
 		expect(cache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([1]);
 	});
 
+	it('[TLV5-PAGE.09-WEB-STORAGE-01] hydrates the raw earlier continuation independently of visible rows', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ limit: 50, storage });
+		const boundedTail = Array.from({ length: 50 }, (_, index) =>
+			entry(index + 251, `message-${index + 251}`),
+		);
+		const pageAfterHiddenScan = {
+			...page('generation-1', boundedTail, 300),
+			hasMore: true,
+			nextBeforeOrdinal: 201,
+		};
+
+		cache.replaceFromPage('chat-1', pageAfterHiddenScan);
+		expect(cache.get('chat-1')).toMatchObject({
+			oldestOrdinal: 251,
+			nextBeforeOrdinal: 201,
+		});
+
+		cache.flush();
+		const hydrated = new ChatTranscriptCache({ limit: 50, storage }).get('chat-1');
+		expect(hydrated).toMatchObject({
+			oldestOrdinal: 251,
+			nextBeforeOrdinal: 201,
+		});
+		expect(hydrated?.messages.map((item) => item.ordinal)).toEqual(
+			Array.from({ length: 50 }, (_, index) => index + 251),
+		);
+	});
+
 	it('allows live creation only when the first batch starts at ordinal 1', () => {
 		const cache = new ChatTranscriptCache({ limit: 100 });
 

@@ -427,6 +427,24 @@ rendered page, a hidden run spanning several budgets, strict raw-cursor
 progress, deterministic stall rejection, and raw-cursor persistence independent
 of the oldest visible ordinal.
 
+The section 5.4 test-first checkpoint registers these coordinates:
+
+| Case ID | Boundary |
+| --- | --- |
+| `TLV5-PAGE.08-SERVER-UNIT-01` | One clamped request performs one bounded raw scan and returns its raw continuation |
+| `TLV5-PAGE.08-SERVER-UNIT-02` | The ordinal-one interval performs one empty scan and returns ceiling zero with no continuation |
+| `TLV5-PAGE.08-WEB-CONTRACT-01` | The client accepts the clamped raw ceiling and continuation when the request exceeds the watermark |
+| `TLV5-PAGE.09-SERVER-UNIT-01` | One hidden-only server page advances without scanning for visible content |
+| `TLV5-PAGE.09-WEB-CONTRACT-01` | An empty presented page with a strict raw continuation is valid |
+| `TLV5-PAGE.09-WEB-STORAGE-01` | Cache persistence and hydration retain the raw cursor independently of visible ordinals |
+| `TLV5-PAGE.09-WEB-UNIT-01` | The client crosses several bounded hidden ranges before delivering visible rows |
+| `TLV5-PAGE.09-WEB-UNIT-02` | Chat switch restores the bounded tail and resumes from the hidden-only raw continuation |
+| `TLV5-PAGE.10-WEB-CONTRACT-01` | Malformed, stalled, and hasMore-inconsistent continuations reject at the API boundary |
+| `TLV5-PAGE.10-WEB-UNIT-01` | A stalled hidden continuation fails before active-state mutation or retry looping |
+
+These cases are intentional red until the section 5.4 server, shared/client,
+state, and cache changes land.
+
 Replay cases cover fixed high watermark, row and byte bounds, hidden-only
 ranges, live append beyond the watermark, stale view, dropped send, disconnect
 mid-continuation, and safe restart. A Chromium case must disconnect after at
@@ -463,6 +481,20 @@ The covering array includes:
 - a final assistant after dozens of individual tool and compaction rows;
 - long user stretches with assistant and tool rows between them;
 - repeated equal-content rows with distinct addresses.
+
+Timer-specific `TLV5-UX.10-WEB-UNIT-01` retires. The replacement state and
+controller coordinates are:
+
+| Case ID | Boundary |
+| --- | --- |
+| `TLV5-UX.17-WEB-UNIT-01` | An active earlier-page request retains both loaded edges beyond the old timer boundary |
+| `TLV5-UX.17-WEB-UNIT-02` | Viewport-owned programmatic scrolling retains both loaded edges |
+| `TLV5-UX.17-WEB-UNIT-03` | A bottom-pinned expanded interval remains intact beyond 180 seconds |
+| `TLV5-UX.17-WEB-UNIT-04` | Switch discards expansion and return restores the exact bounded tail with earlier paging available |
+
+The static timer-absence case is supplementary; the four behavioral cases are
+primary and remain intentional red only where the production timer still
+trims the selected transcript.
 
 Every strict geometry case uses the same expected row-model helper and
 address-keyed frame sampler. Helpers expose any paging, publication,

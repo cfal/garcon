@@ -36,7 +36,6 @@ function clock(
 			'live-append': liveAppendRevision,
 			'history-earlier': 0,
 			'history-later': 0,
-			'history-pruned': 0,
 			replacement: 0,
 			'presentation-structure': presentationRevision,
 		},

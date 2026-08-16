@@ -71,21 +71,27 @@ function page(
 		lastOrdinal: number;
 		pageOldestOrdinal: number;
 		pageNewestOrdinal: number;
+		nextBeforeOrdinal: number | null;
 		hasMore: boolean;
 		resendCandidates: ResendCandidate[];
 	}> = {},
 ) {
 	const messages = overrides.messages ?? [entry(1, assistant('hello'))];
+	const pageOldestOrdinal = overrides.pageOldestOrdinal ?? messages[0]?.ordinal ?? 0;
+	const hasMore = overrides.hasMore ?? false;
 	return {
 		historyState: { kind: 'complete' as const },
 		transcriptViewId: overrides.transcriptViewId ?? 'generation-1',
 		messages,
 		lastOrdinal: overrides.lastOrdinal ?? messages.at(-1)?.ordinal ?? 0,
-		pageOldestOrdinal: overrides.pageOldestOrdinal ?? messages[0]?.ordinal ?? 0,
+		pageOldestOrdinal,
 		pageNewestOrdinal: overrides.pageNewestOrdinal ?? messages.at(-1)?.ordinal
 			?? overrides.lastOrdinal
 			?? 0,
-		hasMore: overrides.hasMore ?? false,
+		nextBeforeOrdinal: overrides.nextBeforeOrdinal ?? (hasMore && pageOldestOrdinal > 1
+			? pageOldestOrdinal
+			: null),
+		hasMore,
 		resendCandidates: overrides.resendCandidates ?? [],
 	};
 }
@@ -236,7 +242,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 3 });
 	});
 
-	it('retains a bottom-pinned live transcript until explicit compaction', () => {
+	it('retains a bottom-pinned live transcript without mutation-time compaction', () => {
 		const chat = new ActiveTranscriptState();
 		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 51;
 
@@ -255,11 +261,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
-
-		expect(chat.compactToRecentMessages()).toBe(true);
-		expect(chat.entries.map((message) => message.ordinal)).toEqual(
-			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) => index + 52),
-		);
 	});
 
 	it('bounds oversized generation replacements to the recent message window', () => {
@@ -304,7 +305,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
 
-	it('[TLV5-UX.05-WEB-UNIT-01] retains expanded live-edge history until explicit compaction', () => {
+	it('[TLV5-UX.05-WEB-UNIT-01] retains expanded live-edge history while selected', () => {
 		const chat = new ActiveTranscriptState();
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -333,10 +334,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 50);
 		expect(chat.oldestOrdinal).toBe(1);
 		expect(chat.hasEarlierMessages).toBe(false);
-
-		expect(chat.compactToRecentMessages()).toBe(true);
-		expect(chat.entries[0]?.ordinal).toBe(51);
-		expect(chat.entries.at(-1)?.ordinal).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
 	});
 
 	it('[TLV5-UX.02-WEB-UNIT-01] preserves both loaded edges while detached live history grows', () => {
@@ -482,6 +479,179 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.visibleMessageCount).toBe(total);
+	});
+
+	it('[TLV5-PAGE.09-WEB-UNIT-01] crosses several hidden raw budgets before delivering visible earlier rows', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
+			lastOrdinal: 300,
+			pageOldestOrdinal: 251,
+			pageNewestOrdinal: 300,
+			hasMore: true,
+		});
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: [],
+					lastOrdinal: 300,
+					pageOldestOrdinal: 0,
+					pageNewestOrdinal: 250,
+					nextBeforeOrdinal: 201,
+					hasMore: true,
+				}),
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: [],
+					lastOrdinal: 300,
+					pageOldestOrdinal: 0,
+					pageNewestOrdinal: 200,
+					nextBeforeOrdinal: 151,
+					hasMore: true,
+				}),
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: assistantEntries(101, 150),
+					lastOrdinal: 300,
+					pageOldestOrdinal: 101,
+					pageNewestOrdinal: 150,
+					nextBeforeOrdinal: 101,
+					hasMore: true,
+				}),
+			});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+
+		expect(vi.mocked(getChatMessages).mock.calls.map(([request]) => request.beforeOrdinal))
+			.toEqual([251, 201, 151]);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual([
+			...Array.from({ length: 50 }, (_, index) => index + 101),
+			...Array.from({ length: 50 }, (_, index) => index + 251),
+		]);
+		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(false);
+	});
+
+	it('[TLV5-PAGE.10-WEB-UNIT-01] rejects a stalled raw continuation before mutating the loaded interval', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
+			lastOrdinal: 300,
+			pageOldestOrdinal: 251,
+			pageNewestOrdinal: 300,
+			hasMore: true,
+		});
+		const before = chat.entries;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: [],
+				lastOrdinal: 300,
+				pageOldestOrdinal: 0,
+				pageNewestOrdinal: 250,
+				nextBeforeOrdinal: 251,
+				hasMore: true,
+			}),
+		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
+
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(chat.entries).toBe(before);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 50 }, (_, index) => index + 251),
+		);
+	});
+
+	it('[TLV5-PAGE.09-WEB-UNIT-02] resumes a hidden-only earlier continuation after chat switch', async () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
+		const chat = new ActiveTranscriptState(transcriptCache);
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
+			lastOrdinal: 300,
+			pageOldestOrdinal: 251,
+			pageNewestOrdinal: 300,
+			hasMore: true,
+		});
+
+		let releaseHeldPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		let markHeldRequest!: () => void;
+		const heldRequestStarted = new Promise<void>((resolve) => {
+			markHeldRequest = resolve;
+		});
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: [],
+					lastOrdinal: 300,
+					pageOldestOrdinal: 0,
+					pageNewestOrdinal: 250,
+					nextBeforeOrdinal: 201,
+					hasMore: true,
+				}),
+			})
+			.mockImplementationOnce((request) => {
+				markHeldRequest();
+				return new Promise((resolve) => {
+					releaseHeldPage = resolve;
+				});
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: assistantEntries(151, 200),
+					lastOrdinal: 300,
+					pageOldestOrdinal: 151,
+					pageNewestOrdinal: 200,
+					nextBeforeOrdinal: 151,
+					hasMore: true,
+				}),
+			});
+
+		const interruptedLoad = chat.loadEarlierPage('chat-1');
+		const firstPhase = await Promise.race([
+			interruptedLoad.then((result) => ({ kind: 'completed' as const, result })),
+			heldRequestStarted.then(() => ({ kind: 'continued' as const })),
+		]);
+		expect(firstPhase).toEqual({ kind: 'continued' });
+		expect(vi.mocked(getChatMessages).mock.calls[1]?.[0].beforeOrdinal).toBe(201);
+
+		expect(chat.activateChat('chat-2')).toBeNull();
+		releaseHeldPage({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(151, 200),
+				lastOrdinal: 300,
+				pageOldestOrdinal: 151,
+				pageNewestOrdinal: 200,
+				nextBeforeOrdinal: 151,
+				hasMore: true,
+			}),
+		});
+		await expect(interruptedLoad).resolves.toBe('invalidated');
+
+		expect(chat.activateChat('chat-1')).toEqual({ count: 50, stale: false });
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 50 }, (_, index) => index + 251),
+		);
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+
+		expect(vi.mocked(getChatMessages).mock.calls[2]?.[0].beforeOrdinal).toBe(201);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual([
+			...Array.from({ length: 50 }, (_, index) => index + 151),
+			...Array.from({ length: 50 }, (_, index) => index + 251),
+		]);
 	});
 
 	it('[TLV5-UX.03-WEB-UNIT-01] keeps the loaded later edge when earlier paging expands a detached window', async () => {
@@ -3792,6 +3962,33 @@ describe('ActiveTranscriptState', () => {
 		expect(result).toBe('applied');
 		expect(chat.chatMessages.map(contentOf)).toEqual(['first', 'second', 'third', 'fourth']);
 		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([3, 4]);
+	});
+
+	it('[TLV5-UX.17-WEB-UNIT-04] discards an expanded interval on chat switch and restores only the exact bounded tail', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 3 });
+		const chat = new ActiveTranscriptState(transcriptCache);
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			assistantEntries(1, 5),
+			{ lastOrdinal: 5, pageOldestOrdinal: 1, hasMore: false },
+		);
+		applyMessages(chat, 'chat-1', 'generation-1', assistantEntries(6, 7));
+		expect(chat.entries.map((item) => item.ordinal)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+
+		expect(chat.activateChat('chat-2')).toBeNull();
+		expect(chat.entries).toEqual([]);
+
+		expect(chat.activateChat('chat-1')).toEqual({ count: 3, stale: false });
+		expect(chat.entries.map((item) => [item.ordinal, contentOf(item.message)])).toEqual([
+			[5, 'message-5'],
+			[6, 'message-6'],
+			[7, 'message-7'],
+		]);
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 7 });
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.canLoadEarlier).toBe(true);
 	});
 });
 

@@ -1006,6 +1006,94 @@ describe('chats API contract', () => {
 		}
 	});
 
+	it('[TLV5-PAGE.09-WEB-CONTRACT-01] accepts an all-hidden raw page with a strict continuation', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponse({
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 300,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			resendCandidates: [],
+			hasMore: true,
+			limit: 50,
+		}));
+
+		await expect(getChatMessages({
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			beforeOrdinal: 251,
+			limit: 50,
+		})).resolves.toMatchObject({
+			messages: [],
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			hasMore: true,
+		});
+	});
+
+	it('[TLV5-PAGE.08-WEB-CONTRACT-01] accepts a server-clamped raw interval ceiling', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponse({
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 250,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			resendCandidates: [],
+			hasMore: true,
+			limit: 50,
+		}));
+
+		await expect(getChatMessages({
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			beforeOrdinal: 999,
+			limit: 50,
+		})).resolves.toMatchObject({
+			lastOrdinal: 250,
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			hasMore: true,
+		});
+	});
+
+	it('[TLV5-PAGE.10-WEB-CONTRACT-01] rejects malformed or stalled raw continuations', async () => {
+		const validPage = {
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 300,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			resendCandidates: [],
+			hasMore: true,
+			limit: 50,
+		};
+		const request = {
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			beforeOrdinal: 251,
+			limit: 50,
+		} satisfies Parameters<typeof getChatMessages>[0];
+
+		for (const patch of [
+			{ nextBeforeOrdinal: null },
+			{ nextBeforeOrdinal: 0 },
+			{ nextBeforeOrdinal: 251 },
+			{ nextBeforeOrdinal: 201, hasMore: false },
+		]) {
+			fetchMock.mockResolvedValueOnce(jsonResponse({ ...validPage, ...patch }));
+			await expect(getChatMessages(request)).rejects.toThrow('Invalid chat messages page');
+		}
+	});
+
 	it('[TLV5-PAGE.01-WEB-CONTRACT-01] qualifies transcript page requests by view and validates the response against the request', async () => {
 		const message = (ordinal: number, content: string) => ({
 			ordinal,

@@ -13,6 +13,148 @@ import { TranscriptViewReader } from '../view-reader.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptViewReader', () => {
+  it('[TLV5-PAGE.08-SERVER-UNIT-01] presents exactly one bounded raw page with its raw continuation', async () => {
+    const pageCalls = [];
+    const rawRows = Array.from({ length: 50 }, (_, index) => {
+      const ordinal = 451 + index;
+      if (ordinal === 475) {
+        return {
+          viewId: transcriptViewId('view-1'),
+          ordinal,
+          kind: 'provider-row',
+          at: TS,
+          providerMeta: null,
+          message: new AssistantMessage(TS, 'only visible row'),
+        };
+      }
+      return {
+        viewId: transcriptViewId('view-1'),
+        ordinal,
+        kind: 'session',
+        at: TS,
+        providerMeta: null,
+        detail: {
+          agentSessionId: `session-${ordinal}`,
+          nativeSession: null,
+          nativeSeedReceipt: null,
+        },
+      };
+    });
+    const reader = new TranscriptViewReader({
+      highWatermark: () => ({ viewId: transcriptViewId('view-1'), ordinal: 500 }),
+      page(chatId, viewId, limit, beforeOrdinal) {
+        pageCalls.push({ chatId, viewId, limit, beforeOrdinal });
+        if (pageCalls.length > 1) throw new Error('One HTTP page must perform one raw scan');
+        return { viewId, rows: rawRows, nextBefore: 451 };
+      },
+    }, {
+      ensure: async () => ({
+        viewId: transcriptViewId('view-1'),
+        status: 'current',
+        createdAt: TS,
+        contentStartOrdinal: 1,
+      }),
+    });
+
+    await expect(reader.page('chat-1', 50, 999, 'view-1')).resolves.toEqual({
+      transcriptViewId: 'view-1',
+      messages: [{
+        ordinal: 475,
+        message: new AssistantMessage(TS, 'only visible row'),
+      }],
+      lastOrdinal: 500,
+      pageOldestOrdinal: 475,
+      pageNewestOrdinal: 500,
+      nextBeforeOrdinal: 451,
+      hasMore: true,
+    });
+    expect(pageCalls).toEqual([{
+      chatId: 'chat-1',
+      viewId: 'view-1',
+      limit: 50,
+      beforeOrdinal: 501,
+    }]);
+  });
+
+  it('[TLV5-PAGE.09-SERVER-UNIT-01] advances an all-hidden raw page without scanning for a visible row', async () => {
+    const pageCalls = [];
+    const reader = new TranscriptViewReader({
+      highWatermark: () => ({ viewId: transcriptViewId('view-1'), ordinal: 250 }),
+      page(chatId, viewId, limit, beforeOrdinal) {
+        pageCalls.push({ chatId, viewId, limit, beforeOrdinal });
+        if (pageCalls.length > 1) throw new Error('Hidden rows must not trigger another server scan');
+        return {
+          viewId,
+          rows: Array.from({ length: 50 }, (_, index) => ({
+            viewId,
+            ordinal: 201 + index,
+            kind: 'session',
+            at: TS,
+            providerMeta: null,
+            detail: {
+              agentSessionId: `session-${201 + index}`,
+              nativeSession: null,
+              nativeSeedReceipt: null,
+            },
+          })),
+          nextBefore: 201,
+        };
+      },
+    }, {
+      ensure: async () => ({
+        viewId: transcriptViewId('view-1'),
+        status: 'current',
+        createdAt: TS,
+        contentStartOrdinal: 1,
+      }),
+    });
+
+    await expect(reader.page('chat-1', 50, 251, 'view-1')).resolves.toEqual({
+      transcriptViewId: 'view-1',
+      messages: [],
+      lastOrdinal: 250,
+      pageOldestOrdinal: 0,
+      pageNewestOrdinal: 250,
+      nextBeforeOrdinal: 201,
+      hasMore: true,
+    });
+    expect(pageCalls).toHaveLength(1);
+  });
+
+  it('[TLV5-PAGE.08-SERVER-UNIT-02] queries the empty raw interval at ordinal one exactly once', async () => {
+    const pageCalls = [];
+    const reader = new TranscriptViewReader({
+      highWatermark: () => ({ viewId: transcriptViewId('view-1'), ordinal: 250 }),
+      page(chatId, viewId, limit, beforeOrdinal) {
+        pageCalls.push({ chatId, viewId, limit, beforeOrdinal });
+        return { viewId, rows: [], nextBefore: null };
+      },
+    }, {
+      ensure: async () => ({
+        viewId: transcriptViewId('view-1'),
+        status: 'current',
+        createdAt: TS,
+        contentStartOrdinal: 1,
+      }),
+    });
+
+    await expect(reader.page('chat-1', 50, 1, 'view-1')).resolves.toEqual({
+      transcriptViewId: 'view-1',
+      messages: [],
+      lastOrdinal: 250,
+      pageOldestOrdinal: 0,
+      pageNewestOrdinal: 0,
+      nextBeforeOrdinal: null,
+      hasMore: false,
+    });
+    expect(pageCalls).toEqual([{
+      chatId: 'chat-1',
+      viewId: 'view-1',
+      limit: 50,
+      beforeOrdinal: 1,
+    }]);
+  });
+
   it('[TLV5-L01.01-CORE-UNIT-01] pages visible messages by durable ordinal across hidden lifecycle rows', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       const lease = ledger.openProducer('chat-1', 'test');
