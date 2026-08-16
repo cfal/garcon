@@ -54,18 +54,20 @@ async function importProvider() {
 }
 
 describe('OpenCodeRuntime model discovery', () => {
-  it('disables OpenCode autoupdate in the spawned server environment', async () => {
+  it('isolates the spawned server environment and disables provider-managed updates', async () => {
     const { buildOpenCodeServerEnv } = await import('../server-instance.js');
 
     expect(buildOpenCodeServerEnv({
       KEEP_ME: 'yes',
-      OPENCODE_CONFIG_CONTENT: '{"mode":"user"}',
+      OPENCODE_CONFIG_CONTENT:
+        '{"mode":"user","plugin":["file:///tmp/user-opencode-plugin.js"]}',
+      OPENCODE_DISABLE_AUTOCOMPACT: '0',
       OPENCODE_DISABLE_AUTOUPDATE: '0',
       OPENCODE_PURE: '1',
     }, 'file:///tmp/garcon-opencode-plugin.js')).toEqual({
       KEEP_ME: 'yes',
-      OPENCODE_CONFIG_CONTENT:
-        '{"plugin":["file:///tmp/garcon-opencode-plugin.js"]}',
+      OPENCODE_CONFIG_CONTENT: '{}',
+      OPENCODE_DISABLE_AUTOCOMPACT: '1',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
     });
   });
