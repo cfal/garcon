@@ -11,18 +11,23 @@ afterEach(async () => {
 });
 
 describe('Amp history import', () => {
-  it('[TLV5-ADOPT.07-AMP-UNIT-01] distinguishes supported absence from provider read failure', async () => {
+  it('[TLV5-ADOPT.07-AMP-UNIT-01] retries the same source after a provider read failure', async () => {
     const root = await temporaryRoot();
-    const integration = new AmpAgentIntegration(createHost(root, '/definitely/missing/amp'));
+    const binary = join(root, 'amp-legacy-fixture');
+    const integration = new AmpAgentIntegration(createHost(root, binary));
     try {
       expect(integration.legacyHistoryImport).toBeDefined();
       expect(integration.legacyHistoryImport).not.toBeNull();
       await expect(importedRows(integration.legacyHistoryImport, chat(integration))).resolves
         .toEqual([]);
-      await expect(importedRows(
-        integration.legacyHistoryImport,
-        chat(integration, { agentSessionId: 'missing-amp-thread' }),
-      )).rejects.toThrow();
+      const reference = chat(integration, { agentSessionId: 'repairable-amp-thread' });
+      await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
+
+      await writeFile(binary, `#!${process.execPath}
+console.log(JSON.stringify({ messages: [] }));
+`, 'utf8');
+      await chmod(binary, 0o755);
+      await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
     } finally {
       await integration.lifecycle.stop();
     }

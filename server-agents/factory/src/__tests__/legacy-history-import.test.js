@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe('Factory history import', () => {
-  it('[TLV5-ADOPT.07-FACTORY-UNIT-01] distinguishes supported absence from malformed provider history', async () => {
+  it('[TLV5-ADOPT.07-FACTORY-UNIT-01] retries the same source after malformed provider history', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-factory-legacy-import-'));
     roots.push(root);
     const integration = new FactoryAgentIntegration(createHost(root));
@@ -24,14 +24,18 @@ describe('Factory history import', () => {
       expect(integration.legacyHistoryImport).not.toBeNull();
       await expect(importedRows(integration.legacyHistoryImport, chat(integration))).resolves
         .toEqual([]);
-      await expect(importedRows(integration.legacyHistoryImport, chat(integration, {
+      const reference = chat(integration, {
         agentSessionId: 'factory-malformed',
         nativeSession: {
           ownerId: 'factory',
           schemaVersion: 1,
           value: { path: malformedPath, agentSessionId: 'factory-malformed' },
         },
-      }))).rejects.toThrow();
+      });
+      await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
+
+      await writeFile(malformedPath, '', 'utf8');
+      await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
     } finally {
       await integration.lifecycle.stop();
     }

@@ -22,6 +22,17 @@ const DIRECT_REGISTRATIONS = [
     Integration: DirectOpenAiResponsesCompatibleIntegration,
   },
 ];
+const DIRECT_PREFIX_LITERAL_PATTERN =
+  /(?:'[^'\r\n]*direct-[^'\r\n]*'|"[^"\r\n]*direct-[^"\r\n]*"|`[^`]*direct-[^`]*`|\/(?:\\.|[^/\\\r\n])*direct-(?:\\.|[^/\\\r\n])*\/[dgimsuvy]*)/;
+const DIRECT_PROVIDER_CONSTANT_PATTERN =
+  /\b(?:(?:[A-Z0-9]+_)*DIRECT_(?:[A-Z0-9]+_)*(?:AGENT|PROVIDER|OPENAI|ANTHROPIC|RESPONSES|COMPATIBLE)(?:_[A-Z0-9]+)*|(?:[A-Z0-9]+_)*(?:AGENT|PROVIDER|OPENAI|ANTHROPIC|RESPONSES|COMPATIBLE)(?:_[A-Z0-9]+)*_DIRECT(?:_[A-Z0-9]+)*)\b/;
+const DIRECT_PROVIDER_IDENTIFIER_PATTERN =
+  /\b(?:(?:is|has|uses|supports|matches)Direct(?:Agent|Provider|Integration)\w*|direct(?:Agent|Provider|Integration)(?:Id|Ids|ID|IDs)?|Direct(?:OpenAI|OpenAi|Anthropic|Responses)\w*|(?:OpenAI|OpenAi|Anthropic)\w*Direct(?:Agent|Provider|Integration)\w*)\b/;
+const DIRECT_PROVIDER_PATTERNS = [
+  DIRECT_PREFIX_LITERAL_PATTERN,
+  DIRECT_PROVIDER_CONSTANT_PATTERN,
+  DIRECT_PROVIDER_IDENTIFIER_PATTERN,
+];
 
 describe('transcript adoption architecture', () => {
   it('[TLV5-ADOPT.01-CORE-STATIC-01] keeps legacy adoption and native Reload facets at separate call sites', () => {
@@ -52,6 +63,9 @@ describe('transcript adoption architecture', () => {
       expect(source, relative).not.toMatch(/@garcon\/server-agent-direct-[^'"/]+\//);
       expect(source, relative).not.toMatch(/@garcon\/server-agent-direct-/);
       expect(source, relative).not.toMatch(/\.startsWith\(\s*['"`]direct-/);
+      for (const pattern of DIRECT_PROVIDER_PATTERNS) {
+        expect(source, relative).not.toMatch(pattern);
+      }
       for (const { binding } of DIRECT_REGISTRATIONS) {
         expect(source, relative).not.toMatch(new RegExp(`\\b${binding}\\b`));
       }
@@ -62,6 +76,17 @@ describe('transcript adoption architecture', () => {
       if (relative === 'server/agents/default-agent-integrations.ts') {
         expect(source, relative).not.toMatch(/\b(?:legacyHistoryImport|TranscriptAdoption|adoption)\b/);
       }
+    }
+
+    const forbiddenExamples = [
+      "if (agentId === 'direct-example') useProvider();",
+      'if (`direct-${agentId}` === descriptor.id) useProvider();',
+      'if (/^direct-/.test(agentId)) useProvider();',
+      'if (agentId === DIRECT_PROVIDER_ID) useProvider();',
+      'if (isDirectProvider(agentId)) useProvider();',
+    ];
+    for (const source of forbiddenExamples) {
+      expect(DIRECT_PROVIDER_PATTERNS.some((pattern) => pattern.test(source)), source).toBe(true);
     }
   });
 

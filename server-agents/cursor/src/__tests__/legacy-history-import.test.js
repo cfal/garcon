@@ -16,8 +16,7 @@ afterEach(async () => {
 });
 
 describe('Cursor history import', () => {
-  it('[TLV5-ADOPT.07-CURSOR-UNIT-01] distinguishes a missing legacy store from an unreadable one', async () => {
-    expectIsolatedTranscriptSourceInjection();
+  it('[TLV5-ADOPT.07-CURSOR-UNIT-01] retries the same store after an unreadable legacy source', async () => {
     const cursorHome = await mkdtemp(join(tmpdir(), 'garcon-cursor-legacy-import-'));
     roots.push(cursorHome);
     const sessionId = `sacs-legacy-${crypto.randomUUID()}`;
@@ -35,13 +34,16 @@ describe('Cursor history import', () => {
       await mkdir(sessionDirectory, { recursive: true });
       await writeFile(storePath, 'not a sqlite database', 'utf8');
       await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
+
+      await rm(storePath, { force: true });
+      await createEmptyCursorStore(storePath);
+      await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
     } finally {
       await integration.lifecycle.stop();
     }
   });
 
   it('[TLV5-ADOPT.08-CURSOR-NATIVE-UNIT-01] distinguishes valid empty native history from selected-store failures', async () => {
-    expectIsolatedTranscriptSourceInjection();
     const cursorHome = await mkdtemp(join(tmpdir(), 'garcon-cursor-native-import-'));
     roots.push(cursorHome);
     const emptySessionId = `sacs-native-empty-${crypto.randomUUID()}`;
@@ -70,11 +72,6 @@ describe('Cursor history import', () => {
     }
   });
 });
-
-function expectIsolatedTranscriptSourceInjection() {
-  expect(createCursorTranscriptSource.toString()).toMatch(/\bcursorHome\b/);
-  expect(CursorAgentIntegration.toString()).toMatch(/\btranscriptSource\b/);
-}
 
 async function createEmptyCursorStore(storePath) {
   await mkdir(dirname(storePath), { recursive: true });

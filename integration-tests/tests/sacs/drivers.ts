@@ -332,20 +332,23 @@ function directLegacyHistoryImport(input: {
       await mkdir(dirname(legacyPath), { recursive: true });
       await writeFile(legacyPath, contents, 'utf8');
 
+      const replaceActiveSource = async (nextContents: string) => {
+        const activePath = await fileExists(relocatedPath) ? relocatedPath : legacyPath;
+        const alternatePath = activePath === relocatedPath ? legacyPath : relocatedPath;
+        await rm(alternatePath, { recursive: true, force: true });
+        await mkdir(dirname(activePath), { recursive: true });
+        await writeFile(activePath, nextContents, 'utf8');
+      };
+
       return {
         async corrupt() {
-          await writeFile(legacyPath, '{"role":"user","content":', 'utf8');
+          await replaceActiveSource('{"role":"user","content":');
         },
         async empty() {
-          await writeFile(legacyPath, '', 'utf8');
+          await replaceActiveSource('');
         },
         async restore() {
-          const target = await fileExists(relocatedPath) ? relocatedPath : legacyPath;
-          const other = target === legacyPath ? relocatedPath : legacyPath;
-          await rm(other, { recursive: true, force: true });
-          await rm(target, { recursive: true, force: true });
-          await mkdir(dirname(target), { recursive: true });
-          await writeFile(target, contents, 'utf8');
+          await replaceActiveSource(contents);
         },
         async remove() {
           await Promise.all([

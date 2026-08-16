@@ -314,10 +314,12 @@ prefix/session/current-binding ordering.
 A recorded carryover quarantine is a separate positive branch. Contract tests
 round-trip `{type: 'carryover-migration-quarantine', artifactId, errorCode}`;
 the fold matrix preserves it only in the frozen projection; Reload carries it
-while dropping ordinary notices. Provider-capability SACS applies the same
-adoption assertions to every integration advertising the facet. Direct's three
-drivers share the module and still advertise no native Reload; OpenCode remains
-directory-scoped and receives no unscoped fallback case.
+while dropping ordinary notices. Provider-capability SACS pins the exact driver
+and source-control roster, then applies the same adoption assertions to every
+integration advertising the facet. Direct's three drivers share the module and
+still advertise no native Reload; OpenCode remains directory-scoped and receives
+no unscoped fallback case. Amp, Factory, and Cursor repair and retry the same
+provider source after their provider-unit failure assertion.
 
 Native-import occasion evidence is independently gated by the nullable
 `nativeHistoryImport` SACS capability rather than the native-session codec or

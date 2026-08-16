@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatMessage } from '../../../common/chat-types.js';
-import { transcriptViewId, type LedgerRow } from '../../../server/ledger/contracts.js';
+import {
+  transcriptViewId,
+  type LedgerRow,
+  type LedgerSessionRow,
+} from '../../../server/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
@@ -18,9 +22,11 @@ import {
 } from './drivers.js';
 import type {
   SacsDriverEnvironment,
+  SacsDirectoryScopedHistoryFacet,
   SacsLegacyHistoryImportFacet,
   SacsLegacyTranscriptRow,
   SacsPreparedHistorySource,
+  SacsReleasedJsonlFacet,
 } from './driver.js';
 
 const SACS_TIMEOUT_MS = 120_000;
@@ -31,10 +37,28 @@ const DIRECT_RELEASED_CASE_IDS: Readonly<Record<string, string>> = {
   'direct-openai-responses-compatible': '[TLV5-ADOPT.07-SACS-DIRECT-RESPONSES-01]',
   'direct-anthropic-compatible': '[TLV5-ADOPT.07-SACS-DIRECT-ANTHROPIC-01]',
 };
+const EXPECTED_RELEASED_JSONL_DRIVER_IDS = [
+  'direct-openai-responses-compatible',
+  'direct-openai-compatible',
+  'direct-anthropic-compatible',
+];
+const EXPECTED_DIRECTORY_SCOPED_DRIVER_IDS = process.platform === 'linux'
+  ? ['opencode']
+  : [];
 
 test('[TLV5-ADOPT.07-SACS-CAPABILITY-01] registers a legacy adoption fixture for every scripted driver', () => {
+  expect(Object.keys(DIRECT_RELEASED_CASE_IDS).toSorted())
+    .toEqual(EXPECTED_RELEASED_JSONL_DRIVER_IDS.toSorted());
   expect(sacsScriptedDriverFactories.every((driver) => driver.legacyHistoryImport !== null))
     .toBe(true);
+  expect(sacsScriptedDriverFactories
+    .filter((driver) => Boolean(driver.legacyHistoryImport?.releasedJsonl))
+    .map((driver) => driver.id))
+    .toEqual(EXPECTED_RELEASED_JSONL_DRIVER_IDS);
+  expect(sacsScriptedDriverFactories
+    .filter((driver) => Boolean(driver.legacyHistoryImport?.directoryScoped))
+    .map((driver) => driver.id))
+    .toEqual(EXPECTED_DIRECTORY_SCOPED_DRIVER_IDS);
 });
 
 test('[TLV5-ADOPT.08-SACS-CAPABILITY-01] registers native import independently from legacy and session codecs', () => {
@@ -97,6 +121,15 @@ for (const driverFactory of sacsScriptedDriverFactories) {
         try {
           const planted = await completedChat(fixture, activeDriver, 'ABSENT');
           const source = await legacy.prepare(fixture, planted.chatId, planted.rows);
+          const before = await fixture.client.getMessages(planted.chatId);
+          const originalSessionDetail = requireSingleSessionDetail(
+            readRows(fixture, planted.chatId, before.transcriptViewId),
+          );
+          const originalRegistryBinding = await readRegistrySessionBinding(
+            fixture,
+            planted.chatId,
+          );
+          expect(originalRegistryBinding).toEqual(originalSessionDetail);
 
           await restartWithPreV5Chat(fixture, planted.chatId, () => source.remove());
 
@@ -105,9 +138,11 @@ for (const driverFactory of sacsScriptedDriverFactories) {
           expect(readCurrentView(fixture, planted.chatId)).toMatchObject({
             viewId: transcriptViewId(adopted.transcriptViewId),
           });
-          expect(readRows(fixture, planted.chatId, adopted.transcriptViewId)).toEqual([
-            expect.objectContaining({ kind: 'session' }),
-          ]);
+          const adoptedRows = readRows(fixture, planted.chatId, adopted.transcriptViewId);
+          expect(adoptedRows).toHaveLength(1);
+          expect(requireSingleSessionDetail(adoptedRows)).toEqual(originalSessionDetail);
+          expect(await readRegistrySessionBinding(fixture, planted.chatId))
+            .toEqual(originalRegistryBinding);
           activeDriver.assertSettled(fixture);
         } finally {
           activeDriver.reset();
@@ -305,11 +340,11 @@ for (const driverFactory of sacsScriptedDriverFactories) {
     }
 
     const directCaseId = DIRECT_RELEASED_CASE_IDS[driverFactory.id];
-    if (directCaseId && driverFactory.legacyHistoryImport?.releasedJsonl) {
+    if (directCaseId) {
       test(`${directCaseId} keeps released JSONL adoption-only and resumes from ledger context`, async () => {
         const activeDriver = requireDriver(driver, driverFactory.label);
         const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
-        const releasedJsonl = legacy.releasedJsonl!;
+        const releasedJsonl = requireReleasedJsonlFacet(legacy, driverFactory.label);
 
         await withIntegrationFixture(`${activeDriver.id}-sacs-direct-legacy`, async (fixture) => {
           try {
@@ -391,11 +426,11 @@ for (const driverFactory of sacsScriptedDriverFactories) {
       }, SACS_TIMEOUT_MS);
     }
 
-    if (driverFactory.legacyHistoryImport?.directoryScoped) {
+    if (driverFactory.id === 'opencode') {
       test('[TLV5-ADOPT.07-SACS-OPENCODE-SCOPED-01][TLV5-ADOPT.07-SACS-OPENCODE-NOTFOUND-01] keeps legacy discovery within the recorded project directory', async () => {
         const activeDriver = requireDriver(driver, driverFactory.label);
         const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
-        const directoryScoped = legacy.directoryScoped!;
+        const directoryScoped = requireDirectoryScopedFacet(legacy, driverFactory.label);
 
         await withIntegrationFixture(`${activeDriver.id}-sacs-scoped-legacy`, async (fixture) => {
           try {
@@ -527,6 +562,26 @@ function requireLegacyFacet(
   return facet;
 }
 
+function requireReleasedJsonlFacet(
+  facet: SacsLegacyHistoryImportFacet,
+  label: string,
+): SacsReleasedJsonlFacet {
+  if (!facet.releasedJsonl) {
+    throw new Error(`${label} does not advertise released JSONL history controls.`);
+  }
+  return facet.releasedJsonl;
+}
+
+function requireDirectoryScopedFacet(
+  facet: SacsLegacyHistoryImportFacet,
+  label: string,
+): SacsDirectoryScopedHistoryFacet {
+  if (!facet.directoryScoped) {
+    throw new Error(`${label} does not advertise directory-scoped history controls.`);
+  }
+  return facet.directoryScoped;
+}
+
 function marker(agentId: string, label: string): string {
   return `SACS_${agentId.toUpperCase()}_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
 }
@@ -580,6 +635,28 @@ function readRows(
   } finally {
     store.close();
   }
+}
+
+function requireSingleSessionDetail(rows: readonly LedgerRow[]): LedgerSessionRow['detail'] {
+  const sessions = rows.filter((row): row is LedgerSessionRow => row.kind === 'session');
+  expect(sessions).toHaveLength(1);
+  return structuredClone(sessions[0]!.detail);
+}
+
+async function readRegistrySessionBinding(fixture: IntegrationFixture, chatId: string) {
+  const registryPath = join(fixture.dirs.workspace, 'chats.json');
+  const registry = JSON.parse(await readFile(registryPath, 'utf8')) as {
+    sessions?: Record<string, Record<string, unknown>>;
+  };
+  const chat = registry.sessions?.[chatId];
+  if (!chat || typeof chat.agentSessionId !== 'string') {
+    throw new Error(`SACS chat ${chatId} has no persisted session binding.`);
+  }
+  return structuredClone({
+    agentSessionId: chat.agentSessionId,
+    nativeSession: chat.nativeSession ?? null,
+    nativeSeedReceipt: chat.nativeSeedReceipt ?? null,
+  });
 }
 
 function readCurrentView(fixture: IntegrationFixture, chatId: string) {
