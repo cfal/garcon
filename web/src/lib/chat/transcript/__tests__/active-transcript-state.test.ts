@@ -2281,6 +2281,40 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows.at(-1)).toMatchObject({ id: 'generation-1:400', ordinal: 400 });
 	});
 
+	it('preserves a partially expanded visible start through transient row settlement', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 200), {
+			lastOrdinal: 200,
+			pageOldestOrdinal: 1,
+			hasMore: false,
+		});
+		applyMessages(chat, 'chat-1', 'generation-1', assistantEntries(201, 300));
+		chat.isUserScrolledUp = true;
+		expect(chat.revealEarlierLoadedRows()).toBe(true);
+		const expectedStart = { id: 'generation-1:101', ordinal: 101 };
+		expect(chat.visibleRows[0]).toMatchObject(expectedStart);
+
+		chat.appendLocalNotice('progress', 'temporary status');
+		expect(chat.visibleRows[0]).toMatchObject(expectedStart);
+		chat.clearLocalNotices();
+		expect(chat.visibleRows[0]).toMatchObject(expectedStart);
+
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'message-301',
+			content: 'message-301',
+		}));
+		expect(chat.visibleRows[0]).toMatchObject(expectedStart);
+		expect(chat.optimisticUserInputs).toHaveLength(1);
+
+		expect(applyMessages(chat, 'chat-1', 'generation-1', [
+			entry(301, user('message-301', { clientMessageId: 'message-301' })),
+		])).toBe('applied');
+		expect(chat.optimisticUserInputs).toEqual([]);
+		expect(chat.visibleRows[0]).toMatchObject(expectedStart);
+		expect(chat.visibleRows.filter((row) => rowContentOf(row) === 'message-301')).toHaveLength(1);
+		expect(chat.visibleRows.at(-1)).toMatchObject({ id: 'generation-1:301', ordinal: 301 });
+	});
+
 	it('does not re-arm expanded-window growth from replacement-generation count slack', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration(
