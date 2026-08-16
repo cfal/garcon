@@ -644,6 +644,36 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 1 });
 	});
 
+	it.each([
+		{
+			name: 'another transcript view',
+			transcriptViewId: 'generation-2',
+			ordinal: 1,
+			expectedResult: 'view-changed' as const,
+		},
+		{
+			name: 'a noncontiguous ordinal range',
+			transcriptViewId: 'generation-1',
+			ordinal: 3,
+			expectedResult: 'gap-detected' as const,
+		},
+	])(
+		'does not acknowledge an optimistic input from $name',
+		({ transcriptViewId, ordinal, expectedResult }) => {
+			const chat = new ActiveTranscriptState();
+			applyMessages(chat, 'chat-1', 'generation-1', [entry(1, assistant('current'))]);
+			chat.upsertOptimisticUserInput(optimisticInput());
+
+			const result = applyMessages(chat, 'chat-1', transcriptViewId, [
+				entry(ordinal, user('rejected echo', { clientMessageId: 'msg-1' })),
+			]);
+
+			expect(result).toBe(expectedResult);
+			expect(chat.optimisticUserInputs).toEqual([optimisticInput()]);
+			expect(chat.displayMessages.map(contentOf)).toEqual(['current', 'optimistic']);
+		},
+	);
+
 	it('renders local messages as transient display-only rows', () => {
 		const chat = new ActiveTranscriptState();
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, user('server'))]);
