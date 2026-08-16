@@ -56,16 +56,27 @@ function makeRuntime(dir, overrides = {}) {
   return new AnthropicCompatibleChatRuntime(runtimeConfig(dir, overrides));
 }
 
-function waitForMessages(runtime) {
-  return new Promise((resolve) => {
-    runtime.onMessages((_chatId, messages) => resolve(messages));
-  });
+function captureOperation(runId) {
+  const events = [];
+  let resolveTerminal;
+  const terminal = new Promise((resolve) => { resolveTerminal = resolve; });
+  return {
+    events,
+    terminal,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+        if (event.type === 'run-ended') resolveTerminal(event);
+      },
+    },
+  };
 }
 
-function waitForFailure(runtime) {
-  return new Promise((resolve) => {
-    runtime.onFailed((_chatId, message) => resolve(message));
-  });
+function capturedMessages(capture) {
+  return capture.events
+    .filter((event) => event.type === 'rows')
+    .flatMap((event) => event.rows.map((row) => row.message));
 }
 
 describe('AnthropicCompatibleChatRuntime', () => {
@@ -154,7 +165,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
     });
 
     const runtime = makeRuntime(dir);
-    const messagesPromise = waitForMessages(runtime);
+    const capture = captureOperation('run-stream');
 
     await runtime.startSession({
       chatId: 'chat-1',
@@ -164,9 +175,11 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: capture.operation,
     });
 
-    const messages = await messagesPromise;
+    await capture.terminal;
+    const messages = capturedMessages(capture);
     expect(requestBody).toMatchObject({
       model: 'acme-sonnet',
       max_tokens: 4096,
@@ -191,7 +204,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       });
     });
     const runtime = makeRuntime(dir);
-    const messages = waitForMessages(runtime);
+    const capture = captureOperation('run-json');
 
     await runtime.startSession({
       chatId: 'chat-json',
@@ -201,10 +214,12 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: capture.operation,
     });
 
     expect(requestBody.stream).toBe(true);
-    await expect(messages).resolves.toMatchObject([{ content: 'session response' }]);
+    await capture.terminal;
+    expect(capturedMessages(capture)).toMatchObject([{ content: 'session response' }]);
   });
 
   it('forwards the current interactive effort and removes it for Default', async () => {
@@ -217,7 +232,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       ]);
     });
     const runtime = makeRuntime(dir);
-    const firstMessages = waitForMessages(runtime);
+    const first = captureOperation('run-first');
 
     const started = await runtime.startSession({
       chatId: 'chat-1',
@@ -227,8 +242,9 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'high',
       claudeThinkingMode: 'auto',
+      operation: first.operation,
     });
-    await firstMessages;
+    await first.terminal;
 
     await runtime.runTurn({
       chatId: 'chat-1',
@@ -239,6 +255,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'low',
       claudeThinkingMode: 'auto',
+      operation: captureOperation('run-second').operation,
     });
     await runtime.runTurn({
       chatId: 'chat-1',
@@ -249,6 +266,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: captureOperation('run-third').operation,
     });
 
     expect(requestBodies[0].output_config).toEqual({ effort: 'high' });
@@ -287,6 +305,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
         new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
         new AssistantMessage('2026-01-01T00:00:01.000Z', 'first response'),
       ],
+      operation: captureOperation('run-hydrated').operation,
     });
 
     expect(requestBody.messages).toEqual([
@@ -485,7 +504,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       { type: 'error', error: { message: 'generation failed' } },
     ]));
     const runtime = makeRuntime(dir);
-    const failure = waitForFailure(runtime);
+    const capture = captureOperation('run-error');
 
     await runtime.startSession({
       chatId: 'chat-error',
@@ -495,9 +514,10 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: capture.operation,
     });
 
-    await expect(failure).resolves.toBe(
+    await expect(capture.terminal.then((event) => event.error?.message)).resolves.toBe(
       'Direct (Anthropic) stream error: generation failed',
     );
   });
@@ -508,7 +528,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
     ], { complete: false }));
     const runtime = makeRuntime(dir);
-    const failure = waitForFailure(runtime);
+    const capture = captureOperation('run-truncated');
 
     await runtime.startSession({
       chatId: 'chat-truncated',
@@ -518,9 +538,10 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: capture.operation,
     });
 
-    await expect(failure).resolves.toBe(
+    await expect(capture.terminal.then((event) => event.error?.message)).resolves.toBe(
       'Direct (Anthropic) stream ended before message_stop.',
     );
   });

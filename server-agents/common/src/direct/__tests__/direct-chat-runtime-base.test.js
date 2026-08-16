@@ -15,12 +15,6 @@ async function tempDir() {
   return dir;
 }
 
-function waitForMessages(runtime) {
-  return new Promise((resolve) => {
-    runtime.onMessages((_chatId, messages) => resolve(messages));
-  });
-}
-
 class CapturingDirectRuntime extends DirectChatRuntimeBase {
   captured = [];
   responses = [];
@@ -96,6 +90,7 @@ function startRequest(overrides = {}) {
     permissionMode: 'default',
     thinkingMode: 'high',
     claudeThinkingMode: 'auto',
+    operation: { runId: 'run-start', publish() {} },
     ...overrides,
   };
 }
@@ -110,6 +105,7 @@ function resumeRequest(agentSessionId, overrides = {}) {
     permissionMode: 'default',
     thinkingMode: 'low',
     claudeThinkingMode: 'auto',
+    operation: { runId: 'run-resume', publish() {} },
     ...overrides,
   };
 }
@@ -124,10 +120,10 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
 
   it('captures effort before initial provider work', async () => {
     const runtime = new CapturingDirectRuntime(await tempDir());
-    const messages = waitForMessages(runtime);
+    const observed = capturingOperation('run-high');
 
-    await runtime.startSession(startRequest({ thinkingMode: 'high' }));
-    await messages;
+    await runtime.startSession(startRequest({ thinkingMode: 'high', operation: observed.operation }));
+    await observed.terminal;
 
     expect(runtime.captured).toEqual([{
       thinkingMode: 'high',
@@ -137,10 +133,11 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
 
   it('emits the persisted assistant turn identity despite timestamp drift', async () => {
     const runtime = new CapturingDirectRuntime(await tempDir());
-    const messages = waitForMessages(runtime);
+    const observed = capturingOperation('turn-1');
 
-    await runtime.startSession(startRequest({ turnId: 'turn-1' }));
-    const emitted = await messages;
+    await runtime.startSession(startRequest({ operation: observed.operation }));
+    await observed.terminal;
+    const emitted = observed.events[0].rows.map((row) => row.message);
 
     expect(emitted).toHaveLength(1);
     expect(getNativeMessageRevisionSource(emitted[0])).toEqual({
@@ -151,9 +148,12 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
 
   it('replaces effort on every in-memory resume, including Default', async () => {
     const runtime = new CapturingDirectRuntime(await tempDir());
-    const firstMessages = waitForMessages(runtime);
-    const started = await runtime.startSession(startRequest({ thinkingMode: 'high' }));
-    await firstMessages;
+    const first = capturingOperation('run-first');
+    const started = await runtime.startSession(startRequest({
+      thinkingMode: 'high',
+      operation: first.operation,
+    }));
+    await first.terminal;
 
     await runtime.runTurn(resumeRequest(started.agentSessionId, {
       command: 'second message',
@@ -214,10 +214,13 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
 
   it('normalizes invalid untyped effort to Default', async () => {
     const runtime = new CapturingDirectRuntime(await tempDir());
-    const messages = waitForMessages(runtime);
+    const observed = capturingOperation('run-invalid');
 
-    await runtime.startSession(startRequest({ thinkingMode: 'invalid' }));
-    await messages;
+    await runtime.startSession(startRequest({
+      thinkingMode: 'invalid',
+      operation: observed.operation,
+    }));
+    await observed.terminal;
 
     expect(runtime.captured[0].thinkingMode).toBe('none');
   });
@@ -226,16 +229,22 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     const runtime = new CapturingDirectRuntime(await tempDir());
     const firstResponse = deferred();
     runtime.responses.push(firstResponse.promise, 'second response');
-    const emitted = [];
-    runtime.onMessages((_chatId, messages) => emitted.push(...messages));
+    const first = capturingOperation('run-first');
+    const second = capturingOperation('run-second');
 
-    const started = await runtime.startSession(startRequest());
+    const started = await runtime.startSession(startRequest({ operation: first.operation }));
     expect(runtime.abort(started.agentSessionId)).toBe(true);
-    await runtime.runTurn(resumeRequest(started.agentSessionId, { command: 'second message' }));
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'second message',
+      operation: second.operation,
+    }));
     firstResponse.resolve('late first response');
-    await Bun.sleep(0);
+    await first.terminal;
 
-    expect(emitted.map((message) => message.content)).toEqual([
+    expect([
+      second.events[0].rows[0].message.content,
+      first.events[0].rows[0].message.content,
+    ]).toEqual([
       'second response',
       'late first response',
     ]);
@@ -249,14 +258,10 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     const second = capturingOperation('run-2');
 
     const started = await runtime.startSession(startRequest({
-      clientRequestId: 'run-1',
-      turnId: 'run-1',
       operation: first.operation,
     }));
     expect(runtime.abort(started.agentSessionId)).toBe(true);
     await runtime.runTurn(resumeRequest(started.agentSessionId, {
-      clientRequestId: 'run-2',
-      turnId: 'run-2',
       command: 'second message',
       operation: second.operation,
     }));
@@ -265,12 +270,12 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     firstResponse.resolve('late first response');
     await first.terminal;
 
-    expect(first.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(first.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
     expect(first.events[0].rows.map((row) => row.message.content)).toEqual([
       'late first response',
     ]);
     expect(first.events[1]).toMatchObject({ type: 'run-ended', runId: 'run-1' });
-    expect(second.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(second.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
     expect(second.events[0].rows.map((row) => row.message.content)).toEqual([
       'second response',
     ]);

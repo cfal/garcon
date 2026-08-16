@@ -8,6 +8,7 @@ import {
   type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
 } from '../execution/runtime-events.js';
+import type { AgentStartedSession } from '@garcon/server-agent-interface';
 import { resolveAgentEndpoint } from '../execution/resolve-endpoint.js';
 import type { DirectEndpointRouterRuntime, DirectCompatibleRuntime } from './router.js';
 
@@ -23,18 +24,26 @@ implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
   ) {
     const endpoint = await this.#endpoint(request);
+    let established: AgentStartedSession | null = null;
+    const establish = (result: { readonly agentSessionId: string }) => {
+      if (established) return established;
+      established = {
+        agentSessionId: result.agentSessionId,
+        nativeSession: null,
+        nativeSeedReceipt: null,
+      };
+      publish({ type: 'session', session: established });
+      return established;
+    };
     const result = await this.runtime.startSession({
       ...executionFields(request),
       command: request.prompt,
       images: request.attachments,
       endpoint,
       operation: runtimeOperation(request.runId, publish),
+      onSessionActivated: (session) => void establish(session),
     });
-    return {
-      agentSessionId: result.agentSessionId,
-      nativeSession: null,
-      nativeSeedReceipt: null,
-    };
+    return established ?? establish(result);
   }
 
   async resume(
@@ -102,8 +111,6 @@ function executionFields(
     model: request.model,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
-    clientRequestId: request.runId,
-    turnId: request.runId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
   type AgentExecutionHandle,
@@ -136,38 +135,10 @@ export function createAgentProducerAdapter(
 }
 
 function publishRuntimeEvent(binding: ProducerBinding, event: AgentRuntimeEvent): void {
-  if (event.type === 'messages') {
-    publishMessages(binding, event.runId, event.rows);
-    return;
-  }
   if (event.type === 'session') {
-    binding.sink.publish({ type: 'session', session: event.session });
     binding.publishedSession = event.session;
-    return;
   }
-  if (event.type === 'permission') {
-    const runId = event.runId ?? crypto.randomUUID();
-    if (event.lifecycle.kind === 'requested') {
-      if (!event.decision) {
-        throw new TypeError('Permission request response capability is required');
-      }
-      binding.sink.publish({
-        type: 'permission',
-        runId,
-        lifecycle: event.lifecycle,
-        decision: event.decision,
-      });
-    } else {
-      binding.sink.publish({ type: 'permission', runId, lifecycle: event.lifecycle });
-    }
-    return;
-  }
-  binding.sink.publish({
-    type: 'run-ended',
-    runId: event.runId,
-    outcome: event.outcome,
-    ...(event.error ? { error: event.error } : {}),
-  });
+  binding.sink.publish(event);
 }
 
 function sameSession(
@@ -177,14 +148,6 @@ function sameSession(
   return left?.agentSessionId === right.agentSessionId
     && JSON.stringify(left.nativeSession) === JSON.stringify(right.nativeSession)
     && JSON.stringify(left.nativeSeedReceipt) === JSON.stringify(right.nativeSeedReceipt);
-}
-
-function publishMessages(
-  binding: ProducerBinding,
-  _runId: string | null,
-  messages: Extract<AgentRuntimeEvent, { readonly type: 'messages' }>['rows'],
-): void {
-  if (messages.length > 0) binding.sink.publish({ type: 'rows', rows: messages });
 }
 
 function withoutSink<T extends { readonly sink: AgentProducerSink }>(request: T): Omit<T, 'sink'> {

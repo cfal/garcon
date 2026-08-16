@@ -24,11 +24,17 @@ function noopOperation(runId = 'run-default') {
   return { runId, publish() {} };
 }
 
-function collectOperation(runId) {
+function collectOperation(runId, onPublish = () => undefined) {
   const events = [];
   return {
     events,
-    operation: { runId, publish: (event) => events.push(event) },
+    operation: {
+      runId,
+      publish: (event) => {
+        events.push(event);
+        onPublish(event);
+      },
+    },
   };
 }
 
@@ -465,11 +471,11 @@ describe('FactoryCliRuntime lifecycle', () => {
 
   it('continues an existing session and emits assistant messages', async () => {
     const provider = new FactoryCliRuntime();
-    const messages = mock();
     let runningWhenFinished;
-    provider.onMessages(messages);
-    provider.onFinished(() => {
-      runningWhenFinished = provider.isRunning('factory-session-2');
+    const observed = collectOperation('run-continue', (event) => {
+      if (event.type === 'run-ended') {
+        runningWhenFinished = provider.isRunning('factory-session-2');
+      }
     });
 
     const proc = createFakeProc();
@@ -483,7 +489,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'acceptEdits',
       thinkingMode: 'medium',
-      operation: noopOperation('run-continue'),
+      operation: observed.operation,
     });
 
     proc.pushJson({
@@ -503,9 +509,8 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     await turnPromise;
 
-    expect(messages).toHaveBeenCalledTimes(1);
-    expect(messages.mock.calls[0][0]).toBe('chat-2');
-    expect(messages.mock.calls[0][1][0].content).toBe('factory reply');
+    expect(observed.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
+    expect(observed.events[0].rows[0].message.content).toBe('factory reply');
     expect(runningWhenFinished).toBe(false);
     expect(spawnMock.mock.calls[0][1].env.FACTORY_AIRGAP_ENABLED).toBeUndefined();
   });
@@ -555,10 +560,6 @@ describe('FactoryCliRuntime lifecycle', () => {
     spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc);
     const first = collectOperation('run-a');
     const second = collectOperation('run-b');
-    const messages = mock();
-    provider.onMessages(messages);
-    const terminals = [];
-    provider.onFinished((_chatId, _exitCode, metadata) => terminals.push(metadata));
 
     const firstTurn = provider.runTurn({
       command: 'first',
@@ -568,8 +569,6 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'default',
       thinkingMode: 'none',
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
       operation: first.operation,
     });
     firstProc.pushJson({ type: 'completion', session_id: 'factory-session-reused' });
@@ -584,8 +583,6 @@ describe('FactoryCliRuntime lifecycle', () => {
       model: 'claude-opus-4-6',
       permissionMode: 'default',
       thinkingMode: 'none',
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
       operation: second.operation,
     }).then(() => { secondSettled = true; });
 
@@ -601,12 +598,10 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     expect(secondSettled).toBe(false);
     expect(provider.isRunning('factory-session-reused')).toBe(true);
-    expect(messages).toHaveBeenCalledTimes(1);
-    expect(messages.mock.calls[0][1][0].content).toBe('late output from A');
-    expect(first.events.map((event) => event.type)).toEqual(['run-ended', 'messages']);
+    expect(first.events.map((event) => event.type)).toEqual(['run-ended', 'rows']);
+    expect(first.events[1].rows[0].message.content).toBe('late output from A');
     expect(JSON.stringify(first.events)).toContain('late output from A');
     expect(second.events).toEqual([]);
-    expect(terminals).toEqual([{ clientRequestId: 'req-a', turnId: 'turn-a' }]);
 
     secondProc.pushJson({ type: 'completion', session_id: 'factory-session-reused' });
     secondProc.close(0);
@@ -614,10 +609,6 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     expect(second.events).toEqual([
       expect.objectContaining({ type: 'run-ended', runId: 'run-b' }),
-    ]);
-    expect(terminals).toEqual([
-      { clientRequestId: 'req-a', turnId: 'turn-a' },
-      { clientRequestId: 'req-b', turnId: 'turn-b' },
     ]);
   });
 
@@ -697,12 +688,12 @@ describe('FactoryCliRuntime lifecycle', () => {
     await secondTurn;
 
     expect(firstEvents.map((event) => event.type)).toEqual(['run-ended']);
-    expect(second.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(second.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
     expect(second.events[0].rows[0].message.content).toBe('accepted current output');
     expect(warnings).toContainEqual({
       message: 'Factory publisher rejected an event.',
       details: expect.objectContaining({
-        eventType: 'messages',
+        eventType: 'rows',
         error: 'Transcript producer sink is closed',
       }),
     });
@@ -713,9 +704,7 @@ describe('FactoryCliRuntime lifecycle', () => {
 
   it('rolls back a synchronous resume spawn failure so the session can retry', async () => {
     const provider = new FactoryCliRuntime();
-    const processing = [];
     const retryProc = createFakeProc();
-    provider.onProcessing((_chatId, running) => processing.push(running));
     spawnMock
       .mockImplementationOnce(() => {
         throw new Error('spawn failed');
@@ -734,7 +723,6 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     await expect(provider.runTurn(request)).rejects.toThrow('spawn failed');
     expect(provider.isRunning(request.agentSessionId)).toBe(false);
-    expect(processing).toEqual([true, false]);
 
     const retry = provider.runTurn({ ...request, command: 'retry' });
     retryProc.pushJson({ type: 'completion', session_id: request.agentSessionId });

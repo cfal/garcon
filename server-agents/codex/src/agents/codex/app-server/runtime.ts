@@ -1,9 +1,6 @@
 import { AssistantMessage, ErrorMessage, type ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import type { AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
 import {
-  codexOperation,
   publishFailed,
   publishFinished,
   publishPermissionRequested,
@@ -32,7 +29,6 @@ import { buildApprovalMessage, buildApprovalResponse, cancelPendingApprovals, cr
 import {
   CodexAppServerClient,
   type CodexAppServerClientOptions,
-  type CodexAppServerMetric,
 } from './client.js';
 import { convertCodexRawCodeModeItem } from './converter.js';
 import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
@@ -113,7 +109,7 @@ import {
 
 export type { CodexAppServerRuntimeOptions } from './runtime-session-state.js';
 
-export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
+export class CodexAppServerRuntime {
   #sessions = new Map<string, RunningCodexSession>();
   #sources = new Map<CodexAppServerClient, RunningCodexSession>();
   #terminalOperations = new WeakSet<CodexOperation>();
@@ -152,7 +148,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }, { maxIdleMs: 0 });
 
   constructor(options: CodexAppServerRuntimeOptions = {}) {
-    super();
     this.#createClient = options.createClient ?? ((clientOptions) => new CodexAppServerClient(clientOptions));
     this.#materializationTimeoutMs = options.materializationTimeoutMs ?? 10_000;
     this.#capacityRetryDelaysMs = (options.capacityRetryDelaysMs ?? CAPACITY_RETRY_DELAYS_MS)
@@ -429,7 +424,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async submitGoalControl(
     request: CodexResumeRequest,
-    publish: AgentRuntimePublisher,
     beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void> = async (handoff) => {
       handoff.validate();
       handoff.commit();
@@ -440,7 +434,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return false;
     }
     if (!session.managesGoalLifecycle) return false;
-    const operation = codexOperation(request, publish);
+    const operation = request.operation;
     const delivery = session.activeInputChain.then(async () => {
       if (this.#sessions.get(request.agentSessionId) !== session) return false;
       if (
@@ -634,10 +628,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async startSession(
     request: CodexStartRequest,
-    publish: AgentRuntimePublisher,
   ): Promise<CodexStartedSession> {
     assertCodexExecutionOpen(request);
-    const operation = codexOperation(request, publish);
+    const operation = request.operation;
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
 
@@ -658,10 +651,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeSession = session;
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
-      this.emitSessionCreated(request.chatId);
       request.onSessionActivated?.({ agentSessionId: threadId, nativePath: started.thread.path });
       if (request.executionAdmission) await markCodexExecutionStarted(request);
-      this.emitProcessing(request.chatId, true);
       await this.#startRequestedTurn(client, session, request, operation);
 
       const nativePath = await waitForMaterializedThread(started.thread, {
@@ -682,7 +673,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       } else {
         this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
-          this.emitProcessing(request.chatId, false);
           publishFailed(this.#logger, request.chatId, message, operation);
         }
         await this.#shutdownClient(client);
@@ -691,9 +681,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async runTurn(request: CodexResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
+  async runTurn(request: CodexResumeRequest): Promise<void> {
     assertCodexExecutionOpen(request);
-    const operation = codexOperation(request, publish);
+    const operation = request.operation;
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
 
@@ -722,7 +712,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
           }
           if (request.executionAdmission) await markCodexExecutionStarted(request);
-          this.emitProcessing(request.chatId, true);
           if (!request.codexGoalCommand) {
             if (session.managesGoalLifecycle) {
               await this.#deliverReservedGoalControl(session, request, operation);
@@ -766,7 +755,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       } else {
         this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
-          this.emitProcessing(request.chatId, false);
           publishFailed(this.#logger, request.chatId, message, operation);
         }
         await this.#shutdownClient(client);
@@ -778,7 +766,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   // Triggers native context compaction as its own turn. Mirrors runTurn but
   // starts the turn via thread/compact/start; the resulting contextCompaction
   // item and turn lifecycle arrive through the shared notification handlers.
-  async compact(request: CodexResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
+  async compact(request: CodexResumeRequest): Promise<void> {
     assertCodexExecutionOpen(request);
     // A live session means a turn is already active for this thread; starting a
     // second one would overwrite the session map and leak the existing client.
@@ -786,7 +774,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       throw new Error('Cannot compact while a Codex turn is active');
     }
 
-    const operation = codexOperation(request, publish);
+    const operation = request.operation;
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
 
@@ -807,7 +795,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       session.turnItems.markManualCompaction();
       this.#releaseBufferedClientEvents(client);
       if (request.executionAdmission) await markCodexExecutionStarted(request);
-      this.emitProcessing(request.chatId, true);
       session.nextTurnOperation = operation;
       await client.compactThread(resumed.thread.id);
     } catch (error) {
@@ -822,7 +809,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       } else {
         this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
-          this.emitProcessing(request.chatId, false);
           publishFailed(this.#logger, request.chatId, message, operation);
         }
         await this.#shutdownClient(client);
@@ -1030,7 +1016,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       pageCount += 1;
     } while (cursor && pageCount < 20);
 
-    void this.#sampleUtilityLoadedThreads();
     return threads;
   }
 
@@ -1054,23 +1039,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         attempt += 1;
         await delay(25 * attempt);
       }
-    }
-  }
-
-  async #sampleUtilityLoadedThreads(): Promise<void> {
-    const client = this.#utilityClient;
-    if (!client) return;
-    try {
-      const response = await client.loadedThreads();
-      const metric: CodexAppServerMetric = {
-        name: 'codex.app_server.loaded_threads',
-        loadedThreadCount: response.data.length,
-      };
-      this.emit('metric', metric);
-    } catch (error) {
-      this.#logger.warn('Codex loaded-thread sampling failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
     }
   }
 
@@ -1163,7 +1131,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     });
     client.on('stderr', () => this.#logger.warn('Codex app-server stderr'));
     client.on('warning', (message: string) => this.#logger.warn(message));
-    client.on('metric', (metric: unknown) => this.emit('metric', metric));
     client.on('exit', (code: number) => this.#handleClientExit(client, code));
   }
 
@@ -1654,7 +1621,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       session.client,
       opts.aborted ? 'aborted' : 'session-complete',
     );
-    this.emitProcessing(session.chatId, false);
     void session.cleanupAttachments?.();
 
     if (opts.failedMessage) {
@@ -1697,7 +1663,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   ): void {
     if (operation && this.#terminalOperations.has(operation)) return;
     if (operation) this.#terminalOperations.add(operation);
-    publishFinished(this.#logger, session.chatId, 0, operation ?? undefined);
+    publishFinished(this.#logger, session.chatId, operation ?? undefined);
   }
 
   #publishFailedOnce(

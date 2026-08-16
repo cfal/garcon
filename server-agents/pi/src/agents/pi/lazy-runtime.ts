@@ -1,4 +1,3 @@
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
   AgentSteerRequest,
   AgentSteerResult,
@@ -20,11 +19,6 @@ export interface PiRuntime {
   steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
   startPurgeTimer(): void;
   shutdown(): Promise<void>;
-  onMessages(callback: Parameters<AgentEventEmitterRuntime['onMessages']>[0]): void;
-  onProcessing(callback: Parameters<AgentEventEmitterRuntime['onProcessing']>[0]): void;
-  onSessionCreated(callback: Parameters<AgentEventEmitterRuntime['onSessionCreated']>[0]): void;
-  onFinished(callback: Parameters<AgentEventEmitterRuntime['onFinished']>[0]): void;
-  onFailed(callback: Parameters<AgentEventEmitterRuntime['onFailed']>[0]): void;
 }
 
 export type PiRuntimeLoader = () => Promise<PiRuntime>;
@@ -34,7 +28,7 @@ interface PendingRuntimeOperation {
   cancelled: boolean;
 }
 
-export class LazyPiRuntime extends AgentEventEmitterRuntime {
+export class LazyPiRuntime {
   readonly #loadRuntime: PiRuntimeLoader;
   #runtime: PiRuntime | null = null;
   #runtimePromise: Promise<PiRuntime> | null = null;
@@ -44,7 +38,6 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
   #shutdownPromise: Promise<void> | null = null;
 
   constructor(loadRuntime: PiRuntimeLoader) {
-    super();
     this.#loadRuntime = loadRuntime;
   }
 
@@ -145,17 +138,6 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime {
 
     this.#runtimePromise = this.#loadRuntime().then((runtime) => {
       this.#runtime = runtime;
-      runtime.onMessages((chatId, messages, metadata) =>
-        this.emitMessages(chatId, messages, metadata),
-      );
-      runtime.onProcessing((chatId, isProcessing) =>
-        this.emitProcessing(chatId, isProcessing),
-      );
-      runtime.onSessionCreated((chatId) => this.emitSessionCreated(chatId));
-      runtime.onFinished((chatId, exitCode, metadata) =>
-        this.emitFinished(chatId, exitCode, metadata),
-      );
-      runtime.onFailed((chatId, message, metadata) => this.emitFailed(chatId, message, metadata));
       if (this.#purgeTimerRequested) runtime.startPurgeTimer();
       return runtime;
     });

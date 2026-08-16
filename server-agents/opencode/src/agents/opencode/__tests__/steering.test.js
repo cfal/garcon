@@ -19,6 +19,29 @@ function envelope(event) {
   return { directory: '/repo', payload: event };
 }
 
+function collectOperation(runId = 'run-default') {
+  const events = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+      },
+    },
+  };
+}
+
+function publishedMessages(events) {
+  return events.flatMap((event) => (
+    event.type === 'rows' ? event.rows.map((row) => row.message) : []
+  ));
+}
+
+function terminalEvents(events) {
+  return events.filter((event) => event.type === 'run-ended');
+}
+
 function createEventStream() {
   const events = [connectedEnvelope()];
   const waiters = [];
@@ -131,6 +154,7 @@ function createRuntime(overrides = {}) {
 }
 
 async function start(runtime, overrides = {}) {
+  const published = collectOperation();
   await runtime.startSession({
     command: 'hello',
     chatId: 'chat-1',
@@ -139,8 +163,10 @@ async function start(runtime, overrides = {}) {
     permissionMode: 'default',
     clientRequestId: 'request-1',
     turnId: 'turn-1',
+    operation: published.operation,
     ...overrides,
   });
+  return published;
 }
 
 async function bindPrompt(eventStream, promptAsync, callIndex, input) {
@@ -228,12 +254,7 @@ function pushAssistant(eventStream, {
 describe('OpenCodeRuntime steering', () => {
   it('uses promptAsync as literal same-turn steering and waits for its exact provider part', async () => {
     const { runtime, eventStream, promptAsync } = createRuntime();
-    const messages = [];
-    const finishes = [];
-    runtime.onMessages((_chatId, emitted, metadata) => messages.push({ emitted, metadata }));
-    runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
-
-    await start(runtime);
+    const published = await start(runtime);
     expect(runtime.steering.captureTarget('session-1')).toBeNull();
     await bindPrompt(eventStream, promptAsync, 0, 'hello');
     const target = await waitForTarget(runtime);
@@ -300,23 +321,24 @@ describe('OpenCodeRuntime steering', () => {
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
-    await waitFor(() => finishes.length === 1);
+    await waitFor(() => terminalEvents(published.events).length === 1);
 
-    expect(messages.flatMap(({ emitted }) => emitted.map((message) => message.content))).toEqual([
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
       'initial reply',
       'steered reply',
     ]);
-    expect(messages.every(({ metadata }) => metadata.turnId === 'turn-1')).toBe(true);
-    expect(finishes).toEqual([expect.objectContaining({ turnId: 'turn-1' })]);
+    expect(terminalEvents(published.events)).toEqual([{
+      type: 'run-ended',
+      runId: 'run-default',
+      outcome: 'finished',
+    }]);
     eventStream.close();
     await runtime.shutdown();
   });
 
   it('defers idle settlement while delivery preparation is in flight', async () => {
     const { runtime, eventStream, promptAsync } = createRuntime();
-    const finishes = [];
-    runtime.onFinished(() => finishes.push('finished'));
-    await start(runtime);
+    const published = await start(runtime);
     await bindPrompt(eventStream, promptAsync, 0, 'hello');
     const target = await waitForTarget(runtime);
     const preparation = deferred();
@@ -342,11 +364,11 @@ describe('OpenCodeRuntime steering', () => {
     });
     await Promise.resolve();
     await Promise.resolve();
-    expect(finishes).toEqual([]);
+    expect(terminalEvents(published.events)).toEqual([]);
 
     preparation.reject(new Error('delivery preparation failed'));
     expect(await steeringOutcome).toMatchObject({ message: 'delivery preparation failed' });
-    await waitFor(() => finishes.length === 1);
+    await waitFor(() => terminalEvents(published.events).length === 1);
     expect(promptAsync).toHaveBeenCalledTimes(1);
     eventStream.close();
     await runtime.shutdown();
@@ -392,6 +414,7 @@ describe('OpenCodeRuntime steering', () => {
     });
     await waitFor(() => !runtime.isRunning('session-1'));
 
+    const successorOperation = collectOperation('run-successor');
     const successor = runtime.runTurn({
       command: 'successor',
       agentSessionId: 'session-1',
@@ -401,6 +424,7 @@ describe('OpenCodeRuntime steering', () => {
       permissionMode: 'default',
       clientRequestId: 'request-2',
       turnId: 'turn-2',
+      operation: successorOperation.operation,
     });
     const successorOutcome = successor.catch((error) => error);
     await waitFor(() => promptAsync.mock.calls.length === 2);
@@ -441,6 +465,7 @@ describe('OpenCodeRuntime steering', () => {
     await expect(steering).resolves.toEqual({ kind: 'accepted' });
     await expect(runtime.abort('session-1')).resolves.toBe(true);
 
+    const recoveryOperation = collectOperation('run-recovery');
     const recovery = runtime.runTurn({
       command: 'recover',
       agentSessionId: 'session-1',
@@ -450,6 +475,7 @@ describe('OpenCodeRuntime steering', () => {
       permissionMode: 'default',
       clientRequestId: 'request-2',
       turnId: 'turn-2',
+      operation: recoveryOperation.operation,
     });
     await waitFor(() => promptAsync.mock.calls.length === 3);
     expect(revert).toHaveBeenCalledWith(expect.objectContaining({
@@ -519,6 +545,7 @@ describe('OpenCodeRuntime steering', () => {
     }));
     await expect(steering).resolves.toEqual({ kind: 'accepted' });
 
+    const recoveryOperation = collectOperation('run-recovery');
     const recovery = runtime.runTurn({
       command: 'recover',
       agentSessionId: 'session-1',
@@ -528,6 +555,7 @@ describe('OpenCodeRuntime steering', () => {
       permissionMode: 'default',
       clientRequestId: 'request-2',
       turnId: 'turn-2',
+      operation: recoveryOperation.operation,
     });
     await waitFor(() => abort.mock.calls.length === 1);
     expect(promptAsync).toHaveBeenCalledTimes(2);

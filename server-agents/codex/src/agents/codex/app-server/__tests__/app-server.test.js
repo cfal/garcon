@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionCancelledMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint, permissionOccurrenceKey } from '@garcon/common/chat-types';
+import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import {
@@ -25,67 +25,57 @@ import {
   mapThinkingModeToCodexEffort,
 } from '../request-builders.ts';
 
-// The runtime publishes transcript output through the capability each operation captured, so a
-// test observes it by supplying one publisher per call. The listener surface reports the request
-// that created the delivering publisher, which is how an event reaching the wrong operation stays
-// visible to assertions.
 function createRuntime(options) {
-  const provider = new CodexAppServerRuntime(options);
-  const listeners = { messages: [], finished: [], failed: [] };
-  const permissionCapabilities = new Map();
-  provider.onMessages = (listener) => { listeners.messages.push(listener); };
-  provider.onFinished = (listener) => { listeners.finished.push(listener); };
-  provider.onFailed = (listener) => { listeners.failed.push(listener); };
-  const publisherFor = (request) => {
-    const metadata = {
-      ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
-      ...(request.turnId ? { turnId: request.turnId } : {}),
-    };
-    return (event) => {
-      if (event.type === 'messages') {
-        const messages = event.rows.map((row) => row.message);
-        for (const listener of listeners.messages) listener(request.chatId, messages, metadata);
-      } else if (event.type === 'permission') {
-        const lifecycle = event.lifecycle;
-        const message = lifecycle.kind === 'requested'
-          ? new PermissionRequestMessage(
-              '',
-              lifecycle.requestId,
-              lifecycle.incarnation,
-              lifecycle.requestedTool,
-            )
-          : new PermissionCancelledMessage(
-              '',
-              lifecycle.requestId,
-              lifecycle.incarnation,
-              lifecycle.reason ?? undefined,
-            );
-        if (event.decision) {
-          permissionCapabilities.set(
-            permissionOccurrenceKey(lifecycle.requestId, lifecycle.incarnation),
-            event.decision,
-          );
+  return new CodexAppServerRuntime(options);
+}
+
+function collectOperation(chatId = 'chat-1', runId = 'run-default') {
+  const events = [];
+  const waiters = new Set();
+  return {
+    events,
+    operation: Object.freeze({
+      chatId,
+      runId,
+      publish(event) {
+        events.push(event);
+        for (const waiter of waiters) {
+          if (!waiter.predicate(event)) continue;
+          waiters.delete(waiter);
+          waiter.resolve(event);
         }
-        for (const listener of listeners.messages) listener(request.chatId, [message], metadata);
-      } else if (event.type === 'run-ended' && event.outcome === 'finished') {
-        for (const listener of listeners.finished) listener(request.chatId, event.exitCode ?? 0, metadata);
-      } else if (event.type === 'run-ended' && event.outcome === 'failed') {
-        for (const listener of listeners.failed) listener(request.chatId, event.error?.message, metadata);
-      }
-    };
+      },
+    }),
+    waitForEvent(predicate) {
+      const existing = events.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve) => waiters.add({ predicate, resolve }));
+    },
   };
-  for (const name of ['startSession', 'runTurn', 'compact', 'submitGoalControl']) {
-    const method = provider[name].bind(provider);
-    provider[name] = (request, ...rest) => method(request, publisherFor(request), ...rest);
-  }
-  provider.permissionCapabilityFor = (message) => permissionCapabilities.get(
-    permissionOccurrenceKey(message.permissionRequestId, message.incarnation),
-  );
-  return provider;
+}
+
+function publishedMessages(events) {
+  return events.flatMap((event) => (
+    event.type === 'rows' ? event.rows.map((row) => row.message) : []
+  ));
+}
+
+function permissionEvents(events) {
+  return events.filter((event) => event.type === 'permission');
+}
+
+function terminalEvents(events) {
+  return events.filter((event) => event.type === 'run-ended');
+}
+
+function failureMessages(events) {
+  return terminalEvents(events)
+    .filter((event) => event.outcome === 'failed')
+    .map((event) => event.error?.message);
 }
 
 function makeRequest(overrides = {}) {
-  return {
+  const request = {
     chatId: 'chat-1',
     command: 'hello',
     projectPath: '/repo',
@@ -93,6 +83,14 @@ function makeRequest(overrides = {}) {
     permissionMode: 'default',
     thinkingMode: 'medium',
     ...overrides,
+  };
+  if (request.operation) return request;
+  return {
+    ...request,
+    operation: collectOperation(
+      request.chatId,
+      request.turnId ?? request.clientRequestId ?? 'run-default',
+    ).operation,
   };
 }
 
@@ -1590,7 +1588,7 @@ describe('CodexAppServerRuntime', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  function createActiveGoalQueue(provider, codexGoalCommand) {
+  function createActiveGoalQueue(provider, codexGoalCommand, operation) {
     return new ChatExecutionCoordinator(
       tmpDir,
       {
@@ -1601,6 +1599,7 @@ describe('CodexAppServerRuntime', () => {
           command,
           codexGoalCommand,
           nativePath: null,
+          ...(operation ? { operation } : {}),
         }), beforeDelivery),
         abortSession: async () => false,
         isChatRunning: () => provider.isRunning('thread-1'),
@@ -1978,14 +1977,16 @@ describe('CodexAppServerRuntime', () => {
 
   it('emits pre-session failures before waiting for graceful shutdown', async () => {
     const operations = [
-      (provider) => provider.startSession(makeRequest()),
-      (provider) => provider.runTurn(makeRequest({
+      (provider, operation) => provider.startSession(makeRequest({ operation })),
+      (provider, operation) => provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         nativePath: null,
+        operation,
       })),
-      (provider) => provider.compact(makeRequest({
+      (provider, operation) => provider.compact(makeRequest({
         agentSessionId: 'thread-1',
         nativePath: null,
+        operation,
       })),
     ];
 
@@ -1998,10 +1999,15 @@ describe('CodexAppServerRuntime', () => {
         shutdown: () => shutdown.promise,
       });
       const provider = createRuntime({ createClient: () => fake });
-      const failed = new Promise((resolve) => provider.onFailed((_chatId, message) => resolve(message)));
+      const published = collectOperation();
+      const failed = published.waitForEvent(
+        (event) => event.type === 'run-ended' && event.outcome === 'failed',
+      );
 
-      const operation = operate(provider);
-      await expect(failed).resolves.toBe('Codex error: app-server startup failed');
+      const operation = operate(provider, published.operation);
+      await expect(failed).resolves.toMatchObject({
+        error: { message: 'Codex error: app-server startup failed' },
+      });
       expect(fake.shutdown).toHaveBeenCalledTimes(1);
       shutdown.resolve();
       await expect(operation).rejects.toThrow('app-server startup failed');
@@ -2024,23 +2030,18 @@ describe('CodexAppServerRuntime', () => {
     };
     const fake = new FakeClient();
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    const processing = [];
-    const finished = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    provider.onProcessing((_chatId, value) => processing.push(value));
-    provider.onFinished((chatId, exitCode) => finished.push({ chatId, exitCode }));
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       nativePath: null,
+      operation: published.operation,
     }));
     await expect(provider.abort('thread-1')).resolves.toBe(true);
 
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(provider.getRunningSessions()).toMatchObject([{ id: 'thread-1', status: 'interrupting' }]);
     expect(fake.shutdown).not.toHaveBeenCalled();
-    expect(processing).toEqual([true]);
 
     fake.emit('notification', {
       method: 'item/completed',
@@ -2051,6 +2052,7 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
+    const emitted = publishedMessages(published.events);
     expect(emitted).toHaveLength(2);
     expect(emitted[0]).toBeInstanceOf(BashToolUseMessage);
     expect(emitted[1]).toBeInstanceOf(ToolResultMessage);
@@ -2070,7 +2072,9 @@ describe('CodexAppServerRuntime', () => {
       },
     ]);
 
-    const terminal = new Promise((resolve) => provider.onFinished(resolve));
+    const terminal = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: {
@@ -2080,8 +2084,9 @@ describe('CodexAppServerRuntime', () => {
     });
     await terminal;
 
-    expect(finished).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
-    expect(processing).toEqual([true, false]);
+    expect(terminalEvents(published.events)).toEqual([
+      expect.objectContaining({ outcome: 'finished' }),
+    ]);
     expect(provider.isRunning('thread-1')).toBe(false);
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
@@ -2111,24 +2116,25 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    const processing = [];
-    const finished = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    provider.onProcessing((_chatId, value) => processing.push(value));
-    provider.onFinished((chatId, exitCode) => finished.push({ chatId, exitCode }));
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       nativePath,
+      operation: published.operation,
     }));
-    const terminal = new Promise((resolve) => provider.onFinished(resolve));
+    const terminal = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await expect(provider.abort('thread-1')).resolves.toBe(true);
     await terminal;
 
-    expect(emitted.filter((message) => message.toolId === 'race-command')).toEqual([]);
-    expect(finished).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
-    expect(processing).toEqual([true, false]);
+    expect(publishedMessages(published.events).filter(
+      (message) => message.toolId === 'race-command',
+    )).toEqual([]);
+    expect(terminalEvents(published.events)).toEqual([
+      expect.objectContaining({ outcome: 'finished' }),
+    ]);
     expect(provider.isRunning('thread-1')).toBe(false);
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
@@ -2175,9 +2181,12 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
@@ -2210,11 +2219,15 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
@@ -2232,13 +2245,8 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    const failures = [];
-    const processing = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    provider.onFailed((chatId, message) => failures.push({ chatId, message }));
-    provider.onProcessing((_chatId, value) => processing.push(value));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'error',
@@ -2267,16 +2275,17 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emitted.map((message) => message.content)).toEqual([
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
       'Reconnecting... 1/5',
       'Reconnecting... 2/5',
     ]);
     expect(provider.isRunning('thread-1')).toBe(true);
-    expect(processing.at(-1)).toBe(true);
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn() },
@@ -2303,19 +2312,19 @@ describe('CodexAppServerRuntime', () => {
     });
     const clients = [staleClient, activeClient];
     const provider = createRuntime({ createClient: () => clients.shift(), materializationTimeoutMs: 20 });
-    const emitted = [];
-    const failures = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    provider.onFailed((_chatId, message) => failures.push(message));
+    const oldPublished = collectOperation('chat-1', 'run-old');
+    const activePublished = collectOperation('chat-1', 'run-active');
 
-    await provider.startSession(makeRequest());
-    const oldFinished = new Promise((resolve) => provider.onFinished(resolve));
+    await provider.startSession(makeRequest({ operation: oldPublished.operation }));
+    const oldFinished = oldPublished.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     staleClient.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'old-turn' }) },
     });
     await oldFinished;
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: activePublished.operation }));
 
     staleClient.emit('notification', {
       method: 'turn/started',
@@ -2359,12 +2368,16 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
     });
 
-    expect(emitted).toEqual([]);
-    expect(failures).toEqual([]);
+    expect(publishedMessages(oldPublished.events)).toEqual([]);
+    expect(publishedMessages(activePublished.events)).toEqual([]);
+    expect(failureMessages(oldPublished.events)).toEqual([]);
+    expect(failureMessages(activePublished.events)).toEqual([]);
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(activeClient.shutdown).not.toHaveBeenCalled();
 
-    const activeFinished = new Promise((resolve) => provider.onFinished(resolve));
+    const activeFinished = activePublished.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     activeClient.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
@@ -2382,11 +2395,8 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    const failures = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    provider.onFailed((_chatId, message) => failures.push(message));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'error',
@@ -2422,12 +2432,14 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'stale-turn' }) },
     });
 
-    expect(emitted).toEqual([]);
-    expect(failures).toEqual([]);
+    expect(publishedMessages(published.events)).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
@@ -2454,17 +2466,18 @@ describe('CodexAppServerRuntime', () => {
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
     });
-    const failures = [];
-    provider.onFailed((_chatId, message) => failures.push(message));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     emitCapacityFailure(fake, 'turn-1');
 
     await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', input: [] });
     expect(provider.isRunning('thread-1')).toBe(true);
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
@@ -2507,9 +2520,8 @@ describe('CodexAppServerRuntime', () => {
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
     });
-    const failures = [];
-    provider.onFailed((_chatId, message) => failures.push(message));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
@@ -2525,9 +2537,11 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'active');
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(true);
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-2', goal: makeGoal('thread-1', 'Finish the work', 'complete') },
@@ -2571,15 +2585,18 @@ describe('CodexAppServerRuntime', () => {
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
     });
+    const published = collectOperation();
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(fake.startTurn).toHaveBeenCalledTimes(2);
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
@@ -2647,10 +2664,12 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
+    const controlPublished = collectOperation('chat-1', 'run-control');
     await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Continue through capacity recovery',
       nativePath: null,
+      operation: controlPublished.operation,
     }))).resolves.toBe(true);
     await retryStarted.promise;
 
@@ -2659,7 +2678,9 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = controlPublished.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: {
@@ -2714,11 +2735,13 @@ describe('CodexAppServerRuntime', () => {
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
     });
+    const published = collectOperation();
 
     const running = provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'resume' },
       nativePath: null,
+      operation: published.operation,
     }));
     await retryStarted.promise;
     await running;
@@ -2727,7 +2750,9 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: {
@@ -2781,7 +2806,8 @@ describe('CodexAppServerRuntime', () => {
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
     });
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     emitCapacityFailure(fake, 'turn-1');
     await finalRetryStarted.promise;
@@ -2790,7 +2816,9 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-3' }) },
@@ -2839,7 +2867,8 @@ describe('CodexAppServerRuntime', () => {
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
     });
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
@@ -2856,7 +2885,9 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-3', goal: makeGoal('thread-1', 'Finish the work', 'complete') },
@@ -2913,11 +2944,13 @@ describe('CodexAppServerRuntime', () => {
         capacityRetryDelaysMs: [25],
         capacityRetryDelay: controlledDelay.wait,
       });
+      const published = collectOperation();
 
       const running = provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         command: 'Deliver this before retrying',
         nativePath: null,
+        operation: published.operation,
       }));
       await expect(initialDeliveryStarted.promise).resolves.toMatchObject({
         threadId: 'thread-1',
@@ -2937,7 +2970,9 @@ describe('CodexAppServerRuntime', () => {
       expect(fake.startTurn).toHaveBeenCalledTimes(1);
       expect(fake.setThreadGoalStatus).not.toHaveBeenCalled();
 
-      const finished = new Promise((resolve) => provider.onFinished(resolve));
+      const finished = published.waitForEvent(
+        (event) => event.type === 'run-ended' && event.outcome === 'finished',
+      );
       fake.emit('notification', {
         method: 'turn/completed',
         params: { threadId: 'thread-1', turn: makeTurn({ id: 'user-turn' }) },
@@ -3066,8 +3101,11 @@ describe('CodexAppServerRuntime', () => {
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0, 0],
     });
-    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    const failed = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
       emitCapacityFailure(fake, `turn-${attempt + 1}`);
@@ -3076,9 +3114,8 @@ describe('CodexAppServerRuntime', () => {
       }
     }
 
-    await expect(failed).resolves.toEqual({
-      chatId: 'chat-1',
-      message: 'Selected model is at capacity. Please try a different model.',
+    await expect(failed).resolves.toMatchObject({
+      error: { message: 'Selected model is at capacity. Please try a different model.' },
     });
     expect(fake.startTurn).toHaveBeenCalledTimes(4);
     expect(provider.isRunning('thread-1')).toBe(false);
@@ -3120,8 +3157,11 @@ describe('CodexAppServerRuntime', () => {
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
     });
-    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    const failed = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
@@ -3139,9 +3179,8 @@ describe('CodexAppServerRuntime', () => {
       }
     }
 
-    await expect(failed).resolves.toEqual({
-      chatId: 'chat-1',
-      message: 'Selected model is at capacity. Please try a different model.',
+    await expect(failed).resolves.toMatchObject({
+      error: { message: 'Selected model is at capacity. Please try a different model.' },
     });
     expect(fake.setThreadGoalStatus).toHaveBeenCalledTimes(3);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
@@ -3159,10 +3198,11 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    const failed = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'error',
@@ -3178,7 +3218,8 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    await expect(failed).resolves.toEqual({ chatId: 'chat-1', message: 'Codex turn failed' });
+    await expect(failed).resolves.toMatchObject({ error: { message: 'Codex turn failed' } });
+    const emitted = publishedMessages(published.events);
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ type: 'error', content: 'Codex turn failed' });
     expect(provider.isRunning('thread-1')).toBe(false);
@@ -3195,9 +3236,8 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'rawResponseItem/completed',
@@ -3263,6 +3303,7 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
+    const emitted = publishedMessages(published.events);
     expect(emitted.map((message) => message.type)).toEqual([
       'bash-tool-use',
       'tool-result',
@@ -3301,9 +3342,8 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'rawResponseItem/completed',
@@ -3323,6 +3363,7 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
+    const emitted = publishedMessages(published.events);
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({
       type: 'codex-subagent-tool-use',
@@ -3351,13 +3392,15 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Keep the session active' },
       nativePath: null,
+      operation: published.operation,
     }));
 
     fake.emit('notification', {
@@ -3391,7 +3434,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emitted.map((message) => message.type)).toEqual(['wait-tool-use']);
+    expect(publishedMessages(published.events).map((message) => message.type)).toEqual([
+      'wait-tool-use',
+    ]);
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: {
@@ -3484,17 +3529,19 @@ describe('CodexAppServerRuntime', () => {
         getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Existing work', status) }),
       });
       const provider = createRuntime({ createClient: () => fake });
-      const emitted = [];
-      provider.onMessages((_chatId, messages) => emitted.push(...messages));
+      const published = collectOperation();
       await provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         codexGoalCommand: { kind: 'set', objective: 'Replacement work' },
         nativePath: null,
+        operation: published.operation,
       }));
 
       expect(fake.setThreadGoal).not.toHaveBeenCalled();
       expect(fake.clearThreadGoal).not.toHaveBeenCalled();
-      expect(emitted.at(-1)?.content).toContain('/goal replace <objective>');
+      expect(publishedMessages(published.events).at(-1)?.content).toContain(
+        '/goal replace <objective>',
+      );
       expect(provider.isRunning('thread-1')).toBe(status === 'active');
     }
   });
@@ -3575,13 +3622,13 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'replace', objective: 'Replacement work' },
       nativePath: null,
+      operation: published.operation,
     }));
 
     expect(calls).toEqual([
@@ -3591,7 +3638,7 @@ describe('CodexAppServerRuntime', () => {
     ]);
     expect(fake.getThreadGoal).toHaveBeenCalledTimes(3);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(emitted.at(-1)?.content).toContain('replacement rejected');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('replacement rejected');
   });
 
   it('keeps an active restored goal alive when replacement set fails', async () => {
@@ -3675,12 +3722,16 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'replace', objective: 'Replacement work' },
       nativePath: null,
+      operation: published.operation,
     }));
     fake.emit('notification', {
       method: 'thread/goal/cleared',
@@ -3771,21 +3822,21 @@ describe('CodexAppServerRuntime', () => {
       }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal',
       codexGoalCommand: { kind: 'status' },
       nativePath: null,
+      operation: published.operation,
     }));
 
     expect(fake.getThreadGoal).toHaveBeenCalledWith('thread-1');
     expect(fake.startTurn).not.toHaveBeenCalled();
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
-    expect(emitted.map((message) => message.content)).toEqual([
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
       'Goal\nStatus: active\nObjective: Ship the feature\nTime used: 0s\nTokens used: 0\n\nCommands: /goal edit <objective>, /goal pause, /goal clear',
     ]);
   });
@@ -3795,21 +3846,25 @@ describe('CodexAppServerRuntime', () => {
       clearThreadGoal: async () => ({ cleared: true }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal clear',
       codexGoalCommand: { kind: 'clear' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
     expect(fake.clearThreadGoal).toHaveBeenCalledWith('thread-1');
     expect(fake.startTurn).not.toHaveBeenCalled();
-    expect(emitted.map((message) => message.content)).toEqual(['Codex goal cleared.']);
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
+      'Codex goal cleared.',
+    ]);
   });
 
   it('pauses the current Codex goal without starting a turn', async () => {
@@ -3817,21 +3872,23 @@ describe('CodexAppServerRuntime', () => {
       setThreadGoalStatus: async (threadId, status) => ({ goal: makeGoal(threadId, 'Ship the feature', status) }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal pause',
       codexGoalCommand: { kind: 'pause' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
     expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'paused');
     expect(fake.startTurn).not.toHaveBeenCalled();
-    expect(emitted.map((message) => message.content)).toEqual([
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
       'Codex goal paused.\nObjective: Ship the feature\nUsage: time 0s, tokens 0.',
     ]);
   });
@@ -3877,22 +3934,24 @@ describe('CodexAppServerRuntime', () => {
       }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal resume',
       codexGoalCommand: { kind: 'resume' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
     expect(fake.startTurn).not.toHaveBeenCalled();
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(emitted.at(-1)?.content).toContain('Codex goal updated.');
-    expect(emitted.at(-1)?.content).toContain('Ship the feature');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('Codex goal updated.');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('Ship the feature');
   });
 
   it('replays continuation notifications received during thread resume', async () => {
@@ -3989,17 +4048,19 @@ describe('CodexAppServerRuntime', () => {
       }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'pause' },
       nativePath: null,
+      operation: published.operation,
     }));
 
-    expect(emitted.at(-1)?.content).toContain('Codex goal paused.');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('Codex goal paused.');
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
     fake.emit('notification', {
@@ -4041,17 +4102,19 @@ describe('CodexAppServerRuntime', () => {
       clearThreadGoal: async () => ({ cleared: true }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'clear' },
       nativePath: null,
+      operation: published.operation,
     }));
 
-    expect(emitted.at(-1)?.content).toBe('Codex goal cleared.');
+    expect(publishedMessages(published.events).at(-1)?.content).toBe('Codex goal cleared.');
     expect(provider.isRunning('thread-1')).toBe(true);
     fake.emit('notification', {
       method: 'thread/goal/cleared',
@@ -4143,23 +4206,25 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Continue after approval',
       nativePath: null,
+      operation: published.operation,
     }));
 
-    const request = emitted.find((message) => message instanceof PermissionRequestMessage);
-    expect(request).toBeTruthy();
+    const request = permissionEvents(published.events).find(
+      (event) => event.lifecycle.kind === 'requested',
+    );
+    expect(request).toBeDefined();
     expect(fake.respond).not.toHaveBeenCalled();
     expect(fake.getThreadGoal).toHaveBeenCalledWith('thread-1');
     expect(fake.steerTurn).toHaveBeenCalledWith(expect.objectContaining({
       expectedTurnId: 'automatic-turn',
     }));
-    await provider.permissionCapabilityFor(request).respond({ allow: true });
+    await request.decision.respond({ allow: true });
     expect(fake.respond).toHaveBeenCalledWith(77, { decision: 'accept' });
   });
 
@@ -4257,16 +4322,16 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'status' },
       nativePath: null,
+      operation: published.operation,
     }));
 
-    expect(emitted.at(-1)?.content).toContain('Status: complete');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('Status: complete');
     expect(fake.startTurn).not.toHaveBeenCalled();
     expect(fake.steerTurn).not.toHaveBeenCalled();
   });
@@ -4304,8 +4369,6 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const processing = [];
-    provider.onProcessing((_chatId, value) => processing.push(value));
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -4314,7 +4377,6 @@ describe('CodexAppServerRuntime', () => {
     }));
 
     expect(provider.isRunning('thread-1')).toBe(true);
-    expect(processing).toContain(true);
     expect(fake.startTurn).toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread-1',
       input: [{ type: 'text', text: 'Do not dispatch after terminal replay', text_elements: [] }],
@@ -4336,12 +4398,12 @@ describe('CodexAppServerRuntime', () => {
         },
       });
       const provider = createRuntime({ createClient: () => fake });
-      const emitted = [];
-      provider.onMessages((_chatId, messages) => emitted.push(...messages));
+      const published = collectOperation();
       const running = provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         codexGoalCommand: { kind: 'set', objective: `Wait for ${termination}` },
         nativePath: null,
+        operation: published.operation,
       }));
       await ready;
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -4356,7 +4418,9 @@ describe('CodexAppServerRuntime', () => {
       await running;
 
       expect(provider.isRunning('thread-1')).toBe(false);
-      expect(emitted.some((message) => String(message.content).includes('timed out waiting'))).toBe(false);
+      expect(publishedMessages(published.events).some(
+        (message) => String(message.content).includes('timed out waiting'),
+      )).toBe(false);
     },
   );
 
@@ -4372,13 +4436,17 @@ describe('CodexAppServerRuntime', () => {
       setThreadGoal: async (threadId, params) => ({ goal: { ...existing, threadId, ...params } }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal edit Better objective',
       codexGoalCommand: { kind: 'edit', objective: 'Better objective' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
@@ -4399,12 +4467,16 @@ describe('CodexAppServerRuntime', () => {
       }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'edit', objective: 'Better objective' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
@@ -4419,19 +4491,23 @@ describe('CodexAppServerRuntime', () => {
   it('shows actionable usage for a bare goal edit', async () => {
     const fake = new FakeClient();
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal edit',
       codexGoalCommand: { kind: 'edit', objective: null },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
-    expect(emitted.at(-1)?.content).toBe('Usage: /goal edit <objective>');
+    expect(publishedMessages(published.events).at(-1)?.content).toBe(
+      'Usage: /goal edit <objective>',
+    );
     expect(fake.getThreadGoal).toHaveBeenCalledTimes(1);
   });
 
@@ -4448,12 +4524,16 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Finish all rounds' },
       nativePath: null,
+      operation: published.operation,
     }));
     fake.emit('notification', {
       method: 'turn/completed',
@@ -4699,14 +4779,17 @@ describe('CodexAppServerRuntime', () => {
       setThreadGoalStatus: async () => { throw new Error('goal status unavailable'); },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
-    const queue = createActiveGoalQueue(provider, { kind: 'pause' });
+    const published = collectOperation('chat-1', 'run-goal-failure');
+    const queue = createActiveGoalQueue(
+      provider,
+      { kind: 'pause' },
+      published.operation,
+    );
 
     await expect(queue.deliverGoalControlInput('chat-1', '/goal pause', {
       clientRequestId: 'request-goal-failure',
@@ -4718,7 +4801,9 @@ describe('CodexAppServerRuntime', () => {
       cause: expect.objectContaining({ message: 'goal status unavailable' }),
     });
 
-    expect(emitted.at(-1)?.content).toBe('Codex error: goal status unavailable');
+    expect(publishedMessages(published.events).at(-1)?.content).toBe(
+      'Codex error: goal status unavailable',
+    );
   });
 
   it('reports accepted active goal cancellation through the queue delivery contract', async () => {
@@ -4777,8 +4862,11 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
@@ -5245,7 +5333,7 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startTurn).not.toHaveBeenCalled();
   });
 
-  it('keeps predecessor metadata when persistence fails with a terminal finish pending', async () => {
+  it('keeps the predecessor publisher when persistence fails with a terminal finish pending', async () => {
     let fake;
     fake = new FakeClient({
       getThreadGoal: async () => ({ goal: null }),
@@ -5258,15 +5346,18 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const failed = new Promise((resolve) => provider.onFailed(
-      (chatId, message, metadata) => resolve({ chatId, message, metadata }),
-    ));
+    const predecessor = collectOperation('chat-1', 'turn-a');
+    const successor = collectOperation('chat-1', 'turn-b');
+    const failed = predecessor.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       clientRequestId: 'request-a',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
       turnId: 'turn-a',
+      operation: predecessor.operation,
     }));
 
     const first = provider.submitGoalControl(makeRequest({
@@ -5275,6 +5366,7 @@ describe('CodexAppServerRuntime', () => {
       command: 'First input',
       nativePath: null,
       turnId: 'turn-b',
+      operation: successor.operation,
     }), async () => {
       fake.emit('notification', {
         method: 'error',
@@ -5288,14 +5380,11 @@ describe('CodexAppServerRuntime', () => {
       throw new Error('registration failed');
     });
     await expect(first).rejects.toThrow('registration failed');
-    await expect(failed).resolves.toEqual({
-      chatId: 'chat-1',
-      message: 'terminal failure',
-      metadata: {
-        clientRequestId: 'request-a',
-        turnId: 'turn-a',
-      },
+    await expect(failed).resolves.toMatchObject({
+      runId: 'turn-a',
+      error: { message: 'terminal failure' },
     });
+    expect(terminalEvents(successor.events)).toEqual([]);
     let accepted = false;
     await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
@@ -5324,11 +5413,15 @@ describe('CodexAppServerRuntime', () => {
       }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
+      operation: published.operation,
     }));
 
     await provider.submitGoalControl(makeRequest({
@@ -5363,11 +5456,15 @@ describe('CodexAppServerRuntime', () => {
       clearThreadGoal: async () => ({ cleared: true }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Clear safely' },
       nativePath: null,
+      operation: published.operation,
     }));
 
     await provider.submitGoalControl(makeRequest({
@@ -5442,8 +5539,6 @@ describe('CodexAppServerRuntime', () => {
       clearThreadGoal: async () => ({ cleared: false }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -5454,14 +5549,18 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
 
+    const controlPublished = collectOperation('chat-1', 'run-clear');
     await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal clear',
       codexGoalCommand: { kind: 'clear' },
       nativePath: null,
+      operation: controlPublished.operation,
     }))).resolves.toBe(true);
 
-    expect(emitted.at(-1)?.content).toBe('No Codex goal was set.');
+    expect(publishedMessages(controlPublished.events).at(-1)?.content).toBe(
+      'No Codex goal was set.',
+    );
     expect(provider.isRunning('thread-1')).toBe(false);
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
@@ -5485,9 +5584,13 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await provider.startSession(makeRequest({
       codexGoalCommand: { kind: 'set', objective: 'Inspect attachments' },
+      operation: published.operation,
       images: [
         { name: 'screen.png', mimeType: 'image/png', data: 'data:image/png;base64,aW1hZ2U=' },
         { name: 'notes.pdf', mimeType: 'application/pdf', data: 'data:application/pdf;base64,ZmlsZQ==' },
@@ -6255,14 +6358,17 @@ describe('CodexAppServerRuntime', () => {
       }),
     });
     const provider = createRuntime({ createClient: () => fake });
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
     const session = {
       provider: 'codex',
       agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     };
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     const before = await provider.resolveNativePath(session);
     listedPath = secondResolvedPath;
@@ -6296,18 +6402,19 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
     });
     await finished;
 
-    expect(emitted).toEqual([]);
+    expect(publishedMessages(published.events)).toEqual([]);
   });
 
   it('uses live streaming as the source of truth on successful turn completion', async () => {
@@ -6331,11 +6438,12 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'item/completed',
       params: { threadId: 'thread-1', turnId: 'turn-1', item: liveItem },
@@ -6349,6 +6457,7 @@ describe('CodexAppServerRuntime', () => {
     });
     await finished;
 
+    const emitted = publishedMessages(published.events);
     expect(emitted.map((message) => message.content)).toEqual(['Already emitted']);
     expect(getNativeMessageRevisionSource(emitted[0])).toEqual({
       entryId: 'turn:turn-1:item:a1',
@@ -6366,11 +6475,12 @@ describe('CodexAppServerRuntime', () => {
     };
     const fake = new FakeClient();
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
-    await provider.runTurn(makeRequest());
+    await provider.runTurn(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'turn/completed',
       params: {
@@ -6380,7 +6490,9 @@ describe('CodexAppServerRuntime', () => {
     });
     await finished;
 
-    expect(emitted.map((message) => message.content)).toEqual(['Recovered final line']);
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
+      'Recovered final line',
+    ]);
   });
 
   it('does not append native-only interrupted tools behind live assistant output', async () => {
@@ -6437,11 +6549,12 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'item/completed',
       params: { threadId: 'thread-1', turnId: 'turn-1', item: liveCommand },
@@ -6464,6 +6577,7 @@ describe('CodexAppServerRuntime', () => {
     });
     await finished;
 
+    const emitted = publishedMessages(published.events);
     expect(emitted.map((message) => {
       if (message.type === 'bash-tool-use') {
         return [message.type, message.toolId, message.command];
@@ -6519,22 +6633,23 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
     fake.emit('serverRequest', {
       id: 7,
       method: 'item/commandExecution/requestApproval',
       params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-1', command: 'ls' },
     });
 
-    const request = emitted.find((message) => message instanceof PermissionRequestMessage);
-    expect(request).toBeTruthy();
-    await provider.permissionCapabilityFor(request).respond({ allow: true });
+    const request = permissionEvents(published.events).find(
+      (event) => event.lifecycle.kind === 'requested',
+    );
+    expect(request).toBeDefined();
+    await request.decision.respond({ allow: true });
 
     expect(fake.respond).toHaveBeenCalledWith(7, { decision: 'accept' });
-    expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(false);
+    expect(permissionEvents(published.events)).toHaveLength(1);
   });
 
   it('cancels each pending approval through the operation that created it', async () => {
@@ -6564,15 +6679,14 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emissions = [];
-    provider.onMessages((_chatId, messages, metadata) => {
-      emissions.push(...messages.map((message) => ({ message, metadata })));
-    });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
     await provider.startSession(makeRequest({
       clientRequestId: 'run-a',
       turnId: 'run-a',
       command: 'Keep working',
       codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+      operation: first.operation,
     }));
 
     fake.emit('serverRequest', {
@@ -6586,6 +6700,7 @@ describe('CodexAppServerRuntime', () => {
       clientRequestId: 'run-b',
       turnId: 'run-b',
       codexGoalCommand: { kind: 'status' },
+      operation: second.operation,
     }));
     fake.emit('serverRequest', {
       id: 72,
@@ -6604,23 +6719,24 @@ describe('CodexAppServerRuntime', () => {
     });
     await Promise.resolve();
 
-    const requests = emissions.filter(({ message }) => message instanceof PermissionRequestMessage);
-    const requestByCommand = new Map(requests.map(({ message, metadata }) => [
-      message.requestedTool.command,
-      { permissionRequestId: message.permissionRequestId, metadata },
+    const requests = permissionEvents(first.events).filter(
+      (event) => event.lifecycle.kind === 'requested',
+    );
+    const requestByCommand = new Map(requests.map((event) => [
+      event.lifecycle.requestedTool.command,
+      event.lifecycle.requestId,
     ]));
-    expect(requestByCommand.get('command-a')?.metadata).toMatchObject({ turnId: 'run-a' });
-    expect(requestByCommand.get('command-b')?.metadata).toMatchObject({ turnId: 'run-a' });
+    expect(requestByCommand.has('command-a')).toBe(true);
+    expect(requestByCommand.has('command-b')).toBe(true);
+    expect(permissionEvents(second.events)).toEqual([]);
 
-    const cancelled = emissions.filter(({ message }) => message instanceof PermissionCancelledMessage);
-    const cancellationMetadata = new Map(cancelled.map(({ message, metadata }) => [
-      message.permissionRequestId,
-      metadata,
-    ]));
-    expect(cancellationMetadata.get(requestByCommand.get('command-a').permissionRequestId))
-      .toMatchObject({ turnId: 'run-a' });
-    expect(cancellationMetadata.get(requestByCommand.get('command-b').permissionRequestId))
-      .toMatchObject({ turnId: 'run-a' });
+    const cancelledRequestIds = permissionEvents(first.events)
+      .filter((event) => event.lifecycle.kind === 'cancelled')
+      .map((event) => event.lifecycle.requestId);
+    expect(cancelledRequestIds).toEqual([
+      requestByCommand.get('command-a'),
+      requestByCommand.get('command-b'),
+    ]);
   });
 
   it('binds each native turn once across later operations and delayed starts', async () => {
@@ -6655,17 +6771,14 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emissions = [];
-    const finished = [];
-    provider.onMessages((chatId, messages, metadata) => {
-      emissions.push(...messages.map((message) => ({ chatId, message, metadata })));
-    });
-    provider.onFinished((_chatId, _exitCode, metadata) => finished.push(metadata));
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
 
     await provider.startSession(makeRequest({
       clientRequestId: 'run-a',
       turnId: 'run-a',
       codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+      operation: first.operation,
     }));
     await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
@@ -6673,6 +6786,7 @@ describe('CodexAppServerRuntime', () => {
       clientRequestId: 'run-b',
       turnId: 'run-b',
       codexGoalCommand: { kind: 'resume' },
+      operation: second.operation,
     }));
 
     fake.emit('notification', {
@@ -6707,18 +6821,22 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a' }) },
     });
 
-    const operationForContent = (content) => emissions.find(({ message }) => (
-      message.content === content
-    ))?.metadata;
-    expect(operationForContent('late from turn A')).toMatchObject({ turnId: 'run-a' });
-    expect(operationForContent('current from turn B')).toMatchObject({ turnId: 'run-b' });
-    const operationForApproval = (command) => emissions.find(({ message }) => (
-      message instanceof PermissionRequestMessage && message.requestedTool.command === command
-    ))?.metadata;
-    expect(operationForApproval('approval-a')).toMatchObject({ turnId: 'run-a' });
-    expect(operationForApproval('approval-b')).toMatchObject({ turnId: 'run-b' });
-    expect(finished).toContainEqual(expect.objectContaining({ turnId: 'run-a' }));
-    expect(finished).not.toContainEqual(expect.objectContaining({ turnId: 'run-b' }));
+    expect(publishedMessages(first.events).map((message) => message.content)).toContain(
+      'late from turn A',
+    );
+    expect(publishedMessages(second.events).map((message) => message.content)).toContain(
+      'current from turn B',
+    );
+    expect(permissionEvents(first.events).map(
+      (event) => event.lifecycle.requestedTool?.command,
+    )).toContain('approval-a');
+    expect(permissionEvents(second.events).map(
+      (event) => event.lifecycle.requestedTool?.command,
+    )).toContain('approval-b');
+    expect(terminalEvents(first.events)).toContainEqual(
+      expect.objectContaining({ runId: 'run-a', outcome: 'finished' }),
+    );
+    expect(terminalEvents(second.events)).toEqual([]);
     expect(provider.captureSteerTarget('thread-1')).toBeTruthy();
   });
 
@@ -6740,11 +6858,12 @@ describe('CodexAppServerRuntime', () => {
       shutdown: () => sourceClosed.promise,
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emissions = [];
-    provider.onMessages((_chatId, messages, metadata) => {
-      emissions.push(...messages.map((message) => ({ message, metadata })));
-    });
-    await provider.startSession(makeRequest({ clientRequestId: 'run-a', turnId: 'run-a' }));
+    const published = collectOperation('chat-1', 'run-a');
+    await provider.startSession(makeRequest({
+      clientRequestId: 'run-a',
+      turnId: 'run-a',
+      operation: published.operation,
+    }));
 
     fake.emit('notification', {
       method: 'turn/completed',
@@ -6759,8 +6878,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emissions.find(({ message }) => message.content === 'after terminal')?.metadata)
-      .toMatchObject({ turnId: 'run-a' });
+    expect(publishedMessages(published.events).map((message) => message.content)).toContain(
+      'after terminal',
+    );
 
     sourceClosed.resolve();
     await Promise.resolve();
@@ -6773,7 +6893,9 @@ describe('CodexAppServerRuntime', () => {
         item: { type: 'agentMessage', id: 'retired-item', text: 'after retirement', phase: null, memoryCitation: null },
       },
     });
-    expect(emissions.some(({ message }) => message.content === 'after retirement')).toBe(false);
+    expect(publishedMessages(published.events).some(
+      (message) => message.content === 'after retirement',
+    )).toBe(false);
   });
 
   it('[TLV5-L07.04-CODEX-UNIT-01] keeps identical native turn ids isolated by client and thread', async () => {
@@ -6796,19 +6918,19 @@ describe('CodexAppServerRuntime', () => {
     }));
     let clientIndex = 0;
     const provider = createRuntime({ createClient: () => clients[clientIndex++] });
-    const emissions = [];
-    provider.onMessages((chatId, messages, metadata) => {
-      emissions.push(...messages.map((message) => ({ chatId, message, metadata })));
-    });
+    const first = collectOperation('chat-a', 'run-a');
+    const second = collectOperation('chat-b', 'run-b');
     await provider.startSession(makeRequest({
       chatId: 'chat-a',
       clientRequestId: 'run-a',
       turnId: 'run-a',
+      operation: first.operation,
     }));
     await provider.startSession(makeRequest({
       chatId: 'chat-b',
       clientRequestId: 'run-b',
       turnId: 'run-b',
+      operation: second.operation,
     }));
 
     for (const [index, text] of ['from chat A', 'from chat B'].entries()) {
@@ -6822,10 +6944,12 @@ describe('CodexAppServerRuntime', () => {
       });
     }
 
-    expect(emissions.find(({ message }) => message.content === 'from chat A'))
-      .toMatchObject({ chatId: 'chat-a', metadata: { turnId: 'run-a' } });
-    expect(emissions.find(({ message }) => message.content === 'from chat B'))
-      .toMatchObject({ chatId: 'chat-b', metadata: { turnId: 'run-b' } });
+    expect(publishedMessages(first.events).map((message) => message.content)).toEqual([
+      'from chat A',
+    ]);
+    expect(publishedMessages(second.events).map((message) => message.content)).toEqual([
+      'from chat B',
+    ]);
   });
 
   it('keeps a native turn with the run that started it after a later operation takes the session', async () => {
@@ -6855,15 +6979,14 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emissions = [];
-    provider.onMessages((_chatId, messages, metadata) => {
-      emissions.push(...messages.map((message) => ({ message, metadata })));
-    });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
     await provider.startSession(makeRequest({
       clientRequestId: 'run-a',
       turnId: 'run-a',
       command: 'Keep working',
       codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+      operation: first.operation,
     }));
     await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
@@ -6871,6 +6994,7 @@ describe('CodexAppServerRuntime', () => {
       clientRequestId: 'run-b',
       turnId: 'run-b',
       codexGoalCommand: { kind: 'status' },
+      operation: second.operation,
     }));
 
     fake.emit('notification', {
@@ -6882,27 +7006,25 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    const turnContent = emissions.find(({ message }) => message.content === 'still working');
-    expect(turnContent?.metadata).toMatchObject({ turnId: 'run-a' });
-    const statusReply = emissions.find(({ message }) => (
-      typeof message.content === 'string' && message.content.includes('Keep working')
-    ));
-    expect(statusReply?.metadata).toMatchObject({ turnId: 'run-b' });
+    expect(publishedMessages(first.events).map((message) => message.content)).toContain(
+      'still working',
+    );
+    expect(publishedMessages(second.events).some(
+      (message) => typeof message.content === 'string' && message.content.includes('Keep working'),
+    )).toBe(true);
   });
 
   it('[TLV5-L07.09-CODEX-UNIT-01] publishes compaction through the operation that requested it', async () => {
     const fake = new FakeClient();
     const provider = createRuntime({ createClient: () => fake });
-    const emissions = [];
-    provider.onMessages((_chatId, messages, metadata) => {
-      emissions.push(...messages.map((message) => ({ message, metadata })));
-    });
+    const published = collectOperation('chat-1', 'run-compact');
 
     await provider.compact(makeRequest({
       agentSessionId: 'thread-1',
       nativePath: null,
       clientRequestId: 'run-compact',
       turnId: 'run-compact',
+      operation: published.operation,
     }));
     fake.emit('notification', {
       method: 'turn/started',
@@ -6917,8 +7039,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emissions.find(({ message }) => message.content === 'compacted')?.metadata)
-      .toMatchObject({ turnId: 'run-compact' });
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
+      'compacted',
+    ]);
   });
 
   it('auto-approves app-server approvals in manual bypass without emitting a permission row', async () => {
@@ -6931,10 +7054,12 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
 
-    await provider.startSession(makeRequest({ permissionMode: 'manualBypass' }));
+    await provider.startSession(makeRequest({
+      permissionMode: 'manualBypass',
+      operation: published.operation,
+    }));
     fake.emit('serverRequest', {
       id: 9,
       method: 'item/commandExecution/requestApproval',
@@ -6942,8 +7067,7 @@ describe('CodexAppServerRuntime', () => {
     });
 
     expect(fake.respond).toHaveBeenCalledWith(9, { decision: 'accept' });
-    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
-    expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(false);
+    expect(permissionEvents(published.events)).toEqual([]);
   });
 
   it('applies live manual bypass updates to app-server approvals', async () => {
@@ -6956,10 +7080,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
 
-    const started = await provider.startSession(makeRequest());
+    const started = await provider.startSession(makeRequest({ operation: published.operation }));
     provider.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
     fake.emit('serverRequest', {
       id: 10,
@@ -6968,7 +7091,7 @@ describe('CodexAppServerRuntime', () => {
     });
 
     expect(fake.respond).toHaveBeenCalledWith(10, { decision: 'accept' });
-    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(permissionEvents(published.events)).toEqual([]);
   });
 
   it('does not re-emit the submitted prompt when app-server echoes userMessage items', async () => {
@@ -6981,10 +7104,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation();
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'item/completed',
       params: {
@@ -7002,7 +7124,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emitted.map((message) => message.type)).toEqual(['assistant-message']);
-    expect(emitted[0].content).toBe('Hi there');
+    expect(publishedMessages(published.events).map((message) => message.type)).toEqual([
+      'assistant-message',
+    ]);
+    expect(publishedMessages(published.events)[0].content).toBe('Hi there');
   });
 });

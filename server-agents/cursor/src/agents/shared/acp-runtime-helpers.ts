@@ -1,5 +1,5 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
-import type { AcpJsonRpcId, AcpSessionUpdateNotification } from '../../acp/protocol.js';
+import type { AcpJsonRpcId } from '../../acp/protocol.js';
 import type { AcpAbortStrategy, AcpAgentPolicy } from './acp-agent-runtime.js';
 import type { AcpResumeRequest, AcpStartRequest } from './runtime-types.js';
 
@@ -61,13 +61,6 @@ export function permissionCancelledOutcome(): Record<string, unknown> {
 export function humanizeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return String(error);
-}
-
-export function upstreamRequestIdFromUpdate(
-  notification: AcpSessionUpdateNotification,
-): string | undefined {
-  const update = asObject(notification.update);
-  return asString(update.requestId ?? update.request_id);
 }
 
 export function abortStrategy(policy: AcpAgentPolicy): AcpAbortStrategy {

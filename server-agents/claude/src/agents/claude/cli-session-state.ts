@@ -11,7 +11,7 @@ import type { ClaudeTurnSteeringState } from './steering.js';
 interface ClaudeProviderStateTurn {
   readonly protocol: ClaudeTurnState;
   readonly steering: ClaudeTurnSteeringState;
-  readonly eventMetadata: { readonly turnId?: string };
+  readonly turnId: string;
 }
 
 export interface ClaudeProviderStateSession {
@@ -57,7 +57,7 @@ function settleClaudeProviderIdle(
   steering.rememberProviderIdle();
   const details = {
     chatId: session.chatId,
-    turnId: activeTurn.eventMetadata.turnId ?? null,
+    turnId: activeTurn.turnId,
     sessionId: session.id.slice(0, 8),
     processId: session.process?.pid ?? null,
     inputId: protocol.inputUuid.slice(0, 8),
@@ -151,7 +151,7 @@ export function handleClaudeProviderLifecycleMessage(
     }
     handlers.logger.debug('Claude CLI background tasks changed', {
       chatId: session.chatId,
-      turnId: activeTurn?.eventMetadata.turnId ?? null,
+      turnId: activeTurn?.turnId ?? null,
       sessionId: session.id.slice(0, 8),
       processId: session.process?.pid ?? null,
       previousCount: previous,
@@ -169,7 +169,7 @@ export function handleClaudeProviderLifecycleMessage(
   const activeTurn = session.activeTurn;
   handlers.logger.debug('Claude CLI session state changed', {
     chatId: session.chatId,
-    turnId: activeTurn?.eventMetadata.turnId ?? null,
+    turnId: activeTurn?.turnId ?? null,
     sessionId: session.id.slice(0, 8),
     processId: session.process?.pid ?? null,
     previous,

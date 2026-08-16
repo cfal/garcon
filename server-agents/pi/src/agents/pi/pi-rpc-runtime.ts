@@ -14,7 +14,6 @@ import {
 } from '@garcon/server-agent-common/execution/runtime-events';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
   AgentLogger,
   AgentSteerRequest,
@@ -47,7 +46,6 @@ import {
 import {
   assertPiExecutionOpen,
   markPiExecutionStarted,
-  piEventMetadata,
   type PiResumeRequest,
   type PiStartedSession,
   type PiStartRequest,
@@ -71,7 +69,7 @@ export interface PiModelReader {
 const READY_TIMEOUT_MS = 60_000;
 const STEER_RESPONSE_TIMEOUT_MS = 15_000;
 
-export class PiRpcRuntime extends AgentEventEmitterRuntime {
+export class PiRpcRuntime {
   readonly #config: PiConfig;
   readonly #logger: AgentLogger;
   readonly #models: PiModelReader;
@@ -91,7 +89,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       readonly maxIdleMs?: number;
     };
   }) {
-    super();
     this.#config = options.config;
     this.#logger = options.logger;
     this.#models = options.models;
@@ -123,11 +120,12 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       assertPiExecutionOpen(request);
       this.#assertAcceptingOperations();
       this.#sessions.set(session.id, session);
-      this.emitSessionCreated(session.chatId);
+      const started = { agentSessionId: session.id, nativePath: session.nativePath };
+      request.onSessionActivated?.(started);
       const dispatch = await this.#dispatchPrompt(session, request, prompt);
       // Initial session identity must bind before an unbounded prompt preflight can wedge.
       void dispatch.accepted.catch(() => undefined);
-      return { agentSessionId: session.id, nativePath: session.nativePath };
+      return started;
     } catch (error) {
       if (session) {
         await this.#retireAndLog(session, 'initial turn failed', {
@@ -581,9 +579,8 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       resolveSettle = resolve;
     });
     const turn: PiActiveTurn = {
-      turnId: request.turnId,
+      turnId: request.operation.runId,
       operation: request.operation,
-      eventMetadata: piEventMetadata(request, 'agentSessionId' in request ? undefined : 'chat-start'),
       stopRequested: false,
       settleObserved: false,
       completion: 'pending',
@@ -598,9 +595,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     session.state = 'prompting';
     session.startTime = Date.now();
     session.lastActivityAt = session.startTime;
-    this.#emitLifecycle(session, 'processing-started', () => {
-      this.emitProcessing(session.chatId, true);
-    });
     const response = client.sendUnbounded({
       type: 'prompt',
       message: prompt.message,
@@ -792,45 +786,27 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     if (session.turn === turn) session.turn = null;
     session.pendingFinish = null;
     session.lastActivityAt = Date.now();
-    this.#emitLifecycle(session, 'processing-finished', () => {
-      this.emitProcessing(session.chatId, false);
-    });
     if (outcome === 'finished') {
-      this.#emitLifecycle(session, 'turn-finished', () => {
-        this.#publishTurnEvent(session, turn, {
-          type: 'run-ended',
-          runId: turn.operation.runId,
-          outcome: 'finished',
-          exitCode: 0,
-        });
-        this.emitFinished(session.chatId, 0, turn.eventMetadata);
+      this.#publishTurnEvent(session, turn, {
+        type: 'run-ended',
+        runId: turn.operation.runId,
+        outcome: 'finished',
       });
     } else if (outcome === 'stopped') {
-      this.#emitLifecycle(session, 'turn-stopped', () => {
-        this.#publishTurnEvent(session, turn, {
-          type: 'run-ended',
-          runId: turn.operation.runId,
-          outcome: 'finished',
-          exitCode: 0,
-        });
-        this.emitFinished(session.chatId, 0, turn.eventMetadata);
+      this.#publishTurnEvent(session, turn, {
+        type: 'run-ended',
+        runId: turn.operation.runId,
+        outcome: 'finished',
       });
     } else if (outcome === 'failed') {
-      this.#emitLifecycle(session, 'turn-failed', () => {
-        this.#publishTurnEvent(session, turn, {
-          type: 'run-ended',
-          runId: turn.operation.runId,
-          outcome: 'failed',
-          error: {
-            code: 'PROVIDER_FAILURE',
-            message: failureMessage ?? 'Pi turn failed before completion',
-          },
-        });
-        this.emitFailed(
-          session.chatId,
-          failureMessage ?? 'Pi turn failed before completion',
-          turn.eventMetadata,
-        );
+      this.#publishTurnEvent(session, turn, {
+        type: 'run-ended',
+        runId: turn.operation.runId,
+        outcome: 'failed',
+        error: {
+          code: 'PROVIDER_FAILURE',
+          message: failureMessage ?? 'Pi turn failed before completion',
+        },
       });
     }
     turn.settle();
@@ -845,11 +821,9 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
     messages: ChatMessage[],
   ): void {
     this.#publishTurnEvent(session, turn, {
-      type: 'messages',
+      type: 'rows',
       rows: runtimeRows(messages),
-      runId: turn.operation.runId,
     });
-    this.emitMessages(session.chatId, messages, turn.eventMetadata);
   }
 
   #publishTurnEvent(
@@ -865,22 +839,6 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
         eventType: event.type,
         error: errorMessage(error),
       });
-    }
-  }
-
-  #emitLifecycle(session: PiRpcSession, event: string, emit: () => void): void {
-    try {
-      emit();
-    } catch (error) {
-      try {
-        this.#logger.error('Pi lifecycle event handling failed', {
-          sessionId: session.id,
-          event,
-          error: errorMessage(error),
-        });
-      } catch {
-        // Lifecycle completion must not depend on a logger implementation.
-      }
     }
   }
 

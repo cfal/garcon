@@ -1,12 +1,9 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type {
   AgentExecutionContextV5,
-  AgentEstablishedSession,
-  AgentPermissionResponseCapability,
-  AgentProviderPermissionLifecycle,
+  AgentProducerEvent,
   AgentProducedRow,
   AgentResumeRequestV5,
-  AgentRunFailureDetail,
   AgentRunningSession,
   AgentStartedSession,
   AgentStartRequestV5,
@@ -17,37 +14,16 @@ export type AgentRuntimeExecutionContext = Omit<AgentExecutionContextV5, 'sink'>
 export type AgentRuntimeStartRequest = Omit<AgentStartRequestV5, 'sink'>;
 export type AgentRuntimeResumeRequest = Omit<AgentResumeRequestV5, 'sink'>;
 
-// Events carry no routing. The publisher a runtime was handed is the route, so an event can
-// only reach the transcript its originating operation was given access to.
+type ProviderRunEndedEvent = Omit<
+  Extract<AgentProducerEvent, { readonly type: 'run-ended' }>,
+  'outcome'
+> & { readonly outcome: 'finished' | 'failed' };
+
+// Runtime publication is the provider event contract itself. The publisher a runtime was handed
+// is the route, so events carry no chat identity and require no adapter-specific dialect.
 export type AgentRuntimeEvent =
-  | {
-      readonly type: 'messages';
-      readonly rows: readonly AgentProducedRow[];
-      readonly runId: string | null;
-    }
-  | {
-      readonly type: 'session';
-      readonly session: AgentEstablishedSession;
-    }
-  | {
-      readonly type: 'permission';
-      readonly runId: string | null;
-      readonly lifecycle: Extract<AgentProviderPermissionLifecycle, { readonly kind: 'requested' }>;
-      readonly decision: AgentPermissionResponseCapability;
-    }
-  | {
-      readonly type: 'permission';
-      readonly runId: string | null;
-      readonly lifecycle: Exclude<AgentProviderPermissionLifecycle, { readonly kind: 'requested' }>;
-      readonly decision?: never;
-    }
-  | {
-      readonly type: 'run-ended';
-      readonly runId: string;
-      readonly outcome: 'finished' | 'failed';
-      readonly exitCode?: number;
-      readonly error?: AgentRunFailureDetail;
-    };
+  | Exclude<AgentProducerEvent, { readonly type: 'run-ended' }>
+  | ProviderRunEndedEvent;
 
 // Captured on the concrete turn, request, or callback object that produces events, never looked
 // up per event. A runtime that demultiplexes a process-wide stream keys publishers by the

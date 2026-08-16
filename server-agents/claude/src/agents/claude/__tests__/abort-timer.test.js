@@ -19,6 +19,35 @@ function createRuntime() {
   });
 }
 
+function collectOperation(runId = 'run-default') {
+  const events = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+      },
+    },
+  };
+}
+
+function terminalEvents(events) {
+  return events.filter((event) => event.type === 'run-ended');
+}
+
+function failureMessages(events) {
+  return terminalEvents(events)
+    .filter((event) => event.outcome === 'failed')
+    .map((event) => event.error?.message);
+}
+
+function publishedMessages(events) {
+  return events.flatMap((event) => (
+    event.type === 'rows' ? event.rows.map((row) => row.message) : []
+  ));
+}
+
 // Real timer, captured before the per-test global patch, used to flush the
 // async stdout reader loop without going through the tracking wrapper.
 const realSetTimeout = globalThis.setTimeout;
@@ -120,6 +149,7 @@ function startOptions(overrides = {}) {
     projectPath: '/tmp',
     thinkingMode: 'none',
     claudeThinkingMode: 'auto',
+    operation: { runId: 'run-default', publish() {} },
     ...overrides,
   };
 }
@@ -199,25 +229,29 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   it('rolls back a synchronous resume spawn failure so the session can retry', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
-    const processing = [];
-    runtime.onProcessing((_chatId, running) => processing.push(running));
+    const failedStart = collectOperation('run-failed-start');
     spawnMock
       .mockImplementationOnce(() => {
         throw new Error('spawn failed');
       })
       .mockReturnValueOnce(ctrl.proc);
 
-    await expect(runtime.runClaudeTurn(startOptions())).rejects.toThrow('spawn failed');
+    await expect(runtime.runClaudeTurn(startOptions({ operation: failedStart.operation })))
+      .rejects.toThrow('spawn failed');
     expect(runtime.isClaudeInternalSessionRunning('session-1')).toBe(false);
-    expect(processing).toEqual([]);
+    expect(failedStart.events).toEqual([]);
 
-    const retry = runtime.runClaudeTurn(startOptions({ command: 'retry' }));
+    const retried = collectOperation('run-retry');
+    const retry = runtime.runClaudeTurn(startOptions({
+      command: 'retry',
+      operation: retried.operation,
+    }));
     await flush();
     ctrl.startLatestInput();
     ctrl.push(INIT);
     settleTurn(ctrl);
     await retry;
-    expect(processing).toEqual([true, false]);
+    expect(terminalEvents(retried.events)).toHaveLength(1);
     runtime.shutdown();
   });
 
@@ -252,10 +286,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
-    const failures = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
+    const published = collectOperation('run-interrupt');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
@@ -282,7 +315,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     expect(cleared).toContain(abortTimerId);
     expect(ctrl.proc.killed).toBe(false);
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
   });
 
   it('reports a submitted input that remains queued as an unacknowledged interrupt', async () => {
@@ -315,10 +348,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
-    const failures = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
+    const published = collectOperation('run-interrupt');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
@@ -342,10 +374,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     completionFallback.fn();
     await turn;
     expect(ctrl.proc.killed).toBe(true);
-    expect(failures).toEqual([{
-      chatId: 'chat-1',
-      message: 'Claude CLI did not confirm the interrupt.',
-    }]);
+    expect(failureMessages(published.events)).toEqual([
+      'Claude CLI did not confirm the interrupt.',
+    ]);
   });
 
   it('settles cleanly when an interrupt ends a fenced background wait', async () => {
@@ -353,12 +384,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     const nextCtrl = createControllableProc();
     spawnMock.mockReturnValueOnce(ctrl.proc).mockReturnValueOnce(nextCtrl.proc);
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
-    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+    const published = collectOperation('run-interrupt');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
@@ -385,10 +413,14 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     expect(cleared).toContain(completionFallback.id);
     expect(ctrl.proc.killed).toBe(false);
     expect(ctrl.proc.ended).toBe(true);
-    expect(failures).toEqual([]);
-    expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+    expect(failureMessages(published.events)).toEqual([]);
+    expect(terminalEvents(published.events)).toHaveLength(1);
 
-    const nextTurn = runtime.runClaudeTurn(startOptions({ command: 'after stop' }));
+    const nextPublished = collectOperation('run-next');
+    const nextTurn = runtime.runClaudeTurn(startOptions({
+      command: 'after stop',
+      operation: nextPublished.operation,
+    }));
     await flush();
     nextCtrl.push(INIT);
     nextCtrl.startLatestInput();
@@ -402,12 +434,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
-    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+    const published = collectOperation('run-cancelled');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     const input = ctrl.latestInput();
@@ -431,20 +460,17 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     expect(cleared).toContain(abortTimerId);
     expect(ctrl.proc.killed).toBe(false);
-    expect(failures).toEqual([]);
-    expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+    expect(failureMessages(published.events)).toEqual([]);
+    expect(terminalEvents(published.events)).toHaveLength(1);
   });
 
   it('settles a pre-start abort from the interrupt cancellation receipt', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
-    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+    const published = collectOperation('run-pre-start');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     const input = ctrl.latestInput();
@@ -457,8 +483,8 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await expect(abort).resolves.toBe(true);
     await turn;
 
-    expect(failures).toEqual([]);
-    expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+    expect(failureMessages(published.events)).toEqual([]);
+    expect(terminalEvents(published.events)).toHaveLength(1);
     expect(ctrl.proc.killed).toBe(false);
   });
 
@@ -548,10 +574,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
-    const failures = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
+    const published = collectOperation('run-provider-failure');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
@@ -567,10 +592,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     await turn;
     await expect(abort).resolves.toBe(false);
-    expect(failures).toEqual([{
-      chatId: 'chat-1',
-      message: 'provider failed before interrupt acknowledgement',
-    }]);
+    expect(failureMessages(published.events)).toEqual([
+      'provider failed before interrupt acknowledgement',
+    ]);
   });
 
   it('does not apply a late interrupt receipt to a replacement turn', async () => {
@@ -612,10 +636,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
-    const failures = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
+    const published = collectOperation('run-control-failure');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
@@ -635,7 +658,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await turn;
 
     expect(ctrl.proc.killed).toBe(true);
-    expect(failures).toEqual(['Claude CLI interrupt request failed.']);
+    expect(failureMessages(published.events)).toEqual([
+      'Claude CLI interrupt request failed.',
+    ]);
   });
 
   it.each([
@@ -683,14 +708,12 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const failures = [];
-    const messages = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
-    runtime.onMessages((_chatId, emitted, metadata) => messages.push({ emitted, metadata }));
+    const firstPublished = collectOperation('run-a');
 
     const first = runtime.startClaudeCliSession(startOptions({
       clientRequestId: 'req-a',
       turnId: 'turn-a',
+      operation: firstPublished.operation,
     }));
     ctrl.push(INIT);
     await flush();
@@ -708,10 +731,12 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
 
     // New prompt within the old 5s window reuses the same persistent process.
+    const secondPublished = collectOperation('run-b');
     const second = runtime.runClaudeTurn(startOptions({
       command: 'continue',
       clientRequestId: 'req-b',
       turnId: 'turn-b',
+      operation: secondPublished.operation,
     }));
     await flush();
 
@@ -726,16 +751,13 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await second;
 
     expect(ctrl.proc.killed).toBe(false);
-    expect(failures).toEqual([]);
-    expect(messages).toEqual([
-      {
-        emitted: [expect.objectContaining({ content: 'first output' })],
-        metadata: expect.objectContaining({ clientRequestId: 'req-a', turnId: 'turn-a' }),
-      },
-      {
-        emitted: [expect.objectContaining({ content: 'second output' })],
-        metadata: expect.objectContaining({ clientRequestId: 'req-b', turnId: 'turn-b' }),
-      },
+    expect(failureMessages(firstPublished.events)).toEqual([]);
+    expect(failureMessages(secondPublished.events)).toEqual([]);
+    expect(publishedMessages(firstPublished.events)).toMatchObject([
+      { content: 'first output' },
+    ]);
+    expect(publishedMessages(secondPublished.events)).toMatchObject([
+      { content: 'second output' },
     ]);
   });
 
@@ -745,14 +767,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const secondCtrl = createControllableProc();
     spawnMock.mockReturnValueOnce(firstCtrl.proc).mockReturnValueOnce(secondCtrl.proc);
 
-    const failures = [];
-    const finishes = [];
-    const messages = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
-    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
-    runtime.onMessages((_chatId, emitted, metadata) => messages.push({ emitted, metadata }));
+    const firstPublished = collectOperation('run-first');
 
-    const first = runtime.startClaudeCliSession(startOptions());
+    const first = runtime.startClaudeCliSession(startOptions({ operation: firstPublished.operation }));
     firstCtrl.push(INIT);
     await flush();
     firstCtrl.startLatestInput();
@@ -764,7 +781,11 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     let resolveProbe;
     versionProbe = () => new Promise((resolve) => { resolveProbe = resolve; });
-    const second = runtime.startClaudeCliSession(startOptions({ command: 'replacement' }));
+    const secondPublished = collectOperation('run-replacement');
+    const second = runtime.startClaudeCliSession(startOptions({
+      command: 'replacement',
+      operation: secondPublished.operation,
+    }));
     await flush();
 
     expect(firstCtrl.proc.ended).toBe(true);
@@ -776,8 +797,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     // replacement while its version probe is still pending.
     firstCtrl.push(RESULT);
     await flush();
-    expect(finishes).toEqual([]);
-    expect(failures).toEqual([]);
+    expect(secondPublished.events).toEqual([]);
 
     resolveProbe([2, 1, 220]);
     await flush();
@@ -788,19 +808,18 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     firstCtrl.push({ type: 'assistant', content: [{ type: 'text', text: 'late replaced output' }] });
     firstCtrl.push(RESULT);
     await flush();
-    expect(messages).toEqual([]);
-    expect(finishes).toEqual([]);
+    expect(publishedMessages(secondPublished.events)).toEqual([]);
+    expect(terminalEvents(secondPublished.events)).toEqual([]);
     expect(runtime.isClaudeInternalSessionRunning('session-1')).toBe(true);
 
     secondCtrl.push({ type: 'assistant', content: [{ type: 'text', text: 'replacement output' }] });
     settleTurn(secondCtrl);
     await second;
-    expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
-    expect(failures).toEqual([]);
-    expect(messages).toEqual([{
-      emitted: [expect.objectContaining({ content: 'replacement output' })],
-      metadata: expect.any(Object),
-    }]);
+    expect(terminalEvents(secondPublished.events)).toHaveLength(1);
+    expect(failureMessages(secondPublished.events)).toEqual([]);
+    expect(publishedMessages(secondPublished.events)).toMatchObject([
+      { content: 'replacement output' },
+    ]);
   });
 
   it('rejects a resume while the initial turn is still active', async () => {
@@ -926,12 +945,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
-    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+    const published = collectOperation('run-timeout');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
 
@@ -945,11 +961,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     expect(ctrl.proc.killed).toBe(true);
     await expect(abort).rejects.toThrow('Claude CLI interrupt control request timed out');
     await turn;
-    expect(failures).toEqual([{
-      chatId: 'chat-1',
-      message: 'Claude CLI did not confirm the interrupt.',
-    }]);
-    expect(finishes).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([
+      'Claude CLI did not confirm the interrupt.',
+    ]);
   });
 
   it('rejects when an active abort never receives a correlated control response', async () => {
@@ -957,12 +971,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
-    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+    const published = collectOperation('run-control-timeout');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
@@ -974,21 +985,18 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await expect(abort).rejects.toThrow('Claude CLI interrupt control request timed out');
     await turn;
 
-    expect(failures).toEqual([{
-      chatId: 'chat-1',
-      message: 'Claude CLI did not confirm the interrupt.',
-    }]);
-    expect(finishes).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([
+      'Claude CLI did not confirm the interrupt.',
+    ]);
   });
 
   it('extends the result deadline after an active interrupt receipt', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
-    const failures = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
+    const published = collectOperation('run-result-timeout');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
@@ -1006,10 +1014,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     completionFallback.fn();
     await turn;
-    expect(failures).toEqual([{
-      chatId: 'chat-1',
-      message: 'Claude CLI did not confirm the interrupt.',
-    }]);
+    expect(failureMessages(published.events)).toEqual([
+      'Claude CLI did not confirm the interrupt.',
+    ]);
   });
 
   it('rejects the interrupt and reports a genuine crash during the abort window', async () => {
@@ -1017,12 +1024,9 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
-    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+    const published = collectOperation('run-crash');
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const turn = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
     ctrl.push(INIT);
     await flush();
 
@@ -1034,7 +1038,6 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await turn;
 
     // A real crash must still surface as a failure, not be masked as clean.
-    expect(failures.some((f) => f.chatId === 'chat-1' && /137/.test(f.message))).toBe(true);
-    expect(finishes.some((f) => f.exitCode === 0)).toBe(false);
+    expect(failureMessages(published.events).some((message) => /137/.test(message))).toBe(true);
   });
 });

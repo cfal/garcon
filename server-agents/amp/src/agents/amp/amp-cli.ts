@@ -1,6 +1,6 @@
 // Amp CLI transport. Uses a spawn-per-turn model: each user message
 // spawns a fresh `amp` process (new chat or `amp threads continue`).
-// Parses JSONL stdout and routes messages through AgentEventEmitterRuntime events.
+// Parses JSONL stdout and publishes rows through each turn's captured operation.
 
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -14,19 +14,16 @@ import {
 import type { AmpConfig } from '../../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, type ChatMessage } from '@garcon/common/chat-types';
 import { convertAmpToolUse } from "./tool-use-converter.js";
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import type { AmpThreadExport } from "./history-loader.js";
 import {
-  ampEventMetadata,
   assertAmpExecutionOpen,
   markAmpExecutionStarted,
   type AmpResumeRequest,
   type AmpStartRequest,
   type AmpStartedSession,
 } from './runtime-types.js';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
 import {
@@ -50,11 +47,9 @@ interface AmpSession {
 }
 
 interface AmpTurnContext {
-  readonly eventMetadata: RuntimeEventMetadata;
   readonly operation: AgentRuntimeOperation;
   readonly startedAt: number;
   isRunning: boolean;
-  processingStarted: boolean;
   completed: boolean;
   aborted: boolean;
   sourceRetired: boolean;
@@ -356,16 +351,11 @@ function createSession(
   };
 }
 
-function createTurn(
-  eventMetadata: RuntimeEventMetadata,
-  operation: AgentRuntimeOperation,
-): AmpTurnContext {
+function createTurn(operation: AgentRuntimeOperation): AmpTurnContext {
   return {
-    eventMetadata,
     operation,
     startedAt: Date.now(),
     isRunning: true,
-    processingStarted: false,
     completed: false,
     aborted: false,
     sourceRetired: false,
@@ -388,7 +378,7 @@ function buildContinueArgs(threadId: string, model?: string): string[] {
   return args;
 }
 
-class AmpCliRuntime extends AgentEventEmitterRuntime {
+class AmpCliRuntime {
   readonly #config: AmpConfig;
   readonly #logger: AgentLogger;
   #runningSessions = new Map<string, AmpSession>();
@@ -400,7 +390,6 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
   });
 
   constructor(options: { config?: AmpConfig; logger?: AgentLogger } = {}) {
-    super();
     this.#config = options.config ?? DEFAULT_CONFIG;
     this.#logger = options.logger ?? SILENT_LOGGER;
   }
@@ -428,14 +417,12 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
       case 'result':
         if (!turn.completed) {
+          this.#completeTurn(session, turn);
           this.#publishTurnEvent(session, turn, {
             type: 'run-ended',
             runId: turn.operation.runId,
             outcome: 'finished',
-            exitCode: msg.is_error ? 1 : 0,
           });
-          this.#completeTurn(session, turn);
-          this.emitFinished(session.chatId, msg.is_error ? 1 : 0, turn.eventMetadata);
         }
         break;
 
@@ -488,14 +475,13 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       if (!turn.completed) {
         if (!turn.aborted) {
           const message = `Amp process exited before result (code ${exitCode})`;
+          this.#completeTurn(session, turn);
           this.#publishTurnEvent(session, turn, {
             type: 'run-ended',
             runId: turn.operation.runId,
             outcome: 'failed',
             error: { code: 'PROVIDER_FAILURE', message },
           });
-          this.#completeTurn(session, turn);
-          this.emitFailed(session.chatId, message, turn.eventMetadata);
         } else {
           this.#completeTurn(session, turn);
         }
@@ -513,7 +499,6 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     turn.isRunning = false;
     if (session.activeTurn === turn) {
       session.activeTurn = null;
-      if (turn.processingStarted) this.emitProcessing(session.chatId, false);
     }
     const resolve = turn.resolve;
     turn.resolve = null;
@@ -605,11 +590,9 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     messages: ChatMessage[],
   ): void {
     this.#publishTurnEvent(session, turn, {
-      type: 'messages',
+      type: 'rows',
       rows: runtimeRows(messages),
-      runId: turn.operation.runId,
     });
-    this.emitMessages(session.chatId, messages, turn.eventMetadata);
   }
 
   #publishTurnEvent(
@@ -653,7 +636,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
   async startSession(request: AmpStartRequest): Promise<AmpStartedSession> {
     assertAmpExecutionOpen(request);
-    const { command, chatId, projectPath, model, clientRequestId, turnId, operation } = request;
+    const { command, chatId, projectPath, model, operation } = request;
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
     const threadId = await createThread({ cwd: projectPath }, this.#config);
     assertAmpExecutionOpen(request);
@@ -663,19 +646,18 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     }
 
     const session = createSession(threadId, chatId);
-    const turn = createTurn(
-      ampEventMetadata({ clientRequestId, turnId }, 'chat-start'),
-      operation,
-    );
+    const turn = createTurn(operation);
     session.activeTurn = turn;
-    this.emitSessionCreated(chatId);
+    const started = {
+      agentSessionId: threadId,
+      nativePath: createArtificialNativePath('amp', threadId),
+    };
+    request.onSessionActivated?.(started);
 
     const args = buildContinueArgs(threadId, model);
 
     try {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
-      turn.processingStarted = true;
-      this.emitProcessing(chatId, true);
       this.#spawnAmp(session, turn, projectPath, args, command);
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, true);
@@ -687,17 +669,13 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
           outcome: 'failed',
           error: { code: 'PROVIDER_FAILURE', message },
         });
-        this.emitFailed(chatId, message, turn.eventMetadata);
       }
       throw err;
     }
     this.#retireSupersededChatSessions(session);
     this.#runningSessions.set(threadId, session);
 
-    return {
-      agentSessionId: threadId,
-      nativePath: createArtificialNativePath('amp', threadId),
-    };
+    return started;
   }
 
   async runTurn(request: AmpResumeRequest): Promise<void> {
@@ -708,8 +686,6 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       chatId,
       projectPath,
       model,
-      clientRequestId,
-      turnId,
       operation,
     } = request;
     if (!threadId) throw new Error('Cannot resume without thread ID');
@@ -727,7 +703,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
         throw new Error(`Session ${threadId} is already running`);
       }
     }
-    const turn = createTurn(ampEventMetadata({ clientRequestId, turnId }), operation);
+    const turn = createTurn(operation);
     session.activeTurn = turn;
     session.lastActivityAt = Date.now();
 
@@ -735,8 +711,6 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
     try {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
-      turn.processingStarted = true;
-      this.emitProcessing(chatId, true);
       this.#spawnAmp(session, turn, projectPath, args, command);
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, false);
@@ -748,7 +722,6 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
           outcome: 'failed',
           error: { code: 'PROVIDER_FAILURE', message },
         });
-        this.emitFailed(chatId, message, turn.eventMetadata);
       }
       throw err;
     }

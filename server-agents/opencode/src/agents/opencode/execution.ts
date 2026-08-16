@@ -7,6 +7,7 @@ import {
   type AgentRuntimeExecutionContext,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import type { AgentStartedSession } from '@garcon/server-agent-interface';
 import type { OpenCodeRuntime } from './opencode.js';
 
 export class OpenCodeExecution implements AgentRuntimeExecution {
@@ -20,21 +21,29 @@ export class OpenCodeExecution implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
   ) {
     const seed = request.carriedContext?.prefix ?? '';
+    let established: AgentStartedSession | null = null;
+    const establish = (agentSessionId: string) => {
+      if (established) return established;
+      established = {
+        agentSessionId,
+        nativeSession: this.nativeSessions.encode({
+          path: createArtificialNativePath('opencode', agentSessionId),
+          agentSessionId,
+          modelEndpointId: null,
+        }),
+        nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
+      };
+      publish({ type: 'session', session: established });
+      return established;
+    };
     const agentSessionId = await this.runtime.startSession({
       ...executionFields(request),
       command: `${seed}${request.prompt}`,
       images: request.attachments,
       operation: runtimeOperation(request.runId, publish),
+      onSessionActivated: (sessionId) => void establish(sessionId),
     });
-    return {
-      agentSessionId,
-      nativeSession: this.nativeSessions.encode({
-        path: createArtificialNativePath('opencode', agentSessionId),
-        agentSessionId,
-        modelEndpointId: null,
-      }),
-      nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
-    };
+    return established ?? establish(agentSessionId);
   }
 
   async resume(
@@ -86,8 +95,6 @@ function executionFields(request: AgentRuntimeExecutionContext) {
     model: request.model,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
-    clientRequestId: request.runId,
-    turnId: request.runId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),

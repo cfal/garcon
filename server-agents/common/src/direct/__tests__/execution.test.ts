@@ -2,8 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import {
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
-import { AgentEventEmitterRuntime } from '../../shared/event-emitter-runtime.js';
+import { UserMessage } from '@garcon/common/chat-types';
 import type {
   AgentRuntimeEvent,
   AgentRuntimeOperation,
@@ -69,14 +68,7 @@ describe('DirectExecution', () => {
       agentSessionId: 'session-1',
       nativePath: '/tmp/session-1.json',
     }));
-    const subscribe = () => {};
-    const runtime = {
-      startSession,
-      onMessages: subscribe,
-      onProcessing: subscribe,
-      onFinished: subscribe,
-      onFailed: subscribe,
-    };
+    const runtime = { startSession };
     const execution = new DirectExecution(host(), runtime as never);
     const { agentSessionId: _agentSessionId, nativeSession: _nativeSession, ...base } = request('endpoint-a');
     const start: AgentRuntimeStartRequest = {
@@ -94,14 +86,7 @@ describe('DirectExecution', () => {
 
   test('forwards core-owned context when rebuilding a stateless request', async () => {
     const runTurn = mock(async () => {});
-    const subscribe = () => {};
-    const runtime = {
-      runTurn,
-      onMessages: subscribe,
-      onProcessing: subscribe,
-      onFinished: subscribe,
-      onFailed: subscribe,
-    };
+    const runtime = { runTurn };
     const execution = new DirectExecution(host(), runtime as never);
     const resume = request('endpoint-b');
 
@@ -133,32 +118,28 @@ describe('DirectExecution', () => {
     )).rejects.toThrow('replacement failed');
 
     operations[0].publish({
-      type: 'messages',
-      runId: operations[0].runId,
+      type: 'rows',
       rows: [],
     });
 
-    expect(firstEvents).toHaveLength(1);
+    expect(firstEvents.map((event) => event.type)).toEqual(['session', 'rows']);
     expect(replacementEvents).toEqual([]);
   });
 
-	test('[TLV5-L07.05-DIRECT-UNIT-01] does not route an unnamed runtime emission through a current request', async () => {
+	test('[TLV5-L07.05-DIRECT-UNIT-01] exposes no unnamed runtime emission surface', async () => {
     const emitted: AgentRuntimeEvent[] = [];
-    const runtime = new AgentEventEmitterRuntime() as AgentEventEmitterRuntime & {
-      startSession: () => Promise<{ agentSessionId: string; nativePath: string }>;
+    const runtime = {
+      startSession: mock(async () => ({
+        agentSessionId: 'session-1',
+        nativePath: '/tmp/session-1.json',
+      })),
     };
-    runtime.startSession = mock(async () => ({
-      agentSessionId: 'session-1',
-      nativePath: '/tmp/session-1.json',
-    }));
     const execution = new DirectExecution(host(), runtime as never);
     const { agentSessionId: _agentSessionId, nativeSession: _nativeSession, ...start } = request('endpoint-a');
 
     await execution.start({ ...start, carriedContext: null }, (event) => emitted.push(event));
-    runtime.emitMessages('chat-1', [
-      new AssistantMessage('2026-01-01T00:00:00.000Z', 'unnamed'),
-    ]);
 
-    expect(emitted).toEqual([]);
+    expect(runtime).not.toHaveProperty('emitMessages');
+    expect(emitted.map((event) => event.type)).toEqual(['session']);
   });
 });

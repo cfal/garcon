@@ -24,6 +24,39 @@ function createRuntime(logger = createLogger(), overrides = {}) {
   });
 }
 
+function collectOperation(runId = 'run-default') {
+  const events = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+      },
+    },
+  };
+}
+
+function terminalEvents(events) {
+  return events.filter((event) => event.type === 'run-ended');
+}
+
+function failureMessages(events) {
+  return terminalEvents(events)
+    .filter((event) => event.outcome === 'failed')
+    .map((event) => event.error?.message);
+}
+
+function publishedMessages(events) {
+  return events.flatMap((event) => (
+    event.type === 'rows' ? event.rows.map((row) => row.message) : []
+  ));
+}
+
+function permissionEvents(events) {
+  return events.filter((event) => event.type === 'permission');
+}
+
 function deferred() {
   let resolve;
   let reject;
@@ -219,6 +252,7 @@ function startOptions(overrides = {}) {
     model: 'sonnet',
     permissionMode: 'default',
     thinkingMode: 'none',
+    operation: { runId: 'run-default', publish() {} },
     ...overrides,
   };
 }
@@ -254,8 +288,8 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueProviderState(fake, 'idle');
       await second;
 
-      expect(firstEvents.map((event) => event.type)).toEqual(['messages', 'run-ended']);
-      expect(secondEvents.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+      expect(firstEvents.map((event) => event.type)).toEqual(['rows', 'run-ended']);
+      expect(secondEvents.map((event) => event.type)).toEqual(['rows', 'run-ended']);
       expect(firstEvents.at(-1)).toMatchObject({ runId: 'run-a', outcome: 'finished' });
       expect(secondEvents.at(-1)).toMatchObject({ runId: 'run-b', outcome: 'finished' });
       await runtime.shutdown();
@@ -292,7 +326,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         'Claude CLI input result received; awaiting provider idle',
         {
         chatId: 'chat-1',
-        turnId: null,
+        turnId: 'run-default',
         sessionId: 'expected',
         processId: null,
         inputId: expect.any(String),
@@ -421,24 +455,23 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime(logger);
-      const failed = new Promise((resolve) => {
-        runtime.onFailed((chatId, errorMessage) => resolve({ chatId, errorMessage }));
-      });
-      const start = runtime.startClaudeCliSession(startOptions());
+      const published = collectOperation('run-exit');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await Promise.resolve();
       await Promise.resolve();
       fake.exit(137);
 
       await expect(start).rejects.toThrow('Claude CLI process exited with code 137');
-      await expect(failed).resolves.toEqual({
-        chatId: 'chat-1',
-        errorMessage: 'Claude CLI process exited with code 137',
-      });
+      expect(failureMessages(published.events)).toEqual([
+        'Claude CLI process exited with code 137',
+      ]);
       expect(logger.error).toHaveBeenCalledWith(
         'Claude CLI process exited during an active turn',
         {
           chatId: 'chat-1',
-          turnId: null,
+          turnId: 'run-exit',
           sessionId: 'expected',
           processId: null,
           exitCode: 137,
@@ -479,15 +512,16 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
       try {
         const runtime = createRuntime();
-        const failures = [];
-        runtime.onFailed((_chatId, message) => failures.push(message));
-        const start = runtime.startClaudeCliSession(startOptions());
+        const published = collectOperation('run-output-failure');
+        const start = runtime.startClaudeCliSession(startOptions({
+          operation: published.operation,
+        }));
         await waitForWrittenUserMessage(fake);
 
         trigger(fake);
 
         await expect(start).resolves.toBe('expected-session');
-        expect(failures).toEqual([expected]);
+        expect(failureMessages(published.events)).toEqual([expected]);
         await runtime.shutdown();
       } finally {
         Bun.spawn = originalSpawn;
@@ -503,11 +537,10 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime(logger);
-      const failures = [];
-      const finishes = [];
-      runtime.onFailed((chatId, errorMessage) => failures.push({ chatId, errorMessage }));
-      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
-      const start = runtime.startClaudeCliSession(startOptions());
+      const published = collectOperation('run-result-failure');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'result',
@@ -519,11 +552,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueProviderState(fake, 'idle');
 
       await expect(start).resolves.toBe('expected-session');
-      expect(failures).toEqual([{
-        chatId: 'chat-1',
-        errorMessage: 'Provider request failed',
-      }]);
-      expect(finishes).toEqual([]);
+      expect(failureMessages(published.events)).toEqual(['Provider request failed']);
       expect(logger.warn).toHaveBeenCalledWith(
         'Claude CLI input result received; awaiting provider idle',
         expect.objectContaining({
@@ -547,9 +576,10 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const failures = [];
-      runtime.onFailed((_chatId, message) => failures.push(message));
-      const start = runtime.startClaudeCliSession(startOptions());
+      const published = collectOperation('run-structured-failure');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await enqueueInputStarted(fake);
       fake.stdout.enqueue(encoder.encode(JSON.stringify({
         type: 'result',
@@ -560,7 +590,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       fake.closeStdout();
 
       await expect(start).resolves.toBe('expected-session');
-      expect(failures).toEqual(['Provider request failed']);
+      expect(failureMessages(published.events)).toEqual(['Provider request failed']);
       await runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;
@@ -606,14 +636,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime(logger);
-      const messages = [];
-      const finishes = [];
-      const processing = [];
-      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
-      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
-      runtime.onProcessing((chatId, isProcessing) => processing.push({ chatId, isProcessing }));
+      const published = collectOperation('run-submitted-input');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       const input = await waitForWrittenUserMessage(fake);
       expect(input.uuid).toBeString();
 
@@ -640,10 +667,9 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       ].join('\n') + '\n'));
       await Promise.resolve();
 
-      expect(finishes).toEqual([]);
-      expect(messages).toEqual([]);
+      expect(terminalEvents(published.events)).toEqual([]);
+      expect(publishedMessages(published.events)).toEqual([]);
       expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
-      expect(processing).not.toContainEqual({ chatId: 'chat-1', isProcessing: false });
 
       fake.stdout.enqueue(new TextEncoder().encode([
         JSON.stringify({
@@ -683,13 +709,18 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       ].join('\n') + '\n'));
 
       await expect(start).resolves.toBe('expected-session');
-      expect(messages).toEqual([
+      expect(publishedMessages(published.events)).toEqual([
         expect.objectContaining({
           type: 'assistant-message',
           content: 'actual user response',
         }),
       ]);
-      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+      expect(terminalEvents(published.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-submitted-input',
+          outcome: 'finished',
+        }),
+      ]);
       expect(logger.info).toHaveBeenCalledWith(
         'Claude CLI emitted an uncorrelated result while user input was pending',
         expect.objectContaining({
@@ -711,18 +742,12 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const messages = [];
-      const finishes = [];
-      const processing = [];
-      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
-      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
-      runtime.onProcessing((chatId, isProcessing) => processing.push({ chatId, isProcessing }));
+      const published = collectOperation('run-continuation');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       const input = await enqueueInputStarted(fake);
-      for (let attempt = 0; attempt < 10 && processing.length === 0; attempt += 1) {
-        await Promise.resolve();
-      }
       enqueueProviderState(fake, 'running');
       fake.stdout.enqueue(encoder.encode([
         JSON.stringify({
@@ -755,9 +780,8 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       ].join('\n') + '\n'));
       await Promise.resolve();
 
-      expect(finishes).toEqual([]);
+      expect(terminalEvents(published.events)).toEqual([]);
       expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
-      expect(processing).not.toContainEqual({ chatId: 'chat-1', isProcessing: false });
 
       fake.stdout.enqueue(encoder.encode([
         JSON.stringify({
@@ -778,14 +802,15 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       ].join('\n') + '\n'));
 
       await expect(start).resolves.toBe('expected-session');
-      expect(messages).toMatchObject([
+      expect(publishedMessages(published.events)).toMatchObject([
         { type: 'assistant-message', content: 'Background build started.' },
         { type: 'assistant-message', content: 'Background build finished.' },
       ]);
-      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
-      expect(processing).toEqual([
-        { chatId: 'chat-1', isProcessing: true },
-        { chatId: 'chat-1', isProcessing: false },
+      expect(terminalEvents(published.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-continuation',
+          outcome: 'finished',
+        }),
       ]);
       await runtime.shutdown();
     } finally {
@@ -801,10 +826,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime(logger);
-      const finishes = [];
-      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+      const published = collectOperation('run-background-completed');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       const input = await enqueueInputStarted(fake);
       enqueueProviderState(fake, 'running');
       fake.stdout.enqueue(encoder.encode([
@@ -844,7 +870,12 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueProviderState(fake, 'idle');
 
       await expect(start).resolves.toBe('expected-session');
-      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+      expect(terminalEvents(published.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-background-completed',
+          outcome: 'finished',
+        }),
+      ]);
       expect(logger.info).not.toHaveBeenCalledWith(
         'Claude CLI became idle while a background continuation remains pending',
         expect.anything(),
@@ -863,10 +894,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime(logger);
-      const finishes = [];
-      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+      const published = collectOperation('run-background-pending');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       const input = await enqueueInputStarted(fake);
       enqueueProviderState(fake, 'running');
       fake.stdout.enqueue(encoder.encode([
@@ -896,7 +928,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         await Promise.resolve();
       }
 
-      expect(finishes).toEqual([]);
+      expect(terminalEvents(published.events)).toEqual([]);
       expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
       expect(logger.info).toHaveBeenCalledWith(
         'Claude CLI became idle while a background continuation remains pending',
@@ -932,14 +964,19 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       ].join('\n') + '\n'));
 
       await expect(start).resolves.toBe('expected-session');
-      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+      expect(terminalEvents(published.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-background-pending',
+          outcome: 'finished',
+        }),
+      ]);
       await runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;
     }
   });
 
-  it('logs and retires provider activity without an active Garcon turn', async () => {
+  it('[TLV5-L07.05-CLAUDE-UNIT-01] logs and retires provider activity without an active Garcon turn', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
     const logger = createLogger();
@@ -985,15 +1022,16 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const failures = [];
-      runtime.onFailed((_chatId, message) => failures.push(message));
-      const start = runtime.startClaudeCliSession(startOptions());
+      const published = collectOperation('run-idle-without-result');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await enqueueInputStarted(fake);
 
       enqueueProviderState(fake, 'idle');
 
       await expect(start).resolves.toBe('expected-session');
-      expect(failures).toEqual([
+      expect(failureMessages(published.events)).toEqual([
         'Claude CLI became idle before the submitted message produced a terminal result.',
       ]);
       expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
@@ -1009,10 +1047,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const messages = [];
-      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
+      const published = collectOperation('run-live-tool-result');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode([
         JSON.stringify({
@@ -1045,7 +1084,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       ].join('\n') + '\n'));
 
       await expect(start).resolves.toBe('expected-session');
-      expect(messages).toMatchObject([
+      expect(publishedMessages(published.events)).toMatchObject([
         { type: 'tool-result', toolId: 'tool-1', isError: false },
         { type: 'assistant-message', content: 'done' },
       ]);
@@ -1062,10 +1101,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const finishes = [];
-      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+      const published = collectOperation('run-correlated-result');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       const input = await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'result',
@@ -1076,7 +1116,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       }) + '\n'));
       await Promise.resolve();
 
-      expect(finishes).toEqual([]);
+      expect(terminalEvents(published.events)).toEqual([]);
       expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
 
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
@@ -1089,7 +1129,12 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueProviderState(fake, 'idle');
 
       await expect(start).resolves.toBe('expected-session');
-      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+      expect(terminalEvents(published.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-correlated-result',
+          outcome: 'finished',
+        }),
+      ]);
       runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;
@@ -1103,10 +1148,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const failures = [];
-      runtime.onFailed((chatId, errorMessage) => failures.push({ chatId, errorMessage }));
+      const first = collectOperation('run-setup-failure');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: first.operation,
+      }));
       const input = await waitForWrittenUserMessage(fake);
       fake.stdout.enqueue(new TextEncoder().encode([
         JSON.stringify({
@@ -1125,14 +1171,17 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       ].join('\n') + '\n'));
 
       await expect(start).resolves.toBe('expected-session');
-      expect(failures).toEqual([{
-        chatId: 'chat-1',
-        errorMessage: 'queryParams builder failed: invalid runtime configuration',
-      }]);
+      expect(failureMessages(first.events)).toEqual([
+        'queryParams builder failed: invalid runtime configuration',
+      ]);
       expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(false);
 
       startedInputByFake.set(fake, input.uuid);
-      const retry = runtime.runClaudeTurn(startOptions({ command: 'retry after setup failure' }));
+      const retryPublished = collectOperation('run-setup-retry');
+      const retry = runtime.runClaudeTurn(startOptions({
+        command: 'retry after setup failure',
+        operation: retryPublished.operation,
+      }));
       await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode([
         JSON.stringify({
@@ -1152,7 +1201,13 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         }),
       ].join('\n') + '\n'));
       await retry;
-      expect(failures).toHaveLength(1);
+      expect(failureMessages(first.events)).toHaveLength(1);
+      expect(terminalEvents(retryPublished.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-setup-retry',
+          outcome: 'finished',
+        }),
+      ]);
       runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;
@@ -1167,10 +1222,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
       try {
         const runtime = createRuntime();
-        const failures = [];
-        runtime.onFailed((_chatId, errorMessage) => failures.push(errorMessage));
+        const published = collectOperation(`run-input-${state}`);
 
-        const start = runtime.startClaudeCliSession(startOptions());
+        const start = runtime.startClaudeCliSession(startOptions({
+          operation: published.operation,
+        }));
         const input = await waitForWrittenUserMessage(fake);
         fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
           type: 'command_lifecycle',
@@ -1179,7 +1235,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         }) + '\n'));
 
         await expect(start).resolves.toBe('expected-session');
-        expect(failures).toEqual([
+        expect(failureMessages(published.events)).toEqual([
           state === 'completed'
             ? 'Claude CLI marked the submitted message complete without starting it or producing a response.'
             : 'Claude CLI discarded the submitted message before it started.',
@@ -1198,10 +1254,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const failures = [];
-      runtime.onFailed((chatId, errorMessage) => failures.push({ chatId, errorMessage }));
+      const published = collectOperation('run-empty-response');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'result',
@@ -1215,10 +1272,9 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueProviderState(fake, 'idle');
 
       await expect(start).resolves.toBe('expected-session');
-      expect(failures).toEqual([{
-        chatId: 'chat-1',
-        errorMessage: 'Claude CLI completed the submitted message without producing a response.',
-      }]);
+      expect(failureMessages(published.events)).toEqual([
+        'Claude CLI completed the submitted message without producing a response.',
+      ]);
       runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;
@@ -1232,10 +1288,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const failures = [];
-      runtime.onFailed((chatId, errorMessage) => failures.push({ chatId, errorMessage }));
+      const published = collectOperation('run-structured-error');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'result',
@@ -1252,10 +1309,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueProviderState(fake, 'idle');
 
       await expect(start).resolves.toBe('expected-session');
-      expect(failures).toEqual([{
-        chatId: 'chat-1',
-        errorMessage: 'API Error: 529 overloaded',
-      }]);
+      expect(failureMessages(published.events)).toEqual(['API Error: 529 overloaded']);
       runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;
@@ -1270,10 +1324,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime(logger);
-      const failures = [];
-      runtime.onFailed((_chatId, errorMessage) => failures.push(errorMessage));
+      const published = collectOperation('run-api-retry');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode([
         JSON.stringify({
@@ -1302,7 +1357,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       await expect(start).resolves.toBe('expected-session');
       expect(logger.warn).toHaveBeenCalledWith('Claude API request is retrying', {
         chatId: 'chat-1',
-        turnId: null,
+        turnId: 'run-api-retry',
         sessionId: 'expected',
         processId: null,
         matchedUserInput: true,
@@ -1312,7 +1367,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         errorStatus: 529,
         error: 'overloaded',
       });
-      expect(failures).toEqual([
+      expect(failureMessages(published.events)).toEqual([
         'Claude CLI completed the submitted message without producing a response.'
           + ' Last API retry: 529 overloaded (attempt 10/10).',
       ]);
@@ -1329,9 +1384,10 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const messages = [];
-      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
-      const start = runtime.startClaudeCliSession(startOptions());
+      const published = collectOperation('run-permission-cancel');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       await enqueueInputStarted(fake);
 
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
@@ -1344,21 +1400,27 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
           tool_use_id: 'tool-1',
         },
       }) + '\n'));
-      for (let attempt = 0; attempt < 10 && messages.length === 0; attempt += 1) {
+      for (let attempt = 0; attempt < 10 && permissionEvents(published.events).length === 0; attempt += 1) {
         await Promise.resolve();
       }
-      expect(messages.map((message) => message.type)).toEqual(['permission-request']);
+      expect(permissionEvents(published.events).map((event) => event.lifecycle.kind)).toEqual([
+        'requested',
+      ]);
 
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'control_cancel_request',
         request_id: 'cli-permission-1',
       }) + '\n'));
-      for (let attempt = 0; attempt < 10 && messages.length < 2; attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < 10 && permissionEvents(published.events).length < 2;
+        attempt += 1
+      ) {
         await Promise.resolve();
       }
-      expect(messages.map((message) => message.type)).toEqual([
-        'permission-request',
-        'permission-cancelled',
+      expect(permissionEvents(published.events).map((event) => event.lifecycle.kind)).toEqual([
+        'requested',
+        'cancelled',
       ]);
 
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
@@ -1466,9 +1528,10 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
       try {
         const runtime = createRuntime();
-        const messages = [];
-        runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
-        const start = runtime.startClaudeCliSession(startOptions());
+        const published = collectOperation(`run-permission-${name}`);
+        const start = runtime.startClaudeCliSession(startOptions({
+          operation: published.operation,
+        }));
         await enqueueInputStarted(fake);
 
         fake.stdout.enqueue(encoder.encode(JSON.stringify({
@@ -1481,22 +1544,28 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
             tool_use_id: 'tool-1',
           },
         }) + '\n'));
-        for (let attempt = 0; attempt < 10 && messages.length === 0; attempt += 1) {
+        for (
+          let attempt = 0;
+          attempt < 10 && permissionEvents(published.events).length === 0;
+          attempt += 1
+        ) {
           await Promise.resolve();
         }
 
         settle(fake);
         await start;
-        for (let attempt = 0; attempt < 10 && messages.length < 2; attempt += 1) {
+        for (
+          let attempt = 0;
+          attempt < 10 && permissionEvents(published.events).length < 2;
+          attempt += 1
+        ) {
           await Promise.resolve();
         }
         expect(
-          messages
-            .filter((message) => message.type.startsWith('permission-'))
-            .map((message) => message.type),
+          permissionEvents(published.events).map((event) => event.lifecycle.kind),
         ).toEqual([
-          'permission-request',
-          'permission-cancelled',
+          'requested',
+          'cancelled',
         ]);
         await runtime.shutdown();
       } finally {
@@ -1512,11 +1581,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const messages = [];
-      const failures = [];
       const events = [];
-      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
-      runtime.onFailed((_chatId, message) => failures.push(message));
       const start = runtime.startClaudeCliSession(startOptions({
         operation: { runId: 'run-1', publish: (event) => events.push(event) },
       }));
@@ -1532,7 +1597,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
           tool_use_id: 'tool-1',
         },
       }) + '\n'));
-      for (let attempt = 0; attempt < 10 && messages.length === 0; attempt += 1) {
+      for (let attempt = 0; attempt < 10 && permissionEvents(events).length === 0; attempt += 1) {
         await Promise.resolve();
       }
       fake.proc.stdin.flush.mockImplementationOnce(() => Promise.reject(
@@ -1543,15 +1608,15 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       expect(permission).toMatchObject({
         lifecycle: {
           kind: 'requested',
-          requestId: messages[0].permissionRequestId,
-          incarnation: messages[0].incarnation,
+          requestId: expect.any(String),
+          incarnation: expect.any(String),
         },
       });
       await expect(permission.decision.respond({ allow: true, alwaysAllow: false }))
         .rejects.toThrow('permission flush exploded');
 
       await start;
-      expect(failures).toEqual([
+      expect(failureMessages(events)).toEqual([
         'Claude CLI write failed: permission flush exploded',
       ]);
       await runtime.shutdown();
@@ -1567,15 +1632,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
     try {
       const runtime = createRuntime();
-      const processing = [];
-      runtime.onProcessing((chatId, isProcessing) => {
-        processing.push({ chatId, isProcessing });
-      });
-      const failed = new Promise((resolve) => {
-        runtime.onFailed((chatId, errorMessage) => resolve({ chatId, errorMessage }));
-      });
+      const published = collectOperation('run-wrong-session');
 
-      const start = runtime.startClaudeCliSession(startOptions());
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'system',
         subtype: 'init',
@@ -1583,12 +1644,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       }) + '\n'));
 
       await expect(start).rejects.toThrow('Claude CLI process was retired');
-      await expect(failed).resolves.toEqual({
-        chatId: 'chat-1',
-        errorMessage: 'Unexpected Claude session ID: wrong-session',
-      });
+      expect(failureMessages(published.events)).toEqual([
+        'Unexpected Claude session ID: wrong-session',
+      ]);
       expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
-      expect(processing).toContainEqual({ chatId: 'chat-1', isProcessing: false });
+      expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(false);
     } finally {
       Bun.spawn = originalSpawn;
     }
@@ -1612,10 +1672,12 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       expect(Bun.spawn).toHaveBeenCalledTimes(1);
 
       fake.proc.kill.mockClear();
+      const resumedOperation = collectOperation('run-resume-options');
       const resumed = runtime.runClaudeTurn({
         command: 'continue',
         agentSessionId: 'expected-session',
         chatId: 'chat-1',
+        operation: resumedOperation.operation,
       });
       await Promise.resolve();
 
@@ -2060,15 +2122,11 @@ describe('ClaudeCliRuntime steering', () => {
 
     try {
       runtime = createRuntime();
-      const finishes = [];
-      const failures = [];
-      runtime.onFinished((chatId, exitCode, metadata) => {
-        finishes.push({ chatId, exitCode, metadata });
-      });
-      runtime.onFailed((chatId, message, metadata) => {
-        failures.push({ chatId, message, metadata });
-      });
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const published = collectOperation('run-deferred-idle');
+      const run = runtime.startClaudeCliSession(startOptions({
+        turnId: 'turn-active',
+        operation: published.operation,
+      }));
       const original = await enqueueInputStarted(fake);
       const preparation = deferred();
       const steering = runtime.steer(steerRequest(
@@ -2079,8 +2137,7 @@ describe('ClaudeCliRuntime steering', () => {
       enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
       enqueueProviderState(fake, 'idle');
       await Bun.sleep(1);
-      expect(finishes).toEqual([]);
-      expect(failures).toEqual([]);
+      expect(terminalEvents(published.events)).toEqual([]);
 
       preparation.resolve();
       await expect(steering).resolves.toEqual({ kind: 'accepted' });
@@ -2103,12 +2160,12 @@ describe('ClaudeCliRuntime steering', () => {
       });
 
       await run;
-      expect(failures).toEqual([]);
-      expect(finishes).toMatchObject([{
-        chatId: 'chat-1',
-        exitCode: 0,
-        metadata: { turnId: 'turn-active' },
-      }]);
+      expect(terminalEvents(published.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-deferred-idle',
+          outcome: 'finished',
+        }),
+      ]);
     } finally {
       await runtime?.shutdown();
       Bun.spawn = originalSpawn;
@@ -2123,9 +2180,11 @@ describe('ClaudeCliRuntime steering', () => {
 
     try {
       runtime = createRuntime();
-      const finishes = [];
-      runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const published = collectOperation('run-steering-lifecycles');
+      const run = runtime.startClaudeCliSession(startOptions({
+        turnId: 'turn-active',
+        operation: published.operation,
+      }));
       const original = await enqueueInputStarted(fake);
       const sharedMessageId = '019ff704-7b0c-70a1-b062-875461e5b578';
       const first = runtime.steer(steerRequest(
@@ -2163,7 +2222,7 @@ describe('ClaudeCliRuntime steering', () => {
       enqueueAssistantAndResult(fake, secondFrame.uuid, 'batched reply');
       enqueueProviderState(fake, 'idle');
       await Bun.sleep(1);
-      expect(finishes).toEqual([]);
+      expect(terminalEvents(published.events)).toEqual([]);
 
       enqueueCliMessage(fake, {
         type: 'command_lifecycle',
@@ -2171,7 +2230,7 @@ describe('ClaudeCliRuntime steering', () => {
         state: 'completed',
       });
       await Bun.sleep(1);
-      expect(finishes).toEqual([]);
+      expect(terminalEvents(published.events)).toEqual([]);
       enqueueCliMessage(fake, {
         type: 'command_lifecycle',
         command_uuid: secondFrame.uuid,
@@ -2179,7 +2238,12 @@ describe('ClaudeCliRuntime steering', () => {
       });
 
       await run;
-      expect(finishes).toMatchObject([{ turnId: 'turn-active' }]);
+      expect(terminalEvents(published.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-steering-lifecycles',
+          outcome: 'finished',
+        }),
+      ]);
     } finally {
       await runtime?.shutdown();
       Bun.spawn = originalSpawn;
@@ -2194,9 +2258,11 @@ describe('ClaudeCliRuntime steering', () => {
 
     try {
       runtime = createRuntime(createLogger(), { steerIdleFenceTimeoutMs: 2 });
-      const failures = [];
-      runtime.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const published = collectOperation('run-steering-timeout');
+      const run = runtime.startClaudeCliSession(startOptions({
+        turnId: 'turn-active',
+        operation: published.operation,
+      }));
       const original = await enqueueInputStarted(fake);
       await expect(runtime.steer(steerRequest(
         runtime.captureSteerTarget('expected-session'),
@@ -2207,10 +2273,9 @@ describe('ClaudeCliRuntime steering', () => {
       await Bun.sleep(10);
       await run;
 
-      expect(failures).toMatchObject([{
-        message: 'Claude CLI did not make progress on accepted steering input.',
-        metadata: { turnId: 'turn-active' },
-      }]);
+      expect(failureMessages(published.events)).toEqual([
+        'Claude CLI did not make progress on accepted steering input.',
+      ]);
       expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
     } finally {
       await runtime?.shutdown();
@@ -2226,9 +2291,11 @@ describe('ClaudeCliRuntime steering', () => {
 
     try {
       runtime = createRuntime();
-      const finishes = [];
-      runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const published = collectOperation('run-preparation-failure');
+      const run = runtime.startClaudeCliSession(startOptions({
+        turnId: 'turn-active',
+        operation: published.operation,
+      }));
       const original = await enqueueInputStarted(fake);
       const preparation = deferred();
       const steering = runtime.steer(steerRequest(
@@ -2239,13 +2306,18 @@ describe('ClaudeCliRuntime steering', () => {
       enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
       enqueueProviderState(fake, 'idle');
       await Bun.sleep(1);
-      expect(finishes).toEqual([]);
+      expect(terminalEvents(published.events)).toEqual([]);
 
       const preparationError = new Error('delivery preparation failed');
       preparation.reject(preparationError);
       await expect(steering).rejects.toBe(preparationError);
       await run;
-      expect(finishes).toMatchObject([{ turnId: 'turn-active' }]);
+      expect(terminalEvents(published.events)).toEqual([
+        expect.objectContaining({
+          runId: 'run-preparation-failure',
+          outcome: 'finished',
+        }),
+      ]);
       expect(writtenUserMessages(fake)).toHaveLength(1);
     } finally {
       await runtime?.shutdown();
@@ -2291,9 +2363,11 @@ describe('ClaudeCliRuntime steering', () => {
 
     try {
       runtime = createRuntime();
-      const failures = [];
-      runtime.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
-      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const published = collectOperation('run-replayed-steer');
+      const run = runtime.startClaudeCliSession(startOptions({
+        turnId: 'turn-active',
+        operation: published.operation,
+      }));
       const original = await enqueueInputStarted(fake);
       await expect(runtime.steer(steerRequest(
         runtime.captureSteerTarget('expected-session'),
@@ -2310,10 +2384,9 @@ describe('ClaudeCliRuntime steering', () => {
       });
       await run;
 
-      expect(failures).toMatchObject([{
-        message: 'Claude CLI replayed steering input without accepting it into the command queue.',
-        metadata: { turnId: 'turn-active' },
-      }]);
+      expect(failureMessages(published.events)).toEqual([
+        'Claude CLI replayed steering input without accepting it into the command queue.',
+      ]);
     } finally {
       await runtime?.shutdown();
       Bun.spawn = originalSpawn;

@@ -12,22 +12,19 @@ import type {
   AgentLogger,
   AgentPermissionResponseCapability,
 } from '@garcon/server-agent-interface';
+import type { CodexRuntimeOperation } from '../runtime-types.js';
 
 // A Codex call together with the capability core handed it. The app-server multiplexes every chat
 // over one process-wide stream, so the operation carries the route and the event carries none.
-export interface CodexOperation {
-  readonly chatId: string;
-  readonly runId: string;
-  readonly publish: AgentRuntimePublisher;
-}
+export type CodexOperation = CodexRuntimeOperation;
 
 export function codexOperation(
-  request: { chatId: string; clientRequestId?: string; turnId?: string },
+  request: { chatId: string; runId?: string; clientRequestId?: string; turnId?: string },
   publish: AgentRuntimePublisher,
 ): CodexOperation {
   return Object.freeze({
     chatId: request.chatId,
-    runId: request.turnId ?? request.clientRequestId ?? '',
+    runId: request.runId ?? request.turnId ?? request.clientRequestId ?? '',
     publish,
   });
 }
@@ -39,7 +36,7 @@ export function publishRows(
   operation: CodexOperation | undefined,
 ): void {
   if (!messages.length) return;
-  publish(logger, chatId, operation, (runId) => ({ type: 'messages', rows: runtimeRows(messages), runId }));
+  publish(logger, chatId, operation, () => ({ type: 'rows', rows: runtimeRows(messages) }));
 }
 
 export function publishPermissionRequested(
@@ -90,10 +87,9 @@ export function publishPermissionCancelled(
 export function publishFinished(
   logger: AgentLogger,
   chatId: string,
-  exitCode: number,
   operation: CodexOperation | undefined,
 ): void {
-  publish(logger, chatId, operation, (runId) => ({ type: 'run-ended', runId, outcome: 'finished', exitCode }));
+  publish(logger, chatId, operation, (runId) => ({ type: 'run-ended', runId, outcome: 'finished' }));
 }
 
 export function publishFailed(

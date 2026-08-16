@@ -210,7 +210,7 @@ export class ClaudeTurnSteeringState {
 export interface ClaudeSteerableTurn {
   readonly protocol: Pick<ClaudeTurnState, 'inputStarted' | 'abortRequested'>;
   readonly steering: ClaudeTurnSteeringState;
-  readonly eventMetadata: { readonly turnId?: string };
+  readonly turnId: string;
 }
 
 export interface ClaudeSteerableSession {
@@ -315,7 +315,7 @@ export class ClaudeSteeringController {
       }
       this.#options.logger.debug('Claude steering input accepted for native delivery', {
         chatId: captured.session.chatId,
-        turnId: captured.activeTurn.eventMetadata.turnId ?? null,
+        turnId: captured.activeTurn.turnId,
         sessionId: captured.session.id.slice(0, 8),
         inputId: nativeInputId.slice(0, 8),
         writeMs: Date.now() - writeStartedAt,
@@ -338,7 +338,7 @@ export class ClaudeSteeringController {
     if (observation.kind === 'started') {
       this.#options.logger.debug('Claude steering input started', {
         chatId: session.chatId,
-        turnId: activeTurn.eventMetadata.turnId ?? null,
+        turnId: activeTurn.turnId,
         sessionId: session.id.slice(0, 8),
         inputId: observation.uuid.slice(0, 8),
         source: observation.source,
@@ -369,7 +369,7 @@ export class ClaudeSteeringController {
     }
     this.#options.logger.warn('Claude steering input ended without normal completion', {
       chatId: session.chatId,
-      turnId: activeTurn.eventMetadata.turnId ?? null,
+      turnId: activeTurn.turnId,
       sessionId: session.id.slice(0, 8),
       inputId: observation.uuid.slice(0, 8),
       phase: observation.phase,

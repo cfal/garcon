@@ -1,8 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { LazyPiRuntime } from '../lazy-runtime.ts';
 
-class FakePiRuntime extends AgentEventEmitterRuntime {
+class FakePiRuntime {
   startSession = mock(async () => ({ agentSessionId: 'pi-session', nativePath: null }));
   runTurn = mock(async () => {});
   abort = mock(() => true);
@@ -56,18 +55,20 @@ describe('LazyPiRuntime', () => {
     expect(loaded.steer).toHaveBeenCalledWith(request);
   });
 
-  it('shares an in-flight load and forwards runtime events', async () => {
+  it('shares an in-flight load and preserves each concrete operation', async () => {
     const loaded = new FakePiRuntime();
     const loadRuntime = mock(async () => loaded);
     const runtime = new LazyPiRuntime(loadRuntime);
-    const received = mock(() => {});
-    runtime.onMessages(received);
+    const startOperation = { runId: 'run-start', publish: mock(() => {}) };
+    const turnOperation = { runId: 'run-turn', publish: mock(() => {}) };
+    const startRequest = { operation: startOperation };
+    const turnRequest = { agentSessionId: 'pi-session', operation: turnOperation };
 
-    await Promise.all([runtime.startSession({}), runtime.runTurn({})]);
-    loaded.emitMessages('chat-1', ['hello']);
+    await Promise.all([runtime.startSession(startRequest), runtime.runTurn(turnRequest)]);
 
     expect(loadRuntime).toHaveBeenCalledTimes(1);
-    expect(received).toHaveBeenCalledWith('chat-1', ['hello']);
+    expect(loaded.startSession).toHaveBeenCalledWith(startRequest);
+    expect(loaded.runTurn).toHaveBeenCalledWith(turnRequest);
   });
 
   it('cancels only the matching queued turn when aborted during loading', async () => {

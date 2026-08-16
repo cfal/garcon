@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
 import type { PermissionMode } from '@garcon/common/chat-modes';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import {
@@ -10,7 +9,6 @@ import {
 } from './sse-events.js';
 
 export interface OpenCodeTurnContext {
-  eventMetadata: RuntimeEventMetadata;
   operation: AgentRuntimeOperation;
   // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
   providerMessageId: string | null;
@@ -56,11 +54,9 @@ export interface OpenCodeSession {
 const RECENT_EVENT_ID_LIMIT = 512;
 
 export function createOpenCodeTurnContext(
-  eventMetadata: RuntimeEventMetadata,
   operation: AgentRuntimeOperation,
 ): OpenCodeTurnContext {
   return {
-    eventMetadata,
     operation,
     providerMessageId: null,
     providerPromptPartId: createOpenCodePromptPartId(),

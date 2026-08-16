@@ -27,6 +27,35 @@ function envelope(event) {
   return { directory: '/repo', payload: event };
 }
 
+function collectOperation(runId = 'run-default') {
+  const events = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+      },
+    },
+  };
+}
+
+function publishedMessages(events) {
+  return events.flatMap((event) => (
+    event.type === 'rows' ? event.rows.map((row) => row.message) : []
+  ));
+}
+
+function terminalEvents(events) {
+  return events.filter((event) => event.type === 'run-ended');
+}
+
+function failureMessages(events) {
+  return terminalEvents(events)
+    .filter((event) => event.outcome === 'failed')
+    .map((event) => event.error?.message);
+}
+
 function completedAssistantEnvelope({
   eventId,
   messageId,
@@ -175,13 +204,17 @@ function promptThrough(eventStream, promptAsync) {
 }
 
 async function start(runtime, overrides = {}) {
+  const { runId = 'run-default', ...requestOverrides } = overrides;
+  const published = collectOperation(runId);
   await runtime.startSession({
     command: 'hello',
     chatId: 'chat-1',
     projectPath: '/repo',
     permissionMode: 'default',
-    ...overrides,
+    operation: published.operation,
+    ...requestOverrides,
   });
+  return published;
 }
 
 describe('OpenCodeRuntime abort', () => {
@@ -315,13 +348,12 @@ describe('OpenCodeRuntime abort', () => {
         server: { close },
       })),
     });
-    const failures = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
+    const published = await start(runtime);
+    await waitFor(() => failureMessages(published.events).length === 1);
 
-    await start(runtime);
-    await waitFor(() => failures.length === 1);
-
-    expect(failures).toEqual(['OpenCode event stream heartbeat timed out after 10ms']);
+    expect(failureMessages(published.events)).toEqual([
+      'OpenCode event stream heartbeat timed out after 10ms',
+    ]);
     expect(runtime.isRunning('session-1')).toBe(false);
     expect(close).toHaveBeenCalledTimes(1);
     await runtime.shutdown();
@@ -360,16 +392,14 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       mock(() => prompt.promise),
     );
-    const failures = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
-    await start(runtime);
+    const published = await start(runtime);
 
     await expect(runtime.abort('session-1')).resolves.toBe(true);
     prompt.reject(new Error('request cancelled by abort'));
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
     runtime.shutdown();
   });
 
@@ -387,11 +417,13 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ data: true })),
       promptAsync,
     );
-    const failures = [];
-    runtime.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
-    await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
+    const firstPublished = await start(runtime, {
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+    });
     await expect(runtime.abort('session-1')).resolves.toBe(true);
 
+    const successorPublished = collectOperation('run-successor');
     const successor = runtime.runTurn({
       command: 'successor',
       agentSessionId: 'session-1',
@@ -400,6 +432,7 @@ describe('OpenCodeRuntime abort', () => {
       permissionMode: 'default',
       clientRequestId: 'req-b',
       turnId: 'turn-b',
+      operation: successorPublished.operation,
     });
     const successorOutcome = successor.then(
       () => null,
@@ -411,7 +444,8 @@ describe('OpenCodeRuntime abort', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(failures).toEqual([]);
+    expect(failureMessages(firstPublished.events)).toEqual([]);
+    expect(failureMessages(successorPublished.events)).toEqual([]);
     expect(runtime.isRunning('session-1')).toBe(true);
 
     await expect(runtime.abort('session-1')).resolves.toBe(true);
@@ -428,12 +462,11 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const messages = [];
-    const finishes = [];
-    runtime.onMessages((_chatId, emitted, metadata) => messages.push({ emitted, metadata }));
-    runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
-
-    await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
+    const firstPublished = await start(runtime, {
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+      runId: 'run-a',
+    });
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.updated',
@@ -468,8 +501,9 @@ describe('OpenCodeRuntime abort', () => {
       messageId: 'assistant-a',
       parentId: 'user-a',
     }));
-    await waitFor(() => finishes.length === 1);
+    await waitFor(() => terminalEvents(firstPublished.events).length === 1);
 
+    const successorPublished = collectOperation('run-b');
     const successor = runtime.runTurn({
       command: 'successor',
       agentSessionId: 'session-1',
@@ -478,6 +512,7 @@ describe('OpenCodeRuntime abort', () => {
       permissionMode: 'default',
       clientRequestId: 'req-b',
       turnId: 'turn-b',
+      operation: successorPublished.operation,
     });
     await waitFor(() => promptAsync.mock.calls.length === 2);
 
@@ -506,8 +541,10 @@ describe('OpenCodeRuntime abort', () => {
     await Promise.resolve();
 
     expect(runtime.isRunning('session-1')).toBe(true);
-    expect(messages).toEqual([]);
-    expect(finishes).toHaveLength(1);
+    expect(publishedMessages(firstPublished.events)).toEqual([]);
+    expect(publishedMessages(successorPublished.events)).toEqual([]);
+    expect(terminalEvents(firstPublished.events)).toHaveLength(1);
+    expect(terminalEvents(successorPublished.events)).toEqual([]);
 
     eventStream.push(envelope({
       id: 'evt_0005',
@@ -538,7 +575,7 @@ describe('OpenCodeRuntime abort', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(runtime.isRunning('session-1')).toBe(true);
-    expect(finishes).toHaveLength(1);
+    expect(terminalEvents(successorPublished.events)).toEqual([]);
 
     eventStream.push(envelope({
       id: 'evt_0008',
@@ -573,13 +610,18 @@ describe('OpenCodeRuntime abort', () => {
     }));
 
     await expect(successor).resolves.toBeUndefined();
-    expect(messages).toHaveLength(1);
-    expect(messages[0].emitted[0].content).toBe('current');
-    expect(messages[0].metadata).toMatchObject({ clientRequestId: 'req-b', turnId: 'turn-b' });
-    expect(finishes).toEqual([
-      expect.objectContaining({ clientRequestId: 'req-a', turnId: 'turn-a' }),
-      expect.objectContaining({ clientRequestId: 'req-b', turnId: 'turn-b' }),
-    ]);
+    expect(publishedMessages(firstPublished.events)).toEqual([]);
+    expect(publishedMessages(successorPublished.events)).toMatchObject([{ content: 'current' }]);
+    expect(terminalEvents(firstPublished.events)).toEqual([{
+      type: 'run-ended',
+      runId: 'run-a',
+      outcome: 'finished',
+    }]);
+    expect(terminalEvents(successorPublished.events)).toEqual([{
+      type: 'run-ended',
+      runId: 'run-b',
+      outcome: 'finished',
+    }]);
 
     eventStream.close();
     runtime.shutdown();
@@ -594,10 +636,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const finishes = [];
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime);
+    const published = await start(runtime);
     eventStream.push(envelope({
       id: 'evt_sync_0001',
       type: 'sync',
@@ -639,7 +678,7 @@ describe('OpenCodeRuntime abort', () => {
       parentId: 'user-a',
     }));
 
-    await waitFor(() => finishes.length === 1);
+    await waitFor(() => terminalEvents(published.events).length === 1);
     expect(runtime.isRunning('session-1')).toBe(false);
 
     eventStream.close();
@@ -655,12 +694,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const messages = [];
-    const finishes = [];
-    runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime);
+    const published = await start(runtime);
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.updated',
@@ -746,9 +780,8 @@ describe('OpenCodeRuntime abort', () => {
       parentId: 'user-new',
     }));
 
-    await waitFor(() => finishes.length === 1);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].content).toBe('current');
+    await waitFor(() => terminalEvents(published.events).length === 1);
+    expect(publishedMessages(published.events)).toMatchObject([{ content: 'current' }]);
 
     eventStream.close();
     runtime.shutdown();
@@ -764,19 +797,19 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt },
     );
-    const failures = [];
     const unhandled = [];
     const onUnhandledRejection = (reason) => unhandled.push(reason);
-    runtime.onFailed((_chatId, message) => failures.push(message));
     process.on('unhandledRejection', onUnhandledRejection);
 
     try {
+      const published = collectOperation('run-pending-submit');
       const turn = runtime.runTurn({
         command: 'hello',
         agentSessionId: 'session-1',
         chatId: 'chat-1',
         projectPath: '/repo',
         permissionMode: 'default',
+        operation: published.operation,
       });
       const outcome = turn.then(
         () => null,
@@ -785,7 +818,7 @@ describe('OpenCodeRuntime abort', () => {
       await waitFor(() => turnPrompt.mock.calls.length === 1);
 
       eventStream.close();
-      await waitFor(() => failures.length === 1);
+      await waitFor(() => failureMessages(published.events).length === 1);
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       promptRequest.reject(new Error('prompt submit failed after stream loss'));
@@ -816,19 +849,18 @@ describe('OpenCodeRuntime abort', () => {
       subscribe,
       { sseRetryDelayMs: 1_000 },
     );
-    const failures = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
-
-    await start(runtime);
+    const firstPublished = await start(runtime, { runId: 'run-first' });
     firstStream.close();
-    await waitFor(() => failures.length === 1);
+    await waitFor(() => failureMessages(firstPublished.events).length === 1);
 
+    const successorPublished = collectOperation('run-successor');
     const successor = runtime.runTurn({
       command: 'successor',
       agentSessionId: 'session-1',
       chatId: 'chat-1',
       projectPath: '/repo',
       permissionMode: 'default',
+      operation: successorPublished.operation,
     });
     const successorOutcome = successor.then(
       () => null,
@@ -836,7 +868,7 @@ describe('OpenCodeRuntime abort', () => {
     );
     await waitFor(() => promptAsync.mock.calls.length === 2);
     secondStream.close();
-    await waitFor(() => failures.length === 2);
+    await waitFor(() => failureMessages(successorPublished.events).length === 1);
     expect(await successorOutcome).toMatchObject({ message: 'OpenCode event stream ended' });
 
     runtime.shutdown();
@@ -891,12 +923,9 @@ describe('OpenCodeRuntime abort', () => {
       sseRetryDelayMs: 1,
       unavailableRetryMs: 5,
     });
-    const failures = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
-
-    await start(runtime);
+    const published = await start(runtime);
     firstStream.close();
-    await waitFor(() => failures.length === 1);
+    await waitFor(() => failureMessages(published.events).length === 1);
     await waitFor(() => firstClose.mock.calls.length === 1);
     await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -914,23 +943,26 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => prompt.promise),
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
     );
-    const failures = [];
-    runtime.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
-
-    await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
+    const published = await start(runtime, {
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+      runId: 'run-a',
+    });
     eventStream.close();
-    await waitFor(() => failures.length === 1);
+    await waitFor(() => failureMessages(published.events).length === 1);
 
     expect(runtime.isRunning('session-1')).toBe(false);
-    expect(failures).toEqual([{
-      message: 'OpenCode event stream ended',
-      metadata: expect.objectContaining({ clientRequestId: 'req-a', turnId: 'turn-a' }),
+    expect(terminalEvents(published.events)).toEqual([{
+      type: 'run-ended',
+      runId: 'run-a',
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: 'OpenCode event stream ended' },
     }]);
 
     prompt.reject(new Error('late prompt cancellation'));
     await Promise.resolve();
     await Promise.resolve();
-    expect(failures).toHaveLength(1);
+    expect(terminalEvents(published.events)).toHaveLength(1);
     runtime.shutdown();
   });
 
@@ -943,14 +975,11 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const messages = [];
-    const failures = [];
-    const finishes = [];
-    runtime.onMessages((_chatId, emitted, metadata) => messages.push({ emitted, metadata }));
-    runtime.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
+    const published = await start(runtime, {
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+      runId: 'run-a',
+    });
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.part.updated',
@@ -971,7 +1000,7 @@ describe('OpenCodeRuntime abort', () => {
       error: { name: 'ProviderError', data: { message: 'provider said no' } },
       finish: 'error',
     }));
-    await waitFor(() => failures.length === 1);
+    await waitFor(() => failureMessages(published.events).length === 1);
 
     eventStream.push(envelope({
       id: 'evt_0003',
@@ -982,14 +1011,11 @@ describe('OpenCodeRuntime abort', () => {
     await Promise.resolve();
 
     expect(runtime.isRunning('session-1')).toBe(false);
-    expect(failures).toEqual([{
-      message: 'provider said no',
-      metadata: expect.objectContaining({ clientRequestId: 'req-a', turnId: 'turn-a' }),
-    }]);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].emitted[0]).toMatchObject({ type: 'error', content: 'provider said no' });
-    expect(messages[0].metadata).toMatchObject({ clientRequestId: 'req-a', turnId: 'turn-a' });
-    expect(finishes).toEqual([]);
+    expect(failureMessages(published.events)).toEqual(['provider said no']);
+    expect(publishedMessages(published.events)).toMatchObject([
+      { type: 'error', content: 'provider said no' },
+    ]);
+    expect(terminalEvents(published.events)).toHaveLength(1);
 
     eventStream.close();
     runtime.shutdown();
@@ -1010,20 +1036,8 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { permissionReply, turnPrompt },
     );
-    const messages = [];
-    const operationEvents = [];
-    const failures = [];
-    const finishes = [];
-    runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
-    runtime.onFailed((_chatId, message) => failures.push(message));
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime, {
-      operation: {
-        runId: 'run-a',
-        publish: (event) => operationEvents.push(event),
-      },
-    });
+    const published = collectOperation('run-a');
+    await start(runtime, { operation: published.operation });
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.updated',
@@ -1140,8 +1154,8 @@ describe('OpenCodeRuntime abort', () => {
         tool: { messageID: 'assistant-b' },
       },
     }));
-    await waitFor(() => operationEvents.some((event) => event.type === 'permission'));
-    const permission = operationEvents.find((event) => event.type === 'permission');
+    await waitFor(() => published.events.some((event) => event.type === 'permission'));
+    const permission = published.events.find((event) => event.type === 'permission');
     await permission.decision.respond({ allow: true });
     expect(permissionReply.mock.calls.at(-1)[0]).toMatchObject({
       requestID: 'permission-after-compaction',
@@ -1173,17 +1187,17 @@ describe('OpenCodeRuntime abort', () => {
       },
     });
 
-    await waitFor(() => finishes.length === 1);
-    expect(messages.map((message) => message.type)).toEqual([
-      'permission-request',
-      'assistant-message',
+    await waitFor(() => terminalEvents(published.events).length === 1);
+    expect(published.events.map((event) => event.type)).toEqual([
+      'permission',
+      'rows',
+      'run-ended',
     ]);
-    expect(messages.at(-1)).toMatchObject({
+    expect(publishedMessages(published.events)).toEqual([expect.objectContaining({
       type: 'assistant-message',
       content: 'recovered',
-    });
-    expect(operationEvents.filter((event) => event.type === 'messages')).toHaveLength(1);
-    expect(failures).toEqual([]);
+    })]);
+    expect(failureMessages(published.events)).toEqual([]);
     eventStream.close();
     runtime.shutdown();
   });
@@ -1197,12 +1211,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime);
+    const published = await start(runtime);
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.updated',
@@ -1237,9 +1246,9 @@ describe('OpenCodeRuntime abort', () => {
       finish: 'error',
     }));
 
-    await waitFor(() => failures.length === 1);
-    expect(failures).toEqual(['cannot compact']);
-    expect(finishes).toEqual([]);
+    await waitFor(() => failureMessages(published.events).length === 1);
+    expect(failureMessages(published.events)).toEqual(['cannot compact']);
+    expect(terminalEvents(published.events)).toHaveLength(1);
     eventStream.close();
     runtime.shutdown();
   });
@@ -1253,19 +1262,19 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const failures = [];
     const unhandled = [];
     const onUnhandledRejection = (reason) => unhandled.push(reason);
-    runtime.onFailed((_chatId, message) => failures.push(message));
     process.on('unhandledRejection', onUnhandledRejection);
 
     try {
+      const published = collectOperation('run-session-error');
       const turn = runtime.runTurn({
         command: 'hello',
         agentSessionId: 'session-1',
         chatId: 'chat-1',
         projectPath: '/repo',
         permissionMode: 'default',
+        operation: published.operation,
       });
       const outcome = turn.then(
         () => null,
@@ -1295,7 +1304,7 @@ describe('OpenCodeRuntime abort', () => {
       }));
 
       expect(await outcome).toMatchObject({ message: 'truncated stream' });
-      expect(failures).toEqual(['truncated stream']);
+      expect(failureMessages(published.events)).toEqual(['truncated stream']);
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(unhandled).toEqual([]);
     } finally {
@@ -1311,10 +1320,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({})),
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
     );
-    const failures = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
-
-    await start(runtime);
+    const published = await start(runtime);
     await expect(runtime.abort('session-1')).resolves.toBe(true);
     eventStream.push(envelope({
       id: 'evt_0001',
@@ -1327,7 +1333,7 @@ describe('OpenCodeRuntime abort', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
     eventStream.close();
     runtime.shutdown();
   });
@@ -1354,18 +1360,16 @@ describe('OpenCodeRuntime abort', () => {
         turnPrompt: promptThrough(secondStream, promptAsync),
       },
     );
-    const messages = [];
-    const failures = [];
-    const finishes = [];
-    runtime.onMessages((_chatId, emitted, metadata) => messages.push({ emitted, metadata }));
-    runtime.onFailed((_chatId, message) => failures.push(message));
-    runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
-
-    await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
+    const firstPublished = await start(runtime, {
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+      runId: 'run-a',
+    });
     firstStream.close();
-    await waitFor(() => failures.length === 1);
+    await waitFor(() => failureMessages(firstPublished.events).length === 1);
     expect(runtime.isRunning('session-1')).toBe(false);
 
+    const successorPublished = collectOperation('run-b');
     const successor = runtime.runTurn({
       command: 'successor',
       agentSessionId: 'session-1',
@@ -1374,6 +1378,7 @@ describe('OpenCodeRuntime abort', () => {
       permissionMode: 'default',
       clientRequestId: 'req-b',
       turnId: 'turn-b',
+      operation: successorPublished.operation,
     });
     await waitFor(() => abort.mock.calls.length === 1);
     expect(abort).toHaveBeenCalledTimes(1);
@@ -1431,13 +1436,12 @@ describe('OpenCodeRuntime abort', () => {
         error: { name: 'ProviderError', data: { message: 'retired turn failure' } },
       },
     }));
-    await waitFor(() => messages.length === 1);
+    await waitFor(() => publishedMessages(firstPublished.events).length === 1);
 
     expect(runtime.isRunning('session-1')).toBe(false);
-    expect(messages[0].emitted[0].content).toBe('stale');
-    expect(messages[0].metadata).toMatchObject({ clientRequestId: 'req-a', turnId: 'turn-a' });
-    expect(finishes).toEqual([]);
-    expect(failures).toHaveLength(1);
+    expect(publishedMessages(firstPublished.events)[0].content).toBe('stale');
+    expect(terminalEvents(successorPublished.events)).toEqual([]);
+    expect(failureMessages(firstPublished.events)).toHaveLength(1);
 
     quiescence.resolve({ data: true });
     await waitFor(() => promptAsync.mock.calls.length === 2);
@@ -1488,15 +1492,16 @@ describe('OpenCodeRuntime abort', () => {
       parentId: 'user-b',
     }));
 
-    await waitFor(() => messages.length === 2);
-    await waitFor(() => finishes.length === 1);
+    await waitFor(() => publishedMessages(successorPublished.events).length === 1);
+    await waitFor(() => terminalEvents(successorPublished.events).length === 1);
     await expect(successor).resolves.toBeUndefined();
-    expect(messages).toHaveLength(2);
-    expect(messages[1].emitted[0].content).toBe('current');
-    expect(messages[1].metadata).toMatchObject({ clientRequestId: 'req-b', turnId: 'turn-b' });
-    expect(finishes).toEqual([
-      expect.objectContaining({ clientRequestId: 'req-b', turnId: 'turn-b' }),
-    ]);
+    expect(publishedMessages(firstPublished.events)).toMatchObject([{ content: 'stale' }]);
+    expect(publishedMessages(successorPublished.events)).toMatchObject([{ content: 'current' }]);
+    expect(terminalEvents(successorPublished.events)).toEqual([{
+      type: 'run-ended',
+      runId: 'run-b',
+      outcome: 'finished',
+    }]);
 
     secondStream.close();
     runtime.shutdown();
@@ -1511,14 +1516,10 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime);
+    const firstPublished = await start(runtime, { runId: 'run-a' });
     await expect(runtime.abort('session-1')).resolves.toBe(true);
 
+    const successorPublished = collectOperation('run-b');
     const successor = runtime.runTurn({
       command: 'successor',
       agentSessionId: 'session-1',
@@ -1527,6 +1528,7 @@ describe('OpenCodeRuntime abort', () => {
       permissionMode: 'default',
       clientRequestId: 'req-b',
       turnId: 'turn-b',
+      operation: successorPublished.operation,
     });
     await waitFor(() => promptAsync.mock.calls.length === 2);
 
@@ -1541,7 +1543,8 @@ describe('OpenCodeRuntime abort', () => {
     }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(failures).toEqual([]);
+    expect(failureMessages(firstPublished.events)).toEqual([]);
+    expect(failureMessages(successorPublished.events)).toEqual([]);
     expect(runtime.isRunning('session-1')).toBe(true);
 
     eventStream.push(envelope({
@@ -1588,10 +1591,11 @@ describe('OpenCodeRuntime abort', () => {
     }));
 
     await expect(successor).resolves.toBeUndefined();
-    expect(failures).toEqual([]);
+    expect(failureMessages(successorPublished.events)).toEqual([]);
     // One terminal for the aborted turn and one for the successor; the late
     // unwind mints nothing extra.
-    expect(finishes).toHaveLength(2);
+    expect(terminalEvents(firstPublished.events)).toHaveLength(1);
+    expect(terminalEvents(successorPublished.events)).toHaveLength(1);
 
     eventStream.close();
     runtime.shutdown();
@@ -1607,10 +1611,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const finishes = [];
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime);
+    const published = await start(runtime);
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.part.updated',
@@ -1635,14 +1636,14 @@ describe('OpenCodeRuntime abort', () => {
     }));
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(finishes).toEqual([]);
+    expect(terminalEvents(published.events)).toEqual([]);
     expect(runtime.isRunning('session-1')).toBe(true);
 
     acknowledged.resolve({ data: true });
     await expect(aborting).resolves.toBe(true);
     // The acknowledged stop emits exactly one terminal; the skipped unwind
     // idle adds none.
-    expect(finishes).toEqual(['finished']);
+    expect(terminalEvents(published.events)).toHaveLength(1);
     expect(runtime.isRunning('session-1')).toBe(false);
     eventStream.close();
     runtime.shutdown();
@@ -1658,10 +1659,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const finishes = [];
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime);
+    const published = await start(runtime);
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.part.updated',
@@ -1685,11 +1683,11 @@ describe('OpenCodeRuntime abort', () => {
       parentId: 'user-a',
     }));
     await new Promise((resolve) => setImmediate(resolve));
-    expect(finishes).toEqual([]);
+    expect(terminalEvents(published.events)).toEqual([]);
 
     acknowledged.resolve({ error: { message: 'abort rejected' } });
     await expect(aborting).resolves.toBe(false);
-    expect(finishes).toEqual(['finished']);
+    expect(terminalEvents(published.events)).toHaveLength(1);
     expect(runtime.isRunning('session-1')).toBe(false);
     eventStream.close();
     runtime.shutdown();
@@ -1705,12 +1703,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
       { turnPrompt: promptThrough(eventStream, promptAsync) },
     );
-    const failures = [];
-    const finishes = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
-    runtime.onFinished(() => finishes.push('finished'));
-
-    await start(runtime);
+    const published = await start(runtime);
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.part.updated',
@@ -1742,12 +1735,11 @@ describe('OpenCodeRuntime abort', () => {
       finish: 'error',
     }));
     await new Promise((resolve) => setImmediate(resolve));
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
 
     acknowledged.resolve({ error: { message: 'abort rejected' } });
     await expect(aborting).resolves.toBe(false);
-    expect(failures).toEqual(['cannot compact']);
-    expect(finishes).toEqual([]);
+    expect(failureMessages(published.events)).toEqual(['cannot compact']);
     expect(runtime.isRunning('session-1')).toBe(false);
     eventStream.close();
     runtime.shutdown();
@@ -1765,15 +1757,12 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => new Promise(() => {})),
       subscribe,
     );
-    const failures = [];
-    runtime.onFailed((_chatId, message) => failures.push(message));
-
-    await start(runtime);
+    const published = await start(runtime);
     subscriptionOptions.onSseError(new Error('socket reset'));
     eventStream.close();
-    await waitFor(() => failures.length === 1);
+    await waitFor(() => failureMessages(published.events).length === 1);
 
-    expect(failures).toEqual(['socket reset']);
+    expect(failureMessages(published.events)).toEqual(['socket reset']);
     expect(subscribe).toHaveBeenCalledTimes(1);
     runtime.shutdown();
   });

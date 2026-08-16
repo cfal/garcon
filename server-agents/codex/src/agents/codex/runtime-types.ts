@@ -1,5 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type { CodexGoalCommand } from './goal-command.js';
 
 export type CodexConfigValue =
@@ -36,6 +37,11 @@ export interface CodexExecutionRequest {
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Record<string, string>;
   readonly codexConfig?: CodexProviderConfig;
+  readonly operation: CodexRuntimeOperation;
+}
+
+export interface CodexRuntimeOperation extends AgentRuntimeOperation {
+  readonly chatId: string;
 }
 
 export interface CodexStartRequest extends CodexExecutionRequest {

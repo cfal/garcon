@@ -14,11 +14,9 @@ import {
   type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import { convertFactoryToolUse } from "./tool-use-converter.js";
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import {
   assertFactoryExecutionOpen,
-  factoryEventMetadata,
   markFactoryExecutionStarted,
   type FactoryCommandImage,
   type FactoryResumeRequest,
@@ -29,7 +27,6 @@ import { FactoryModelCatalogService } from './factory-models.js';
 import { inferFactoryModelSupportsImages, isFactoryCustomModel } from './factory-model-id.js';
 import { buildFactoryCliEnv } from './factory-env.js';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { findFactorySessionFileBySessionId } from './history-loader.js';
 import { convertFactoryAssistantText, visibleFactoryAssistantText } from './factory-text.js';
@@ -50,17 +47,14 @@ interface FactorySession {
   id: string;
   activeTurn: FactoryTurnContext | null;
   readonly sources: Set<FactoryTurnContext>;
-  sessionCreatedEmitted: boolean;
   lastActivityAt: number;
 }
 
 interface FactoryTurnContext {
-  readonly eventMetadata: RuntimeEventMetadata;
   readonly operation: AgentRuntimeOperation;
   readonly startedAt: number;
   cleanup?: (() => Promise<void>) | undefined;
   isRunning: boolean;
-  processingStarted: boolean;
   completed: boolean;
   aborted: boolean;
   sourceRetired: boolean;
@@ -73,6 +67,7 @@ interface FactoryStartedSessionTracker {
   readonly promise: Promise<FactoryStartedSession>;
   readonly reject: (error: unknown) => void;
   readonly resolve: (value: FactoryStartedSession) => void;
+  readonly onActivated: ((value: FactoryStartedSession) => void) | undefined;
   identityObserved: boolean;
   settled: boolean;
 }
@@ -386,25 +381,21 @@ function createFactorySession(chatId: string, sessionId: string): FactorySession
     id: sessionId,
     activeTurn: null,
     sources: new Set(),
-    sessionCreatedEmitted: Boolean(sessionId),
     lastActivityAt: Date.now(),
   };
 }
 
 function createFactoryTurn(options: {
   readonly cleanup?: (() => Promise<void>) | undefined;
-  readonly eventMetadata: RuntimeEventMetadata;
   readonly operation: AgentRuntimeOperation;
   readonly startedSession: FactoryStartedSessionTracker | null;
 }): FactoryTurnContext {
   return {
     cleanup: options.cleanup,
-    eventMetadata: options.eventMetadata,
     operation: options.operation,
     startedSession: options.startedSession,
     startedAt: Date.now(),
     isRunning: true,
-    processingStarted: false,
     completed: false,
     aborted: false,
     sourceRetired: false,
@@ -413,7 +404,7 @@ function createFactoryTurn(options: {
   };
 }
 
-export class FactoryCliRuntime extends AgentEventEmitterRuntime {
+export class FactoryCliRuntime {
   readonly #config: FactoryConfig;
   readonly #logger: AgentLogger;
   readonly #models: FactoryModelCatalogService;
@@ -430,7 +421,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     readonly logger?: AgentLogger;
     readonly models?: FactoryModelCatalogService;
   } = {}) {
-    super();
     this.#config = options.config ?? DEFAULT_CONFIG;
     this.#logger = options.logger ?? SILENT_LOGGER;
     this.#models = options.models ?? new FactoryModelCatalogService(this.#config);
@@ -447,7 +437,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     turn.isRunning = false;
     if (session.activeTurn === turn) {
       session.activeTurn = null;
-      if (turn.processingStarted) this.emitProcessing(session.chatId, false);
     }
     const resolve = turn.resolve;
     turn.resolve = null;
@@ -478,11 +467,11 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  #routeEvent(
+  async #routeEvent(
     session: FactorySession,
     turn: FactoryTurnContext,
     event: FactoryCliEvent,
-  ): void {
+  ): Promise<void> {
     if (turn.sourceRetired) return;
     const type = typeof event.type === 'string' ? event.type : '';
     switch (type) {
@@ -499,11 +488,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         }
         session.id = initEvent.session_id;
 
-        if (!session.sessionCreatedEmitted) {
-          this.emitSessionCreated(session.chatId);
-          session.sessionCreatedEmitted = true;
-        }
-
         if (turn.startedSession && !turn.startedSession.identityObserved) {
           const startedSession = turn.startedSession;
           const agentSessionId = session.id;
@@ -512,21 +496,20 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
           // Factory chats are persisted only with Droid's real JSONL path.
           // A missing path is treated as startup failure instead of inventing
           // a placeholder that cannot support reliable resume/reload.
-          void resolveFactoryStartedNativePath(agentSessionId)
-            .then((nativePath) => {
-              startedSession.resolve({ agentSessionId, nativePath });
-            })
-            .catch((error) => {
-              this.#logger.warn('Factory native path resolution failed.', {
-                sessionId: agentSessionId,
-                error: error instanceof Error ? error.message : String(error),
-              });
-              turn.aborted = true;
-              if (turn.process && !turn.process.killed) {
-                turn.process.kill();
-              }
-              startedSession.reject(error);
+          try {
+            const nativePath = await resolveFactoryStartedNativePath(agentSessionId);
+            const result = { agentSessionId, nativePath };
+            startedSession.onActivated?.(result);
+            startedSession.resolve(result);
+          } catch (error) {
+            this.#logger.warn('Factory native path resolution failed.', {
+              sessionId: agentSessionId,
+              error: error instanceof Error ? error.message : String(error),
             });
+            turn.aborted = true;
+            if (turn.process && !turn.process.killed) turn.process.kill();
+            startedSession.reject(error);
+          }
         }
         break;
       }
@@ -566,14 +549,12 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       case 'completion':
       case 'result':
         if (!turn.completed) {
+          this.#completeTurn(session, turn);
           this.#publishTurnEvent(session, turn, {
             type: 'run-ended',
             runId: turn.operation.runId,
             outcome: 'finished',
-            exitCode: 0,
           });
-          this.#completeTurn(session, turn);
-          this.emitFinished(session.chatId, 0, turn.eventMetadata);
         }
         break;
 
@@ -604,7 +585,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            this.#routeEvent(session, turn, JSON.parse(line) as FactoryCliEvent);
+            await this.#routeEvent(session, turn, JSON.parse(line) as FactoryCliEvent);
           } catch {
             this.#logger.warn('Factory emitted invalid JSON.', {
               sessionId: session.id,
@@ -622,14 +603,13 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
           this.#completeTurn(session, turn);
         } else if (!turn.aborted) {
           const message = `Factory process exited before completion (code ${exitCode})`;
+          this.#completeTurn(session, turn);
           this.#publishTurnEvent(session, turn, {
             type: 'run-ended',
             runId: turn.operation.runId,
             outcome: 'failed',
             error: { code: 'PROVIDER_FAILURE', message },
           });
-          this.#completeTurn(session, turn);
-          this.emitFailed(session.chatId, message, turn.eventMetadata);
         } else {
           this.#completeTurn(session, turn);
         }
@@ -677,7 +657,9 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  #createSessionTracker(): FactoryStartedSessionTracker {
+  #createSessionTracker(
+    onActivated: ((value: FactoryStartedSession) => void) | undefined,
+  ): FactoryStartedSessionTracker {
     let resolveRef: ((value: FactoryStartedSession) => void) | null = null;
     let rejectRef: ((error: unknown) => void) | null = null;
     const promise = new Promise<FactoryStartedSession>((resolve, reject) => {
@@ -697,6 +679,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         tracker.settled = true;
         resolveRef?.(value);
       },
+      onActivated,
       identityObserved: false,
       settled: false,
     };
@@ -709,11 +692,9 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     messages: ChatMessage[],
   ): void {
     this.#publishTurnEvent(session, turn, {
-      type: 'messages',
+      type: 'rows',
       rows: runtimeRows(messages),
-      runId: turn.operation.runId,
     });
-    this.emitMessages(session.chatId, messages, turn.eventMetadata);
   }
 
   #publishTurnEvent(
@@ -763,11 +744,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     const supportsImages = modelMetadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
     const args = buildFactoryArgs(request, reasoningEffort);
     const { cleanup, prompt } = await buildFactoryPrompt(request.command, request.images, supportsImages, request.permissionMode);
-    const startedSession = this.#createSessionTracker();
+    const startedSession = this.#createSessionTracker(request.onSessionActivated);
     const session = createFactorySession(request.chatId, '');
     const turn = createFactoryTurn({
       cleanup,
-      eventMetadata: factoryEventMetadata(request, 'chat-start'),
       operation: request.operation,
       startedSession,
     });
@@ -775,8 +755,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
 
     try {
       if (request.executionAdmission) await markFactoryExecutionStarted(request);
-      turn.processingStarted = true;
-      this.emitProcessing(request.chatId, true);
       this.#spawnFactory(
         session,
         turn,
@@ -824,7 +802,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       ?? createFactorySession(request.chatId, request.agentSessionId);
     const turn = createFactoryTurn({
       cleanup,
-      eventMetadata: factoryEventMetadata(request),
       operation: request.operation,
       startedSession: null,
     });
@@ -834,8 +811,6 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
 
     try {
       if (request.executionAdmission) await markFactoryExecutionStarted(request);
-      turn.processingStarted = true;
-      this.emitProcessing(request.chatId, true);
       this.#spawnFactory(
         session,
         turn,

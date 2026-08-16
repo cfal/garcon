@@ -10,7 +10,20 @@ import {
   OPENCODE_PERMISSION_KEYS,
 } from '../opencode.js';
 import { convertOpencodePermissionTool } from '../permission-tool-converter.js';
-import { EnterPlanModeToolUseMessage, PermissionRequestMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '@garcon/common/chat-types';
+import { EnterPlanModeToolUseMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '@garcon/common/chat-types';
+
+function collectOperation(runId) {
+  const events = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+      },
+    },
+  };
+}
 
 function createAsyncEventStream(promptHarness) {
   const events = [{ payload: { id: 'evt_connected', type: 'server.connected', properties: {} } }];
@@ -339,10 +352,12 @@ describe('OpenCodeRuntime permissions', () => {
   });
 
   it('passes comprehensive bypass permission rules at session creation', async () => {
+    const published = collectOperation('run-bypass');
     await provider.startSession({
       command: 'test command',
       chatId: '123',
       permissionMode: 'bypassPermissions',
+      operation: published.operation,
     });
 
     expect(client.session.create.mock.calls[0][0]).toEqual({
@@ -357,13 +372,13 @@ describe('OpenCodeRuntime permissions', () => {
   it('auto-replies once for manual bypass permission events without emitting a permission row', async () => {
     const eventStream = createAsyncEventStream(promptHarness);
     client.global.event.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const published = collectOperation('run-manual');
 
     await provider.startSession({
       command: 'test command',
       chatId: '123',
       permissionMode: 'manualBypass',
+      operation: published.operation,
     });
 
     eventStream.push({
@@ -412,7 +427,7 @@ describe('OpenCodeRuntime permissions', () => {
       requestID: 'req-manual',
       reply: 'once',
     });
-    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(published.events.some((event) => event.type === 'permission')).toBe(false);
 
     eventStream.close();
     provider.shutdown();
@@ -426,20 +441,20 @@ describe('OpenCodeRuntime permissions', () => {
       .mockImplementationOnce(() => Promise.resolve({ data: { id: 'sess-1' } }))
       .mockImplementationOnce(() => Promise.resolve({ data: { id: 'sess-2' } }));
     client.permission.reply.mockImplementation(() => reply.promise);
-    const failures = [];
-    const finishes = [];
-    provider.onFailed((chatId, message) => failures.push({ chatId, message }));
-    provider.onFinished((chatId) => finishes.push(chatId));
+    const manual = collectOperation('run-manual');
+    const healthy = collectOperation('run-healthy');
 
     await provider.startSession({
       command: 'manual command',
       chatId: 'chat-manual',
       permissionMode: 'manualBypass',
+      operation: manual.operation,
     });
     await provider.startSession({
       command: 'healthy command',
       chatId: 'chat-healthy',
       permissionMode: 'default',
+      operation: healthy.operation,
     });
 
     eventStream.push({
@@ -536,16 +551,22 @@ describe('OpenCodeRuntime permissions', () => {
         },
       },
     });
-    await waitFor(() => finishes.length === 1);
-    expect(finishes).toEqual(['chat-healthy']);
-    expect(failures).toEqual([]);
+    await waitFor(() => healthy.events.some((event) => event.type === 'run-ended'));
+    expect(healthy.events).toContainEqual({
+      type: 'run-ended',
+      runId: 'run-healthy',
+      outcome: 'finished',
+    });
+    expect(manual.events.some((event) => event.type === 'run-ended')).toBe(false);
 
     reply.reject(new Error('permission endpoint failed'));
-    await waitFor(() => failures.length === 1);
-    expect(failures).toEqual([{
-      chatId: 'chat-manual',
-      message: 'permission endpoint failed',
-    }]);
+    await waitFor(() => manual.events.some((event) => event.type === 'run-ended'));
+    expect(manual.events).toContainEqual({
+      type: 'run-ended',
+      runId: 'run-manual',
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: 'permission endpoint failed' },
+    });
     expect(client.global.event).toHaveBeenCalledTimes(1);
 
     eventStream.close();

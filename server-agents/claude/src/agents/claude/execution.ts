@@ -23,7 +23,6 @@ import {
   createClaudeNativePath,
   prepareClaudeNativeSessionRelocation,
 } from './native-path.js';
-import { claudeEventMetadata } from './runtime-types.js';
 import type { ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeConfig } from '../../config.js';
 
@@ -55,6 +54,26 @@ export class ClaudeExecution implements AgentRuntimeExecution {
       images: request.attachments,
       envOverrides,
       operation: runtimeOperation(request.runId, publish),
+      onSessionActivated: () => undefined,
+    };
+    const established = {
+      agentSessionId,
+      nativeSession: this.nativeSessions.encode({
+        path: nativePath,
+        agentSessionId,
+        modelEndpointId: request.endpoint?.endpointId ?? null,
+      }),
+      nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
+    };
+    let resolveActivation!: () => void;
+    let rejectActivation!: (error: unknown) => void;
+    const activation = new Promise<void>((resolve, reject) => {
+      resolveActivation = resolve;
+      rejectActivation = reject;
+    });
+    runtimeRequest.onSessionActivated = () => {
+      publish({ type: 'session', session: established });
+      resolveActivation();
     };
     void this.runtime.startClaudeCliSession(runtimeRequest).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -66,19 +85,12 @@ export class ClaudeExecution implements AgentRuntimeExecution {
         agentSessionId,
         request.chatId,
         message,
-        claudeEventMetadata(runtimeRequest, 'chat-start'),
         runtimeRequest.operation,
       );
+      rejectActivation(error);
     });
-    return {
-      agentSessionId,
-      nativeSession: this.nativeSessions.encode({
-        path: nativePath,
-        agentSessionId,
-        modelEndpointId: request.endpoint?.endpointId ?? null,
-      }),
-      nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
-    };
+    await activation;
+    return established;
   }
 
   async resume(
@@ -190,8 +202,6 @@ function executionFields(request: AgentRuntimeExecutionContext) {
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
     claudeThinkingMode: claudeThinkingMode(request.settings.values.claudeThinkingMode),
-    clientRequestId: request.runId,
-    turnId: request.runId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),

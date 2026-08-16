@@ -5,7 +5,6 @@ import {
   CursorAskQuestionToolUseMessage,
   CursorCreatePlanToolUseMessage,
   ErrorMessage,
-  PermissionRequestMessage,
 } from '@garcon/common/chat-types';
 import { AcpTransport } from '../../../acp/transport.js';
 import { AcpAgentRuntime } from '../../shared/acp-agent-runtime.js';
@@ -53,6 +52,12 @@ function collectOperation(runId) {
       return new Promise((resolve) => waiters.push({ predicate, resolve }));
     },
   };
+}
+
+function publishedMessages(events) {
+  return events.flatMap((event) => (
+    event.type === 'rows' ? event.rows.map((row) => row.message) : []
+  ));
 }
 
 function option(id, currentValue, values, extra = {}) {
@@ -346,31 +351,10 @@ function createRuntimeHarness(options = {}) {
     createTransport: acp.createTransport,
     logger: options.logger,
   });
-  const messages = [];
-  const messageWaiters = [];
-
-  runtime.onMessages((_chatId, incoming) => {
-    messages.push(...incoming);
-    for (let i = messageWaiters.length - 1; i >= 0; i -= 1) {
-      const waiter = messageWaiters[i];
-      const match = messages.find(waiter.predicate);
-      if (!match) continue;
-      messageWaiters.splice(i, 1);
-      waiter.resolve(match);
-    }
-  });
 
   return {
     acp,
     runtime,
-    messages,
-    waitForMessage(predicate) {
-      const existing = messages.find(predicate);
-      if (existing) return Promise.resolve(existing);
-      return new Promise((resolve) => {
-        messageWaiters.push({ predicate, resolve });
-      });
-    },
   };
 }
 
@@ -412,13 +396,18 @@ describe('Cursor ACP runtime', () => {
   });
 
   it('fails before prompting when Cursor reports a model config mismatch', async () => {
-    const { acp, runtime, waitForMessage } = createRuntimeHarness({
+    const { acp, runtime } = createRuntimeHarness({
       configMismatch: { configId: 'reasoning', currentValue: 'medium' },
     });
-    await expect(runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high' })))
+    const published = collectOperation('run-mismatch');
+    await expect(runtime.startSession(startRequest({
+      model: 'gpt-5.5-extra-high',
+      operation: published.operation,
+    })))
       .rejects.toThrow('Cursor did not apply requested model gpt-5.5-extra-high');
 
-    const error = await waitForMessage((message) => message instanceof ErrorMessage);
+    const error = publishedMessages(published.events)
+      .find((message) => message instanceof ErrorMessage);
     expect(error.content).toContain('Cursor did not apply requested model gpt-5.5-extra-high');
     expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
 
@@ -452,7 +441,7 @@ describe('Cursor ACP runtime', () => {
       content: { text: 'still belongs to the established source' },
     });
     const late = await first.waitForEvent((event) => (
-      event.type === 'messages'
+      event.type === 'rows'
       && JSON.stringify(event).includes('still belongs to the established source')
     ));
     expect(JSON.stringify(late)).toContain('still belongs to the established source');
@@ -475,7 +464,7 @@ describe('Cursor ACP runtime', () => {
       content: { text: 'late A output' },
     });
     await first.waitForEvent((event) => (
-      event.type === 'messages' && JSON.stringify(event).includes('late A output')
+      event.type === 'rows' && JSON.stringify(event).includes('late A output')
     ));
 
     const nextTurn = runtime.runTurn(startRequest({
@@ -494,9 +483,9 @@ describe('Cursor ACP runtime', () => {
     client.finishPrompt();
     await nextTurn;
 
-    expect(first.events.map((event) => event.type)).toEqual(['run-ended', 'messages']);
+    expect(first.events.map((event) => event.type)).toEqual(['run-ended', 'rows']);
     expect(JSON.stringify(first.events)).not.toContain('B output');
-    expect(second.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(second.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
     expect(JSON.stringify(second.events)).not.toContain('late A output');
     runtime.shutdown();
   });
@@ -526,7 +515,7 @@ describe('Cursor ACP runtime', () => {
       content: { text: 'only chat A receives this' },
     });
     await first.waitForEvent((event) => (
-      event.type === 'messages' && JSON.stringify(event).includes('only chat A receives this')
+      event.type === 'rows' && JSON.stringify(event).includes('only chat A receives this')
     ));
     expect(colliding.events).toEqual([]);
     runtime.shutdown();
@@ -540,7 +529,7 @@ describe('Cursor ACP runtime', () => {
       error: mock(),
     };
     const operation = collectOperation('run-named');
-    const { acp, runtime, messages } = createRuntimeHarness({ logger });
+    const { acp, runtime } = createRuntimeHarness({ logger });
     await runtime.startSession(startRequest({ operation: operation.operation }));
     await acp.waitForClientMethod('session/prompt');
 
@@ -555,7 +544,7 @@ describe('Cursor ACP runtime', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(messages.some((message) => message.content === 'must be dropped')).toBe(false);
+    expect(JSON.stringify(operation.events)).not.toContain('must be dropped');
     expect(operation.events).toEqual([]);
     expect(logger.warn).toHaveBeenCalledWith(
       'Dropped an ACP session update without its owning native session.',
@@ -641,7 +630,7 @@ describe('Cursor ACP runtime', () => {
   });
 
   it('[TLV5-L07.08-CURSOR-UNIT-01] ignores buffered updates from a retired ACP client after reconnect', async () => {
-    const { acp, runtime, messages } = createRuntimeHarness({ keepKilledStreamOpen: true });
+    const { acp, runtime } = createRuntimeHarness({ keepKilledStreamOpen: true });
     const first = collectOperation('run-a');
     const second = collectOperation('run-b');
     const started = await runtime.startSession(startRequest({
@@ -679,8 +668,6 @@ describe('Cursor ACP runtime', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(messages.some((message) => message.content === 'late output from A')).toBe(false);
-    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
     expect(first.events).toEqual([]);
     expect(second.events).toEqual([]);
 
@@ -692,7 +679,7 @@ describe('Cursor ACP runtime', () => {
   });
 
   it('emits standard ACP permission requests and responds with selected option outcomes', async () => {
-    const { acp, runtime, waitForMessage } = createRuntimeHarness();
+    const { acp, runtime } = createRuntimeHarness();
     const operation = collectOperation('run-1');
     const started = await runtime.startSession(startRequest({ operation: operation.operation }));
 
@@ -716,16 +703,15 @@ describe('Cursor ACP runtime', () => {
       },
     });
 
-    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
+    const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    const request = permission.lifecycle;
     expect(request.requestedTool).toBeInstanceOf(BashToolUseMessage);
     expect(request.requestedTool.command).toBe('echo hello');
-
-    const permission = await operation.waitForEvent((event) => event.type === 'permission');
     expect(permission).toMatchObject({
       runId: 'run-1',
       lifecycle: {
         kind: 'requested',
-        requestId: request.permissionRequestId,
+        requestId: request.requestId,
         incarnation: request.incarnation,
       },
     });
@@ -782,8 +768,12 @@ describe('Cursor ACP runtime', () => {
   });
 
   it('auto-approves standard ACP permission requests in manual bypass without emitting a row', async () => {
-    const { acp, runtime, messages } = createRuntimeHarness();
-    await runtime.startSession(startRequest({ permissionMode: 'manualBypass' }));
+    const { acp, runtime } = createRuntimeHarness();
+    const published = collectOperation('run-bypass');
+    await runtime.startSession(startRequest({
+      permissionMode: 'manualBypass',
+      operation: published.operation,
+    }));
     await acp.waitForClientMethod('session/prompt');
 
     acp.serverRequest({
@@ -804,15 +794,16 @@ describe('Cursor ACP runtime', () => {
     expect(response.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'allow-once' },
     });
-    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(published.events.some((event) => event.type === 'permission')).toBe(false);
 
     acp.finishPrompt();
     runtime.shutdown();
   });
 
   it('uses live manual bypass setting updates for subsequent ACP permission requests', async () => {
-    const { acp, runtime, messages } = createRuntimeHarness();
-    const started = await runtime.startSession(startRequest());
+    const { acp, runtime } = createRuntimeHarness();
+    const published = collectOperation('run-updated-bypass');
+    const started = await runtime.startSession(startRequest({ operation: published.operation }));
     await acp.waitForClientMethod('session/prompt');
 
     runtime.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
@@ -834,14 +825,14 @@ describe('Cursor ACP runtime', () => {
     expect(response.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'allow-once' },
     });
-    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(published.events.some((event) => event.type === 'permission')).toBe(false);
 
     acp.finishPrompt();
     runtime.shutdown();
   });
 
   it('emits Cursor ask-question requests and forwards answered responses', async () => {
-    const { acp, runtime, waitForMessage } = createRuntimeHarness();
+    const { acp, runtime } = createRuntimeHarness();
     const operation = collectOperation('run-1');
     await runtime.startSession(startRequest({ operation: operation.operation }));
     await acp.waitForClientMethod('session/prompt');
@@ -860,10 +851,6 @@ describe('Cursor ACP runtime', () => {
       },
     });
 
-    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
-    expect(request.requestedTool).toBeInstanceOf(CursorAskQuestionToolUseMessage);
-    expect(request.requestedTool.questions[0].prompt).toBe('Which mode?');
-
     const answered = {
       outcome: {
         outcome: 'answered',
@@ -871,6 +858,8 @@ describe('Cursor ACP runtime', () => {
       },
     };
     const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    expect(permission.lifecycle.requestedTool).toBeInstanceOf(CursorAskQuestionToolUseMessage);
+    expect(permission.lifecycle.requestedTool.questions[0].prompt).toBe('Which mode?');
     await permission.decision.respond({ allow: true, response: answered });
 
     const response = await acp.waitForWrite((message) => message.id === 'question-1' && message.result);
@@ -881,7 +870,7 @@ describe('Cursor ACP runtime', () => {
   });
 
   it('emits Cursor create-plan requests and can reject them', async () => {
-    const { acp, runtime, waitForMessage } = createRuntimeHarness();
+    const { acp, runtime } = createRuntimeHarness();
     const operation = collectOperation('run-1');
     await runtime.startSession(startRequest({ operation: operation.operation }));
     await acp.waitForClientMethod('session/prompt');
@@ -897,11 +886,9 @@ describe('Cursor ACP runtime', () => {
       },
     });
 
-    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
-    expect(request.requestedTool).toBeInstanceOf(CursorCreatePlanToolUseMessage);
-    expect(request.requestedTool.plan).toBe('Do the work');
-
     const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    expect(permission.lifecycle.requestedTool).toBeInstanceOf(CursorCreatePlanToolUseMessage);
+    expect(permission.lifecycle.requestedTool.plan).toBe('Do the work');
     await permission.decision.respond({ allow: false });
     const response = await acp.waitForWrite((message) => message.id === 'plan-1' && message.result);
     expect(response.result).toEqual({

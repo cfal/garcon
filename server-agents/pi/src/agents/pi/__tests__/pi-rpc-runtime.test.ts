@@ -244,16 +244,6 @@ function baseResumeRequest(overrides = {}) {
   };
 }
 
-function collect(runtime) {
-  const seen = { messages: [], processing: [], finished: [], failed: [], created: [] };
-  runtime.onMessages((chatId, messages) => seen.messages.push({ chatId, messages }));
-  runtime.onProcessing((chatId, isProcessing) => seen.processing.push({ chatId, isProcessing }));
-  runtime.onFinished((chatId) => seen.finished.push(chatId));
-  runtime.onFailed((chatId, message) => seen.failed.push({ chatId, message }));
-  runtime.onSessionCreated((chatId) => seen.created.push(chatId));
-  return seen;
-}
-
 function collectOperation(runId: string) {
   const events: AgentRuntimeEvent[] = [];
   return {
@@ -319,8 +309,12 @@ describe('PiRpcRuntime', () => {
 
   it('starts a session with RPC args, readiness handshake, and no --session flag', async () => {
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    const started = await runtime.startSession(baseStartRequest());
+    const published = collectOperation('run-start');
+    const onSessionActivated = mock(() => {});
+    const started = await runtime.startSession(baseStartRequest({
+      operation: published.operation,
+      onSessionActivated,
+    }));
 
     expect(started.agentSessionId).toBe('pi-session-1');
     expect(started.nativePath).toBe(path.join(tempRoot, 'sessions', 'pi-session-1.jsonl'));
@@ -330,7 +324,7 @@ describe('PiRpcRuntime', () => {
     expect(args).toEqual(expect.arrayContaining(['--model', 'github-copilot/gpt-5.4']));
     expect(args).toEqual(expect.arrayContaining(['--thinking', 'off']));
     expect(args).not.toContain('--session');
-    expect(seen.created).toEqual(['chat-1']);
+    expect(onSessionActivated).toHaveBeenCalledWith(started);
 
     const fake = fakes[0];
     expect(fake.commands.map((command) => command.type)).toEqual([
@@ -344,7 +338,11 @@ describe('PiRpcRuntime', () => {
 
     fake.pushEvent({ type: 'agent_settled' });
     await settleIo();
-    expect(seen.finished).toEqual(['chat-1']);
+    expect(published.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-start',
+      outcome: 'finished',
+    }]);
     await runtime.shutdown();
   });
 
@@ -414,9 +412,9 @@ describe('PiRpcRuntime', () => {
   it('returns initial session identity before prompt preflight completes', async () => {
     spawnOptions.push({ promptBehavior: 'hold' });
     const runtime = createRuntime();
-    const seen = collect(runtime);
+    const published = collectOperation('run-start');
 
-    const started = await runtime.startSession(baseStartRequest());
+    const started = await runtime.startSession(baseStartRequest({ operation: published.operation }));
 
     expect(started.agentSessionId).toBe('pi-session-1');
     expect(runtime.isRunning(started.agentSessionId)).toBe(true);
@@ -424,23 +422,32 @@ describe('PiRpcRuntime', () => {
     expect(runtime.abort(started.agentSessionId)).toBe(true);
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
-    expect(seen.failed).toEqual([]);
-    // The stop is turn-terminal work: one finished event releases the turn.
-    expect(seen.finished).toEqual(['chat-1']);
+    expect(published.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-start',
+      outcome: 'finished',
+    }]);
     await runtime.shutdown();
   });
 
   it('reports an initial prompt rejection after session identity is returned', async () => {
     spawnOptions.push({ promptBehavior: 'reject' });
     const runtime = createRuntime();
-    const seen = collect(runtime);
+    const published = collectOperation('run-start');
 
-    const started = await runtime.startSession(baseStartRequest());
+    const started = await runtime.startSession(baseStartRequest({ operation: published.operation }));
     expect(started.agentSessionId).toBe('pi-session-1');
     await settleIo();
 
-    expect(seen.failed).toHaveLength(1);
-    expect(seen.failed[0].message).toContain('scripted prompt rejection');
+    expect(published.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-start',
+      outcome: 'failed',
+      error: {
+        code: 'PROVIDER_FAILURE',
+        message: expect.stringContaining('scripted prompt rejection'),
+      },
+    }]);
     expect(fakes[0].proc.killed).toBe(true);
     await runtime.shutdown();
   });
@@ -516,15 +523,19 @@ describe('PiRpcRuntime', () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     spawnOptions.push({ killDelayMs: 30 });
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    const first = runtime.runTurn(baseResumeRequest());
+    const firstPublished = collectOperation('run-first');
+    const first = runtime.runTurn(baseResumeRequest({ operation: firstPublished.operation }));
     await waitForActive(runtime);
     fakes[0].pushEvent({ type: 'agent_settled' });
     await first;
-    expect(seen.finished).toHaveLength(1);
+    expect(firstPublished.events).toHaveLength(1);
 
     spawnOptions.push({ modelId: 'gpt-9' });
-    const drift = runtime.runTurn(baseResumeRequest({ model: 'github-copilot/gpt-9' }));
+    const driftPublished = collectOperation('run-drift');
+    const drift = runtime.runTurn(baseResumeRequest({
+      model: 'github-copilot/gpt-9',
+      operation: driftPublished.operation,
+    }));
     await settleIo();
     expect(fakes[0].signals).toEqual(['SIGTERM']);
     expect(spawnMock).toHaveBeenCalledTimes(1);
@@ -533,9 +544,15 @@ describe('PiRpcRuntime', () => {
     fakes[0].pushEvent({ type: 'agent_settled' });
     await waitForActive(runtime);
     expect(spawnMock).toHaveBeenCalledTimes(2);
-    expect(seen.finished).toHaveLength(1);
+    expect(firstPublished.events).toHaveLength(1);
+    expect(driftPublished.events).toEqual([]);
     fakes[1].pushEvent({ type: 'agent_settled' });
     await drift;
+    expect(driftPublished.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-drift',
+      outcome: 'finished',
+    }]);
     await runtime.shutdown();
   });
 
@@ -669,8 +686,8 @@ describe('PiRpcRuntime', () => {
   it('routes tool and assistant events and settles only on agent_settled', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    const turn = runtime.runTurn(baseResumeRequest());
+    const published = collectOperation('run-turn');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
     await waitForActive(runtime);
 
     const fake = fakes[0];
@@ -716,17 +733,22 @@ describe('PiRpcRuntime', () => {
       },
     });
     await settleIo();
-    expect(seen.finished).toEqual([]);
+    expect(published.events.filter((event) => event.type === 'run-ended')).toEqual([]);
 
     // agent_end is a per-run event, not a terminal one.
     fake.pushEvent({ type: 'agent_end', messages: [] });
     await settleIo();
-    expect(seen.finished).toEqual([]);
+    expect(published.events.filter((event) => event.type === 'run-ended')).toEqual([]);
 
     fake.pushEvent({ type: 'agent_settled' });
     await turn;
-    expect(seen.finished).toEqual(['chat-2']);
-    expect(seen.messages.flatMap((entry) => entry.messages)).toHaveLength(3);
+    expect(published.events.filter((event) => event.type === 'run-ended')).toEqual([{
+      type: 'run-ended',
+      runId: 'run-turn',
+      outcome: 'finished',
+    }]);
+    expect(published.events.flatMap((event) => event.type === 'rows' ? event.rows : []))
+      .toHaveLength(3);
     await runtime.shutdown();
   });
 
@@ -769,9 +791,9 @@ describe('PiRpcRuntime', () => {
     await secondTurn;
 
     expect(first.events.map((event) => [event.type, 'runId' in event ? event.runId : null]))
-      .toEqual([['messages', 'run-a'], ['run-ended', 'run-a']]);
+      .toEqual([['rows', null], ['run-ended', 'run-a']]);
     expect(second.events.map((event) => [event.type, 'runId' in event ? event.runId : null]))
-      .toEqual([['messages', 'run-b'], ['run-ended', 'run-b']]);
+      .toEqual([['rows', null], ['run-ended', 'run-b']]);
     expect(JSON.stringify(first.events)).toContain('from operation A');
     expect(JSON.stringify(first.events)).not.toContain('from operation B');
     expect(JSON.stringify(second.events)).toContain('from operation B');
@@ -901,7 +923,7 @@ describe('PiRpcRuntime', () => {
 
     expect(warnings.map(({ message, context }) => [message, context.eventType, context.error]))
       .toEqual([
-        ['Pi publisher rejected an event', 'messages', 'Transcript producer sink is closed'],
+        ['Pi publisher rejected an event', 'rows', 'Transcript producer sink is closed'],
         ['Pi publisher rejected an event', 'run-ended', 'Transcript producer sink is closed'],
       ]);
 
@@ -926,10 +948,9 @@ describe('PiRpcRuntime', () => {
     fake.pushEvent({ type: 'agent_settled' });
     await currentTurn;
 
-    expect(current.events.map((event) => event.type)).toEqual(['messages', 'run-ended']);
+    expect(current.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
     expect(current.events[0]).toMatchObject({
-      type: 'messages',
-      runId: 'run-current',
+      type: 'rows',
       rows: [{ message: { type: 'assistant-message', content: 'accepted current output' } }],
     });
     await runtime.shutdown();
@@ -969,36 +990,23 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('settles the turn even when a lifecycle listener throws', async () => {
-    await fs.writeFile(baseResumeRequest().nativePath, '');
-    const runtime = createRuntime();
-    const seen = collect(runtime);
-    runtime.onProcessing(() => {
-      throw new Error('processing listener failed');
-    });
-    runtime.onFinished(() => {
-      throw new Error('finished listener failed');
-    });
-
-    const turn = runtime.runTurn(baseResumeRequest());
-    await waitForActive(runtime);
-    fakes[0].pushEvent({ type: 'agent_settled' });
-    await turn;
-
-    expect(seen.finished).toEqual(['chat-2']);
-    expect(runtime.isRunning('pi-session-1')).toBe(false);
-    await runtime.shutdown();
-  });
-
   it('fails the turn and retires the session when Pi rejects the prompt', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     spawnOptions.push({ promptBehavior: 'reject' });
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    await expect(runtime.runTurn(baseResumeRequest())).rejects.toThrow(
+    const published = collectOperation('run-rejected');
+    await expect(runtime.runTurn(baseResumeRequest({ operation: published.operation }))).rejects.toThrow(
       /scripted prompt rejection/,
     );
-    expect(seen.failed).toHaveLength(1);
+    expect(published.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-rejected',
+      outcome: 'failed',
+      error: {
+        code: 'PROVIDER_FAILURE',
+        message: expect.stringContaining('scripted prompt rejection'),
+      },
+    }]);
     await settleIo();
 
     // The retired process is replaced by a fresh spawn on the next turn.
@@ -1014,31 +1022,38 @@ describe('PiRpcRuntime', () => {
   it('fails the turn when the process exits unexpectedly mid-run', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    const turn = runtime.runTurn(baseResumeRequest());
+    const published = collectOperation('run-exit');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
     await waitForActive(runtime);
     fakes[0].close(7);
     await turn;
-    expect(seen.failed.map((entry) => entry.message)).toEqual([
-      'Pi process exited before completion (code 7)',
-    ]);
-    expect(seen.finished).toEqual([]);
+    expect(published.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-exit',
+      outcome: 'failed',
+      error: {
+        code: 'PROVIDER_FAILURE',
+        message: 'Pi process exited before completion (code 7)',
+      },
+    }]);
     await runtime.shutdown();
   });
 
   it('stop kills the process, emits one stop terminal, and resolves the turn', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    const turn = runtime.runTurn(baseResumeRequest());
+    const published = collectOperation('run-stop');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
     await waitForActive(runtime);
 
     expect(runtime.isRunning('pi-session-1')).toBe(true);
     expect(runtime.abort('pi-session-1')).toBe(true);
     await turn;
-    expect(seen.finished).toEqual(['chat-2']);
-    expect(seen.failed).toEqual([]);
-    expect(seen.processing.at(-1)).toEqual({ chatId: 'chat-2', isProcessing: false });
+    expect(published.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-stop',
+      outcome: 'finished',
+    }]);
     expect(fakes[0].proc.killed).toBe(true);
     expect(runtime.isRunning('pi-session-1')).toBe(false);
 
@@ -1290,8 +1305,8 @@ describe('PiRpcRuntime', () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     spawnOptions.push({ steerBehavior: 'exit' });
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    const turn = runtime.runTurn(baseResumeRequest());
+    const published = collectOperation('run-steer-exit');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
     await waitForActive(runtime);
 
     const result = await runtime.steer({
@@ -1307,7 +1322,15 @@ describe('PiRpcRuntime', () => {
 
     expect(result).toMatchObject({ kind: 'failed', outcome: 'unknown' });
     await turn;
-    expect(seen.failed).toHaveLength(1);
+    expect(published.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-steer-exit',
+      outcome: 'failed',
+      error: {
+        code: 'PROVIDER_FAILURE',
+        message: 'Pi process exited before completion (code 7)',
+      },
+    }]);
     expect(runtime.captureSteerTarget('pi-session-1')).toBeNull();
 
     spawnOptions.push({});
@@ -1409,8 +1432,8 @@ describe('PiRpcRuntime', () => {
   it('defers settlement while a steer delivery is reserved', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    const turn = runtime.runTurn(baseResumeRequest());
+    const published = collectOperation('run-held-steer');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
     await waitForActive(runtime);
 
     let releasePrepare;
@@ -1432,7 +1455,7 @@ describe('PiRpcRuntime', () => {
     // Settle arrives mid-delivery: finish is stashed until the reservation releases.
     fakes[0].pushEvent({ type: 'agent_settled' });
     await settleIo();
-    expect(seen.finished).toEqual([]);
+    expect(published.events).toEqual([]);
     expect(runtime.captureSteerTarget('pi-session-1')).toBeNull();
 
     releasePrepare();
@@ -1441,7 +1464,11 @@ describe('PiRpcRuntime', () => {
       reason: 'turn-changed',
     });
     await turn;
-    expect(seen.finished).toEqual(['chat-2']);
+    expect(published.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-held-steer',
+      outcome: 'finished',
+    }]);
     expect(fakes[0].proc.killed).toBe(false);
     await runtime.shutdown();
   });
@@ -1497,13 +1524,13 @@ describe('PiRpcRuntime', () => {
   it('shuts down by settling active turns and killing every process', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
-    const seen = collect(runtime);
-    const turn = runtime.runTurn(baseResumeRequest());
+    const published = collectOperation('run-shutdown');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
     await waitForActive(runtime);
     await runtime.shutdown();
     await turn;
     expect(fakes[0].proc.killed).toBe(true);
-    expect(seen.processing.at(-1)).toEqual({ chatId: 'chat-2', isProcessing: false });
+    expect(published.events).toEqual([]);
     expect(runtime.getRunningSessions()).toEqual([]);
     expect(runtime.captureSteerTarget('pi-session-1')).toBeNull();
   });

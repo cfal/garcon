@@ -1,8 +1,6 @@
 import crypto from 'node:crypto';
 import {
   ErrorMessage,
-  PermissionCancelledMessage,
-  PermissionRequestMessage,
   UnknownToolUseMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
@@ -13,10 +11,8 @@ import {
   type AgentRuntimeEvent,
   type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { normalizeToolInput } from '@garcon/server-agent-common/shared/normalize-util';
 import {
-  acpEventMetadata,
   assertAcpExecutionOpen,
   markAcpExecutionStarted,
   type AcpProjectPathUpdateRequest,
@@ -27,7 +23,6 @@ import {
 } from './runtime-types.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
 import { isRecoverableLoadFailure } from '../../acp/errors.js';
@@ -56,7 +51,6 @@ import {
   permissionCancelledOutcome,
   permissionOptionId,
   permissionOutcome,
-  upstreamRequestIdFromUpdate,
 } from './acp-runtime-helpers.js';
 
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
@@ -93,17 +87,14 @@ interface AcpAgentRuntimeSession {
 interface AcpTurnContext {
   readonly session: AcpAgentRuntimeSession;
   readonly operation: AgentRuntimeOperation;
-  readonly eventMetadata: RuntimeEventMetadata;
   readonly pendingPermissions: Set<PendingPermissionRequest>;
   readonly detachSourceListeners: Array<() => void>;
   permissionMode: PermissionMode;
   running: boolean;
   completed: boolean;
   aborted: boolean;
-  processingStarted: boolean;
   sourceActive: boolean;
   sourceRetired: boolean;
-  upstreamRequestId?: string;
 }
 
 export type AcpAbortStrategy = 'cancel' | 'process-restart';
@@ -150,7 +141,7 @@ const SILENT_LOGGER: AgentLogger = {
   error() {},
 };
 
-export class AcpAgentRuntime extends AgentEventEmitterRuntime {
+export class AcpAgentRuntime {
   #policy: AcpAgentPolicy;
   #converter: AcpEventConverter;
   #capabilityCache: AcpCapabilityCache;
@@ -166,7 +157,6 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
   });
 
   constructor(policy: AcpAgentPolicy, options: AcpAgentRuntimeOptions) {
-    super();
     this.#policy = policy;
     this.#converter = options.converter;
     this.#capabilityCache = options.capabilityCache ?? new AcpCapabilityCache();
@@ -219,7 +209,11 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       lastActivityAt: Date.now(),
     };
     this.#sessions.set(sessionId, session);
-    this.emitSessionCreated(request.chatId);
+    const result = {
+      agentSessionId: sessionId,
+      nativePath: this.#nativePathFor(sessionId),
+    };
+    request.onSessionActivated?.(result);
     let resolveStarted!: () => void;
     let rejectStarted!: (error: unknown) => void;
     let executionStarted = false;
@@ -245,10 +239,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       throw error;
     }
 
-    return {
-      agentSessionId: sessionId,
-      nativePath: this.#nativePathFor(sessionId),
-    };
+    return result;
   }
 
   async runTurn(request: AcpResumeRequest): Promise<void> {
@@ -494,12 +485,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
         if (!this.#activateTurnSource(turn, request.projectPath)) return;
         executionStarted = true;
         onExecutionStarted?.();
-        this.emitProcessing(session.chatId, true);
       });
-      const result = await promptRequest;
-      if (typeof result.requestId === 'string' && result.requestId) {
-        turn.upstreamRequestId = result.requestId;
-      }
+      await promptRequest;
       success = !turn.aborted;
     } catch (error) {
       admissionClosed = request.executionAdmission?.signal.aborted === true;
@@ -524,17 +511,11 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       this.#completeTurn(turn);
 
       if (success && !turn.sourceRetired) {
-        const metadata = {
-          ...turn.eventMetadata,
-          ...(turn.upstreamRequestId ? { upstreamRequestId: turn.upstreamRequestId } : {}),
-        } satisfies RuntimeEventMetadata;
         this.#publishTurnEvent(turn, {
           type: 'run-ended',
           runId: turn.operation.runId,
           outcome: 'finished',
-          exitCode: 0,
         });
-        this.emitFinished(session.chatId, 0, metadata);
       } else if (!turn.aborted && !admissionClosed && failureMessage && !turn.sourceRetired) {
         this.#publishMessages(turn, [
           new ErrorMessage(new Date().toISOString(), failureMessage),
@@ -545,7 +526,6 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
           outcome: 'failed',
           error: { code: 'PROVIDER_FAILURE', message: failureMessage },
         });
-        this.emitFailed(session.chatId, failureMessage, turn.eventMetadata);
       }
 
       this.#cancelPermissionsForTurn(turn, turn.aborted ? 'aborted' : 'session-complete');
@@ -564,17 +544,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     return {
       session,
       operation: request.operation,
-      eventMetadata: acpEventMetadata(
-        request,
-        'agentSessionId' in request ? undefined : 'chat-start',
-      ),
       pendingPermissions: new Set(),
       detachSourceListeners: [],
       permissionMode: request.permissionMode,
       running: false,
       completed: false,
       aborted: false,
-      processingStarted: false,
       sourceActive: false,
       sourceRetired: false,
     };
@@ -589,7 +564,6 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     }
     turn.sourceActive = true;
     turn.running = true;
-    turn.processingStarted = true;
     session.sourceTurn = turn;
     session.activeTurn = turn;
     session.permissionMode = turn.permissionMode;
@@ -632,7 +606,6 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
           outcome: 'failed',
           error: { code: 'PROVIDER_FAILURE', message },
         });
-        this.emitFailed(session.chatId, message, turn.eventMetadata);
       }
       this.#retireSession(session, 'cancelled');
     }));
@@ -657,20 +630,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     }
 
     session.lastActivityAt = Date.now();
-    const upstreamRequestId = upstreamRequestIdFromUpdate(params);
-    if (upstreamRequestId) {
-      turn.upstreamRequestId = upstreamRequestId;
-    }
     const context = this.#sessionUpdateContext(turn);
     const converted = this.#converter.fromSessionUpdate(params, context);
     if (turn.completed) {
       converted.push(...(this.#converter.endTurn?.(session.id, context) ?? []));
     }
-    const metadata = {
-      ...turn.eventMetadata,
-      ...(upstreamRequestId ? { upstreamRequestId } : {}),
-    } satisfies RuntimeEventMetadata;
-    this.#publishMessages(turn, converted, metadata);
+    this.#publishMessages(turn, converted);
   }
 
   #onPermissionRequest(turn: AcpTurnContext, requestId: AcpJsonRpcId, rawParams: unknown): void {
@@ -734,19 +699,18 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       },
       permissionCancelledOutcome,
     );
-    const message = new PermissionRequestMessage(
-      new Date().toISOString(),
-      permissionRequestId,
-      pending.incarnation,
-      requestedTool,
-    );
-    this.emitPermissionRequested(
-      session.chatId,
-      message,
-      this.#decisionCapability(pending),
-      turn.eventMetadata,
-      turn.operation,
-    );
+    this.#publishTurnEvent(turn, {
+      type: 'permission',
+      runId: turn.operation.runId,
+      lifecycle: {
+        kind: 'requested',
+        requestId: permissionRequestId,
+        incarnation: pending.incarnation,
+        requestedTool,
+        options: [],
+      },
+      decision: this.#decisionCapability(pending),
+    });
   }
 
   #onCustomBlockingRequest(
@@ -772,19 +736,18 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       converted.responseForDecision,
       converted.responseForCancellation,
     );
-    const message = new PermissionRequestMessage(
-      new Date().toISOString(),
-      permissionRequestId,
-      pending.incarnation,
-      converted.tool,
-    );
-    this.emitPermissionRequested(
-      turn.session.chatId,
-      message,
-      this.#decisionCapability(pending),
-      turn.eventMetadata,
-      turn.operation,
-    );
+    this.#publishTurnEvent(turn, {
+      type: 'permission',
+      runId: turn.operation.runId,
+      lifecycle: {
+        kind: 'requested',
+        requestId: permissionRequestId,
+        incarnation: pending.incarnation,
+        requestedTool: converted.tool,
+        options: [],
+      },
+      decision: this.#decisionCapability(pending),
+    });
     return true;
   }
 
@@ -826,17 +789,16 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
       try {
         pending.session.client.respond(pending.requestId, pending.responseForCancellation(reason));
       } catch {}
-      this.emitPermissionCancelled(
-        turn.session.chatId,
-        new PermissionCancelledMessage(
-          new Date().toISOString(),
-          pending.permissionRequestId,
-          pending.incarnation,
+      this.#publishTurnEvent(turn, {
+        type: 'permission',
+        runId: turn.operation.runId,
+        lifecycle: {
+          kind: 'cancelled',
+          requestId: pending.permissionRequestId,
+          incarnation: pending.incarnation,
           reason,
-        ),
-        turn.eventMetadata,
-        turn.operation,
-      );
+        },
+      });
     }
     turn.pendingPermissions.clear();
   }
@@ -847,10 +809,6 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
     turn.running = false;
     const session = turn.session;
     if (session.activeTurn === turn) session.activeTurn = null;
-    if (turn.processingStarted) {
-      turn.processingStarted = false;
-      this.emitProcessing(session.chatId, false);
-    }
   }
 
   #emitFlushedMessages(turn: AcpTurnContext): void {
@@ -864,15 +822,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime {
   #publishMessages(
     turn: AcpTurnContext,
     messages: ChatMessage[],
-    metadata: RuntimeEventMetadata = turn.eventMetadata,
   ): void {
     if (messages.length === 0 || turn.sourceRetired) return;
     this.#publishTurnEvent(turn, {
-      type: 'messages',
+      type: 'rows',
       rows: runtimeRows(messages),
-      runId: turn.operation.runId,
     });
-    this.emitMessages(turn.session.chatId, messages, metadata);
   }
 
   #publishTurnEvent(turn: AcpTurnContext, event: AgentRuntimeEvent): void {

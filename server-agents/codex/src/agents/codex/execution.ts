@@ -19,6 +19,7 @@ import {
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
 } from './app-server/endpoint-runtime.js';
+import { codexOperation } from './app-server/operation-routes.js';
 import type { CodexAppServerRuntime } from './app-server/runtime.js';
 import { parseCodexGoalCommand, type CodexGoalCommand } from './goal-command.js';
 import type {
@@ -44,10 +45,8 @@ export class CodexExecution implements AgentRuntimeExecution {
 
   async start(request: AgentRuntimeStartRequest, publish: AgentRuntimePublisher) {
     const configuration = await this.#runtimeConfiguration(request);
-    const runtimeRequest = prepareStartRequest(request, configuration);
-    // The session event must precede any turn event: a blocking runtime can
-    // settle the first turn inside startSession, and the settled audit needs
-    // the session identity to read provider evidence.
+    const runtimeRequest = prepareStartRequest(request, configuration, publish);
+    // A blocking runtime can settle the first turn inside startSession.
     const holder: { session: AgentStartedSession | null } = { session: null };
     const emitStarted = (started: { agentSessionId: string; nativePath: string | null }) => {
       if (holder.session) return holder.session;
@@ -70,7 +69,7 @@ export class CodexExecution implements AgentRuntimeExecution {
     const started = await this.runtime.startSession({
       ...runtimeRequest,
       onSessionActivated: (session) => void emitStarted(session),
-    }, publish);
+    });
     const early = holder.session;
     return early && early.agentSessionId === started.agentSessionId
       // The materialized path supersedes the activation-time path for core's
@@ -87,7 +86,7 @@ export class CodexExecution implements AgentRuntimeExecution {
   }
 
   async resume(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
-    return this.#resume(request, (runtimeRequest) => this.runtime.runTurn(runtimeRequest, publish));
+    return this.#resume(request, publish, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
   }
 
   async submitGoalControl(
@@ -98,12 +97,13 @@ export class CodexExecution implements AgentRuntimeExecution {
       request,
       await this.#runtimeConfiguration(request),
       this.nativeSessions,
+      publish,
     );
-    return this.runtime.submitGoalControl(runtimeRequest, publish, request.beforeDelivery);
+    return this.runtime.submitGoalControl(runtimeRequest, request.beforeDelivery);
   }
 
   async compact(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
-    return this.#resume(request, (runtimeRequest) => this.runtime.compact(runtimeRequest, publish));
+    return this.#resume(request, publish, (runtimeRequest) => this.runtime.compact(runtimeRequest));
   }
 
   async abort(agentSessionId: string): Promise<boolean> {
@@ -133,12 +133,14 @@ export class CodexExecution implements AgentRuntimeExecution {
 
   async #resume(
     request: AgentRuntimeResumeRequest,
+    publish: AgentRuntimePublisher,
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,
   ): Promise<void> {
     await action(prepareResumeRequest(
       request,
       await this.#runtimeConfiguration(request),
       this.nativeSessions,
+      publish,
     ));
   }
 
@@ -189,6 +191,7 @@ function executionFields(
 function prepareStartRequest(
   request: AgentRuntimeStartRequest,
   configuration: CodexRuntimeConfiguration,
+  publish: AgentRuntimePublisher,
 ): CodexStartRequest {
   const goal = parseCodexGoalCommand(request.prompt);
   if (goal && goal.kind !== 'set') {
@@ -201,6 +204,7 @@ function prepareStartRequest(
   const carriedContext = request.carriedContext?.prefix ?? null;
   return {
     ...executionFields(request),
+    operation: codexOperation(request, publish),
     command: goal?.objective ?? (carriedContext ? `${carriedContext}${request.prompt}` : request.prompt),
     images: request.attachments,
     ...configuration,
@@ -213,10 +217,12 @@ function prepareResumeRequest(
   request: AgentRuntimeResumeRequest,
   configuration: CodexRuntimeConfiguration,
   nativeSessions: PathNativeSessionCodec,
+  publish: AgentRuntimePublisher,
 ): CodexResumeRequest {
   const goal = parseCodexGoalCommand(request.prompt);
   return {
     ...executionFields(request),
+    operation: codexOperation(request, publish),
     agentSessionId: request.agentSessionId,
     command: goalObjective(goal) ?? request.prompt,
     images: request.attachments,

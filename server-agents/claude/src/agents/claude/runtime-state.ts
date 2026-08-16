@@ -1,6 +1,4 @@
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { ClaudeActiveTurn } from './active-turn.js';
 import type { ClaudeProcessTransport } from './cli-process-transport.js';
@@ -44,10 +42,8 @@ export interface PendingPermission {
   incarnation: string;
   cliRequestId: string;
   agentSessionId: string;
-  chatId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
   toolUseId?: string;
-  eventMetadata: RuntimeEventMetadata;
-  operation: AgentRuntimeOperation | undefined;
+  turn: ClaudeActiveTurn;
 }

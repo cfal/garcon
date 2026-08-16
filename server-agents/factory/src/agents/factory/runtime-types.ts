@@ -1,6 +1,5 @@
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface FactoryCommandImage {
   readonly data: string;
@@ -19,8 +18,6 @@ export interface FactoryExecutionRequest {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
-  readonly clientRequestId?: string;
-  readonly turnId?: string;
   readonly operation: AgentRuntimeOperation;
   readonly executionAdmission?: FactoryExecutionAdmission;
 }
@@ -28,6 +25,7 @@ export interface FactoryExecutionRequest {
 export interface FactoryStartRequest extends FactoryExecutionRequest {
   readonly command: string;
   readonly images?: FactoryCommandImage[];
+  readonly onSessionActivated?: (session: FactoryStartedSession) => void;
 }
 
 export interface FactoryResumeRequest extends FactoryStartRequest {
@@ -50,15 +48,4 @@ export async function markFactoryExecutionStarted(
 ): Promise<void> {
   assertFactoryExecutionOpen(request);
   await request.executionAdmission?.markStarted();
-}
-
-export function factoryEventMetadata(
-  request: Pick<FactoryExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: RuntimeEventMetadata['commandType'],
-) {
-  return Object.freeze({
-    ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
-    ...(commandType ? { commandType } : {}),
-    ...(request.turnId ? { turnId: request.turnId } : {}),
-  });
 }

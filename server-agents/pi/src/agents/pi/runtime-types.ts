@@ -1,7 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
 export interface PiExecutionAdmission {
   readonly signal: AbortSignal;
@@ -14,8 +13,6 @@ export interface PiExecutionRequest {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
-  readonly clientRequestId?: string;
-  readonly turnId?: string;
   readonly operation: AgentRuntimeOperation;
   readonly executionAdmission?: PiExecutionAdmission;
   readonly command: string;
@@ -23,7 +20,9 @@ export interface PiExecutionRequest {
   readonly envOverrides?: Readonly<Record<string, string>>;
 }
 
-export type PiStartRequest = PiExecutionRequest;
+export interface PiStartRequest extends PiExecutionRequest {
+  readonly onSessionActivated?: (session: PiStartedSession) => void;
+}
 
 export interface PiResumeRequest extends PiExecutionRequest {
   readonly agentSessionId: string;
@@ -46,15 +45,4 @@ export async function markPiExecutionStarted(
 ): Promise<void> {
   assertPiExecutionOpen(request);
   await request.executionAdmission?.markStarted();
-}
-
-export function piEventMetadata(
-  request: Pick<PiExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: RuntimeEventMetadata['commandType'],
-): RuntimeEventMetadata {
-  return Object.freeze({
-    ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
-    ...(commandType ? { commandType } : {}),
-    ...(request.turnId ? { turnId: request.turnId } : {}),
-  });
 }
