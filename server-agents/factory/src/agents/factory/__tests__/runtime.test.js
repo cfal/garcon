@@ -44,12 +44,31 @@ function createFakeProc() {
   let stderrController;
   let resolveExited;
   let closed = false;
+  let stdoutReadRequests = 0;
+  const stdoutReadWaiters = [];
 
-  const stdout = new ReadableStream({
+  const stdoutStream = new ReadableStream({
     start(controller) {
       stdoutController = controller;
     },
   });
+  const stdout = {
+    getReader() {
+      const reader = stdoutStream.getReader();
+      return {
+        read() {
+          stdoutReadRequests += 1;
+          for (let index = stdoutReadWaiters.length - 1; index >= 0; index -= 1) {
+            const waiter = stdoutReadWaiters[index];
+            if (stdoutReadRequests < waiter.count) continue;
+            stdoutReadWaiters.splice(index, 1);
+            waiter.resolve();
+          }
+          return reader.read();
+        },
+      };
+    },
+  };
 
   const stderr = new ReadableStream({
     start(controller) {
@@ -65,9 +84,18 @@ function createFakeProc() {
       end() { },
     },
     killed: false,
+    get stdoutReadRequests() {
+      return stdoutReadRequests;
+    },
     exited: new Promise((resolve) => {
       resolveExited = resolve;
     }),
+    waitForStdoutReadRequests(count) {
+      if (stdoutReadRequests >= count) return Promise.resolve();
+      return new Promise((resolve) => {
+        stdoutReadWaiters.push({ count, resolve });
+      });
+    },
     pushJson(message) {
       stdoutController.enqueue(encoder.encode(JSON.stringify(message) + '\n'));
     },
@@ -234,10 +262,110 @@ describe('FactoryCliRuntime lifecycle', () => {
       agentSessionId: 'factory-session-real',
       nativePath: '/tmp/factory/factory-session-real.jsonl',
     });
-    expect(findFactorySessionFileBySessionId).toHaveBeenCalledWith('factory-session-real');
+    expect(findFactorySessionFileBySessionId).toHaveBeenCalledWith(
+      'factory-session-real',
+      expect.any(AbortSignal),
+    );
 
     proc.pushJson({ type: 'completion', session_id: 'factory-session-real' });
     proc.close(0);
+  });
+
+  it('drains stdout while native path discovery is held and routes queued events in order', async () => {
+    let releaseDiscovery;
+    let signalDiscoveryStarted;
+    const discoveryStarted = new Promise((resolve) => {
+      signalDiscoveryStarted = resolve;
+    });
+    const discoveryGate = new Promise((resolve) => {
+      releaseDiscovery = resolve;
+    });
+    findFactorySessionFileBySessionId.mockImplementationOnce(async () => {
+      signalDiscoveryStarted();
+      await discoveryGate;
+      return '/tmp/factory/factory-session-drain.jsonl';
+    });
+    const provider = new FactoryCliRuntime();
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+    let signalTerminalPublished;
+    const terminalPublished = new Promise((resolve) => {
+      signalTerminalPublished = resolve;
+    });
+    const observed = collectOperation('run-drain', (event) => {
+      if (event.type === 'run-ended') signalTerminalPublished();
+    });
+
+    const started = provider.startSession({
+      command: 'hello',
+      chatId: 'chat-drain',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: observed.operation,
+    });
+    proc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-drain',
+    });
+
+    await discoveryStarted;
+    expect(proc.stdoutReadRequests).toBeGreaterThanOrEqual(2);
+    proc.pushJson({
+      type: 'message',
+      role: 'assistant',
+      text: 'queued while discovery is held',
+      session_id: 'factory-session-drain',
+    });
+    await proc.waitForStdoutReadRequests(3);
+    proc.pushJson({ type: 'completion', session_id: 'factory-session-drain' });
+    await proc.waitForStdoutReadRequests(4);
+    expect(observed.events).toEqual([]);
+    proc.close(0);
+
+    releaseDiscovery();
+    await expect(started).resolves.toEqual({
+      agentSessionId: 'factory-session-drain',
+      nativePath: '/tmp/factory/factory-session-drain.jsonl',
+    });
+    await terminalPublished;
+    expect(observed.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
+    expect(observed.events[0].rows[0].message.content).toBe('queued while discovery is held');
+    provider.shutdown();
+  });
+
+  it('bounds native path discovery and aborts the recursive lookup on timeout', async () => {
+    let discoverySignal;
+    findFactorySessionFileBySessionId.mockImplementationOnce((_sessionId, signal) => {
+      discoverySignal = signal;
+      return new Promise(() => {});
+    });
+    const provider = new FactoryCliRuntime({ nativePathDiscoveryTimeoutMs: 5 });
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const started = provider.startSession({
+      command: 'hello',
+      chatId: 'chat-discovery-timeout',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: noopOperation('run-discovery-timeout'),
+    });
+    proc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-discovery-timeout',
+    });
+
+    await expect(started).rejects.toThrow('timed out locating the JSONL transcript');
+    expect(discoverySignal).toBeInstanceOf(AbortSignal);
+    expect(discoverySignal.aborted).toBe(true);
+    expect(proc.killed).toBe(true);
+    provider.shutdown();
   });
 
   it('rejects startSession when Factory does not expose a real JSONL path', async () => {
@@ -558,7 +686,13 @@ describe('FactoryCliRuntime lifecycle', () => {
     const firstProc = createFakeProc();
     const secondProc = createFakeProc();
     spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc);
-    const first = collectOperation('run-a');
+    let signalLateRowPublished;
+    const lateRowPublished = new Promise((resolve) => {
+      signalLateRowPublished = resolve;
+    });
+    const first = collectOperation('run-a', (event) => {
+      if (event.type === 'rows') signalLateRowPublished();
+    });
     const second = collectOperation('run-b');
 
     const firstTurn = provider.runTurn({
@@ -594,7 +728,7 @@ describe('FactoryCliRuntime lifecycle', () => {
     });
     firstProc.close(0);
     await firstProc.exited;
-    await Promise.resolve();
+    await lateRowPublished;
 
     expect(secondSettled).toBe(false);
     expect(provider.isRunning('factory-session-reused')).toBe(true);

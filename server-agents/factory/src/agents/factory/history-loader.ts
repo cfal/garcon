@@ -123,16 +123,26 @@ function toIsoString(value: number | string | undefined): string | null {
   return null;
 }
 
-async function readFactorySessionDiscoveryIndex(): Promise<FactorySessionDiscoveryIndex> {
+async function readFactorySessionDiscoveryIndex(
+  signal?: AbortSignal,
+): Promise<FactorySessionDiscoveryIndex> {
+  signal?.throwIfAborted();
   try {
     const raw = await fs.readFile(getFactorySessionDiscoveryIndexPath(), 'utf8');
+    signal?.throwIfAborted();
     return JSON.parse(raw) as FactorySessionDiscoveryIndex;
   } catch {
+    signal?.throwIfAborted();
     return {};
   }
 }
 
-async function findFileWithSuffix(dir: string, suffix: string): Promise<string | null> {
+async function findFileWithSuffix(
+  dir: string,
+  suffix: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  signal?.throwIfAborted();
   if (!dir || !suffix) return null;
 
   if (typeof Bun !== 'undefined' && typeof Bun.Glob === 'function') {
@@ -150,9 +160,11 @@ async function findFileWithSuffix(dir: string, suffix: string): Promise<string |
         followSymlinks: false,
         onlyFiles: true,
       })) {
+        signal?.throwIfAborted();
         return filePath;
       }
     } catch {
+      signal?.throwIfAborted();
       return null;
     }
   }
@@ -161,13 +173,15 @@ async function findFileWithSuffix(dir: string, suffix: string): Promise<string |
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
+    signal?.throwIfAborted();
     return null;
   }
 
   for (const entry of entries) {
+    signal?.throwIfAborted();
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory() && !entry.isSymbolicLink()) {
-      const nested = await findFileWithSuffix(fullPath, suffix);
+      const nested = await findFileWithSuffix(fullPath, suffix, signal);
       if (nested) return nested;
       continue;
     }
@@ -177,26 +191,37 @@ async function findFileWithSuffix(dir: string, suffix: string): Promise<string |
   return null;
 }
 
-export async function getFactorySessionDiscoveryEntry(sessionId: string): Promise<FactorySessionDiscoveryEntry | null> {
+export async function getFactorySessionDiscoveryEntry(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<FactorySessionDiscoveryEntry | null> {
+  signal?.throwIfAborted();
   if (!sessionId) return null;
-  const index = await readFactorySessionDiscoveryIndex();
+  const index = await readFactorySessionDiscoveryIndex(signal);
+  signal?.throwIfAborted();
   return index.entries?.[sessionId] ?? null;
 }
 
-export async function findFactorySessionFileBySessionId(sessionId: string): Promise<string | null> {
+export async function findFactorySessionFileBySessionId(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  signal?.throwIfAborted();
   if (!sessionId) return null;
 
-  const discoveryEntry = await getFactorySessionDiscoveryEntry(sessionId);
+  const discoveryEntry = await getFactorySessionDiscoveryEntry(sessionId, signal);
   if (discoveryEntry?.sessionPath) {
     try {
       await fs.access(discoveryEntry.sessionPath);
+      signal?.throwIfAborted();
       return discoveryEntry.sessionPath;
     } catch {
+      signal?.throwIfAborted();
       // Falls back to scanning because Factory's discovery index can lag moves.
     }
   }
 
-  return findFileWithSuffix(getFactorySessionsRoot(), `${sessionId}.jsonl`);
+  return findFileWithSuffix(getFactorySessionsRoot(), `${sessionId}.jsonl`, signal);
 }
 
 async function readFactorySessionEvents(

@@ -41,6 +41,7 @@ const DEFAULT_CONFIG: FactoryConfig = {
 const SILENT_LOGGER: AgentLogger = {
   debug() {}, info() {}, warn() {}, error() {},
 };
+const FACTORY_NATIVE_PATH_DISCOVERY_TIMEOUT_MS = 10_000;
 
 interface FactorySession {
   chatId: string;
@@ -317,12 +318,34 @@ async function runFactoryExec(
   return { stdout, stderr };
 }
 
-async function resolveFactoryStartedNativePath(sessionId: string): Promise<string> {
-  const found = await findFactorySessionFileBySessionId(sessionId);
-  if (!found) {
-    throw new Error(`Factory did not create a JSONL transcript path for session ${sessionId}`);
+async function resolveFactoryStartedNativePath(
+  sessionId: string,
+  timeoutMs: number,
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutError = new Error(
+    `Factory timed out locating the JSONL transcript for session ${sessionId}`,
+  );
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, timeoutMs);
+  });
+
+  try {
+    const found = await Promise.race([
+      findFactorySessionFileBySessionId(sessionId, controller.signal),
+      timedOut,
+    ]);
+    if (!found) {
+      throw new Error(`Factory did not create a JSONL transcript path for session ${sessionId}`);
+    }
+    return found;
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
-  return found;
 }
 
 export async function runSingleQuery(
@@ -408,6 +431,7 @@ export class FactoryCliRuntime {
   readonly #config: FactoryConfig;
   readonly #logger: AgentLogger;
   readonly #models: FactoryModelCatalogService;
+  readonly #nativePathDiscoveryTimeoutMs: number;
   #runningSessions = new Map<string, FactorySession>();
   #idlePurger = new IdleSessionPurger<FactorySession>({
     sessions: () => this.#runningSessions.entries(),
@@ -420,10 +444,13 @@ export class FactoryCliRuntime {
     readonly config?: FactoryConfig;
     readonly logger?: AgentLogger;
     readonly models?: FactoryModelCatalogService;
+    readonly nativePathDiscoveryTimeoutMs?: number;
   } = {}) {
     this.#config = options.config ?? DEFAULT_CONFIG;
     this.#logger = options.logger ?? SILENT_LOGGER;
     this.#models = options.models ?? new FactoryModelCatalogService(this.#config);
+    this.#nativePathDiscoveryTimeoutMs = options.nativePathDiscoveryTimeoutMs
+      ?? FACTORY_NATIVE_PATH_DISCOVERY_TIMEOUT_MS;
   }
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
@@ -497,7 +524,10 @@ export class FactoryCliRuntime {
           // A missing path is treated as startup failure instead of inventing
           // a placeholder that cannot support reliable resume/reload.
           try {
-            const nativePath = await resolveFactoryStartedNativePath(agentSessionId);
+            const nativePath = await resolveFactoryStartedNativePath(
+              agentSessionId,
+              this.#nativePathDiscoveryTimeoutMs,
+            );
             const result = { agentSessionId, nativePath };
             startedSession.onActivated?.(result);
             startedSession.resolve(result);
@@ -572,6 +602,7 @@ export class FactoryCliRuntime {
     const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let eventProcessing = Promise.resolve();
 
     try {
       while (true) {
@@ -584,17 +615,30 @@ export class FactoryCliRuntime {
 
         for (const line of lines) {
           if (!line.trim()) continue;
+          let event: FactoryCliEvent;
           try {
-            await this.#routeEvent(session, turn, JSON.parse(line) as FactoryCliEvent);
+            event = JSON.parse(line) as FactoryCliEvent;
           } catch {
             this.#logger.warn('Factory emitted invalid JSON.', {
               sessionId: session.id,
             });
+            continue;
           }
+          const eventType = typeof event.type === 'string' ? event.type : 'unknown';
+          eventProcessing = eventProcessing
+            .then(() => this.#routeEvent(session, turn, event))
+            .catch((error) => {
+              this.#logger.warn('Factory event routing failed.', {
+                sessionId: session.id || 'pending',
+                eventType,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
         }
       }
     } finally {
       const exitCode = await proc.exited;
+      await eventProcessing;
       if (!turn.completed) {
         if (turn.startedSession && !turn.startedSession.settled) {
           turn.startedSession.reject(
