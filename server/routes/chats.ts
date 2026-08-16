@@ -281,7 +281,6 @@ interface ChatRouteDeps {
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   searchIndex?: ChatSearchDep;
-  notifyHistoryChanged?: (chatId: string) => void;
   lastSelectedChat?: LastSelectedChatState;
 }
 
@@ -298,7 +297,6 @@ export default function createChatRoutes({
   commandService,
   chatListProjector,
   searchIndex,
-  notifyHistoryChanged,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;

@@ -71,7 +71,6 @@ export default function createAllRoutes({
   runtimeState,
   commandLedger,
   transientFeeds,
-  notifyHistoryChanged,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -99,7 +98,6 @@ export default function createAllRoutes({
   runtimeState: ServerRuntimeState;
   commandLedger: CommandLedger;
   transientFeeds: ChatTransientFeedStore;
-  notifyHistoryChanged: (chatId: string) => void;
 }): RouteMap {
   return {
     ...createRuntimeRoutes(runtimeState),
@@ -128,7 +126,6 @@ export default function createAllRoutes({
       chatListProjector,
       lastSelectedChat,
       searchIndex,
-      notifyHistoryChanged,
     }),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
     ...createFilesRoutes(registry),

@@ -533,8 +533,7 @@ export async function startServer(): Promise<void> {
     const telegramNotifier = new TelegramNotifier(
       telegramSettings.getBotToken(),
     );
-    // eslint-disable-next-line no-unused-vars
-    const _attentionTracker = new AttentionTracker(
+    new AttentionTracker(
       agentRegistry,
       queue,
       settings,
@@ -611,9 +610,6 @@ export async function startServer(): Promise<void> {
       runtimeState,
       commandLedger,
       transientFeeds,
-      notifyHistoryChanged(chatId) {
-        eventWiring?.notifyTranscriptCompositionChanged(chatId);
-      },
     });
 
     const chatHandler = new ChatHandler({
