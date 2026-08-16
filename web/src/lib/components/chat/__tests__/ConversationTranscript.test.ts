@@ -1,8 +1,49 @@
-import { cleanup, render } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { UserMessage } from '$shared/chat-types';
+import type { PendingPermissionRequest } from '$lib/types/chat';
+import { BashToolUseMessage, PermissionRequestMessage, UserMessage } from '$shared/chat-types';
 import ConversationTranscriptTestHost from './ConversationTranscriptTestHost.svelte';
+
+const PERMISSION_TIMESTAMP = '2026-07-22T00:00:02.000Z';
+
+function permissionRow(incarnation: string): ChatDisplayRow {
+	return {
+		kind: 'message',
+		id: 'generation-1:2',
+		ordinal: 2,
+		message: new PermissionRequestMessage(
+			PERMISSION_TIMESTAMP,
+			'reused-request',
+			incarnation,
+			new BashToolUseMessage(PERMISSION_TIMESTAMP, 'tool-1', 'pwd'),
+		),
+	};
+}
+
+function pendingPermission(
+	incarnation: string,
+	withCapability: boolean,
+): PendingPermissionRequest {
+	return {
+		chatId: 'chat-1',
+		permissionRequestId: 'reused-request',
+		incarnation,
+		requestedTool: new BashToolUseMessage(PERMISSION_TIMESTAMP, 'tool-1', 'pwd'),
+		...(withCapability
+			? {
+					control: {
+						serverInstanceId: 'server-1',
+						chatId: 'chat-1',
+						runId: 'run-1',
+						id: 'reused-request',
+						incarnation,
+					},
+					transcript: { transcriptViewId: 'generation-1', afterOrdinal: 2 },
+				}
+			: {}),
+	};
+}
 
 describe('ConversationTranscript', () => {
 	beforeEach(() => {
@@ -42,5 +83,35 @@ describe('ConversationTranscript', () => {
 				(row) => row.dataset.chatAnchorId,
 			),
 		).toEqual(['generation-1:1']);
+	});
+
+	it('keeps historical permission occurrences non-actionable without an exact transient match', () => {
+		render(ConversationTranscriptTestHost, {
+			rows: [permissionRow('historical-incarnation')],
+			pendingPermissionRequests: [
+				pendingPermission('historical-incarnation', false),
+				pendingPermission('different-incarnation', true),
+			],
+			onPermissionDecision: vi.fn(),
+		});
+
+		expect(screen.queryByRole('button', { name: /allow once/i })).toBeNull();
+		expect(screen.queryByRole('button', { name: /^deny$/i })).toBeNull();
+	});
+
+	it('makes a durable permission occurrence actionable only through its transient capability', async () => {
+		const onPermissionDecision = vi.fn();
+		render(ConversationTranscriptTestHost, {
+			rows: [permissionRow('active-incarnation')],
+			pendingPermissionRequests: [pendingPermission('active-incarnation', true)],
+			onPermissionDecision,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /allow once/i }));
+		expect(onPermissionDecision).toHaveBeenCalledWith(
+			'reused-request',
+			'active-incarnation',
+			{ allow: true },
+		);
 	});
 });
