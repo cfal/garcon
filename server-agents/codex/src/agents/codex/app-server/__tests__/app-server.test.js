@@ -2745,6 +2745,7 @@ describe('CodexAppServerRuntime', () => {
 
   it('continues an unmanaged retry when its turn fails before the retry response resolves', async () => {
     const nativePath = path.join(tmpDir, 'same-chunk-capacity-retry-thread.jsonl');
+    const finalRetryStarted = createDeferred();
     let fake;
     let turnNumber = 0;
     fake = new FakeClient({
@@ -2764,6 +2765,12 @@ describe('CodexAppServerRuntime', () => {
             params: { threadId: 'thread-1', turn },
           });
           emitCapacityFailure(fake, turn.id);
+        } else if (turnNumber === 3) {
+          fake.emit('notification', {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn },
+          });
+          finalRetryStarted.resolve();
         }
         return { turn };
       },
@@ -2777,7 +2784,7 @@ describe('CodexAppServerRuntime', () => {
     await provider.startSession(makeRequest());
 
     emitCapacityFailure(fake, 'turn-1');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await finalRetryStarted.promise;
 
     expect(fake.startTurn).toHaveBeenCalledTimes(3);
     expect(provider.isRunning('thread-1')).toBe(true);
