@@ -635,8 +635,6 @@ describe('Cursor ACP runtime', () => {
     const second = collectOperation('run-b');
     const started = await runtime.startSession(startRequest({
       command: 'first message',
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
       operation: first.operation,
     }));
     await acp.waitForClientMethod('session/prompt');
@@ -646,8 +644,6 @@ describe('Cursor ACP runtime', () => {
     const nextTurn = runtime.runTurn(startRequest({
       agentSessionId: started.agentSessionId,
       command: 'second message',
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
       operation: second.operation,
     }));
     const restarted = await acp.waitForInstance(1);
