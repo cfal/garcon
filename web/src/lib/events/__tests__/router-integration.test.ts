@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
 import RouterIntegrationHost from './RouterIntegrationHost.svelte';
 import type { EventRouterStores } from '../router.svelte';
@@ -8,6 +8,13 @@ import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
+import { getChatSnapshot } from '$lib/api/chats.js';
+import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
+
+vi.mock('$lib/api/chats.js', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/api/chats.js')>(),
+	getChatSnapshot: vi.fn(),
+}));
 
 const TS = '2026-05-14T00:00:01.000Z';
 
@@ -67,6 +74,44 @@ function chatRecord(): ChatSessionRecord {
 
 function rawMessage(ordinal: number, message: Record<string, unknown>) {
 	return { ordinal, message };
+}
+
+function transientFeed(transcriptViewId: string, transientRevision = 0) {
+	return {
+		serverInstanceId: 'server-instance-1',
+		chatId: 'chat-a',
+		transcriptViewId,
+		transientRevision,
+		rows: [],
+	};
+}
+
+function chatSnapshot(transcriptViewId: string): ChatSnapshotResponse {
+	return {
+		observedAt: TS,
+		messageLimit: 1,
+		chat: {
+			id: 'chat-a',
+			title: 'Chat A',
+			agentId: 'claude',
+			agentOwnershipEpoch: 'epoch-1',
+			carryOverRevision: 'carryover-1',
+			model: 'opus',
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			projectPath: '/repo',
+			tags: [],
+			canReloadFromNativeHistory: false,
+			activity: { createdAt: TS, lastActivityAt: TS },
+		},
+		processingPhase: null,
+		control: executionControl('server-instance-1', 1, 'queued'),
+		transientFeed: transientFeed(transcriptViewId),
+		transcript: { availability: 'not-requested' },
+	};
 }
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
@@ -149,6 +194,10 @@ function renderRouterWithRawMessages(
 }
 
 describe('event router integration', () => {
+	afterEach(() => {
+		vi.mocked(getChatSnapshot).mockReset();
+	});
+
 	it('routes a global event from raw payload through normalize + filter + handler', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
@@ -574,6 +623,47 @@ describe('event router integration', () => {
 		expect(stores.chatState.markVisibleChatPreviewStale).toHaveBeenCalledWith('chat-b');
 		expect(stores.chatState.loadVisibleChatPreview).toHaveBeenCalledWith('chat-b');
 		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b');
+	});
+
+	it('does not restore a stale transient snapshot after transcript replacement', async () => {
+		let resolveSnapshot!: (snapshot: ChatSnapshotResponse) => void;
+		const pendingSnapshot = new Promise<ChatSnapshotResponse>((resolve) => {
+			resolveSnapshot = resolve;
+		});
+		vi.mocked(getChatSnapshot).mockReturnValue(pendingSnapshot);
+		const stores = createStores();
+		expect(stores.conversationUi.setTransientFeedFromSnapshot(
+			transientFeed('generation-old'),
+		)).toMatchObject({ kind: 'applied' });
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-transient-feed-mutation',
+					...transientFeed('generation-old', 2),
+					mutation: { kind: 'clear-run', runId: 'run-old' },
+				},
+				{
+					type: 'chat-transcript-replaced',
+					chatId: 'chat-a',
+					previousTranscriptViewId: 'generation-old',
+					transcriptViewId: 'generation-new',
+					lastOrdinal: 0,
+				},
+			],
+			stores,
+		);
+
+		await vi.waitFor(() => expect(getChatSnapshot).toHaveBeenCalledWith('chat-a', 1));
+		expect(stores.conversationUi.getTransientFeed('chat-a')).toBeNull();
+
+		resolveSnapshot(chatSnapshot('generation-old'));
+		await pendingSnapshot;
+		await Promise.resolve();
+
+		expect(stores.conversationUi.getTransientFeed('chat-a')).toBeNull();
+		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledOnce();
+		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
 	it('preserves streamed output order before same-drain stop messages', () => {
