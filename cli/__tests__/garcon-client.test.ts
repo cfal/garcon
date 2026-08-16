@@ -85,6 +85,7 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
       lastOrdinal: 0,
       pageOldestOrdinal: 0,
       pageNewestOrdinal: 0,
+      nextBeforeOrdinal: null,
       hasMore: false,
     },
     transientFeed: {

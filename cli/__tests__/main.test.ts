@@ -86,6 +86,7 @@ function controlSnapshotResponse(): Response {
       lastOrdinal: 0,
       pageOldestOrdinal: 0,
       pageNewestOrdinal: 0,
+      nextBeforeOrdinal: null,
       hasMore: false,
     },
     transientFeed: {
