@@ -330,16 +330,24 @@ function buildDispatch(
 		refreshChats: () => { void stores.sessions.quietRefreshChats(); },
 		removeChatTranscript: stores.chatState.removeChatTranscript,
 	};
+	const transientTranscriptViews = new Map<string, string>();
 
-	const refreshTransientFeed = (chatId: string) => {
+	const refreshTransientFeed = (chatId: string, requestedTranscriptViewId: string) => {
+		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
+		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId) return;
+		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
 		const previousTranscriptViewId = stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
 		void getChatSnapshot(chatId, 1)
 			.then((snapshot) => {
+				if (transientTranscriptViews.get(chatId) !== requestedTranscriptViewId) return;
 				const result = stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
-				if (result.kind === 'applied' && previousTranscriptViewId
-					&& previousTranscriptViewId !== snapshot.transientFeed.transcriptViewId) {
-					handleViewTransition(chatId, snapshot.transientFeed.transcriptViewId);
-				}
+				if (result.kind !== 'applied') return;
+				const snapshotTranscriptViewId = snapshot.transientFeed.transcriptViewId;
+				transientTranscriptViews.set(chatId, snapshotTranscriptViewId);
+				if (
+					(previousTranscriptViewId && previousTranscriptViewId !== snapshotTranscriptViewId)
+					|| requestedTranscriptViewId !== snapshotTranscriptViewId
+				) handleViewTransition(chatId, snapshotTranscriptViewId);
 			})
 			.catch(() => undefined);
 	};
@@ -373,6 +381,7 @@ function buildDispatch(
 		},
 		'chat-transcript-replaced': (msg) => {
 			if (!(msg instanceof ChatTranscriptReplacedMessage)) return;
+			transientTranscriptViews.set(msg.chatId, msg.transcriptViewId);
 			stores.conversationUi.removeTransientFeed(msg.chatId);
 			handleViewTransition(msg.chatId, msg.transcriptViewId);
 		},
@@ -380,7 +389,7 @@ function buildDispatch(
 			if (!(msg instanceof ChatTransientFeedMutationMessage)) return;
 			const result = stores.conversationUi.applyTransientFeedMutation(msg);
 			if (result.kind === 'snapshot-required' || result.kind === 'corrupt') {
-				refreshTransientFeed(msg.chatId);
+				refreshTransientFeed(msg.chatId, msg.transcriptViewId);
 			}
 		},
 		'agent-run-finished': (msg) => {
@@ -431,6 +440,7 @@ function buildDispatch(
 		},
 		'chat-session-deleted': (msg) => {
 			if (msg instanceof ChatSessionDeletedWsMessage) {
+				transientTranscriptViews.delete(msg.chatId);
 				stores.conversationUi.removeTransientFeed(msg.chatId);
 				handleChatDeleted(msg, sidebarCtx);
 			}
