@@ -38,6 +38,7 @@ vi.mock('$lib/api/chats.js', () => ({
 				lastOrdinal: 4,
 				pageOldestOrdinal: 1,
 				pageNewestOrdinal: 4,
+				nextBeforeOrdinal: null,
 				hasMore: false,
 				limit: 50,
 		}),
