@@ -205,6 +205,41 @@ describe('scripted Pi persistence', () => {
     }, withScriptedPi());
   }, 120_000);
 
+  test('[TLV5-A12-PI-SCRIPTED-01] never backfills output lost before Pi persisted it', async () => {
+    const testEnvironment = requireEnvironment();
+    const lostPrompt = marker('LOST_BEFORE_PERSISTENCE_PROMPT');
+    const lostReply = marker('LOST_BEFORE_PERSISTENCE_REPLY');
+    const held = testEnvironment.model.scriptHeldTurn([chatCompletionsText(lostReply)]);
+
+    await withIntegrationFixture('pi-accepted-loss-before-persistence', async (fixture) => {
+      const chatId = fixture.newChatId();
+      await fixture.client.startChat(scriptedPiStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: lostPrompt,
+      }));
+      await held.requested;
+      const nativeBeforeCrash = await piNativeSession(fixture, chatId);
+
+      await fixture.crashAndRestartGarcon();
+      held.release();
+
+      const restarted = await fixture.client.getMessages(chatId);
+      expect(userContents(restarted.messages)).toEqual([lostPrompt]);
+      expect(assistantContents(restarted.messages)).toEqual([]);
+      expect(restarted.resendCandidates).toEqual([{
+        ordinal: 1,
+        content: lostPrompt,
+        attachmentNames: [],
+      }]);
+      expect(await piNativeSession(fixture, chatId)).toEqual(nativeBeforeCrash);
+      await expect(readFile(nativeBeforeCrash.path, 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      testEnvironment.model.assertSettled();
+    }, withScriptedPi());
+  }, 120_000);
+
   test('forks a whole session into a distinct file and isolates further turns', async () => {
     const testEnvironment = requireEnvironment();
     const sourceReply = marker('FORK_SOURCE_REPLY');

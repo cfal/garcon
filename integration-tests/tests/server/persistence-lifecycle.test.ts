@@ -320,6 +320,39 @@ describe('persistence lifecycle', () => {
     });
   });
 
+  test('[TLV5-A07-SERVER-RESTART-01] recomputes unanswered resend candidates after every restart', async () => {
+    await withIntegrationFixture('ephemeral-resend-exclusion-restart', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const prompt = 'resend-candidate-survives-client-opt-out';
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: prompt });
+      await fixture.client.startDirectChat({
+        chatId,
+        content: prompt,
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await held.received;
+
+      const aborted = held.expectAbort();
+      await fixture.restartGarcon();
+      await aborted;
+      held.releaseTruncatedStream();
+
+      const firstRestart = await fixture.client.getMessages(chatId);
+      expect(firstRestart.resendCandidates).toEqual([{
+        ordinal: 1,
+        content: prompt,
+        attachmentNames: [],
+      }]);
+
+      await fixture.restartGarcon();
+      const secondRestart = await fixture.client.getMessages(chatId);
+      expect(secondRestart.transcriptViewId).toBe(firstRestart.transcriptViewId);
+      expect(secondRestart.messages).toEqual(firstRestart.messages);
+      expect(secondRestart.resendCandidates).toEqual(firstRestart.resendCandidates);
+    });
+  }, 60_000);
+
   test('deletes a running chat without stale provider resurrection', async () => {
     await withIntegrationFixture('delete-running-chat', async (fixture) => {
       const chatId = fixture.newChatId();
