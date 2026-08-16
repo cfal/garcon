@@ -54,7 +54,7 @@ describe('native history ledger seed', () => {
     ]);
   });
 
-  it('rejects a rewritten carried-context prefix before creating ledger drafts', async () => {
+  it('[TLV5-ADOPT.08-NATIVE-SEED-SANITATION-UNIT-01] rejects a rewritten carried-context prefix before creating ledger drafts', async () => {
     const prefix = carriedContextPrefix();
     const receipt = createNativeSeedReceipt({
       agentSessionId: SESSION_ID,

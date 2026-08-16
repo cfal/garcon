@@ -391,7 +391,7 @@ describe('forkChatFileCopy', () => {
     expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(2);
   });
 
-  it('discards the fork when its native history cannot be read', async () => {
+  it('[TLV5-ADOPT.08-NATIVE-FORK-CORE-UNIT-01] discards a native fork when its selected history cannot be read', async () => {
     const deps = makeDeps({
       readForkedNativeHistory: mock(async () => { throw new Error('history unreadable'); }),
     });
@@ -405,7 +405,11 @@ describe('forkChatFileCopy', () => {
     })).rejects.toThrow('history unreadable');
 
     expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+    expect(deps.forkAgentSession).toHaveBeenCalledOnce();
+    expect(deps.readForkedNativeHistory).toHaveBeenCalledOnce();
     expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
+    expect(deps.sessions.has('target-chat')).toBe(false);
   });
 
   it('rejects a point beyond the ledger watermark before creating artifacts', async () => {

@@ -31,6 +31,9 @@ export function validateAgentIntegration(
       || typeof integration.execution.abort !== 'function') {
     throw new Error(`Agent integration ${integration.descriptor.id} has an invalid execution facet`);
   }
+  if (!('legacyHistoryImport' in integration) || integration.legacyHistoryImport === undefined) {
+    throw new Error(`Agent integration ${integration.descriptor.id} is missing required legacyHistoryImport capability state`);
+  }
   for (const facet of [
     'nativeHistoryImport',
     'nativeActivity',

@@ -56,14 +56,21 @@ describe('TranscriptReloadService', () => {
     });
   });
 
-  it('leaves the old view current when native import fails', async () => {
+  it('[TLV5-ADOPT.08-RELOAD-CORE-UNIT-01] leaves the old view current when selected native import fails', async () => {
     await withReload(async ({ ledger, reload, lease, replacementLease, integration }) => {
       integration.nativeHistoryImport.load = async function* load() {
-        throw new Error('native read failed');
+        yield [{ message: new UserMessage(TS, 'partial native history') }];
+        throw new Error('native iteration failed');
       };
 
-      await expect(reload.reload('chat-1')).rejects.toThrow('native read failed');
+      await expect(reload.reload('chat-1')).rejects.toThrow('native iteration failed');
       expect(ledger.currentView('chat-1')?.viewId).toBe('view-1');
+      expect(ledger.conversationMessages('chat-1').map((message) => message.content)).toEqual([
+        'frozen prompt',
+        'frozen answer',
+        'old current prompt',
+        'old current answer',
+      ]);
       expect(lease.closed).toBe(true);
       expect(replacementLease.current?.closed).toBe(false);
 
@@ -74,6 +81,29 @@ describe('TranscriptReloadService', () => {
       expect(ledger.currentView('chat-1')?.viewId).toBe('view-1');
       expect(ledger.conversationMessages('chat-1').at(-1)?.content)
         .toBe('output after failed reload');
+    });
+  });
+
+  it('[TLV5-ADOPT.08-RELOAD-CORE-UNIT-02] cuts over when the selected native session is validly empty', async () => {
+    await withReload(async ({ ledger, reload, integration, oldViewId }) => {
+      integration.nativeHistoryImport.load = async function* load() {
+        yield [];
+      };
+
+      const replacement = await reload.reload('chat-1');
+
+      expect(replacement.viewId).not.toBe(oldViewId);
+      expect(replacement.contentStartOrdinal).toBe(3);
+      expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
+        'user-input',
+        'provider-row',
+        'session',
+      ]);
+      expect(ledger.conversationMessages('chat-1').map((message) => message.content)).toEqual([
+        'frozen prompt',
+        'frozen answer',
+      ]);
+      expect(() => ledger.rowsAfter('chat-1', oldViewId, 0)).toThrow();
     });
   });
 
@@ -138,18 +168,59 @@ describe('TranscriptReloadService', () => {
       expect(ledger.currentSession('chat-1')?.detail.agentSessionId).toBe('session-late');
     });
   });
+
+  it('[TLV5-ADOPT.06-CORE-UNIT-01] carries the quarantine notice through reload while dropping ordinary notices', async () => {
+    const quarantineDetail = {
+      type: 'carryover-migration-quarantine',
+      artifactId: 'artifact-1',
+      errorCode: 'CARRYOVER_PARSE_FAILED',
+    };
+    await withReload(async ({ ledger, reload }) => {
+      const replacement = await reload.reload('chat-1');
+      const notices = ledger.currentRows('chat-1').filter((row) => row.kind === 'notice');
+
+      expect(replacement.contentStartOrdinal).toBe(4);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({
+        message: 'Some earlier chat history could not be migrated. Quarantine reference: artifact-1.',
+        detail: quarantineDetail,
+      });
+      expect(ledger.currentRows('chat-1').some((row) => (
+        row.kind === 'notice' && row.detail.action === 'reload-native-history'
+      ))).toBe(false);
+    }, {
+      frozenDrafts: [
+        {
+          kind: 'notice',
+          at: TS,
+          providerMeta: null,
+          message: 'Native history changed.',
+          detail: { action: 'reload-native-history' },
+        },
+        {
+          kind: 'notice',
+          at: TS,
+          providerMeta: null,
+          message: 'Some earlier chat history could not be migrated. Quarantine reference: artifact-1.',
+          detail: quarantineDetail,
+        },
+      ],
+    });
+  });
 });
 
-async function withReload(run) {
+async function withReload(run, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-ledger-reload-'));
   const store = new TranscriptLedgerStore(root, {
     createViewId: () => 'view-1',
     now: () => TS,
   });
   const ledger = new TranscriptLedgerService(store, { now: () => TS });
+  const frozenDrafts = options.frozenDrafts ?? [];
   const old = ledger.initializeChat('chat-1', [
     inputDraft('frozen prompt', 'frozen-1'),
     providerDraft('frozen answer'),
+    ...frozenDrafts,
     {
       kind: 'session',
       at: TS,
@@ -163,7 +234,7 @@ async function withReload(run) {
     inputDraft('old current prompt', 'old-1'),
     providerDraft('old current answer'),
     { kind: 'run-ended', at: TS, outcome: 'finished', origin: 'provider', providerMeta: null },
-  ], 3);
+  ], 3 + frozenDrafts.length);
   const lease = ledger.openProducer('chat-1', 'test');
   const entry = {
     agentId: 'test',

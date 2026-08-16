@@ -34,7 +34,9 @@ event family is present:
   inertness;
 - adoption-only `legacyHistoryImport`, including fail-closed reads and recorded
   quarantine, independently of the Reload-only `nativeHistoryImport` facet;
-- native history import, activity probe, and fork behavior;
+- native history import missing/read-failure/valid-empty behavior, gated by its
+  own nullable driver facet rather than the session codec or legacy facet;
+- native activity probe and fork behavior;
 - steering, goals, compaction, and project-path updates;
 - shared-stream routing and per-chat sink-rejection isolation;
 - source retirement and route/callback cleanup.

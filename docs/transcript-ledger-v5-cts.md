@@ -5,9 +5,9 @@ Status: Revision 18 regression catalog, stabilization in progress
 Governing artifacts:
 
 - `TRANSCRIPT_LEDGER_V5_DESIGN.md`, revision 18, SHA-256
-  `65221ada96081075a5b13d34364bc6a95032527e0452bf7b1c41e36075a7f5c2`
+  `a46a0f53bfd1eacaafe755853cf87f0652640656156f9aceb44e25a7b1419d91`
 - `TRANSCRIPT_LEDGER_V5_RELEASE_STABILIZATION_PLAN.md`, SHA-256
-  `27c875288d7b17fde48b2b5b6c30ee2f1b06cfed8ff36d237ce31cfa19a0ef48`
+  `8ab51427369e12c3faa1ce3c039494cc4ee3c365288f63e0610a20733c39dff3`
 
 Inventory baseline: `fix/codex-newest-line-duplication` at
 `1c293cb33ede268a54dc61af55827960c832eaf0`, plus the registered test-owner
@@ -366,6 +366,7 @@ local testing.
 | TLV5-ADOPT.05  | Frozen projection alone preserves the quarantine warning; model context, search, and preview exclude it.                           | Read-fold matrix           |
 | TLV5-ADOPT.06  | Reload carries the quarantine warning as the explicit exception while dropping ordinary notices.                                  | Core unit                  |
 | TLV5-ADOPT.07  | Core remains provider-neutral; Direct migration is adoption-only with no Reload, and OpenCode discovery remains directory-scoped.  | Static, SACS capability    |
+| TLV5-ADOPT.08  | A selected native source must be successfully opened: missing, NotFound, read, parse, sanitation, or incomplete evidence fails while validly empty succeeds; Reload preserves the current view and native-fidelity fork seeding remains fatal on failure. | Provider unit, SACS, core unit |
 
 ### Permission Occurrences
 
@@ -570,7 +571,8 @@ row, and asserts exact addresses and provider callbacks throughout.
 | TLV5-ADOPT.04 | Exact typed notice round trip and usable recorded-quarantine adoption.                                            | Covered oracle      |
 | TLV5-ADOPT.05 | Frozen projection, model context, search, and preview matrix.                                                     | Covered oracle      |
 | TLV5-ADOPT.06 | Reload preserves only the quarantine notice while dropping ordinary notices.                                     | Covered oracle      |
-| TLV5-ADOPT.07 | Core-neutrality static guard; generic Direct/OpenCode SACS fixtures still depend on production facet wiring.     | Partial SACS module |
+| TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and Amp/Factory/Cursor provider oracles are locked. | Intentional red     |
+| TLV5-ADOPT.08 | Shared native-capability SACS, provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Intentional red |
 
 Intentional-red adoption cases fail only where current production still calls
 the native facet, swallows unknown failures, omits legacy rows, or lacks the
@@ -753,6 +755,33 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.04-CONTRACT-01      | `common/__tests__/transcript-notice-contract.test.js`: exact quarantine detail parser and round trip                                                      | ADOPT.04                    |
 | TLV5-ADOPT.05-CORE-MATRIX-01   | `server/ledger/__tests__/quarantine-notice.test.js`: frozen-only preservation and read-fold exclusion                                                     | ADOPT.05                    |
 | TLV5-ADOPT.06-CORE-UNIT-01     | `server/ledger/__tests__/reload.test.js`: Reload carries quarantine while dropping ordinary notices                                                       | ADOPT.06                    |
+| TLV5-ADOPT.01-SACS-ABSENCE-01  | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted driver treats a missing supported source as empty while preserving its binding | ADOPT.01, ADOPT.07       |
+| TLV5-ADOPT.02-SERVER-FAIL-CLOSED-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: provider read failure returns typed HTTP failure, creates no view, isolates another chat, and retries | ADOPT.02, ADOPT.07  |
+| TLV5-ADOPT.04-SACS-QUARANTINE-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted driver adopts with the exact durable quarantine warning and artifact         | ADOPT.04, ADOPT.07          |
+| TLV5-ADOPT.07-SACS-CAPABILITY-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every independently registered scripted driver advertises the legacy fixture facet         | ADOPT.07                    |
+| TLV5-ADOPT.07-SACS-IMPORT-01   | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted driver imports exact released history once with addressed order              | ADOPT.07                    |
+| TLV5-ADOPT.07-SACS-DIRECT-OPENAI-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: Direct OpenAI released JSONL is adoption-only and later context is ledger-derived         | ADOPT.07                    |
+| TLV5-ADOPT.07-SACS-DIRECT-RESPONSES-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: Direct Responses released JSONL is adoption-only and later context is ledger-derived | ADOPT.07                    |
+| TLV5-ADOPT.07-SACS-DIRECT-ANTHROPIC-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: Direct Anthropic released JSONL is adoption-only and later context is ledger-derived | ADOPT.07                    |
+| TLV5-ADOPT.07-SACS-OPENCODE-SCOPED-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: OpenCode imports only the recorded project-directory source                              | ADOPT.07                    |
+| TLV5-ADOPT.07-SACS-OPENCODE-NOTFOUND-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: scoped OpenCode NotFound is positive legacy absence without unscoped fallback        | ADOPT.07                    |
+| TLV5-ADOPT.07-AMP-UNIT-01      | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp distinguishes supported absence from provider read failure                            | ADOPT.07                    |
+| TLV5-ADOPT.07-FACTORY-UNIT-01  | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: Factory distinguishes supported absence from malformed provider history               | ADOPT.07                    |
+| TLV5-ADOPT.07-CURSOR-UNIT-01   | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: Cursor distinguishes a missing legacy store from an unreadable one                     | ADOPT.07                    |
+| TLV5-ADOPT.07-INTERFACE-NEGATIVE-01 | `server-agents/interface/src/testing/__tests__/conformance.test.ts`: interface conformance rejects omission of the nullable legacy facet                 | ADOPT.07, L12.03            |
+| TLV5-ADOPT.07-DIRECT-STATIC-01 | `server/ledger/__tests__/adoption-architecture.test.js`: Direct exposes a read-only legacy importer and no native Reload or session JSONL writer             | ADOPT.07, L12.01            |
+| TLV5-ADOPT.08-SACS-CAPABILITY-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: the scripted roster declares native import independently from legacy import and native-session codecs | ADOPT.08, L12.03 |
+| TLV5-ADOPT.08-SACS-NATIVE-MISSING-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted integration with a native import facet rejects a missing selected source without cutover | ADOPT.08 |
+| TLV5-ADOPT.08-SACS-NATIVE-READ-FAILURE-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted native importer rejects unreadable selected evidence and preserves the view | ADOPT.08 |
+| TLV5-ADOPT.08-SACS-NATIVE-EMPTY-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted native importer accepts a successfully opened validly empty source | ADOPT.08 |
+| TLV5-ADOPT.08-AMP-NATIVE-UNIT-01 | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp distinguishes valid empty from selected-thread missing and malformed failures | ADOPT.08 |
+| TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01 | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: Factory distinguishes valid empty from selected JSONL missing and malformed failures | ADOPT.08 |
+| TLV5-ADOPT.08-CURSOR-NATIVE-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: Cursor distinguishes valid empty from selected store missing and unreadable failures | ADOPT.08 |
+| TLV5-ADOPT.08-NATIVE-WRAPPER-UNIT-01 | `server-agents/common/src/native-session/__tests__/native-history-import.test.ts`: shared import wrapper preserves valid-empty and selected-source failure outcomes | ADOPT.08 |
+| TLV5-ADOPT.08-RELOAD-CORE-UNIT-01 | `server/ledger/__tests__/reload.test.js`: selected-native failure preserves the exact current view and rows | ADOPT.08 |
+| TLV5-ADOPT.08-RELOAD-CORE-UNIT-02 | `server/ledger/__tests__/reload.test.js`: successfully opened validly empty native source cuts over | ADOPT.08 |
+| TLV5-ADOPT.08-NATIVE-SEED-SANITATION-UNIT-01 | `server/ledger/__tests__/native-history-seed.test.js`: invalid native seed evidence fails before draft creation | ADOPT.08 |
+| TLV5-ADOPT.08-NATIVE-FORK-CORE-UNIT-01 | `server/chats/__tests__/fork-chat.test.js`: selected native history failure discards the fork without registry publication or fallback feed | ADOPT.08 |
 | TLV5-L07.03-CODEX-SCRIPTED-01  | `integration-tests/tests/server/codex-producer-routing.test.ts`: `drops content emitted by the old native client after transcript replacement`            | L07.03, L07.08              |
 | TLV5-PERM.04-CODEX-SCRIPTED-01 | `integration-tests/tests/server/codex-producer-routing.test.ts`: `keeps reused native approval ids bound to their exact occurrences`                      | PERM.04, PERM.05            |
 | TLV5-L10.01-CODEX-STATIC-01    | `server-agents/codex/src/agents/codex/app-server/__tests__/architecture.test.js`: live runtime does not import the history loader                         | L10.01, R3                  |

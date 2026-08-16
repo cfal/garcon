@@ -22,6 +22,7 @@ const integration = {
     abort: async () => false,
     runningSessions: () => [],
   },
+  legacyHistoryImport: null,
   nativeHistoryImport: null,
   nativeActivity: null,
   nativeSessions: null,
@@ -55,7 +56,7 @@ const integration = {
   goals: null,
   endpoints: null,
   singleQuery: null,
-} satisfies AgentIntegration;
+} satisfies AgentIntegration & { readonly legacyHistoryImport: null };
 
 describe('validateAgentIntegration', () => {
   test('rejects a descriptor and class ID mismatch', () => {
@@ -96,5 +97,14 @@ describe('validateAgentIntegration', () => {
         steering: { steer: async () => ({ kind: 'accepted' as const }) },
       } as AgentIntegration,
     })).toThrow('invalid steering facet');
+  });
+
+  test('[TLV5-ADOPT.07-INTERFACE-NEGATIVE-01] rejects a missing legacy history capability declaration', () => {
+    const { legacyHistoryImport: _legacyHistoryImport, ...missingLegacyHistoryImport } = integration;
+
+    expect(() => validateAgentIntegration({
+      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integration: missingLegacyHistoryImport as AgentIntegration,
+    })).toThrow('missing required legacyHistoryImport capability state');
   });
 });

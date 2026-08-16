@@ -7,9 +7,9 @@ Companion specification: `docs/transcript-ledger-v5-cts.md`
 Governing artifacts:
 
 - `TRANSCRIPT_LEDGER_V5_DESIGN.md`, revision 18, SHA-256
-  `65221ada96081075a5b13d34364bc6a95032527e0452bf7b1c41e36075a7f5c2`
+  `a46a0f53bfd1eacaafe755853cf87f0652640656156f9aceb44e25a7b1419d91`
 - `TRANSCRIPT_LEDGER_V5_RELEASE_STABILIZATION_PLAN.md`, SHA-256
-  `27c875288d7b17fde48b2b5b6c30ee2f1b06cfed8ff36d237ce31cfa19a0ef48`
+  `8ab51427369e12c3faa1ce3c039494cc4ee3c365288f63e0610a20733c39dff3`
 
 Inventory baseline: `fix/codex-newest-line-duplication` at
 `1c293cb33ede268a54dc61af55827960c832eaf0`, plus the registered test-owner
@@ -318,6 +318,25 @@ while dropping ordinary notices. Provider-capability SACS applies the same
 adoption assertions to every integration advertising the facet. Direct's three
 drivers share the module and still advertise no native Reload; OpenCode remains
 directory-scoped and receives no unscoped fallback case.
+
+Native-import occasion evidence is independently gated by the nullable
+`nativeHistoryImport` SACS capability rather than the native-session codec or
+legacy facet:
+
+| Case ID | Boundary |
+| --- | --- |
+| `TLV5-ADOPT.08-SACS-CAPABILITY-01` | The scripted roster declares native import independently from legacy import and the session-reference codec |
+| `TLV5-ADOPT.08-SACS-NATIVE-MISSING-01` | Claude, Codex, Pi, and OpenCode selected native source missing while Reload preserves the view |
+| `TLV5-ADOPT.08-SACS-NATIVE-READ-FAILURE-01` | The same scripted drivers reject unreadable selected native evidence without cutover |
+| `TLV5-ADOPT.08-SACS-NATIVE-EMPTY-01` | The same scripted drivers accept a successfully opened validly empty source |
+| `TLV5-ADOPT.08-AMP-NATIVE-UNIT-01` | Amp selected-thread missing/malformed versus valid-empty provider boundary |
+| `TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01` | Factory selected JSONL missing/malformed versus valid-empty provider boundary |
+| `TLV5-ADOPT.08-CURSOR-NATIVE-UNIT-01` | Cursor selected store missing/unreadable versus valid-empty provider boundary |
+| `TLV5-ADOPT.08-NATIVE-WRAPPER-UNIT-01` | Shared importer preserves source success and failure outcomes |
+| `TLV5-ADOPT.08-RELOAD-CORE-UNIT-01` | Reload failure retains the exact current view and rows |
+| `TLV5-ADOPT.08-RELOAD-CORE-UNIT-02` | Reload cuts over from a validly empty selected source |
+| `TLV5-ADOPT.08-NATIVE-SEED-SANITATION-UNIT-01` | Invalid native seed evidence is fatal before ledger drafts |
+| `TLV5-ADOPT.08-NATIVE-FORK-CORE-UNIT-01` | Native-fidelity import failure discards artifacts without registration or fallback feed |
 
 ### T7 HTTP Paging and WebSocket Replay
 
