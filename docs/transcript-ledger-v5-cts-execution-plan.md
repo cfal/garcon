@@ -333,7 +333,10 @@ user/developer input_text plus assistant output_text/text, Factory user and
 assistant text plus assistant thinking, and OpenCode user and assistant text
 plus the assistant reasoning-or-text disjunction;
 missing/non-string payloads reject while empty strings remain structurally
-valid. Each case then repairs and retries the same source. Provider housekeeping
+valid. Claude and Codex also reject null, primitive, array, and missing-, empty-,
+or non-string-type part envelopes while ignoring a nonempty unknown string type;
+Claude continues to preserve top-level string content.
+Each case then repairs and retries the same source. Provider housekeeping
 records remain ignorable, and preview/runtime readers remain lenient. Separate Amp, Factory,
 and Cursor legacy cases retain the absence versus unreadable-source distinction
 and repair the same source before retry; native-facet evidence does not replace
@@ -374,8 +377,8 @@ SACS capability rather than the native-session codec or legacy facet:
 | Case ID | Boundary |
 | --- | --- |
 | `TLV5-ADOPT.07-AMP-READ-FAILURE-UNIT-01` | Amp legacy absence, provider read failure, and same-source repair retry |
-| `TLV5-ADOPT.07-CLAUDE-UNIT-01` | Claude legacy import rejects incomplete records and missing/non-string user/assistant text plus assistant thinking payloads; empty strings and housekeeping remain valid |
-| `TLV5-ADOPT.07-CODEX-UNIT-01` | Codex legacy import rejects incomplete records and missing/non-string user/developer input_text plus assistant output_text/text payloads; empty strings and housekeeping remain valid |
+| `TLV5-ADOPT.07-CLAUDE-UNIT-01` | Claude legacy import rejects malformed part envelopes and incomplete known payloads while preserving top-level string content, unknown nonempty typed parts, empty strings, and housekeeping |
+| `TLV5-ADOPT.07-CODEX-UNIT-01` | Codex legacy import rejects malformed part envelopes and incomplete known payloads while preserving unknown nonempty typed parts, empty strings, and housekeeping |
 | `TLV5-ADOPT.07-FACTORY-READ-FAILURE-UNIT-01` | Factory legacy absence, unreadable file, and same-path repair retry |
 | `TLV5-ADOPT.07-FACTORY-UNIT-01` | Factory legacy import rejects invalid events and missing/non-string user/assistant text plus assistant thinking payloads; empty strings and housekeeping produce exactly no rows |
 | `TLV5-ADOPT.07-OPENCODE-UNIT-01` | OpenCode legacy import rejects missing/non-string user/assistant text plus assistant reasoning payloads while accepting either reasoning string carrier when the other is non-string, empty strings, and housekeeping |
@@ -385,8 +388,8 @@ SACS capability rather than the native-session codec or legacy facet:
 | `TLV5-ADOPT.08-SACS-NATIVE-READ-FAILURE-01` | The same scripted drivers reject unreadable selected native evidence without cutover |
 | `TLV5-ADOPT.08-SACS-NATIVE-EMPTY-01` | The same scripted drivers accept a successfully opened validly empty source |
 | `TLV5-ADOPT.08-AMP-NATIVE-UNIT-01` | Amp rejects incomplete selected-thread content and retries the same source as valid empty |
-| `TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01` | Claude's native facet rejects incomplete records and missing/non-string user/assistant text plus assistant thinking payloads, then accepts empty strings and repaired valid empty |
-| `TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01` | Codex's native facet rejects incomplete records and missing/non-string user/developer input_text plus assistant output_text/text payloads, then accepts empty strings and repaired valid empty |
+| `TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01` | Claude's native facet rejects malformed selected part envelopes and incomplete known payloads while preserving top-level string content and unknown nonempty typed parts, then accepts repaired valid empty |
+| `TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01` | Codex's native facet rejects malformed selected part envelopes and incomplete known payloads while preserving unknown nonempty typed parts, then accepts repaired valid empty |
 | `TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01` | Factory's native facet rejects incomplete events and missing/non-string user/assistant text plus assistant thinking payloads, then accepts exact-empty strings/housekeeping and repaired valid empty |
 | `TLV5-ADOPT.08-CURSOR-NATIVE-UNIT-01` | Cursor rejects incomplete selected-session content and retries the same store as valid empty |
 | `TLV5-ADOPT.08-OPENCODE-NATIVE-UNIT-01` | OpenCode's native facet rejects missing/non-string user/assistant text plus assistant reasoning payloads, accepts either reasoning string carrier when the other is non-string plus empty strings/housekeeping, and retries valid empty |

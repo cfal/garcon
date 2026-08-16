@@ -27,6 +27,12 @@ describe('Claude strict history import', () => {
       })).rejects.toThrow();
 
       const invalidParts = [
+        ['null part', 'assistant', null],
+        ['non-object part', 'assistant', 17],
+        ['array part', 'assistant', []],
+        ['part type missing', 'assistant', {}],
+        ['part type empty', 'assistant', { type: '' }],
+        ['part type non-string', 'assistant', { type: 17 }],
         ['user text missing', 'user', { type: 'text' }],
         ['user text non-string', 'user', { type: 'text', text: 17 }],
         ['assistant text missing', 'assistant', { type: 'text' }],
@@ -50,6 +56,18 @@ describe('Claude strict history import', () => {
           outcomes.push([label, 'rejected']);
         }
       }
+
+      const topLevelContent = 'retained top-level assistant content';
+      await fs.writeFile(filePath, `${JSON.stringify({
+        sessionId: 'session-1',
+        type: 'assistant',
+        uuid: 'top-level-assistant',
+        timestamp: '2026-08-16T00:00:00.000Z',
+        message: { role: 'assistant', content: topLevelContent },
+      })}\n`, 'utf8');
+      await expect(loadClaudeChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).resolves.toMatchObject([{ type: 'assistant-message', content: topLevelContent }]);
 
       await fs.writeFile(filePath, [
         JSON.stringify({
@@ -76,6 +94,7 @@ describe('Claude strict history import', () => {
             content: [
               { type: 'text', text: '' },
               { type: 'thinking', thinking: '' },
+              { type: 'future-housekeeping', payload: { retained: true } },
             ],
           },
         }),

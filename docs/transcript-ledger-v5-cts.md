@@ -574,15 +574,16 @@ row, and asserts exact addresses and provider callbacks throughout.
 | TLV5-ADOPT.04 | Exact typed notice round trip and usable recorded-quarantine adoption.                                            | Covered             |
 | TLV5-ADOPT.05 | Frozen projection, model context, search, and preview matrix.                                                     | Covered             |
 | TLV5-ADOPT.06 | Reload preserves only the quarantine notice while dropping ordinary notices.                                     | Covered             |
-| TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and Amp/Factory/Cursor provider oracles are locked. | Covered             |
-| TLV5-ADOPT.08 | Shared native-capability SACS, provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Covered |
+| TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and strict provider-source oracles are locked. | Intentional red |
+| TLV5-ADOPT.08 | Shared native-capability SACS, strict provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Intentional red |
 | TLV5-ADOPT.09 | Small-cap source discrimination, lossless server wiring, frozen ownership-boundary mapping, and multi-segment black-box order are locked. | Covered |
 | TLV5-ADOPT.10 | Source warning, propagated integration error with no source-bearing cause, route logging, and HTTP error surfaces are locked against transcript-content leakage. | Covered |
 | TLV5-ADOPT.11 | Direct relocation and Codex/Cursor source-selection ambiguity fail closed while true absence and repaired retry remain viable. | Covered |
 
-All registered genesis-adoption families are covered across their mapped SACS,
-provider, core, route, and black-box tiers. A completed empty source remains a
-distinct green control.
+`ADOPT.07` and `ADOPT.08` are intentionally red only for malformed Claude and
+Codex content-part envelopes at the strict legacy and native boundaries. Their
+unknown nonempty typed-part and valid-empty controls, and every other adoption
+family, remain green.
 
 ## Read-Fold Matrix
 
@@ -773,8 +774,8 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.07-OPENCODE-UNIT-01 | `server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js`: strict OpenCode legacy import rejects missing/non-string user and assistant text plus assistant reasoning payloads, accepts either reasoning string carrier even when the other is non-string plus empty strings/housekeeping, and retries the same scoped source | ADOPT.02, ADOPT.07 |
 | TLV5-ADOPT.07-AMP-READ-FAILURE-UNIT-01 | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp distinguishes positive absence from provider read failure and retries the same repaired source | ADOPT.07 |
 | TLV5-ADOPT.07-AMP-UNIT-01      | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp rejects an incomplete user text part and retries the same repaired source             | ADOPT.07                    |
-| TLV5-ADOPT.07-CLAUDE-UNIT-01   | `server-agents/claude/src/agents/claude/__tests__/history-loader.test.js`: strict Claude legacy import rejects incomplete records plus missing/non-string user and assistant text and assistant thinking payloads, accepts empty strings/housekeeping, and retries the same source | ADOPT.02, ADOPT.07 |
-| TLV5-ADOPT.07-CODEX-UNIT-01    | `server-agents/codex/src/agents/codex/__tests__/history-loader.test.js`: strict Codex legacy import rejects incomplete records plus missing/non-string user and developer input_text and assistant output_text/text payloads, accepts empty strings/housekeeping, and retries the same source | ADOPT.02, ADOPT.07 |
+| TLV5-ADOPT.07-CLAUDE-UNIT-01   | `server-agents/claude/src/agents/claude/__tests__/history-loader.test.js`: strict Claude legacy import rejects malformed part envelopes plus incomplete known payloads, preserves top-level string content, ignores nonempty unknown typed parts, accepts valid empty, and retries the same source | ADOPT.02, ADOPT.07 |
+| TLV5-ADOPT.07-CODEX-UNIT-01    | `server-agents/codex/src/agents/codex/__tests__/history-loader.test.js`: strict Codex legacy import rejects malformed part envelopes plus incomplete known payloads, ignores nonempty unknown typed parts, accepts valid empty, and retries the same source | ADOPT.02, ADOPT.07 |
 | TLV5-ADOPT.07-FACTORY-UNIT-01  | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: strict Factory legacy import rejects invalid events plus missing/non-string user and assistant text and assistant thinking payloads, accepts exact-empty strings/housekeeping, and retries the same source | ADOPT.02, ADOPT.07 |
 | TLV5-ADOPT.07-FACTORY-READ-FAILURE-UNIT-01 | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: Factory distinguishes positive absence from unreadable source failure and retries the same repaired path | ADOPT.07 |
 | TLV5-ADOPT.07-CURSOR-UNIT-01   | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: Cursor rejects an incomplete user text part in a valid store and retries the same repaired store | ADOPT.07                |
@@ -786,8 +787,8 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.08-SACS-NATIVE-READ-FAILURE-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted native importer rejects unreadable selected evidence and preserves the view | ADOPT.08 |
 | TLV5-ADOPT.08-SACS-NATIVE-EMPTY-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted native importer accepts a successfully opened validly empty source | ADOPT.08 |
 | TLV5-ADOPT.08-AMP-NATIVE-UNIT-01 | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp rejects an incomplete selected-thread user record, then retries the same repaired source as valid empty | ADOPT.08 |
-| TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01 | `server-agents/claude/src/__tests__/integration.test.js`: Claude's native facet rejects incomplete selected records plus missing/non-string user and assistant text and assistant thinking payloads, accepts empty strings/housekeeping, and retries valid empty on the same source | ADOPT.08 |
-| TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01 | `server-agents/codex/src/__tests__/integration.test.js`: Codex's native facet rejects incomplete selected records plus missing/non-string user and developer input_text and assistant output_text/text payloads, accepts empty strings/housekeeping, and retries valid empty on the same source | ADOPT.08 |
+| TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01 | `server-agents/claude/src/__tests__/integration.test.js`: Claude's native facet rejects malformed selected part envelopes plus incomplete known payloads, preserves top-level string content, ignores nonempty unknown typed parts, and retries valid empty on the same source | ADOPT.08 |
+| TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01 | `server-agents/codex/src/__tests__/integration.test.js`: Codex's native facet rejects malformed selected part envelopes plus incomplete known payloads, ignores nonempty unknown typed parts, and retries valid empty on the same source | ADOPT.08 |
 | TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01 | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: Factory's native facet rejects incomplete selected events plus missing/non-string user and assistant text and assistant thinking payloads, accepts exact-empty strings/housekeeping, and retries valid empty on the same source | ADOPT.08 |
 | TLV5-ADOPT.08-CURSOR-NATIVE-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: Cursor rejects an incomplete selected-session user record, then retries the same repaired store as valid empty | ADOPT.08 |
 | TLV5-ADOPT.08-OPENCODE-NATIVE-UNIT-01 | `server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js`: OpenCode's native facet rejects missing/non-string user and assistant text plus assistant reasoning payloads, accepts either reasoning string carrier even when the other is non-string plus empty strings/housekeeping, and retries valid empty on the same source | ADOPT.08 |

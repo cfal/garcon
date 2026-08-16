@@ -115,6 +115,12 @@ describe('ClaudeAgentIntegration', () => {
       await expect(importedRows(integration.nativeHistoryImport, reference)).rejects.toThrow();
 
       const invalidParts = [
+        ['null part', 'assistant', null],
+        ['non-object part', 'assistant', 17],
+        ['array part', 'assistant', []],
+        ['part type missing', 'assistant', {}],
+        ['part type empty', 'assistant', { type: '' }],
+        ['part type non-string', 'assistant', { type: 17 }],
         ['user text missing', 'user', { type: 'text' }],
         ['user text non-string', 'user', { type: 'text', text: 17 }],
         ['assistant text missing', 'assistant', { type: 'text' }],
@@ -138,6 +144,18 @@ describe('ClaudeAgentIntegration', () => {
           outcomes.push([label, 'rejected']);
         }
       }
+
+      const topLevelContent = 'retained top-level assistant content';
+      await writeFile(nativePath, `${JSON.stringify({
+        sessionId: 'session-1',
+        type: 'assistant',
+        uuid: 'top-level-assistant',
+        timestamp: '2026-08-16T00:00:00.000Z',
+        message: { role: 'assistant', content: topLevelContent },
+      })}\n`, 'utf8');
+      await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toMatchObject([{
+        message: { type: 'assistant-message', content: topLevelContent },
+      }]);
 
       await writeFile(nativePath, [
         JSON.stringify({
@@ -164,6 +182,7 @@ describe('ClaudeAgentIntegration', () => {
             content: [
               { type: 'text', text: '' },
               { type: 'thinking', thinking: '' },
+              { type: 'future-housekeeping', payload: { retained: true } },
             ],
           },
         }),

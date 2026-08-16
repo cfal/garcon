@@ -30,6 +30,12 @@ describe('loadCodexChatMessages', () => {
       })).rejects.toThrow();
 
       const invalidParts = [
+        ['null part', 'assistant', null],
+        ['non-object part', 'assistant', 17],
+        ['array part', 'assistant', []],
+        ['part type missing', 'assistant', {}],
+        ['part type empty', 'assistant', { type: '' }],
+        ['part type non-string', 'assistant', { type: 17 }],
         ['user input_text missing', 'user', { type: 'input_text' }],
         ['user input_text non-string', 'user', { type: 'input_text', text: 17 }],
         ['developer input_text missing', 'developer', { type: 'input_text' }],
@@ -65,6 +71,7 @@ describe('loadCodexChatMessages', () => {
           ['developer', { type: 'input_text', text: '' }],
           ['assistant', { type: 'output_text', text: '' }],
           ['assistant', { type: 'text', text: '' }],
+          ['assistant', { type: 'future-housekeeping', payload: { retained: true } }],
         ].map(([role, part], index) => JSON.stringify({
           type: 'response_item',
           timestamp: `2026-01-01T00:00:0${index + 1}.000Z`,
