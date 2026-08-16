@@ -32,7 +32,7 @@ console.log(JSON.stringify({ messages: [] }));
     }
   });
 
-  it('[TLV5-ADOPT.07-AMP-UNIT-01] retries the same source after an invalid user record', async () => {
+  it('[TLV5-ADOPT.07-AMP-UNIT-01] retries the same source after invalid content parts', async () => {
     const root = await temporaryRoot();
     const binary = join(root, 'amp-legacy-fixture');
     const integration = new AmpAgentIntegration(createHost(root, binary));
@@ -42,20 +42,46 @@ console.log(JSON.stringify({ messages: [] }));
       await expect(importedRows(integration.legacyHistoryImport, chat(integration))).resolves
         .toEqual([]);
       const reference = chat(integration, { agentSessionId: 'repairable-amp-thread' });
-      await writeFile(binary, `#!${process.execPath}
-console.log(JSON.stringify({
-  created: '2026-08-16T00:00:00.000Z',
-  messages: [{ role: 'user', messageId: 1, content: [{ type: 'text' }] }],
-}));
-`, 'utf8');
-      await chmod(binary, 0o755);
-      await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
+      const invalidContents = [
+        ['user text missing', 'user', [{ type: 'text' }]],
+        ['user empty part type', 'user', [{ type: '' }]],
+        ['assistant empty part type', 'assistant', [{ type: '' }]],
+        [
+          'recognized part before empty part type',
+          'assistant',
+          [{ type: 'text', text: 'recognized assistant content' }, { type: '' }],
+        ],
+        [
+          'empty part type before recognized part',
+          'assistant',
+          [{ type: '' }, { type: 'text', text: 'recognized assistant content' }],
+        ],
+      ];
+      const outcomes = [];
+      for (const [label, role, content] of invalidContents) {
+        await writeAmpFixture(binary, {
+          created: '2026-08-16T00:00:00.000Z',
+          messages: [{ role, messageId: 1, content }],
+        });
+        try {
+          await importedRows(integration.legacyHistoryImport, reference);
+          outcomes.push([label, 'fulfilled']);
+        } catch {
+          outcomes.push([label, 'rejected']);
+        }
+      }
 
-      await writeFile(binary, `#!${process.execPath}
-console.log(JSON.stringify({ messages: [] }));
-`, 'utf8');
-      await chmod(binary, 0o755);
+      await writeAmpFixture(binary, {
+        created: '2026-08-16T00:00:00.000Z',
+        messages: [
+          { role: 'user', messageId: 1, content: [{ type: 'future-housekeeping' }] },
+          { role: 'assistant', messageId: 2, content: [{ type: 'future-housekeeping' }] },
+          { role: 'user', messageId: 3, content: [] },
+          { role: 'assistant', messageId: 4, content: [] },
+        ],
+      });
       await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
+      expect(outcomes).toEqual(invalidContents.map(([label]) => [label, 'rejected']));
     } finally {
       await integration.lifecycle.stop();
     }
@@ -72,13 +98,6 @@ if (threadId === 'missing-thread') {
 }
 if (threadId === 'malformed-thread') {
   console.log('{');
-  process.exit(0);
-}
-if (threadId === 'incomplete-thread') {
-  console.log(JSON.stringify({
-    created: '2026-08-16T00:00:00.000Z',
-    messages: [{ role: 'user', messageId: 1, content: [{ type: 'text' }] }],
-  }));
   process.exit(0);
 }
 console.log(JSON.stringify({ messages: [] }));
@@ -105,19 +124,51 @@ console.log(JSON.stringify({ messages: [] }));
       expect(missing.status).toBe('rejected');
       expect(malformed.status).toBe('rejected');
 
-      const incompleteReference = chat(integration, {
-        agentSessionId: 'incomplete-thread',
-        nativeSession: nativeSession('incomplete-thread'),
+      const repairableReference = chat(integration, {
+        agentSessionId: 'repairable-thread',
+        nativeSession: nativeSession('repairable-thread'),
       });
-      await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
-        .rejects.toThrow();
+      const invalidContents = [
+        ['user text missing', 'user', [{ type: 'text' }]],
+        ['user empty part type', 'user', [{ type: '' }]],
+        ['assistant empty part type', 'assistant', [{ type: '' }]],
+        [
+          'recognized part before empty part type',
+          'assistant',
+          [{ type: 'text', text: 'recognized assistant content' }, { type: '' }],
+        ],
+        [
+          'empty part type before recognized part',
+          'assistant',
+          [{ type: '' }, { type: 'text', text: 'recognized assistant content' }],
+        ],
+      ];
+      const outcomes = [];
+      for (const [label, role, content] of invalidContents) {
+        await writeAmpFixture(binary, {
+          created: '2026-08-16T00:00:00.000Z',
+          messages: [{ role, messageId: 1, content }],
+        });
+        try {
+          await importedRows(integration.nativeHistoryImport, repairableReference);
+          outcomes.push([label, 'fulfilled']);
+        } catch {
+          outcomes.push([label, 'rejected']);
+        }
+      }
 
-      await writeFile(binary, `#!${process.execPath}
-console.log(JSON.stringify({ messages: [] }));
-`, 'utf8');
-      await chmod(binary, 0o755);
-      await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
+      await writeAmpFixture(binary, {
+        created: '2026-08-16T00:00:00.000Z',
+        messages: [
+          { role: 'user', messageId: 1, content: [{ type: 'future-housekeeping' }] },
+          { role: 'assistant', messageId: 2, content: [{ type: 'future-housekeeping' }] },
+          { role: 'user', messageId: 3, content: [] },
+          { role: 'assistant', messageId: 4, content: [] },
+        ],
+      });
+      await expect(importedRows(integration.nativeHistoryImport, repairableReference))
         .resolves.toEqual([]);
+      expect(outcomes).toEqual(invalidContents.map(([label]) => [label, 'rejected']));
     } finally {
       await integration.lifecycle.stop();
     }
@@ -128,6 +179,13 @@ async function temporaryRoot() {
   const root = await mkdtemp(join(tmpdir(), 'garcon-amp-history-import-'));
   roots.push(root);
   return root;
+}
+
+async function writeAmpFixture(binary, threadExport) {
+  await writeFile(binary, `#!${process.execPath}
+console.log(JSON.stringify(${JSON.stringify(threadExport)}));
+`, 'utf8');
+  await chmod(binary, 0o755);
 }
 
 function createHost(root, binary) {

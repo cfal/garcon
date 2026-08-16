@@ -117,12 +117,25 @@ describe('CodexAgentIntegration', () => {
         ['text missing', 'assistant', { type: 'text' }],
         ['text non-string', 'assistant', { type: 'text', text: null }],
       ];
+      const invalidContents = [
+        ...invalidParts.map(([label, role, part]) => [label, role, [part]]),
+        [
+          'recognized part before malformed part',
+          'assistant',
+          [{ type: 'output_text', text: 'recognized assistant content' }, {}],
+        ],
+        [
+          'malformed part before recognized part',
+          'assistant',
+          [{}, { type: 'output_text', text: 'recognized assistant content' }],
+        ],
+      ];
       const outcomes = [];
-      for (const [label, role, part] of invalidParts) {
+      for (const [label, role, content] of invalidContents) {
         const message = JSON.stringify({
           type: 'response_item',
           timestamp: '2026-08-16T00:00:01.000Z',
-          payload: { type: 'message', role, content: [part] },
+          payload: { type: 'message', role, content },
         });
         await writeFile(nativePath, `${sessionMetadata}\n${message}\n`, 'utf8');
         try {
@@ -146,6 +159,11 @@ describe('CodexAgentIntegration', () => {
         timestamp: `2026-08-16T00:00:0${index + 1}.000Z`,
         payload: { type: 'message', role, content: [part] },
       }));
+      validEmptyMessages.push(...['user', 'developer', 'assistant'].map((role, index) => JSON.stringify({
+        type: 'response_item',
+        timestamp: `2026-08-16T00:00:1${index}.000Z`,
+        payload: { type: 'message', role, content: [] },
+      })));
       await writeFile(
         nativePath,
         `${sessionMetadata}\n${validEmptyMessages.join('\n')}\n`,
@@ -155,7 +173,7 @@ describe('CodexAgentIntegration', () => {
 
       await writeFile(nativePath, `${sessionMetadata}\n`, 'utf8');
       await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toEqual([]);
-      expect(outcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
+      expect(outcomes).toEqual(invalidContents.map(([label]) => [label, 'rejected']));
     } finally {
       await integration.lifecycle.stop();
       await rm(root, { recursive: true, force: true });

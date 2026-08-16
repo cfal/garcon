@@ -50,12 +50,25 @@ describe('loadCodexChatMessages', () => {
         ['text missing', 'assistant', { type: 'text' }],
         ['text non-string', 'assistant', { type: 'text', text: null }],
       ];
+      const invalidContents = [
+        ...invalidParts.map(([label, role, part]) => [label, role, [part]]),
+        [
+          'recognized part before malformed part',
+          'assistant',
+          [{ type: 'output_text', text: 'recognized assistant content' }, {}],
+        ],
+        [
+          'malformed part before recognized part',
+          'assistant',
+          [{}, { type: 'output_text', text: 'recognized assistant content' }],
+        ],
+      ];
       const outcomes = [];
-      for (const [label, role, part] of invalidParts) {
+      for (const [label, role, content] of invalidContents) {
         await fs.writeFile(filePath, `${JSON.stringify({
           type: 'response_item',
           timestamp: '2026-01-01T00:00:00.000Z',
-          payload: { type: 'message', role, content: [part] },
+          payload: { type: 'message', role, content },
         })}\n`, 'utf8');
         try {
           await loadCodexChatMessages(filePath, undefined, { throwOnError: true });
@@ -84,6 +97,11 @@ describe('loadCodexChatMessages', () => {
           timestamp: `2026-01-01T00:00:0${index + 1}.000Z`,
           payload: { type: 'message', role, content: [part] },
         })),
+        ...['user', 'developer', 'assistant'].map((role, index) => JSON.stringify({
+          type: 'response_item',
+          timestamp: `2026-01-01T00:00:1${index}.000Z`,
+          payload: { type: 'message', role, content: [] },
+        })),
       ].join('\n') + '\n', 'utf8');
       await expect(loadCodexChatMessages(filePath, undefined, {
         throwOnError: true,
@@ -93,7 +111,7 @@ describe('loadCodexChatMessages', () => {
       await expect(loadCodexChatMessages(filePath, undefined, {
         throwOnError: true,
       })).resolves.toEqual([]);
-      expect(outcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
+      expect(outcomes).toEqual(invalidContents.map(([label]) => [label, 'rejected']));
     });
   });
 

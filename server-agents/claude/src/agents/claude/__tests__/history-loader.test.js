@@ -45,14 +45,27 @@ describe('Claude strict history import', () => {
         ['thinking missing', 'assistant', { type: 'thinking' }],
         ['thinking non-string', 'assistant', { type: 'thinking', thinking: false }],
       ];
+      const invalidContents = [
+        ...invalidParts.map(([label, role, part]) => [label, role, [part]]),
+        [
+          'recognized part before malformed part',
+          'assistant',
+          [{ type: 'text', text: 'recognized assistant content' }, {}],
+        ],
+        [
+          'malformed part before recognized part',
+          'assistant',
+          [{}, { type: 'text', text: 'recognized assistant content' }],
+        ],
+      ];
       const outcomes = [];
-      for (const [label, role, part] of invalidParts) {
+      for (const [label, role, content] of invalidContents) {
         await fs.writeFile(filePath, `${JSON.stringify({
           sessionId: 'session-1',
           type: role,
           uuid: 'invalid-part',
           timestamp: '2026-08-16T00:00:00.000Z',
-          message: { role, content: [part] },
+          message: { role, content },
         })}\n`, 'utf8');
         try {
           await loadClaudeChatMessages(filePath, undefined, { throwOnError: true });
@@ -115,6 +128,13 @@ describe('Claude strict history import', () => {
             ],
           },
         }),
+        ...['user', 'assistant'].map((role, index) => JSON.stringify({
+          sessionId: 'session-1',
+          type: role,
+          uuid: `empty-${role}-array`,
+          timestamp: `2026-08-16T00:00:0${index + 3}.000Z`,
+          message: { role, content: [] },
+        })),
       ].join('\n') + '\n', 'utf8');
       await expect(loadClaudeChatMessages(filePath, undefined, {
         throwOnError: true,
@@ -124,7 +144,7 @@ describe('Claude strict history import', () => {
       await expect(loadClaudeChatMessages(filePath, undefined, {
         throwOnError: true,
       })).resolves.toEqual([]);
-      expect(outcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
+      expect(outcomes).toEqual(invalidContents.map(([label]) => [label, 'rejected']));
     });
   });
 });
