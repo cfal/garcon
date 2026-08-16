@@ -8,6 +8,7 @@ import {
   CompactionMessage,
   ToolResultMessage,
   UserMessage,
+  WebSearchToolUseMessage,
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
@@ -290,6 +291,47 @@ function mixedOrderingRows(firstOrdinal: number): {
   addMessage(new AssistantMessage(timestamp(), 'mixed-final-assistant-after-all-tools'));
 
   return { drafts, expected };
+}
+
+function crossPageToolPairRows(firstOrdinal: number): {
+  drafts: LedgerRowDraft[];
+  toolResultOrdinal: number;
+  toolUseOrdinal: number;
+} {
+  const drafts: LedgerRowDraft[] = [];
+  let ordinal = firstOrdinal;
+  const add = (message: ChatMessage): number => {
+    const messageOrdinal = ordinal;
+    drafts.push({
+      kind: 'provider-row',
+      at: message.timestamp,
+      message,
+      providerMeta: null,
+    });
+    ordinal += 1;
+    return messageOrdinal;
+  };
+  const timestamp = () => new Date(Date.UTC(2026, 7, 15) + ordinal).toISOString();
+
+  for (let index = 0; index < 48; index += 1) {
+    add(new AssistantMessage(timestamp(), `tool-boundary-before-${index}`));
+  }
+  const toolId = 'cross-page-web-search';
+  const toolUseOrdinal = add(
+    new WebSearchToolUseMessage(timestamp(), toolId, 'cross-page transcript stability'),
+  );
+  const toolResultOrdinal = add(
+    new ToolResultMessage(
+      timestamp(),
+      toolId,
+      { raw: 'cross-page-search-result' },
+      false,
+    ),
+  );
+  for (let index = 0; index < 49; index += 1) {
+    add(new AssistantMessage(timestamp(), `tool-boundary-after-${index}`));
+  }
+  return { drafts, toolResultOrdinal, toolUseOrdinal };
 }
 
 async function appendLedgerRows(
@@ -3736,6 +3778,69 @@ async function verifyMixedTranscriptOrdering(fixture: ChromiumFixture): Promise<
   fixture.assertNoBrowserErrors();
 }
 
+async function verifyCrossPageToolPairPrepend(
+  fixture: ChromiumFixture,
+  viewport: { height: number; width: number },
+): Promise<void> {
+  const chatId = await seedTranscript(fixture.integration, 1, 'tool-boundary-baseline');
+  const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const generated = crossPageToolPairRows(initial.lastOrdinal + 1);
+  await appendLedgerRows(
+    fixture,
+    chatId,
+    initial.transcriptViewId,
+    generated.drafts,
+  );
+
+  await fixture.page.setViewportSize(viewport);
+  const prepared = await prepareTranscript(fixture, chatId);
+  expect(await transcriptEntryCount(fixture.page)).toBe(50);
+  const toolUseRowId = `${initial.transcriptViewId}:${generated.toolUseOrdinal}`;
+  const toolResultRowId = `${initial.transcriptViewId}:${generated.toolResultOrdinal}`;
+  expect(await fixture.page.locator(`[data-chat-row-id="${toolUseRowId}"]`).count()).toBe(0);
+  expect(await fixture.page.locator(`[data-chat-row-id="${toolResultRowId}"]`).count()).toBe(0);
+
+  const { anchor, frames } = await revealEarlierTranscript(
+    fixture.page,
+    prepared.initialModelCount,
+  );
+  expect(frames.length).toBeGreaterThan(2);
+  expect(
+    frames.filter(
+      (frame) =>
+        !frame.connected
+        || !frame.sameNode
+        || frame.offset === null
+        || frame.rowId !== anchor.rowId
+        || frame.text !== anchor.text,
+    ),
+    JSON.stringify({ anchor, frames }, null, 2),
+  ).toEqual([]);
+  expect(
+    Math.max(
+      ...frames.map((frame) =>
+        frame.offset === null
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(frame.offset - anchor.offset),
+      ),
+    ),
+    JSON.stringify({ anchor, frames }, null, 2),
+  ).toBeLessThanOrEqual(1);
+
+  const scan = await scanLoadedTranscript(fixture.page);
+  const toolUse = scan.rows.filter((row) => row.rowId === toolUseRowId);
+  const toolResult = scan.rows.filter((row) => row.rowId === toolResultRowId);
+  expect(toolUse).toHaveLength(1);
+  expect(toolResult).toHaveLength(1);
+  expect(toolUse[0]).toMatchObject({ messageType: 'web-search-tool-use' });
+  expect(toolResult[0]).toMatchObject({ messageType: 'tool-result' });
+  expect(toolUse[0]?.itemIndex).toBeLessThan(toolResult[0]?.itemIndex ?? -1);
+  expect(scan.duplicateMountedRowIds).toEqual([]);
+  expect(scan.indexChanges).toEqual([]);
+  expect(scan.visualOrderViolations).toEqual([]);
+  fixture.assertNoBrowserErrors();
+}
+
 async function seedPermissionTranscript(
   fixture: ChromiumFixture,
   environment: ScriptedClaudeTestEnvironment,
@@ -4170,6 +4275,22 @@ describe('Chromium transcript virtualization', () => {
       browser,
     );
   }, 180_000);
+
+  for (const viewport of TRANSCRIPT_VIEWPORTS) {
+    test(`keeps a ${viewport.label} reading row stable when paging completes a tool pair`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      await withChromiumFixture(
+        `transcript-cross-page-tool-pair-${viewport.label}`,
+        async (fixture, markPhase) => {
+          markPhase(`completing a ${viewport.label} tool pair across an earlier-page boundary`);
+          await verifyCrossPageToolPairPrepend(fixture, viewport);
+        },
+        diagnostics,
+        { serverEnvironment: environment.serverEnvironment },
+        browser,
+      );
+    }, 180_000);
+  }
 
   test('retains the complete detached transcript through paging and live following', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
