@@ -98,6 +98,7 @@ export class ChatReloadedMessage {
     public lastOrdinal: number,
     public pageOldestOrdinal: number,
     public pageNewestOrdinal: number,
+    public nextBeforeOrdinal: number | null,
     public hasMore: boolean,
   ) {}
 }
@@ -547,6 +548,10 @@ export function parseServerWsMessage(
       const lastOrdinal = nonNegativeInt(data.lastOrdinal);
       const pageOldestOrdinal = nonNegativeInt(data.pageOldestOrdinal);
       const pageNewestOrdinal = nonNegativeInt(data.pageNewestOrdinal);
+      const rawNextBeforeOrdinal = data.nextBeforeOrdinal;
+      const nextBeforeOrdinal = rawNextBeforeOrdinal === null
+        ? null
+        : nonNegativeInt(rawNextBeforeOrdinal);
       if (
         !clientRequestId ||
         !chatId ||
@@ -554,6 +559,7 @@ export function parseServerWsMessage(
         lastOrdinal === null ||
         pageOldestOrdinal === null ||
         pageNewestOrdinal === null ||
+        (rawNextBeforeOrdinal !== null && (nextBeforeOrdinal === null || nextBeforeOrdinal <= 1)) ||
         typeof data.hasMore !== 'boolean'
       )
         return null;
@@ -564,6 +570,7 @@ export function parseServerWsMessage(
         lastOrdinal,
         pageOldestOrdinal,
         pageNewestOrdinal,
+        nextBeforeOrdinal,
         hasMore: data.hasMore,
       };
       if (!isRelationallyValidNewestTranscriptPage(page)) return null;
@@ -575,6 +582,7 @@ export function parseServerWsMessage(
         lastOrdinal,
         pageOldestOrdinal,
         pageNewestOrdinal,
+        nextBeforeOrdinal,
         data.hasMore,
       );
     }

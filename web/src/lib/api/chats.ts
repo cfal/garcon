@@ -16,6 +16,7 @@ import {
 import type { ApiProtocol } from '$shared/api-providers';
 import {
 	CHAT_MESSAGES_MAX_LIMIT,
+	isRelationallyValidBoundedTranscriptPage,
 	isRelationallyValidTranscriptPage,
 	parseChatHistoryState,
 	parseResendCandidates,
@@ -386,7 +387,11 @@ function requirePositiveInteger(value: unknown, fieldName: string): number {
 	return value;
 }
 
-type ChatMessagesRequest = {
+function requireNullablePositiveInteger(value: unknown, fieldName: string): number | null {
+	return value === null ? null : requirePositiveInteger(value, fieldName);
+}
+
+export type ChatMessagesRequest = {
 	chatId: string;
 	limit?: number;
 } & (
@@ -401,6 +406,7 @@ interface ValidatedChatMessagesPage {
 	lastOrdinal: number;
 	pageOldestOrdinal: number;
 	pageNewestOrdinal: number;
+	nextBeforeOrdinal: number | null;
 	hasMore: boolean;
 	limit: number;
 }
@@ -422,18 +428,19 @@ function validateChatMessagesPage(
 	) {
 		invalidChatMessagesPage('transcriptViewId does not match request');
 	}
-	if (request.beforeOrdinal === undefined) {
-		if (page.pageNewestOrdinal !== page.lastOrdinal) {
-			invalidChatMessagesPage('newest page cursor does not match lastOrdinal');
-		}
-	} else {
-		if (page.pageNewestOrdinal !== request.beforeOrdinal - 1) {
-			invalidChatMessagesPage('pageNewestOrdinal does not precede beforeOrdinal');
-		}
+	const effectiveBefore = Math.min(
+		request.beforeOrdinal ?? page.lastOrdinal + 1,
+		page.lastOrdinal + 1,
+	);
+	if (page.pageNewestOrdinal !== effectiveBefore - 1) {
+		invalidChatMessagesPage('pageNewestOrdinal does not match the effective request boundary');
 	}
 	if (page.messages.length > page.limit) invalidChatMessagesPage('messages exceed limit');
 	if (!isRelationallyValidTranscriptPage(page)) {
 		invalidChatMessagesPage('ordinal relations are inconsistent');
+	}
+	if (!isRelationallyValidBoundedTranscriptPage(page, page.limit)) {
+		invalidChatMessagesPage('raw continuation does not match the bounded interval');
 	}
 }
 
@@ -456,6 +463,7 @@ export async function getChatMessages(params: ChatMessagesRequest): Promise<Chat
 		lastOrdinal?: unknown;
 		pageOldestOrdinal?: unknown;
 		pageNewestOrdinal?: unknown;
+		nextBeforeOrdinal?: unknown;
 		resendCandidates?: unknown;
 		hasMore?: unknown;
 		limit?: unknown;
@@ -473,6 +481,7 @@ export async function getChatMessages(params: ChatMessagesRequest): Promise<Chat
 			'lastOrdinal',
 			'pageOldestOrdinal',
 			'pageNewestOrdinal',
+			'nextBeforeOrdinal',
 			'hasMore',
 			'limit',
 		] as const) {
@@ -500,6 +509,10 @@ export async function getChatMessages(params: ChatMessagesRequest): Promise<Chat
 		lastOrdinal: requireNonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
 		pageOldestOrdinal: requireNonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
 		pageNewestOrdinal: requireNonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
+		nextBeforeOrdinal: requireNullablePositiveInteger(
+			response.nextBeforeOrdinal,
+			'nextBeforeOrdinal',
+		),
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
 	};

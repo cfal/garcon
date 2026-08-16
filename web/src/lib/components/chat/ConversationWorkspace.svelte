@@ -472,7 +472,6 @@
 		});
 
 		return () => {
-			scroll.destroy();
 			unregisterSubagentToolbar();
 			onRegisterUserMessageNavigator?.(null);
 		};

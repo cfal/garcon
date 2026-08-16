@@ -17,8 +17,6 @@ import {
 import { ledgerRowsToMessages, ledgerRowsToTranscriptMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
 
-const RAW_PAGE_SIZE = 256;
-
 export class TranscriptViewReader {
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
@@ -71,30 +69,22 @@ export class TranscriptViewReader {
       throw new StaleTranscriptViewError(chatId, expectedTranscriptViewId, view.viewId);
     }
     const highWatermark = this.#ledger.highWatermark(chatId).ordinal;
-    let before = beforeOrdinal === undefined
+    const effectiveBefore = beforeOrdinal === undefined
       ? highWatermark + 1
       : Math.min(beforeOrdinal, highWatermark + 1);
-    const pageNewestOrdinal = before - 1;
-    let messages: TranscriptMessage[] = [];
-
-    while (messages.length <= limit && before > 1) {
-      signal.throwIfAborted();
-      const page = this.#ledger.page(chatId, view.viewId, RAW_PAGE_SIZE, before);
-      const presented = ledgerRowsToTranscriptMessages(page.rows);
-      messages = [...presented, ...messages];
-      if (page.nextBefore === null) break;
-      before = page.nextBefore;
-    }
-
-    const hasMore = messages.length > limit;
-    if (hasMore) messages = messages.slice(-limit);
+    const pageNewestOrdinal = effectiveBefore - 1;
+    signal.throwIfAborted();
+    const rawPage = this.#ledger.page(chatId, view.viewId, limit, effectiveBefore);
+    const messages: TranscriptMessage[] = ledgerRowsToTranscriptMessages(rawPage.rows);
+    const nextBeforeOrdinal = rawPage.nextBefore;
     return {
       transcriptViewId: view.viewId,
       messages,
       lastOrdinal: highWatermark,
       pageOldestOrdinal: messages[0]?.ordinal ?? 0,
       pageNewestOrdinal,
-      hasMore,
+      nextBeforeOrdinal,
+      hasMore: nextBeforeOrdinal !== null,
     };
   }
 

@@ -492,6 +492,7 @@ export default function createChatRoutes({
         lastOrdinal: page.lastOrdinal,
         pageOldestOrdinal: page.pageOldestOrdinal,
         pageNewestOrdinal: page.pageNewestOrdinal,
+        nextBeforeOrdinal: page.nextBeforeOrdinal,
         hasMore: page.hasMore,
         resendCandidates: processing.phase(chatId) === null
           ? [...agents.resendCandidates(chatId)]

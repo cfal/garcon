@@ -1,19 +1,17 @@
 import {
-	isUnavailableChatHistoryResponse,
 	type ChatHistoryState,
+	type CompleteChatHistoryResponse,
 	type TranscriptMessage,
 } from '$shared/chat-view';
-import { getChatMessages } from '$lib/api/chats.js';
+import { loadTranscriptPageDemand } from './transcript-page-demand.js';
 import {
 	idlePageState,
-	validateEarlierTranscriptPage,
 	type TranscriptPageDirection,
 	type TranscriptPageLoadResult,
 	type TranscriptPageState,
 } from './transcript-page-progress.js';
 
-type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
-type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
+type ChatPage = CompleteChatHistoryResponse;
 
 interface TranscriptPageHost {
 	activeChatId: string | null;
@@ -21,6 +19,7 @@ interface TranscriptPageHost {
 	entries: TranscriptMessage[];
 	lastOrdinal: number;
 	oldestOrdinal: number;
+	nextBeforeOrdinal: number | null;
 	loadedThroughOrdinal: number;
 	hasEarlierMessages: boolean;
 	hasLaterMessages: boolean;
@@ -38,6 +37,11 @@ interface TranscriptPageLoaderOptions {
 		historyState: Exclude<ChatHistoryState, { kind: 'complete' }>,
 	): void;
 	onPageApplied(direction: TranscriptPageDirection): void;
+	onEarlierPageProgress(
+		chatId: string,
+		requestBeforeOrdinal: number,
+		page: ChatPage,
+	): void;
 }
 
 export class TranscriptPageLoader {
@@ -66,6 +70,7 @@ export class TranscriptPageLoader {
 		const transcriptViewId = this.host.transcriptViewId;
 		const operationEpoch = this.#operationEpoch;
 		const loadedThroughOrdinal = this.host.loadedThroughOrdinal;
+		const lastOrdinal = this.host.lastOrdinal;
 		const retryError = this.host.pageStates[direction].status === 'error'
 			? this.host.pageStates[direction].error
 			: null;
@@ -76,6 +81,7 @@ export class TranscriptPageLoader {
 			transcriptViewId,
 			operationEpoch,
 			loadedThroughOrdinal,
+			lastOrdinal,
 		);
 		this.#loadPromise = loadPromise;
 		this.#loadingChatId = chatId;
@@ -103,28 +109,23 @@ export class TranscriptPageLoader {
 		transcriptViewId: string,
 		operationEpoch: number,
 		loadedThroughOrdinal: number,
+		lastOrdinal: number,
 	): Promise<TranscriptPageLoadResult> {
 		try {
-			const page = await getChatMessages({
+			if (direction === 'earlier') {
+				return await this.#performEarlierLoad(
+					chatId,
+					transcriptViewId,
+					operationEpoch,
+				);
+			}
+			return await this.#performLaterLoad(
 				chatId,
-				limit: this.options.pageSize,
-				beforeOrdinal: this.#beforeOrdinal(direction, loadedThroughOrdinal),
 				transcriptViewId,
-			});
-			if (!this.#isCurrent(chatId, transcriptViewId, operationEpoch)) {
-				return 'invalidated';
-			}
-			if (isUnavailableChatHistoryResponse(page)) {
-				this.options.onHistoryUnavailable(chatId, page.historyState);
-				return 'invalidated';
-			}
-			if (page.transcriptViewId !== transcriptViewId) {
-				await this.host.loadMessages(chatId);
-				return 'invalidated';
-			}
-			return direction === 'earlier'
-				? this.#applyEarlierPage(page)
-				: this.#applyLaterPage(page, loadedThroughOrdinal);
+				operationEpoch,
+				loadedThroughOrdinal,
+				lastOrdinal,
+			);
 		} catch (error) {
 			if (this.#isCurrent(chatId, transcriptViewId, operationEpoch)) {
 				this.host.pageStates[direction] = {
@@ -137,53 +138,107 @@ export class TranscriptPageLoader {
 		}
 	}
 
-	#beforeOrdinal(direction: TranscriptPageDirection, loadedThroughOrdinal: number): number {
-		if (direction === 'earlier') return this.host.oldestOrdinal;
-		return Math.min(
-			loadedThroughOrdinal + this.options.pageSize + 1,
-			this.host.lastOrdinal + 1,
+	async #performEarlierLoad(
+		chatId: string,
+		transcriptViewId: string,
+		operationEpoch: number,
+	): Promise<TranscriptPageLoadResult> {
+		const requestBeforeOrdinal = this.host.nextBeforeOrdinal;
+		if (requestBeforeOrdinal === null) return 'exhausted';
+		const demand = await loadTranscriptPageDemand({
+			direction: 'backward',
+			chatId,
+			transcriptViewId,
+			beforeOrdinal: requestBeforeOrdinal,
+			visibleLimit: this.options.pageSize,
+			isCurrent: () => this.#isCurrent(chatId, transcriptViewId, operationEpoch),
+			onPageValidated: (request, page) => {
+				if (request.beforeOrdinal === undefined) {
+					throw new Error('Earlier transcript request has no raw boundary');
+				}
+				this.options.onEarlierPageProgress(chatId, request.beforeOrdinal, page);
+			},
+		});
+		if (demand.kind === 'invalidated') return 'invalidated';
+		if (demand.kind === 'unavailable') {
+			this.options.onHistoryUnavailable(chatId, demand.response.historyState);
+			return 'invalidated';
+		}
+		if (demand.kind === 'view-changed') {
+			await this.host.loadMessages(chatId);
+			return 'invalidated';
+		}
+		const finalPage = demand.pages.at(-1);
+		if (!finalPage) return 'exhausted';
+		this.host.nextBeforeOrdinal = finalPage.nextBeforeOrdinal;
+		this.host.hasEarlierMessages = finalPage.nextBeforeOrdinal !== null;
+		this.host.lastOrdinal = Math.max(this.host.lastOrdinal, demand.lastOrdinal);
+		this.host.hasLaterMessages = this.host.loadedThroughOrdinal < this.host.lastOrdinal;
+		return demand.messages.length === 0
+			? 'exhausted'
+			: this.#applyEarlierMessages(demand.messages);
+	}
+
+	async #performLaterLoad(
+		chatId: string,
+		transcriptViewId: string,
+		operationEpoch: number,
+		loadedThroughOrdinal: number,
+		lastOrdinal: number,
+	): Promise<TranscriptPageLoadResult> {
+		const demand = await loadTranscriptPageDemand({
+			direction: 'later',
+			chatId,
+			transcriptViewId,
+			afterOrdinal: loadedThroughOrdinal,
+			throughOrdinal: lastOrdinal,
+			visibleLimit: this.options.pageSize,
+			isCurrent: () => this.#isCurrent(chatId, transcriptViewId, operationEpoch),
+		});
+		if (demand.kind === 'invalidated') return 'invalidated';
+		if (demand.kind === 'unavailable') {
+			this.options.onHistoryUnavailable(chatId, demand.response.historyState);
+			return 'invalidated';
+		}
+		if (demand.kind === 'view-changed') {
+			await this.host.loadMessages(chatId);
+			return 'invalidated';
+		}
+		const finalPage = demand.pages.at(-1);
+		if (!finalPage) return 'exhausted';
+		return this.#applyLaterMessages(
+			demand.messages,
+			finalPage.pageNewestOrdinal,
+			Math.max(lastOrdinal, demand.lastOrdinal),
 		);
 	}
 
-	#applyEarlierPage(page: ChatPage): TranscriptPageLoadResult {
-		validateEarlierTranscriptPage(page, this.host.oldestOrdinal);
-		if (page.messages.length === 0) {
-			this.host.hasEarlierMessages = false;
-			return 'exhausted';
-		}
-
-		this.host.entries = [...page.messages, ...this.host.entries];
-		this.host.oldestOrdinal = page.messages[0].ordinal;
-		this.host.lastOrdinal = Math.max(this.host.lastOrdinal, page.lastOrdinal);
-		this.host.hasEarlierMessages = page.hasMore;
+	#applyEarlierMessages(messages: TranscriptMessage[]): TranscriptPageLoadResult {
+		this.host.entries = [...messages, ...this.host.entries];
+		this.host.oldestOrdinal = messages[0].ordinal;
 		this.host.totalMessages = this.host.entries.length;
-		this.host.visibleMessageCount += page.messages.length;
+		this.host.visibleMessageCount += messages.length;
 		this.options.onPageApplied('earlier');
 		return 'loaded';
 	}
 
-	#applyLaterPage(
-		page: ChatPage,
-		loadedThroughOrdinal: number,
+	#applyLaterMessages(
+		messages: TranscriptMessage[],
+		pageNewestOrdinal: number,
+		lastOrdinal: number,
 	): TranscriptPageLoadResult {
-		const reachesLatest = page.pageNewestOrdinal >= page.lastOrdinal;
-		const addedMessages = page.messages.filter((entry) => entry.ordinal > loadedThroughOrdinal);
-		if (addedMessages.length === 0) {
-			if (page.pageNewestOrdinal <= loadedThroughOrdinal) {
-				throw new Error('Later transcript page did not advance the loaded window');
-			}
-			this.host.loadedThroughOrdinal = page.pageNewestOrdinal;
-			this.host.hasLaterMessages = !reachesLatest;
+		const reachesLatest = pageNewestOrdinal >= lastOrdinal;
+		this.host.lastOrdinal = Math.max(this.host.lastOrdinal, lastOrdinal);
+		this.host.loadedThroughOrdinal = pageNewestOrdinal;
+		this.host.hasLaterMessages = !reachesLatest;
+		if (messages.length === 0) {
 			return 'loaded';
 		}
 
-		this.host.entries = [...this.host.entries, ...addedMessages];
-		this.host.lastOrdinal = Math.max(this.host.lastOrdinal, page.lastOrdinal);
-		this.host.loadedThroughOrdinal = page.pageNewestOrdinal;
+		this.host.entries = [...this.host.entries, ...messages];
 		this.host.oldestOrdinal = this.host.entries[0]?.ordinal ?? 0;
-		this.host.hasLaterMessages = !reachesLatest;
 		this.host.totalMessages = this.host.entries.length;
-		this.host.visibleMessageCount += addedMessages.length;
+		this.host.visibleMessageCount += messages.length;
 		if (reachesLatest) {
 			this.host.visibleMessageCount = Math.min(
 				this.host.visibleMessageCount,

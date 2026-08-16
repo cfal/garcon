@@ -15,7 +15,6 @@ const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 const MIN_PAGE_PREFETCH_DISTANCE_PX = 100;
 const EARLIER_PAGE_PREFETCH_VIEWPORTS = 2;
 const LIVE_END_REPIN_THRESHOLD_PX = 50;
-const LIVE_EDGE_PRUNE_IDLE_MS = 180_000;
 
 // Buffers extra earlier history while preserving one-viewport later paging.
 function pagePrefetchDistance(direction: TranscriptPageDirection, viewportHeight: number): number {
@@ -39,7 +38,6 @@ interface DeferredLiveEdgeIntent {
 
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
-	| 'compactToRecentMessages'
 	| 'canAutoFillEarlier'
 	| 'canLoadEarlier'
 	| 'canLoadLater'
@@ -87,11 +85,9 @@ export class ConversationScrollController {
 	#isPageMutationInProgress = false;
 	#activeTargetNavigations = $state(0);
 	#resumeAutoFillAfterTargets = false;
-	#liveEdgePruneTimer: ReturnType<typeof setTimeout> | null = null;
 	#lastObservedFeedChatId: string | null;
 	#lastObservedTranscriptViewId: string;
 	#lastObservedFeedDataRevision: number;
-	#destroyed = false;
 
 	constructor(private deps: ScrollControllerDeps) {
 		this.#lastObservedFeedChatId = deps.sessions.selectedChatId;
@@ -114,24 +110,17 @@ export class ConversationScrollController {
 	scrollToBottom(): void {
 		const viewport = this.deps.getViewport();
 		if (!viewport) return;
-		const restartLiveEdgePrune = this.#liveEdgePruneTimer !== null;
-		this.#cancelLiveEdgePrune();
 		viewport.scrollToEnd();
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
 		this.deps.chatState.isUserScrolledUp = false;
 		this.setPinnedToBottom(true);
-		if (restartLiveEdgePrune) {
-			this.#scheduleLiveEdgePrune(this.deps.sessions.selectedChatId);
-		}
 	}
 
 	async scrollToLatest(): Promise<void> {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId) return;
-		this.#cancelLiveEdgePrune();
 		if (!this.deps.chatState.hasLaterMessages && !this.isScrollingToTop) {
 			this.scrollToBottom();
-			this.#scheduleLiveEdgePrune(chatId);
 			return;
 		}
 		const result = await this.#navigateToWindow(chatId, 'latest', () =>
@@ -139,7 +128,6 @@ export class ConversationScrollController {
 		);
 		if (result === 'invalidated') return;
 		this.scrollToBottom();
-		this.#scheduleLiveEdgePrune(chatId);
 	}
 
 	async restoreLatestWindow(chatId: string): Promise<boolean> {
@@ -154,7 +142,6 @@ export class ConversationScrollController {
 		this.deps.chatState.isUserScrolledUp = !isPinned;
 		if (!isPinned) {
 			this.#deferredLiveEdgeIntent = null;
-			this.#cancelLiveEdgePrune();
 		}
 	}
 
@@ -169,7 +156,6 @@ export class ConversationScrollController {
 		this.#lastObservedTranscriptViewId = transcriptViewId;
 		this.#lastObservedFeedDataRevision = dataRevision;
 		this.deps.chatState.isUserScrolledUp = !this.isPinnedToBottom;
-		if (this.deps.chatState.hasLaterMessages) this.#cancelLiveEdgePrune();
 		const deferredIntent = this.#deferredLiveEdgeIntent;
 		const viewport = this.deps.getViewport();
 		if (
@@ -186,24 +172,9 @@ export class ConversationScrollController {
 			this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
 			viewport?.scrollToEnd();
 		}
-		if (
-			!feedChanged
-			|| !chatId
-			|| this.#destroyed
-			|| !this.#isViewportVisible
-			|| !this.isPinnedToBottom
-			|| this.deps.chatState.isUserScrolledUp
-			|| this.deps.chatState.hasLaterMessages
-			|| this.#isPageMutationInProgress
-			|| this.#activeTargetNavigations > 0
-			|| this.#initialBottomRestoreChatId !== null
-			|| this.isScrollingToTop
-		) return;
-		this.#scheduleLiveEdgePrune(chatId);
 	}
 
 	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
-		this.#cancelLiveEdgePrune();
 		this.#deferredLiveEdgeIntent = null;
 		this.deps.getViewport()?.cancelForUserIntent(direction);
 		// Continued scrolling owns the page's viewport position without cancelling its
@@ -239,7 +210,6 @@ export class ConversationScrollController {
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {
-		this.#cancelLiveEdgePrune();
 		// The next chat's paint gate must not be completed by a deferred end restore
 		// that still belongs to the prior virtual surface.
 		this.deps.getViewport()?.cancelPendingLayoutMutation();
@@ -339,7 +309,6 @@ export class ConversationScrollController {
 				this.setPinnedToBottom(true);
 				this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
 				this.deps.getViewport()?.scrollToEnd();
-				this.#scheduleLiveEdgePrune(this.deps.sessions.selectedChatId);
 			} else if (!nearBottom || this.#userScrollIntent.direction === 'earlier') {
 				this.#preserveHistoryBrowsing();
 			}
@@ -357,7 +326,6 @@ export class ConversationScrollController {
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
-		this.#cancelLiveEdgePrune();
 		const requestIntentEpoch = this.#userScrollIntent.epoch;
 		const requestBoundarySignature =
 			direction === 'earlier' ? this.#earlierBoundarySignature() : null;
@@ -616,7 +584,6 @@ export class ConversationScrollController {
 	setViewportVisible(isVisible: boolean): void {
 		if (isVisible === this.#isViewportVisible) return;
 		this.#isViewportVisible = isVisible;
-		this.#cancelLiveEdgePrune();
 		this.#cancelViewportOperations();
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? null;
 		if (!isVisible) return;
@@ -765,7 +732,6 @@ export class ConversationScrollController {
 	}
 
 	#beginViewportOperation(): number {
-		this.#cancelLiveEdgePrune();
 		this.#deferredLiveEdgeIntent = null;
 		this.deps.chatState.invalidatePendingWindowNavigation();
 		return ++this.#viewportOperationEpoch;
@@ -787,58 +753,6 @@ export class ConversationScrollController {
 		} else {
 			void this.fillUnderfilledViewport();
 		}
-	}
-
-	#scheduleLiveEdgePrune(chatId: string | null): void {
-		this.#cancelLiveEdgePrune();
-		if (!chatId || this.#destroyed || !this.#isViewportVisible) return;
-		const timer = setTimeout(() => {
-			if (this.#liveEdgePruneTimer !== timer) return;
-			this.#liveEdgePruneTimer = null;
-			void this.#compactAtVerifiedLiveEdge(chatId);
-		}, LIVE_EDGE_PRUNE_IDLE_MS);
-		this.#liveEdgePruneTimer = timer;
-	}
-
-	#cancelLiveEdgePrune(): void {
-		if (this.#liveEdgePruneTimer === null) return;
-		clearTimeout(this.#liveEdgePruneTimer);
-		this.#liveEdgePruneTimer = null;
-	}
-
-	async #compactAtVerifiedLiveEdge(chatId: string): Promise<void> {
-		const viewport = this.deps.getViewport();
-		if (
-			this.#destroyed ||
-			!this.#isViewportVisible ||
-			this.deps.sessions.selectedChatId !== chatId ||
-			this.deps.chatState.hasLaterMessages ||
-			this.deps.chatState.isUserScrolledUp ||
-			!this.isPinnedToBottom ||
-			!this.isNearBottom() ||
-			this.#isPageMutationInProgress ||
-			this.#activeTargetNavigations > 0 ||
-			viewport?.ownsScrollPosition()
-		) {
-			return;
-		}
-		if (!this.deps.chatState.compactToRecentMessages()) return;
-		this.#lastObservedFeedDataRevision = this.deps.chatState.feedMutationClock.dataRevision;
-		await tick();
-		if (
-			this.#destroyed ||
-			!this.#isViewportVisible ||
-			this.deps.sessions.selectedChatId !== chatId ||
-			this.deps.chatState.isUserScrolledUp ||
-			!this.isPinnedToBottom
-		) return;
-		this.scrollToBottom();
-	}
-
-	destroy(): void {
-		this.#destroyed = true;
-		this.#deferredLiveEdgeIntent = null;
-		this.#cancelLiveEdgePrune();
 	}
 
 	async #navigateToWindow(

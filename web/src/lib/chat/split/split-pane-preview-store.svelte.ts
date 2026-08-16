@@ -1,7 +1,10 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { isUnavailableChatHistoryResponse, type TranscriptMessage } from '$shared/chat-view';
-import { getChatMessages } from '$lib/api/chats.js';
+import type { TranscriptMessage } from '$shared/chat-view';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import {
+	collapseBackwardTranscriptDemand,
+	loadTranscriptPageDemand,
+} from '$lib/chat/transcript/transcript-page-demand.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const PREVIEW_LIMIT = 50;
@@ -82,18 +85,31 @@ export class SplitPanePreviewStore {
 		this.#loadEpochs.set(chatId, epoch);
 		this.#entries.set(chatId, { ...this.entry(chatId), isLoading: true, error: null });
 		try {
-			const page = await getChatMessages({ chatId, limit: PREVIEW_LIMIT });
-			if (this.#loadEpochs.get(chatId) !== epoch) return;
-			if (isUnavailableChatHistoryResponse(page)) {
-				this.#transcriptCache.remove(chatId);
-				this.#entries.set(chatId, {
-					...emptyEntry(chatId),
-					error: m.chat_history_unavailable(),
+			for (let attempt = 0; attempt < 2; attempt += 1) {
+				const demand = await loadTranscriptPageDemand({
+					direction: 'backward',
+					chatId,
+					visibleLimit: PREVIEW_LIMIT,
+					isCurrent: () => this.#loadEpochs.get(chatId) === epoch,
 				});
+				if (demand.kind === 'invalidated') return;
+				if (demand.kind === 'unavailable') {
+					this.#transcriptCache.remove(chatId);
+					this.#entries.set(chatId, {
+						...emptyEntry(chatId),
+						error: m.chat_history_unavailable(),
+					});
+					return;
+				}
+				if (demand.kind === 'view-changed') continue;
+				this.#transcriptCache.replaceFromPage(
+					chatId,
+					collapseBackwardTranscriptDemand(demand),
+				);
+				this.restore(chatId);
 				return;
 			}
-			this.#transcriptCache.replaceFromPage(chatId, page);
-			this.restore(chatId);
+			throw new Error('Chat generation changed while loading preview');
 		} catch (error) {
 			if (this.#loadEpochs.get(chatId) !== epoch) return;
 			this.#entries.set(chatId, {
@@ -109,9 +125,16 @@ export class SplitPanePreviewStore {
 		transcriptViewId: string,
 		messages: TranscriptMessage[],
 		lastOrdinal: number,
+		nextBeforeOrdinal: number | null,
 	): void {
 		this.#invalidateSnapshotLoad(chatId);
-		this.#transcriptCache.replace(chatId, transcriptViewId, messages, lastOrdinal);
+		this.#transcriptCache.replace(
+			chatId,
+			transcriptViewId,
+			messages,
+			lastOrdinal,
+			nextBeforeOrdinal,
+		);
 		this.restore(chatId);
 	}
 

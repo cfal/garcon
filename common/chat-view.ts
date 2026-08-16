@@ -20,12 +20,18 @@ export interface TranscriptPage {
   readonly lastOrdinal: number;
   readonly pageOldestOrdinal: number;
   readonly pageNewestOrdinal: number;
+  readonly nextBeforeOrdinal: number | null;
   readonly hasMore: boolean;
 }
 
 export type TranscriptPageRelations = Pick<
   TranscriptPage,
-  'messages' | 'lastOrdinal' | 'pageOldestOrdinal' | 'pageNewestOrdinal' | 'hasMore'
+  | 'messages'
+  | 'lastOrdinal'
+  | 'pageOldestOrdinal'
+  | 'pageNewestOrdinal'
+  | 'nextBeforeOrdinal'
+  | 'hasMore'
 >;
 
 export function isRelationallyValidTranscriptPage(page: TranscriptPageRelations): boolean {
@@ -38,16 +44,28 @@ export function isRelationallyValidTranscriptPage(page: TranscriptPageRelations)
     || page.pageNewestOrdinal < 0
     || page.pageOldestOrdinal > page.pageNewestOrdinal
     || page.pageNewestOrdinal > page.lastOrdinal
+    || (
+      page.nextBeforeOrdinal !== null
+      && (
+        !Number.isSafeInteger(page.nextBeforeOrdinal)
+        || page.nextBeforeOrdinal <= 1
+        || page.nextBeforeOrdinal > page.pageNewestOrdinal
+      )
+    )
     || typeof page.hasMore !== 'boolean'
+    || page.hasMore !== (page.nextBeforeOrdinal !== null)
   ) return false;
 
   if (page.messages.length === 0) {
-    return page.pageOldestOrdinal === 0 && !page.hasMore;
+    return page.pageOldestOrdinal === 0;
   }
   if (
     page.pageOldestOrdinal === 0
     || page.messages[0]?.ordinal !== page.pageOldestOrdinal
-    || (page.hasMore && page.pageOldestOrdinal === 1)
+    || (
+      page.nextBeforeOrdinal !== null
+      && page.nextBeforeOrdinal > page.pageOldestOrdinal
+    )
   ) return false;
 
   let previousOrdinal = 0;
@@ -61,6 +79,18 @@ export function isRelationallyValidTranscriptPage(page: TranscriptPageRelations)
     previousOrdinal = entry.ordinal;
   }
   return true;
+}
+
+export function isRelationallyValidBoundedTranscriptPage(
+  page: TranscriptPageRelations,
+  limit: number,
+): boolean {
+  if (!Number.isSafeInteger(limit) || limit <= 0 || !isRelationallyValidTranscriptPage(page)) {
+    return false;
+  }
+  const rawContinuation = page.pageNewestOrdinal - limit + 1;
+  const expectedNextBeforeOrdinal = rawContinuation > 1 ? rawContinuation : null;
+  return page.nextBeforeOrdinal === expectedNextBeforeOrdinal;
 }
 
 export function isRelationallyValidNewestTranscriptPage(
@@ -93,6 +123,7 @@ export interface UnavailableChatHistoryResponse {
   readonly lastOrdinal?: never;
   readonly pageOldestOrdinal?: never;
   readonly pageNewestOrdinal?: never;
+  readonly nextBeforeOrdinal?: never;
   readonly hasMore?: never;
   readonly limit?: never;
 }

@@ -409,6 +409,7 @@ export class ChatHandler {
         reload.lastOrdinal,
         reload.pageOldestOrdinal,
         reload.pageNewestOrdinal,
+        reload.nextBeforeOrdinal,
         reload.hasMore,
       ));
     } catch (error: unknown) {

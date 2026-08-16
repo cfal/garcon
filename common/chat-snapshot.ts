@@ -12,6 +12,7 @@ import {
 } from './chat-modes.js';
 import type { ChatProcessingPhase } from './chat-types.js';
 import {
+  isRelationallyValidBoundedTranscriptPage,
   isRelationallyValidNewestTranscriptPage,
   parseTranscriptMessages,
   type TranscriptMessage,
@@ -53,6 +54,7 @@ export interface AvailableChatSnapshotTranscript {
   lastOrdinal: number;
   pageOldestOrdinal: number;
   pageNewestOrdinal: number;
+  nextBeforeOrdinal: number | null;
   hasMore: boolean;
 }
 
@@ -214,14 +216,23 @@ function parseTranscript(value: unknown, messageLimit: number): ChatSnapshotTran
     raw.pageNewestOrdinal,
     'transcript.pageNewestOrdinal',
   );
+  const nextBeforeOrdinal = nullableEarlierPageCursor(
+    raw.nextBeforeOrdinal,
+    'transcript.nextBeforeOrdinal',
+  );
   if (typeof raw.hasMore !== 'boolean') fail('transcript.hasMore is invalid');
-  if (!isRelationallyValidNewestTranscriptPage({
+  const page = {
     messages,
     lastOrdinal,
     pageOldestOrdinal,
     pageNewestOrdinal,
+    nextBeforeOrdinal,
     hasMore: raw.hasMore,
-  })) {
+  };
+  if (
+    !isRelationallyValidNewestTranscriptPage(page)
+    || !isRelationallyValidBoundedTranscriptPage(page, messageLimit)
+  ) {
     fail('transcript ordinal metadata is inconsistent');
   }
   return {
@@ -234,6 +245,7 @@ function parseTranscript(value: unknown, messageLimit: number): ChatSnapshotTran
     lastOrdinal,
     pageOldestOrdinal,
     pageNewestOrdinal,
+    nextBeforeOrdinal,
     hasMore: raw.hasMore,
   };
 }
@@ -249,6 +261,13 @@ function nonNegativeInteger(value: unknown, field: string): number {
     fail(`${field} must be a non-negative integer`);
   }
   return value;
+}
+
+function nullableEarlierPageCursor(value: unknown, field: string): number | null {
+  if (value === null) return null;
+  const parsed = nonNegativeInteger(value, field);
+  if (parsed <= 1) fail(`${field} must be greater than one`);
+  return parsed;
 }
 
 function nullableString(value: unknown, field: string): string | null {

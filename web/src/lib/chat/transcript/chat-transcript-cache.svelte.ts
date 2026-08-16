@@ -9,6 +9,10 @@ import {
 	LocalChatTranscriptStorage,
 	type CachedChatCursor,
 } from '$lib/chat/transcript/chat-transcript-storage.js';
+import {
+	mergeTranscriptEntriesByOrdinal,
+	retainedEarlierPageCursor,
+} from './transcript-page-progress.js';
 
 export const CHAT_TRANSCRIPT_CACHE_LIMIT = 25;
 
@@ -30,6 +34,7 @@ export interface ChatTranscriptSnapshot {
 	messages: TranscriptMessage[];
 	lastOrdinal: number;
 	oldestOrdinal: number;
+	nextBeforeOrdinal: number | null;
 	stale: boolean;
 }
 
@@ -51,6 +56,7 @@ interface ChatTranscriptPersistDraft {
 	chatId: string;
 	transcriptViewId: string;
 	lastOrdinal: number;
+	nextBeforeOrdinal: number | null;
 	messages: TranscriptMessage[];
 }
 
@@ -69,6 +75,7 @@ function snapshotFromEntry(entry: ChatTranscriptEntry): ChatTranscriptSnapshot {
 		messages: entry.messages,
 		lastOrdinal: entry.lastOrdinal,
 		oldestOrdinal: entry.oldestOrdinal,
+		nextBeforeOrdinal: entry.nextBeforeOrdinal,
 		stale: entry.stale,
 	};
 }
@@ -137,6 +144,7 @@ export class ChatTranscriptCache {
 					{
 						transcriptViewId: draft.transcriptViewId,
 						lastOrdinal: draft.lastOrdinal,
+						nextBeforeOrdinal: draft.nextBeforeOrdinal,
 					},
 					{ limit: this.#limit },
 				);
@@ -164,6 +172,7 @@ export class ChatTranscriptCache {
 			messages: restored.entries,
 			lastOrdinal: restored.lastOrdinal,
 			oldestOrdinal: restored.entries[0]?.ordinal ?? 0,
+			nextBeforeOrdinal: restored.nextBeforeOrdinal,
 			stale: restored.stale,
 			lastAccessedAt: nowIso(),
 			lastValidatedAt: null,
@@ -179,13 +188,19 @@ export class ChatTranscriptCache {
 		options: { stale?: boolean } = {},
 	): ChatTranscriptSnapshot {
 		const windowed = page.messages.slice(-this.#limit);
+		const nextBeforeOrdinal = retainedEarlierPageCursor(
+			page.messages,
+			windowed,
+			page.nextBeforeOrdinal,
+		);
 		const now = nowIso();
 		const entry: ChatTranscriptEntry = {
 			chatId,
 			transcriptViewId: page.transcriptViewId,
 			messages: windowed,
-			lastOrdinal: page.lastOrdinal,
+			lastOrdinal: page.pageNewestOrdinal,
 			oldestOrdinal: windowed[0]?.ordinal ?? 0,
+			nextBeforeOrdinal,
 			stale: options.stale ?? false,
 			lastAccessedAt: now,
 			lastValidatedAt: now,
@@ -201,6 +216,7 @@ export class ChatTranscriptCache {
 		transcriptViewId: string,
 		messages: TranscriptMessage[],
 		lastOrdinal: number,
+		nextBeforeOrdinal: number | null,
 	): ChatTranscriptSnapshot {
 		return this.replaceFromPage(chatId, {
 			transcriptViewId,
@@ -208,8 +224,45 @@ export class ChatTranscriptCache {
 			lastOrdinal,
 			pageOldestOrdinal: messages[0]?.ordinal ?? 0,
 			pageNewestOrdinal: lastOrdinal,
-			hasMore: false,
+			nextBeforeOrdinal,
+			hasMore: nextBeforeOrdinal !== null,
 		});
+	}
+
+	applyEarlierPage(
+		chatId: string,
+		transcriptViewId: string,
+		requestBeforeOrdinal: number,
+		page: TranscriptPage,
+	): void {
+		let entry = this.#entries.get(chatId);
+		if (!entry) {
+			this.hydrate(chatId);
+			entry = this.#entries.get(chatId);
+		}
+		if (
+			!entry
+			|| entry.stale
+			|| entry.transcriptViewId !== transcriptViewId
+			|| entry.nextBeforeOrdinal !== requestBeforeOrdinal
+		) return;
+
+		const merged = mergeTranscriptEntriesByOrdinal(page.messages, entry.messages);
+		const windowed = merged.slice(-this.#limit);
+		const next: ChatTranscriptEntry = {
+			...entry,
+			messages: windowed,
+			lastOrdinal: entry.lastOrdinal,
+			oldestOrdinal: windowed[0]?.ordinal ?? 0,
+			nextBeforeOrdinal: retainedEarlierPageCursor(
+				merged,
+				windowed,
+				page.nextBeforeOrdinal,
+			),
+			lastAccessedAt: nowIso(),
+		};
+		this.#entries.set(chatId, next);
+		this.#persistence.schedule(next);
 	}
 
 	applyMessages(
@@ -244,6 +297,11 @@ export class ChatTranscriptCache {
 			messages: windowed,
 			lastOrdinal: applied.lastOrdinal,
 			oldestOrdinal: windowed[0]?.ordinal ?? 0,
+			nextBeforeOrdinal: retainedEarlierPageCursor(
+				applied.messages,
+				windowed,
+				entry.nextBeforeOrdinal,
+			),
 			stale: false,
 			lastAccessedAt: nowIso(),
 		};
@@ -328,6 +386,7 @@ export class ChatTranscriptCache {
 			messages: windowed,
 			lastOrdinal: applied.lastOrdinal,
 			oldestOrdinal: windowed[0]?.ordinal ?? 0,
+			nextBeforeOrdinal: retainedEarlierPageCursor(applied.messages, windowed, null),
 			stale: false,
 			lastAccessedAt: now,
 			lastValidatedAt: now,

@@ -1,11 +1,14 @@
 import {
-	isUnavailableChatHistoryResponse,
 	type ChatHistoryResponse,
 	type TranscriptMessage,
 } from '$shared/chat-view';
-import { getChatMessages } from '$lib/api/chats.js';
+import type { ChatMessagesRequest } from '$lib/api/chats.js';
 import { INITIAL_VISIBLE_MESSAGES } from './active-transcript-state.svelte.js';
 import type { ChatTranscriptCache } from './chat-transcript-cache.svelte';
+import {
+	collapseBackwardTranscriptDemand,
+	loadTranscriptPageDemand,
+} from './transcript-page-demand.js';
 
 interface PendingBatch {
 	transcriptViewId: string;
@@ -16,20 +19,18 @@ interface PendingBatch {
 
 export interface BackgroundTranscriptLoaderOptions {
 	cache: ChatTranscriptCache;
-	loadPage?: (chatId: string) => Promise<ChatHistoryResponse>;
+	loadPage?: (request: ChatMessagesRequest) => Promise<ChatHistoryResponse>;
 }
 
 export class BackgroundTranscriptLoader {
 	#inFlight = new Map<string, Promise<void>>();
 	#pending = new Map<string, PendingBatch[]>();
 	#cache: ChatTranscriptCache;
-	#loadPage: (chatId: string) => Promise<ChatHistoryResponse>;
+	#loadPage: ((request: ChatMessagesRequest) => Promise<ChatHistoryResponse>) | undefined;
 
 	constructor(options: BackgroundTranscriptLoaderOptions) {
 		this.#cache = options.cache;
-		this.#loadPage =
-			options.loadPage ??
-			((chatId) => getChatMessages({ chatId, limit: INITIAL_VISIBLE_MESSAGES }));
+		this.#loadPage = options.loadPage;
 	}
 
 	queueLoad(chatId: string, failedBatch?: PendingBatch): void {
@@ -56,12 +57,19 @@ export class BackgroundTranscriptLoader {
 	async #load(chatId: string): Promise<boolean> {
 		this.#cache.markStale(chatId);
 		try {
-			const page = await this.#loadPage(chatId);
-			if (isUnavailableChatHistoryResponse(page)) {
+			const demand = await loadTranscriptPageDemand({
+				direction: 'backward',
+				chatId,
+				visibleLimit: INITIAL_VISIBLE_MESSAGES,
+				loadPage: this.#loadPage,
+			});
+			if (demand.kind === 'unavailable') {
 				this.#cache.remove(chatId);
 				this.#pending.delete(chatId);
 				return false;
 			}
+			if (demand.kind !== 'complete') return false;
+			const page = collapseBackwardTranscriptDemand(demand);
 			this.#cache.replaceFromPage(chatId, page);
 			let pending = this.#pending.get(chatId);
 			while (pending && pending.length > 0) {

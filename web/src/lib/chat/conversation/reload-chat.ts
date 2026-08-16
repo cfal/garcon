@@ -23,6 +23,7 @@ export async function reloadChatFromNative(
 		lastOrdinal: message.lastOrdinal,
 		pageOldestOrdinal: message.pageOldestOrdinal,
 		pageNewestOrdinal: message.pageNewestOrdinal,
+		nextBeforeOrdinal: message.nextBeforeOrdinal,
 		hasMore: message.hasMore,
 	});
 	chatState.transcriptCache.markValidated(chatId);

@@ -243,11 +243,11 @@ export class TranscriptLedgerStore {
           `).all(viewId, before, boundedLimit);
       const rows = stored.map(decodeStoredRow).reverse();
       const oldest = rows[0]?.ordinal ?? null;
-      const hasOlder = oldest !== null && Boolean(entry.db.query<{ found: number }, [string, number]>(`
-        SELECT 1 AS found FROM transcript_rows
-        WHERE view_id = ? AND ordinal < ? LIMIT 1
-      `).get(viewId, oldest));
-      return { viewId, rows, nextBefore: hasOlder ? oldest : null };
+      return {
+        viewId,
+        rows,
+        nextBefore: oldest !== null && oldest > 1 ? oldest : null,
+      };
     });
   }
 
