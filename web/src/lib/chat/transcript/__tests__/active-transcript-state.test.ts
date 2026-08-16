@@ -776,6 +776,34 @@ describe('ActiveTranscriptState', () => {
 		]);
 	});
 
+	it('keeps a later optimistic submission after an earlier durable echo', () => {
+		const chat = new ActiveTranscriptState();
+		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, assistant('durable tail'))]);
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-first',
+			content: 'first submitted',
+		}));
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-second',
+			content: 'second submitted',
+		}));
+
+		applyMessages(chat, 'chat-1', 'generation-1', [
+			entry(2, user('first submitted', { clientMessageId: 'msg-first' })),
+		]);
+
+		expect(chat.displayMessages.map(contentOf)).toEqual([
+			'durable tail',
+			'first submitted',
+			'second submitted',
+		]);
+		expect(chat.visibleRows.map((row) => row.id)).toEqual([
+			'generation-1:1',
+			'generation-1:2',
+			'optimistic:msg-second',
+		]);
+	});
+
 	it('renders local messages as transient display-only rows', () => {
 		const chat = new ActiveTranscriptState();
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, user('server'))]);
