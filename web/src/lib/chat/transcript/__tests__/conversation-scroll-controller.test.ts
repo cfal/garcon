@@ -357,6 +357,58 @@ describe('ConversationScrollController', () => {
 		expect(compactToRecentMessages).not.toHaveBeenCalled();
 	});
 
+	it('rearms live-edge pruning after later transcript growth', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		const compactToRecentMessages = vi
+			.fn<ConversationScrollState['compactToRecentMessages']>()
+			.mockReturnValueOnce(false)
+			.mockReturnValueOnce(true);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+			state: { compactToRecentMessages, isUserScrolledUp: true },
+		});
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+		expect(compactToRecentMessages).toHaveBeenCalledOnce();
+
+		fixture.state.feedMutationClock = mutationClock(1);
+		fixture.controller.reconcilePinnedProjection();
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+
+		expect(compactToRecentMessages).toHaveBeenCalledTimes(2);
+	});
+
+	it('retries live-edge pruning after transient viewport ownership releases', async () => {
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(1);
+		let ownsScrollPosition = true;
+		const compactToRecentMessages = vi.fn(() => true);
+		const fixture = controllerFixture({
+			viewport: fakeViewport({
+				isAtEnd: vi.fn(() => true),
+				ownsScrollPosition: vi.fn(() => ownsScrollPosition),
+			}),
+			state: { compactToRecentMessages, isUserScrolledUp: true },
+		});
+		fixture.controller.setPinnedToBottom(false);
+		fixture.controller.noteUserScrollIntent('later');
+		fixture.controller.handleScroll();
+
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+		expect(compactToRecentMessages).not.toHaveBeenCalled();
+
+		ownsScrollPosition = false;
+		fixture.state.feedMutationClock = mutationClock(1);
+		fixture.controller.reconcilePinnedProjection();
+		await vi.advanceTimersByTimeAsync(LIVE_EDGE_PRUNE_IDLE_MS);
+
+		expect(compactToRecentMessages).toHaveBeenCalledOnce();
+	});
+
 	it('cancels delayed live-edge pruning when the transcript becomes hidden', async () => {
 		vi.useFakeTimers();
 		await vi.advanceTimersByTimeAsync(1);

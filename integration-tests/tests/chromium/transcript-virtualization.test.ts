@@ -3530,6 +3530,43 @@ async function verifyLiveEdgePruning(
   );
   await finalRow.waitFor({ state: 'visible' });
   expect((await finalRow.innerText()).trim()).toBe(`echo:${promptPrefix}-${turnCount - 1}`);
+
+  const laterPrompts = Array.from(
+    { length: 3 },
+    (_, index) => `${promptPrefix}-after-prune-${index}`,
+  );
+  for (const prompt of laterPrompts) {
+    await appendTurn(fixture.integration, chatId, prompt);
+  }
+  await fixture.page.clock.runFor(100);
+  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
+  expect(await transcriptEntryCount(fixture.page)).toBe(
+    ACTIVE_TRANSCRIPT_PRUNE_TARGET + laterPrompts.length * 2,
+  );
+
+  await fixture.page.clock.runFor(LIVE_EDGE_PRUNE_IDLE_MS);
+  expect(await transcriptEntryCount(fixture.page)).toBe(ACTIVE_TRANSCRIPT_PRUNE_TARGET);
+
+  const canonicalAfterGrowth = await readCompleteCanonicalTranscript(fixture, chatId);
+  expect(canonicalAfterGrowth.transcriptViewId).toBe(canonicalBeforePrune.transcriptViewId);
+  expect(canonicalAfterGrowth.messages.slice(0, canonicalBeforePrune.messages.length).map(
+    exactTranscriptRow,
+  )).toEqual(canonicalBeforePrune.messages.map(exactTranscriptRow));
+  expect(canonicalAfterGrowth.messages.slice(-laterPrompts.length * 2).map(exactTranscriptRow))
+    .toEqual(laterPrompts.flatMap((prompt) => [
+      expect.objectContaining({ type: 'user-message', text: prompt }),
+      expect.objectContaining({ type: 'assistant-message', text: `echo:${prompt}` }),
+    ]));
+  const finalLiveEntry = canonicalAfterGrowth.messages.at(-1);
+  expect(finalLiveEntry).toMatchObject({
+    message: {
+      type: 'assistant-message',
+      content: `echo:${laterPrompts.at(-1)}`,
+    },
+  });
+  await fixture.page.locator(
+    `[data-chat-row-id="${canonicalAfterGrowth.transcriptViewId}:${finalLiveEntry?.ordinal}"]`,
+  ).waitFor({ state: 'visible' });
   fixture.assertNoBrowserErrors();
 }
 
