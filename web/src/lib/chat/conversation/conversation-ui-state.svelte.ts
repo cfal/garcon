@@ -81,7 +81,7 @@ export class ConversationUiState implements ConversationUiPort {
 
 	clearTurnPermissionRequests(): void {
 		this.pendingPermissionRequests = this.pendingPermissionRequests.filter(
-			(request) => request.permissionRequestId.startsWith('plan-exit-'),
+			(request) => request.requestedTool.type === 'exit-plan-mode-tool-use',
 		);
 	}
 

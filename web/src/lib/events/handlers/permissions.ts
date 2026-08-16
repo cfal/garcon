@@ -64,27 +64,21 @@ export function handlePermissionLifecycleFromBatch(
 			}
 		}
 
-		if (entry instanceof PermissionResolvedMessage) {
-			ctx.popLoadingStatus(WAITING_FOR_PERMISSION_ID);
-			ctx.conversationUi.setPendingPermissionRequests((previous) =>
-				previous.filter((request) => (
-					request.permissionRequestId !== entry.permissionRequestId
-					|| request.incarnation !== entry.incarnation
-				)),
-			);
-		}
-
 		if (
-			entry instanceof PermissionCancelledMessage
+			entry instanceof PermissionResolvedMessage
+			|| entry instanceof PermissionCancelledMessage
 			|| entry instanceof PermissionExpiredMessage
 		) {
-			ctx.popLoadingStatus(WAITING_FOR_PERMISSION_ID);
-			ctx.conversationUi.setPendingPermissionRequests((previous) =>
-				previous.filter((request) => (
+			let occurrenceRemoved = false;
+			ctx.conversationUi.setPendingPermissionRequests((previous) => {
+				const remaining = previous.filter((request) => (
 					request.permissionRequestId !== entry.permissionRequestId
 					|| request.incarnation !== entry.incarnation
-				)),
-			);
+				));
+				occurrenceRemoved = remaining.length !== previous.length;
+				return occurrenceRemoved ? remaining : previous;
+			});
+			if (occurrenceRemoved) ctx.popLoadingStatus(WAITING_FOR_PERMISSION_ID);
 		}
 	}
 }

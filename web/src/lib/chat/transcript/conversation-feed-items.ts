@@ -262,7 +262,7 @@ export function visiblePendingPermissionRequests(
 	pendingPermissionRequests: PendingPermissionRequest[],
 ): PendingPermissionRequest[] {
 	const renderedPermissionOccurrences = new Set<string>();
-	const renderedExitPlanIds = new Set<string>();
+	const renderedExitPlanOccurrences = new Set<string>();
 	const terminalPermissionOccurrences = new Set<string>();
 
 	for (const row of rows) {
@@ -274,7 +274,8 @@ export function visiblePendingPermissionRequests(
 			));
 		}
 		if (row.message.type === 'exit-plan-mode-tool-use') {
-			renderedExitPlanIds.add(`plan-exit-${row.message.toolId}`);
+			const requestId = `plan-exit-${row.message.toolId}`;
+			renderedExitPlanOccurrences.add(permissionOccurrenceKey(requestId, requestId));
 		}
 		if (
 			row.message instanceof PermissionResolvedMessage ||
@@ -293,7 +294,7 @@ export function visiblePendingPermissionRequests(
 		const id = request.permissionRequestId;
 		const occurrence = permissionOccurrenceKey(id, request.incarnation);
 		if (renderedPermissionOccurrences.has(occurrence)) return false;
-		if (renderedExitPlanIds.has(id)) return false;
+		if (renderedExitPlanOccurrences.has(occurrence)) return false;
 		if (terminalPermissionOccurrences.has(occurrence)) return false;
 		if (visiblePermissionOccurrences.has(occurrence)) return false;
 		visiblePermissionOccurrences.add(occurrence);
