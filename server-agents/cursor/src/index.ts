@@ -1,5 +1,4 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
-import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   type AgentChatReference,
@@ -28,7 +27,6 @@ import {
   createCursorAcpNativePath,
   getCursorAgentSessionIdFromNativePath,
 } from './agents/cursor/cursor-native-path.js';
-import { forkCursorAcpSession } from './agents/cursor/cursor-session-store.js';
 import { createCursorTranscriptSource } from './agents/cursor/cursor-transcript-source.js';
 import { runSingleQuery } from './agents/cursor/run-single-query.js';
 
