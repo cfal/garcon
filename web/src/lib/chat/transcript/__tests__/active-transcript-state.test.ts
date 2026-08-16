@@ -804,6 +804,63 @@ describe('ActiveTranscriptState', () => {
 		]);
 	});
 
+	it('preserves optimistic gaps while durable echoes and provider rows interleave', () => {
+		const chat = new ActiveTranscriptState();
+		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, assistant('durable tail'))]);
+		for (const [clientMessageId, content] of [
+			['msg-a', 'submitted a'],
+			['msg-b', 'submitted b'],
+			['msg-c', 'submitted c'],
+			['msg-d', 'submitted d'],
+		] as const) {
+			chat.upsertOptimisticUserInput(optimisticInput({ clientMessageId, content }));
+		}
+
+		applyMessages(chat, 'chat-1', 'generation-1', [
+			entry(2, user('submitted a', { clientMessageId: 'msg-a' })),
+			entry(3, user('submitted c', { clientMessageId: 'msg-c' })),
+			entry(4, assistant('provider output')),
+		]);
+
+		expect(chat.displayMessages.map(contentOf)).toEqual([
+			'durable tail',
+			'submitted a',
+			'submitted b',
+			'submitted c',
+			'submitted d',
+			'provider output',
+		]);
+		expect(chat.visibleRows.map((row) => row.id)).toEqual([
+			'generation-1:1',
+			'generation-1:2',
+			'optimistic:msg-b',
+			'generation-1:3',
+			'optimistic:msg-d',
+			'generation-1:4',
+		]);
+
+		applyMessages(chat, 'chat-1', 'generation-1', [
+			entry(5, user('submitted b', { clientMessageId: 'msg-b' })),
+		]);
+
+		expect(chat.displayMessages.map(contentOf)).toEqual([
+			'durable tail',
+			'submitted a',
+			'submitted c',
+			'provider output',
+			'submitted b',
+			'submitted d',
+		]);
+		expect(chat.visibleRows.map((row) => row.id)).toEqual([
+			'generation-1:1',
+			'generation-1:2',
+			'generation-1:3',
+			'generation-1:4',
+			'generation-1:5',
+			'optimistic:msg-d',
+		]);
+	});
+
 	it('renders local messages as transient display-only rows', () => {
 		const chat = new ActiveTranscriptState();
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, user('server'))]);
