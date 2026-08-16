@@ -195,6 +195,7 @@ function assertImportableAmpThreadExport(value: unknown): asserts value is AmpTh
         || typeof part !== 'object'
         || Array.isArray(part)
         || typeof rawPart.type !== 'string'
+        || !rawPart.type
         || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
       ) {
         throw new Error('Amp thread export contains an invalid content part');

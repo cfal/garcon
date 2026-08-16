@@ -361,10 +361,14 @@ function assertImportableClaudeEntry(
   }
   if (!Array.isArray(message.content)) return;
   for (const rawPart of message.content) {
-    if (!rawPart || typeof rawPart !== 'object' || Array.isArray(rawPart)) continue;
+    if (!rawPart || typeof rawPart !== 'object' || Array.isArray(rawPart)) {
+      throw new Error(`Claude transcript record ${lineNumber} has an invalid message part`);
+    }
     const part = rawPart as Record<string, unknown>;
     if (
-      (part.type === 'text' && typeof part.text !== 'string')
+      typeof part.type !== 'string'
+      || !part.type
+      || (part.type === 'text' && typeof part.text !== 'string')
       || (part.type === 'thinking' && typeof part.thinking !== 'string')
     ) {
       throw new Error(`Claude transcript record ${lineNumber} has an invalid message part`);

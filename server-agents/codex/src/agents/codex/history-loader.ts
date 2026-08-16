@@ -145,11 +145,17 @@ function assertImportableCodexJsonlEntry(entry: Record<string, unknown>): void {
     throw new Error('Codex response message is invalid');
   }
   for (const rawPart of payload.content) {
-    if (!rawPart || typeof rawPart !== 'object' || Array.isArray(rawPart)) continue;
+    if (!rawPart || typeof rawPart !== 'object' || Array.isArray(rawPart)) {
+      throw new Error('Codex response message part is invalid');
+    }
     const part = rawPart as Record<string, unknown>;
     if (
-      (part.type === 'input_text' || part.type === 'output_text' || part.type === 'text')
-      && typeof part.text !== 'string'
+      typeof part.type !== 'string'
+      || !part.type
+      || (
+        (part.type === 'input_text' || part.type === 'output_text' || part.type === 'text')
+        && typeof part.text !== 'string'
+      )
     ) {
       throw new Error('Codex response message part is invalid');
     }
