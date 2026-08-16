@@ -11,12 +11,15 @@ import { TranscriptLedgerStore } from '../store.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptReloadService', () => {
-  it('atomically replaces the current binding while preserving only the frozen conversation', async () => {
+  it('atomically repeats replacement while preserving one frozen conversation prefix', async () => {
     await withReload(async ({ ledger, reload, lease, replacementLease, oldViewId }) => {
+      const firstReplacement = await reload.reload('chat-1');
+      const firstReplacementLease = replacementLease.current;
       const replacement = await reload.reload('chat-1');
       const rows = ledger.currentRows('chat-1');
 
       expect(replacement.viewId).not.toBe(oldViewId);
+      expect(replacement.viewId).not.toBe(firstReplacement.viewId);
       expect(replacement.contentStartOrdinal).toBe(3);
       expect(rows.map((row) => row.kind)).toEqual([
         'user-input',
@@ -35,8 +38,10 @@ describe('TranscriptReloadService', () => {
         rows.filter((row) => row.kind === 'user-input').map((row) => row.detail.clientMessageId),
       ).toEqual(['frozen-1', null]);
       expect(() => ledger.rowsAfter('chat-1', oldViewId, 0)).toThrow();
+      expect(() => ledger.rowsAfter('chat-1', firstReplacement.viewId, 0)).toThrow();
       expect(ledger.currentSession('chat-1')?.detail.agentSessionId).toBe('session-1');
       expect(lease.closed).toBe(true);
+      expect(firstReplacementLease?.closed).toBe(true);
       expect(replacementLease.current?.closed).toBe(false);
     });
   });
