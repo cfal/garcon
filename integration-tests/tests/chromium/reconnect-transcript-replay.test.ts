@@ -52,6 +52,11 @@ interface DetachedReplaySampler {
   frames: DetachedReplayFrame[];
 }
 
+interface HeldTranscriptSnapshot {
+  readonly received: Promise<void>;
+  release(): void;
+}
+
 type ReplayGateScope = typeof globalThis & {
   __garconDetachedReplaySampler?: DetachedReplaySampler;
   __garconReplayGate?: ReplayGate;
@@ -221,6 +226,40 @@ async function releaseHeldContinuation(page: Page): Promise<void> {
     if (!release) throw new Error('No held reconnect continuation is available.');
     release();
   });
+}
+
+async function holdNextNewestTranscriptSnapshot(
+  page: Page,
+  chatId: string,
+): Promise<HeldTranscriptSnapshot> {
+  let markReceived: () => void = () => {};
+  let releaseResponse: () => void = () => {};
+  const received = new Promise<void>((resolve) => {
+    markReceived = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    releaseResponse = resolve;
+  });
+  let held = false;
+  await page.route('**/api/v1/chats/messages?**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const isTargetSnapshot = !held
+      && request.method() === 'GET'
+      && url.searchParams.get('chatId') === chatId
+      && !url.searchParams.has('beforeOrdinal');
+    if (!isTargetSnapshot) {
+      await route.continue();
+      return;
+    }
+
+    held = true;
+    const response = await route.fetch();
+    markReceived();
+    await released;
+    await route.fulfill({ response });
+  });
+  return { received, release: releaseResponse };
 }
 
 function replayRows(count: number, finalContent: string): LedgerRowDraft[] {
@@ -679,6 +718,116 @@ describe('Chromium reconnect transcript replay', () => {
         text: anchor.text,
       }));
       expect(Math.abs(retainedAnchor.offset - anchor.offset)).toBeLessThanOrEqual(1);
+      assertNoUnexpectedReconnectBrowserErrors(fixture.browserErrors);
+    });
+  }, 180_000);
+
+  test('merges buffered live rows into a held same-view snapshot without moving the reader', async () => {
+    await withChromiumFixture('reconnect-held-snapshot-live-tail', async (fixture, markPhase) => {
+      await installReplayGate(fixture.context);
+      await fixture.page.setViewportSize({ width: 390, height: 700 });
+
+      markPhase('creating and expanding the detached transcript');
+      const chatId = await createLongDirectTranscript(fixture, 'held-snapshot-live-history');
+      await fixture.page.goto(
+        `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+      );
+      await fixture.page.locator(FEED_SELECTOR).waitFor();
+      await fixture.page.waitForFunction(
+        () => ((globalThis as ReplayGateScope).__garconReplayGate?.openCount ?? 0) > 0,
+      );
+      const { expandedModelCount, initialModelCount } = await revealEarlierRows(fixture.page);
+      expect(expandedModelCount).toBeGreaterThan(initialModelCount);
+      await positionAtLoadedStart(fixture.page);
+
+      const newestPage = await fixture.integration.client.getMessages(chatId, { limit: 50 });
+      const anchor = await captureDetachedAnchor(fixture.page);
+      const anchorOrdinal = Number(anchor.rowId.slice(anchor.rowId.lastIndexOf(':') + 1));
+      expect(anchorOrdinal).toBeLessThan(newestPage.pageOldestOrdinal);
+      await startDetachedReplaySampler(fixture.page, anchor);
+
+      const heldSnapshot = await holdNextNewestTranscriptSnapshot(fixture.page, chatId);
+      const connectionCount = await replayGateOpenCount(fixture.page);
+      await armReplayGate(fixture.page, { chatId, mode: 'force-stale-first' });
+      markPhase('holding the fallback snapshot before live publication');
+      await fixture.integration.crashAndRestartGarcon({ reusePort: true });
+      await waitForForcedStaleView(fixture.page, connectionCount);
+      await heldSnapshot.received;
+
+      const liveContent = 'held-snapshot-live-tail';
+      markPhase('publishing a complete live turn while the snapshot is held');
+      const live = await fixture.integration.client.runDirectChat({
+        chatId,
+        content: liveContent,
+        agent: fixture.integration.directAgents.openAi,
+      });
+      await waitForLiveEvent(fixture.page, liveContent);
+      await fixture.integration.client.waitForTurnTerminal(chatId, live.turnId);
+      await waitForLiveEvent(fixture.page, `echo:${liveContent}`);
+      heldSnapshot.release();
+
+      await fixture.page.locator(`${FEED_SELECTOR}[aria-busy="false"]`).waitFor();
+      await fixture.page.evaluate(async () => {
+        for (let index = 0; index < 4; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      });
+      const retainedModelCount = await fixture.page.locator(SIZER_SELECTOR).evaluate(
+        (sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0),
+      );
+      expect(
+        retainedModelCount,
+        JSON.stringify({ expandedModelCount, retainedModelCount }),
+      ).toBe(expandedModelCount + 2);
+      const frames = await finishDetachedReplaySampler(fixture.page);
+      expectStableDetachedFrames(frames, anchor);
+
+      const retainedAnchor = await captureDetachedAnchor(fixture.page);
+      expect(retainedAnchor).toEqual(expect.objectContaining({
+        key: anchor.key,
+        rowId: anchor.rowId,
+        text: anchor.text,
+      }));
+      expect(Math.abs(retainedAnchor.offset - anchor.offset)).toBeLessThanOrEqual(1);
+
+      markPhase('verifying the buffered live suffix at the live edge');
+      await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+        const feed = feedElement as HTMLElement;
+        feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 600 }));
+        feed.scrollTop = feed.scrollHeight;
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+      await fixture.page.waitForFunction(
+        ({ selector, user, assistant }) => {
+          const texts = [...document.querySelectorAll<HTMLElement>(selector)]
+            .map((element) => (element.textContent ?? '').trim());
+          return texts.filter((text) => text === user).length === 1
+            && texts.filter((text) => text === assistant).length === 1;
+        },
+        { selector: MESSAGE_SELECTOR, user: liveContent, assistant: `echo:${liveContent}` },
+      );
+      const liveRows = await fixture.page.locator(MESSAGE_SELECTOR).evaluateAll(
+        (elements, expected) => elements
+          .map((element) => ({
+            rowId: (element as HTMLElement).dataset.chatRowId ?? '',
+            text: (element.textContent ?? '').trim(),
+            top: element.getBoundingClientRect().top,
+          }))
+          .filter((row) => row.text === expected.user || row.text === expected.assistant)
+          .sort((left, right) => left.top - right.top),
+        { user: liveContent, assistant: `echo:${liveContent}` },
+      );
+      expect(liveRows.map((row) => row.text)).toEqual([liveContent, `echo:${liveContent}`]);
+      const liveOrdinals = liveRows.map((row) => Number(row.rowId.slice(row.rowId.lastIndexOf(':') + 1)));
+      expect(liveOrdinals.every(Number.isFinite)).toBe(true);
+      expect(liveOrdinals[0]).toBeLessThan(liveOrdinals[1]!);
+
+      const canonical = await fixture.integration.client.getMessages(chatId, { limit: 10 });
+      expect(canonical.messages.slice(-2).map((entry) => entry.message)).toMatchObject([
+        { type: 'user-message', content: liveContent },
+        { type: 'assistant-message', content: `echo:${liveContent}` },
+      ]);
       assertNoUnexpectedReconnectBrowserErrors(fixture.browserErrors);
     });
   }, 180_000);
