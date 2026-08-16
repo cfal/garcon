@@ -244,6 +244,20 @@ describe('GET /api/v1/chats/messages', () => {
     expect(body.errorCode).toBe('STALE_TRANSCRIPT_VIEW');
   });
 
+  it('rejects a newest-page refresh from a replaced transcript view', async () => {
+    const { routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`
+      + '&limit=20&transcriptViewId=requested-view',
+    );
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('STALE_TRANSCRIPT_VIEW');
+  });
+
   it('returns a typed fenced-ledger state instead of an empty complete page', async () => {
     const { routes } = createRoutesFixture({
       chatViews: {

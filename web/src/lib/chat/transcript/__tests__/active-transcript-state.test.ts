@@ -2157,6 +2157,11 @@ describe('ActiveTranscriptState', () => {
 			}),
 		});
 		await chat.navigateToWindow('chat-1', 'latest');
+		expect(vi.mocked(getChatMessages)).toHaveBeenLastCalledWith({
+			chatId: 'chat-1',
+			limit: 50,
+			transcriptViewId: 'generation-1',
+		});
 
 		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.visibleRows.at(-1)).toMatchObject({ kind: 'message', ordinal: 101 });
