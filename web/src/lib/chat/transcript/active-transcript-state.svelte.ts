@@ -26,13 +26,13 @@ import {
 	idlePageState,
 	mergeTranscriptEntriesByOrdinal,
 	retainTranscriptEntries,
-	validateEarlierTranscriptPage,
 	type TranscriptPageDirection,
 	type TranscriptPageLoadResult,
 	type TranscriptPageState,
 	type TranscriptWindowLoadResult,
 	type TranscriptWindowTarget,
 } from './transcript-page-progress.js';
+import { TranscriptPageLoader } from './transcript-page-loader.js';
 import {
 	TranscriptReconnectReplayState,
 	type TranscriptBufferedBatch,
@@ -60,8 +60,6 @@ export type { ChatDisplayRow, ChatTranscriptRow } from './transcript-row-project
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
-type ChatHistoryPage = Awaited<ReturnType<typeof getChatMessages>>;
-type ChatPage = Extract<ChatHistoryPage, { historyState: { kind: 'complete' } }>;
 type ActiveTranscriptSnapshot = TranscriptPage & { resendCandidates?: ResendCandidate[] };
 type SnapshotInstallMode = 'merge' | 'preserve-window' | 'replace';
 export type MessageApplyResult = TranscriptReplayApplyResult;
@@ -108,16 +106,25 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#growExpandedVisibleWindow();
 		this.#feedMutations.record('presentation-structure');
 	});
-	#pageLoadPromise: Promise<TranscriptPageLoadResult> | null = null;
-	#loadingPageChatId: string | null = null;
-	#loadingPageDirection: TranscriptPageDirection | null = null;
-	#pageLoadOperationEpoch = 0;
 	#windowNavigationEpoch = 0;
 	#expandedVisibleStartOrdinal: number | null = null;
 	#feedMutations = new ConversationFeedMutationState();
+	#pageLoader: TranscriptPageLoader;
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
 		this.transcriptCache = transcriptCache;
+		this.#pageLoader = new TranscriptPageLoader(this, {
+			pageSize: MESSAGES_PER_PAGE,
+			onHistoryUnavailable: (chatId, historyState) => {
+				this.#setUnavailableHistory(chatId, historyState);
+			},
+			onPageApplied: (direction) => {
+				this.#rememberExpandedVisibleWindow();
+				this.#feedMutations.record(
+					direction === 'earlier' ? 'history-earlier' : 'history-later',
+				);
+			},
+		});
 	}
 
 	get localNotices(): (LocalNoticeRow & { revision: number })[] {
@@ -653,144 +660,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	async loadEarlierPage(chatId: string): Promise<TranscriptPageLoadResult> {
-		return this.#loadPage('earlier', chatId);
+		return this.#pageLoader.load('earlier', chatId);
 	}
 
 	async loadLaterPage(chatId: string): Promise<TranscriptPageLoadResult> {
-		return this.#loadPage('later', chatId);
-	}
-
-	async #loadPage(
-		direction: TranscriptPageDirection,
-		chatId: string,
-	): Promise<TranscriptPageLoadResult> {
-		if (this.#pageLoadPromise) {
-			return this.#loadingPageDirection === direction && this.#loadingPageChatId === chatId
-				? this.#pageLoadPromise
-				: 'invalidated';
-		}
-		if (!chatId || (direction === 'earlier' ? !this.hasEarlierMessages : !this.hasLaterMessages)) {
-			return 'exhausted';
-		}
-
-		const transcriptViewId = this.transcriptViewId;
-		const operationEpoch = this.#pageLoadOperationEpoch;
-		const loadedThroughOrdinal = this.loadedThroughOrdinal;
-		const retryError =
-			this.pageStates[direction].status === 'error' ? this.pageStates[direction].error : null;
-		this.pageStates[direction] = { status: 'loading', error: retryError };
-		const loadPromise = this.#performPageLoad(
-			direction,
-			chatId,
-			transcriptViewId,
-			operationEpoch,
-			loadedThroughOrdinal,
-		);
-		this.#pageLoadPromise = loadPromise;
-		this.#loadingPageChatId = chatId;
-		this.#loadingPageDirection = direction;
-		try {
-			return await loadPromise;
-		} finally {
-			if (this.#pageLoadPromise === loadPromise) {
-				this.#pageLoadPromise = null;
-				this.#loadingPageChatId = null;
-				this.#loadingPageDirection = null;
-				if (this.pageStates[direction].status === 'loading') {
-					this.pageStates[direction] = idlePageState();
-				}
-			}
-		}
-	}
-
-	async #performPageLoad(
-		direction: TranscriptPageDirection,
-		chatId: string,
-		transcriptViewId: string,
-		operationEpoch: number,
-		loadedThroughOrdinal: number,
-	): Promise<TranscriptPageLoadResult> {
-		try {
-			const beforeOrdinal = direction === 'earlier'
-				? this.oldestOrdinal
-				: Math.min(loadedThroughOrdinal + MESSAGES_PER_PAGE + 1, this.lastOrdinal + 1);
-			const page = await getChatMessages(
-				{ chatId, limit: MESSAGES_PER_PAGE, beforeOrdinal, transcriptViewId },
-			);
-			if (!this.#isCurrentPageLoad(chatId, transcriptViewId, operationEpoch)) {
-				return 'invalidated';
-			}
-			if (isUnavailableChatHistoryResponse(page)) {
-				this.#setUnavailableHistory(chatId, page.historyState);
-				return 'invalidated';
-			}
-			if (page.transcriptViewId !== transcriptViewId) {
-				await this.loadMessages(chatId);
-				return 'invalidated';
-			}
-			return direction === 'earlier'
-				? this.#applyEarlierPage(page)
-				: this.#applyLaterPage(page, loadedThroughOrdinal);
-		} catch (error) {
-			if (this.#isCurrentPageLoad(chatId, transcriptViewId, operationEpoch)) {
-				this.pageStates[direction] = {
-					status: 'error',
-					error: error instanceof Error ? error.message : 'Page load failed',
-				};
-			}
-			console.error(`Error loading ${direction} messages:`, error);
-			return 'failed';
-		}
-	}
-
-	#applyEarlierPage(page: ChatPage): TranscriptPageLoadResult {
-		validateEarlierTranscriptPage(page, this.oldestOrdinal);
-		if (page.messages.length === 0) {
-			this.hasEarlierMessages = false;
-			return 'exhausted';
-		}
-		const addedMessages = page.messages;
-		const mergedEntries = [...addedMessages, ...this.entries];
-		this.entries = mergedEntries;
-		this.oldestOrdinal = addedMessages[0].ordinal;
-		this.lastOrdinal = Math.max(this.lastOrdinal, page.lastOrdinal);
-		this.hasEarlierMessages = page.hasMore;
-		this.totalMessages = this.entries.length;
-		this.visibleMessageCount += addedMessages.length;
-		this.#rememberExpandedVisibleWindow();
-		this.#feedMutations.record('history-earlier');
-		return 'loaded';
-	}
-
-	#applyLaterPage(
-		page: ChatPage,
-		loadedThroughOrdinal: number,
-	): TranscriptPageLoadResult {
-		const reachesLatest = page.pageNewestOrdinal >= page.lastOrdinal;
-		const addedMessages = page.messages.filter((entry) => entry.ordinal > loadedThroughOrdinal);
-		if (addedMessages.length === 0) {
-			if (page.pageNewestOrdinal <= loadedThroughOrdinal) {
-				throw new Error('Later transcript page did not advance the loaded window');
-			}
-			this.loadedThroughOrdinal = page.pageNewestOrdinal;
-			this.hasLaterMessages = !reachesLatest;
-			return 'loaded';
-		}
-
-		const merged = [...this.entries, ...addedMessages];
-		this.entries = merged;
-		this.lastOrdinal = Math.max(this.lastOrdinal, page.lastOrdinal);
-		this.loadedThroughOrdinal = page.pageNewestOrdinal;
-		this.oldestOrdinal = this.entries[0]?.ordinal ?? 0;
-		this.hasLaterMessages = !reachesLatest;
-		this.totalMessages = this.entries.length;
-		this.visibleMessageCount += addedMessages.length;
-		if (reachesLatest) {
-			this.visibleMessageCount = Math.min(this.visibleMessageCount, this.displayMessageCount);
-		}
-		this.#rememberExpandedVisibleWindow();
-		this.#feedMutations.record('history-later');
-		return 'loaded';
+		return this.#pageLoader.load('later', chatId);
 	}
 
 	invalidatePendingHistoryLoad(): void {
@@ -801,20 +675,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#windowNavigationEpoch += 1;
 	}
 
-	#isCurrentPageLoad(chatId: string, transcriptViewId: string, operationEpoch: number): boolean {
-		return (
-			this.#pageLoadOperationEpoch === operationEpoch &&
-			this.activeChatId === chatId &&
-			this.transcriptViewId === transcriptViewId
-		);
-	}
-
 	#invalidatePageLoad(): void {
-		this.#pageLoadOperationEpoch += 1;
-		this.#pageLoadPromise = null;
-		this.#loadingPageChatId = null;
-		this.#loadingPageDirection = null;
-		this.pageStates = { earlier: idlePageState(), later: idlePageState() };
+		this.#pageLoader.invalidate();
 	}
 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
