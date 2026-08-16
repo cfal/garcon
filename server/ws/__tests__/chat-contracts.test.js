@@ -545,7 +545,7 @@ describe('chat WebSocket handler', () => {
     );
   });
 
-  it('repeats the captured replay watermark on continuation requests', async () => {
+  it('[TLV5-REPLAY.02-CONTRACT-01] repeats the captured replay watermark on continuation requests', async () => {
     mockChatViews.readReplay.mockReturnValueOnce({
       transcriptViewId: 'view-1',
       messages: [],

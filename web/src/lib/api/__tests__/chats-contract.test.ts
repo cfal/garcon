@@ -1008,7 +1008,7 @@ describe('chats API contract', () => {
 		}
 	});
 
-	it('qualifies transcript page requests by view and validates the response against the request', async () => {
+	it('[TLV5-PAGE.01-WEB-CONTRACT-01] qualifies transcript page requests by view and validates the response against the request', async () => {
 		const message = (ordinal: number, content: string) => ({
 			ordinal,
 			message: {

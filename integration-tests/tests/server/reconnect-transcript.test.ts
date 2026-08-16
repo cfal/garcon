@@ -386,7 +386,7 @@ describe('reconnect and transcript stability', () => {
     });
   });
 
-  test('replays fifty thousand mixed rows in bounded fixed-watermark pages', async () => {
+  test('[TLV5-REPLAY.03-SERVER-01] replays fifty thousand mixed rows in bounded fixed-watermark pages', async () => {
     await withIntegrationFixture('reconnect-bounded-replay', async (fixture) => {
       const chatId = fixture.newChatId();
       const started = await fixture.client.startDirectChat({
@@ -618,7 +618,7 @@ describe('reconnect and transcript stability', () => {
     });
   });
 
-  test('rejects an HTTP page cursor from another transcript view', async () => {
+  test('[TLV5-PAGE.02-SERVER-01] rejects an HTTP page cursor from another transcript view', async () => {
     await withIntegrationFixture('view-qualified-http-paging', async (fixture) => {
       const chatId = fixture.newChatId();
       const accepted = await fixture.client.startDirectChat({

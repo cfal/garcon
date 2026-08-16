@@ -211,7 +211,7 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(true);
 	});
 
-	it('delays history compaction after the user returns to the live edge', async () => {
+	it('[TLV5-UX.10-WEB-UNIT-01] delays history compaction after the user returns to the live edge', async () => {
 		vi.useFakeTimers();
 		await vi.advanceTimersByTimeAsync(1);
 		const compactToRecentMessages = vi.fn(() => true);
@@ -652,7 +652,7 @@ describe('ConversationScrollController', () => {
 		now.mockRestore();
 	});
 
-	it('does not page from a viewport-owned scroll inside the intent window', async () => {
+	it('[TLV5-UX.07-WEB-UNIT-02] does not page from a viewport-owned scroll inside the intent window', async () => {
 		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
 		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
 		const fixture = controllerFixture({
@@ -722,7 +722,7 @@ describe('ConversationScrollController', () => {
 		expect(state.isUserScrolledUp).toBe(true);
 	});
 
-	it('requires fresh directional intent for viewport-ahead prefetching', () => {
+	it('[TLV5-UX.07-WEB-UNIT-01] requires fresh directional intent for viewport-ahead prefetching', () => {
 		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
 		const { controller } = controllerFixture({
 			state: { canLoadEarlier: true, isUserScrolledUp: true, loadEarlierPage },
@@ -915,7 +915,7 @@ describe('ConversationScrollController', () => {
 		expect(state.isUserScrolledUp).toBe(true);
 	});
 
-	it('requires an explicit retry after a directional page failure', async () => {
+	it('[TLV5-UX.07-WEB-UNIT-03] requires an explicit retry after a directional page failure', async () => {
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const { controller, scroller } = controllerFixture({
 			state: {

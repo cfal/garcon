@@ -114,7 +114,7 @@ describe('ConversationFeedRenderModelController', () => {
 		]);
 	});
 
-	it('keeps distinct identical assistant messages because their row ids differ', () => {
+	it('[TLV5-L02.03-WEB-UNIT-01] keeps distinct identical assistant messages because their row ids differ', () => {
 		const controller = new ConversationFeedRenderModelController();
 		const messages = [
 			row(10, new AssistantMessage(TS, 'Standing by.')),

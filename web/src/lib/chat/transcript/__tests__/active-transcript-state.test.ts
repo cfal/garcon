@@ -299,7 +299,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
 
-	it('retains expanded live-edge history until explicit compaction', () => {
+	it('[TLV5-UX.05-WEB-UNIT-01] retains expanded live-edge history until explicit compaction', () => {
 		const chat = new ActiveTranscriptState();
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -334,7 +334,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.entries.at(-1)?.ordinal).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
 	});
 
-	it('preserves both loaded edges while detached live history grows', () => {
+	it('[TLV5-UX.02-WEB-UNIT-01] preserves both loaded edges while detached live history grows', () => {
 		const chat = new ActiveTranscriptState();
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -389,7 +389,7 @@ describe('ActiveTranscriptState', () => {
 			pageOldestOrdinal: 50,
 			pageNewestOrdinal: 51,
 		},
-	])('rejects an earlier page with $name before mutating the window', async ({
+	])('[TLV5-PAGE.03-WEB-UNIT-01] rejects an earlier page with $name before mutating the window', async ({
 		messages,
 		pageOldestOrdinal,
 		pageNewestOrdinal,
@@ -427,7 +427,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.pageStates.earlier.status).toBe('error');
 	});
 
-	it('grows one loaded interval across repeated bidirectional paging', async () => {
+	it('[TLV5-UX.01-WEB-UNIT-01] grows one loaded interval across repeated bidirectional paging', async () => {
 		const chat = new ActiveTranscriptState();
 		const total = 400;
 		chat.replaceGeneration(
@@ -479,7 +479,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleMessageCount).toBe(total);
 	});
 
-	it('keeps the loaded later edge when earlier paging expands a detached window', async () => {
+	it('[TLV5-UX.03-WEB-UNIT-01] keeps the loaded later edge when earlier paging expands a detached window', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration(
 			'chat-1',
@@ -562,7 +562,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
 
-	it('retains an earlier failure while its explicit retry is loading', async () => {
+	it('[TLV5-PAGE.06-WEB-UNIT-01] retains an earlier failure while its explicit retry is loading', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
 			lastOrdinal: 100,

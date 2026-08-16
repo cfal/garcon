@@ -202,7 +202,7 @@ async function virtualTranscriptSnapshot(page: Page): Promise<VirtualTranscriptS
 }
 
 describe("Lightpanda transcript scrolling", () => {
-  test("pages earlier history while keeping the virtual DOM bounded", async () => {
+  test("[TLV5-PAGE.07-LIGHTPANDA-01] pages earlier history while keeping the virtual DOM bounded", async () => {
     await withE2eFixture("transcript-scrolling", async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       const turns = Array.from(

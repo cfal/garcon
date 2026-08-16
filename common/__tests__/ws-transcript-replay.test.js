@@ -79,7 +79,7 @@ describe('bounded transcript replay WebSocket contract', () => {
     }
   });
 
-  it('preserves the fixed watermark and next cursor on replay responses', () => {
+  it('[TLV5-REPLAY.01-CONTRACT-01] preserves the fixed watermark and next cursor on replay responses', () => {
     expect(parseServerWsMessage(replayResponse())).toMatchObject({
       nextAfterOrdinal: 220,
       throughOrdinal: 500,

@@ -494,7 +494,7 @@ function expectStableDetachedFrames(
 }
 
 describe('Chromium reconnect transcript replay', () => {
-  test('finishes a fixed replay before applying live rows without a snapshot fallback', async () => {
+  test('[TLV5-REPLAY.05-CHROMIUM-01] finishes a fixed replay before applying live rows without a snapshot fallback', async () => {
     await withChromiumFixture('reconnect-live-replay-order', async (fixture, markPhase) => {
       await installReplayGate(fixture.context);
 
@@ -596,7 +596,7 @@ describe('Chromium reconnect transcript replay', () => {
     });
   }, 180_000);
 
-  test('keeps an expanded detached reading interval through bounded reconnect replay', async () => {
+  test('[TLV5-UX.11-CHROMIUM-REPLAY-01] keeps an expanded detached reading interval through bounded reconnect replay', async () => {
     await withChromiumFixture('reconnect-detached-expanded-history', async (fixture, markPhase) => {
       await installReplayGate(fixture.context);
       await fixture.page.setViewportSize({ width: 390, height: 700 });

@@ -1040,7 +1040,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('preserves live rows that arrive beyond the fixed watermark during selected replay', async () => {
+	it('[TLV5-REPLAY.05-WEB-UNIT-01] preserves live rows that arrive beyond the fixed watermark during selected replay', async () => {
 		const activeTranscript = new ActiveTranscriptState();
 		activeTranscript.replaceGeneration(
 			'chat-1',
@@ -1140,7 +1140,7 @@ describe('ChatReconnectCoordinator', () => {
 		]);
 	});
 
-	it('discards a partial selected replay when its transcript view is replaced', async () => {
+	it('[TLV5-REPLAY.07-WEB-UNIT-01] discards a partial selected replay when its transcript view is replaced', async () => {
 		const activeTranscript = new ActiveTranscriptState();
 		activeTranscript.replaceGeneration(
 			'chat-1',
@@ -1380,7 +1380,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.markBackgroundStale).not.toHaveBeenCalled();
 	});
 
-	it('abandons a partial replay on disconnect and restarts with a fresh watermark', async () => {
+	it('[TLV5-REPLAY.06-WEB-UNIT-01] abandons a partial replay on disconnect and restarts with a fresh watermark', async () => {
 		const heldContinuation = deferred<Record<string, unknown>>();
 		const deps = createReconnectDeps();
 		let subscribeCount = 0;

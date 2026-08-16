@@ -77,7 +77,7 @@ function pendingPermission(
 }
 
 describe('buildConversationFeedRenderItems', () => {
-	it('keeps every renderable transcript message in exact source order', () => {
+	it('[TLV5-UX.08-WEB-UNIT-01] keeps every renderable transcript message in exact source order', () => {
 		const messages = [
 			new UserMessage(TS, 'start'),
 			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
@@ -241,7 +241,7 @@ describe('buildConversationFeedRenderItems', () => {
 		});
 	});
 
-	it('keeps terminal state separate when a permission request id is reused', () => {
+	it('[TLV5-PERM.08-WEB-UNIT-01] keeps terminal state separate when a permission request id is reused', () => {
 		const first = new PermissionCancelledMessage(
 			TS,
 			'shared',

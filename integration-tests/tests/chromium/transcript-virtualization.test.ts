@@ -68,6 +68,7 @@ interface TranscriptTouchDrag {
 }
 
 interface TouchPrependScenario {
+  caseId: string;
   clampBeforeRelease: boolean;
   label: string;
   liveBehavior: 'completed' | 'expanding' | 'paused-interrupted';
@@ -4215,7 +4216,7 @@ describe('Chromium transcript virtualization', () => {
     }
   });
 
-  test('preserves virtual transcript geometry across paging, appends, and scale', async () => {
+  test('[TLV5-UX.01-CHROMIUM-01] preserves virtual transcript geometry across paging, appends, and scale', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     await withChromiumFixture(
@@ -4256,43 +4257,49 @@ describe('Chromium transcript virtualization', () => {
 
   for (const scenario of [
     {
+      caseId: '[TLV5-UX.06-COMPACT-TOUCH-COMPLETED-01]',
       clampBeforeRelease: false,
       label: 'compact-completed',
       liveBehavior: 'completed',
       viewport: { height: 700, width: 390 },
     },
     {
+      caseId: '[TLV5-UX.06-COMPACT-TOUCH-LIVE-01]',
       clampBeforeRelease: true,
       label: 'compact-live-expanding',
       liveBehavior: 'expanding',
       viewport: { height: 700, width: 390 },
     },
     {
+      caseId: '[TLV5-UX.06-COMPACT-TOUCH-INTERRUPTED-01]',
       clampBeforeRelease: false,
       label: 'compact-paused-interrupted',
       liveBehavior: 'paused-interrupted',
       viewport: { height: 700, width: 390 },
     },
     {
+      caseId: '[TLV5-UX.06-WIDE-TOUCH-COMPLETED-01]',
       clampBeforeRelease: false,
       label: 'wide-completed',
       liveBehavior: 'completed',
       viewport: { height: 900, width: 1280 },
     },
     {
+      caseId: '[TLV5-UX.06-WIDE-TOUCH-LIVE-01]',
       clampBeforeRelease: true,
       label: 'wide-live-expanding',
       liveBehavior: 'expanding',
       viewport: { height: 900, width: 1280 },
     },
     {
+      caseId: '[TLV5-UX.06-WIDE-TOUCH-INTERRUPTED-01]',
       clampBeforeRelease: false,
       label: 'wide-paused-interrupted',
       liveBehavior: 'paused-interrupted',
       viewport: { height: 900, width: 1280 },
     },
   ] satisfies TouchPrependScenario[]) {
-    test(`keeps touch scrolling stable through a ${scenario.label} earlier-page prepend`, async () => {
+    test(`${scenario.caseId} keeps touch scrolling stable through a ${scenario.label} earlier-page prepend`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       await withChromiumFixture(
         `transcript-touch-prepend-${scenario.label}`,
@@ -4307,8 +4314,18 @@ describe('Chromium transcript virtualization', () => {
     }, 180_000);
   }
 
-  for (const viewport of TRANSCRIPT_VIEWPORTS) {
-    test(`keeps a ${viewport.label} scrollbar reversal stable through an earlier-page prepend`, async () => {
+  for (const scenario of [
+    {
+      caseId: '[TLV5-UX.06-COMPACT-SCROLLBAR-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[0],
+    },
+    {
+      caseId: '[TLV5-UX.06-WIDE-SCROLLBAR-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[1],
+    },
+  ] as const) {
+    const { viewport } = scenario;
+    test(`${scenario.caseId} keeps a ${viewport.label} scrollbar reversal stable through an earlier-page prepend`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       await withChromiumFixture(
         `transcript-scrollbar-prepend-${viewport.label}`,
@@ -4323,8 +4340,18 @@ describe('Chromium transcript virtualization', () => {
     }, 180_000);
   }
 
-  for (const viewport of TRANSCRIPT_VIEWPORTS) {
-    test(`keeps a ${viewport.label} keyboard page stable through an earlier-page prepend`, async () => {
+  for (const scenario of [
+    {
+      caseId: '[TLV5-UX.06-COMPACT-KEYBOARD-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[0],
+    },
+    {
+      caseId: '[TLV5-UX.06-WIDE-KEYBOARD-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[1],
+    },
+  ] as const) {
+    const { viewport } = scenario;
+    test(`${scenario.caseId} keeps a ${viewport.label} keyboard page stable through an earlier-page prepend`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       await withChromiumFixture(
         `transcript-keyboard-prepend-${viewport.label}`,
@@ -4383,7 +4410,7 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 180_000);
 
-  test('keeps historical permission rows inert after a server restart', async () => {
+  test('[TLV5-PERM.07-CHROMIUM-RESTART-01] keeps historical permission rows inert after a server restart', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     await withChromiumFixture(
@@ -4398,7 +4425,7 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 180_000);
 
-  test('hides native-history reload for a direct chat', async () => {
+  test('[TLV5-L10.03-CHROMIUM-01] hides native-history reload for a direct chat', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
       'transcript-native-history-reload',
@@ -4412,8 +4439,18 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 120_000);
 
-  for (const viewport of TRANSCRIPT_VIEWPORTS) {
-    test(`isolates a held earlier page across a ${viewport.label} chat switch`, async () => {
+  for (const scenario of [
+    {
+      caseId: '[TLV5-UX.11-COMPACT-SWITCH-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[0],
+    },
+    {
+      caseId: '[TLV5-UX.11-WIDE-SWITCH-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[1],
+    },
+  ] as const) {
+    const { viewport } = scenario;
+    test(`${scenario.caseId} isolates a held earlier page across a ${viewport.label} chat switch`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       await withChromiumFixture(
         `transcript-held-page-switch-${viewport.label}`,
@@ -4427,7 +4464,10 @@ describe('Chromium transcript virtualization', () => {
       );
     }, 180_000);
 
-    test(`replaces an idle detached ${viewport.label} transcript from native history`, async () => {
+    const reloadCaseId = viewport.label === 'compact'
+      ? '[TLV5-UX.11-COMPACT-RELOAD-01]'
+      : '[TLV5-UX.11-WIDE-RELOAD-01]';
+    test(`${reloadCaseId} replaces an idle detached ${viewport.label} transcript from native history`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       const testEnvironment = environment;
       await withChromiumFixture(
@@ -4443,7 +4483,7 @@ describe('Chromium transcript virtualization', () => {
     }, 180_000);
   }
 
-  test('ignores a held old-view page after native history replaces the transcript', async () => {
+  test('[TLV5-PAGE.05-CHROMIUM-01] ignores a held old-view page after native history replaces the transcript', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     await withChromiumFixture(
@@ -4458,7 +4498,7 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 180_000);
 
-  test('renders mixed paged transcripts in exact ledger order on compact and wide layouts', async () => {
+  test('[TLV5-UX.09-CHROMIUM-01] renders mixed paged transcripts in exact ledger order on compact and wide layouts', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
       'transcript-mixed-ordering',
@@ -4472,8 +4512,18 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 180_000);
 
-  for (const viewport of TRANSCRIPT_VIEWPORTS) {
-    test(`keeps a ${viewport.label} reading row stable when paging completes a tool pair`, async () => {
+  for (const scenario of [
+    {
+      caseId: '[TLV5-UX.06-COMPACT-TOOL-PAIR-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[0],
+    },
+    {
+      caseId: '[TLV5-UX.06-WIDE-TOOL-PAIR-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[1],
+    },
+  ] as const) {
+    const { viewport } = scenario;
+    test(`${scenario.caseId} keeps a ${viewport.label} reading row stable when paging completes a tool pair`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       await withChromiumFixture(
         `transcript-cross-page-tool-pair-${viewport.label}`,
@@ -4488,7 +4538,7 @@ describe('Chromium transcript virtualization', () => {
     }, 180_000);
   }
 
-  test('retains the complete detached transcript through paging and live following', async () => {
+  test('[TLV5-UX.04-CHROMIUM-01] retains the complete detached transcript through paging and live following', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
       'transcript-detached-window-retention',
@@ -4502,8 +4552,18 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 180_000);
 
-  for (const viewport of TRANSCRIPT_VIEWPORTS) {
-    test(`prunes a ${viewport.label} expanded transcript only after live-edge idle`, async () => {
+  for (const scenario of [
+    {
+      caseId: '[TLV5-UX.10-COMPACT-CHROMIUM-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[0],
+    },
+    {
+      caseId: '[TLV5-UX.10-WIDE-CHROMIUM-01]',
+      viewport: TRANSCRIPT_VIEWPORTS[1],
+    },
+  ] as const) {
+    const { viewport } = scenario;
+    test(`${scenario.caseId} prunes a ${viewport.label} expanded transcript only after live-edge idle`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       await withChromiumFixture(
         `transcript-live-edge-prune-${viewport.label}`,
