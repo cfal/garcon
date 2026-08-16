@@ -117,21 +117,26 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.feedMutationClock.dataRevision).toBe(0);
 	});
 
-	it('keeps resend opt-outs ephemeral and prunes them with the candidate set', () => {
-		const chat = new ActiveTranscriptState();
-		chat.setResendCandidates([
+	it('[TLV5-A07-WEB-UNIT-01] restores excluded resend candidates in a fresh transcript state', () => {
+		const candidates = [
 			{ ordinal: 1, content: 'first', attachmentNames: [] },
 			{ ordinal: 2, content: 'second', attachmentNames: ['image.png'] },
-		]);
+		];
+		const beforeRestart = new ActiveTranscriptState();
+		beforeRestart.setResendCandidates(candidates);
 
-		chat.excludeResendCandidate(1);
-		expect(chat.resendCandidates.map((candidate) => candidate.ordinal)).toEqual([2]);
-		expect(chat.excludedResendOrdinals).toEqual([1]);
+		beforeRestart.excludeResendCandidate(1);
+		expect(beforeRestart.resendCandidates.map((candidate) => candidate.ordinal)).toEqual([2]);
+		expect(beforeRestart.excludedResendOrdinals).toEqual([1]);
 
-		chat.setResendCandidates([{ ordinal: 2, content: 'second', attachmentNames: [] }]);
-		expect(chat.excludedResendOrdinals).toEqual([]);
-		chat.clearResendExclusions();
-		expect(chat.resendCandidates.map((candidate) => candidate.ordinal)).toEqual([2]);
+		const afterRestart = new ActiveTranscriptState();
+		afterRestart.setResendCandidates(candidates);
+		expect(afterRestart.excludedResendOrdinals).toEqual([]);
+		expect(afterRestart.resendCandidates.map((candidate) => candidate.ordinal)).toEqual([1, 2]);
+
+		afterRestart.excludeResendCandidate(1);
+		afterRestart.setResendCandidates([candidates[1]!]);
+		expect(afterRestart.excludedResendOrdinals).toEqual([]);
 	});
 
 	it('renders degraded history without retaining sequence or cache state', async () => {
