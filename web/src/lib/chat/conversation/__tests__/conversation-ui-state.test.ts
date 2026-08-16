@@ -43,8 +43,7 @@ function makeEntry(id: string, content: string, revision = 1) {
 
 function makePermissionRequest(id: string, chatId: string | null = null): PendingPermissionRequest {
 	return {
-		permissionRequestId: id,
-		incarnation: `incarnation-${id}`,
+		permissionOccurrenceId: `incarnation-${id}`,
 		requestedTool: new BashToolUseMessage('2026-07-15T00:00:00.000Z', `tool-${id}`, 'echo test'),
 		chatId,
 	};
@@ -52,8 +51,7 @@ function makePermissionRequest(id: string, chatId: string | null = null): Pendin
 
 function makeExitPlanRequest(id: string): PendingPermissionRequest {
 	return {
-		permissionRequestId: id,
-		incarnation: `incarnation-${id}`,
+		permissionOccurrenceId: id,
 		requestedTool: new ExitPlanModeToolUseMessage(
 			'2026-07-15T00:00:00.000Z',
 			`tool-${id}`,
@@ -73,9 +71,9 @@ describe('ConversationUiState', () => {
 			makePermissionRequest('two', 'chat-1'),
 		]);
 
-		expect(store.pendingPermissionRequests.map((request) => request.permissionRequestId)).toEqual([
-			'one',
-			'two',
+		expect(store.pendingPermissionRequests.map((request) => request.permissionOccurrenceId)).toEqual([
+			'incarnation-one',
+			'incarnation-two',
 		]);
 
 		store.clearPendingPermissionRequests();
@@ -93,7 +91,7 @@ describe('ConversationUiState', () => {
 
 		store.clearTurnPermissionRequests();
 
-		expect(store.pendingPermissionRequests.map((request) => request.permissionRequestId)).toEqual([
+		expect(store.pendingPermissionRequests.map((request) => request.permissionOccurrenceId)).toEqual([
 			'plan-exit-confirmation',
 		]);
 	});

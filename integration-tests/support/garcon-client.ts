@@ -631,7 +631,7 @@ export class GarconTestClient {
   ): Promise<CommandAcceptedResponse> {
     const control = request.control ?? await this.#permissionControl(
       request.chatId,
-      request.permissionRequestId,
+      request.permissionOccurrenceId,
     );
     return this.post<CommandAcceptedResponse>(
       '/api/v1/chats/permissions/decision',
@@ -648,16 +648,16 @@ export class GarconTestClient {
 
   async #permissionControl(
     chatId: string,
-    permissionRequestId: string,
+    permissionOccurrenceId: string,
   ): Promise<PermissionDecisionCommandRequest['control']> {
     const snapshot = await this.getChatSnapshot(chatId, 0);
     const rows = snapshot.transientFeed.rows.filter((candidate) => (
-      candidate.id === permissionRequestId
+      candidate.permissionOccurrenceId === permissionOccurrenceId
       && candidate.message.type === 'permission-request'
     ));
     if (rows.length !== 1) {
       throw new Error(
-        `Expected one transient permission for ${permissionRequestId}, found ${rows.length}`,
+        `Expected one transient permission for ${permissionOccurrenceId}, found ${rows.length}`,
       );
     }
     const row = rows[0]!;
@@ -665,8 +665,7 @@ export class GarconTestClient {
       serverInstanceId: snapshot.transientFeed.serverInstanceId,
       chatId,
       runId: row.runId,
-      id: row.id,
-      incarnation: row.incarnation,
+      permissionOccurrenceId: row.permissionOccurrenceId,
     };
   }
 

@@ -1,4 +1,4 @@
-import { PermissionRequestMessage, permissionOccurrenceKey } from '$shared/chat-types';
+import { PermissionRequestMessage } from '$shared/chat-types';
 import type {
   ChatTransientControlAction,
   ChatTransientFeedMutation,
@@ -46,15 +46,14 @@ export function applyTransientFeedMutation(
     return { kind: 'snapshot-required' };
   }
   const rows = new Map(current.rows.map((row) => [
-    permissionOccurrenceKey(row.id, row.incarnation),
+    row.permissionOccurrenceId,
     row,
   ]));
   const mutation = incoming.mutation;
   if (mutation.kind === 'upsert') {
-    rows.set(permissionOccurrenceKey(mutation.row.id, mutation.row.incarnation), mutation.row);
+    rows.set(mutation.row.permissionOccurrenceId, mutation.row);
   } else if (mutation.kind === 'remove') {
-    const key = permissionOccurrenceKey(mutation.id, mutation.incarnation);
-    if (!rows.delete(key)) return { kind: 'corrupt' };
+    if (!rows.delete(mutation.permissionOccurrenceId)) return { kind: 'corrupt' };
   } else {
     for (const [id, row] of rows) {
       if (row.runId === mutation.runId) rows.delete(id);
@@ -82,12 +81,10 @@ export function pendingPermissionsFromTransientFeed(
       serverInstanceId: snapshot.serverInstanceId,
       chatId: snapshot.chatId,
       runId: row.runId,
-      id: row.id,
-      incarnation: row.incarnation,
+      permissionOccurrenceId: row.permissionOccurrenceId,
     };
     return [{
-      permissionRequestId: row.message.permissionRequestId,
-      incarnation: row.incarnation,
+      permissionOccurrenceId: row.message.permissionOccurrenceId,
       requestedTool: row.message.requestedTool,
       chatId: snapshot.chatId,
       receivedAt: new Date(row.message.timestamp),
@@ -117,7 +114,6 @@ function cloneRow(row: TransientFeedRow): TransientFeedRow {
 function sortedRows(rows: Iterable<TransientFeedRow>): TransientFeedRow[] {
   return [...rows].map(cloneRow).sort((left, right) => (
     left.displayOrder - right.displayOrder
-    || left.id.localeCompare(right.id)
-    || left.incarnation.localeCompare(right.incarnation)
+    || left.permissionOccurrenceId.localeCompare(right.permissionOccurrenceId)
   ));
 }

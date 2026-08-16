@@ -221,7 +221,7 @@ describe('parseServerWsMessage', () => {
 			type: 'chat-transient-feed-mutation',
 			...transientFeed(),
 			transientRevision: 1,
-			mutation: { kind: 'remove', id: 'permission-1', incarnation: 'one' },
+			mutation: { kind: 'remove', permissionOccurrenceId: 'one' },
 		});
 		expect(mutation).toBeInstanceOf(ChatTransientFeedMutationMessage);
 	});

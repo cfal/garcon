@@ -170,11 +170,11 @@ function allRowKindDrafts() {
         toModel: 'gpt-5.4',
       },
     },
-    permissionDraft('requested', 'shared-request', 'first-occurrence'),
-    permissionDraft('cancelled', 'shared-request', 'first-occurrence'),
-    permissionDraft('requested', 'shared-request', 'second-occurrence'),
-    permissionDraft('resolved', 'shared-request', 'second-occurrence'),
-    permissionDraft('expired', 'another-request', 'third-occurrence'),
+    permissionDraft('requested', 'first-occurrence'),
+    permissionDraft('cancelled', 'first-occurrence'),
+    permissionDraft('requested', 'second-occurrence'),
+    permissionDraft('resolved', 'second-occurrence'),
+    permissionDraft('expired', 'third-occurrence'),
     {
       kind: 'session',
       at: AT,
@@ -218,8 +218,8 @@ function allRowKindDrafts() {
   ];
 }
 
-function permissionDraft(kind, requestId, incarnation) {
-  const common = { kind, requestId, incarnation };
+function permissionDraft(kind, permissionOccurrenceId) {
+  const common = { kind, permissionOccurrenceId };
   if (kind === 'requested') {
     return {
       kind: 'permission-requested',
@@ -227,7 +227,7 @@ function permissionDraft(kind, requestId, incarnation) {
       providerMeta: null,
       lifecycle: {
         ...common,
-        requestedTool: new BashToolUseMessage(AT, `tool-${incarnation}`, 'pwd'),
+        requestedTool: new BashToolUseMessage(AT, `tool-${permissionOccurrenceId}`, 'pwd'),
         options: [],
       },
     };

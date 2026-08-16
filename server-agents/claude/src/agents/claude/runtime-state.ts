@@ -38,8 +38,7 @@ export interface ClaudeRunningSession {
 }
 
 export interface PendingPermission {
-  permissionRequestId: string;
-  incarnation: string;
+  permissionOccurrenceId: string;
   cliRequestId: string;
   agentSessionId: string;
   toolName: string;

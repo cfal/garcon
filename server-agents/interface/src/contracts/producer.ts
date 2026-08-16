@@ -23,27 +23,23 @@ export interface AgentPermissionOption extends JsonObject {
 export type AgentPermissionLifecycle =
   | {
       readonly kind: 'requested';
-      readonly requestId: string;
-      readonly incarnation: string;
+      readonly permissionOccurrenceId: string;
       readonly requestedTool: ToolUseChatMessage;
       readonly options: readonly AgentPermissionOption[];
     }
   | {
       readonly kind: 'resolved';
-      readonly requestId: string;
-      readonly incarnation: string;
+      readonly permissionOccurrenceId: string;
       readonly decision: PermissionDecisionPayload;
     }
   | {
       readonly kind: 'cancelled';
-      readonly requestId: string;
-      readonly incarnation: string;
+      readonly permissionOccurrenceId: string;
       readonly reason: string | null;
     }
   | {
       readonly kind: 'expired';
-      readonly requestId: string;
-      readonly incarnation: string;
+      readonly permissionOccurrenceId: string;
     };
 
 export type AgentProviderPermissionLifecycle = Exclude<
@@ -52,8 +48,7 @@ export type AgentProviderPermissionLifecycle = Exclude<
 >;
 
 export interface AgentPermissionResponseCapability {
-  readonly requestId: string;
-  readonly incarnation: string;
+  readonly permissionOccurrenceId: string;
   respond(decision: PermissionDecisionPayload): Promise<void>;
 }
 

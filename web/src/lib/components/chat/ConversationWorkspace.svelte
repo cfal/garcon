@@ -734,10 +734,10 @@
 				onUserScrollIntent={(direction) => scroll.noteUserScrollIntent(direction)}
 				onLoadEarlier={() => void scroll.requestPage('earlier', 'button')}
 				onLoadLater={() => void scroll.requestPage('later', 'button')}
-				onPermissionDecision={(id, incarnation, decision) => (
-					controller.handlePermissionDecision(id, incarnation, decision))}
-				onExitPlanMode={(id, incarnation, choice, plan) => (
-					controller.handleExitPlanMode(id, incarnation, choice, plan))}
+				onPermissionDecision={(permissionOccurrenceId, decision) => (
+					controller.handlePermissionDecision(permissionOccurrenceId, decision))}
+				onExitPlanMode={(permissionOccurrenceId, choice, plan) => (
+					controller.handleExitPlanMode(permissionOccurrenceId, choice, plan))}
 				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
 				onRetry={() => {
 					const chatId = sessions.selectedChatId;

@@ -144,7 +144,7 @@ function draftValue(draft: LedgerRowDraft): unknown {
     case 'permission-resolved':
     case 'permission-cancelled':
     case 'permission-expired':
-      return draft.lifecycle;
+      return encodePermissionLifecycle(draft.lifecycle);
   }
 }
 
@@ -224,8 +224,10 @@ function parseNativeSession(value: unknown): AgentEstablishedSession['nativeSess
 
 function parsePermissionLifecycle(value: unknown): AgentPermissionLifecycle {
   const lifecycle = record(value, 'permission lifecycle');
-  const requestId = nonEmptyString(lifecycle.requestId, 'permission request ID');
-  const incarnation = nonEmptyString(lifecycle.incarnation, 'permission incarnation');
+  const permissionOccurrenceId = nonEmptyString(
+    lifecycle.incarnation,
+    'permission occurrence ID',
+  );
   switch (lifecycle.kind) {
     case 'requested': {
       const requestedTool = parseMessage(lifecycle.requestedTool) as ToolUseChatMessage;
@@ -237,7 +239,7 @@ function parsePermissionLifecycle(value: unknown): AgentPermissionLifecycle {
         nonEmptyString(parsed.label, 'permission option label');
         return parsed;
       });
-      return { kind: 'requested', requestId, incarnation, requestedTool, options };
+      return { kind: 'requested', permissionOccurrenceId, requestedTool, options };
     }
     case 'resolved': {
       const decision = record(lifecycle.decision, 'permission decision');
@@ -253,25 +255,28 @@ function parsePermissionLifecycle(value: unknown): AgentPermissionLifecycle {
       };
       return {
         kind: 'resolved',
-        requestId,
-        incarnation,
+        permissionOccurrenceId,
         decision: parsedDecision,
       };
     }
     case 'cancelled':
       return {
         kind: 'cancelled',
-        requestId,
-        incarnation,
+        permissionOccurrenceId,
         reason: lifecycle.reason === null
           ? null
           : nonEmptyString(lifecycle.reason, 'permission cancellation reason'),
       };
     case 'expired':
-      return { kind: 'expired', requestId, incarnation };
+      return { kind: 'expired', permissionOccurrenceId };
     default:
       throw new TypeError('Stored permission lifecycle kind is invalid');
   }
+}
+
+function encodePermissionLifecycle(value: AgentPermissionLifecycle): Record<string, unknown> {
+  const { permissionOccurrenceId, ...detail } = value;
+  return { ...detail, incarnation: permissionOccurrenceId };
 }
 
 function parseRunFailure(value: unknown): AgentRunFailureDetail {

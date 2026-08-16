@@ -38,13 +38,11 @@
 		terminal?: PermissionTerminalState;
 		actionable?: boolean;
 		onDecision: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			choice: PlanExitChoice,
 			plan: string,
 		) => void;
@@ -279,7 +277,7 @@
 	}
 
 	function respondToAskUserQuestion(outcome: 'answered' | 'skipped'): void {
-		onDecision(request.permissionRequestId, request.incarnation, {
+		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'answered',
 			response: askUserQuestionResponse(outcome),
 		});
@@ -316,7 +314,7 @@
 	}
 
 	function respondToCursorQuestion(outcome: 'answered' | 'skipped'): void {
-		onDecision(request.permissionRequestId, request.incarnation, {
+		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'answered',
 			response: cursorQuestionResponse(outcome),
 		});
@@ -328,7 +326,7 @@
 	}
 
 	function respondToCursorPlan(outcome: 'accepted' | 'rejected'): void {
-		onDecision(request.permissionRequestId, request.incarnation, {
+		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'accepted',
 			response: cursorPlanResponse(outcome),
 		});
@@ -417,8 +415,7 @@
 					<button
 						type="button"
 						onclick={() => onExitPlanMode?.(
-							request.permissionRequestId,
-							request.incarnation,
+							request.permissionOccurrenceId,
 							'bypass-new',
 							plan,
 						)}
@@ -430,8 +427,7 @@
 					<button
 						type="button"
 						onclick={() => onExitPlanMode?.(
-							request.permissionRequestId,
-							request.incarnation,
+							request.permissionOccurrenceId,
 							'bypass',
 							plan,
 						)}
@@ -443,8 +439,7 @@
 					<button
 						type="button"
 						onclick={() => onExitPlanMode?.(
-							request.permissionRequestId,
-							request.incarnation,
+							request.permissionOccurrenceId,
 							'approve-edits',
 							plan,
 						)}
@@ -456,7 +451,7 @@
 					<button
 						type="button"
 						onclick={() =>
-							onDecision(request.permissionRequestId, request.incarnation, {
+							onDecision(request.permissionOccurrenceId, {
 								allow: false,
 								message: m.chat_permission_revise_plan_message(),
 							})}
@@ -468,8 +463,7 @@
 					<button
 						type="button"
 						onclick={() => onExitPlanMode?.(
-							request.permissionRequestId,
-							request.incarnation,
+							request.permissionOccurrenceId,
 							'deny',
 							plan,
 						)}
@@ -519,7 +513,7 @@
 									>
 										<input
 											type={question.allowMultiple ? 'checkbox' : 'radio'}
-											name={`${request.permissionRequestId}-${question.id}`}
+											name={`${request.permissionOccurrenceId}-${question.id}`}
 											checked={isOptionSelected(question.id, option.id)}
 											disabled={!isPending}
 											onchange={(event) =>
@@ -607,7 +601,7 @@
 									>
 										<input
 											type={question.allowMultiple ? 'checkbox' : 'radio'}
-											name={`${request.permissionRequestId}-${question.id}`}
+											name={`${request.permissionOccurrenceId}-${question.id}`}
 											checked={isOptionSelected(question.id, option.id)}
 											disabled={!isPending}
 											onchange={(event) =>
@@ -822,8 +816,7 @@
 					<button
 						type="button"
 						onclick={() => onDecision(
-							request.permissionRequestId,
-							request.incarnation,
+							request.permissionOccurrenceId,
 							{ allow: true },
 						)}
 						class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors"
@@ -834,7 +827,7 @@
 					<button
 						type="button"
 						onclick={() =>
-							onDecision(request.permissionRequestId, request.incarnation, {
+							onDecision(request.permissionOccurrenceId, {
 								allow: false,
 								message: 'User denied tool use',
 							})}

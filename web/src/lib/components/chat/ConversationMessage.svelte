@@ -69,13 +69,11 @@
 		permissionTerminal?: PermissionTerminalState;
 		permissionActionable?: boolean;
 		onPermissionDecision?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			choice: string,
 			plan: string,
 		) => void;
@@ -87,13 +85,9 @@
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
 		disclosureState?: ConversationDisclosureStatePort;
-		permissionDraft?: (
-			permissionRequestId: string,
-			incarnation: string,
-		) => PermissionQuestionDraft;
+		permissionDraft?: (permissionOccurrenceId: string) => PermissionQuestionDraft;
 		onPermissionDraftChange?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			draft: PermissionQuestionDraft,
 		) => void;
 		acquireTransientActivity?: (close: () => void) => () => void;
@@ -170,7 +164,6 @@
 		asToolUse?.type === 'exit-plan-mode-tool-use'
 			? new PermissionRequestMessage(
 					message.timestamp,
-					`plan-exit-${asToolUse.toolId}`,
 					`plan-exit-${asToolUse.toolId}`,
 					asToolUse,
 				)
@@ -584,15 +577,13 @@
 							{onExitPlanMode}
 							{chatContext}
 							draft={permissionDraft?.(
-								exitPlanPermissionRequest.permissionRequestId,
-								exitPlanPermissionRequest.incarnation,
+								exitPlanPermissionRequest.permissionOccurrenceId,
 							)}
 							{acquireTransientActivity}
 							onDraftChange={onPermissionDraftChange
 								? (draft) =>
 										onPermissionDraftChange(
-											exitPlanPermissionRequest.permissionRequestId,
-											exitPlanPermissionRequest.incarnation,
+											exitPlanPermissionRequest.permissionOccurrenceId,
 											draft,
 										)
 								: undefined}
@@ -726,14 +717,12 @@
 							{onExitPlanMode}
 							{chatContext}
 							draft={permissionDraft?.(
-								asPermissionRequest.permissionRequestId,
-								asPermissionRequest.incarnation,
+								asPermissionRequest.permissionOccurrenceId,
 							)}
 							{acquireTransientActivity}
 							onDraftChange={onPermissionDraftChange
 								? (draft) => onPermissionDraftChange(
-										asPermissionRequest.permissionRequestId,
-										asPermissionRequest.incarnation,
+										asPermissionRequest.permissionOccurrenceId,
 										draft,
 									)
 								: undefined}

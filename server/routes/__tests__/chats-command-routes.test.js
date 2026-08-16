@@ -1395,7 +1395,7 @@ describe('REST chat command routes', () => {
     const decision = {
       clientRequestId: 'req-permission-1',
       chatId: CHAT_ID,
-      permissionRequestId: 'perm-1',
+      permissionOccurrenceId: 'incarnation-1',
       allow: true,
       alwaysAllow: false,
       response: { outcome: { outcome: 'accepted' } },
@@ -1403,8 +1403,7 @@ describe('REST chat command routes', () => {
         serverInstanceId: 'server-instance-test',
         chatId: CHAT_ID,
         runId: 'run-1',
-        id: 'perm-1',
-        incarnation: 'incarnation-1',
+        permissionOccurrenceId: 'incarnation-1',
       },
     };
 
@@ -1417,7 +1416,7 @@ describe('REST chat command routes', () => {
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
     expect(agent.agents.resolvePermission).toHaveBeenCalledTimes(1);
-    expect(agent.agents.resolvePermission).toHaveBeenCalledWith(CHAT_ID, 'perm-1', {
+    expect(agent.agents.resolvePermission).toHaveBeenCalledWith(CHAT_ID, 'incarnation-1', {
       allow: true,
       alwaysAllow: false,
       response: { outcome: { outcome: 'accepted' } },

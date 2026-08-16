@@ -97,12 +97,10 @@ export function createRuntimeTranscriptFixture(options = {}) {
         chatId: control.chatId,
         viewId: view.viewId,
         runId: control.runId,
-        requestId: control.id,
-        incarnation: control.incarnation,
+        permissionOccurrenceId: control.permissionOccurrenceId,
         claimId: 'claim-1',
         decision: options.permissionDecision ?? {
-          requestId: control.id,
-          incarnation: control.incarnation,
+          permissionOccurrenceId: control.permissionOccurrenceId,
           respond: async () => undefined,
         },
       };

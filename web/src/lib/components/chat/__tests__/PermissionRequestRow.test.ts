@@ -8,7 +8,6 @@ const TS = '2026-07-02T00:00:00.000Z';
 function askUserQuestionRequest(): PermissionRequestMessage {
 	return new PermissionRequestMessage(
 		TS,
-		'perm-question',
 		'incarnation-question',
 		new AskUserQuestionToolUseMessage(TS, 'tool-question', undefined, [
 			{
@@ -53,7 +52,7 @@ describe('PermissionRequestRow', () => {
 
 		await fireEvent.click(submit);
 
-		expect(onDecision).toHaveBeenCalledWith('perm-question', 'incarnation-question', {
+		expect(onDecision).toHaveBeenCalledWith('incarnation-question', {
 			allow: true,
 			response: {
 				type: 'ask-user-question-response',
@@ -71,7 +70,7 @@ describe('PermissionRequestRow', () => {
 			request,
 			onDecision,
 			terminal: {
-				incarnation: 'incarnation-question',
+				permissionOccurrenceId: 'incarnation-question',
 				state: 'resolved',
 				allowed: true,
 				selectedQuestionOptions: { 'Which mode?': ['Careful'] },
@@ -98,7 +97,7 @@ describe('PermissionRequestRow', () => {
 			request,
 			onDecision,
 			terminal: {
-				incarnation: 'incarnation-question',
+				permissionOccurrenceId: 'incarnation-question',
 				state: 'resolved',
 				allowed: false,
 				reason: 'The user did not answer the questions.',

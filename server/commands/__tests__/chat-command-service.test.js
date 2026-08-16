@@ -2958,13 +2958,12 @@ describe('ChatCommandService', () => {
         clientRequestId: 'req-run-1',
         turnId: 'turn-1',
       },
-      id: 'perm-1',
-      incarnation: 'incarnation-1',
+      permissionOccurrenceId: 'incarnation-1',
     };
 
     await service.submitPermissionDecision({
       chatId: SOURCE_CHAT_ID,
-      permissionRequestId: 'perm-1',
+      permissionOccurrenceId: 'incarnation-1',
       allow: true,
       alwaysAllow: false,
       response,
@@ -2972,7 +2971,7 @@ describe('ChatCommandService', () => {
       control,
     });
 
-    expect(agents.resolvePermission).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'perm-1', {
+    expect(agents.resolvePermission).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'incarnation-1', {
       allow: true,
       alwaysAllow: false,
       response,
@@ -2989,7 +2988,7 @@ describe('ChatCommandService', () => {
     const { service, agents } = makeService({ transientFeeds: { validateAction } });
     const input = {
       chatId: SOURCE_CHAT_ID,
-      permissionRequestId: 'perm-stale',
+      permissionOccurrenceId: 'incarnation-1',
       allow: true,
       alwaysAllow: false,
       clientRequestId: 'req-perm-stale',
@@ -3003,8 +3002,7 @@ describe('ChatCommandService', () => {
           clientRequestId: 'req-run-1',
           turnId: 'turn-1',
         },
-        id: 'perm-stale',
-        incarnation: 'incarnation-1',
+        permissionOccurrenceId: 'incarnation-1',
       },
     };
 

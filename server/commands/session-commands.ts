@@ -212,7 +212,7 @@ export class SessionCommands {
       clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
       payload: {
         chatId: input.chatId,
-        permissionRequestId: input.permissionRequestId,
+        permissionOccurrenceId: input.permissionOccurrenceId,
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
         control: input.control,
@@ -223,7 +223,7 @@ export class SessionCommands {
     if (ledger.kind !== 'duplicate') {
       try {
         this.deps.transientFeeds.validateAction(input.control);
-        await this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
+        await this.deps.agents.resolvePermission(input.chatId, input.permissionOccurrenceId, {
           allow: input.allow,
           alwaysAllow: input.alwaysAllow,
           response: input.response,

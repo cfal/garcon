@@ -113,7 +113,7 @@ export interface AgentRegistryServiceContract {
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
   resolvePermission(
     chatId: string,
-    permissionRequestId: string,
+    permissionOccurrenceId: string,
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
   ): Promise<void>;
@@ -285,11 +285,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   getRunningSessionCount(): number { return this.#runtime.getRunningSessionCount(); }
   resolvePermission(
     chatId: string,
-    permissionRequestId: string,
+    permissionOccurrenceId: string,
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
   ): Promise<void> {
-    return this.#runtime.resolvePermission(chatId, permissionRequestId, decision, control);
+    return this.#runtime.resolvePermission(chatId, permissionOccurrenceId, decision, control);
   }
   prepareProjectPathUpdate(
     agentId: string,

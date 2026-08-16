@@ -1579,8 +1579,7 @@ export class CodexAppServerRuntime {
       session.chatId,
       message,
       Object.freeze({
-        requestId: pending.permissionRequestId,
-        incarnation: pending.incarnation,
+        permissionOccurrenceId: pending.permissionOccurrenceId,
         respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
       }),
       pending.operation,

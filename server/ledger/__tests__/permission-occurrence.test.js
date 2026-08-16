@@ -11,7 +11,6 @@ import { TranscriptLedgerStore } from '../store.ts';
 
 const CHAT_ID = 'chat-1';
 const RUN_ID = 'run-1';
-const REQUEST_ID = 'permission-1';
 const TS = '2026-08-15T00:00:00.000Z';
 
 describe('transcript permission occurrences', () => {
@@ -28,8 +27,7 @@ describe('transcript permission occurrences', () => {
         runId: RUN_ID,
         lifecycle: {
           kind: 'cancelled',
-          requestId: REQUEST_ID,
-          incarnation: 'incarnation-1',
+          permissionOccurrenceId: 'incarnation-1',
           reason: null,
         },
       });
@@ -51,10 +49,7 @@ describe('transcript permission occurrences', () => {
       const lease = startRun(ledger);
       const lifecycle = permissionRequest('incarnation-1');
 
-      for (const decision of [
-        permissionDecision('incarnation-1', 'permission-2'),
-        permissionDecision('incarnation-2'),
-      ]) {
+      for (const decision of [permissionDecision('incarnation-2'), permissionDecision('incarnation-3')]) {
         expect(() => lease.sink.publish({
           type: 'permission',
           runId: RUN_ID,
@@ -177,8 +172,7 @@ describe('transcript permission occurrences', () => {
         runId: RUN_ID,
         lifecycle: {
           kind: 'cancelled',
-          requestId: REQUEST_ID,
-          incarnation: 'incarnation-1',
+          permissionOccurrenceId: 'incarnation-1',
           reason: 'provider cancelled',
         },
       });
@@ -201,8 +195,7 @@ describe('transcript permission occurrences', () => {
         runId: RUN_ID,
         lifecycle: {
           kind: 'expired',
-          requestId: REQUEST_ID,
-          incarnation: 'incarnation-1',
+          permissionOccurrenceId: 'incarnation-1',
         },
       });
 
@@ -236,8 +229,7 @@ describe('transcript permission occurrences', () => {
         runId: RUN_ID,
         lifecycle: {
           kind: 'cancelled',
-          requestId: REQUEST_ID,
-          incarnation: 'incarnation-1',
+          permissionOccurrenceId: 'incarnation-1',
           reason: null,
         },
       });
@@ -247,8 +239,7 @@ describe('transcript permission occurrences', () => {
       expect(ledger.completePermissionResolution(second, { allow: false })).toMatchObject({
         kind: 'permission-resolved',
         lifecycle: {
-          requestId: REQUEST_ID,
-          incarnation: 'incarnation-2',
+          permissionOccurrenceId: 'incarnation-2',
           decision: { allow: false },
         },
       });
@@ -279,8 +270,7 @@ describe('transcript permission occurrences', () => {
     ['server instance', { serverInstanceId: 'server-2' }],
     ['chat', { chatId: 'chat-2' }],
     ['run', { runId: 'run-2' }],
-    ['request', { id: 'permission-2' }],
-    ['incarnation', { incarnation: 'incarnation-2' }],
+    ['occurrence', { permissionOccurrenceId: 'incarnation-2' }],
   ]) {
     it(`rejects a stale permission ${coordinate} without consuming the live occurrence`, async () => {
       await withLedger((ledger) => {
@@ -369,11 +359,11 @@ function startRun(ledger) {
   return lease;
 }
 
-function publishRequest(sink, incarnation, decision, runId = RUN_ID) {
+function publishRequest(sink, permissionOccurrenceId, decision, runId = RUN_ID) {
   sink.publish({
     type: 'permission',
     runId,
-    lifecycle: permissionRequest(incarnation),
+    lifecycle: permissionRequest(permissionOccurrenceId),
     decision,
   });
 }
@@ -389,30 +379,27 @@ function claimPermission(ledger) {
   return { lease, claim };
 }
 
-function permissionRequest(incarnation) {
+function permissionRequest(permissionOccurrenceId) {
   return {
     kind: 'requested',
-    requestId: REQUEST_ID,
-    incarnation,
-    requestedTool: new BashToolUseMessage(TS, `tool-${incarnation}`, 'pwd'),
+    permissionOccurrenceId,
+    requestedTool: new BashToolUseMessage(TS, `tool-${permissionOccurrenceId}`, 'pwd'),
     options: [],
   };
 }
 
-function permissionDecision(incarnation, requestId = REQUEST_ID) {
+function permissionDecision(permissionOccurrenceId) {
   return {
-    requestId,
-    incarnation,
+    permissionOccurrenceId,
     respond: async () => undefined,
   };
 }
 
-function permissionControl(incarnation, runId = RUN_ID) {
+function permissionControl(permissionOccurrenceId, runId = RUN_ID) {
   return {
     serverInstanceId: 'server-1',
     chatId: CHAT_ID,
     runId,
-    id: REQUEST_ID,
-    incarnation,
+    permissionOccurrenceId,
   };
 }

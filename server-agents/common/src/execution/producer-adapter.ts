@@ -58,6 +58,14 @@ export function createAgentProducerAdapter(
   function publisherFor(sink: AgentProducerSink, chatId: string): AgentRuntimePublisher {
     const binding = bindingFor(sink);
     return (event) => {
+      if (event.type === 'permission' && !validRunId(event.runId)) {
+        logger.warn('Dropped an unnamed provider permission event', {
+          chatId,
+          eventType: 'permission',
+          reason: 'missing operation run ID',
+        });
+        return;
+      }
       try {
         publishRuntimeEvent(binding, event);
       } catch (error) {
@@ -132,6 +140,10 @@ export function createAgentProducerAdapter(
   }
 
   return { execution, runExisting };
+}
+
+function validRunId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
 }
 
 function publishRuntimeEvent(binding: ProducerBinding, event: AgentRuntimeEvent): void {

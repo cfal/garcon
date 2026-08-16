@@ -356,7 +356,7 @@ export interface PermissionDecisionPayload {
 export interface PermissionDecisionCommandRequest extends PermissionDecisionPayload {
   clientRequestId: string;
   chatId: string;
-  permissionRequestId: string;
+  permissionOccurrenceId: string;
   alwaysAllow: boolean;
   control: ChatTransientControlAction;
 }
@@ -808,14 +808,17 @@ export function parsePermissionDecisionCommandRequest(value: unknown): Permissio
   const control = parseChatTransientControlAction(body.control);
   if (!control) throw new CommandRequestValidationError('control is invalid');
   const chatId = requiredChatId(body, 'chatId');
-  const permissionRequestId = requiredString(body, 'permissionRequestId');
-  if (control.chatId !== chatId || control.id !== permissionRequestId) {
+  const permissionOccurrenceId = requiredString(body, 'permissionOccurrenceId');
+  if (
+    control.chatId !== chatId
+    || control.permissionOccurrenceId !== permissionOccurrenceId
+  ) {
     throw new CommandRequestValidationError('control does not match the permission request');
   }
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId,
-    permissionRequestId,
+    permissionOccurrenceId,
     allow: body.allow,
     alwaysAllow: body.alwaysAllow,
     control,

@@ -1,6 +1,5 @@
 import {
 	isToolUseMessage,
-	permissionOccurrenceKey,
 	ToolResultMessage,
 } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
@@ -306,10 +305,7 @@ function permissionItem(
 ): ConversationVirtualFeedItem {
 	return {
 		kind: 'permission',
-		key: key(`permission:${permissionOccurrenceKey(
-			request.permissionRequestId,
-			request.incarnation,
-		)}`),
+		key: key(`permission:${request.permissionOccurrenceId}`),
 		request,
 		leadingSpacing,
 		spacingAfter: trailingSpacing ? 'responsive-feed' : 'none',

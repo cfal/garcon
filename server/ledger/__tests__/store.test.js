@@ -294,8 +294,7 @@ describe('TranscriptLedgerStore', () => {
         at,
         lifecycle: {
           kind: 'resolved',
-          requestId: 'permission-one',
-          incarnation: 'incarnation-one',
+          permissionOccurrenceId: 'incarnation-one',
           decision: { allow: true },
         },
       },
@@ -304,8 +303,7 @@ describe('TranscriptLedgerStore', () => {
         at,
         lifecycle: {
           kind: 'cancelled',
-          requestId: 'permission-two',
-          incarnation: 'incarnation-two',
+          permissionOccurrenceId: 'incarnation-two',
           reason: 'cancelled',
         },
       },
@@ -314,8 +312,7 @@ describe('TranscriptLedgerStore', () => {
         at,
         lifecycle: {
           kind: 'expired',
-          requestId: 'permission-three',
-          incarnation: 'incarnation-three',
+          permissionOccurrenceId: 'incarnation-three',
         },
       },
       {
@@ -936,8 +933,7 @@ function permissionRequested() {
     at,
     lifecycle: {
       kind: 'requested',
-      requestId: 'permission-one',
-      incarnation: 'incarnation-one',
+      permissionOccurrenceId: 'incarnation-one',
       requestedTool: new BashToolUseMessage(at, 'tool-one', 'pwd'),
       options: [{ id: 'allow', label: 'Allow' }],
     },

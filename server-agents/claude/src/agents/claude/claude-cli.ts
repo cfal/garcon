@@ -487,8 +487,7 @@ class ClaudeCliRuntime {
         runId: pending.turn.operation.runId,
         lifecycle: {
           kind: 'cancelled',
-          requestId: pending.permissionRequestId,
-          incarnation: pending.incarnation,
+          permissionOccurrenceId: pending.permissionOccurrenceId,
           reason: 'cancelled',
         },
       });
@@ -511,6 +510,11 @@ class ClaudeCliRuntime {
     }
     const activeTurn = session.activeTurn;
     if (!activeTurn?.protocol.inputStarted) {
+      this.#dependencies.logger.warn('Dropped an unnamed Claude permission event', {
+        chatId: session.chatId,
+        eventType: 'permission',
+        reason: 'missing active operation',
+      });
       this.#trySendToCLI(session.id, JSON.stringify({
         type: 'control_response',
         response: {
@@ -522,8 +526,7 @@ class ClaudeCliRuntime {
       return;
     }
 
-    const permissionRequestId = `claude-${crypto.randomBytes(8).toString('hex')}`;
-    const incarnation = crypto.randomUUID();
+    const permissionOccurrenceId = crypto.randomUUID();
     const toolName = request.tool_name || 'Unknown';
     const toolInput = request.input || {};
     const toolUseId = request.tool_use_id;
@@ -545,8 +548,7 @@ class ClaudeCliRuntime {
     }
 
     const pending: PendingPermission = {
-      permissionRequestId,
-      incarnation,
+      permissionOccurrenceId,
       cliRequestId: msg.request_id!,
       agentSessionId: session.id,
       toolName,
@@ -559,7 +561,7 @@ class ClaudeCliRuntime {
     const now = new Date().toISOString();
     const requestedTool = convertClaudePermissionTool(
       now,
-      toolUseId ?? permissionRequestId,
+      toolUseId ?? permissionOccurrenceId,
       toolName,
       request.input,
     );
@@ -568,14 +570,12 @@ class ClaudeCliRuntime {
       runId: activeTurn.operation.runId,
       lifecycle: {
         kind: 'requested',
-        requestId: permissionRequestId,
-        incarnation,
+        permissionOccurrenceId,
         requestedTool,
         options: [],
       },
       decision: Object.freeze({
-        requestId: permissionRequestId,
-        incarnation,
+        permissionOccurrenceId,
         respond: (decision: PermissionDecisionPayload) => (
           this.#resolvePendingPermission(pending, decision)
         ),
@@ -584,22 +584,27 @@ class ClaudeCliRuntime {
   }
 
   #handleControlCancelRequest(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
-    if (!msg.request_id) return;
-    for (const pending of this.#pendingPermissions) {
-      if (pending.agentSessionId !== session.id || pending.cliRequestId !== msg.request_id) continue;
-      this.#pendingPermissions.delete(pending);
-      this.#turnPublisher.event(session, pending.turn, {
-        type: 'permission',
-        runId: pending.turn.operation.runId,
-        lifecycle: {
-          kind: 'cancelled',
-          requestId: pending.permissionRequestId,
-          incarnation: pending.incarnation,
-          reason: 'cancelled',
-        },
-      });
-      return;
+    if (msg.request_id) {
+      for (const pending of this.#pendingPermissions) {
+        if (pending.agentSessionId !== session.id || pending.cliRequestId !== msg.request_id) continue;
+        this.#pendingPermissions.delete(pending);
+        this.#turnPublisher.event(session, pending.turn, {
+          type: 'permission',
+          runId: pending.turn.operation.runId,
+          lifecycle: {
+            kind: 'cancelled',
+            permissionOccurrenceId: pending.permissionOccurrenceId,
+            reason: 'cancelled',
+          },
+        });
+        return;
+      }
     }
+    this.#dependencies.logger.warn('Dropped an unnamed Claude permission event', {
+      chatId: session.chatId,
+      eventType: 'permission',
+      reason: 'missing permission occurrence',
+    });
   }
 
   #handleControlResponse(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {

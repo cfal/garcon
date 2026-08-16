@@ -36,16 +36,14 @@ export function handlePermissionLifecycleFromBatch(
 			let requestAdded = false;
 			ctx.conversationUi.setPendingPermissionRequests((previous) => {
 				if (previous.some((request) => (
-					request.permissionRequestId === entry.permissionRequestId
-					&& request.incarnation === entry.incarnation
+					request.permissionOccurrenceId === entry.permissionOccurrenceId
 				)))
 					return previous;
 				requestAdded = true;
 				return [
 					...previous,
 					{
-						permissionRequestId: entry.permissionRequestId,
-						incarnation: entry.incarnation,
+						permissionOccurrenceId: entry.permissionOccurrenceId,
 						requestedTool: entry.requestedTool,
 						chatId: msg.chatId || null,
 						receivedAt: new Date(),
@@ -72,8 +70,7 @@ export function handlePermissionLifecycleFromBatch(
 			let occurrenceRemoved = false;
 			ctx.conversationUi.setPendingPermissionRequests((previous) => {
 				const remaining = previous.filter((request) => (
-					request.permissionRequestId !== entry.permissionRequestId
-					|| request.incarnation !== entry.incarnation
+					request.permissionOccurrenceId !== entry.permissionOccurrenceId
 				));
 				occurrenceRemoved = remaining.length !== previous.length;
 				return occurrenceRemoved ? remaining : previous;

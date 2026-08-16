@@ -11,8 +11,7 @@ import { publishPermissionCancelled, type CodexOperation } from './operation-rou
 import type { JsonRpcServerRequest } from './protocol.js';
 
 export interface CodexPendingApproval {
-  permissionRequestId: string;
-  incarnation: string;
+  permissionOccurrenceId: string;
   requestId: number;
   chatId: string;
   method: string;
@@ -31,8 +30,7 @@ export function isApprovalRequest(request: JsonRpcServerRequest): boolean {
 
 export function createPendingApproval(chatId: string, request: JsonRpcServerRequest): CodexPendingApproval {
   return {
-    permissionRequestId: `codex-${crypto.randomBytes(8).toString('hex')}`,
-    incarnation: crypto.randomUUID(),
+    permissionOccurrenceId: crypto.randomUUID(),
     requestId: request.id,
     chatId,
     method: request.method,
@@ -42,7 +40,9 @@ export function createPendingApproval(chatId: string, request: JsonRpcServerRequ
 
 export function buildApprovalMessage(pending: CodexPendingApproval): PermissionRequestMessage {
   const now = new Date().toISOString();
-  const toolId = stringField(pending.params.itemId) || stringField(pending.params.callId) || pending.permissionRequestId;
+  const toolId = stringField(pending.params.itemId)
+    || stringField(pending.params.callId)
+    || pending.permissionOccurrenceId;
 
   if (pending.method === 'item/commandExecution/requestApproval') {
     const command = stringField(pending.params.command)
@@ -51,8 +51,7 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
       || 'Command approval requested';
     return new PermissionRequestMessage(
       now,
-      pending.permissionRequestId,
-      pending.incarnation,
+      pending.permissionOccurrenceId,
       new BashToolUseMessage(now, toolId, command),
     );
   }
@@ -63,8 +62,7 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
       : stringField(pending.params.reason) || 'Command approval requested';
     return new PermissionRequestMessage(
       now,
-      pending.permissionRequestId,
-      pending.incarnation,
+      pending.permissionOccurrenceId,
       new BashToolUseMessage(now, toolId, command),
     );
   }
@@ -72,16 +70,14 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
   if (pending.method === 'item/fileChange/requestApproval' || pending.method === 'applyPatchApproval') {
     return new PermissionRequestMessage(
       now,
-      pending.permissionRequestId,
-      pending.incarnation,
+      pending.permissionOccurrenceId,
       new EditToolUseMessage(now, toolId),
     );
   }
 
   return new PermissionRequestMessage(
     now,
-    pending.permissionRequestId,
-    pending.incarnation,
+    pending.permissionOccurrenceId,
     new RequestPermissionsToolUseMessage(
       now,
       toolId,
@@ -172,8 +168,7 @@ export function cancelPendingApprovals(
       approval.chatId,
       new PermissionCancelledMessage(
         new Date().toISOString(),
-        approval.permissionRequestId,
-        approval.incarnation,
+        approval.permissionOccurrenceId,
         reason,
       ),
       approval.operation,

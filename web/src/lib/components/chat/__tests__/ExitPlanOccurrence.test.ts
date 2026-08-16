@@ -6,10 +6,9 @@ import ExitPlanOccurrenceTestHost from './ExitPlanOccurrenceTestHost.svelte';
 
 const timestamp = '2026-08-15T00:00:00.000Z';
 
-function pendingExitPlan(incarnation: string): PendingPermissionRequest {
+function pendingExitPlan(permissionOccurrenceId: string): PendingPermissionRequest {
 	return {
-		permissionRequestId: 'plan-exit-plan-1',
-		incarnation,
+		permissionOccurrenceId,
 		requestedTool: new ExitPlanModeToolUseMessage(timestamp, 'plan-1', 'Current plan.'),
 		chatId: 'chat-1',
 		receivedAt: new Date(timestamp),
@@ -19,7 +18,7 @@ function pendingExitPlan(incarnation: string): PendingPermissionRequest {
 describe('exit-plan permission occurrence rendering', () => {
 	afterEach(cleanup);
 
-	it('does not make an older exit-plan row actionable for a reused request id', () => {
+	it('does not make an older exit-plan row actionable for a different occurrence', () => {
 		render(ExitPlanOccurrenceTestHost, {
 			pendingPermissionRequests: [pendingExitPlan('current-occurrence')],
 			onExitPlanMode: vi.fn(),

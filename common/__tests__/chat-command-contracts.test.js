@@ -381,24 +381,23 @@ describe('chat command request parsers', () => {
     expect(() => parsePermissionDecisionCommandRequest({
       clientRequestId: 'request-5',
       chatId: CHAT_ID,
-      permissionRequestId: 'permission-1',
+      permissionOccurrenceId: 'occurrence-1',
       allow: 'yes',
       alwaysAllow: false,
     })).toThrow('allow must be a boolean');
   });
 
-  it('binds permission decisions to the exact transient control incarnation', () => {
+  it('binds permission decisions to the exact transient occurrence', () => {
     const control = {
       serverInstanceId: 'server-1',
       chatId: CHAT_ID,
       runId: 'run-1',
-      id: 'permission-1',
-      incarnation: 'incarnation-1',
+      permissionOccurrenceId: 'occurrence-1',
     };
     const request = {
       clientRequestId: 'decision-1',
       chatId: CHAT_ID,
-      permissionRequestId: 'permission-1',
+      permissionOccurrenceId: 'occurrence-1',
       allow: true,
       alwaysAllow: false,
       control,
@@ -407,7 +406,7 @@ describe('chat command request parsers', () => {
     expect(parsePermissionDecisionCommandRequest(request).control).toEqual(control);
     expect(() => parsePermissionDecisionCommandRequest({
       ...request,
-      permissionRequestId: 'permission-2',
+      permissionOccurrenceId: 'occurrence-2',
     })).toThrow('control does not match');
     expect(() => parsePermissionDecisionCommandRequest({
       ...request,

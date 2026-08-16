@@ -46,10 +46,7 @@ export function publishPermissionRequested(
   decision: AgentPermissionResponseCapability,
   operation: CodexOperation | undefined,
 ): void {
-  if (
-    decision.requestId !== message.permissionRequestId
-    || decision.incarnation !== message.incarnation
-  ) {
+  if (decision.permissionOccurrenceId !== message.permissionOccurrenceId) {
     throw new TypeError('Permission response capability does not match its request occurrence');
   }
   publish(logger, chatId, operation, (runId) => ({
@@ -57,8 +54,7 @@ export function publishPermissionRequested(
     runId,
     lifecycle: {
       kind: 'requested',
-      requestId: message.permissionRequestId,
-      incarnation: message.incarnation,
+      permissionOccurrenceId: message.permissionOccurrenceId,
       requestedTool: message.requestedTool,
       options: [],
     },
@@ -77,8 +73,7 @@ export function publishPermissionCancelled(
     runId,
     lifecycle: {
       kind: 'cancelled',
-      requestId: message.permissionRequestId,
-      incarnation: message.incarnation,
+      permissionOccurrenceId: message.permissionOccurrenceId,
       reason: message.reason ?? null,
     },
   }));

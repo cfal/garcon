@@ -6,7 +6,6 @@ import {
 	UnknownToolUseMessage,
 	UserMessage,
 	isToolUseMessage,
-	permissionOccurrenceKey,
 } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import {
@@ -279,10 +278,7 @@ export class ConversationFeedAnnouncerState {
 				rememberAnnouncementLineage(this.#observedUserRequestIds, requestId);
 			}
 			if (row.message instanceof PermissionRequestMessage) {
-				const occurrence = permissionOccurrenceKey(
-					row.message.permissionRequestId,
-					row.message.incarnation,
-				);
+				const occurrence = row.message.permissionOccurrenceId;
 				if (this.#observedPermissionOccurrences.has(occurrence)) return false;
 				rememberAnnouncementLineage(this.#observedPermissionOccurrences, occurrence);
 			}
@@ -368,10 +364,7 @@ export class ConversationFeedAnnouncerState {
 			[
 				...rows.flatMap((row) =>
 					row.kind === 'message' && row.message instanceof PermissionRequestMessage
-						? [permissionOccurrenceKey(
-								row.message.permissionRequestId,
-								row.message.incarnation,
-							)]
+						? [row.message.permissionOccurrenceId]
 						: [],
 				),
 				...floatingPermissionOccurrences,

@@ -559,13 +559,12 @@ describe('chats API contract', () => {
 		await sendPermissionDecision({
 			clientRequestId: 'req-perm',
 			chatId: 'c-1',
-			permissionRequestId: 'perm-1',
+			permissionOccurrenceId: 'incarnation-1',
 			control: {
 				serverInstanceId: 'server-instance-test',
 				chatId: 'c-1',
 				runId: 'turn-1',
-				id: 'perm-1',
-				incarnation: 'incarnation-1',
+				permissionOccurrenceId: 'incarnation-1',
 			},
 			allow: true,
 			alwaysAllow: false,
@@ -576,13 +575,12 @@ describe('chats API contract', () => {
 			expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
 			clientRequestId: 'req-perm',
 			chatId: 'c-1',
-			permissionRequestId: 'perm-1',
+			permissionOccurrenceId: 'incarnation-1',
 			control: {
 				serverInstanceId: 'server-instance-test',
 				chatId: 'c-1',
 				runId: 'turn-1',
-				id: 'perm-1',
-				incarnation: 'incarnation-1',
+				permissionOccurrenceId: 'incarnation-1',
 			},
 			allow: true,
 			alwaysAllow: false,

@@ -1524,10 +1524,12 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       const permissions = events.filter((event) => event.type === 'permission');
       const second = permissions[1];
       expect(second).toBeDefined();
-      expect(first.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
-      expect(second.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
-      expect(first.lifecycle.incarnation).not.toBe('cli-permission-reused');
-      expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+      expect(first.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(second.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(first.lifecycle.permissionOccurrenceId).not.toBe('cli-permission-reused');
+      expect(second.lifecycle.permissionOccurrenceId).not.toBe(
+        first.lifecycle.permissionOccurrenceId,
+      );
       await first.decision.respond({ allow: true, alwaysAllow: false });
       await expect(first.decision.respond({ allow: false }))
         .rejects.toThrow('no longer pending');
@@ -1659,8 +1661,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       expect(permission).toMatchObject({
         lifecycle: {
           kind: 'requested',
-          requestId: expect.any(String),
-          incarnation: expect.any(String),
+          permissionOccurrenceId: expect.any(String),
         },
       });
       await expect(permission.decision.respond({ allow: true, alwaysAllow: false }))

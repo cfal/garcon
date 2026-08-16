@@ -38,13 +38,11 @@
 		onLoadEarlier: () => void;
 		onLoadLater: () => void;
 		onPermissionDecision?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecision,
 		) => void;
 		onExitPlanMode?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			choice: string,
 			plan: string,
 		) => void;
@@ -82,8 +80,7 @@
 		const timestamp = request.receivedAt?.toISOString() ?? request.requestedTool.timestamp;
 		return new PermissionRequestMessage(
 			timestamp,
-			request.permissionRequestId,
-			request.incarnation,
+			request.permissionOccurrenceId,
 			request.requestedTool,
 		);
 	}
@@ -136,14 +133,12 @@
 				request={permissionRequestMessage(item.request)}
 				onDecision={onPermissionDecision}
 				draft={itemState.permissionDraft(
-					item.request.permissionRequestId,
-					item.request.incarnation,
+					item.request.permissionOccurrenceId,
 				)}
 				{acquireTransientActivity}
 				onDraftChange={(draft) =>
 					itemState.setPermissionDraft(
-						item.request.permissionRequestId,
-						item.request.incarnation,
+						item.request.permissionOccurrenceId,
 						draft,
 					)}
 			/>

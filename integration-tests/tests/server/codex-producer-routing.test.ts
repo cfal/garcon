@@ -194,7 +194,7 @@ describe('Codex producer routing', () => {
       const firstDecision = await fixture.client.sendPermissionDecision({
         clientRequestId: randomUUID(),
         chatId,
-        permissionRequestId: first.message.permissionRequestId,
+        permissionOccurrenceId: first.message.permissionOccurrenceId,
         allow: true,
         alwaysAllow: false,
         control: transientPermissionControl(serverInstanceId, chatId, first),
@@ -222,15 +222,15 @@ describe('Codex producer routing', () => {
       if (second.message.type !== 'permission-request') {
         throw new Error('The second reused Codex approval was not published.');
       }
-      expect(first.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
-      expect(second.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
-      expect(first.incarnation).not.toBe(String(nativeRequestId));
-      expect(second.incarnation).not.toBe(first.incarnation);
+      expect(first.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(second.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(first.permissionOccurrenceId).not.toBe(String(nativeRequestId));
+      expect(second.permissionOccurrenceId).not.toBe(first.permissionOccurrenceId);
 
       await expect(fixture.client.sendPermissionDecision({
         clientRequestId: randomUUID(),
         chatId,
-        permissionRequestId: first.message.permissionRequestId,
+        permissionOccurrenceId: first.message.permissionOccurrenceId,
         allow: false,
         alwaysAllow: false,
         control: transientPermissionControl(serverInstanceId, chatId, first),
@@ -246,7 +246,7 @@ describe('Codex producer routing', () => {
       const secondDecision = await fixture.client.sendPermissionDecision({
         clientRequestId: randomUUID(),
         chatId,
-        permissionRequestId: second.message.permissionRequestId,
+        permissionOccurrenceId: second.message.permissionOccurrenceId,
         allow: false,
         alwaysAllow: false,
         control: transientPermissionControl(serverInstanceId, chatId, second),
@@ -264,30 +264,25 @@ describe('Codex producer routing', () => {
         }
         return [{
           type: message.type,
-          requestId: message.permissionRequestId,
-          incarnation: message.incarnation,
+          permissionOccurrenceId: message.permissionOccurrenceId,
         }];
       });
       expect(permissionRows).toEqual([
         {
           type: 'permission-request',
-          requestId: first.message.permissionRequestId,
-          incarnation: first.incarnation,
+          permissionOccurrenceId: first.permissionOccurrenceId,
         },
         {
           type: 'permission-resolved',
-          requestId: first.message.permissionRequestId,
-          incarnation: first.incarnation,
+          permissionOccurrenceId: first.permissionOccurrenceId,
         },
         {
           type: 'permission-request',
-          requestId: second.message.permissionRequestId,
-          incarnation: second.incarnation,
+          permissionOccurrenceId: second.permissionOccurrenceId,
         },
         {
           type: 'permission-resolved',
-          requestId: second.message.permissionRequestId,
-          incarnation: second.incarnation,
+          permissionOccurrenceId: second.permissionOccurrenceId,
         },
       ]);
 
@@ -522,16 +517,14 @@ function transientPermissionControl(
   chatId: string,
   row: {
     readonly runId: string;
-    readonly id: string;
-    readonly incarnation: string;
+    readonly permissionOccurrenceId: string;
   },
 ) {
   return {
     serverInstanceId,
     chatId,
     runId: row.runId,
-    id: row.id,
-    incarnation: row.incarnation,
+    permissionOccurrenceId: row.permissionOccurrenceId,
   };
 }
 

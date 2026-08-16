@@ -7,28 +7,26 @@ import ConversationTranscriptTestHost from './ConversationTranscriptTestHost.sve
 
 const PERMISSION_TIMESTAMP = '2026-07-22T00:00:02.000Z';
 
-function permissionRow(incarnation: string): ChatDisplayRow {
+function permissionRow(permissionOccurrenceId: string): ChatDisplayRow {
 	return {
 		kind: 'message',
 		id: 'generation-1:2',
 		ordinal: 2,
 		message: new PermissionRequestMessage(
 			PERMISSION_TIMESTAMP,
-			'reused-request',
-			incarnation,
+			permissionOccurrenceId,
 			new BashToolUseMessage(PERMISSION_TIMESTAMP, 'tool-1', 'pwd'),
 		),
 	};
 }
 
 function pendingPermission(
-	incarnation: string,
+	permissionOccurrenceId: string,
 	withCapability: boolean,
 ): PendingPermissionRequest {
 	return {
 		chatId: 'chat-1',
-		permissionRequestId: 'reused-request',
-		incarnation,
+		permissionOccurrenceId,
 		requestedTool: new BashToolUseMessage(PERMISSION_TIMESTAMP, 'tool-1', 'pwd'),
 		...(withCapability
 			? {
@@ -36,8 +34,7 @@ function pendingPermission(
 						serverInstanceId: 'server-1',
 						chatId: 'chat-1',
 						runId: 'run-1',
-						id: 'reused-request',
-						incarnation,
+						permissionOccurrenceId,
 					},
 					transcript: { transcriptViewId: 'generation-1', afterOrdinal: 2 },
 				}
@@ -108,10 +105,6 @@ describe('ConversationTranscript', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: /allow once/i }));
-		expect(onPermissionDecision).toHaveBeenCalledWith(
-			'reused-request',
-			'active-incarnation',
-			{ allow: true },
-		);
+		expect(onPermissionDecision).toHaveBeenCalledWith('active-incarnation', { allow: true });
 	});
 });

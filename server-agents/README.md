@@ -138,8 +138,9 @@ The producer surface is deliberately small:
   `providerMeta`. Content rows have no `runId`.
 - `session` establishes the current provider-native session and has no
   `runId`.
-- `permission` carries `runId`, request ID, incarnation, and, for a request,
-  an ephemeral response capability for that exact occurrence.
+- `permission` carries `runId`, one integration-generated
+  `permissionOccurrenceId`, and, for a request, the exact ephemeral response
+  capability. Provider-native request IDs remain integration-private.
 - `run-ended` carries `runId`, outcome, and an optional sanitized failure.
 
 The sink commits synchronously. Providers absorb a closed or fenced sink

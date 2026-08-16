@@ -9,7 +9,6 @@ import {
 	UnknownToolUseMessage,
 	UserMessage,
 	WaitToolUseMessage,
-	permissionOccurrenceKey,
 	type ChatMessage,
 } from '$shared/chat-types';
 import {
@@ -65,10 +64,6 @@ const enabled = {
 	hiddenToolTypes: [] as string[],
 	floatingPermissionOccurrences: [] as string[],
 };
-
-function permissionKey(id: string, incarnation = 'incarnation-1'): string {
-	return permissionOccurrenceKey(id, incarnation);
-}
 
 describe('ConversationFeedAnnouncerState', () => {
 	it('does not announce the initial or replacement transcript', () => {
@@ -223,7 +218,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				...enabled,
 				pinnedToBottom: false,
 				isLiveWindow: false,
-				floatingPermissionOccurrences: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: ['incarnation-1'],
 			}),
 		).toBe('New response available');
 	});
@@ -521,7 +516,6 @@ describe('ConversationFeedAnnouncerState', () => {
 					'3',
 					new PermissionRequestMessage(
 						'',
-						'permission-1',
 						'incarnation-1',
 						new BashToolUseMessage('', 'tool-2', 'rm file'),
 					),
@@ -609,7 +603,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				],
 				mutationClock: clock(2, 0, 2),
 				...enabled,
-				floatingPermissionOccurrences: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: ['incarnation-1'],
 			}),
 		).toBe('Permission required');
 	});
@@ -680,14 +674,13 @@ describe('ConversationFeedAnnouncerState', () => {
 				rows: [assistantRow('1', 'existing')],
 				mutationClock: clock(2, 0, 2),
 				...enabled,
-				floatingPermissionOccurrences: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: ['incarnation-1'],
 			}),
 		).toBe('Permission required');
 		const permission = messageRow(
 			'2',
 			new PermissionRequestMessage(
 				'',
-				'permission-1',
 				'incarnation-1',
 				new BashToolUseMessage('', 'tool-1', 'pwd'),
 			),
@@ -702,14 +695,13 @@ describe('ConversationFeedAnnouncerState', () => {
 		).toBeNull();
 	});
 
-	it('announces reused permission request ids as distinct occurrences', () => {
+	it('announces distinct permission occurrences independently', () => {
 		const announcer = new ConversationFeedAnnouncerState();
 		const existing = assistantRow('1', 'existing');
 		const first = messageRow(
 			'2',
 			new PermissionRequestMessage(
 				'',
-				'permission-1',
 				'incarnation-1',
 				new BashToolUseMessage('', 'tool-1', 'printf first'),
 			),
@@ -718,7 +710,6 @@ describe('ConversationFeedAnnouncerState', () => {
 			'3',
 			new PermissionRequestMessage(
 				'',
-				'permission-1',
 				'incarnation-2',
 				new BashToolUseMessage('', 'tool-2', 'printf second'),
 			),
@@ -802,7 +793,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				mutationClock: clock(2, 0, 2),
 				...enabled,
 				visible: false,
-				floatingPermissionOccurrences: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: ['incarnation-1'],
 			}),
 		).toBe('');
 		expect(
@@ -811,14 +802,13 @@ describe('ConversationFeedAnnouncerState', () => {
 				rows: [assistantRow('1', 'existing')],
 				mutationClock: clock(2, 0, 2),
 				...enabled,
-				floatingPermissionOccurrences: [permissionKey('permission-1')],
+				floatingPermissionOccurrences: ['incarnation-1'],
 			}),
 		).toBeNull();
 		const permission = messageRow(
 			'2',
 			new PermissionRequestMessage(
 				'',
-				'permission-1',
 				'incarnation-1',
 				new BashToolUseMessage('', 'tool-1', 'pwd'),
 			),
@@ -847,7 +837,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				rows: [assistantRow('1', 'existing')],
 				mutationClock: clock(2, 0, 2),
 				...enabled,
-				floatingPermissionOccurrences: [permissionKey('permission-active')],
+				floatingPermissionOccurrences: ['incarnation-1'],
 			}),
 		).toBe('Permission required');
 
@@ -856,7 +846,6 @@ describe('ConversationFeedAnnouncerState', () => {
 				String(index + 2),
 				new PermissionRequestMessage(
 					'',
-					`permission-history-${index}`,
 					`incarnation-history-${index}`,
 					new BashToolUseMessage('', `tool-${index}`, 'pwd'),
 				),
@@ -869,7 +858,7 @@ describe('ConversationFeedAnnouncerState', () => {
 				mutationClock: clock(3, 3, 2),
 				...enabled,
 				visible: false,
-				floatingPermissionOccurrences: [permissionKey('permission-active')],
+				floatingPermissionOccurrences: ['incarnation-1'],
 			}),
 		).toBe('');
 
@@ -877,7 +866,6 @@ describe('ConversationFeedAnnouncerState', () => {
 			'515',
 			new PermissionRequestMessage(
 				'',
-				'permission-active',
 				'incarnation-1',
 				new BashToolUseMessage('', 'tool-active', 'pwd'),
 			),

@@ -12,8 +12,7 @@
 
 	interface Props {
 		onDecision: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 	}
@@ -53,14 +52,13 @@
 		},
 	} as never);
 
-	function permissionRequest(incarnation: string, label: string): PendingPermissionRequest {
+	function permissionRequest(permissionOccurrenceId: string, label: string): PendingPermissionRequest {
 		return {
 			chatId: 'chat-1',
-			permissionRequestId: 'reused-permission',
-			incarnation,
+			permissionOccurrenceId,
 			requestedTool: new AskUserQuestionToolUseMessage(
 				timestamp,
-				`tool-${incarnation}`,
+				`tool-${permissionOccurrenceId}`,
 				undefined,
 				[
 					{
@@ -89,8 +87,7 @@
 	function requestMessage(request: PendingPermissionRequest): PermissionRequestMessage {
 		return new PermissionRequestMessage(
 			timestamp,
-			request.permissionRequestId,
-			request.incarnation,
+			request.permissionOccurrenceId,
 			request.requestedTool,
 		);
 	}
@@ -101,14 +98,10 @@
 		<PermissionRequestRow
 			request={requestMessage(item.request)}
 			{onDecision}
-			draft={itemState.permissionDraft(
-				item.request.permissionRequestId,
-				item.request.incarnation,
-			)}
+			draft={itemState.permissionDraft(item.request.permissionOccurrenceId)}
 			onDraftChange={(draft) =>
 				itemState.setPermissionDraft(
-					item.request.permissionRequestId,
-					item.request.incarnation,
+					item.request.permissionOccurrenceId,
 					draft,
 				)}
 		/>

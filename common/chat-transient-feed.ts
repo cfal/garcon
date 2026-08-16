@@ -1,13 +1,11 @@
 import {
   PermissionRequestMessage,
   parseChatMessage,
-  permissionOccurrenceKey,
   type ChatMessage,
 } from './chat-types';
 
 export interface TransientFeedRow {
-  readonly id: string;
-  readonly incarnation: string;
+  readonly permissionOccurrenceId: string;
   readonly runId: string;
   readonly transcript: {
     readonly transcriptViewId: string;
@@ -19,7 +17,7 @@ export interface TransientFeedRow {
 
 export type ChatTransientFeedMutationBody =
   | { readonly kind: 'upsert'; readonly row: TransientFeedRow }
-  | { readonly kind: 'remove'; readonly id: string; readonly incarnation: string }
+  | { readonly kind: 'remove'; readonly permissionOccurrenceId: string }
   | { readonly kind: 'clear-run'; readonly runId: string };
 
 export interface ChatTransientFeedMutation {
@@ -42,8 +40,7 @@ export interface ChatTransientControlAction {
   readonly serverInstanceId: string;
   readonly chatId: string;
   readonly runId: string;
-  readonly id: string;
-  readonly incarnation: string;
+  readonly permissionOccurrenceId: string;
 }
 
 export function parseTransientFeedRow(value: unknown): TransientFeedRow | null {
@@ -51,25 +48,20 @@ export function parseTransientFeedRow(value: unknown): TransientFeedRow | null {
   const transcript = raw ? record(raw.transcript) : null;
   const message = raw ? record(raw.message) : null;
   if (!raw || !transcript || !message) return null;
-  const id = requiredString(raw.id);
-  const incarnation = requiredString(raw.incarnation);
+  const permissionOccurrenceId = requiredString(raw.permissionOccurrenceId);
   const runId = requiredString(raw.runId);
   const transcriptViewId = requiredString(transcript.transcriptViewId);
   const afterOrdinal = nonNegativeInteger(transcript.afterOrdinal);
   const displayOrder = nonNegativeInteger(raw.displayOrder);
   const parsedMessage = parseChatMessage(message);
-  if (!id || !incarnation || !runId || !transcriptViewId
+  if (!permissionOccurrenceId || !runId || !transcriptViewId
       || afterOrdinal === null || displayOrder === null || !parsedMessage) return null;
   if (
     parsedMessage instanceof PermissionRequestMessage
-    && (
-      parsedMessage.permissionRequestId !== id
-      || parsedMessage.incarnation !== incarnation
-    )
+    && parsedMessage.permissionOccurrenceId !== permissionOccurrenceId
   ) return null;
   return {
-    id,
-    incarnation,
+    permissionOccurrenceId,
     runId,
     transcript: { transcriptViewId, afterOrdinal },
     displayOrder,
@@ -99,10 +91,9 @@ export function parseChatTransientFeedMutation(value: unknown): ChatTransientFee
     if (!row || row.transcript.transcriptViewId !== base.transcriptViewId) return null;
     parsedMutation = { kind: 'upsert', row };
   } else if (mutation.kind === 'remove') {
-    const id = requiredString(mutation.id);
-    const incarnation = requiredString(mutation.incarnation);
-    if (!id || !incarnation) return null;
-    parsedMutation = { kind: 'remove', id, incarnation };
+    const permissionOccurrenceId = requiredString(mutation.permissionOccurrenceId);
+    if (!permissionOccurrenceId) return null;
+    parsedMutation = { kind: 'remove', permissionOccurrenceId };
   } else if (mutation.kind === 'clear-run') {
     const runId = requiredString(mutation.runId);
     if (!runId) return null;
@@ -119,10 +110,9 @@ export function parseChatTransientControlAction(value: unknown): ChatTransientCo
   const serverInstanceId = requiredString(raw.serverInstanceId);
   const chatId = requiredString(raw.chatId);
   const runId = requiredString(raw.runId);
-  const id = requiredString(raw.id);
-  const incarnation = requiredString(raw.incarnation);
-  return serverInstanceId && chatId && runId && id && incarnation
-    ? { serverInstanceId, chatId, runId, id, incarnation }
+  const permissionOccurrenceId = requiredString(raw.permissionOccurrenceId);
+  return serverInstanceId && chatId && runId && permissionOccurrenceId
+    ? { serverInstanceId, chatId, runId, permissionOccurrenceId }
     : null;
 }
 
@@ -143,9 +133,8 @@ function parseRows(values: readonly unknown[]): TransientFeedRow[] | null {
   for (const value of values) {
     const row = parseTransientFeedRow(value);
     if (!row) return null;
-    const key = permissionOccurrenceKey(row.id, row.incarnation);
-    if (occurrences.has(key)) return null;
-    occurrences.add(key);
+    if (occurrences.has(row.permissionOccurrenceId)) return null;
+    occurrences.add(row.permissionOccurrenceId);
     rows.push(row);
   }
   return rows;

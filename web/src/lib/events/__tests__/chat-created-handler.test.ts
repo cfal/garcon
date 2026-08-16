@@ -94,14 +94,12 @@ describe('handleChatCreated', () => {
 
 		const result = updater([
 			{
-				permissionRequestId: 'r1',
-				incarnation: 'incarnation-1',
+				permissionOccurrenceId: 'incarnation-1',
 				requestedTool: { type: 'bash-tool-use', toolId: 't1' },
 				chatId: '',
 			},
 			{
-				permissionRequestId: 'r2',
-				incarnation: 'incarnation-2',
+				permissionOccurrenceId: 'incarnation-2',
 				requestedTool: { type: 'read-tool-use', toolId: 't2' },
 				chatId: 'existing',
 			},

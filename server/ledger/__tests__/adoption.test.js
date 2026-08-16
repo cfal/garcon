@@ -41,7 +41,6 @@ describe('TranscriptAdoptionService', () => {
       setCurrent([
         new PermissionRequestMessage(
           TS,
-          'permission-1',
           'incarnation-1',
           new BashToolUseMessage(TS, 'tool-1', 'pwd'),
         ),

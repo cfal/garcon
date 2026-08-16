@@ -489,12 +489,15 @@ export class AgentRuntimeRouter {
 
   async resolvePermission(
     chatId: string,
-    permissionRequestId: string,
+    permissionOccurrenceId: string,
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
   ): Promise<void> {
-    if (!permissionRequestId) throw new Error('Permission request ID is required');
-    if (control.chatId !== chatId || control.id !== permissionRequestId) {
+    if (!permissionOccurrenceId) throw new Error('Permission occurrence ID is required');
+    if (
+      control.chatId !== chatId
+      || control.permissionOccurrenceId !== permissionOccurrenceId
+    ) {
       throw new Error('Permission control does not match the request');
     }
     const claim = this.#ledger.claimPermissionResolution(control);

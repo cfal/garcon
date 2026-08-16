@@ -150,8 +150,7 @@ describe('conversation virtual feed model', () => {
 	it('includes viewport geometry and established floating permission spacing', () => {
 		const permission: PendingPermissionRequest = {
 			chatId: 'chat-1',
-			permissionRequestId: 'permission-1',
-			incarnation: 'incarnation-1',
+			permissionOccurrenceId: 'incarnation-1',
 			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
 		};
 		const model = buildConversationVirtualFeedModel({
@@ -165,8 +164,7 @@ describe('conversation virtual feed model', () => {
 			transcriptItems: [userItem(1)],
 			pendingPermissions: [permission, {
 				...permission,
-				permissionRequestId: 'permission-2',
-				incarnation: 'incarnation-2',
+				permissionOccurrenceId: 'incarnation-2',
 			}],
 		});
 
@@ -182,18 +180,17 @@ describe('conversation virtual feed model', () => {
 		expect(estimateConversationFeedItemSize(model.items.at(-1), 1)).toBe(56);
 	});
 
-	it('gives reused permission request occurrences distinct virtual identities', () => {
+	it('gives permission occurrences distinct virtual identities', () => {
 		const first = {
 			chatId: 'chat-1',
-			permissionRequestId: 'reused-permission',
-			incarnation: 'occurrence-1',
+			permissionOccurrenceId: 'occurrence-1',
 			requestedTool: new BashToolUseMessage('', 'tool-1', 'printf first'),
-		} satisfies PendingPermissionRequest & { incarnation: string };
+		} satisfies PendingPermissionRequest;
 		const second = {
 			...first,
-			incarnation: 'occurrence-2',
+			permissionOccurrenceId: 'occurrence-2',
 			requestedTool: new BashToolUseMessage('', 'tool-2', 'printf second'),
-		} satisfies PendingPermissionRequest & { incarnation: string };
+		} satisfies PendingPermissionRequest;
 
 		const model = buildConversationVirtualFeedModel({
 			showTopToolbarSpacer: false,
@@ -210,7 +207,9 @@ describe('conversation virtual feed model', () => {
 
 		expect(permissions).toHaveLength(2);
 		expect(new Set(permissions.map((item) => item.key)).size).toBe(2);
-		expect(permissions.map((item) => item.kind === 'permission' && item.request.incarnation)).toEqual([
+		expect(permissions.map((item) => (
+			item.kind === 'permission' && item.request.permissionOccurrenceId
+		))).toEqual([
 			'occurrence-1',
 			'occurrence-2',
 		]);
@@ -219,8 +218,7 @@ describe('conversation virtual feed model', () => {
 	it('updates suffix indexes when transcript items append incrementally', () => {
 		const permission: PendingPermissionRequest = {
 			chatId: 'chat-1',
-			permissionRequestId: 'permission-1',
-			incarnation: 'incarnation-1',
+			permissionOccurrenceId: 'incarnation-1',
 			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
 		};
 		const model = buildConversationVirtualFeedModel({

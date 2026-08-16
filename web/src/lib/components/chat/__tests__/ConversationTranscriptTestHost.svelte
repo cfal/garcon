@@ -14,8 +14,7 @@
 		rows: ChatDisplayRow[];
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onPermissionDecision?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload,
 		) => void;
 	}

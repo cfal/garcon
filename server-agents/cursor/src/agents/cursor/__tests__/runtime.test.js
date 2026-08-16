@@ -708,8 +708,7 @@ describe('Cursor ACP runtime', () => {
       runId: 'run-1',
       lifecycle: {
         kind: 'requested',
-        requestId: request.requestId,
-        incarnation: request.incarnation,
+        permissionOccurrenceId: request.permissionOccurrenceId,
       },
     });
     await permission.decision.respond({ allow: true });
@@ -746,13 +745,15 @@ describe('Cursor ACP runtime', () => {
     request();
     const second = await operation.waitForEvent((event) => (
       event.type === 'permission'
-      && event.lifecycle.incarnation !== first.lifecycle.incarnation
+      && event.lifecycle.permissionOccurrenceId !== first.lifecycle.permissionOccurrenceId
     ));
 
-    expect(first.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
-    expect(second.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
-    expect(first.lifecycle.incarnation).not.toBe('permission-reused');
-    expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+    expect(first.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(second.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(first.lifecycle.permissionOccurrenceId).not.toBe('permission-reused');
+    expect(second.lifecycle.permissionOccurrenceId).not.toBe(
+      first.lifecycle.permissionOccurrenceId,
+    );
     await first.decision.respond({ allow: true });
     await expect(first.decision.respond({ allow: false }))
       .rejects.toThrow('no longer pending');

@@ -6,7 +6,6 @@
 		isToolUseMessage,
 		PermissionRequestMessage,
 		ToolResultMessage,
-		permissionOccurrenceKey,
 		type ChatMessage,
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
@@ -35,13 +34,11 @@
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		onPermissionDecision?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecision,
 		) => void;
 		onExitPlanMode?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			choice: string,
 			plan: string,
 		) => void;
@@ -71,10 +68,7 @@
 	const pendingPermissionOccurrences = $derived(
 		new Set(
 			pendingPermissionRequests
-				.map((request) => permissionOccurrenceKey(
-					request.permissionRequestId,
-					request.incarnation,
-				)),
+				.map((request) => request.permissionOccurrenceId),
 		),
 	);
 	const disclosureState = $derived(itemState?.disclosurePort(item.id));
@@ -82,34 +76,22 @@
 	function permissionActionableFor(message: ChatMessage): boolean {
 		if (message instanceof PermissionRequestMessage) {
 			return pendingPermissionRequests.some((request) => (
-				request.permissionRequestId === message.permissionRequestId
-				&& request.incarnation === message.incarnation
-				&& request.control?.id === message.permissionRequestId
-				&& request.control.incarnation === message.incarnation
+				request.permissionOccurrenceId === message.permissionOccurrenceId
+				&& request.control?.permissionOccurrenceId === message.permissionOccurrenceId
 			));
 		}
 		if (message.type !== 'exit-plan-mode-tool-use') return false;
-		const permissionRequestId = `plan-exit-${message.toolId}`;
-		return pendingPermissionOccurrences.has(permissionOccurrenceKey(
-			permissionRequestId,
-			permissionRequestId,
-		));
+		return pendingPermissionOccurrences.has(`plan-exit-${message.toolId}`);
 	}
 
 	function permissionTerminalFor(message: ChatMessage): PermissionTerminalState | undefined {
 		if (message instanceof PermissionRequestMessage) {
-			return renderModel.permissionTerminalByOccurrence.get(permissionOccurrenceKey(
-				message.permissionRequestId,
-				message.incarnation,
-			));
+			return renderModel.permissionTerminalByOccurrence.get(message.permissionOccurrenceId);
 		}
 		if (message.type !== 'exit-plan-mode-tool-use') return undefined;
-		const permissionRequestId = `plan-exit-${message.toolId}`;
-		if (pendingPermissionOccurrences.has(permissionOccurrenceKey(
-			permissionRequestId,
-			permissionRequestId,
-		))) return undefined;
-		return { incarnation: permissionRequestId, state: 'resolved', allowed: true };
+		const permissionOccurrenceId = `plan-exit-${message.toolId}`;
+		if (pendingPermissionOccurrences.has(permissionOccurrenceId)) return undefined;
+		return { permissionOccurrenceId, state: 'resolved', allowed: true };
 	}
 </script>
 
@@ -153,10 +135,10 @@
 			{canForkAtMessageNow}
 			{disclosureState}
 			permissionDraft={itemState
-				? (id, incarnation) => itemState.permissionDraft(id, incarnation)
+				? (id) => itemState.permissionDraft(id)
 				: undefined}
 			onPermissionDraftChange={itemState
-				? (id, incarnation, draft) => itemState.setPermissionDraft(id, incarnation, draft)
+				? (id, draft) => itemState.setPermissionDraft(id, draft)
 				: undefined}
 			{acquireTransientActivity}
 		/>

@@ -365,8 +365,8 @@ describe('TranscriptLedgerService', () => {
       lease.sink.publish({
         type: 'permission',
         runId: 'run-1',
-        lifecycle: permissionRequest('permission-1', 'incarnation-1'),
-        decision: permissionDecision('permission-1', 'incarnation-1'),
+        lifecycle: permissionRequest('incarnation-1'),
+        decision: permissionDecision('incarnation-1'),
       });
 
       const claim = ledger.claimPermissionResolution(permissionControl());
@@ -375,8 +375,7 @@ describe('TranscriptLedgerService', () => {
       expect(resolved).toMatchObject({
         kind: 'permission-resolved',
         lifecycle: {
-          requestId: 'permission-1',
-          incarnation: 'incarnation-1',
+          permissionOccurrenceId: 'incarnation-1',
           decision: { allow: true },
         },
       });
@@ -385,37 +384,37 @@ describe('TranscriptLedgerService', () => {
     }, { serverInstanceId: 'server-1' });
   });
 
-  it('[TLV5-PERM.04-CORE-UNIT-01] keeps reused permission request ids actionable as separate occurrences', async () => {
+  it('[TLV5-PERM.04-CORE-UNIT-01] keeps distinct permission occurrences separately actionable', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
       const lease = ledger.openProducer('chat-1', 'test');
       ledger.beginRun('chat-1', 'run-1');
-      const firstDecision = permissionDecision('permission-1', 'incarnation-1');
-      const secondDecision = permissionDecision('permission-1', 'incarnation-2');
+      const firstDecision = permissionDecision('incarnation-1');
+      const secondDecision = permissionDecision('incarnation-2');
       lease.sink.publish({
         type: 'permission',
         runId: 'run-1',
-        lifecycle: permissionRequest('permission-1', 'incarnation-1'),
+        lifecycle: permissionRequest('incarnation-1'),
         decision: firstDecision,
       });
       lease.sink.publish({
         type: 'permission',
         runId: 'run-1',
-        lifecycle: permissionRequest('permission-1', 'incarnation-2'),
+        lifecycle: permissionRequest('incarnation-2'),
         decision: secondDecision,
       });
 
       const first = ledger.claimPermissionResolution(permissionControl({
-        incarnation: 'incarnation-1',
+        permissionOccurrenceId: 'incarnation-1',
       }));
       ledger.completePermissionResolution(first, { allow: false });
       const second = ledger.claimPermissionResolution(permissionControl({
-        incarnation: 'incarnation-2',
+        permissionOccurrenceId: 'incarnation-2',
       }));
 
-      expect(first.incarnation).toBe('incarnation-1');
+      expect(first.permissionOccurrenceId).toBe('incarnation-1');
       expect(first.decision).toBe(firstDecision);
-      expect(second.incarnation).toBe('incarnation-2');
+      expect(second.permissionOccurrenceId).toBe('incarnation-2');
       expect(second.decision).toBe(secondDecision);
     }, { serverInstanceId: 'server-1' });
   });
@@ -430,8 +429,8 @@ describe('TranscriptLedgerService', () => {
       lease.sink.publish({
         type: 'permission',
         runId: 'run-1',
-        lifecycle: permissionRequest('permission-1', 'incarnation-1'),
-        decision: permissionDecision('permission-1', 'incarnation-1'),
+        lifecycle: permissionRequest('incarnation-1'),
+        decision: permissionDecision('incarnation-1'),
       });
 
       expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
@@ -451,15 +450,15 @@ describe('TranscriptLedgerService', () => {
       lease.sink.publish({
         type: 'permission',
         runId: 'run-1',
-        lifecycle: permissionRequest('permission-1', 'incarnation-1'),
-        decision: permissionDecision('permission-1', 'incarnation-1'),
+        lifecycle: permissionRequest('incarnation-1'),
+        decision: permissionDecision('incarnation-1'),
       });
 
       const claim = ledger.claimPermissionResolution(permissionControl());
       ledger.abandonPermissionResolution(claim);
 
       expect(ledger.claimPermissionResolution(permissionControl())).toMatchObject({
-        requestId: 'permission-1',
+        permissionOccurrenceId: 'incarnation-1',
         runId: 'run-1',
       });
     }, { serverInstanceId: 'server-1' });
@@ -603,20 +602,18 @@ async function withService(run, serviceOptions = {}) {
   }
 }
 
-function permissionRequest(requestId, incarnation) {
+function permissionRequest(permissionOccurrenceId) {
   return {
     kind: 'requested',
-    requestId,
-    incarnation,
+    permissionOccurrenceId,
     requestedTool: new BashToolUseMessage(TS, 'tool-1', 'pwd'),
     options: [],
   };
 }
 
-function permissionDecision(requestId, incarnation) {
+function permissionDecision(permissionOccurrenceId) {
   return {
-    requestId,
-    incarnation,
+    permissionOccurrenceId,
     respond: async () => undefined,
   };
 }
@@ -626,8 +623,7 @@ function permissionControl(overrides = {}) {
     serverInstanceId: 'server-1',
     chatId: 'chat-1',
     runId: 'run-1',
-    id: 'permission-1',
-    incarnation: 'incarnation-1',
+    permissionOccurrenceId: 'incarnation-1',
     ...overrides,
   };
 }

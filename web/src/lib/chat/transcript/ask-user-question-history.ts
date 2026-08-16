@@ -92,7 +92,7 @@ function answersFromLegacyText(
 function terminalFromResult(
   tool: AskUserQuestionToolUseMessage,
   result: ToolResultMessage,
-): Omit<PermissionTerminalState, 'incarnation'> {
+): Omit<PermissionTerminalState, 'permissionOccurrenceId'> {
 	const answers = answerMap(result);
 	const rawText = rawToolResultText(result.content);
 	if (answers) {
@@ -130,14 +130,13 @@ export function historicalAskUserQuestion(
 	tool: AskUserQuestionToolUseMessage,
 	result: ToolResultMessage,
 ): HistoricalAskUserQuestion {
-	const permissionRequestId = `ask-user-question-${tool.toolId || 'unknown'}`;
+	const permissionOccurrenceId = `ask-user-question-${tool.toolId || 'unknown'}`;
 	return {
 		request: new PermissionRequestMessage(
 			tool.timestamp,
-			permissionRequestId,
-			permissionRequestId,
+			permissionOccurrenceId,
 			tool,
 		),
-		terminal: { ...terminalFromResult(tool, result), incarnation: permissionRequestId },
+		terminal: { ...terminalFromResult(tool, result), permissionOccurrenceId },
 	};
 }

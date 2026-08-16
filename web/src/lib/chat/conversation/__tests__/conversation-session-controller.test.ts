@@ -1708,8 +1708,7 @@ describe('ConversationSessionController', () => {
 		const controller = new ConversationSessionController(deps);
 
 		controller.handleExitPlanMode(
-			'perm-1',
-			'incarnation-1',
+			'plan-exit-1',
 			'bypass',
 			'Use the approved design.',
 		);
@@ -1731,24 +1730,21 @@ describe('ConversationSessionController', () => {
 			serverInstanceId: 'server-1',
 			chatId: 'chat-1',
 			runId: 'run-1',
-			id: 'permission-1',
-			incarnation: 'incarnation-1',
+			permissionOccurrenceId: 'incarnation-1',
 		} satisfies ChatTransientControlAction;
 		const secondControl = {
 			...firstControl,
-			incarnation: 'incarnation-2',
+			permissionOccurrenceId: 'incarnation-2',
 		} satisfies ChatTransientControlAction;
 		const { deps } = createDeps();
 		deps.conversationUi.pendingPermissionRequests = [
 			{
-				permissionRequestId: 'permission-1',
-				incarnation: 'incarnation-1',
+				permissionOccurrenceId: 'incarnation-1',
 				requestedTool: new BashToolUseMessage('', 'tool-1', 'printf first'),
 				control: firstControl,
 			},
 			{
-				permissionRequestId: 'permission-1',
-				incarnation: 'incarnation-2',
+				permissionOccurrenceId: 'incarnation-2',
 				requestedTool: new BashToolUseMessage('', 'tool-2', 'printf second'),
 				control: secondControl,
 			},
@@ -1760,16 +1756,16 @@ describe('ConversationSessionController', () => {
 		});
 		const controller = new ConversationSessionController(deps);
 
-		controller.handlePermissionDecision('permission-1', 'incarnation-1', { allow: true });
-		controller.handlePermissionDecision('permission-1', 'incarnation-2', { allow: false });
+		controller.handlePermissionDecision('incarnation-1', { allow: true });
+		controller.handlePermissionDecision('incarnation-2', { allow: false });
 
 		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(1, expect.objectContaining({
-			permissionRequestId: 'permission-1',
+			permissionOccurrenceId: 'incarnation-1',
 			control: firstControl,
 			allow: true,
 		}));
 		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(2, expect.objectContaining({
-			permissionRequestId: 'permission-1',
+			permissionOccurrenceId: 'incarnation-2',
 			control: secondControl,
 			allow: false,
 		}));
@@ -1777,7 +1773,7 @@ describe('ConversationSessionController', () => {
 
 		secondResponse.resolve(permissionDecisionAccepted('decision-2'));
 		await flushPromises();
-		expect(deps.conversationUi.pendingPermissionRequests.map((request) => request.incarnation)).toEqual([
+		expect(deps.conversationUi.pendingPermissionRequests.map((request) => request.permissionOccurrenceId)).toEqual([
 			'incarnation-1',
 		]);
 

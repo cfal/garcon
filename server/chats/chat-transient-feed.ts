@@ -1,6 +1,5 @@
 import {
   PermissionRequestMessage,
-  permissionOccurrenceKey,
 } from '../../common/chat-types.js';
 import type {
   ChatTransientControlAction,
@@ -48,11 +47,11 @@ export class ChatTransientFeedStore {
         if (row.runId === event.runId) record.rows.delete(id);
       }
       mutation = { kind: 'clear-run', runId: event.runId };
-    } else if (event.row.lifecycle.kind === 'requested' && event.runId) {
+    } else if (event.row.lifecycle.kind === 'requested') {
+      if (!event.runId) return { kind: 'unchanged' };
       const lifecycle = event.row.lifecycle;
       const row: TransientFeedRow = {
-        id: lifecycle.requestId,
-        incarnation: lifecycle.incarnation,
+        permissionOccurrenceId: lifecycle.permissionOccurrenceId,
         runId: event.runId,
         transcript: {
           transcriptViewId: event.viewId,
@@ -61,21 +60,18 @@ export class ChatTransientFeedStore {
         displayOrder: event.row.ordinal,
         message: new PermissionRequestMessage(
           event.row.at,
-          lifecycle.requestId,
-          lifecycle.incarnation,
+          lifecycle.permissionOccurrenceId,
           lifecycle.requestedTool,
         ),
       };
-      record.rows.set(permissionOccurrenceKey(row.id, row.incarnation), row);
+      record.rows.set(row.permissionOccurrenceId, row);
       mutation = { kind: 'upsert', row };
     } else {
       const lifecycle = event.row.lifecycle;
-      const key = permissionOccurrenceKey(lifecycle.requestId, lifecycle.incarnation);
-      if (!record.rows.delete(key)) return { kind: 'unchanged' };
+      if (!record.rows.delete(lifecycle.permissionOccurrenceId)) return { kind: 'unchanged' };
       mutation = {
         kind: 'remove',
-        id: lifecycle.requestId,
-        incarnation: lifecycle.incarnation,
+        permissionOccurrenceId: lifecycle.permissionOccurrenceId,
       };
     }
     record.transientRevision += 1;
@@ -118,7 +114,7 @@ export class ChatTransientFeedStore {
     }
     const row = this.#records
       .get(action.chatId)
-      ?.rows.get(permissionOccurrenceKey(action.id, action.incarnation));
+      ?.rows.get(action.permissionOccurrenceId);
     if (!row || row.runId !== action.runId) {
       throw new TransientControlActionError('TRANSIENT_CONTROL_STALE');
     }
@@ -176,8 +172,7 @@ function snapshotOf(
     transientRevision: record.transientRevision,
     rows: [...record.rows.values()].sort((left, right) => (
       left.displayOrder - right.displayOrder
-      || left.id.localeCompare(right.id)
-      || left.incarnation.localeCompare(right.incarnation)
+      || left.permissionOccurrenceId.localeCompare(right.permissionOccurrenceId)
     )),
   };
 }

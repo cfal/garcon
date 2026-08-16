@@ -74,7 +74,7 @@ describe('plan mode handler', () => {
 		handlePlanModeMessages(message, ctx);
 		const pending = read();
 		expect(pending).toHaveLength(1);
-		expect(pending[0].permissionRequestId).toBe('plan-exit-tool-sc-exit');
+		expect(pending[0].permissionOccurrenceId).toBe('plan-exit-tool-sc-exit');
 		expect(pending[0].requestedTool.type).toBe('exit-plan-mode-tool-use');
 	});
 

@@ -1,5 +1,3 @@
-import { permissionOccurrenceKey } from '$shared/chat-types';
-
 export type ConversationDisclosureKind = 'thinking' | 'tool-input' | 'tool-result' | 'compaction';
 
 export interface ConversationDisclosureStatePort {
@@ -64,19 +62,16 @@ export class ConversationFeedItemState {
 		this.#disclosureOverrides = next;
 	}
 
-	permissionDraft(permissionRequestId: string, incarnation: string): PermissionQuestionDraft {
-		return this.#permissionDrafts.get(
-			permissionOccurrenceKey(permissionRequestId, incarnation),
-		) ?? EMPTY_PERMISSION_DRAFT;
+	permissionDraft(permissionOccurrenceId: string): PermissionQuestionDraft {
+		return this.#permissionDrafts.get(permissionOccurrenceId) ?? EMPTY_PERMISSION_DRAFT;
 	}
 
 	setPermissionDraft(
-		permissionRequestId: string,
-		incarnation: string,
+		permissionOccurrenceId: string,
 		draft: PermissionQuestionDraft,
 	): void {
 		const next = new Map(this.#permissionDrafts);
-		next.set(permissionOccurrenceKey(permissionRequestId, incarnation), draft);
+		next.set(permissionOccurrenceId, draft);
 		this.#permissionDrafts = next;
 	}
 

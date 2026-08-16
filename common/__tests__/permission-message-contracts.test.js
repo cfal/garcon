@@ -4,13 +4,12 @@ import { parseChatMessage } from '../chat-types.ts';
 const AT = '2026-08-15T00:00:00.000Z';
 
 describe('permission message contracts', () => {
-  it('[TLV5-PERM.03-CONTRACT-01] round-trips the occurrence incarnation for every permission lifecycle message', () => {
+  it('[TLV5-PERM.03-CONTRACT-01] round-trips the occurrence UUID for every permission lifecycle message', () => {
     const messages = [
       {
         type: 'permission-request',
         timestamp: AT,
-        permissionRequestId: 'shared-request',
-        incarnation: 'requested-occurrence',
+        permissionOccurrenceId: 'requested-occurrence',
         requestedTool: {
           type: 'bash-tool-use',
           timestamp: AT,
@@ -21,26 +20,23 @@ describe('permission message contracts', () => {
       {
         type: 'permission-resolved',
         timestamp: AT,
-        permissionRequestId: 'shared-request',
-        incarnation: 'resolved-occurrence',
+        permissionOccurrenceId: 'resolved-occurrence',
         allowed: true,
       },
       {
         type: 'permission-cancelled',
         timestamp: AT,
-        permissionRequestId: 'shared-request',
-        incarnation: 'cancelled-occurrence',
+        permissionOccurrenceId: 'cancelled-occurrence',
         reason: 'aborted',
       },
       {
         type: 'permission-expired',
         timestamp: AT,
-        permissionRequestId: 'shared-request',
-        incarnation: 'expired-occurrence',
+        permissionOccurrenceId: 'expired-occurrence',
       },
     ];
 
-    expect(messages.map((message) => parseChatMessage(message)?.incarnation)).toEqual([
+    expect(messages.map((message) => parseChatMessage(message)?.permissionOccurrenceId)).toEqual([
       'requested-occurrence',
       'resolved-occurrence',
       'cancelled-occurrence',
@@ -53,7 +49,6 @@ describe('permission message contracts', () => {
     expect(parseChatMessage({
       type: 'permission-cancelled',
       timestamp: AT,
-      permissionRequestId: 'shared-request',
       reason: 'aborted',
     })).toBeNull();
   });

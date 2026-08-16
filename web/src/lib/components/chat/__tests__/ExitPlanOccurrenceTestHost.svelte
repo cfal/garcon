@@ -18,8 +18,7 @@
 	interface Props {
 		pendingPermissionRequests: PendingPermissionRequest[];
 		onExitPlanMode: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			choice: string,
 			plan: string,
 		) => void;

@@ -13,14 +13,12 @@ import {
 
 function row(overrides: Partial<TransientFeedRow> = {}): TransientFeedRow {
 	return {
-		id: 'permission-1',
-		incarnation: 'incarnation-1',
+		permissionOccurrenceId: 'incarnation-1',
 		runId: 'run-1',
 		transcript: { transcriptViewId: 'view-1', afterOrdinal: 3 },
 		displayOrder: 0,
 		message: new PermissionRequestMessage(
 			'2026-08-11T00:00:00.000Z',
-			'permission-1',
 			'incarnation-1',
 			new BashToolUseMessage('2026-08-11T00:00:00.000Z', 'tool-1', 'bun test'),
 		),
@@ -57,7 +55,7 @@ describe('transient feed browser reducer', () => {
 	it('does not resurrect a removed permission from a delayed upsert', () => {
 		const removed = applyTransientFeedMutation(
 			snapshot(),
-			mutation({ kind: 'remove', id: 'permission-1', incarnation: 'incarnation-1' }),
+			mutation({ kind: 'remove', permissionOccurrenceId: 'incarnation-1' }),
 		);
 		expect(removed).toMatchObject({ kind: 'applied', snapshot: { rows: [] } });
 		if (removed.kind !== 'applied') throw new Error('expected applied removal');
@@ -105,8 +103,7 @@ describe('transient feed browser reducer', () => {
 			serverInstanceId: 'server-1',
 			chatId: 'chat-1',
 			runId: 'run-1',
-			id: 'permission-1',
-			incarnation: 'incarnation-1',
+			permissionOccurrenceId: 'incarnation-1',
 		});
 		expect(permissions[0]?.transcript).toEqual({
 			transcriptViewId: 'view-1',
@@ -115,7 +112,7 @@ describe('transient feed browser reducer', () => {
 	});
 
 	it('clears only rows belonging to the ended run', () => {
-		const other = row({ id: 'permission-2', incarnation: 'incarnation-2', runId: 'run-2' });
+		const other = row({ permissionOccurrenceId: 'incarnation-2', runId: 'run-2' });
 		const applied = applyTransientFeedMutation(
 			snapshot({ rows: [row(), other] }),
 			mutation({ kind: 'clear-run', runId: 'run-1' }),
@@ -123,30 +120,29 @@ describe('transient feed browser reducer', () => {
 
 		expect(applied).toMatchObject({
 			kind: 'applied',
-			snapshot: { rows: [{ id: 'permission-2', runId: 'run-2' }] },
+			snapshot: { rows: [{ permissionOccurrenceId: 'incarnation-2', runId: 'run-2' }] },
 		});
 	});
 
-	it('removes only the named occurrence when a request id is reused', () => {
+	it('removes only the named permission occurrence', () => {
 		const first = row();
 		const second = row({
-			incarnation: 'incarnation-2',
+			permissionOccurrenceId: 'incarnation-2',
 			displayOrder: 1,
 			message: new PermissionRequestMessage(
 				'2026-08-11T00:00:00.000Z',
-				'permission-1',
 				'incarnation-2',
 				new BashToolUseMessage('2026-08-11T00:00:00.000Z', 'tool-2', 'bun test --watch'),
 			),
 		});
 		const applied = applyTransientFeedMutation(
 			snapshot({ rows: [first, second] }),
-			mutation({ kind: 'remove', id: 'permission-1', incarnation: 'incarnation-1' }),
+			mutation({ kind: 'remove', permissionOccurrenceId: 'incarnation-1' }),
 		);
 
 		expect(applied).toMatchObject({
 			kind: 'applied',
-			snapshot: { rows: [{ id: 'permission-1', incarnation: 'incarnation-2' }] },
+			snapshot: { rows: [{ permissionOccurrenceId: 'incarnation-2' }] },
 		});
 	});
 });

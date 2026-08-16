@@ -6,7 +6,6 @@ import {
 	PermissionResolvedMessage,
 	ToolResultMessage,
 	isToolUseMessage,
-	permissionOccurrenceKey,
 } from '$shared/chat-types';
 import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
@@ -16,7 +15,7 @@ import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js'
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 
 export interface PermissionTerminalState {
-	incarnation: string;
+	permissionOccurrenceId: string;
 	state: 'resolved' | 'cancelled';
 	allowed?: boolean;
 	reason?: string;
@@ -199,29 +198,20 @@ export function buildConversationFeedRenderModel(
 		const message = row.message;
 
 		if (message instanceof PermissionResolvedMessage) {
-			permissionTerminalByOccurrence.set(permissionOccurrenceKey(
-				message.permissionRequestId,
-				message.incarnation,
-			), {
-				incarnation: message.incarnation,
+			permissionTerminalByOccurrence.set(message.permissionOccurrenceId, {
+				permissionOccurrenceId: message.permissionOccurrenceId,
 				state: 'resolved',
 				allowed: message.allowed,
 			});
 		} else if (message instanceof PermissionCancelledMessage) {
-			permissionTerminalByOccurrence.set(permissionOccurrenceKey(
-				message.permissionRequestId,
-				message.incarnation,
-			), {
-				incarnation: message.incarnation,
+			permissionTerminalByOccurrence.set(message.permissionOccurrenceId, {
+				permissionOccurrenceId: message.permissionOccurrenceId,
 				state: 'cancelled',
 				reason: message.reason,
 			});
 		} else if (message instanceof PermissionExpiredMessage) {
-			permissionTerminalByOccurrence.set(permissionOccurrenceKey(
-				message.permissionRequestId,
-				message.incarnation,
-			), {
-				incarnation: message.incarnation,
+			permissionTerminalByOccurrence.set(message.permissionOccurrenceId, {
+				permissionOccurrenceId: message.permissionOccurrenceId,
 				state: 'cancelled',
 				reason: 'expired',
 			});
@@ -268,31 +258,23 @@ export function visiblePendingPermissionRequests(
 	for (const row of rows) {
 		if (row.kind !== 'message') continue;
 		if (row.message instanceof PermissionRequestMessage) {
-			renderedPermissionOccurrences.add(permissionOccurrenceKey(
-				row.message.permissionRequestId,
-				row.message.incarnation,
-			));
+			renderedPermissionOccurrences.add(row.message.permissionOccurrenceId);
 		}
 		if (row.message.type === 'exit-plan-mode-tool-use') {
-			const requestId = `plan-exit-${row.message.toolId}`;
-			renderedExitPlanOccurrences.add(permissionOccurrenceKey(requestId, requestId));
+			renderedExitPlanOccurrences.add(`plan-exit-${row.message.toolId}`);
 		}
 		if (
 			row.message instanceof PermissionResolvedMessage ||
 			row.message instanceof PermissionCancelledMessage ||
 			row.message instanceof PermissionExpiredMessage
 		) {
-			terminalPermissionOccurrences.add(permissionOccurrenceKey(
-				row.message.permissionRequestId,
-				row.message.incarnation,
-			));
+			terminalPermissionOccurrences.add(row.message.permissionOccurrenceId);
 		}
 	}
 
 	const visiblePermissionOccurrences = new Set<string>();
 	return pendingPermissionRequests.filter((request) => {
-		const id = request.permissionRequestId;
-		const occurrence = permissionOccurrenceKey(id, request.incarnation);
+		const occurrence = request.permissionOccurrenceId;
 		if (renderedPermissionOccurrences.has(occurrence)) return false;
 		if (renderedExitPlanOccurrences.has(occurrence)) return false;
 		if (terminalPermissionOccurrences.has(occurrence)) return false;

@@ -734,18 +734,18 @@ describe('direct constructor round-trip', () => {
 describe('PermissionRequestMessage round-trip', () => {
 	it('round-trips PermissionRequestMessage with Bash requestedTool', () => {
 		const requestedTool = new BashToolUseMessage(TS, 'tool-1', 'ls -la');
-		const msg = new PermissionRequestMessage(TS, 'perm-1', 'incarnation-1', requestedTool);
+		const msg = new PermissionRequestMessage(TS, 'incarnation-1', requestedTool);
 		const parsed = roundTrip(msg) as PermissionRequestMessage;
 
 		expect(parsed).toBeInstanceOf(PermissionRequestMessage);
-		expect(parsed.incarnation).toBe('incarnation-1');
+		expect(parsed.permissionOccurrenceId).toBe('incarnation-1');
 		expect(parsed.requestedTool).toBeInstanceOf(BashToolUseMessage);
 		expect((parsed.requestedTool as BashToolUseMessage).command).toBe('ls -la');
 	});
 
 	it('round-trips PermissionRequestMessage with ExitPlanMode requestedTool', () => {
 		const requestedTool = new ExitPlanModeToolUseMessage(TS, 'tool-2', 'Do X', []);
-		const msg = new PermissionRequestMessage(TS, 'perm-2', 'incarnation-2', requestedTool);
+		const msg = new PermissionRequestMessage(TS, 'incarnation-2', requestedTool);
 		const parsed = roundTrip(msg) as PermissionRequestMessage;
 
 		expect(parsed.requestedTool).toBeInstanceOf(ExitPlanModeToolUseMessage);
@@ -762,7 +762,6 @@ describe('PermissionRequestMessage round-trip', () => {
 		]);
 		const msg = new PermissionRequestMessage(
 			TS,
-			'perm-question',
 			'incarnation-question',
 			requestedTool,
 		);
@@ -776,7 +775,7 @@ describe('PermissionRequestMessage round-trip', () => {
 
 	it('round-trips PermissionRequestMessage with UnknownToolUse requestedTool', () => {
 		const requestedTool = new UnknownToolUseMessage(TS, 'tool-3', 'custom', { key: 'val' });
-		const msg = new PermissionRequestMessage(TS, 'perm-3', 'incarnation-3', requestedTool);
+		const msg = new PermissionRequestMessage(TS, 'incarnation-3', requestedTool);
 		const parsed = roundTrip(msg) as PermissionRequestMessage;
 
 		expect(parsed.requestedTool).toBeInstanceOf(UnknownToolUseMessage);
@@ -787,7 +786,7 @@ describe('PermissionRequestMessage round-trip', () => {
 		const msg = parseChatMessage({
 			type: 'permission-request',
 			timestamp: TS,
-			permissionRequestId: 'perm-bad',
+			permissionOccurrenceId: 'incarnation-bad',
 		});
 		expect(msg).toBeNull();
 	});
@@ -796,8 +795,7 @@ describe('PermissionRequestMessage round-trip', () => {
 		const msg = parseChatMessage({
 			type: 'permission-request',
 			timestamp: TS,
-			permissionRequestId: 'perm-bad',
-			incarnation: 'incarnation-bad',
+			permissionOccurrenceId: 'incarnation-bad',
 			requestedTool: { type: 'assistant-message', timestamp: TS, content: 'hi' },
 		});
 		expect(msg).toBeNull();

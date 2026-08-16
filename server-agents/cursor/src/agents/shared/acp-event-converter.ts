@@ -1,7 +1,6 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ToolUseChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
-import type { AcpJsonRpcId } from '../../acp/protocol.js';
 import type { AcpSessionUpdateNotification } from '../../acp/protocol.js';
 
 export interface AcpSessionUpdateContext {
@@ -12,7 +11,7 @@ export interface AcpSessionUpdateContext {
 
 export interface AcpCustomRequest {
   method: string;
-  requestId: AcpJsonRpcId;
+  permissionOccurrenceId: string;
   params: unknown;
 }
 

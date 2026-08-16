@@ -345,11 +345,11 @@ describe('live Claude lifecycle', () => {
       if (permissionRequest.message.type !== 'permission-request') {
         throw new Error('Live Claude permission request was not found.');
       }
-      const permissionRequestId = permissionRequest.message.permissionRequestId;
+      const permissionOccurrenceId = permissionRequest.message.permissionOccurrenceId;
       const decision = await fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
-        permissionRequestId,
+        permissionOccurrenceId,
         allow: true,
         alwaysAllow: false,
       });
@@ -364,10 +364,10 @@ describe('live Claude lifecycle', () => {
       });
       const beforeRestart = await fixture.client.getMessages(chatId);
       const permission = messagesOfType(beforeRestart.messages, 'permission-request').find(
-        (message) => message.permissionRequestId === permissionRequestId,
+        (message) => message.permissionOccurrenceId === permissionOccurrenceId,
       );
       const resolution = messagesOfType(beforeRestart.messages, 'permission-resolved').find(
-        (message) => message.permissionRequestId === permissionRequestId,
+        (message) => message.permissionOccurrenceId === permissionOccurrenceId,
       );
       const bash = messagesOfType(beforeRestart.messages, 'bash-tool-use').find(
         (message) => message.command.includes(toolCommand),
@@ -376,7 +376,7 @@ describe('live Claude lifecycle', () => {
       const result = messagesOfType(beforeRestart.messages, 'tool-result').find(
         (message) => message.toolId === bash.toolId,
       );
-      expect(permission?.permissionRequestId).toBe(permissionRequestId);
+      expect(permission?.permissionOccurrenceId).toBe(permissionOccurrenceId);
       expect(resolution?.allowed).toBe(true);
       expect(result?.isError).toBe(false);
       expect(JSON.stringify(result?.content)).toContain(toolMarker);
@@ -426,11 +426,11 @@ describe('live Claude lifecycle', () => {
       if (deniedPermission.message.type !== 'permission-request') {
         throw new Error('Live Claude denied permission request was not found.');
       }
-      const deniedPermissionId = deniedPermission.message.permissionRequestId;
+      const deniedPermissionId = deniedPermission.message.permissionOccurrenceId;
       expect((await fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
-        permissionRequestId: deniedPermissionId,
+        permissionOccurrenceId: deniedPermissionId,
         allow: false,
         alwaysAllow: false,
       })).status).toBe('accepted');
@@ -441,7 +441,7 @@ describe('live Claude lifecycle', () => {
 
       const afterDenial = await fixture.client.getMessages(chatId);
       const deniedResolution = messagesOfType(afterDenial.messages, 'permission-resolved').find(
-        (message) => message.permissionRequestId === deniedPermissionId,
+        (message) => message.permissionOccurrenceId === deniedPermissionId,
       );
       const deniedBash = messagesOfType(afterDenial.messages, 'bash-tool-use').find(
         (message) => message.command.includes(deniedToolCommand),

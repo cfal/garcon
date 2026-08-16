@@ -2,14 +2,13 @@
 // notifications when a chat requires user attention.
 //
 // Three notification triggers:
-// 1. Permission request  - immediate, deduped by permissionRequestId
+// 1. Permission request  - immediate, deduped by occurrence
 // 2. Chat idle           - turn finished and queue drained (completed/failed)
 // 3. Session stopped     - user-initiated abort
 
 import {
   AssistantMessage,
   isAbortAcknowledged,
-  permissionOccurrenceKey,
   type ChatMessage,
   type ChatStopOutcome,
 } from '../../common/chat-types.js';
@@ -172,15 +171,15 @@ export class AttentionTracker {
     if (event.type !== 'permission') return;
     const lifecycle = event.row.lifecycle;
     if (lifecycle.kind === 'requested') {
+      if (!event.runId) return;
       this.#trackPermission(
         event.chatId,
-        lifecycle.requestId,
-        lifecycle.incarnation,
+        lifecycle.permissionOccurrenceId,
         toolDisplayName(lifecycle.requestedTool),
       );
       return;
     }
-    this.#clearPermission(event.chatId, lifecycle.requestId, lifecycle.incarnation);
+    this.#clearPermission(event.chatId, lifecycle.permissionOccurrenceId);
   }
 
   // Reads the last user message from the history cache. This covers both
@@ -197,8 +196,7 @@ export class AttentionTracker {
 
   #trackPermission(
     chatId: string,
-    permissionRequestId: string,
-    incarnation: string,
+    permissionOccurrenceId: string,
     toolName: string,
   ): void {
     let ids = this.#pendingPermissions.get(chatId);
@@ -206,9 +204,8 @@ export class AttentionTracker {
       ids = new Set();
       this.#pendingPermissions.set(chatId, ids);
     }
-    const occurrence = permissionOccurrenceKey(permissionRequestId, incarnation);
-    if (ids.has(occurrence)) return;
-    ids.add(occurrence);
+    if (ids.has(permissionOccurrenceId)) return;
+    ids.add(permissionOccurrenceId);
 
     const meta = this.#chatMeta(chatId);
     const userMsg = this.#getLastUserMessage(chatId);
@@ -217,10 +214,10 @@ export class AttentionTracker {
     ));
   }
 
-  #clearPermission(chatId: string, permissionRequestId: string, incarnation: string): void {
+  #clearPermission(chatId: string, permissionOccurrenceId: string): void {
     const ids = this.#pendingPermissions.get(chatId);
     if (!ids) return;
-    ids.delete(permissionOccurrenceKey(permissionRequestId, incarnation));
+    ids.delete(permissionOccurrenceId);
     if (ids.size === 0) this.#pendingPermissions.delete(chatId);
   }
 

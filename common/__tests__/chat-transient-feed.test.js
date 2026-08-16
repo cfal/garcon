@@ -8,19 +8,16 @@ import {
 const CHAT_ID = '1785337200123456';
 
 function row(overrides = {}) {
-  const id = overrides.id ?? 'permission-1';
-  const incarnation = overrides.incarnation ?? 'incarnation-1';
+  const permissionOccurrenceId = overrides.permissionOccurrenceId ?? 'occurrence-1';
   return {
-    id,
-    incarnation,
+    permissionOccurrenceId,
     runId: 'run-1',
     transcript: { transcriptViewId: 'view-1', afterOrdinal: 3 },
     displayOrder: 0,
     message: {
       type: 'permission-request',
       timestamp: '2026-08-11T00:00:00.000Z',
-      permissionRequestId: id,
-      incarnation,
+      permissionOccurrenceId,
       requestedTool: {
         type: 'bash-tool-use',
         timestamp: '2026-08-11T00:00:00.000Z',
@@ -47,12 +44,14 @@ describe('chat transient feed contracts', () => {
   it('parses snapshots, mutations, and action fences', () => {
     expect(parseChatTransientFeedSnapshot(snapshot())).toMatchObject({
       transcriptViewId: 'view-1',
-      rows: [{ id: 'permission-1', runId: 'run-1' }],
+      rows: [{ permissionOccurrenceId: 'occurrence-1', runId: 'run-1' }],
     });
     expect(parseChatTransientFeedMutation({
       ...snapshot({ rows: undefined }),
       mutation: { kind: 'upsert', row: row() },
-    })).toMatchObject({ mutation: { kind: 'upsert', row: { id: 'permission-1' } } });
+    })).toMatchObject({
+      mutation: { kind: 'upsert', row: { permissionOccurrenceId: 'occurrence-1' } },
+    });
     expect(parseChatTransientFeedMutation({
       ...snapshot({ rows: undefined }),
       mutation: { kind: 'clear-run', runId: 'run-1' },
@@ -61,24 +60,22 @@ describe('chat transient feed contracts', () => {
       serverInstanceId: 'server-1',
       chatId: CHAT_ID,
       runId: 'run-1',
-      id: 'permission-1',
-      incarnation: 'incarnation-1',
+      permissionOccurrenceId: 'occurrence-1',
     })).toEqual({
       serverInstanceId: 'server-1',
       chatId: CHAT_ID,
       runId: 'run-1',
-      id: 'permission-1',
-      incarnation: 'incarnation-1',
+      permissionOccurrenceId: 'occurrence-1',
     });
   });
 
-  it('treats reused request ids as distinct occurrence slots', () => {
+  it('treats distinct occurrence UUIDs as distinct slots', () => {
     expect(parseChatTransientFeedSnapshot(snapshot({
-      rows: [row(), row({ incarnation: 'incarnation-2' })],
+      rows: [row(), row({ permissionOccurrenceId: 'occurrence-2' })],
     }))).toMatchObject({
       rows: [
-        { id: 'permission-1', incarnation: 'incarnation-1' },
-        { id: 'permission-1', incarnation: 'incarnation-2' },
+        { permissionOccurrenceId: 'occurrence-1' },
+        { permissionOccurrenceId: 'occurrence-2' },
       ],
     });
     expect(parseChatTransientFeedSnapshot(snapshot({
@@ -101,8 +98,7 @@ describe('chat transient feed contracts', () => {
       serverInstanceId: 'server-1',
       chatId: CHAT_ID,
       runId: '',
-      id: 'permission-1',
-      incarnation: 'incarnation-1',
+      permissionOccurrenceId: 'occurrence-1',
     })).toBeNull();
   });
 });

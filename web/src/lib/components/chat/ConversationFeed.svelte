@@ -3,7 +3,6 @@
 	import ConversationFeedVirtualRow from './ConversationFeedVirtualRow.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import { permissionOccurrenceKey } from '$shared/chat-types';
 	import {
 		getActiveTranscriptState,
 		getAgentState,
@@ -51,13 +50,11 @@
 		onscroll?: () => void;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
 		onPermissionDecision?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (
-			permissionRequestId: string,
-			incarnation: string,
+			permissionOccurrenceId: string,
 			choice: string,
 			plan: string,
 		) => void;
@@ -239,10 +236,7 @@
 			detachedStatus: m.chat_feed_new_response_available(),
 			hiddenToolTypes: localSettings.hiddenToolTypes,
 			floatingPermissionOccurrences: projectionInput.pendingPermissions.map(
-				(request) => permissionOccurrenceKey(
-					request.permissionRequestId,
-					request.incarnation,
-				),
+				(request) => request.permissionOccurrenceId,
 			),
 		};
 		untrack(() => {
@@ -285,10 +279,7 @@
 	$effect.pre(() => {
 		const input = projectionInput;
 		const pendingPermissionOccurrences = new Set(
-			activePendingPermissionRequests.map((request) => permissionOccurrenceKey(
-				request.permissionRequestId,
-				request.incarnation,
-			)),
+			activePendingPermissionRequests.map((request) => request.permissionOccurrenceId),
 		);
 		untrack(() => {
 			const nextProjection = projectionState.reconcile(input);

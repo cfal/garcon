@@ -642,8 +642,7 @@ export class PermissionRequestMessage {
   readonly type = 'permission-request' as const;
   constructor(
     public timestamp: string,
-    public permissionRequestId: string,
-    public incarnation: string,
+    public permissionOccurrenceId: string,
     public requestedTool: ToolUseChatMessage,
   ) {}
 }
@@ -652,8 +651,7 @@ export class PermissionResolvedMessage {
   readonly type = 'permission-resolved' as const;
   constructor(
     public timestamp: string,
-    public permissionRequestId: string,
-    public incarnation: string,
+    public permissionOccurrenceId: string,
     public allowed: boolean,
   ) {}
 }
@@ -662,8 +660,7 @@ export class PermissionCancelledMessage {
   readonly type = 'permission-cancelled' as const;
   constructor(
     public timestamp: string,
-    public permissionRequestId: string,
-    public incarnation: string,
+    public permissionOccurrenceId: string,
     public reason?: 'cancelled' | 'session-complete' | 'aborted',
   ) {}
 }
@@ -672,13 +669,8 @@ export class PermissionExpiredMessage {
   readonly type = 'permission-expired' as const;
   constructor(
     public timestamp: string,
-    public permissionRequestId: string,
-    public incarnation: string,
+    public permissionOccurrenceId: string,
   ) {}
-}
-
-export function permissionOccurrenceKey(requestId: string, incarnation: string): string {
-  return JSON.stringify([requestId, incarnation]);
 }
 
 // What initiated a context compaction: an explicit `/compact` command or an
@@ -1136,47 +1128,40 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         data.action === 'reload-native-history' ? data.action : undefined,
       );
     case 'permission-request': {
-      const permissionRequestId = str(data.permissionRequestId);
-      const incarnation = str(data.incarnation);
+      const permissionOccurrenceId = str(data.permissionOccurrenceId);
       const requestedToolData = asRecord(data.requestedTool);
       const requestedTool = parseChatMessage(requestedToolData);
-      if (!permissionRequestId || !incarnation || !requestedTool || !isToolUseMessage(requestedTool)) {
+      if (!permissionOccurrenceId || !requestedTool || !isToolUseMessage(requestedTool)) {
         return null;
       }
       return new PermissionRequestMessage(
         str(data.timestamp),
-        permissionRequestId,
-        incarnation,
+        permissionOccurrenceId,
         requestedTool,
       );
     }
     case 'permission-resolved': {
-      const permissionRequestId = str(data.permissionRequestId);
-      const incarnation = str(data.incarnation);
-      if (!permissionRequestId || !incarnation) return null;
+      const permissionOccurrenceId = str(data.permissionOccurrenceId);
+      if (!permissionOccurrenceId) return null;
       return new PermissionResolvedMessage(
         str(data.timestamp),
-        permissionRequestId,
-        incarnation,
+        permissionOccurrenceId,
         Boolean(data.allowed),
       );
     }
     case 'permission-cancelled': {
-      const permissionRequestId = str(data.permissionRequestId);
-      const incarnation = str(data.incarnation);
-      if (!permissionRequestId || !incarnation) return null;
+      const permissionOccurrenceId = str(data.permissionOccurrenceId);
+      if (!permissionOccurrenceId) return null;
       return new PermissionCancelledMessage(
         str(data.timestamp),
-        permissionRequestId,
-        incarnation,
+        permissionOccurrenceId,
         data.reason as 'cancelled' | 'session-complete' | 'aborted' | undefined,
       );
     }
     case 'permission-expired': {
-      const permissionRequestId = str(data.permissionRequestId);
-      const incarnation = str(data.incarnation);
-      if (!permissionRequestId || !incarnation) return null;
-      return new PermissionExpiredMessage(str(data.timestamp), permissionRequestId, incarnation);
+      const permissionOccurrenceId = str(data.permissionOccurrenceId);
+      if (!permissionOccurrenceId) return null;
+      return new PermissionExpiredMessage(str(data.timestamp), permissionOccurrenceId);
     }
     case 'compaction':
       return new CompactionMessage(

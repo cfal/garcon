@@ -10,8 +10,7 @@ const TIMESTAMP = '2026-08-11T00:00:00.000Z';
 
 function permissionEvent({
   kind = 'requested',
-  requestId = 'permission-1',
-  incarnation = 'one',
+  permissionOccurrenceId = 'occurrence-one',
   runId = 'run-1',
   ordinal = 3,
   viewId = 'view-1',
@@ -19,14 +18,17 @@ function permissionEvent({
   const lifecycle = kind === 'requested'
     ? {
         kind,
-        requestId,
-        incarnation,
-        requestedTool: new BashToolUseMessage(TIMESTAMP, `tool-${requestId}`, 'bun test'),
+        permissionOccurrenceId,
+        requestedTool: new BashToolUseMessage(
+          TIMESTAMP,
+          `tool-${permissionOccurrenceId}`,
+          'bun test',
+        ),
         options: [],
       }
     : kind === 'cancelled'
-      ? { kind, requestId, incarnation, reason: null }
-      : { kind, requestId, incarnation };
+      ? { kind, permissionOccurrenceId, reason: null }
+      : { kind, permissionOccurrenceId };
   return {
     type: 'permission',
     chatId: CHAT_ID,
@@ -64,8 +66,7 @@ function action(overrides = {}) {
     serverInstanceId: 'server-1',
     chatId: CHAT_ID,
     runId: 'run-1',
-    id: 'permission-1',
-    incarnation: 'one',
+    permissionOccurrenceId: 'occurrence-one',
     ...overrides,
   };
 }
@@ -82,15 +83,16 @@ describe('ChatTransientFeedStore', () => {
         mutation: {
           kind: 'upsert',
           row: {
-            id: 'permission-1',
-            incarnation: 'one',
+            permissionOccurrenceId: 'occurrence-one',
             runId: 'run-1',
             transcript: { transcriptViewId: 'view-1', afterOrdinal: 3 },
           },
         },
       },
     });
-    expect(feed.validateAction(action())).toMatchObject({ id: 'permission-1' });
+    expect(feed.validateAction(action())).toMatchObject({
+      permissionOccurrenceId: 'occurrence-one',
+    });
 
     expect(feed.apply(permissionEvent({ kind: 'cancelled', ordinal: 4 }))).toMatchObject({
       kind: 'mutation',
@@ -103,8 +105,7 @@ describe('ChatTransientFeedStore', () => {
     const feed = new ChatTransientFeedStore('server-1');
     feed.apply(permissionEvent());
     feed.apply(permissionEvent({
-      requestId: 'permission-2',
-      incarnation: 'two',
+      permissionOccurrenceId: 'occurrence-two',
       runId: 'run-2',
       ordinal: 4,
     }));
@@ -114,29 +115,33 @@ describe('ChatTransientFeedStore', () => {
       value: { mutation: { kind: 'clear-run', runId: 'run-1' } },
     });
     expect(feed.currentSnapshot(CHAT_ID)?.rows).toMatchObject([
-      { id: 'permission-2', runId: 'run-2' },
+      { permissionOccurrenceId: 'occurrence-two', runId: 'run-2' },
     ]);
     expect(feed.apply(runEndedEvent('unknown', 6))).toEqual({ kind: 'unchanged' });
   });
 
-  it('keeps reused request ids as separate actionable occurrences', () => {
+  it('keeps distinct occurrence UUIDs separately actionable', () => {
     const feed = new ChatTransientFeedStore('server-1');
     feed.apply(permissionEvent());
-    feed.apply(permissionEvent({ incarnation: 'two', ordinal: 4 }));
+    feed.apply(permissionEvent({ permissionOccurrenceId: 'occurrence-two', ordinal: 4 }));
 
     expect(feed.currentSnapshot(CHAT_ID)?.rows).toMatchObject([
-      { id: 'permission-1', incarnation: 'one' },
-      { id: 'permission-1', incarnation: 'two' },
+      { permissionOccurrenceId: 'occurrence-one' },
+      { permissionOccurrenceId: 'occurrence-two' },
     ]);
-    expect(feed.validateAction(action())).toMatchObject({ incarnation: 'one' });
-    expect(feed.validateAction(action({ incarnation: 'two' }))).toMatchObject({ incarnation: 'two' });
+    expect(feed.validateAction(action())).toMatchObject({
+      permissionOccurrenceId: 'occurrence-one',
+    });
+    expect(feed.validateAction(action({ permissionOccurrenceId: 'occurrence-two' }))).toMatchObject({
+      permissionOccurrenceId: 'occurrence-two',
+    });
 
     expect(feed.apply(permissionEvent({ kind: 'cancelled', ordinal: 5 }))).toMatchObject({
       kind: 'mutation',
-      value: { mutation: { kind: 'remove', id: 'permission-1', incarnation: 'one' } },
+      value: { mutation: { kind: 'remove', permissionOccurrenceId: 'occurrence-one' } },
     });
     expect(feed.currentSnapshot(CHAT_ID)?.rows).toMatchObject([
-      { id: 'permission-1', incarnation: 'two' },
+      { permissionOccurrenceId: 'occurrence-two' },
     ]);
   });
 
@@ -183,14 +188,14 @@ describe('ChatTransientFeedStore', () => {
     expect(feed.currentSnapshot(CHAT_ID)).toBeNull();
   });
 
-  it('rejects stale server, run, and incarnation action fences', () => {
+  it('rejects stale server, run, and occurrence action fences', () => {
     const feed = new ChatTransientFeedStore('server-1');
     feed.apply(permissionEvent());
 
     for (const candidate of [
       action({ serverInstanceId: 'server-2' }),
       action({ runId: 'run-2' }),
-      action({ incarnation: 'two' }),
+      action({ permissionOccurrenceId: 'occurrence-two' }),
     ]) {
       expect(() => feed.validateAction(candidate)).toThrow(TransientControlActionError);
     }

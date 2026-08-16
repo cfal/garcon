@@ -12,49 +12,42 @@ import {
 const AT = '2026-08-15T00:00:00.000Z';
 
 describe('transcript ledger presentation', () => {
-  it('preserves permission incarnation when a provider reuses a request id', () => {
+  it('preserves the permission occurrence UUID through presentation', () => {
     const messages = ledgerRowsToMessages([
       permissionRow(1, {
         kind: 'requested',
-        requestId: 'shared-request',
-        incarnation: 'first-occurrence',
+        permissionOccurrenceId: 'first-occurrence',
         requestedTool: new BashToolUseMessage(AT, 'tool-1', 'first command'),
         options: [],
       }),
       permissionRow(2, {
         kind: 'requested',
-        requestId: 'shared-request',
-        incarnation: 'second-occurrence',
+        permissionOccurrenceId: 'second-occurrence',
         requestedTool: new BashToolUseMessage(AT, 'tool-2', 'second command'),
         options: [],
       }),
       permissionRow(3, {
         kind: 'cancelled',
-        requestId: 'shared-request',
-        incarnation: 'first-occurrence',
+        permissionOccurrenceId: 'first-occurrence',
         reason: 'superseded',
       }),
     ]);
 
     expect(messages.map((message) => ({
       type: message.type,
-      requestId: message.permissionRequestId,
-      incarnation: message.incarnation,
+      permissionOccurrenceId: message.permissionOccurrenceId,
     }))).toEqual([
       {
         type: 'permission-request',
-        requestId: 'shared-request',
-        incarnation: 'first-occurrence',
+        permissionOccurrenceId: 'first-occurrence',
       },
       {
         type: 'permission-request',
-        requestId: 'shared-request',
-        incarnation: 'second-occurrence',
+        permissionOccurrenceId: 'second-occurrence',
       },
       {
         type: 'permission-cancelled',
-        requestId: 'shared-request',
-        incarnation: 'first-occurrence',
+        permissionOccurrenceId: 'first-occurrence',
       },
     ]);
   });
@@ -102,27 +95,23 @@ describe('transcript ledger presentation', () => {
       },
       permissionRow(5, {
         kind: 'requested',
-        requestId: 'permission-1',
-        incarnation: 'incarnation-1',
+        permissionOccurrenceId: 'incarnation-1',
         requestedTool: new BashToolUseMessage(AT, 'tool-1', 'pwd'),
         options: [],
       }),
       permissionRow(6, {
         kind: 'resolved',
-        requestId: 'permission-1',
-        incarnation: 'incarnation-1',
+        permissionOccurrenceId: 'incarnation-1',
         decision: { allow: true, alwaysAllow: false },
       }),
       permissionRow(7, {
         kind: 'cancelled',
-        requestId: 'permission-2',
-        incarnation: 'incarnation-2',
+        permissionOccurrenceId: 'incarnation-2',
         reason: 'provider-cancelled',
       }),
       permissionRow(8, {
         kind: 'expired',
-        requestId: 'permission-3',
-        incarnation: 'incarnation-3',
+        permissionOccurrenceId: 'incarnation-3',
       }),
       {
         kind: 'session',

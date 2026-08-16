@@ -149,14 +149,12 @@ describe('AgentRegistry session cache', () => {
       runId: 'preview-run',
       lifecycle: {
         kind: 'requested',
-        requestId: 'preview-permission',
-        incarnation: 'preview-incarnation',
+        permissionOccurrenceId: 'preview-incarnation',
         requestedTool: new BashToolUseMessage(AT, 'preview-tool', 'pwd'),
         options: [],
       },
       decision: {
-        requestId: 'preview-permission',
-        incarnation: 'preview-incarnation',
+        permissionOccurrenceId: 'preview-incarnation',
         respond: async () => {},
       },
     });
@@ -174,8 +172,7 @@ describe('AgentRegistry session cache', () => {
       runId: 'preview-run',
       lifecycle: {
         kind: 'cancelled',
-        requestId: 'preview-permission',
-        incarnation: 'preview-incarnation',
+        permissionOccurrenceId: 'preview-incarnation',
         reason: 'already ended',
       },
     });

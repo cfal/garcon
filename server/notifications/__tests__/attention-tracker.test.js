@@ -31,18 +31,13 @@ function createMockAgentRegistry() {
         providerMeta: null,
         lifecycle: {
           kind: 'requested',
-          requestId: message.permissionRequestId,
-          incarnation: message.incarnation,
+          permissionOccurrenceId: message.permissionOccurrenceId,
           requestedTool: message.requestedTool,
           options: [],
         },
       },
     }),
-    emitPermissionRemoved: (
-      chatId,
-      permissionRequestId,
-      incarnation = 'incarnation-1',
-    ) => emitter.emit('transcript', {
+    emitPermissionRemoved: (chatId, permissionOccurrenceId) => emitter.emit('transcript', {
       type: 'permission',
       chatId,
       viewId: 'view-1',
@@ -54,8 +49,7 @@ function createMockAgentRegistry() {
         providerMeta: null,
         lifecycle: {
           kind: 'cancelled',
-          requestId: permissionRequestId,
-          incarnation,
+          permissionOccurrenceId,
           reason: null,
         },
       },
@@ -175,7 +169,7 @@ describe('AttentionTracker', () => {
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage(
-        '2024-01-01T00:00:01Z', 'perm-1', 'incarnation-1', bashTool,
+        '2024-01-01T00:00:01Z', 'incarnation-1', bashTool,
       );
       agents.emitPermissionRequest('c1', msg);
 
@@ -196,7 +190,7 @@ describe('AttentionTracker', () => {
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage(
-        '2024-01-01T00:00:01Z', 'perm-1', 'incarnation-1', bashTool,
+        '2024-01-01T00:00:01Z', 'incarnation-1', bashTool,
       );
       agents.emitPermissionRequest('c1', msg);
 
@@ -209,7 +203,7 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage(
-        '2024-01-01T00:00:00Z', 'perm-1', 'incarnation-1', bashTool,
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
       );
       agents.emitPermissionRequest('c1', msg);
       agents.emitPermissionRequest('c1', msg);
@@ -218,24 +212,24 @@ describe('AttentionTracker', () => {
       expect(telegram.send).toHaveBeenCalledTimes(1);
     });
 
-    it('tracks reused permission request ids as separate occurrences', async () => {
+    it('tracks distinct permission occurrence UUIDs separately', async () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const first = new PermissionRequestMessage(
-        '2024-01-01T00:00:00Z', 'perm-1', 'incarnation-1', bashTool,
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
       );
       const second = new PermissionRequestMessage(
-        '2024-01-01T00:00:00Z', 'perm-1', 'incarnation-2', bashTool,
+        '2024-01-01T00:00:00Z', 'incarnation-2', bashTool,
       );
       agents.emitPermissionRequest('c1', first);
       agents.emitPermissionRequest('c1', second);
-      agents.emitPermissionRemoved('c1', 'perm-1', 'incarnation-1');
+      agents.emitPermissionRemoved('c1', 'incarnation-1');
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(2);
 
-      agents.emitPermissionRemoved('c1', 'perm-1', 'incarnation-2');
+      agents.emitPermissionRemoved('c1', 'incarnation-2');
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
       await new Promise(r => setTimeout(r, 10));
@@ -246,11 +240,11 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const reqMsg = new PermissionRequestMessage(
-        '2024-01-01T00:00:00Z', 'perm-1', 'incarnation-1', bashTool,
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
       );
 
       agents.emitPermissionRequest('c1', reqMsg);
-      agents.emitPermissionRemoved('c1', 'perm-1');
+      agents.emitPermissionRemoved('c1', 'incarnation-1');
 
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
@@ -263,7 +257,7 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const reqMsg = new PermissionRequestMessage(
-        '2024-01-01T00:00:00Z', 'perm-1', 'incarnation-1', bashTool,
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
       );
 
       agents.emitPermissionRequest('c1', reqMsg);
@@ -368,7 +362,7 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage(
-        '2024-01-01T00:00:00Z', 'perm-1', 'incarnation-1', bashTool,
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
       );
       agents.emitPermissionRequest('c1', msg);
       queue.emitChatIdle('c1');
@@ -381,7 +375,7 @@ describe('AttentionTracker', () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage(
-        '2024-01-01T00:00:00Z', 'perm-1', 'incarnation-1', bashTool,
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
       );
       agents.emitPermissionRequest('c1', msg);
       registry.emitChatRemoved('c1');

@@ -6758,16 +6758,16 @@ describe('CodexAppServerRuntime', () => {
     );
     const requestByCommand = new Map(requests.map((event) => [
       event.lifecycle.requestedTool.command,
-      event.lifecycle.requestId,
+      event.lifecycle.permissionOccurrenceId,
     ]));
     expect(requestByCommand.has('command-a')).toBe(true);
     expect(requestByCommand.has('command-b')).toBe(true);
     expect(permissionEvents(second.events)).toEqual([]);
 
-    const cancelledRequestIds = permissionEvents(first.events)
+    const cancelledOccurrenceIds = permissionEvents(first.events)
       .filter((event) => event.lifecycle.kind === 'cancelled')
-      .map((event) => event.lifecycle.requestId);
-    expect(cancelledRequestIds).toEqual([
+      .map((event) => event.lifecycle.permissionOccurrenceId);
+    expect(cancelledOccurrenceIds).toEqual([
       requestByCommand.get('command-a'),
       requestByCommand.get('command-b'),
     ]);

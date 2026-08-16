@@ -59,7 +59,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
         permissionMode: 'default',
       }));
 
-      const permissionRequestId = await waitForBashPermissionRequest(
+      const permissionOccurrenceId = await waitForBashPermissionRequest(
         fixture.client,
         chatId,
         cursor,
@@ -67,7 +67,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
       const decision = await fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
-        permissionRequestId,
+        permissionOccurrenceId,
         allow: true,
         alwaysAllow: false,
       });
@@ -85,7 +85,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(transcript.messages.some((entry) =>
         entry.message.type === 'permission-resolved'
-        && entry.message.permissionRequestId === permissionRequestId
+        && entry.message.permissionOccurrenceId === permissionOccurrenceId
         && entry.message.allowed)).toBe(true);
       const bash = messagesOfType(transcript.messages, 'bash-tool-use').find(
         (message) => message.command === command,
@@ -120,7 +120,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
         permissionMode: 'default',
       }));
 
-      const permissionRequestId = await waitForBashPermissionRequest(
+      const permissionOccurrenceId = await waitForBashPermissionRequest(
         fixture.client,
         chatId,
         cursor,
@@ -128,7 +128,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
       await fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
-        permissionRequestId,
+        permissionOccurrenceId,
         allow: false,
         alwaysAllow: false,
       });
@@ -146,7 +146,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(transcript.messages.some((entry) =>
         entry.message.type === 'permission-resolved'
-        && entry.message.permissionRequestId === permissionRequestId
+        && entry.message.permissionOccurrenceId === permissionOccurrenceId
         && !entry.message.allowed)).toBe(true);
       const rejectedTool = messagesOfType(transcript.messages, 'bash-tool-use').find(
         (message) => message.command === command,
@@ -258,7 +258,7 @@ async function waitForBashPermissionRequest(
     throw new Error('OpenCode bash permission request was not found.');
   }
   expect(permission.message.requestedTool.type).toBe('request-permissions-tool-use');
-  return permission.message.permissionRequestId;
+  return permission.message.permissionOccurrenceId;
 }
 
 async function readMarker(projectDir: string, name: string): Promise<string> {

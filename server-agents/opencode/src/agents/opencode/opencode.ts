@@ -105,8 +105,7 @@ interface PendingTurnWaiter {
 }
 
 interface PendingPermission {
-  permissionRequestId: string;
-  incarnation: string;
+  permissionOccurrenceId: string;
   originalRequestId: string;
   agentSessionId: string;
   directory?: string;
@@ -736,8 +735,7 @@ export class OpenCodeRuntime {
         runId: pending.operation.runId,
         lifecycle: {
           kind: 'cancelled',
-          requestId: pending.permissionRequestId,
-          incarnation: pending.incarnation,
+          permissionOccurrenceId: pending.permissionOccurrenceId,
           reason,
         },
       });
@@ -812,11 +810,9 @@ export class OpenCodeRuntime {
       this.#replyManualBypassPermission(client, route, permission.requestId);
       return;
     }
-    const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
-    const incarnation = crypto.randomUUID();
+    const permissionOccurrenceId = crypto.randomUUID();
     const pending: PendingPermission = {
-      permissionRequestId,
-      incarnation,
+      permissionOccurrenceId,
       originalRequestId: permission.requestId,
       agentSessionId: sessionId,
       directory: route.directory,
@@ -826,7 +822,7 @@ export class OpenCodeRuntime {
     const now = new Date().toISOString();
     const requestedTool = convertOpencodePermissionTool(
       now,
-      permissionRequestId,
+      permissionOccurrenceId,
       permission.toolInput,
     );
     this.#publish(sessionId, route.turn.operation, {
@@ -834,14 +830,12 @@ export class OpenCodeRuntime {
       runId: route.turn.operation.runId,
       lifecycle: {
         kind: 'requested',
-        requestId: permissionRequestId,
-        incarnation,
+        permissionOccurrenceId,
         requestedTool,
         options: [],
       },
       decision: Object.freeze({
-        requestId: permissionRequestId,
-        incarnation,
+        permissionOccurrenceId,
         respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
       }),
     });

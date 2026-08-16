@@ -157,8 +157,7 @@ describe('NativeTranscriptActivityService', () => {
           at: '2026-08-12T00:00:11.000Z',
           lifecycle: {
             kind: 'resolved',
-            requestId: 'permission-1',
-            incarnation: 'incarnation-1',
+            permissionOccurrenceId: 'incarnation-1',
             decision: { allow: true },
           },
           providerMeta: null,

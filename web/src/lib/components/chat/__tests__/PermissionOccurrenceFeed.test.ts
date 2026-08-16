@@ -7,7 +7,7 @@ describe('permission occurrence feed rendering', () => {
 		cleanup();
 	});
 
-	it('keeps equal request ids mounted, editable, and actionable as separate occurrences', async () => {
+	it('keeps permission occurrences mounted, editable, and actionable independently', async () => {
 		const onDecision = vi.fn();
 		render(PermissionOccurrenceFeedTestHost, { onDecision });
 
@@ -30,7 +30,7 @@ describe('permission occurrence feed rendering', () => {
 
 		await fireEvent.click(second.getByRole('button', { name: /submit answer/i }));
 		expect(onDecision).toHaveBeenCalledOnce();
-		expect(onDecision).toHaveBeenCalledWith('reused-permission', 'occurrence-two', {
+		expect(onDecision).toHaveBeenCalledWith('occurrence-two', {
 			allow: true,
 			response: {
 				type: 'ask-user-question-response',

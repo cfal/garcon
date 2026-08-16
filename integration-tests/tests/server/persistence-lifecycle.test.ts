@@ -107,8 +107,7 @@ describe('persistence lifecycle', () => {
           at,
           lifecycle: {
             kind: 'requested',
-            requestId: 'context-permission',
-            incarnation: 'context-incarnation',
+            permissionOccurrenceId: 'context-incarnation',
             requestedTool: new BashToolUseMessage(at, 'context-tool', 'printf hidden'),
             options: [],
           },
@@ -125,8 +124,7 @@ describe('persistence lifecycle', () => {
           at,
           lifecycle: {
             kind: 'cancelled',
-            requestId: 'context-permission',
-            incarnation: 'context-incarnation',
+            permissionOccurrenceId: 'context-incarnation',
             reason: 'run ended',
           },
           providerMeta: null,

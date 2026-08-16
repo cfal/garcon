@@ -672,10 +672,12 @@ describe('OpenCode operation routing', () => {
     await waitFor(() => events.filter((event) => event.type === 'permission').length === 2);
     const permissions = events.filter((event) => event.type === 'permission');
     const second = permissions[1];
-    expect(first.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
-    expect(second.lifecycle.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
-    expect(first.lifecycle.incarnation).not.toBe('permission-reused');
-    expect(second.lifecycle.incarnation).not.toBe(first.lifecycle.incarnation);
+    expect(first.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(second.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(first.lifecycle.permissionOccurrenceId).not.toBe('permission-reused');
+    expect(second.lifecycle.permissionOccurrenceId).not.toBe(
+      first.lifecycle.permissionOccurrenceId,
+    );
     await first.decision.respond({ allow: true });
     await expect(first.decision.respond({ allow: false }))
       .rejects.toThrow('no longer pending');

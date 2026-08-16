@@ -69,7 +69,7 @@ describe('scripted Claude permissions', () => {
       if (permission.message.type !== 'permission-request') {
         throw new Error('Scripted AskUserQuestion permission request was not found.');
       }
-      const permissionRequestId = permission.message.permissionRequestId;
+      const permissionOccurrenceId = permission.message.permissionOccurrenceId;
       expect(permission.message.requestedTool.type).toBe('ask-user-question-tool-use');
 
       const control = {
@@ -77,16 +77,15 @@ describe('scripted Claude permissions', () => {
           .transientFeed.serverInstanceId,
         chatId,
         runId: permission.runId,
-        id: permission.id,
-        incarnation: permission.incarnation,
+        permissionOccurrenceId: permission.permissionOccurrenceId,
       };
       await expect(fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
-        permissionRequestId,
+        permissionOccurrenceId,
         allow: true,
         alwaysAllow: false,
-        control: { ...control, incarnation: crypto.randomUUID() },
+        control: { ...control, serverInstanceId: crypto.randomUUID() },
         response: {
           type: 'ask-user-question-response',
           outcome: 'answered',
@@ -110,7 +109,7 @@ describe('scripted Claude permissions', () => {
       const decision = await fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
-        permissionRequestId,
+        permissionOccurrenceId,
         allow: true,
         alwaysAllow: false,
         control,
@@ -134,7 +133,7 @@ describe('scripted Claude permissions', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(transcript.messages.some((entry) =>
         entry.message.type === 'permission-resolved'
-        && entry.message.permissionRequestId === permissionRequestId
+        && entry.message.permissionOccurrenceId === permissionOccurrenceId
         && entry.message.allowed)).toBe(true);
       testEnvironment.model.assertSettled();
     }, {
@@ -177,14 +176,13 @@ describe('scripted Claude permissions', () => {
       if (permission.message.type !== 'permission-request') {
         throw new Error('Scripted stale permission request was not found.');
       }
-      expect(permission.incarnation).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(permission.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
       const beforeRestart = await fixture.client.getChatSnapshot(chatId, 0);
       const staleControl = {
         serverInstanceId: beforeRestart.transientFeed.serverInstanceId,
         chatId,
         runId: permission.runId,
-        id: permission.id,
-        incarnation: permission.incarnation,
+        permissionOccurrenceId: permission.permissionOccurrenceId,
       };
 
       await fixture.restartGarcon();
@@ -195,14 +193,14 @@ describe('scripted Claude permissions', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(messagesOfType(transcript.messages, 'permission-request')).toEqual([
         expect.objectContaining({
-          permissionRequestId: permission.message.permissionRequestId,
+          permissionOccurrenceId: permission.message.permissionOccurrenceId,
         }),
       ]);
 
       await expect(fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
-        permissionRequestId: permission.message.permissionRequestId,
+        permissionOccurrenceId: permission.message.permissionOccurrenceId,
         allow: false,
         alwaysAllow: false,
         control: staleControl,

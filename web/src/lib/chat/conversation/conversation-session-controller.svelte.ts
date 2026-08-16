@@ -793,20 +793,18 @@ export class ConversationSessionController {
 	}
 
 	handlePermissionDecision(
-		permissionRequestId: string,
-		incarnation: string,
+		permissionOccurrenceId: string,
 		decision: PermissionDecisionPayload,
 	): void {
-		this.#permissions.handlePermissionDecision(permissionRequestId, incarnation, decision);
+		this.#permissions.handlePermissionDecision(permissionOccurrenceId, decision);
 	}
 
 	handleExitPlanMode(
-		permissionRequestId: string,
-		incarnation: string,
+		permissionOccurrenceId: string,
 		choice: string,
 		plan: string,
 	): void {
-		this.#permissions.handleExitPlanMode(permissionRequestId, incarnation, choice, plan);
+		this.#permissions.handleExitPlanMode(permissionOccurrenceId, choice, plan);
 	}
 
 	handleQueuePause(): Promise<void> {

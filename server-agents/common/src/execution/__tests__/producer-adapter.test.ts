@@ -44,7 +44,7 @@ describe('createAgentProducerAdapter', () => {
   });
 
   it('forwards typed permission lifecycle events without interpreting chat rows', async () => {
-    const decision = permissionDecision('permission-1', 'incarnation-1');
+    const decision = permissionDecision('occurrence-1');
     const fixture = createFixture(({ publish, runId }) => {
       const tool = new BashToolUseMessage(TS, 'tool-1', 'pwd');
       publish({
@@ -54,13 +54,13 @@ describe('createAgentProducerAdapter', () => {
       publish({
         type: 'permission',
         runId,
-        lifecycle: permissionRequest('permission-1', 'incarnation-1', tool),
+        lifecycle: permissionRequest('occurrence-1', tool),
         decision,
       });
       publish({
         type: 'permission',
         runId,
-        lifecycle: permissionCancellation('permission-1', 'incarnation-1'),
+        lifecycle: permissionCancellation('occurrence-1'),
       });
       publish({
         type: 'rows',
@@ -84,8 +84,7 @@ describe('createAgentProducerAdapter', () => {
       runId: 'run-1',
       lifecycle: {
         kind: 'requested',
-        requestId: 'permission-1',
-        incarnation: 'incarnation-1',
+        permissionOccurrenceId: 'occurrence-1',
       },
       decision,
     });
@@ -94,22 +93,20 @@ describe('createAgentProducerAdapter', () => {
       runId: 'run-1',
       lifecycle: {
         kind: 'cancelled',
-        requestId: 'permission-1',
-        incarnation: 'incarnation-1',
+        permissionOccurrenceId: 'occurrence-1',
         reason: 'aborted',
       },
     });
   });
 
-  it('[TLV5-PERM.02-ADAPTER-UNIT-01] preserves the exact permission occurrence when a request id is reused', async () => {
-    const firstDecision = permissionDecision('shared-request', 'first-occurrence');
-    const secondDecision = permissionDecision('shared-request', 'second-occurrence');
+  it('[TLV5-PERM.02-ADAPTER-UNIT-01] preserves each exact permission occurrence', async () => {
+    const firstDecision = permissionDecision('first-occurrence');
+    const secondDecision = permissionDecision('second-occurrence');
     const fixture = createFixture(({ publish, runId }) => {
       publish({
         type: 'permission',
         runId,
         lifecycle: permissionRequest(
-          'shared-request',
           'first-occurrence',
           new BashToolUseMessage(TS, 'tool-1', 'first'),
         ),
@@ -119,7 +116,6 @@ describe('createAgentProducerAdapter', () => {
         type: 'permission',
         runId,
         lifecycle: permissionRequest(
-          'shared-request',
           'second-occurrence',
           new BashToolUseMessage(TS, 'tool-2', 'second'),
         ),
@@ -128,14 +124,14 @@ describe('createAgentProducerAdapter', () => {
       publish({
         type: 'permission',
         runId,
-        lifecycle: permissionCancellation('shared-request', 'first-occurrence'),
+        lifecycle: permissionCancellation('first-occurrence'),
       });
     });
 
     await fixture.adapter.execution.start(fixture.request);
 
     expect(fixture.events.flatMap((event) => (
-      event.type === 'permission' ? [event.lifecycle.incarnation] : []
+      event.type === 'permission' ? [event.lifecycle.permissionOccurrenceId] : []
     ))).toEqual([
       'first-occurrence',
       'second-occurrence',
@@ -146,14 +142,13 @@ describe('createAgentProducerAdapter', () => {
   });
 
   it('[TLV5-PERM.09-ADAPTER-UNIT-01] drops an unnamed permission event with one content-free warning', async () => {
-    const decision = permissionDecision('permission-1', 'incarnation-1');
+    const decision = permissionDecision('occurrence-1');
     const fixture = createFixture(({ publish }) => {
       publish({
         type: 'permission',
         runId: null,
         lifecycle: permissionRequest(
-          'permission-1',
-          'incarnation-1',
+          'occurrence-1',
           new BashToolUseMessage(TS, 'tool-1', 'sensitive-command-must-not-be-logged'),
         ),
         decision,
@@ -411,32 +406,28 @@ function createFixture(
 }
 
 function permissionRequest(
-  requestId: string,
-  incarnation: string,
+  permissionOccurrenceId: string,
   requestedTool: BashToolUseMessage,
 ) {
   return {
     kind: 'requested' as const,
-    requestId,
-    incarnation,
+    permissionOccurrenceId,
     requestedTool,
     options: [],
   };
 }
 
-function permissionCancellation(requestId: string, incarnation: string) {
+function permissionCancellation(permissionOccurrenceId: string) {
   return {
     kind: 'cancelled' as const,
-    requestId,
-    incarnation,
+    permissionOccurrenceId,
     reason: 'aborted',
   };
 }
 
-function permissionDecision(requestId: string, incarnation: string) {
+function permissionDecision(permissionOccurrenceId: string) {
   return {
-    requestId,
-    incarnation,
+    permissionOccurrenceId,
     respond: async () => undefined,
   };
 }

@@ -32,8 +32,7 @@ export class ConversationPermissionService {
 	constructor(private readonly options: ConversationPermissionServiceOptions) {}
 
 	handlePermissionDecision(
-		permissionRequestId: string,
-		incarnation: string,
+		permissionOccurrenceId: string,
 		decision: PermissionDecisionPayload,
 	): void {
 		const { deps } = this.options;
@@ -41,8 +40,7 @@ export class ConversationPermissionService {
 		if (!chatId) return;
 		const request = deps.conversationUi.pendingPermissionRequests.find(
 			(entry) => (
-				entry.permissionRequestId === permissionRequestId
-				&& entry.incarnation === incarnation
+				entry.permissionOccurrenceId === permissionOccurrenceId
 			),
 		);
 		if (!request?.control) {
@@ -55,7 +53,7 @@ export class ConversationPermissionService {
 		void sendPermissionDecision({
 			clientRequestId: createClientCommandId(),
 			chatId,
-			permissionRequestId,
+			permissionOccurrenceId,
 			control: request.control,
 			allow: decision.allow,
 			alwaysAllow: Boolean(decision.alwaysAllow),
@@ -65,8 +63,7 @@ export class ConversationPermissionService {
 				deps.conversationUi.setPendingPermissionRequests(
 					deps.conversationUi.pendingPermissionRequests.filter(
 						(request) => (
-							request.permissionRequestId !== permissionRequestId
-							|| request.incarnation !== incarnation
+							request.permissionOccurrenceId !== permissionOccurrenceId
 						),
 					),
 				);
@@ -80,23 +77,20 @@ export class ConversationPermissionService {
 	}
 
 	handleExitPlanMode(
-		permissionRequestId: string,
-		incarnation: string,
+		permissionOccurrenceId: string,
 		choice: string,
 		plan: string,
 	): void {
 		const { deps } = this.options;
 		const permissionControl = deps.conversationUi.pendingPermissionRequests.find(
 			(request) => (
-				request.permissionRequestId === permissionRequestId
-				&& request.incarnation === incarnation
+				request.permissionOccurrenceId === permissionOccurrenceId
 			),
 		)?.control;
 		deps.conversationUi.setPendingPermissionRequests(
 			deps.conversationUi.pendingPermissionRequests.filter(
 				(request) => (
-					request.permissionRequestId !== permissionRequestId
-					|| request.incarnation !== incarnation
+					request.permissionOccurrenceId !== permissionOccurrenceId
 				),
 			),
 		);
@@ -164,7 +158,7 @@ export class ConversationPermissionService {
 					void sendPermissionDecision({
 						clientRequestId: createClientCommandId(),
 						chatId,
-						permissionRequestId,
+						permissionOccurrenceId,
 						control: permissionControl,
 						allow: false,
 						alwaysAllow: false,

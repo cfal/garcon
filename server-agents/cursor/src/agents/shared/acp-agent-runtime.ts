@@ -56,8 +56,7 @@ import {
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
 interface PendingPermissionRequest {
-  readonly permissionRequestId: string;
-  readonly incarnation: string;
+  readonly permissionOccurrenceId: string;
   readonly session: AcpAgentRuntimeSession;
   readonly turn: AcpTurnContext;
   readonly requestId: AcpJsonRpcId;
@@ -661,9 +660,10 @@ export class AcpAgentRuntime {
       return;
     }
 
-    const permissionRequestId = `${this.#policy.agentId}-${session.id}-${String(requestId)}`;
+    const permissionOccurrenceId = crypto.randomUUID();
     const toolCall = asObject(params.toolCall);
-    const toolId = asString(toolCall.toolCallId ?? toolCall.callId ?? toolCall.id) ?? permissionRequestId;
+    const toolId = asString(toolCall.toolCallId ?? toolCall.callId ?? toolCall.id)
+      ?? permissionOccurrenceId;
     const context = this.#sessionUpdateContext(turn);
     const convertedRequestedTool = this.#converter.permissionToolUse?.(toolCall, context) ?? null;
     const rawName = asString(toolCall.toolName ?? toolCall.tool_name ?? toolCall.kind ?? toolCall.title ?? toolCall.name) ?? 'Permission';
@@ -689,7 +689,7 @@ export class AcpAgentRuntime {
 
     const pending = this.#registerPendingPermission(
       turn,
-      permissionRequestId,
+      permissionOccurrenceId,
       requestId,
       (decision) => {
         const fallback = decision.allow
@@ -704,8 +704,7 @@ export class AcpAgentRuntime {
       runId: turn.operation.runId,
       lifecycle: {
         kind: 'requested',
-        requestId: permissionRequestId,
-        incarnation: pending.incarnation,
+        permissionOccurrenceId: pending.permissionOccurrenceId,
         requestedTool,
         options: [],
       },
@@ -719,19 +718,18 @@ export class AcpAgentRuntime {
     method: string,
     params: unknown,
   ): boolean {
-    const session = turn.session;
     const context = this.#sessionUpdateContext(turn);
+    const permissionOccurrenceId = crypto.randomUUID();
     const converted = this.#converter.customRequestToolUse?.({
       method,
-      requestId,
+      permissionOccurrenceId,
       params,
     }, context) ?? null;
     if (!converted) return false;
 
-    const permissionRequestId = `${this.#policy.agentId}-${session.id}-${String(requestId)}`;
     const pending = this.#registerPendingPermission(
       turn,
-      permissionRequestId,
+      permissionOccurrenceId,
       requestId,
       converted.responseForDecision,
       converted.responseForCancellation,
@@ -741,8 +739,7 @@ export class AcpAgentRuntime {
       runId: turn.operation.runId,
       lifecycle: {
         kind: 'requested',
-        requestId: permissionRequestId,
-        incarnation: pending.incarnation,
+        permissionOccurrenceId: pending.permissionOccurrenceId,
         requestedTool: converted.tool,
         options: [],
       },
@@ -753,14 +750,13 @@ export class AcpAgentRuntime {
 
   #registerPendingPermission(
     turn: AcpTurnContext,
-    permissionRequestId: string,
+    permissionOccurrenceId: string,
     requestId: AcpJsonRpcId,
     responseForDecision: PendingPermissionRequest['responseForDecision'],
     responseForCancellation: PendingPermissionRequest['responseForCancellation'],
   ): PendingPermissionRequest {
     const pending: PendingPermissionRequest = {
-      permissionRequestId,
-      incarnation: crypto.randomUUID(),
+      permissionOccurrenceId,
       session: turn.session,
       turn,
       requestId,
@@ -774,8 +770,7 @@ export class AcpAgentRuntime {
 
   #decisionCapability(pending: PendingPermissionRequest) {
     return Object.freeze({
-      requestId: pending.permissionRequestId,
-      incarnation: pending.incarnation,
+      permissionOccurrenceId: pending.permissionOccurrenceId,
       respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
     });
   }
@@ -794,8 +789,7 @@ export class AcpAgentRuntime {
         runId: turn.operation.runId,
         lifecycle: {
           kind: 'cancelled',
-          requestId: pending.permissionRequestId,
-          incarnation: pending.incarnation,
+          permissionOccurrenceId: pending.permissionOccurrenceId,
           reason,
         },
       });
