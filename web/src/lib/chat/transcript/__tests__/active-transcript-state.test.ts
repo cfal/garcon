@@ -45,6 +45,17 @@ function assistant(content: string) {
 	return new AssistantMessage(TS, content);
 }
 
+function assistantEntries(
+	firstOrdinal: number,
+	lastOrdinal: number,
+	content: (ordinal: number) => string = (ordinal) => `message-${ordinal}`,
+): TranscriptMessage[] {
+	return Array.from({ length: lastOrdinal - firstOrdinal + 1 }, (_, index) => {
+		const ordinal = firstOrdinal + index;
+		return entry(ordinal, assistant(content(ordinal)));
+	});
+}
+
 function contentOf(message: ChatMessage): string {
 	return 'content' in message ? String(message.content) : '';
 }
@@ -1393,6 +1404,109 @@ describe('ActiveTranscriptState', () => {
 		]);
 		expect(chat.resendCandidates).toEqual([liveCandidate]);
 		expect(chat.localNotices.map((notice) => notice.content)).toEqual(['notice after live batch']);
+	});
+
+	it('preserves an expanded detached interval through reconnect replay and buffered live rows', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+			lastOrdinal: 400,
+			pageOldestOrdinal: 201,
+			hasMore: true,
+		});
+		chat.isUserScrolledUp = true;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(151, 200, (ordinal) =>
+					ordinal === 175 ? 'equal-content' : `message-${ordinal}`,
+				),
+				lastOrdinal: 400,
+				pageOldestOrdinal: 151,
+				pageNewestOrdinal: 200,
+				hasMore: true,
+			}),
+		});
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		chat.revealAllLoadedMessages();
+
+		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-1');
+		expect(chat.applyReconnectReplayPage(
+			replayToken,
+			'chat-1',
+			'generation-1',
+			assistantEntries(401, 425, (ordinal) =>
+				ordinal === 425 ? 'equal-content' : `message-${ordinal}`,
+			),
+			401,
+			425,
+			[],
+		)).toBe('applied');
+		expect(applyMessages(
+			chat,
+			'chat-1',
+			'generation-1',
+			assistantEntries(426, 427),
+		)).toBe('applied');
+
+		expect(chat.finishReconnectReplay(replayToken, 'chat-1')).toBe('applied');
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 277 }, (_, index) => index + 151),
+		);
+		expect(chat.entries.filter((message) => contentOf(message.message) === 'equal-content'))
+			.toEqual([
+				expect.objectContaining({ ordinal: 175 }),
+				expect.objectContaining({ ordinal: 425 }),
+			]);
+		expect(chat.visibleRows).toHaveLength(277);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:151', ordinal: 151 });
+		expect(chat.visibleRows.at(-1)).toMatchObject({ id: 'generation-1:427', ordinal: 427 });
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 427 });
+	});
+
+	it('preserves an expanded detached prefix when a same-view snapshot overlaps it', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+			lastOrdinal: 400,
+			pageOldestOrdinal: 201,
+			hasMore: true,
+		});
+		chat.isUserScrolledUp = true;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(151, 200),
+				lastOrdinal: 400,
+				pageOldestOrdinal: 151,
+				pageNewestOrdinal: 200,
+				hasMore: true,
+			}),
+		});
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		chat.revealAllLoadedMessages();
+
+		const snapshotEpoch = chat.beginSnapshotLoad();
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-1',
+				messages: assistantEntries(301, 500),
+				lastOrdinal: 500,
+				pageOldestOrdinal: 301,
+				pageNewestOrdinal: 500,
+				hasMore: true,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 350 }, (_, index) => index + 151),
+		);
+		expect(chat.visibleRows).toHaveLength(350);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:151', ordinal: 151 });
+		expect(chat.visibleRows.at(-1)).toMatchObject({ id: 'generation-1:500', ordinal: 500 });
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 500 });
 	});
 
 	it('retires an obsolete reconnect replay when a replacement snapshot installs', () => {
