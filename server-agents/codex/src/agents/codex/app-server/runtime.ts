@@ -63,7 +63,7 @@ import {
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
 import type { CodexGoalCommand } from '../goal-command.js';
 import { GoalAttachmentOperationQueue, GoalAttachmentOperations } from './goal-attachment-operations.js';
-import { cleanupMaterializedGoalDraft, cleanupOwnedGoalAttachments } from './goal-files.js';
+import { cleanupOwnedGoalAttachments } from './goal-files.js';
 import { editedGoalStatus, formatGoalStatusMessage, formatGoalUpdatedMessage, goalStatusLabel } from './goal-display.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
@@ -1093,7 +1093,7 @@ export class CodexAppServerRuntime {
       pendingFinish: null,
       pendingFinishOperation: null,
       liveCodeModeResultToolIds: new Map(),
-      turnItems: new CodexTurnItemLedger(this.#logger, (turnId, messages) => (
+      turnItems: new CodexTurnItemLedger((turnId, messages) => (
         publishRows(this.#logger, args.chatId, messages, turnRoutes.get(turnId))
       )),
       turnRoutes,

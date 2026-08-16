@@ -1,5 +1,4 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
-import type { AgentLogger } from '@garcon/server-agent-interface';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { convertCodexAppServerLiveItem } from './converter.js';
 import type { CodexThreadItem } from './protocol.js';
@@ -7,7 +6,6 @@ import { codexMessageSourceIdentity } from '../message-source-identity.js';
 
 export class CodexTurnItemLedger {
   readonly #seenIds = new Set<string>();
-  readonly #logger: AgentLogger;
   readonly #emit: (
     turnId: string,
     messages: ReturnType<typeof convertCodexAppServerLiveItem>,
@@ -15,10 +13,8 @@ export class CodexTurnItemLedger {
   #manualCompactionPending = false;
 
   constructor(
-    logger: AgentLogger,
     emit: (turnId: string, messages: ReturnType<typeof convertCodexAppServerLiveItem>) => void,
   ) {
-    this.#logger = logger;
     this.#emit = emit;
   }
 

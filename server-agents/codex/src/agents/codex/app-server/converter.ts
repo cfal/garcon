@@ -4,7 +4,6 @@ import {
   CompactionMessage,
   CodexSubagentToolUseMessage,
   EditToolUseMessage,
-  ErrorMessage,
   ExecToolUseMessage,
   ExternalToolUseMessage,
   GlobToolUseMessage,
