@@ -29,13 +29,18 @@ describe('loadCodexChatMessages', () => {
         throwOnError: true,
       })).rejects.toThrow();
 
+      const malformedPartShapes = [
+        ['null part', null],
+        ['primitive part', 17],
+        ['array part', []],
+        ['part type missing', {}],
+        ['part type empty', { type: '' }],
+        ['part type non-string', { type: 17 }],
+      ];
       const invalidParts = [
-        ['null part', 'assistant', null],
-        ['non-object part', 'assistant', 17],
-        ['array part', 'assistant', []],
-        ['part type missing', 'assistant', {}],
-        ['part type empty', 'assistant', { type: '' }],
-        ['part type non-string', 'assistant', { type: 17 }],
+        ...['user', 'developer', 'assistant'].flatMap((role) => malformedPartShapes.map(
+          ([label, part]) => [`${role} ${label}`, role, part],
+        )),
         ['user input_text missing', 'user', { type: 'input_text' }],
         ['user input_text non-string', 'user', { type: 'input_text', text: 17 }],
         ['developer input_text missing', 'developer', { type: 'input_text' }],
@@ -68,7 +73,9 @@ describe('loadCodexChatMessages', () => {
         }),
         ...[
           ['user', { type: 'input_text', text: '' }],
+          ['user', { type: 'future-housekeeping', payload: { retained: true } }],
           ['developer', { type: 'input_text', text: '' }],
+          ['developer', { type: 'future-housekeeping', payload: { retained: true } }],
           ['assistant', { type: 'output_text', text: '' }],
           ['assistant', { type: 'text', text: '' }],
           ['assistant', { type: 'future-housekeeping', payload: { retained: true } }],

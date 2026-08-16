@@ -26,13 +26,18 @@ describe('Claude strict history import', () => {
         throwOnError: true,
       })).rejects.toThrow();
 
+      const malformedPartShapes = [
+        ['null part', null],
+        ['primitive part', 17],
+        ['array part', []],
+        ['part type missing', {}],
+        ['part type empty', { type: '' }],
+        ['part type non-string', { type: 17 }],
+      ];
       const invalidParts = [
-        ['null part', 'assistant', null],
-        ['non-object part', 'assistant', 17],
-        ['array part', 'assistant', []],
-        ['part type missing', 'assistant', {}],
-        ['part type empty', 'assistant', { type: '' }],
-        ['part type non-string', 'assistant', { type: 17 }],
+        ...['user', 'assistant'].flatMap((role) => malformedPartShapes.map(
+          ([label, part]) => [`${role} ${label}`, role, part],
+        )),
         ['user text missing', 'user', { type: 'text' }],
         ['user text non-string', 'user', { type: 'text', text: 17 }],
         ['assistant text missing', 'assistant', { type: 'text' }],
@@ -57,17 +62,23 @@ describe('Claude strict history import', () => {
         }
       }
 
-      const topLevelContent = 'retained top-level assistant content';
-      await fs.writeFile(filePath, `${JSON.stringify({
+      const topLevelContents = [
+        ['user', 'retained top-level user content'],
+        ['assistant', 'retained top-level assistant content'],
+      ];
+      await fs.writeFile(filePath, `${topLevelContents.map(([role, content], index) => JSON.stringify({
         sessionId: 'session-1',
-        type: 'assistant',
-        uuid: 'top-level-assistant',
-        timestamp: '2026-08-16T00:00:00.000Z',
-        message: { role: 'assistant', content: topLevelContent },
-      })}\n`, 'utf8');
+        type: role,
+        uuid: `top-level-${role}`,
+        timestamp: `2026-08-16T00:00:0${index}.000Z`,
+        message: { role, content },
+      })).join('\n')}\n`, 'utf8');
       await expect(loadClaudeChatMessages(filePath, undefined, {
         throwOnError: true,
-      })).resolves.toMatchObject([{ type: 'assistant-message', content: topLevelContent }]);
+      })).resolves.toMatchObject([
+        { type: 'user-message', content: topLevelContents[0][1] },
+        { type: 'assistant-message', content: topLevelContents[1][1] },
+      ]);
 
       await fs.writeFile(filePath, [
         JSON.stringify({
@@ -82,7 +93,13 @@ describe('Claude strict history import', () => {
           type: 'user',
           uuid: 'empty-user',
           timestamp: '2026-08-16T00:00:01.000Z',
-          message: { role: 'user', content: [{ type: 'text', text: '' }] },
+          message: {
+            role: 'user',
+            content: [
+              { type: 'text', text: '' },
+              { type: 'future-housekeeping', payload: { retained: true } },
+            ],
+          },
         }),
         JSON.stringify({
           sessionId: 'session-1',
