@@ -28,7 +28,6 @@ import {
   createCursorAcpNativePath,
   getCursorAgentSessionIdFromNativePath,
 } from './agents/cursor/cursor-native-path.js';
-import { CursorRequestIdentityStore } from './agents/cursor/cursor-request-identities.js';
 import { forkCursorAcpSession } from './agents/cursor/cursor-session-store.js';
 import { createCursorTranscriptSource } from './agents/cursor/cursor-transcript-source.js';
 import { runSingleQuery } from './agents/cursor/run-single-query.js';
@@ -90,8 +89,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
     const config = createCursorConfig(host.environment);
     const logger = createScopedAgentLogger(host.logger, 'cursor');
     const nativeSessions = createPathNativeSessionCodec('cursor');
-    const requestIdentities = new CursorRequestIdentityStore(host.storage.rootDirectory, logger);
-    const transcriptReader = createCursorTranscriptSource(requestIdentities);
+    const transcriptReader = createCursorTranscriptSource();
     const runtime = new AcpAgentRuntime(createCursorAcpPolicy(config, logger), {
       converter: new CursorAcpEventConverter(),
       logger,
@@ -192,10 +190,7 @@ function createCursorNativeEvidence(
     async load({ chat, signal }) {
       signal.throwIfAborted();
       return {
-        messages: await reader.loadMessages(
-          cursorReference(chat, nativeSessions),
-          { chatId: chat.chatId },
-        ),
+        messages: await reader.loadMessages(cursorReference(chat, nativeSessions)),
       };
     },
     async describeSource({ chat, signal }) {
