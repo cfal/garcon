@@ -13,6 +13,7 @@ import {
   ToolResultMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
+import path from 'node:path';
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
@@ -37,6 +38,7 @@ const SILENT_LOGGER: AgentLogger = Object.freeze({
 const PREVIEW_TAIL_MESSAGE_LIMIT = 20;
 
 interface OpenCodeSession {
+  directory?: string;
   title?: string;
   time?: {
     created?: string | number | Date;
@@ -78,6 +80,17 @@ export interface OpenCodeHistoryLoadOptions {
   logger?: AgentLogger;
   limit?: number;
 }
+
+export class OpenCodeTranscriptNotFoundError extends Error {
+  constructor() {
+    super('OpenCode transcript session not found');
+    this.name = 'OpenCodeTranscriptNotFoundError';
+  }
+}
+
+type OpenCodeStoredMessagesResult =
+  | { readonly kind: 'found'; readonly messages: OpenCodeMessage[] }
+  | { readonly kind: 'not-found' };
 
 interface OpenCodePreview {
   firstMessage: string;
@@ -273,35 +286,76 @@ export async function fetchOpenCodeStoredMessages(
   options: OpenCodeHistoryLoadOptions = {},
 ): Promise<OpenCodeMessage[]> {
   const logger = options.logger ?? SILENT_LOGGER;
-  if (!sessionId) return [];
   try {
-    const client = await getClient();
-    const args = withOpenCodeRequestScope({
-      sessionID: sessionId,
-      ...(options.limit === undefined ? {} : { limit: options.limit }),
-    }, createOpenCodeRequestScope(options.directory));
-    const result = options.signal
-      ? await client.session.messages(args, { signal: options.signal })
-      : await client.session.messages(args);
-    if (isOpenCodeNotFoundResult(result)) return [];
-    if (hasOpenCodeResultError(result)) {
-      const message = openCodeResultErrorMessage(result, 'OpenCode message fetch failed');
-      if (options.throwOnError) throw new Error(message);
-      logger.warn('OpenCode chat message load failed', { sessionId, error: message });
-      return [];
-    }
-    if (Array.isArray(result.data)) return result.data;
-    if (options.throwOnError) throw new Error('OpenCode message fetch returned an invalid payload');
-    logger.warn('OpenCode chat message load returned an invalid payload', { sessionId });
-    return [];
+    const result = await requestOpenCodeStoredMessages(sessionId, getClient, options);
+    return result.kind === 'found' ? result.messages : [];
   } catch (err) {
     if (options.throwOnError) throw err;
     logger.error('OpenCode chat message load failed', {
-      sessionId,
+      sessionId: sessionId ?? null,
       error: errorMessage(err),
     });
     return [];
   }
+}
+
+async function requestOpenCodeStoredMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions,
+): Promise<OpenCodeStoredMessagesResult> {
+  if (!sessionId) return { kind: 'not-found' };
+  const client = await getClient();
+  const scope = createOpenCodeRequestScope(options.directory);
+  const args = withOpenCodeRequestScope({
+    sessionID: sessionId,
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
+  }, scope);
+  const result = options.signal
+    ? await client.session.messages(args, { signal: options.signal })
+    : await client.session.messages(args);
+  if (isOpenCodeNotFoundResult(result)) return { kind: 'not-found' };
+  if (hasOpenCodeResultError(result)) {
+    throw new Error(openCodeResultErrorMessage(result, 'OpenCode message fetch failed'));
+  }
+  if (!Array.isArray(result.data)) {
+    throw new Error('OpenCode message fetch returned an invalid payload');
+  }
+  return { kind: 'found', messages: result.data };
+}
+
+async function requestScopedOpenCodeStoredMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions,
+): Promise<OpenCodeStoredMessagesResult> {
+  if (!sessionId) return { kind: 'not-found' };
+  const client = await getClient();
+  const scope = createOpenCodeRequestScope(options.directory);
+  const sessionArgs = withOpenCodeRequestScope({ sessionID: sessionId }, scope);
+  const sessionResult = await client.session.get(sessionArgs);
+  if (isOpenCodeNotFoundResult(sessionResult)) {
+    return { kind: 'not-found' };
+  }
+  if (hasOpenCodeResultError(sessionResult)) {
+    throw new Error(openCodeResultErrorMessage(sessionResult, 'OpenCode session fetch failed'));
+  }
+  if (!sessionResult.data) {
+    throw new Error('OpenCode session fetch returned an invalid payload');
+  }
+  if (scope.directory) {
+    if (typeof sessionResult.data.directory !== 'string' || !sessionResult.data.directory) {
+      throw new Error('OpenCode session fetch returned a session without a directory');
+    }
+    if (path.resolve(sessionResult.data.directory) !== path.resolve(scope.directory)) {
+      return { kind: 'not-found' };
+    }
+  }
+  const messages = await requestOpenCodeStoredMessages(sessionId, getClient, options);
+  if (messages.kind === 'not-found') {
+    throw new Error('OpenCode transcript messages disappeared during import');
+  }
+  return messages;
 }
 
 export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): ChatMessage[] {
@@ -380,6 +434,43 @@ export async function loadOpenCodeChatMessages(
 ): Promise<ChatMessage[]> {
   const stored = await fetchOpenCodeStoredMessages(sessionId, getClient, options);
   return convertOpenCodeStoredMessages(stored);
+}
+
+export async function loadLegacyOpenCodeChatMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions = {},
+): Promise<ChatMessage[]> {
+  const result = await requestScopedOpenCodeStoredMessages(sessionId, getClient, options);
+  if (result.kind === 'not-found') return [];
+  return convertImportableOpenCodeStoredMessages(result.messages);
+}
+
+export async function loadRequiredOpenCodeChatMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions = {},
+): Promise<ChatMessage[]> {
+  const result = await requestScopedOpenCodeStoredMessages(sessionId, getClient, options);
+  if (result.kind === 'not-found') throw new OpenCodeTranscriptNotFoundError();
+  return convertImportableOpenCodeStoredMessages(result.messages);
+}
+
+function convertImportableOpenCodeStoredMessages(
+  messages: readonly OpenCodeMessage[],
+): ChatMessage[] {
+  for (const message of messages) {
+    const info = asRecord(message.info);
+    if (
+      typeof info.id !== 'string'
+      || !info.id
+      || (info.role !== 'user' && info.role !== 'assistant')
+      || !Array.isArray(message.parts)
+    ) {
+      throw new Error('OpenCode stored transcript message is invalid');
+    }
+  }
+  return convertOpenCodeStoredMessages(messages);
 }
 
 export function latestOpenCodeStoredActivityAt(

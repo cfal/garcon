@@ -18,10 +18,16 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createOpenCodeConfig } from './config.js';
 import { OpenCodeExecution } from './agents/opencode/execution.js';
-import { loadOpenCodeChatMessages } from './agents/opencode/history-loader.js';
+import {
+  loadLegacyOpenCodeChatMessages,
+  loadRequiredOpenCodeChatMessages,
+} from './agents/opencode/history-loader.js';
 import { getOpenCodeAuthStatus } from './agents/opencode/opencode-auth.js';
 import { OpenCodeRuntime } from './agents/opencode/opencode.js';
 import { createOpenCodeNativeActivityProbe } from './agents/opencode/native-activity.js';
@@ -49,6 +55,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly descriptor = OPENCODE_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
@@ -86,9 +93,10 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
         providerExecution.applySessionConfiguration(agentSessionId, configuration)
       ),
     };
-    const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId, logger);
+    const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId);
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createOpenCodeNativeActivityProbe({
       nativeSessions,
@@ -160,8 +168,20 @@ function createOpenCodeNativeEvidence(
   runtime: OpenCodeRuntime,
   nativeSessions: NativeSessionCodec,
   sessionId: (chat: SessionReference) => string | null,
-  logger: AgentHost['logger'],
-): AgentNativeEvidenceSource {
+): AgentNativeEvidenceSource & {
+  readonly loadLegacy: AgentNativeEvidenceSource['load'];
+} {
+  const load = async (
+    chat: AgentChatReference,
+    signal: AbortSignal,
+    loadMessages: typeof loadLegacyOpenCodeChatMessages,
+  ) => {
+    const id = sessionId(chat);
+    return runtime.withClientLease((client) => loadMessages(id, async () => client, {
+      directory: chat.projectPath,
+      signal,
+    }));
+  };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -175,17 +195,11 @@ function createOpenCodeNativeEvidence(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const id = sessionId(chat);
-      if (!id) return { messages: [] };
-      return {
-        messages: await runtime.withClientLease((client) => (
-          loadOpenCodeChatMessages(id, async () => client, {
-            directory: chat.projectPath,
-            signal,
-            logger,
-          })
-        )),
-      };
+      return { messages: await load(chat, signal, loadRequiredOpenCodeChatMessages) };
+    },
+    async loadLegacy({ chat, signal }) {
+      signal.throwIfAborted();
+      return { messages: await load(chat, signal, loadLegacyOpenCodeChatMessages) };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

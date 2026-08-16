@@ -302,6 +302,7 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       registry: chatRegistry,
       integrations: integrationRegistry,
+      logger,
       getCarryOverRevision: (entry) => carryOver.revision(
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine ?? null,

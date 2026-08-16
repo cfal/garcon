@@ -20,7 +20,11 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
+import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import { createPiNativeActivityProbe } from './agents/pi/native-activity.js';
 import { createPiConfig } from './config.js';
 import { PiExecution } from './agents/pi/execution.js';
@@ -56,6 +60,7 @@ export default class PiAgentIntegration implements AgentIntegration {
   readonly descriptor = PI_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
@@ -97,6 +102,7 @@ export default class PiAgentIntegration implements AgentIntegration {
     const nativeEvidence = createPiNativeEvidence(config, nativeSessions);
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createPiNativeActivityProbe(nativeSessions);
     this.catalog = createModelCatalog({
@@ -179,17 +185,21 @@ async function loadPiMessages(
   const history = await import('./agents/pi/history-loader.js');
   if (hasRealPiPath(reference)) return history.loadPiChatMessages(reference.nativePath!);
   if (!reference.agentSessionId) return [];
-  return history.loadPiChatMessagesBySessionId(
+  const { findPiSessionFileBySessionIdStrict } = await import('./agents/pi/pi-session-paths.js');
+  const sessionPath = await findPiSessionFileBySessionIdStrict(
     reference.agentSessionId,
     reference.projectPath,
     config,
   );
+  return sessionPath ? history.loadPiChatMessages(sessionPath) : [];
 }
 
 function createPiNativeEvidence(
   config: PiConfig,
   nativeSessions: NativeSessionCodec,
-): AgentNativeEvidenceSource {
+): AgentNativeEvidenceSource & {
+  readonly loadLegacy: AgentNativeEvidenceSource['load'];
+} {
   const resolvePath = async (chat: AgentChatReference) => {
     const reference = piReference(chat, nativeSessions);
     if (hasRealPiPath(reference)) return reference.nativePath!;
@@ -227,7 +237,28 @@ function createPiNativeEvidence(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      return { messages: await loadPiMessages(piReference(chat, nativeSessions), config) };
+      const nativePath = await resolvePath(chat);
+      signal.throwIfAborted();
+      if (!nativePath) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'Pi native transcript has no selected session',
+          false,
+        );
+      }
+      const history = await import('./agents/pi/history-loader.js');
+      return { messages: await history.loadPiChatMessages(nativePath) };
+    },
+    async loadLegacy({ chat, signal }) {
+      signal.throwIfAborted();
+      try {
+        return { messages: await loadPiMessages(piReference(chat, nativeSessions), config) };
+      } catch (error) {
+        if (hasNodeErrorCode(error, 'ENOENT')) {
+          return { messages: [] };
+        }
+        throw error;
+      }
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

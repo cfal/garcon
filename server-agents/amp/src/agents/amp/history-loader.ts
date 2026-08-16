@@ -115,7 +115,7 @@ function getSortedMessages(threadExport: AmpThreadExport): AmpThreadMessage[] {
 }
 
 export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[] {
-  if (!threadExport || typeof threadExport !== 'object') return [];
+  assertImportableAmpThreadExport(threadExport);
 
   const createdAt = toIsoString(threadExport.created) || new Date().toISOString();
   const messages: ChatMessage[] = [];
@@ -164,6 +164,41 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
   }
 
   return messages;
+}
+
+function assertImportableAmpThreadExport(value: unknown): asserts value is AmpThreadExport {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Amp thread export must be an object');
+  }
+  const thread = value as Record<string, unknown>;
+  if (!Array.isArray(thread.messages)) {
+    throw new Error('Amp thread export has invalid messages');
+  }
+  if (thread.created !== undefined && toIsoString(thread.created as number | string) === null) {
+    throw new Error('Amp thread export has an invalid creation time');
+  }
+  for (const message of thread.messages) {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      throw new Error('Amp thread export contains an invalid message');
+    }
+    const record = message as Record<string, unknown>;
+    if (typeof record.role !== 'string' || !Array.isArray(record.content)) {
+      throw new Error('Amp thread export contains an invalid message');
+    }
+    if (record.messageId !== undefined && !Number.isSafeInteger(record.messageId)) {
+      throw new Error('Amp thread export contains an invalid message ID');
+    }
+    for (const part of record.content) {
+      if (
+        !part
+        || typeof part !== 'object'
+        || Array.isArray(part)
+        || typeof (part as Record<string, unknown>).type !== 'string'
+      ) {
+        throw new Error('Amp thread export contains an invalid content part');
+      }
+    }
+  }
 }
 
 function appendAmpSource(

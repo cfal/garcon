@@ -316,10 +316,30 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
   return messages;
 }
 
-function parseClaudeJsonlLines(lines: string[]): ChatMessage[] {
+function parseClaudeJsonlLines(lines: string[], strict = false): ChatMessage[] {
   return convertClaudeEntries(sortClaudeEntries(lines
-    .map((line, index) => parseClaudeJsonlEntryWithSource(line, index + 1))
+    .map((line, index) => strict
+      ? parseStrictClaudeJsonlEntryWithSource(line, index + 1)
+      : parseClaudeJsonlEntryWithSource(line, index + 1))
     .filter((entry): entry is Record<string, unknown> => Boolean(entry))));
+}
+
+function parseStrictClaudeJsonlEntryWithSource(
+  line: string,
+  lineNumber: number,
+): Record<string, unknown> | null {
+  const parsed = parseFirstJsonlValue<Record<string, unknown>>(line);
+  if (parsed.kind === 'empty') return null;
+  if (parsed.kind !== 'value' || parsed.discardedSuffix) {
+    throw new Error(`Claude transcript record ${lineNumber} is invalid`);
+  }
+  const entry = asRecord(parsed.value);
+  if (!entry.sessionId) return null;
+  const entryId = asString(entry.uuid) || asString(entry.id) || asString(entry.messageId);
+  return attachNativeMessageSource(entry, {
+    lineNumber,
+    ...(entryId ? { entryId } : {}),
+  });
 }
 
 // Reads a Claude JSONL file and returns ChatMessage[].
@@ -338,7 +358,7 @@ export async function loadClaudeChatMessages(
 
   try {
     const raw = await fs.readFile(nativePath, 'utf8');
-    return parseClaudeJsonlLines(raw.split('\n'));
+    return parseClaudeJsonlLines(raw.split('\n'), options.throwOnError === true);
   } catch (error) {
     if (options.throwOnError) throw error;
     logger.error('Claude transcript load failed', {

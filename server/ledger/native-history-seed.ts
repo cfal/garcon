@@ -1,4 +1,4 @@
-import type { AgentIntegration, AgentNativeHistoryImport } from '@garcon/server-agent-interface';
+import type { AgentHistoryImport, AgentIntegration } from '@garcon/server-agent-interface';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
@@ -13,7 +13,7 @@ export interface NativeHistorySeedInput {
   readonly entry: AgentChatEntry;
   readonly integration: AgentIntegration;
   // Taken separately so the caller's capability check, not an assertion here, proves it exists.
-  readonly nativeHistoryImport: AgentNativeHistoryImport;
+  readonly nativeHistoryImport: AgentHistoryImport;
   readonly session: LedgerSessionDetail;
   readonly carryOverRevision: string;
   readonly signal: AbortSignal;

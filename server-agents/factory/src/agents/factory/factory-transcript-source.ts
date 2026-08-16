@@ -44,7 +44,11 @@ export function createFactoryTranscriptSource(
       {},
       logger,
     ),
-    loadFromPath: (sessionPath) => loadFactoryChatMessages(sessionPath, logger),
+    loadFromPath: (sessionPath) => loadFactoryChatMessages(
+      sessionPath,
+      logger,
+      { throwOnError: true },
+    ),
     ...overrides,
   };
 

@@ -21,7 +21,10 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createCodexConfig, type CodexConfig } from './config.js';
 import { getCodexAuthStatus } from './agents/codex/codex-auth.js';
 import { CodexExecution } from './agents/codex/execution.js';
@@ -69,6 +72,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
@@ -132,6 +136,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.nativeSessions = nativeEvidence;
     const producer = createAgentProducerAdapter(execution, logger);
     this.execution = producer.execution;
+    this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createCodexNativeActivityProbe(nativeSessions);
     // Codex compacts natively through its app-server; the execution object owns

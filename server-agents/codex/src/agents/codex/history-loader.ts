@@ -71,8 +71,9 @@ export function addCodexJsonlLine(
   line: string,
   context: CodexJsonlNormalizationContext = {},
   projection = new LegacyCodexProjection(),
+  strict = false,
 ): void {
-  const entry = parseCodexJsonlEntry(line);
+  const entry = strict ? parseStrictCodexJsonlEntry(line) : parseCodexJsonlEntry(line);
   if (!entry) return;
   try {
     const result = projection.project(entry, context);
@@ -103,7 +104,8 @@ export function addCodexJsonlLine(
     if (result.isCanonicalUser) buckets.hasCanonicalUser = true;
     if (result.isCanonicalAssistant) buckets.hasCanonicalAssistant = true;
     if (result.isCanonicalThinking) buckets.hasCanonicalThinking = true;
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return;
   }
 }
@@ -111,6 +113,21 @@ export function addCodexJsonlLine(
 function parseCodexJsonlEntry(line: string): Record<string, unknown> | null {
   const parsed = parseFirstJsonlValue<Record<string, unknown>>(line);
   return parsed.kind === 'value' ? asRecord(parsed.value) : null;
+}
+
+function parseStrictCodexJsonlEntry(line: string): Record<string, unknown> | null {
+  const parsed = parseFirstJsonlValue<Record<string, unknown>>(line);
+  if (parsed.kind === 'empty') return null;
+  if (
+    parsed.kind !== 'value'
+    || parsed.discardedSuffix
+    || !parsed.value
+    || typeof parsed.value !== 'object'
+    || Array.isArray(parsed.value)
+  ) {
+    throw new Error('Codex transcript record is invalid');
+  }
+  return parsed.value;
 }
 
 function codexResponseItemIdentity(entry: Record<string, unknown>): {
@@ -154,7 +171,7 @@ export async function loadCodexChatMessages(
       addCodexJsonlLine(buckets, entry.line, {
         sourceByteOffset: entry.byteOffset,
         sourceLineNumber: entry.lineNumber,
-      }, projection);
+      }, projection, options.throwOnError === true);
     }
 
     return finishCodexMessages(buckets, true);

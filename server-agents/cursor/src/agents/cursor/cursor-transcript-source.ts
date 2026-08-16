@@ -1,6 +1,10 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import { getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
-import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from './history-loader.js';
+import {
+  cursorStoreDbPath,
+  getCursorPreviewFromSessionId,
+  loadCursorChatMessagesBySessionId,
+} from './history-loader.js';
 
 export interface CursorTranscriptReference {
   readonly agentSessionId?: string | null;
@@ -11,22 +15,36 @@ export interface CursorTranscriptReference {
 export interface CursorTranscriptReader {
   loadMessages(session: CursorTranscriptReference): Promise<ChatMessage[]>;
   getPreview(session: CursorTranscriptReference): Promise<unknown>;
+  sourcePath(session: CursorTranscriptReference): string | null;
 }
 
 // Cursor ACP sessions persist SQLite transcripts under ~/.cursor/acp-sessions.
-export function createCursorTranscriptSource(): CursorTranscriptReader {
+export function createCursorTranscriptSource(
+  options: { readonly cursorHome?: string } = {},
+): CursorTranscriptReader {
+  const sessionId = (session: CursorTranscriptReference): string => (
+    session.agentSessionId
+      || getCursorAgentSessionIdFromNativePath(session.nativePath)
+      || ''
+  );
   return {
     async loadMessages(session): Promise<ChatMessage[]> {
-      const agentSessionId = session.agentSessionId
-        || getCursorAgentSessionIdFromNativePath(session.nativePath)
-        || '';
-      return loadCursorChatMessagesBySessionId(agentSessionId, session.projectPath);
+      return loadCursorChatMessagesBySessionId(
+        sessionId(session),
+        session.projectPath,
+        options.cursorHome,
+      );
     },
     async getPreview(session): Promise<unknown> {
-      const agentSessionId = session.agentSessionId
-        || getCursorAgentSessionIdFromNativePath(session.nativePath)
-        || '';
-      return getCursorPreviewFromSessionId(agentSessionId, session.projectPath);
+      return getCursorPreviewFromSessionId(
+        sessionId(session),
+        session.projectPath,
+        options.cursorHome,
+      );
+    },
+    sourcePath(session): string | null {
+      const id = sessionId(session);
+      return id ? cursorStoreDbPath(id, session.projectPath, options.cursorHome) : null;
     },
   };
 }

@@ -11,22 +11,22 @@ export interface AgentImportedTranscriptRow {
   readonly providerMeta?: JsonObject;
 }
 
-export interface AgentNativeHistoryImportRequest {
+export interface AgentHistoryImportRequest {
   readonly chat: AgentChatReference;
   readonly signal: AbortSignal;
 }
 
-export interface AgentNativeHistoryImport {
+export interface AgentHistoryImport {
   load(
-    request: AgentNativeHistoryImportRequest,
+    request: AgentHistoryImportRequest,
   ): AsyncIterable<readonly AgentImportedTranscriptRow[]>;
 }
 
 export interface AgentNativeSessionAccess {
-  resolveNativeSession(request: AgentNativeHistoryImportRequest): Promise<AgentNativeSessionRef | null>;
-  describeSource(request: AgentNativeHistoryImportRequest): Promise<AgentTranscriptSourceLocation | null>;
+  resolveNativeSession(request: AgentHistoryImportRequest): Promise<AgentNativeSessionRef | null>;
+  describeSource(request: AgentHistoryImportRequest): Promise<AgentTranscriptSourceLocation | null>;
   release(
-    request: AgentNativeHistoryImportRequest & { readonly reason: 'deleted' | 'transferred' },
+    request: AgentHistoryImportRequest & { readonly reason: 'deleted' | 'transferred' },
   ): Promise<void>;
 }
 

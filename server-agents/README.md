@@ -27,8 +27,10 @@ code remain private behind its facets.
   provider-named fields. Provider-neutral capabilities are explicit facets.
 - `server-agents/common` contains provider-neutral adapters and the shared
   transcript-search implementation. It is not a provider registry.
-- The core-owned per-chat ledger is the only serving authority. Native history
-  is read in full only for genesis adoption and explicit manual reload.
+- The core-owned per-chat ledger is the only serving authority. Complete
+  integration-owned history is read only through the adoption-only legacy
+  facet or the native-session facet used by explicit Reload and native-fidelity
+  fork seeding.
 - The workspace search database is derived from ledger rows. Providers do not
   expose transcript index sources or live search hints.
 
@@ -75,6 +77,7 @@ export default class ExampleAgentIntegration implements AgentIntegration {
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery = null;
+  readonly legacyHistoryImport = null;
   readonly nativeHistoryImport = null;
   readonly nativeActivity = null;
   readonly nativeSessions = null;
@@ -110,7 +113,8 @@ Required service facets are `descriptor`, `execution`, `catalog`, `settings`,
 | `goals` | Delivers provider-specific goal control. |
 | `endpoints` | Validates API-provider endpoint selections. |
 | `singleQuery` | Runs bounded one-shot work outside a chat execution. |
-| `nativeHistoryImport` | Imports native history for adoption and manual reload. |
+| `legacyHistoryImport` | Imports supported pre-V5 history once during genesis adoption. |
+| `nativeHistoryImport` | Imports one selected native session for Reload and native-fidelity fork seeding. |
 | `nativeActivity` | Performs a bounded advisory native drift probe. |
 | `nativeSessions` | Resolves, describes, and releases provider-native session references. |
 | `sessionConfiguration` | Applies supported configuration changes to an existing session. |

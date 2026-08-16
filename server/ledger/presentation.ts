@@ -6,6 +6,7 @@ import {
   PermissionResolvedMessage,
   TranscriptNoticeMessage,
   UserMessage,
+  isCarryoverMigrationQuarantineNoticeDetail,
   type ChatMessage,
 } from '../../common/chat-types.js';
 import type { TranscriptMessage } from '../../common/chat-view.js';
@@ -46,6 +47,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
         row.at,
         row.message,
         row.detail.action === 'reload-native-history' ? 'reload-native-history' : undefined,
+        isCarryoverMigrationQuarantineNoticeDetail(row.detail) ? row.detail : undefined,
       );
     case 'agent-switch':
       return new AgentSwitchMessage(

@@ -17,7 +17,9 @@ export function createCodexNativeEvidence(
   runtime: CodexTranscriptRuntime,
   nativeSessions: PathNativeSessionCodec,
   logger: AgentLogger,
-): AgentNativeEvidenceSource {
+): AgentNativeEvidenceSource & {
+  readonly loadLegacy: AgentNativeEvidenceSource['load'];
+} {
   const reference = (chat: AgentChatReference) => {
     const native = nativeSessions.decode(chat.nativeSession);
     return {
@@ -103,6 +105,15 @@ export function createCodexNativeEvidence(
     async load({ chat, signal }) {
       signal.throwIfAborted();
       return { messages: await runtime.loadMessages(await retryableReference(chat, signal), signal) };
+    },
+    async loadLegacy({ chat, signal }) {
+      signal.throwIfAborted();
+      const value = reference(chat);
+      const nativePath = await resolvePath(chat, signal);
+      if (!nativePath) return { messages: [] };
+      return {
+        messages: await runtime.loadMessages({ ...value, nativePath }, signal),
+      };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

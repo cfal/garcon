@@ -11,6 +11,7 @@ import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/n
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
 import { attachNativeMessageSource, type NativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import {
   getFactorySessionDiscoveryIndexPath,
@@ -126,18 +127,51 @@ function toIsoString(value: number | string | undefined): string | null {
 async function readFactorySessionDiscoveryIndex(
   signal?: AbortSignal,
 ): Promise<FactorySessionDiscoveryIndex> {
-  signal?.throwIfAborted();
   try {
-    const raw = await fs.readFile(getFactorySessionDiscoveryIndexPath(), 'utf8');
-    signal?.throwIfAborted();
-    return JSON.parse(raw) as FactorySessionDiscoveryIndex;
+    return await readFactorySessionDiscoveryIndexStrict(signal);
   } catch {
     signal?.throwIfAborted();
     return {};
   }
 }
 
+async function readFactorySessionDiscoveryIndexStrict(
+  signal?: AbortSignal,
+): Promise<FactorySessionDiscoveryIndex> {
+  signal?.throwIfAborted();
+  let raw: string;
+  try {
+    raw = await fs.readFile(getFactorySessionDiscoveryIndexPath(), 'utf8');
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return {};
+    throw error;
+  }
+  signal?.throwIfAborted();
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Factory session discovery index is invalid');
+  }
+  const entries = (parsed as Record<string, unknown>).entries;
+  if (entries !== undefined && (!entries || typeof entries !== 'object' || Array.isArray(entries))) {
+    throw new Error('Factory session discovery index entries are invalid');
+  }
+  return parsed as FactorySessionDiscoveryIndex;
+}
+
 async function findFileWithSuffix(
+  dir: string,
+  suffix: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  try {
+    return await findFileWithSuffixStrict(dir, suffix, signal);
+  } catch {
+    signal?.throwIfAborted();
+    return null;
+  }
+}
+
+async function findFileWithSuffixStrict(
   dir: string,
   suffix: string,
   signal?: AbortSignal,
@@ -154,6 +188,7 @@ async function findFileWithSuffix(
         .replace(/\*/g, '\\*')
         .replace(/\?/g, '\\?');
       const glob = new Bun.Glob(`**/*${escapedSuffix}`);
+      let match: string | null = null;
       for await (const filePath of glob.scan({
         absolute: true,
         cwd: dir,
@@ -161,34 +196,46 @@ async function findFileWithSuffix(
         onlyFiles: true,
       })) {
         signal?.throwIfAborted();
-        return filePath;
+        if (match) throw new Error('Factory transcript discovery found duplicate session files');
+        match = filePath;
       }
-    } catch {
+      return match;
+    } catch (error) {
       signal?.throwIfAborted();
-      return null;
+      if (hasNodeErrorCode(error, 'ENOENT')) return null;
+      throw error;
     }
   }
 
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
+  } catch (error) {
     signal?.throwIfAborted();
-    return null;
+    if (hasNodeErrorCode(error, 'ENOENT')) return null;
+    throw error;
   }
 
+  let match: string | null = null;
   for (const entry of entries) {
     signal?.throwIfAborted();
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory() && !entry.isSymbolicLink()) {
-      const nested = await findFileWithSuffix(fullPath, suffix, signal);
-      if (nested) return nested;
+      const nested = await findFileWithSuffixStrict(fullPath, suffix, signal);
+      if (!nested) continue;
+      if (match) throw new Error('Factory transcript discovery found duplicate session files');
+      match = nested;
       continue;
     }
-    if (entry.name.endsWith(suffix)) return fullPath;
+    if (!entry.name.endsWith(suffix)) continue;
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error('Factory transcript source is not a regular file');
+    }
+    if (match) throw new Error('Factory transcript discovery found duplicate session files');
+    match = fullPath;
   }
 
-  return null;
+  return match;
 }
 
 export async function getFactorySessionDiscoveryEntry(
@@ -200,6 +247,28 @@ export async function getFactorySessionDiscoveryEntry(
   const index = await readFactorySessionDiscoveryIndex(signal);
   signal?.throwIfAborted();
   return index.entries?.[sessionId] ?? null;
+}
+
+async function getFactorySessionDiscoveryEntryStrict(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<FactorySessionDiscoveryEntry | null> {
+  signal?.throwIfAborted();
+  if (!sessionId) return null;
+  const index = await readFactorySessionDiscoveryIndexStrict(signal);
+  signal?.throwIfAborted();
+  const entry = index.entries?.[sessionId];
+  if (entry === undefined) return null;
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    throw new Error('Factory session discovery entry is invalid');
+  }
+  if (
+    entry.sessionPath !== undefined
+    && (typeof entry.sessionPath !== 'string' || !entry.sessionPath)
+  ) {
+    throw new Error('Factory session discovery path is invalid');
+  }
+  return entry;
 }
 
 export async function findFactorySessionFileBySessionId(
@@ -222,6 +291,28 @@ export async function findFactorySessionFileBySessionId(
   }
 
   return findFileWithSuffix(getFactorySessionsRoot(), `${sessionId}.jsonl`, signal);
+}
+
+export async function findFactorySessionFileBySessionIdStrict(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  signal?.throwIfAborted();
+  if (!sessionId) return null;
+
+  const discoveryEntry = await getFactorySessionDiscoveryEntryStrict(sessionId, signal);
+  if (discoveryEntry?.sessionPath) {
+    try {
+      await fs.access(discoveryEntry.sessionPath);
+      signal?.throwIfAborted();
+      return discoveryEntry.sessionPath;
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
+    }
+  }
+
+  return findFileWithSuffixStrict(getFactorySessionsRoot(), `${sessionId}.jsonl`, signal);
 }
 
 async function readFactorySessionEvents(

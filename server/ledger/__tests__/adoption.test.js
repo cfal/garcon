@@ -136,7 +136,7 @@ async function withFixture(run) {
       defaults: () => ({ ownerId: 'test', schemaVersion: 1, values: {} }),
       parse: (value) => value,
     },
-    nativeHistoryImport: {
+    legacyHistoryImport: {
       async *load() {
         loadCounts.current += 1;
         yield current.map((message) => ({ message }));

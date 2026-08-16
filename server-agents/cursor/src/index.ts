@@ -14,20 +14,26 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createCursorConfig } from './config.js';
 import { AcpAgentRuntime } from './agents/shared/acp-agent-runtime.js';
 import { createCursorAcpPolicy } from './agents/cursor/cursor-acp-policy.js';
 import { getCursorAuthStatus } from './agents/cursor/cursor-auth.js';
 import { CursorAcpEventConverter } from './agents/cursor/cursor-acp-event-converter.js';
 import { CursorExecution } from './agents/cursor/execution.js';
-import { cursorStoreDbPath } from './agents/cursor/history-loader.js';
+import { CursorTranscriptNotFoundError } from './agents/cursor/history-loader.js';
 import { getCursorModels } from './agents/cursor/cursor-models.js';
 import {
   createCursorAcpNativePath,
   getCursorAgentSessionIdFromNativePath,
 } from './agents/cursor/cursor-native-path.js';
-import { createCursorTranscriptSource } from './agents/cursor/cursor-transcript-source.js';
+import {
+  createCursorTranscriptSource,
+  type CursorTranscriptReader,
+} from './agents/cursor/cursor-transcript-source.js';
 import { runSingleQuery } from './agents/cursor/run-single-query.js';
 
 const CURSOR_DESCRIPTOR = {
@@ -65,6 +71,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
   readonly descriptor = CURSOR_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
   readonly nativeSessions;
@@ -83,11 +90,14 @@ export default class CursorAgentIntegration implements AgentIntegration {
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
-  constructor(host: AgentHost) {
+  constructor(
+    host: AgentHost,
+    options: { readonly transcriptSource?: CursorTranscriptReader } = {},
+  ) {
     const config = createCursorConfig(host.environment);
     const logger = createScopedAgentLogger(host.logger, 'cursor');
     const nativeSessions = createPathNativeSessionCodec('cursor');
-    const transcriptReader = createCursorTranscriptSource();
+    const transcriptReader = options.transcriptSource ?? createCursorTranscriptSource();
     const runtime = new AcpAgentRuntime(createCursorAcpPolicy(config, logger), {
       converter: new CursorAcpEventConverter(),
       logger,
@@ -111,6 +121,16 @@ export default class CursorAgentIntegration implements AgentIntegration {
     const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions);
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.legacyHistoryImport = createHistoryImport({
+      async load(request) {
+        try {
+          return await nativeEvidence.load(request);
+        } catch (error) {
+          if (error instanceof CursorTranscriptNotFoundError) return { messages: [] };
+          throw error;
+        }
+      },
+    });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.catalog = createModelCatalog({
       logger: host.logger,
@@ -197,7 +217,7 @@ function createCursorNativeEvidence(
       if (!reference.agentSessionId) return null;
       return {
         kind: 'filesystem-path',
-        value: cursorStoreDbPath(reference.agentSessionId, reference.projectPath),
+        value: reader.sourcePath(reference)!,
       };
     },
     async release({ signal }) {

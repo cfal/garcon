@@ -1,3 +1,4 @@
+import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/chat-types.js';
 import type { LedgerRow, LedgerRowDraft } from './contracts.js';
 
 export function frozenConversationDrafts(rows: readonly LedgerRow[]): LedgerRowDraft[] {
@@ -12,6 +13,18 @@ export function frozenConversationDrafts(rows: readonly LedgerRow[]): LedgerRowD
     }
     if (row.kind === 'provider-row') {
       return [{ kind: 'provider-row', at: row.at, message: row.message, providerMeta: null }];
+    }
+    if (
+      row.kind === 'notice'
+      && isCarryoverMigrationQuarantineNoticeDetail(row.detail)
+    ) {
+      return [{
+        kind: 'notice',
+        at: row.at,
+        message: row.message,
+        detail: row.detail,
+        providerMeta: null,
+      }];
     }
     return [];
   });

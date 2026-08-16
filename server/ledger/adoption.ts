@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { AgentIntegration } from '@garcon/server-agent-interface';
+import {
+  AgentIntegrationError,
+  type AgentIntegration,
+  type AgentLogger,
+} from '@garcon/server-agent-interface';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
@@ -21,6 +25,7 @@ export interface TranscriptAdoptionOptions {
     entry: AgentChatEntry,
     signal: AbortSignal,
   ) => Promise<readonly ChatMessage[]>;
+  readonly logger?: Pick<AgentLogger, 'warn'>;
   readonly now?: () => string;
 }
 
@@ -51,27 +56,25 @@ export class TranscriptAdoptionService {
       const entry = this.options.registry.getChat(chatId);
       if (!entry) throw new TypeError(`Cannot adopt transcript for unknown chat ${chatId}`);
       const integration = this.options.integrations.require(entry.agentId);
-      let prefix: readonly ChatMessage[] = [];
-      try {
-        prefix = await this.options.loadFrozenPrefix(chatId, entry, signal);
-      } catch {
-        // Legacy projection failures fall through to the provider-native import,
-        // then to an empty ledger when neither source is readable.
-      }
+      const prefix = entry.carryOverMigrationQuarantine
+        ? []
+        : await this.#loadPrefix(chatId, entry, signal);
       signal.throwIfAborted();
-      const nativeRows = await this.#loadCurrent(chatId, entry, integration, signal);
+      const legacyRows = await this.#loadLegacy(chatId, entry, integration, signal);
       signal.throwIfAborted();
       const latest = this.options.registry.getChat(chatId);
       if (!latest || latest.agentOwnershipEpoch !== entry.agentOwnershipEpoch) {
         throw new TypeError(`Chat ownership changed while adopting ${chatId}`);
       }
 
-      const prefixRows = frozenDrafts(prefix, this.#now);
+      const prefixRows = entry.carryOverMigrationQuarantine
+        ? [quarantineDraft(entry.carryOverMigrationQuarantine, this.#now())]
+        : frozenDrafts(prefix, this.#now);
       const contentStartOrdinal = prefixRows.length + 1;
       const session = sessionDraft(entry, this.#now());
       const view = this.options.ledger.initializeChat(
         chatId,
-        [...prefixRows, ...(session ? [session] : []), ...importedDrafts(nativeRows, this.#now)],
+        [...prefixRows, ...(session ? [session] : []), ...importedDrafts(legacyRows, this.#now)],
         contentStartOrdinal,
       );
       this.#repairSessionCache(chatId);
@@ -96,13 +99,25 @@ export class TranscriptAdoptionService {
     this.options.registry.updateChat(chatId, patch);
   }
 
-  async #loadCurrent(
+  async #loadPrefix(
+    chatId: string,
+    entry: AgentChatEntry,
+    signal: AbortSignal,
+  ): Promise<readonly ChatMessage[]> {
+    try {
+      return await this.options.loadFrozenPrefix(chatId, entry, signal);
+    } catch (error) {
+      this.#throwSourceFailure(chatId, entry.agentId, 'frozen-prefix', error, signal);
+    }
+  }
+
+  async #loadLegacy(
     chatId: string,
     entry: AgentChatEntry,
     integration: AgentIntegration,
     signal: AbortSignal,
   ): Promise<readonly ImportedRow[]> {
-    if (!integration.nativeHistoryImport) return [];
+    if (!integration.legacyHistoryImport) return [];
     try {
       const rows: ImportedRow[] = [];
       const chat = toAgentChatReference(
@@ -111,16 +126,72 @@ export class TranscriptAdoptionService {
         entry,
         this.options.getCarryOverRevision(entry),
       );
-      for await (const batch of integration.nativeHistoryImport.load({ chat, signal })) {
+      for await (const batch of integration.legacyHistoryImport.load({ chat, signal })) {
+        signal.throwIfAborted();
         for (const row of batch) {
           rows.push({ message: row.message, providerMeta: row.providerMeta ?? null });
         }
       }
       return sanitizeCurrent(rows, entry);
-    } catch {
-      return [];
+    } catch (error) {
+      this.#throwSourceFailure(chatId, entry.agentId, 'legacy-history-import', error, signal);
     }
   }
+
+  #throwSourceFailure(
+    chatId: string,
+    provider: string,
+    phase: 'frozen-prefix' | 'legacy-history-import',
+    error: unknown,
+    signal: AbortSignal,
+  ): never {
+    if (signal.aborted) signal.throwIfAborted();
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    this.options.logger?.warn('Transcript adoption source failed.', {
+      chatId,
+      provider,
+      phase,
+      reason: sourceFailureReason(error),
+    });
+    if (
+      error instanceof AgentIntegrationError
+      && error.code === 'TRANSCRIPT_UNAVAILABLE'
+      && error.retryable
+    ) {
+      throw error;
+    }
+    throw new AgentIntegrationError(
+      'TRANSCRIPT_UNAVAILABLE',
+      error instanceof Error ? error.message : 'Transcript adoption source failed',
+      true,
+      { provider, phase },
+    );
+  }
+}
+
+function quarantineDraft(
+  quarantine: NonNullable<AgentChatEntry['carryOverMigrationQuarantine']>,
+  at: string,
+): LedgerRowDraft {
+  return {
+    kind: 'notice',
+    at,
+    message: `Some earlier chat history could not be migrated. Quarantine reference: ${quarantine.artifactId}.`,
+    detail: {
+      type: 'carryover-migration-quarantine',
+      artifactId: quarantine.artifactId,
+      errorCode: quarantine.errorCode,
+    },
+    providerMeta: null,
+  };
+}
+
+function sourceFailureReason(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { readonly code?: unknown }).code;
+    if (typeof code === 'string' && code) return code;
+  }
+  return error instanceof Error ? error.name : typeof error;
 }
 
 function sessionDraft(entry: AgentChatEntry, at: string): LedgerRowDraft | null {

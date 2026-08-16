@@ -46,13 +46,13 @@ function assertAcyclicActivePath(entries: SessionEntry[]): void {
   }
 }
 
-async function readPiSessionFile(sessionPath: string): Promise<{
+async function readPiSessionFile(sessionPath: string, strict = false): Promise<{
   entries: FileEntry[];
   header: SessionHeader | null;
   messages: ChatMessage[];
 }> {
   const raw = await fs.readFile(sessionPath, 'utf8');
-  const entries = parseSessionEntries(raw);
+  const entries = strict ? parseStrictPiSessionEntries(raw) : parseSessionEntries(raw);
   const header = findHeader(entries);
   const sessionEntries = entries.filter(isSessionEntry);
   assertAcyclicActivePath(sessionEntries);
@@ -73,7 +73,28 @@ async function readPiSessionFile(sessionPath: string): Promise<{
 }
 
 export async function loadPiChatMessages(sessionPath: string): Promise<ChatMessage[]> {
-  return (await readPiSessionFile(sessionPath)).messages;
+  return (await readPiSessionFile(sessionPath, true)).messages;
+}
+
+function parseStrictPiSessionEntries(raw: string): FileEntry[] {
+  return raw.split('\n').flatMap((line, index) => {
+    if (!line.trim()) return [];
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      throw new Error(`Pi transcript record ${index + 1} is invalid`);
+    }
+    if (
+      !value
+      || typeof value !== 'object'
+      || Array.isArray(value)
+      || typeof (value as Record<string, unknown>).type !== 'string'
+    ) {
+      throw new Error(`Pi transcript record ${index + 1} is invalid`);
+    }
+    return [value as FileEntry];
+  });
 }
 
 export async function loadPiChatMessagesBySessionId(

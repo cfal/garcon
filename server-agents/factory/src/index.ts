@@ -15,13 +15,17 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createFactoryConfig } from './config.js';
 import { getFactoryAuthStatus } from './agents/factory/factory-auth.js';
 import { FactoryCliRuntime, runSingleQuery } from './agents/factory/factory-cli.js';
 import { FactoryExecution } from './agents/factory/execution.js';
 import { FactoryModelCatalogService } from './agents/factory/factory-models.js';
 import { createFactoryTranscriptSource } from './agents/factory/factory-transcript-source.js';
+import { findFactorySessionFileBySessionIdStrict } from './agents/factory/history-loader.js';
 import { createFactoryNativeActivityProbe } from './agents/factory/native-activity.js';
 
 const FACTORY_DESCRIPTOR = {
@@ -47,6 +51,7 @@ export default class FactoryAgentIntegration implements AgentIntegration {
   readonly descriptor = FACTORY_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
@@ -71,7 +76,9 @@ export default class FactoryAgentIntegration implements AgentIntegration {
     const models = new FactoryModelCatalogService(config);
     const nativeSessions = createPathNativeSessionCodec('factory');
     const runtime = new FactoryCliRuntime({ config, logger, models });
-    const transcriptReader = createFactoryTranscriptSource({}, logger);
+    const transcriptReader = createFactoryTranscriptSource({
+      findSessionFileBySessionId: findFactorySessionFileBySessionIdStrict,
+    }, logger);
 
     this.settings = createVersionedSettings({
       ownerId: 'factory',
@@ -83,6 +90,21 @@ export default class FactoryAgentIntegration implements AgentIntegration {
     const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions);
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.legacyHistoryImport = createHistoryImport({
+      async load({ chat, signal }) {
+        signal.throwIfAborted();
+        const reference = await resolveFactoryTranscriptReference(
+          transcriptReader,
+          factoryTranscriptReference(chat, nativeSessions),
+        );
+        signal.throwIfAborted();
+        return {
+          messages: reference.nativePath
+            ? await transcriptReader.loadMessages(reference)
+            : [],
+        };
+      },
+    });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createFactoryNativeActivityProbe(nativeSessions);
     this.catalog = createModelCatalog({
@@ -138,16 +160,12 @@ function createFactoryNativeEvidence(
   reader: ReturnType<typeof createFactoryTranscriptSource>,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
 ): AgentNativeEvidenceSource {
-  const reference = (chat: AgentChatReference) => ({
-    agentSessionId: chat.agentSessionId,
-    nativePath: nativeSessions.decode(chat.nativeSession).path,
-  });
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
       const current = nativeSessions.decode(chat.nativeSession);
       if (current.path) return chat.nativeSession;
-      const path = await reader.resolveNativePath(reference(chat));
+      const path = await reader.resolveNativePath(factoryTranscriptReference(chat, nativeSessions));
       return nativeSessions.encode({
         path,
         agentSessionId: chat.agentSessionId,
@@ -156,16 +174,49 @@ function createFactoryNativeEvidence(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      return { messages: await reader.loadMessages(reference(chat)) };
+      const reference = await resolveFactoryTranscriptReference(
+        reader,
+        factoryTranscriptReference(chat, nativeSessions),
+      );
+      signal.throwIfAborted();
+      if (!reference.nativePath) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'Factory native transcript source is unavailable',
+          false,
+        );
+      }
+      return { messages: await reader.loadMessages(reference) };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();
-      const current = reference(chat);
+      const current = factoryTranscriptReference(chat, nativeSessions);
       const nativePath = current.nativePath ?? await reader.resolveNativePath(current);
       return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();
     },
+  };
+}
+
+function factoryTranscriptReference(
+  chat: AgentChatReference,
+  nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
+) {
+  return {
+    agentSessionId: chat.agentSessionId,
+    nativePath: nativeSessions.decode(chat.nativeSession).path,
+  };
+}
+
+async function resolveFactoryTranscriptReference(
+  reader: ReturnType<typeof createFactoryTranscriptSource>,
+  reference: ReturnType<typeof factoryTranscriptReference>,
+) {
+  if (reference.nativePath || !reference.agentSessionId) return reference;
+  return {
+    ...reference,
+    nativePath: await reader.resolveNativePath(reference),
   };
 }

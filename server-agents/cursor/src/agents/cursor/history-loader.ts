@@ -42,6 +42,13 @@ export interface CursorPreview {
   lastMessage: string;
 }
 
+export class CursorTranscriptNotFoundError extends Error {
+  constructor(readonly sourcePath: string) {
+    super('Cursor transcript database not found');
+    this.name = 'CursorTranscriptNotFoundError';
+  }
+}
+
 function cursorHomePath(): string {
   return path.join(os.homedir(), '.cursor');
 }
@@ -465,10 +472,23 @@ export async function loadCursorChatMessagesBySessionId(
 ): Promise<ChatMessage[]> {
   if (!sessionId) return [];
   const storeDbPath = cursorStoreDbPath(sessionId, projectPath, cursorHome);
-  if (!fs.existsSync(storeDbPath)) {
-    throw new Error(`Cursor transcript database not found: ${storeDbPath}`);
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(storeDbPath);
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) throw new CursorTranscriptNotFoundError(storeDbPath);
+    throw error;
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error('Cursor transcript source is not a regular file');
   }
   return normalizeCursorBlobs(readCursorBlobs(storeDbPath));
+}
+
+function hasNodeErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && (error as NodeJS.ErrnoException).code === code;
 }
 
 function previewText(message: ChatMessage): string {

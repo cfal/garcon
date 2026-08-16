@@ -21,8 +21,8 @@ import type {
 } from './execution.js';
 import type { AgentExecutionV5 } from './execution-v5.js';
 import type {
+  AgentHistoryImport,
   AgentNativeActivityProbe,
-  AgentNativeHistoryImport,
   AgentNativeSessionAccess,
 } from './native-history.js';
 
@@ -42,7 +42,8 @@ export interface AgentIntegration {
   readonly goals: AgentGoals | null;
   readonly endpoints: AgentEndpoints | null;
   readonly singleQuery: AgentSingleQuery | null;
-  readonly nativeHistoryImport: AgentNativeHistoryImport | null;
+  readonly legacyHistoryImport: AgentHistoryImport | null;
+  readonly nativeHistoryImport: AgentHistoryImport | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;
   readonly nativeSessions: AgentNativeSessionAccess | null;
   readonly sessionConfiguration: AgentSessionConfigurationUpdates | null;

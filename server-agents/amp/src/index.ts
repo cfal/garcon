@@ -16,7 +16,10 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createAmpConfig } from './config.js';
 import { getAmpAuthStatus } from './agents/amp/amp-auth.js';
 import { AmpCliRuntime, runSingleQuery } from './agents/amp/amp-cli.js';
@@ -42,6 +45,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
   readonly descriptor = AMP_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
   readonly nativeSessions;
@@ -85,6 +89,19 @@ export default class AmpAgentIntegration implements AgentIntegration {
     const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.legacyHistoryImport = createHistoryImport({
+      async load({ chat, signal }) {
+        signal.throwIfAborted();
+        const id = ampThreadId(chat, nativeSessions);
+        if (!id) return { messages: [] };
+        return {
+          messages: loadAmpChatMessages(await runtime.exportThread(id, {
+            cwd: chat.projectPath,
+            signal,
+          })),
+        };
+      },
+    });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.catalog = createModelCatalog({
       logger: host.logger,
@@ -141,16 +158,10 @@ function createAmpNativeEvidence(
   runtime: AmpCliRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
 ): AgentNativeEvidenceSource {
-  const threadId = (chat: AgentChatReference) => {
-    const native = nativeSessions.decode(chat.nativeSession);
-    return chat.agentSessionId
-      ?? native.agentSessionId
-      ?? getArtificialAgentSessionId(native.path, 'amp');
-  };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
-      const id = threadId(chat);
+      const id = ampThreadId(chat, nativeSessions);
       return id ? nativeSessions.encode({
         path: `!amp:${id}`,
         agentSessionId: id,
@@ -159,19 +170,38 @@ function createAmpNativeEvidence(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const id = threadId(chat);
-      if (!id) return { messages: [] };
+      const id = ampThreadId(chat, nativeSessions);
+      if (!id) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'Amp native transcript has no selected thread',
+          false,
+        );
+      }
       return {
-        messages: loadAmpChatMessages(await runtime.exportThread(id, { cwd: chat.projectPath })),
+        messages: loadAmpChatMessages(await runtime.exportThread(id, {
+          cwd: chat.projectPath,
+          signal,
+        })),
       };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();
-      const id = threadId(chat);
+      const id = ampThreadId(chat, nativeSessions);
       return id ? { kind: 'provider-reference', value: id } : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();
     },
   };
+}
+
+function ampThreadId(
+  chat: AgentChatReference,
+  nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
+): string | null {
+  const native = nativeSessions.decode(chat.nativeSession);
+  return chat.agentSessionId
+    ?? native.agentSessionId
+    ?? getArtificialAgentSessionId(native.path, 'amp');
 }

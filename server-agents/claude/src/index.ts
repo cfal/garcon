@@ -14,12 +14,16 @@ import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/reso
 import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
+import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createNativeHistoryImport } from '@garcon/server-agent-common/native-session/native-history-import';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createClaudeConfig } from './config.js';
 import { getClaudeAuthStatus } from './agents/claude/claude-auth.js';
 import {
@@ -71,6 +75,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
@@ -167,6 +172,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     });
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createClaudeNativeActivityProbe(nativeSessions);
     this.catalog = createModelCatalog({
@@ -262,7 +268,9 @@ function createClaudeNativeEvidence(options: {
   readonly nativeSessions: ReturnType<typeof createPathNativeSessionCodec>;
   readonly configHomeDir: () => string | null;
   readonly logger: AgentHost['logger'];
-}): AgentNativeEvidenceSource {
+}): AgentNativeEvidenceSource & {
+  readonly loadLegacy: AgentNativeEvidenceSource['load'];
+} {
   const reference = (chat: AgentChatReference) => {
     const native = options.nativeSessions.decode(chat.nativeSession);
     return {
@@ -290,6 +298,7 @@ function createClaudeNativeEvidence(options: {
         configHomeDir: options.configHomeDir() ?? undefined,
         logger: options.logger,
       });
+      if (!nativePath && chat.nativeSession) return chat.nativeSession;
       return options.nativeSessions.encode({
         path: nativePath,
         agentSessionId,
@@ -298,7 +307,40 @@ function createClaudeNativeEvidence(options: {
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      return { messages: await loadClaudeChatMessages(await derivedPath(chat), options.logger) };
+      const nativePath = await derivedPath(chat);
+      if (!nativePath) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'Claude native transcript has no selected session',
+          false,
+        );
+      }
+      return {
+        messages: await loadClaudeChatMessages(
+          nativePath,
+          options.logger,
+          { throwOnError: true },
+        ),
+      };
+    },
+    async loadLegacy({ chat, signal }) {
+      signal.throwIfAborted();
+      const nativePath = await derivedPath(chat);
+      if (!nativePath) return { messages: [] };
+      try {
+        return {
+          messages: await loadClaudeChatMessages(
+            nativePath,
+            options.logger,
+            { throwOnError: true },
+          ),
+        };
+      } catch (error) {
+        if (hasNodeErrorCode(error, 'ENOENT')) {
+          return { messages: [] };
+        }
+        throw error;
+      }
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

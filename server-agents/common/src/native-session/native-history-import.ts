@@ -1,10 +1,13 @@
-import type { AgentNativeHistoryImport } from '@garcon/server-agent-interface';
+import {
+  AgentIntegrationError,
+  type AgentHistoryImport,
+} from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from './evidence-source.js';
 import { providerMetadata } from './provider-metadata.js';
 
-export function createNativeHistoryImport(
+export function createHistoryImport(
   source: Pick<AgentNativeEvidenceSource, 'load'>,
-): AgentNativeHistoryImport {
+): AgentHistoryImport {
   return {
     async *load(request) {
       const snapshot = await source.load(request);
@@ -15,6 +18,24 @@ export function createNativeHistoryImport(
           ...(metadata ? { providerMeta: metadata } : {}),
         };
       });
+    },
+  };
+}
+
+export function createNativeHistoryImport(
+  source: Pick<AgentNativeEvidenceSource, 'load'>,
+): AgentHistoryImport {
+  const importer = createHistoryImport(source);
+  return {
+    async *load(request) {
+      if (!request.chat.agentSessionId && !request.chat.nativeSession) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'Native history import requires a selected session',
+          false,
+        );
+      }
+      yield* importer.load(request);
     },
   };
 }

@@ -629,12 +629,21 @@ export class ErrorMessage {
   constructor(public timestamp: string, public content: string) {}
 }
 
+export interface CarryoverMigrationQuarantineNoticeDetail {
+  readonly type: 'carryover-migration-quarantine';
+  readonly artifactId: string;
+  readonly errorCode: string;
+}
+
+export type TranscriptNoticeDetail = CarryoverMigrationQuarantineNoticeDetail;
+
 export class TranscriptNoticeMessage {
   readonly type = 'transcript-notice' as const;
   constructor(
     public timestamp: string,
     public content: string,
     public action?: 'reload-native-history',
+    public detail?: TranscriptNoticeDetail,
   ) {}
 }
 
@@ -1098,6 +1107,27 @@ export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMe
   return TOOL_USE_MESSAGE_TYPES.has(message.type as ToolUseMessageType);
 }
 
+export function isCarryoverMigrationQuarantineNoticeDetail(
+  value: unknown,
+): value is CarryoverMigrationQuarantineNoticeDetail {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const detail = value as Record<string, unknown>;
+  return detail.type === 'carryover-migration-quarantine'
+    && typeof detail.artifactId === 'string'
+    && detail.artifactId.length > 0
+    && typeof detail.errorCode === 'string'
+    && detail.errorCode.length > 0;
+}
+
+function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  if (!isCarryoverMigrationQuarantineNoticeDetail(value)) return null;
+  return {
+    type: value.type,
+    artifactId: value.artifactId,
+    errorCode: value.errorCode,
+  };
+}
+
 // Constructs a typed ChatMessage class instance from raw data.
 // Returns null for unrecognized message types.
 export function parseChatMessage(data: Record<string, unknown>): ChatMessage | null {
@@ -1122,11 +1152,18 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
     case 'error':
       return new ErrorMessage(str(data.timestamp), str(data.content));
     case 'transcript-notice':
-      return new TranscriptNoticeMessage(
-        str(data.timestamp),
-        str(data.content),
-        data.action === 'reload-native-history' ? data.action : undefined,
-      );
+      {
+        const detail = data.detail === undefined
+          ? undefined
+          : parseTranscriptNoticeDetail(data.detail);
+        if (detail === null) return null;
+        return new TranscriptNoticeMessage(
+          str(data.timestamp),
+          str(data.content),
+          data.action === 'reload-native-history' ? data.action : undefined,
+          detail,
+        );
+      }
     case 'permission-request': {
       const permissionOccurrenceId = str(data.permissionOccurrenceId);
       const requestedToolData = asRecord(data.requestedTool);
