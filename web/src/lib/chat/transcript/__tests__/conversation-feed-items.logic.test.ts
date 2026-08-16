@@ -477,6 +477,19 @@ describe('visiblePendingPermissionRequests', () => {
 		expect(visiblePendingPermissionRequests(rows([exitPlan]), [pending])).toEqual([]);
 	});
 
+	it('does not hide a reused exit-plan request behind an older occurrence', () => {
+		const historical = new ExitPlanModeToolUseMessage(TS, 'plan-1', 'Historical plan.');
+		const current: PendingPermissionRequest = {
+			permissionRequestId: 'plan-exit-plan-1',
+			incarnation: 'current-occurrence',
+			requestedTool: new ExitPlanModeToolUseMessage(TS, 'plan-1', 'Current plan.'),
+			chatId: 'chat-1',
+			receivedAt: new Date(TS),
+		};
+
+		expect(visiblePendingPermissionRequests(rows([historical]), [current])).toEqual([current]);
+	});
+
 	it('omits terminal and replayed pending permission ids', () => {
 		const first = pendingPermission('perm-1');
 		const replay = pendingPermission('perm-1');
