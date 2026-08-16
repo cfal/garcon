@@ -273,6 +273,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastOrdinal: messageCount,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 
@@ -313,6 +314,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', initial, {
 			lastOrdinal: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.visibleMessageCount = INITIAL_VISIBLE_MESSAGES + 50;
@@ -344,6 +346,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', initial, {
 			lastOrdinal: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.isUserScrolledUp = true;
@@ -403,7 +406,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
 			chatId: 'chat-1',
@@ -438,7 +441,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 151, assistant(`message-${index + 151}`)),
 			),
-			{ lastOrdinal: total, pageOldestOrdinal: 151, pageNewestOrdinal: 200, hasMore: true },
+			{ lastOrdinal: total, pageOldestOrdinal: 151, pageNewestOrdinal: 200, nextBeforeOrdinal: 151, hasMore: true },
 		);
 		chat.hasLaterMessages = true;
 		vi.mocked(getChatMessages).mockImplementation(async (request) => {
@@ -487,6 +490,7 @@ describe('ActiveTranscriptState', () => {
 			lastOrdinal: 300,
 			pageOldestOrdinal: 251,
 			pageNewestOrdinal: 300,
+			nextBeforeOrdinal: 251,
 			hasMore: true,
 		});
 		vi.mocked(getChatMessages)
@@ -545,9 +549,13 @@ describe('ActiveTranscriptState', () => {
 			lastOrdinal: 300,
 			pageOldestOrdinal: 251,
 			pageNewestOrdinal: 300,
+			nextBeforeOrdinal: 251,
 			hasMore: true,
 		});
 		const before = chat.entries;
+		const beforeNextBeforeOrdinal = chat.nextBeforeOrdinal;
+		const beforeHasEarlierMessages = chat.hasEarlierMessages;
+		const beforeCacheCursor = chat.transcriptCache.get('chat-1')?.nextBeforeOrdinal;
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
 			chatId: 'chat-1',
 			limit: 50,
@@ -569,6 +577,9 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.entries.map((message) => message.ordinal)).toEqual(
 			Array.from({ length: 50 }, (_, index) => index + 251),
 		);
+		expect(chat.nextBeforeOrdinal).toBe(beforeNextBeforeOrdinal);
+		expect(chat.hasEarlierMessages).toBe(beforeHasEarlierMessages);
+		expect(chat.transcriptCache.get('chat-1')?.nextBeforeOrdinal).toBe(beforeCacheCursor);
 	});
 
 	it('[TLV5-PAGE.09-WEB-UNIT-02] resumes a hidden-only earlier continuation after chat switch', async () => {
@@ -578,6 +589,7 @@ describe('ActiveTranscriptState', () => {
 			lastOrdinal: 300,
 			pageOldestOrdinal: 251,
 			pageNewestOrdinal: 300,
+			nextBeforeOrdinal: 251,
 			hasMore: true,
 		});
 
@@ -662,7 +674,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 				entry(index + 201, assistant(`message-${index + 201}`)),
 			),
-			{ lastOrdinal: 400, pageOldestOrdinal: 201, hasMore: true },
+			{ lastOrdinal: 400, pageOldestOrdinal: 201, nextBeforeOrdinal: 201, hasMore: true },
 		);
 		chat.isUserScrolledUp = true;
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
@@ -693,6 +705,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
@@ -720,6 +733,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
@@ -742,6 +756,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		vi.mocked(getChatMessages).mockRejectedValueOnce(new Error('network unavailable'));
@@ -782,7 +797,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		let resolveEarlier!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages).mockReturnValueOnce(
@@ -1159,6 +1174,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, user('durable'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.upsertOptimisticUserInput({
@@ -1200,6 +1216,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.appendLocalNotice('warning', 'stale notice');
@@ -1223,6 +1240,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.appendLocalNotice('warning', 'stale notice');
@@ -1260,6 +1278,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		let resolveFirstSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -1306,6 +1325,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		let resolveFirstSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -1346,6 +1366,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		let resolveSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -1376,6 +1397,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('one'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		let rejectFirstSnapshot!: (reason: Error) => void;
@@ -1433,6 +1455,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'current-generation', [entry(1, assistant('current'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		const epoch = chat.beginSnapshotLoad();
@@ -1460,6 +1483,7 @@ describe('ActiveTranscriptState', () => {
 			chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('current'))], {
 				lastOrdinal: 1,
 				pageOldestOrdinal: 1,
+				nextBeforeOrdinal: null,
 				hasMore: false,
 			});
 			let resolveOldSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -1533,6 +1557,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.appendLocalNotice('warning', 'notice before replay');
@@ -1586,6 +1611,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
+			nextBeforeOrdinal: 201,
 			hasMore: true,
 		});
 		chat.isUserScrolledUp = true;
@@ -1644,6 +1670,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
+			nextBeforeOrdinal: 201,
 			hasMore: true,
 		});
 		chat.isUserScrolledUp = true;
@@ -1736,6 +1763,7 @@ describe('ActiveTranscriptState', () => {
 				{
 					lastOrdinal: current[1],
 					pageOldestOrdinal: current[0],
+					nextBeforeOrdinal: current[0] > 1 ? current[0] : null,
 					hasMore: current[0] > 1,
 				},
 			);
@@ -1780,6 +1808,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
+			nextBeforeOrdinal: 201,
 			hasMore: true,
 		});
 		chat.isUserScrolledUp = true;
@@ -1839,6 +1868,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
+			nextBeforeOrdinal: 201,
 			hasMore: true,
 		});
 		chat.isUserScrolledUp = true;
@@ -1919,7 +1949,7 @@ describe('ActiveTranscriptState', () => {
 			assistantEntries(101, 300, (ordinal) =>
 				ordinal === 175 ? repeatedContent : `message-${ordinal}`,
 			),
-			{ lastOrdinal: 300, pageOldestOrdinal: 101, hasMore: true },
+			{ lastOrdinal: 300, pageOldestOrdinal: 101, nextBeforeOrdinal: 101, hasMore: true },
 		);
 		chat.isUserScrolledUp = true;
 		chat.revealAllLoadedMessages();
@@ -2031,7 +2061,7 @@ describe('ActiveTranscriptState', () => {
 			'chat-1',
 			'generation-1',
 			assistantEntries(101, 300, (ordinal) => `retained-${ordinal}`),
-			{ lastOrdinal: 300, pageOldestOrdinal: 101, hasMore: true },
+			{ lastOrdinal: 300, pageOldestOrdinal: 101, nextBeforeOrdinal: 101, hasMore: true },
 		);
 		chat.isUserScrolledUp = true;
 		chat.revealAllLoadedMessages();
@@ -2120,6 +2150,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
+			nextBeforeOrdinal: 201,
 			hasMore: true,
 		});
 		let resolveStalePage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -2202,6 +2233,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-old');
@@ -2242,6 +2274,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-1');
@@ -2273,6 +2306,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-old');
@@ -2307,6 +2341,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-1');
@@ -2346,7 +2381,7 @@ describe('ActiveTranscriptState', () => {
 			'chat-1',
 			'generation-2',
 			[entry(1, assistant('native'))],
-			{ lastOrdinal: 1, pageOldestOrdinal: 1, hasMore: false },
+			{ lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
 		);
 
 		expect(chat.optimisticUserInputs).toEqual([]);
@@ -2400,6 +2435,7 @@ describe('ActiveTranscriptState', () => {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 100,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		const chat = new ActiveTranscriptState(transcriptCache);
@@ -2421,6 +2457,7 @@ describe('ActiveTranscriptState', () => {
 			lastOrdinal: 200,
 			pageOldestOrdinal: 101,
 			pageNewestOrdinal: 200,
+			nextBeforeOrdinal: 101,
 			hasMore: true,
 		});
 		const chat = new ActiveTranscriptState(transcriptCache);
@@ -2441,6 +2478,7 @@ describe('ActiveTranscriptState', () => {
 			lastOrdinal: 30,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 30,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		const chat = new ActiveTranscriptState(transcriptCache);
@@ -2469,6 +2507,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 50,
+			nextBeforeOrdinal: 50,
 			hasMore: true,
 		});
 
@@ -2489,6 +2528,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastOrdinal: 175,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 
@@ -2515,6 +2555,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 200), {
 			lastOrdinal: 200,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		applyMessages(chat, 'chat-1', 'generation-1', assistantEntries(201, 300));
@@ -2551,6 +2592,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 200), {
 			lastOrdinal: 200,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		applyMessages(chat, 'chat-1', 'generation-1', assistantEntries(201, 300));
@@ -2586,7 +2628,7 @@ describe('ActiveTranscriptState', () => {
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 175 }, (_, index) => entry(index + 1, assistant(`old-${index + 1}`))),
-			{ lastOrdinal: 175, pageOldestOrdinal: 1, hasMore: false },
+			{ lastOrdinal: 175, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
 		);
 		chat.revealAllLoadedMessages();
 		const epoch = chat.beginSnapshotLoad();
@@ -2642,6 +2684,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastOrdinal: 175,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.revealAllLoadedMessages();
@@ -2681,6 +2724,7 @@ describe('ActiveTranscriptState', () => {
 					lastOrdinal: messageCount,
 					pageOldestOrdinal: messageCount === 0 ? 0 : 1,
 					pageNewestOrdinal: messageCount,
+					nextBeforeOrdinal: null,
 					hasMore: false,
 				},
 				epoch,
@@ -2716,6 +2760,7 @@ describe('ActiveTranscriptState', () => {
 				lastOrdinal: 100,
 				pageOldestOrdinal: 1,
 				pageNewestOrdinal: 100,
+				nextBeforeOrdinal: null,
 				hasMore: false,
 			},
 			epoch,
@@ -2732,7 +2777,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 5_995, assistant(`message-${index + 5_995}`)),
 			),
-			{ lastOrdinal: 6_044, pageOldestOrdinal: 5_995, hasMore: true },
+			{ lastOrdinal: 6_044, pageOldestOrdinal: 5_995, nextBeforeOrdinal: 5_995, hasMore: true },
 		);
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
 			chatId: 'chat-1',
@@ -2772,7 +2817,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 71, assistant(`message-${index + 71}`)),
 			),
-			{ lastOrdinal: 120, pageOldestOrdinal: 71, hasMore: true },
+			{ lastOrdinal: 120, pageOldestOrdinal: 71, nextBeforeOrdinal: 71, hasMore: true },
 		);
 		vi.mocked(getChatMessages)
 			.mockResolvedValueOnce({
@@ -2847,7 +2892,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		vi.mocked(getChatMessages)
 			.mockResolvedValueOnce({
@@ -2915,7 +2960,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		let resolveForwardPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages)
@@ -2970,7 +3015,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		vi.mocked(getChatMessages)
 			.mockResolvedValueOnce({
@@ -3019,7 +3064,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`latest-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		let resolveInitial!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages).mockReturnValueOnce(
@@ -3061,6 +3106,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		let resolveInitial!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -3100,6 +3146,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		let resolveInitial!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -3139,7 +3186,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`latest-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`initial-${index + 1}`)),
@@ -3190,7 +3237,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`latest-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`initial-${index + 1}`)),
@@ -3225,7 +3272,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
 			chatId: 'chat-1',
@@ -3284,7 +3331,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`latest-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`initial-${index + 1}`)),
@@ -3332,7 +3379,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`latest-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`initial-${index + 1}`)),
@@ -3430,7 +3477,7 @@ describe('ActiveTranscriptState', () => {
 				Array.from({ length: 50 }, (_, index) =>
 					entry(index + 51, assistant(`latest-${index + 51}`)),
 				),
-				{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+				{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 			);
 			chat.upsertOptimisticUserInput(optimisticInput());
 			chat.entries = Array.from({ length: 50 }, (_, index) =>
@@ -3474,6 +3521,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		let resolvePage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -3515,6 +3563,7 @@ describe('ActiveTranscriptState', () => {
 			lastOrdinal: 30,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 30,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		const chat = new ActiveTranscriptState(transcriptCache);
@@ -3524,7 +3573,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`chat-1-message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		let resolvePage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages).mockReturnValueOnce(
@@ -3564,7 +3613,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`chat-1-message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		let resolveOldPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		let resolveNewPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -3591,7 +3640,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`chat-2-message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		expect(chat.pageStates.earlier.status).toBe('idle');
 
@@ -3646,7 +3695,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`chat-1-message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		let resolveOldPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages)
@@ -3677,7 +3726,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`chat-2-message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 
 		await expect(chat.navigateToWindow('chat-2', 'initial')).resolves.toBe('loaded');
@@ -3717,6 +3766,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		let resolveOldPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -3738,12 +3788,14 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-2', 'generation-2', [entry(1, assistant('chat-2'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.activateChat('chat-1');
 		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		const newLoad = chat.loadEarlierPage('chat-1');
@@ -3796,7 +3848,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`generation-1-message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		let resolveOldPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		let resolveNewPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -3819,7 +3871,7 @@ describe('ActiveTranscriptState', () => {
 			Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`generation-2-message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, hasMore: true },
+			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
 		);
 		const newLoad = chat.loadEarlierPage('chat-1');
 
@@ -3872,6 +3924,7 @@ describe('ActiveTranscriptState', () => {
 		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
+			nextBeforeOrdinal: 51,
 			hasMore: true,
 		});
 		let resolveOldPage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
@@ -3952,7 +4005,7 @@ describe('ActiveTranscriptState', () => {
 			'chat-1',
 			'generation-1',
 			[entry(1, user('first')), entry(2, assistant('second')), entry(3, assistant('third'))],
-			{ lastOrdinal: 3, pageOldestOrdinal: 1, hasMore: false },
+			{ lastOrdinal: 3, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
 		);
 
 		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([2, 3]);
@@ -3971,7 +4024,7 @@ describe('ActiveTranscriptState', () => {
 			'chat-1',
 			'generation-1',
 			assistantEntries(1, 5),
-			{ lastOrdinal: 5, pageOldestOrdinal: 1, hasMore: false },
+			{ lastOrdinal: 5, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
 		);
 		applyMessages(chat, 'chat-1', 'generation-1', assistantEntries(6, 7));
 		expect(chat.entries.map((item) => item.ordinal)).toEqual([1, 2, 3, 4, 5, 6, 7]);

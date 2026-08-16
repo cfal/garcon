@@ -77,6 +77,7 @@ function expandedTranscriptState(): ActiveTranscriptState {
 	chat.replaceGeneration('chat-1', 'generation-1', messages(1, 200), {
 		lastOrdinal: 200,
 		pageOldestOrdinal: 1,
+		nextBeforeOrdinal: null,
 		hasMore: false,
 	});
 	chat.applyMessages('chat-1', 'generation-1', messages(201, 250), 201, 250);

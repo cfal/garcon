@@ -178,16 +178,26 @@ describe('TranscriptViewReader', () => {
       expect(newest).toMatchObject({
         transcriptViewId: 'view-1',
         lastOrdinal: 4,
-        pageOldestOrdinal: 3,
+        pageOldestOrdinal: 0,
+        pageNewestOrdinal: 4,
+        nextBeforeOrdinal: 4,
         hasMore: true,
       });
-      expect(newest.messages.map((entry) => [entry.ordinal, entry.message.content]))
-        .toEqual([[3, 'two']]);
+      expect(newest.messages).toEqual([]);
 
-      const older = await reader.page('chat-1', 1, newest.pageOldestOrdinal);
-      expect(older.messages.map((entry) => [entry.ordinal, entry.message.content]))
+      const assistantPage = await reader.page('chat-1', 1, newest.nextBeforeOrdinal);
+      expect(assistantPage.messages.map((entry) => [entry.ordinal, entry.message.content]))
+        .toEqual([[3, 'two']]);
+      expect(assistantPage.nextBeforeOrdinal).toBe(3);
+
+      const sessionPage = await reader.page('chat-1', 1, assistantPage.nextBeforeOrdinal);
+      expect(sessionPage.messages).toEqual([]);
+      expect(sessionPage.nextBeforeOrdinal).toBe(2);
+
+      const oldest = await reader.page('chat-1', 1, sessionPage.nextBeforeOrdinal);
+      expect(oldest.messages.map((entry) => [entry.ordinal, entry.message.content]))
         .toEqual([[1, 'one']]);
-      expect(older.hasMore).toBe(false);
+      expect(oldest.hasMore).toBe(false);
     });
   });
 

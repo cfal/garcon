@@ -102,6 +102,7 @@ describe('ConversationFeedProjectionState', () => {
 		transcript.replaceGeneration('chat-1', 'generation-1', deepEntries, {
 			lastOrdinal: initialCount,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		transcript.revealAllLoadedMessages();

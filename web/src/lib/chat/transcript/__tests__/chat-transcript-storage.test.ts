@@ -18,7 +18,7 @@ function entry(ordinal: number, content: string): TranscriptMessage {
 }
 
 function cursor(lastOrdinal = 1) {
-	return { transcriptViewId: 'generation-1', lastOrdinal };
+	return { transcriptViewId: 'generation-1', lastOrdinal, nextBeforeOrdinal: null };
 }
 
 function persist(storage: LocalChatTranscriptStorage, chatId: string, entries: TranscriptMessage[]) {
@@ -72,7 +72,7 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(storage.restore('chat-1')).toBeNull();
 		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
 
-		storage.persist('chat-2', [entry(1, 'hello')], { transcriptViewId: '', lastOrdinal: 1 });
+		storage.persist('chat-2', [entry(1, 'hello')], { transcriptViewId: '', nextBeforeOrdinal: null, lastOrdinal: 1 });
 		expect(storage.restore('chat-2')).toBeNull();
 	});
 
@@ -159,10 +159,11 @@ describe('LocalChatTranscriptStorage', () => {
 		const base = new Date('2024-06-01T00:00:00Z').getTime();
 
 		vi.setSystemTime(base);
-		storage.persist('chat-1', [entry(1, 'a')], { transcriptViewId: 'generation-1', lastOrdinal: 1 });
+		storage.persist('chat-1', [entry(1, 'a')], { transcriptViewId: 'generation-1', nextBeforeOrdinal: null, lastOrdinal: 1 });
 		vi.setSystemTime(base + 1000);
 		storage.persist('chat-2', [entry(1, 'b'), entry(2, 'c')], {
 			transcriptViewId: 'generation-2',
+			nextBeforeOrdinal: null,
 			lastOrdinal: 2,
 		});
 
@@ -178,10 +179,12 @@ describe('LocalChatTranscriptStorage', () => {
 	it('excludes stale transcripts from reconnect cursors', () => {
 		storage.persist('chat-1', [entry(1, 'a')], {
 			transcriptViewId: 'generation-1',
+			nextBeforeOrdinal: null,
 			lastOrdinal: 1,
 		});
 		storage.persist('chat-2', [entry(1, 'b')], {
 			transcriptViewId: 'generation-2',
+			nextBeforeOrdinal: null,
 			lastOrdinal: 1,
 		});
 		storage.markStale('chat-2');

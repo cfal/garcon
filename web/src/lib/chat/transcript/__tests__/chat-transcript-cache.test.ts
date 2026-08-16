@@ -24,6 +24,7 @@ function page(
 		lastOrdinal,
 		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
 		pageNewestOrdinal: lastOrdinal,
+		nextBeforeOrdinal: null,
 		hasMore: false,
 	};
 }
@@ -58,7 +59,7 @@ describe('ChatTranscriptCache', () => {
 
 	it('hydrates from storage when memory does not have an entry', () => {
 		const storage = new LocalChatTranscriptStorage();
-		storage.persist('chat-1', [entry(1, 'one')], { transcriptViewId: 'generation-1', lastOrdinal: 1 });
+		storage.persist('chat-1', [entry(1, 'one')], { transcriptViewId: 'generation-1', nextBeforeOrdinal: null, lastOrdinal: 1 });
 		const cache = new ChatTranscriptCache({ limit: 100, storage });
 
 		expect(cache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([1]);
@@ -164,6 +165,7 @@ describe('ChatTranscriptCache', () => {
 		const storage = new LocalChatTranscriptStorage();
 		storage.persist('persisted', [entry(1, 'persisted')], {
 			transcriptViewId: 'generation-persisted',
+			nextBeforeOrdinal: null,
 			lastOrdinal: 1,
 		});
 		const cache = new ChatTranscriptCache({ limit: 100, storage });
@@ -179,6 +181,7 @@ describe('ChatTranscriptCache', () => {
 		const storage = new LocalChatTranscriptStorage();
 		storage.persist('chat-1', [entry(1, 'persisted')], {
 			transcriptViewId: 'generation-1',
+			nextBeforeOrdinal: null,
 			lastOrdinal: 1,
 		});
 		const cache = new ChatTranscriptCache({ limit: 100, storage });
@@ -213,6 +216,7 @@ describe('ChatTranscriptCache', () => {
 		const storage = new LocalChatTranscriptStorage();
 		storage.persist('chat-1', [entry(1, 'persisted')], {
 			transcriptViewId: 'generation-1',
+			nextBeforeOrdinal: null,
 			lastOrdinal: 1,
 		});
 		const cache = new ChatTranscriptCache({ limit: 100, storage });

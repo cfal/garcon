@@ -32,6 +32,7 @@ describe('reloadChatFromNative', () => {
 			lastOrdinal: 4,
 			pageOldestOrdinal: 3,
 			pageNewestOrdinal: 4,
+			nextBeforeOrdinal: 3,
 			hasMore: true,
 			messages: [
 				{
@@ -51,6 +52,7 @@ describe('reloadChatFromNative', () => {
 			lastOrdinal: 4,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 2,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 			limit: 50,
 			resendCandidates: [],
@@ -70,12 +72,16 @@ describe('reloadChatFromNative', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-2', lastOrdinal: 4 });
 		expect(chat.oldestOrdinal).toBe(3);
 		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.nextBeforeOrdinal).toBe(3);
 		expect(chat.chatMessages[0]).toBeInstanceOf(AssistantMessage);
 		expect(chat.chatMessages.map((message) => (message as AssistantMessage).content)).toEqual([
 			'three',
 			'four',
 		]);
-		expect(chat.transcriptCache.get('chat-1')?.lastOrdinal).toBe(4);
+		expect(chat.transcriptCache.get('chat-1')).toMatchObject({
+			lastOrdinal: 4,
+			nextBeforeOrdinal: 3,
+		});
 
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
 
@@ -119,6 +125,7 @@ describe('reloadChatFromNative', () => {
 			lastOrdinal: 2,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 2,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 			messages: [
 				{
@@ -134,6 +141,7 @@ describe('reloadChatFromNative', () => {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 

@@ -451,11 +451,25 @@ describe('TranscriptLedgerStore', () => {
       rows: [provider('one'), provider('two'), provider('three'), provider('four'), provider('five')],
     });
 
-    const newest = store.page('chat-one', view.viewId, 2);
+    const query = Database.prototype.query;
+    const transcriptRowSelects = [];
+    Database.prototype.query = function (sql) {
+      if (/^\s*SELECT[\s\S]*\bFROM\s+transcript_rows\b/i.test(sql)) {
+        transcriptRowSelects.push(sql);
+      }
+      return query.call(this, sql);
+    };
+    let newest;
+    try {
+      newest = store.page('chat-one', view.viewId, 2);
+    } finally {
+      Database.prototype.query = query;
+    }
     const older = store.page('chat-one', view.viewId, 2, newest.nextBefore);
     const oldest = store.page('chat-one', view.viewId, 2, older.nextBefore);
 
     expect(newest.rows.map(renderedContent)).toEqual(['four', 'five']);
+    expect(transcriptRowSelects).toHaveLength(1);
     expect(older.rows.map(renderedContent)).toEqual(['two', 'three']);
     expect(oldest.rows.map(renderedContent)).toEqual(['one']);
     expect(oldest.nextBefore).toBeNull();

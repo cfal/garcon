@@ -36,6 +36,7 @@ function page(messages: TranscriptMessage[], transcriptViewId = 'generation-1') 
 		lastOrdinal: messages.at(-1)?.ordinal ?? 0,
 		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
 		pageNewestOrdinal: messages.at(-1)?.ordinal ?? 0,
+		nextBeforeOrdinal: null,
 		hasMore: false,
 		limit: 50,
 	};
@@ -51,6 +52,7 @@ describe('SplitPanePreviewStore', () => {
 		const storage = new LocalChatTranscriptStorage();
 		storage.persist('chat-1', [userEntry(1, 'hello')], {
 			transcriptViewId: 'generation-1',
+			nextBeforeOrdinal: null,
 			lastOrdinal: 1,
 		});
 		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });

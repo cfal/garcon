@@ -1053,6 +1053,7 @@ describe('ChatReconnectCoordinator', () => {
 				lastOrdinal: 2,
 				pageOldestOrdinal: 1,
 				pageNewestOrdinal: 2,
+				nextBeforeOrdinal: null,
 				hasMore: false,
 			},
 		);
@@ -1153,6 +1154,7 @@ describe('ChatReconnectCoordinator', () => {
 				lastOrdinal: 2,
 				pageOldestOrdinal: 1,
 				pageNewestOrdinal: 2,
+				nextBeforeOrdinal: null,
 				hasMore: false,
 			},
 		);
@@ -1209,7 +1211,7 @@ describe('ChatReconnectCoordinator', () => {
 			'chat-1',
 			'generation-reloaded',
 			[{ ordinal: 1, message: new AssistantMessage(TS, 'reloaded-one') }],
-			{ lastOrdinal: 1, pageOldestOrdinal: 1, pageNewestOrdinal: 1, hasMore: false },
+			{ lastOrdinal: 1, pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
 		);
 		liveMessages.enqueue(new ChatMessagesMessage(
 			'chat-1',

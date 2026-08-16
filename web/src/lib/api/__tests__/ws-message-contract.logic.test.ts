@@ -307,16 +307,18 @@ describe('parseServerWsMessage', () => {
 			clientRequestId: 'req-reload',
 			chatId: 'c-1',
 			transcriptViewId: 'generation-2',
-			messages: [chatViewMessage],
-			lastOrdinal: 1,
-			pageOldestOrdinal: 1,
-			pageNewestOrdinal: 1,
-			hasMore: false,
+			messages: [{ ...chatViewMessage, ordinal: 51 }],
+			lastOrdinal: 100,
+			pageOldestOrdinal: 51,
+			pageNewestOrdinal: 100,
+			nextBeforeOrdinal: 51,
+			hasMore: true,
 		});
 
 		expect(msg).toBeInstanceOf(ChatReloadedMessage);
 		expect((msg as ChatReloadedMessage).clientRequestId).toBe('req-reload');
 		expect((msg as ChatReloadedMessage).transcriptViewId).toBe('generation-2');
+		expect((msg as ChatReloadedMessage).nextBeforeOrdinal).toBe(51);
 	});
 
 	it.each([
@@ -335,6 +337,7 @@ describe('parseServerWsMessage', () => {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 			...patch,
 		})).toBeNull();

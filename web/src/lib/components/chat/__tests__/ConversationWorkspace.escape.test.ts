@@ -72,6 +72,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			lastOrdinal: 0,
 			pageOldestOrdinal: 0,
 			pageNewestOrdinal: 0,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 			limit: 50,
 			resendCandidates: [],

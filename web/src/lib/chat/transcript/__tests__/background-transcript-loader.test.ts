@@ -26,6 +26,7 @@ function page(
 		lastOrdinal,
 		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
 		pageNewestOrdinal: lastOrdinal,
+		nextBeforeOrdinal: null,
 		hasMore: false,
 		resendCandidates: [],
 		limit: 50,

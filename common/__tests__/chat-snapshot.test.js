@@ -66,7 +66,8 @@ function snapshot(overrides = {}) {
       lastOrdinal: 5,
       pageOldestOrdinal: 4,
       pageNewestOrdinal: 5,
-      hasMore: true,
+      nextBeforeOrdinal: null,
+      hasMore: false,
     },
     ...overrides,
   };
@@ -77,7 +78,12 @@ describe('chat snapshot contract', () => {
     expect(parseChatSnapshotResponse(snapshot())).toMatchObject({
       chat: { id: CHAT_ID, tags: ['cli', 'review'] },
       processingPhase: 'running',
-      transcript: { availability: 'available', lastOrdinal: 5 },
+      transcript: {
+        availability: 'available',
+        lastOrdinal: 5,
+        nextBeforeOrdinal: null,
+        hasMore: false,
+      },
     });
     expect(parseChatSnapshotResponse(snapshot({
       transcript: {
@@ -107,18 +113,24 @@ describe('chat snapshot contract', () => {
     expect(parseChatSnapshotResponse(snapshot({
       transcript: {
         availability: 'available',
-		transcriptViewId: 'view-2',
-		messages: [],
-		lastOrdinal: 42,
-		pageOldestOrdinal: 0,
-		pageNewestOrdinal: 42,
-        hasMore: false,
+        transcriptViewId: 'view-2',
+        messages: [],
+        lastOrdinal: 42,
+        pageOldestOrdinal: 0,
+        pageNewestOrdinal: 42,
+        nextBeforeOrdinal: 33,
+        hasMore: true,
       },
       transientFeed: {
         ...snapshot().transientFeed,
         transcriptViewId: 'view-2',
       },
-	})).transcript).toMatchObject({ lastOrdinal: 42, pageOldestOrdinal: 0, hasMore: false });
+    })).transcript).toMatchObject({
+      lastOrdinal: 42,
+      pageOldestOrdinal: 0,
+      nextBeforeOrdinal: 33,
+      hasMore: true,
+    });
   });
 
   test('requires transcript and transient state to share one transcript view', () => {

@@ -59,6 +59,7 @@
 			{
 				lastOrdinal: 1,
 				pageOldestOrdinal: 1,
+				nextBeforeOrdinal: null,
 				hasMore: false,
 			},
 		);
@@ -83,6 +84,7 @@
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastOrdinal: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		if (initialTranscriptScenario === 'loading-later') {
@@ -111,6 +113,7 @@
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastOrdinal: messages.length,
 			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chatState.revealAllLoadedMessages();
@@ -124,6 +127,7 @@
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastOrdinal: 120,
 			pageOldestOrdinal: 101,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chatState.revealAllLoadedMessages();

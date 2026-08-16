@@ -40,6 +40,7 @@ function setup(messages: TranscriptMessage[] = [entry(1, user('first'))]) {
 		lastOrdinal: messages.at(-1)?.ordinal ?? 0,
 		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
 		pageNewestOrdinal: messages.at(-1)?.ordinal ?? 0,
+		nextBeforeOrdinal: null,
 		hasMore: false,
 	});
 	let selectedChatId: string | null = 'chat-1';
@@ -228,6 +229,7 @@ describe('UserMessageNavigatorController', () => {
 			lastOrdinal: 0,
 			pageOldestOrdinal: 0,
 			pageNewestOrdinal: 0,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		controller.reconcileActiveTranscript('chat-1', 'generation-1');
