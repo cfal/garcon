@@ -1568,6 +1568,82 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 502 });
 	});
 
+	it('continues earlier paging from the retained prefix after a same-view snapshot', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+			lastOrdinal: 400,
+			pageOldestOrdinal: 201,
+			hasMore: true,
+		});
+		chat.isUserScrolledUp = true;
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: assistantEntries(151, 200, (ordinal) =>
+						ordinal === 175 ? 'same-text-different-ordinal' : `message-${ordinal}`,
+					),
+					lastOrdinal: 400,
+					pageOldestOrdinal: 151,
+					pageNewestOrdinal: 200,
+					hasMore: true,
+				}),
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: assistantEntries(101, 150, (ordinal) =>
+						ordinal === 125 ? 'same-text-different-ordinal' : `message-${ordinal}`,
+					),
+					lastOrdinal: 500,
+					pageOldestOrdinal: 101,
+					pageNewestOrdinal: 150,
+					hasMore: true,
+				}),
+			});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		chat.revealAllLoadedMessages();
+		const snapshotEpoch = chat.beginSnapshotLoad();
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-1',
+				messages: assistantEntries(301, 500),
+				lastOrdinal: 500,
+				pageOldestOrdinal: 301,
+				pageNewestOrdinal: 500,
+				hasMore: true,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+		expect(chat.oldestOrdinal).toBe(151);
+		expect(chat.hasEarlierMessages).toBe(true);
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		chat.revealAllLoadedMessages();
+		expect(vi.mocked(getChatMessages)).toHaveBeenNthCalledWith(2, {
+			chatId: 'chat-1',
+			beforeOrdinal: 151,
+			limit: 50,
+			transcriptViewId: 'generation-1',
+		});
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 400 }, (_, index) => index + 101),
+		);
+		expect(chat.entries.filter(
+			(message) => contentOf(message.message) === 'same-text-different-ordinal',
+		)).toEqual([
+			expect.objectContaining({ ordinal: 125 }),
+			expect.objectContaining({ ordinal: 175 }),
+		]);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:101', ordinal: 101 });
+		expect(chat.visibleRows.at(-1)).toMatchObject({ id: 'generation-1:500', ordinal: 500 });
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 500 });
+	});
+
 	it('retires an obsolete reconnect replay when a replacement snapshot installs', () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
