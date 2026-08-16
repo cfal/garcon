@@ -141,6 +141,8 @@ describe('reloadChatFromNative', () => {
 			'Unexpected chat reload response',
 		);
 		expect(chat.transcriptViewId).toBe('generation-1');
-		expect(chat.chatMessages.map((message) => message.content)).toEqual(['current']);
+		expect(chat.chatMessages).toEqual([
+			expect.objectContaining({ type: 'assistant-message', content: 'current' }),
+		]);
 	});
 });

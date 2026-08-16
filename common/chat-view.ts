@@ -23,6 +23,53 @@ export interface TranscriptPage {
   readonly hasMore: boolean;
 }
 
+export type TranscriptPageRelations = Pick<
+  TranscriptPage,
+  'messages' | 'lastOrdinal' | 'pageOldestOrdinal' | 'pageNewestOrdinal' | 'hasMore'
+>;
+
+export function isRelationallyValidTranscriptPage(page: TranscriptPageRelations): boolean {
+  if (
+    !Number.isSafeInteger(page.lastOrdinal)
+    || page.lastOrdinal < 0
+    || !Number.isSafeInteger(page.pageOldestOrdinal)
+    || page.pageOldestOrdinal < 0
+    || !Number.isSafeInteger(page.pageNewestOrdinal)
+    || page.pageNewestOrdinal < 0
+    || page.pageOldestOrdinal > page.pageNewestOrdinal
+    || page.pageNewestOrdinal > page.lastOrdinal
+    || typeof page.hasMore !== 'boolean'
+  ) return false;
+
+  if (page.messages.length === 0) {
+    return page.pageOldestOrdinal === 0 && !page.hasMore;
+  }
+  if (
+    page.pageOldestOrdinal === 0
+    || page.messages[0]?.ordinal !== page.pageOldestOrdinal
+    || (page.hasMore && page.pageOldestOrdinal === 1)
+  ) return false;
+
+  let previousOrdinal = 0;
+  for (const entry of page.messages) {
+    if (
+      !Number.isSafeInteger(entry.ordinal)
+      || entry.ordinal <= previousOrdinal
+      || entry.ordinal < page.pageOldestOrdinal
+      || entry.ordinal > page.pageNewestOrdinal
+    ) return false;
+    previousOrdinal = entry.ordinal;
+  }
+  return true;
+}
+
+export function isRelationallyValidNewestTranscriptPage(
+  page: TranscriptPageRelations,
+): boolean {
+  return page.pageNewestOrdinal === page.lastOrdinal
+    && isRelationallyValidTranscriptPage(page);
+}
+
 export type ChatHistoryState =
   | { readonly kind: 'complete' }
   | {

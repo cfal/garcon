@@ -16,6 +16,7 @@ import {
 import type { ApiProtocol } from '$shared/api-providers';
 import {
 	CHAT_MESSAGES_MAX_LIMIT,
+	isRelationallyValidTranscriptPage,
 	parseChatHistoryState,
 	parseResendCandidates,
 	parseTranscriptMessages,
@@ -389,7 +390,7 @@ type ChatMessagesRequest = {
 	chatId: string;
 	limit?: number;
 } & (
-	| { beforeOrdinal?: undefined; transcriptViewId?: never }
+	| { beforeOrdinal?: undefined; transcriptViewId?: string }
 	| { beforeOrdinal: number; transcriptViewId: string }
 );
 
@@ -415,38 +416,24 @@ function validateChatMessagesPage(
 	if (page.chatId !== request.chatId) invalidChatMessagesPage('chatId does not match request');
 	const expectedLimit = Math.min(request.limit ?? 50, CHAT_MESSAGES_MAX_LIMIT);
 	if (page.limit !== expectedLimit) invalidChatMessagesPage('limit does not match request');
+	if (
+		request.transcriptViewId !== undefined
+		&& page.transcriptViewId !== request.transcriptViewId
+	) {
+		invalidChatMessagesPage('transcriptViewId does not match request');
+	}
 	if (request.beforeOrdinal === undefined) {
 		if (page.pageNewestOrdinal !== page.lastOrdinal) {
 			invalidChatMessagesPage('newest page cursor does not match lastOrdinal');
 		}
 	} else {
-		if (page.transcriptViewId !== request.transcriptViewId) {
-			invalidChatMessagesPage('transcriptViewId does not match request');
-		}
 		if (page.pageNewestOrdinal !== request.beforeOrdinal - 1) {
 			invalidChatMessagesPage('pageNewestOrdinal does not precede beforeOrdinal');
 		}
 	}
-	if (page.pageNewestOrdinal > page.lastOrdinal) {
-		invalidChatMessagesPage('pageNewestOrdinal exceeds lastOrdinal');
-	}
-	if (page.pageOldestOrdinal > page.pageNewestOrdinal) {
-		invalidChatMessagesPage('pageOldestOrdinal exceeds pageNewestOrdinal');
-	}
 	if (page.messages.length > page.limit) invalidChatMessagesPage('messages exceed limit');
-	if (page.messages.length === 0) {
-		if (page.pageOldestOrdinal !== 0) invalidChatMessagesPage('empty page has an oldest ordinal');
-		if (page.hasMore) invalidChatMessagesPage('empty page claims earlier messages');
-		return;
-	}
-	if (page.pageOldestOrdinal === 0) invalidChatMessagesPage('nonempty page has no oldest ordinal');
-	if (page.messages[0]?.ordinal !== page.pageOldestOrdinal) {
-		invalidChatMessagesPage('first message does not match pageOldestOrdinal');
-	}
-	if (page.messages.some((message) => (
-		message.ordinal < page.pageOldestOrdinal || message.ordinal > page.pageNewestOrdinal
-	))) {
-		invalidChatMessagesPage('message ordinal is outside page bounds');
+	if (!isRelationallyValidTranscriptPage(page)) {
+		invalidChatMessagesPage('ordinal relations are inconsistent');
 	}
 }
 
@@ -457,6 +444,8 @@ export async function getChatMessages(params: ChatMessagesRequest): Promise<Chat
 	});
 	if (params.beforeOrdinal !== undefined) {
 		query.set('beforeOrdinal', String(params.beforeOrdinal));
+	}
+	if (params.transcriptViewId !== undefined) {
 		query.set('transcriptViewId', params.transcriptViewId);
 	}
 	const response = await apiGet<{

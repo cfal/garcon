@@ -521,7 +521,7 @@ export default function createChatRoutes({
 
       const page = await chatViews.page(chatId, limit, beforeOrdinal);
       if (
-        beforeOrdinal !== undefined
+        expectedTranscriptViewId
         && page.transcriptViewId !== expectedTranscriptViewId
       ) {
         return jsonError(

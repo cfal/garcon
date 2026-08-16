@@ -11,7 +11,11 @@ import {
   type ThinkingMode,
 } from './chat-modes.js';
 import type { ChatProcessingPhase } from './chat-types.js';
-import { parseTranscriptMessages, type TranscriptMessage } from './chat-view.js';
+import {
+  isRelationallyValidNewestTranscriptPage,
+  parseTranscriptMessages,
+  type TranscriptMessage,
+} from './chat-view.js';
 import {
   parseChatTransientFeedSnapshot,
   type ChatTransientFeedSnapshot,
@@ -211,7 +215,13 @@ function parseTranscript(value: unknown, messageLimit: number): ChatSnapshotTran
     'transcript.pageNewestOrdinal',
   );
   if (typeof raw.hasMore !== 'boolean') fail('transcript.hasMore is invalid');
-  if (messages.length > 0 && messages[messages.length - 1]!.ordinal > lastOrdinal) {
+  if (!isRelationallyValidNewestTranscriptPage({
+    messages,
+    lastOrdinal,
+    pageOldestOrdinal,
+    pageNewestOrdinal,
+    hasMore: raw.hasMore,
+  })) {
     fail('transcript ordinal metadata is inconsistent');
   }
   return {

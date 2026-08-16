@@ -1076,19 +1076,14 @@ describe('chats API contract', () => {
 			hasMore: false,
 			limit: 20,
 		};
-		const getViewQualifiedNewestPage = getChatMessages as unknown as (request: {
-			chatId: string;
-			limit: number;
-			transcriptViewId: string;
-		}) => ReturnType<typeof getChatMessages>;
 		const request = {
 			chatId: 'c-1',
 			limit: 20,
 			transcriptViewId: 'view-1',
-		};
+		} satisfies Parameters<typeof getChatMessages>[0];
 		fetchMock.mockResolvedValueOnce(jsonResponse(validPage));
 
-		await getViewQualifiedNewestPage(request);
+		await getChatMessages(request);
 
 		expect(fetchMock.mock.calls[0][0]).toBe(
 			'/api/v1/chats/messages?chatId=c-1&limit=20&transcriptViewId=view-1',
@@ -1097,7 +1092,7 @@ describe('chats API contract', () => {
 		fetchMock.mockResolvedValueOnce(
 			jsonResponse({ ...validPage, transcriptViewId: 'replacement-view' }),
 		);
-		await expect(getViewQualifiedNewestPage(request)).rejects.toThrow(
+		await expect(getChatMessages(request)).rejects.toThrow(
 			'transcriptViewId does not match request',
 		);
 	});

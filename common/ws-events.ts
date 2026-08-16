@@ -1,5 +1,9 @@
 import type { ResendCandidate, TranscriptMessage } from './chat-view';
-import { parseResendCandidates, parseTranscriptMessages } from './chat-view';
+import {
+  isRelationallyValidNewestTranscriptPage,
+  parseResendCandidates,
+  parseTranscriptMessages,
+} from './chat-view';
 import {
   parseChatTransientFeedMutation,
   parseChatTransientFeedSnapshot,
@@ -549,11 +553,20 @@ export function parseServerWsMessage(
         !transcriptViewId ||
         lastOrdinal === null ||
         pageOldestOrdinal === null ||
-        pageNewestOrdinal === null
+        pageNewestOrdinal === null ||
+        typeof data.hasMore !== 'boolean'
       )
         return null;
       const messages = parseTranscriptMessages(data.messages);
       if (messages === null) return null;
+      const page = {
+        messages,
+        lastOrdinal,
+        pageOldestOrdinal,
+        pageNewestOrdinal,
+        hasMore: data.hasMore,
+      };
+      if (!isRelationallyValidNewestTranscriptPage(page)) return null;
       return new ChatReloadedMessage(
         clientRequestId,
         chatId,
@@ -562,7 +575,7 @@ export function parseServerWsMessage(
         lastOrdinal,
         pageOldestOrdinal,
         pageNewestOrdinal,
-        Boolean(data.hasMore),
+        data.hasMore,
       );
     }
     case 'agent-run-finished': {
