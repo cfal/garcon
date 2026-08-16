@@ -375,7 +375,7 @@ async function revealEarlierRows(page: Page): Promise<{
   return { expandedModelCount, initialModelCount };
 }
 
-async function positionAtLoadedStart(page: Page): Promise<void> {
+async function positionAtLoadedStart(page: Page): Promise<number> {
   await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
     const feed = feedElement as HTMLElement;
     const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -384,6 +384,22 @@ async function positionAtLoadedStart(page: Page): Promise<void> {
     feed.dispatchEvent(new Event('scroll', { bubbles: true }));
     for (let index = 0; index < 6; index += 1) await frame();
   });
+  return page.locator(SIZER_SELECTOR).evaluate(async (sizerElement, feedSelector) => {
+    const sizer = sizerElement as HTMLElement;
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    let previous = -1;
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await frame();
+      const feed = document.querySelector<HTMLElement>(feedSelector);
+      const current = Number(sizer.dataset.chatVirtualModelCount ?? 0);
+      const idle = feed?.getAttribute('aria-busy') === 'false';
+      stableFrames = idle && current > 0 && current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 12) return current;
+    }
+    throw new Error('The loaded-start paging sequence did not settle.');
+  }, FEED_SELECTOR);
 }
 
 async function captureDetachedAnchor(page: Page): Promise<DetachedReplayAnchor> {
@@ -543,8 +559,8 @@ describe('Chromium reconnect transcript replay', () => {
       await fixture.page.waitForFunction(
         ({ selector, values }) => {
           const text = [...document.querySelectorAll<HTMLElement>(selector)]
-            .map((element) => element.textContent ?? '');
-          return values.every((value) => text.filter((entry) => entry.includes(value)).length === 1);
+            .map((element) => (element.textContent ?? '').trim());
+          return values.every((value) => text.filter((entry) => entry === value).length === 1);
         },
         { selector: MESSAGE_SELECTOR, values: expectedText },
       );
@@ -552,11 +568,11 @@ describe('Chromium reconnect transcript replay', () => {
         ({ selector, values }) => [...document.querySelectorAll<HTMLElement>(selector)]
           .map((element) => ({
             top: element.getBoundingClientRect().top,
-            text: element.textContent ?? '',
+            text: (element.textContent ?? '').trim(),
           }))
-          .filter((entry) => values.some((value) => entry.text.includes(value)))
+          .filter((entry) => values.includes(entry.text))
           .sort((left, right) => left.top - right.top)
-          .map((entry) => values.find((value) => entry.text.includes(value)) ?? null),
+          .map((entry) => entry.text),
         { selector: MESSAGE_SELECTOR, values: expectedText },
       );
       expect(mounted).toEqual(expectedText);
@@ -676,7 +692,8 @@ describe('Chromium reconnect transcript replay', () => {
       );
       const { expandedModelCount, initialModelCount } = await revealEarlierRows(fixture.page);
       expect(expandedModelCount).toBeGreaterThan(initialModelCount);
-      await positionAtLoadedStart(fixture.page);
+      const settledModelCount = await positionAtLoadedStart(fixture.page);
+      expect(settledModelCount).toBeGreaterThanOrEqual(expandedModelCount);
 
       const newestPage = await fixture.integration.client.getMessages(chatId, { limit: 50 });
       const anchor = await captureDetachedAnchor(fixture.page);
@@ -710,7 +727,7 @@ describe('Chromium reconnect transcript replay', () => {
       const retainedModelCount = await fixture.page.locator(SIZER_SELECTOR).evaluate(
         (sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0),
       );
-      expect(retainedModelCount).toBe(expandedModelCount);
+      expect(retainedModelCount).toBe(settledModelCount);
       const retainedAnchor = await captureDetachedAnchor(fixture.page);
       expect(retainedAnchor).toEqual(expect.objectContaining({
         key: anchor.key,
@@ -738,7 +755,8 @@ describe('Chromium reconnect transcript replay', () => {
       );
       const { expandedModelCount, initialModelCount } = await revealEarlierRows(fixture.page);
       expect(expandedModelCount).toBeGreaterThan(initialModelCount);
-      await positionAtLoadedStart(fixture.page);
+      const settledModelCount = await positionAtLoadedStart(fixture.page);
+      expect(settledModelCount).toBeGreaterThanOrEqual(expandedModelCount);
 
       const newestPage = await fixture.integration.client.getMessages(chatId, { limit: 50 });
       const anchor = await captureDetachedAnchor(fixture.page);
@@ -777,8 +795,8 @@ describe('Chromium reconnect transcript replay', () => {
       );
       expect(
         retainedModelCount,
-        JSON.stringify({ expandedModelCount, retainedModelCount }),
-      ).toBe(expandedModelCount + 2);
+        JSON.stringify({ settledModelCount, retainedModelCount }),
+      ).toBe(settledModelCount + 2);
       const frames = await finishDetachedReplaySampler(fixture.page);
       expectStableDetachedFrames(frames, anchor);
 
