@@ -5,8 +5,13 @@ function createEventStream() {
   const events = [];
   const waiters = [];
   let closed = false;
+  let signalEnded;
+  const ended = new Promise((resolve) => {
+    signalEnded = resolve;
+  });
 
   return {
+    ended,
     push(event) {
       events.push(event);
       for (const resolve of waiters.splice(0)) resolve();
@@ -16,13 +21,17 @@ function createEventStream() {
       for (const resolve of waiters.splice(0)) resolve();
     },
     async *stream() {
-      while (!closed || events.length > 0) {
-        const event = events.shift();
-        if (event) {
-          yield event;
-          continue;
+      try {
+        while (!closed || events.length > 0) {
+          const event = events.shift();
+          if (event) {
+            yield event;
+            continue;
+          }
+          await new Promise((resolve) => waiters.push(resolve));
         }
-        await new Promise((resolve) => waiters.push(resolve));
+      } finally {
+        signalEnded();
       }
     },
   };
@@ -101,4 +110,62 @@ it('waits for provider event delivery confirmation after server.connected', asyn
 
   listener.close();
   eventStream.close();
+});
+
+it('does not reject replacement-generation waiters when the old stream retires', async () => {
+  const oldStream = createEventStream();
+  const replacementStream = createEventStream();
+  const clients = [oldStream, replacementStream].map((eventStream) => ({
+    global: {
+      event: mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    },
+  }));
+  const listener = new OpenCodeGlobalEventListener({
+    requestTimeoutMs: 1_000,
+    heartbeatTimeoutMs: 1_000,
+    retryDelayMs: 1_000,
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    getClient: mock(() => Promise.resolve(clients.shift())),
+    isShuttingDown: () => false,
+    isTemporarilyUnavailable: () => false,
+    getUnavailableRetryAfterMs: () => 0,
+    markTemporarilyUnavailable: () => false,
+    failRunningTurns: mock(() => undefined),
+    closeUnavailableInstanceIfIdle: () => false,
+    confirmEventDelivery: mock(async () => undefined),
+    handleEvent: mock(() => undefined),
+  });
+
+  const firstStart = listener.start('/repo');
+  oldStream.push({
+    payload: { id: 'evt_old_connected', type: 'server.connected', properties: {} },
+  });
+  await firstStart;
+  listener.close();
+
+  const replacementStart = listener.start('/repo');
+  replacementStream.push({
+    payload: { id: 'evt_new_connected', type: 'server.connected', properties: {} },
+  });
+  await replacementStart;
+  const replacementWaiter = listener.waitForEvent(
+    (event) => event.type === 'test.replacement-barrier',
+  );
+
+  oldStream.close();
+  await oldStream.ended;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  replacementStream.push({
+    payload: {
+      id: 'evt_replacement_barrier',
+      type: 'test.replacement-barrier',
+      properties: {},
+    },
+  });
+
+  await expect(replacementWaiter).resolves.toMatchObject({
+    type: 'test.replacement-barrier',
+  });
+  listener.close();
+  replacementStream.close();
 });
