@@ -1218,6 +1218,107 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.finishReconnectReplay(replayToken, 'chat-1')).toBe('stale');
 	});
 
+	it('preserves live rows buffered before a same-view snapshot retires reconnect replay', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			hasMore: false,
+		});
+		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-1');
+		const snapshotEpoch = chat.beginSnapshotLoad();
+
+		expect(applyMessages(
+			chat,
+			'chat-1',
+			'generation-1',
+			[entry(2, assistant('live during snapshot'))],
+		)).toBe('applied');
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-1',
+				messages: [entry(1, assistant('initial'))],
+				lastOrdinal: 1,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+
+		expect(chat.chatMessages.map(contentOf)).toEqual(['initial', 'live during snapshot']);
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 2 });
+		expect(chat.finishReconnectReplay(replayToken, 'chat-1')).toBe('stale');
+	});
+
+	it('preserves replacement-view live rows buffered before its snapshot installs', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			hasMore: false,
+		});
+		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-old');
+		const snapshotEpoch = chat.beginSnapshotLoad();
+
+		expect(applyMessages(
+			chat,
+			'chat-1',
+			'generation-new',
+			[entry(2, assistant('replacement live'))],
+		)).toBe('applied');
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-new',
+				messages: [entry(1, assistant('replacement snapshot'))],
+				lastOrdinal: 1,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+
+		expect(chat.chatMessages.map(contentOf)).toEqual([
+			'replacement snapshot',
+			'replacement live',
+		]);
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-new', lastOrdinal: 2 });
+		expect(chat.finishReconnectReplay(replayToken, 'chat-1')).toBe('stale');
+	});
+
+	it('keeps reconnect replay active when a snapshot installation is stale', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			hasMore: false,
+		});
+		const replayToken = chat.beginReconnectReplay('chat-1', 'generation-1');
+		const staleSnapshotEpoch = chat.beginSnapshotLoad();
+		const currentSnapshotEpoch = chat.beginSnapshotLoad();
+
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-1',
+				messages: [entry(1, assistant('stale snapshot'))],
+				lastOrdinal: 1,
+			}),
+			staleSnapshotEpoch,
+		)).toBe('stale');
+		chat.abortSnapshotLoad(currentSnapshotEpoch);
+		expect(chat.applyReconnectReplayPage(
+			replayToken,
+			'chat-1',
+			'generation-1',
+			[entry(2, assistant('replayed'))],
+			2,
+			2,
+			[],
+		)).toBe('applied');
+		expect(chat.finishReconnectReplay(replayToken, 'chat-1')).toBe('applied');
+
+		expect(chat.chatMessages.map(contentOf)).toEqual(['initial', 'replayed']);
+		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 2 });
+	});
+
 	it('clears optimistic rows when a transcript view is replaced', () => {
 		const chat = new ActiveTranscriptState();
 		chat.upsertOptimisticUserInput(optimisticInput());
