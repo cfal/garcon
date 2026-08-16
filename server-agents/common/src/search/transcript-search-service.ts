@@ -46,7 +46,6 @@ export interface TranscriptSearchIndexInput {
 }
 
 export class TranscriptSearchService {
-  readonly #options: TranscriptSearchServiceOptions;
   readonly #searchDirectory: string;
   readonly #dbPath: string;
   readonly #indexer: SearchWorkerSupervisor<IndexerRequest, IndexerEvent>;
@@ -57,7 +56,6 @@ export class TranscriptSearchService {
   #resyncHandler: (() => void | Promise<void>) | null = null;
 
   constructor(options: TranscriptSearchServiceOptions) {
-    this.#options = options;
     this.#searchDirectory = path.join(options.workspaceDirectory, SEARCH_DIRECTORY);
     this.#dbPath = path.join(this.#searchDirectory, 'index.sqlite');
     const entrypoints = resolveSearchWorkerEntrypoints({

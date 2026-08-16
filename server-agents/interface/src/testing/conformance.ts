@@ -124,7 +124,6 @@ export async function runAgentIntegrationConformance(
     throw new Error(`Agent integration ${agentId} settings migration is not idempotent`);
   }
 
-  const signal = new AbortController().signal;
   let started = false;
   try {
     await integration.lifecycle.start();

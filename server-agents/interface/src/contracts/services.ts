@@ -20,7 +20,7 @@ import type {
   AgentResumeRequestV5,
 } from './execution-v5.js';
 import type { AgentMigrationStore } from './host.js';
-import type { AgentChatReference, AgentNativeSessionRef } from './transcript.js';
+import type { AgentNativeSessionRef } from './transcript.js';
 
 export interface AgentCatalog {
   snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<{
