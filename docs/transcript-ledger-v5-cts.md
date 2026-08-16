@@ -574,18 +574,17 @@ row, and asserts exact addresses and provider callbacks throughout.
 | TLV5-ADOPT.04 | Exact typed notice round trip and usable recorded-quarantine adoption.                                            | Covered             |
 | TLV5-ADOPT.05 | Frozen projection, model context, search, and preview matrix.                                                     | Covered             |
 | TLV5-ADOPT.06 | Reload preserves only the quarantine notice while dropping ordinary notices.                                     | Covered             |
-| TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and strict provider-source oracles are locked. | Intentional red |
-| TLV5-ADOPT.08 | Shared native-capability SACS, strict provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Intentional red |
+| TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and strict provider-source oracles are locked. | Covered |
+| TLV5-ADOPT.08 | Shared native-capability SACS, strict provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Covered |
 | TLV5-ADOPT.09 | Small-cap source discrimination, lossless server wiring, frozen ownership-boundary mapping, and multi-segment black-box order are locked. | Covered |
 | TLV5-ADOPT.10 | Source warning, propagated integration error with no source-bearing cause, route logging, and HTTP error surfaces are locked against transcript-content leakage. | Covered |
 | TLV5-ADOPT.11 | Direct relocation and Codex/Cursor source-selection ambiguity fail closed while true absence and repaired retry remain viable. | Covered |
 
-`ADOPT.07` and `ADOPT.08` are intentionally red only for malformed Claude and
-Codex content-part envelopes, including mixed recognized/malformed arrays, and
-for Amp empty part types alone or mixed with recognized text. The strict legacy
-and native boundaries preserve unknown nonempty typed parts, empty-string
-payloads, and explicit empty content arrays as valid-empty controls. Every
-other adoption family remains green.
+All adoption families are green. The strict legacy and native boundaries reject
+malformed Claude and Codex content-part envelopes, including mixed
+recognized/malformed arrays, and Amp empty part types alone or mixed with
+recognized text. Unknown nonempty typed parts, empty-string payloads, and
+explicit empty content arrays remain valid-empty controls.
 
 ## Read-Fold Matrix
 
