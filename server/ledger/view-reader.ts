@@ -6,6 +6,7 @@ import type {
 import { CHAT_MESSAGES_MAX_LIMIT } from '../../common/chat-view.js';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
+import { DomainError } from '../lib/domain-error.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import type { TranscriptViewId } from './contracts.js';
 import {
@@ -147,10 +148,19 @@ export class TranscriptViewReader {
   }> {
     const view = await this.#adoption.ensure(chatId, signal);
     signal.throwIfAborted();
-    const rows = this.#ledger.currentRows(chatId);
+    const watermark = this.#ledger.highWatermark(chatId);
+    if (watermark.viewId !== view.viewId) {
+      throw new DomainError(
+        'SOURCE_REVISION_CHANGED',
+        'Transcript view changed while capturing the snapshot',
+        409,
+        true,
+      );
+    }
+    const rows = this.#ledger.rowsThrough(chatId, watermark);
     return {
       transcriptViewId: view.viewId,
-      lastOrdinal: rows.at(-1)?.ordinal ?? 0,
+      lastOrdinal: watermark.ordinal,
       messages: ledgerRowsToMessages(rows),
     };
   }
