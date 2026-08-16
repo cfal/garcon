@@ -89,6 +89,7 @@ function fixture(overrides = {}) {
         lastOrdinal: 1,
         pageOldestOrdinal: 1,
         pageNewestOrdinal: 1,
+        nextBeforeOrdinal: null,
         hasMore: false,
       };
     }),

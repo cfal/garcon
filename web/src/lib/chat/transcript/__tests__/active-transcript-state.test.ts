@@ -3182,7 +3182,7 @@ describe('ActiveTranscriptState', () => {
 		await expect(initial).resolves.toBe('loaded');
 		expect(chat.hasLaterMessages).toBe(true);
 		expect(chat.lastOrdinal).toBe(101);
-		expect(chat.loadedThroughOrdinal).toBe(100);
+		expect(chat.loadedThroughOrdinal).toBe(50);
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 100 });
 		expect(chat.transcriptCache.get('chat-1')?.lastOrdinal).toBe(100);
 
