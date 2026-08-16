@@ -1,138 +1,194 @@
 # Server Agent Integrations
 
 `server-agents/` is the ownership boundary between Garcon core and the coding
-agents it hosts. Each agent is an isolated workspace package that exports one
-aggregate integration class. Garcon constructs one instance of that class and
-interacts with it only through `@garcon/server-agent-interface`.
-
-The aggregate may compose as many private services as it needs. The point is
-not to put an entire provider into one large class; it is to give provider code
-one typed boundary and one composition root.
+agents it hosts. Each shipped provider is an isolated workspace package that
+exports one aggregate integration class. Core constructs that class and uses it
+only through `@garcon/server-agent-interface`.
 
 ```text
-Garcon main -> runtime AgentIntegration <- server-agents/<id>
-Garcon search indexer Worker -> AgentTranscriptIndexerModule <- server-agents/<id>
+Garcon core -> AgentIntegration v5 -> server-agents/<id>
+provider operation -> captured publisher -> core sink -> per-chat ledger
+ledger suffix -> shared indexer Worker -> derived search database
 ```
+
+The aggregate is a composition root, not a requirement to put an entire
+provider in one class. Provider protocol, process, storage, and native-history
+code remain private behind its facets.
 
 ## Boundary Rules
 
-- Agent-specific runtime code, dependencies, storage formats, transcript
-  parsing, index-source behavior, and protocol translation belong in
-  `server-agents/<id>/`.
-- Provider packages must not import from `server/`. Garcon core must not import
-  provider implementation modules directly.
-- `server/agents/default-agent-integrations.ts` is the only production core
-  module that imports provider packages.
+- Agent-specific runtime code, dependencies, storage formats, native-history
+  parsing, and protocol translation belong in `server-agents/<id>/`.
+- Provider packages do not import from `server/`. Core imports provider
+  packages only from `server/agents/default-agent-integrations.ts`.
 - A provider package exports only its default integration class from `.`.
-  Runtime handles and implementation helpers stay private to the package.
-- Core code must not branch on provider IDs, inspect provider error strings, or
-  gain provider-named fields. Extend the interface or a shared typed contract
-  when core genuinely needs new agent-independent behavior.
-- Provider SDK clients and native transcript formats are private implementation
-  choices. The provider-neutral search service in `server-agents/common` owns
-  the single indexer Worker, reader Worker, shared SQLite schema, and ranking.
-- `server-agents/common` is a provider-neutral toolkit used by both packages
-  and core. It must not become a provider registry or a home for provider-ID
-  switches.
+  Runtime handles and implementation helpers remain private.
+- Core does not branch on provider IDs, inspect provider error strings, or add
+  provider-named fields. Provider-neutral capabilities are explicit facets.
+- `server-agents/common` contains provider-neutral adapters and the shared
+  transcript-search implementation. It is not a provider registry.
+- The core-owned per-chat ledger is the only serving authority. Native history
+  is read in full only for genesis adoption and explicit manual reload.
+- The workspace search database is derived from ledger rows. Providers do not
+  expose transcript index sources or live search hints.
 
-This release uses static source-time registration. Adding a directory does not
-dynamically install a plugin at runtime; a shipped integration must also be a
-server dependency and be registered in the default composition module.
+Shipped providers use static source-time registration. Adding a package does
+not install it dynamically at runtime.
 
 ## Directory Roles
 
 | Path | Responsibility |
 | --- | --- |
-| `server-agents/interface` | Pure server-side contracts, typed errors, native-session references, and conformance helpers. It has no provider or runtime implementation dependencies. |
-| `server-agents/common` | Reusable provider-neutral adapters and the shared transcript-search service, Workers, schema, and query implementation. |
-| `server-agents/<id>` | One agent's package, dependencies, entrypoint, tests, private persistence, and build contributions. |
-| `server/agents/default-agent-integrations.ts` | The single core composition point for integrations distributed with Garcon. |
+| `server-agents/interface` | Pure server-side contracts, typed errors, native-session references, and conformance helpers. |
+| `server-agents/common` | Reusable adapters plus the fixed transcript indexer/reader Worker pair, schema, and query implementation. |
+| `server-agents/<id>` | One provider's dependencies, entrypoint, protocol code, private storage, tests, and build contributions. |
+| `server/agents/default-agent-integrations.ts` | The single core composition point for distributed integrations. |
+| `server/ledger` | The provider-neutral, append-only transcript serving authority. |
 
 ## Integration Contract
 
-The package's default export implements `AgentIntegration` and has this class
-shape:
+The default export implements `AgentIntegration`. Its class identity is stable
+persisted data:
 
 ```ts
 import type {
   AgentHost,
   AgentIntegration,
 } from '@garcon/server-agent-interface';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 
 export default class ExampleAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'example';
-  static readonly apiVersion = 3 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 1,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: 'example',
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
+  static readonly apiVersion = 5 as const;
+
+  readonly descriptor = EXAMPLE_DESCRIPTOR;
+  readonly attachments = null;
+  readonly execution;
+  readonly catalog;
+  readonly settings;
+  readonly lifecycle;
+  readonly migration;
+  readonly auth = null;
+  readonly commands = null;
+  readonly compaction = null;
+  readonly forking = null;
+  readonly steering = null;
+  readonly goals = null;
+  readonly endpoints = null;
+  readonly singleQuery = null;
+  readonly nativeHistoryImport = null;
+  readonly nativeActivity = null;
+  readonly nativeSessions = null;
+  readonly sessionConfiguration = null;
+  readonly projectPathUpdates = null;
 
   constructor(host: AgentHost) {
-    // Required and nullable facet properties are omitted below for brevity.
-    // The constructor composes their private implementations.
+    this.execution = createExecution(host);
+    this.catalog = createCatalog(host);
+    this.settings = createSettings();
+    this.lifecycle = createLifecycle(host);
+    this.migration = createMigration(this.settings);
   }
 }
 ```
 
 `static integrationId`, `descriptor.id`, settings `ownerId`, native-session
-`ownerId`, package metadata, and the registration ID must all agree. Treat the
-ID as stable persisted data and use lowercase letters, digits, and hyphens.
+`ownerId`, build metadata, and the registration ID must agree. IDs use
+lowercase letters, digits, and hyphens.
 
-Every property exists on the aggregate. Required facets are:
+Required service facets are `descriptor`, `execution`, `catalog`, `settings`,
+`lifecycle`, and `migration`. Every capability property also exists and uses
+`null` when unavailable:
 
 | Facet | Responsibility |
 | --- | --- |
-| `descriptor` | User-visible identity and declared capabilities, endpoint protocols, and environment configuration. |
-| `execution` | Starts, resumes, aborts, and observes sessions; emits normalized execution events. |
-| `transcript` | Resolves native sessions, loads history, describes the user-visible source, resolves opaque index-source references, and releases transcript data. |
-| `catalog` | Reports models, defaults, availability, and generation metadata. |
-| `settings` | Describes, validates, patches, and migrates the integration's versioned settings envelope. |
-| `lifecycle` | Starts and stops private resources and migrates integration-owned storage. |
-| `migration` | Translates legacy native-session and settings records during core-managed migrations. |
+| `attachments` | Declares accepted attachment media types. |
+| `auth` | Reports authentication and, where supported, owns login. |
+| `commands` | Discovers provider slash commands. |
+| `compaction` | Performs provider-native in-place compaction. |
+| `forking` | Creates provider-native transcript forks. |
+| `steering` | Captures and delivers same-turn input to an exact active target. |
+| `goals` | Delivers provider-specific goal control. |
+| `endpoints` | Validates API-provider endpoint selections. |
+| `singleQuery` | Runs bounded one-shot work outside a chat execution. |
+| `nativeHistoryImport` | Imports native history for adoption and manual reload. |
+| `nativeActivity` | Performs a bounded advisory native drift probe. |
+| `nativeSessions` | Resolves, describes, and releases provider-native session references. |
+| `sessionConfiguration` | Applies supported configuration changes to an existing session. |
+| `projectPathUpdates` | Prepares a transactional project-path change. |
 
-Optional capabilities are still explicit properties and use `null` when they
-are not supported: `auth`, `commands`, `forking`, `steering`, `goals`,
-`endpoints`, and `singleQuery`. Optional methods inside a required facet may be omitted when the
-interface allows it.
+The interface files are the authority. Existing integrations are examples,
+not additional contracts.
 
-The runtime integration API is version 3. The independent `garconBuild.apiVersion`
-package metadata contract remains version 2.
+## Transcript Publication
 
-Read the contracts in `server-agents/interface/src/contracts/` before choosing
-an implementation shape. The interface is the authority; existing packages
-are examples, not additional contracts.
+`AgentExecutionV5.start()` and `resume()` receive a core-owned producer sink.
+The common adapter constructs a publisher that closes over that sink. A
+provider captures the publisher on the concrete request, turn, or callback
+that can emit events; it never resolves a publisher from current chat,
+session, run, or mutable metadata when an event arrives.
+
+Process-wide streams demultiplex only by immutable provider operation identity.
+An event without that identity is logged and dropped. A route remains valid
+until its provider event source retires; a Garcon run terminal is not source
+retirement, and late named content remains valid while the sink is open.
+
+The producer surface is deliberately small:
+
+- `rows` carries ordered normalized messages and optional private
+  `providerMeta`. Content rows have no `runId`.
+- `session` establishes the current provider-native session and has no
+  `runId`.
+- `permission` carries `runId`, request ID, incarnation, and, for a request,
+  an ephemeral response capability for that exact occurrence.
+- `run-ended` carries `runId`, outcome, and an optional sanitized failure.
+
+The sink commits synchronously. Providers absorb a closed or fenced sink
+rejection at their event-dispatch boundary so one chat cannot fail a shared
+provider stream. Do not add content, timestamp, token, or fuzzy deduplication.
+Provider stream redelivery may be deduplicated only by a real immutable
+provider-issued identity inside the owning integration.
+
+Known tool uses are normalized inside the provider package to explicit types
+in `common/chat-types.ts`. The browser never infers known behavior from a raw
+provider tool name.
+
+## Native History and Search
+
+`nativeHistoryImport` is nullable. When present, it performs the full native
+read used by first-open adoption, native-fidelity fork seeding, or explicit
+reload. Ordinary serving, paging, resume, interruption, and search read the
+core ledger instead.
+`nativeActivity` is bounded, advisory, and never delays serving or dispatch.
+
+Transcript search is provider-neutral. Core projects committed ledger suffixes
+and sends them to the fixed indexer Worker; the reader Worker queries the
+separate, rebuildable workspace SQLite database. View replacement performs an
+explicit replacement. Providers do not own search Workers, index schemas,
+source references, or query behavior.
+
+Native-session values are opaque, versioned provider data. SDK clients,
+process handles, publishers, and permission capabilities never cross that
+durable boundary.
 
 ## Host Capabilities
 
-The constructor receives a narrow `AgentHost` scoped to the integration:
+The constructor receives an `AgentHost` scoped to the integration:
 
 | Capability | Use |
 | --- | --- |
-| `logger` | Emits structured logs tagged with the agent identity. |
-| `storage` | Allocates integration-owned directories. Store private durable data only below this root. |
-| `environment` | Reads only names declared in `descriptor.configuration`; undeclared reads fail. |
+| `logger` | Emits structured logs tagged with agent identity. Never log transcript content. |
+| `storage` | Allocates integration-owned directories and claims released legacy storage during migration. |
+| `environment` | Reads only variables declared by the descriptor. |
 | `apiProviders` | Resolves endpoint credentials without exposing core credential storage. |
-| `carryOver` | Loads the core-owned transcript prefix for chats transferred between agents. |
 
-Environment configuration is bound from the descriptor after construction.
-Declare every name the integration reads and defer reads until lifecycle or
-operation methods; constructor-time environment reads are rejected.
+Declare environment names in the descriptor and defer reads until lifecycle or
+operation methods. Constructor-time environment reads are rejected by the
+conformance suite.
 
-If an implementation needs a new capability, first decide whether it is truly
-agent independent. Do not import a core store, route, singleton, or filesystem
-path to bypass the host. Add a narrow interface capability only when multiple
-integrations can use the same provider-neutral contract.
+## Package and Build Metadata
 
-## Package Setup
-
-Create `server-agents/<id>/package.json`, `tsconfig.json`, and `src/index.ts`.
-The package name is `@garcon/server-agent-<id>`, while the directory remains
-`server-agents/<id>`.
+Each provider package contains `package.json`, `tsconfig.json`, and
+`src/index.ts`. Its package name is `@garcon/server-agent-<id>`.
 
 ```json
 {
@@ -147,120 +203,49 @@ The package name is `@garcon/server-agent-<id>`, while the directory remains
     "@garcon/server-agent-common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*"
   },
-  "devDependencies": {
-    "@types/bun": "^1.3.14",
-    "typescript": "^6.0.3"
-  },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "example",
-    "standaloneEntrypoints": {
-      "transcript-index-source": "./src/transcript-index-source.ts"
-    },
+    "standaloneEntrypoints": {},
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }
 }
 ```
 
-Declare every provider SDK, CLI wrapper, parser, and native dependency in this
-package rather than in `server/package.json`. Add
-`@garcon/server-agent-common` supplies the compiled-entrypoint resolver and
-provider-neutral helpers. Root workspaces already include `server-agents/*`;
-run `bun install` after adding or changing workspace dependencies.
+`garconBuild` describes compile-time contributions, not runtime facets.
+Standalone entrypoints are separately bundled files such as a provider plugin;
+they are present only when the provider actually needs one. Paths are
+package-relative, begin with `./`, and remain inside the package.
 
-`garconBuild` describes compile-time contributions without making them runtime
-facets:
+Provider SDKs, CLI wrappers, parsers, and native dependencies belong to the
+provider package. Run `bun install` after changing workspace dependencies.
 
-- `standaloneEntrypoints` maps stable names to package-relative files compiled
-  separately. `transcript-index-source` is required.
-- `preMainModules` contains package-relative modules prepared before the main
-  executable build.
-- `embeddedDependencyMetadata` contains dependency `package.json` specifiers
-  needed by the compiled runtime. The dependency must be declared by the agent
-  package.
+## Registration and Validation
 
-Use empty arrays for the two optional list fields. Paths must begin with `./`,
-exist inside the package, and match the package's real build needs.
+To distribute an integration:
 
-## Behavioral Requirements
+- Add its workspace dependency to `server/package.json`.
+- Register its default class in `server/agents/default-agent-integrations.ts`.
+- Update the expected ordered IDs in the default-integration test.
+- Add unit coverage beside the provider and black-box coverage whenever
+  correctness crosses process, persistence, HTTP, WebSocket, permission,
+  reload, fork, handoff, or deletion boundaries.
 
-Execution must preserve the `AgentOperationIdentityV4` supplied by core on every
-emitted event. Respect the request `AbortSignal` and the admission transitions;
-do not make a session externally abortable before the provider runtime can
-actually stop it. Normalize provider failures to `AgentIntegrationError` and
-provider output to the shared `ChatMessage` contract before either crosses the
-boundary.
+Do not add another provider registry, search switch, endpoint switch, or
+build-script provider special case. Build contributions come from package
+metadata and runtime behavior comes through the registered aggregate.
 
-Transcript support is mandatory. Integrations with durable provider-native
-history may read it directly. Integrations without it must durably persist a
-canonical normalized transcript in their own storage so history, restart,
-forking, and search do not depend on live process memory. Native-session values
-are opaque, versioned, integration-owned references; no SDK client or process
-handle may escape through them. `release` must clean up private source data on
-chat deletion or transfer even when transcript search is disabled.
-
-Transcript search is mandatory, but providers do not implement querying or own
-an index. The runtime transcript facet returns an opaque, credential-free
-`AgentTranscriptIndexSourceRef`. The separate `transcript-index-source.ts`
-module is loaded only inside the shared indexer Worker, validates that reference,
-probes the authoritative source, and yields bounded canonical `ChatMessage`
-batches. It must not read carry-over, write SQLite, rank results, or start its
-own Worker. Expected failures use `AgentTranscriptIndexError` with a sanitized
-code and explicit retry and refresh policy.
-
-Only durable provider history is indexed. Live messages never cross the search
-boundary; live events are payload-free dirty hints. Garcon streams its own
-carry-over history separately. File-backed readers must ignore incomplete
-trailing JSONL records and attach native source coordinates where available.
-
-Settings use `AgentSettingsEnvelope` with the integration ID as `ownerId` and
-a positive `schemaVersion`. Defaults must be described, parsing must validate
-untrusted persisted input, and migrations must be idempotent. Lifecycle
-`start()` and `stop()` are also idempotent because conformance tests call each
-twice.
-
-Known tool-use messages must be translated inside the integration package to
-the canonical types in `common/chat-types.ts`. Generic tools use shared types;
-provider-only tools receive an explicit provider-prefixed shared type. Never
-make the client infer known behavior from a raw provider tool name or
-`unknown-tool-use`.
-
-## Registration
-
-To distribute an integration with Garcon:
-
-- Add `@garcon/server-agent-<id>: "workspace:*"` to
-  `server/package.json`.
-- Import the default class and add it to `defaultAgentIntegrations` in
-  `server/agents/default-agent-integrations.ts`.
-- Update the expected ordered ID list in
-  `server/agents/__tests__/default-agent-integrations.test.js`.
-
-Do not add another provider registry, endpoint switch, model map, migration
-switch, search switch, or build-script special case. Architecture checks derive
-the provider set from package metadata. Build contributions are discovered from
-that metadata, and runtime behavior is reached through the registered aggregate.
-
-## Validation
-
-Add focused unit tests beside the package implementation. Once registered, the
-integration is included in
-`server/agents/__tests__/default-integration-conformance.test.js`, which checks
-the required facets, IDs, settings, lifecycle idempotence, and index-source
-module contract. Add black-box tests under `integration-tests/tests/server` whenever
-correctness crosses HTTP, WebSocket, persistence, restart, provider failure,
-fork, transfer, or deletion boundaries.
-
-Before merging an integration, run:
+Run the provider's strongest non-live tier. Claude, Codex, OpenCode, and Pi
+have scripted real-binary coverage; Cursor remains unit-only by policy. The
+repository gate is:
 
 ```sh
 bun run typecheck
+bun run check
 bun run test
 bun run test:integration:server
 ```
 
-Also start Garcon with `bun run start --port 0` under a bounded timeout. Run
-`bun run build-exe` when the integration adds runtime dependencies or build
-contributions, and exercise any affected browser workflow when client-visible
-behavior changes.
+Also run the applicable browser suites, build, and a bounded
+`bun run start --port 0` startup check before release.
