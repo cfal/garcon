@@ -3,6 +3,7 @@ import { appendFile, chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT } from '../../../common/chat-snapshot.js';
+import type { TranscriptMessage } from '../../../common/chat-view.js';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type {
   GetSharedChatResponse,
@@ -21,7 +22,10 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
-import { reloadFromNativeHistory } from '../../support/live-agent.js';
+import {
+  reloadFromNativeHistory,
+  reloadUntilNativeContains,
+} from '../../support/live-agent.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 const HELD_PROMPT = 'native-reload-held-turn';
@@ -372,6 +376,125 @@ describe('native transcript reload', () => {
       },
     });
   }, 30_000);
+
+  test('[TLV5-A13-SERVER-HANDOFF-01] never imports old-owner native activity after handoff', async () => {
+    const environment: Record<string, string> = {};
+    const sourcePrompt = `frozen-source-${crypto.randomUUID()}`;
+    const directPrompt = `middle-owner-${crypto.randomUUID()}`;
+    const currentPrompt = `current-source-${crypto.randomUUID()}`;
+    const staleSourceReply = `stale-source-${crypto.randomUUID()}`;
+
+    await withIntegrationFixture('native-activity-after-handoff', async (fixture) => {
+      const catalog = await fixture.client.listAgentCatalog();
+      const claude = catalog.agents.find((agent) => agent.id === 'claude');
+      if (!claude) throw new Error('Claude integration is required for handoff isolation.');
+
+      const chatId = fixture.newChatId();
+      const source = await fixture.client.startChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        agentId: claude.id,
+        projectPath: fixture.dirs.project,
+        model: claude.defaultModel,
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        agentSettings: claude.defaultSettings,
+        command: sourcePrompt,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, source.turnId);
+      const sourceNative = await claudeNativeSession(fixture.dirs, chatId);
+      const sourceChat = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === chatId,
+      );
+      if (!sourceChat) throw new Error('Source chat disappeared before handoff.');
+
+      const direct = await fixture.client.handoffDirectChat({
+        chatId,
+        content: directPrompt,
+        agent: fixture.directAgents.openAi,
+        expectedAgentOwnershipEpoch: sourceChat.agentOwnershipEpoch,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, direct.turnId);
+
+      await appendFile(sourceNative.path, `${JSON.stringify({
+        sessionId: sourceNative.agentSessionId,
+        type: 'assistant',
+        uuid: crypto.randomUUID(),
+        timestamp: new Date(Date.now() + 60_000).toISOString(),
+        cwd: fixture.dirs.project,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: staleSourceReply }],
+        },
+      })}\n`, 'utf8');
+
+      const directChat = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === chatId,
+      );
+      if (!directChat) throw new Error('Direct chat disappeared before returning to Claude.');
+      const current = await fixture.client.runChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        command: currentPrompt,
+        handoff: {
+          expectedAgentOwnershipEpoch: directChat.agentOwnershipEpoch,
+          target: {
+            agentId: claude.id,
+            model: claude.defaultModel,
+            permissionMode: 'default',
+            thinkingMode: 'none',
+            agentSettings: claude.defaultSettings,
+          },
+        },
+      });
+      await fixture.client.waitForTurnTerminal(chatId, current.turnId);
+      const currentNative = await claudeNativeSession(fixture.dirs, chatId);
+      expect(currentNative.path).not.toBe(sourceNative.path);
+      const live = await fixture.client.getMessages(chatId);
+      const currentReply = assistantContents(live.messages).at(-1);
+      if (!currentReply?.includes(currentPrompt)) {
+        throw new Error('Current Claude session did not render its handoff reply.');
+      }
+      await reloadUntilNativeContains(fixture, chatId, currentPrompt);
+      const settled = await fixture.client.getMessages(chatId);
+      const settledRows = conversationRows(settled.messages);
+      expect(settledRows).toEqual([
+        { type: 'user-message', content: sourcePrompt },
+        { type: 'assistant-message', content: `echo:${sourcePrompt}` },
+        { type: 'agent-switch', content: null },
+        { type: 'user-message', content: directPrompt },
+        { type: 'assistant-message', content: `echo:${directPrompt}` },
+        { type: 'agent-switch', content: null },
+        { type: 'user-message', content: currentPrompt },
+        { type: 'assistant-message', content: currentReply },
+      ]);
+
+      await reloadFromNativeHistory(fixture, chatId);
+      const reloaded = await fixture.client.getMessages(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(settled.transcriptViewId);
+      expect(conversationRows(reloaded.messages)).toEqual(settledRows);
+      expect(assistantContents(reloaded.messages)).not.toContain(staleSourceReply);
+      expect(messagesOfType(reloaded.messages, 'agent-switch')).toHaveLength(2);
+    }, {
+      serverEnvironment: environment,
+      async prepareWorkspace(directories) {
+        const fakeModule = fileURLToPath(
+          new URL('../../support/fake-claude-cli.ts', import.meta.url),
+        );
+        const binaryPath = join(directories.root, 'claude');
+        await writeFile(
+          binaryPath,
+          `#!${process.execPath}\nimport ${JSON.stringify(pathToFileURL(fakeModule).href)};\n`,
+        );
+        await chmod(binaryPath, 0o755);
+        environment.CLAUDE_BINARY = binaryPath;
+        environment.CLAUDE_CONFIG_DIR = join(directories.home, '.claude-integration');
+        environment.ANTHROPIC_API_KEY = 'integration-fake-claude-key';
+      },
+    });
+  }, 120_000);
 });
 
 async function claudeNativeSession(
@@ -409,4 +532,11 @@ async function waitForAssistantContent(
     await Bun.sleep(25);
   }
   throw new Error(`Chat ${chatId} never rendered assistant content ${content}.`);
+}
+
+function conversationRows(messages: readonly TranscriptMessage[]) {
+  return messages.map(({ message }) => ({
+    type: message.type,
+    content: 'content' in message ? message.content : null,
+  }));
 }
