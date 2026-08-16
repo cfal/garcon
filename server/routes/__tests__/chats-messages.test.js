@@ -170,7 +170,7 @@ describe('GET /api/v1/chats/messages', () => {
       resendCandidates: [{ ordinal: 11, content: 'Try again', attachmentNames: [] }],
       limit: 200,
     });
-    expect(chatViews.page).toHaveBeenCalledWith(CHAT_ID, 200, 10);
+    expect(chatViews.page).toHaveBeenCalledWith(CHAT_ID, 200, 10, 'view-1');
     expect(agents.resendCandidates).toHaveBeenCalledWith(CHAT_ID);
   });
 

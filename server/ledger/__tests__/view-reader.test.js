@@ -49,6 +49,29 @@ describe('TranscriptViewReader', () => {
     });
   });
 
+  it('rejects a stale expected view before reading its watermark or rows', async () => {
+    const currentView = {
+      viewId: transcriptViewId('view-2'),
+      status: 'current',
+      createdAt: TS,
+      contentStartOrdinal: 1,
+    };
+    const ledger = {
+      highWatermark() {
+        throw new Error('stale pages must not read a watermark');
+      },
+      page() {
+        throw new Error('stale pages must not scan rows');
+      },
+    };
+    const reader = new TranscriptViewReader(ledger, {
+      ensure: async () => currentView,
+    });
+
+    await expect(reader.page('chat-1', 20, 10, 'view-1'))
+      .rejects.toBeInstanceOf(StaleTranscriptViewError);
+  });
+
   it('[TLV5-REPLAY.04-CORE-UNIT-01] replays the complete committed ordinal range even when no row renders', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       const lease = ledger.openProducer('chat-1', 'test');

@@ -35,10 +35,17 @@ export class TranscriptViewReader {
     chatId: string,
     limit: number,
     beforeOrdinal?: number,
+    expectedTranscriptViewId?: string,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<PresentedTranscriptPage> {
     try {
-      return await this.#page(chatId, limit, beforeOrdinal, signal);
+      return await this.#page(
+        chatId,
+        limit,
+        beforeOrdinal,
+        expectedTranscriptViewId,
+        signal,
+      );
     } catch (error) {
       if (error instanceof LedgerFencedError) {
         throw new TranscriptHistoryUnavailableError({
@@ -55,10 +62,14 @@ export class TranscriptViewReader {
     chatId: string,
     limit: number,
     beforeOrdinal: number | undefined,
+    expectedTranscriptViewId: string | undefined,
     signal: AbortSignal,
   ): Promise<PresentedTranscriptPage> {
     validatePageRequest(limit, beforeOrdinal);
     const view = await this.#adoption.ensure(chatId, signal);
+    if (expectedTranscriptViewId && view.viewId !== expectedTranscriptViewId) {
+      throw new StaleTranscriptViewError(chatId, expectedTranscriptViewId, view.viewId);
+    }
     const highWatermark = this.#ledger.highWatermark(chatId).ordinal;
     let before = beforeOrdinal === undefined
       ? highWatermark + 1

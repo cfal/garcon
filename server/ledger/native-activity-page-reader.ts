@@ -8,8 +8,13 @@ export class NativeActivityPageReader implements TranscriptPageReader {
     private readonly nativeActivity: Pick<NativeTranscriptActivityService, 'requestCheck'>,
   ) {}
 
-  page(chatId: string, limit: number, beforeOrdinal?: number): Promise<TranscriptPage> {
-    const page = this.pages.page(chatId, limit, beforeOrdinal);
+  page(
+    chatId: string,
+    limit: number,
+    beforeOrdinal?: number,
+    expectedTranscriptViewId?: string,
+  ): Promise<TranscriptPage> {
+    const page = this.pages.page(chatId, limit, beforeOrdinal, expectedTranscriptViewId);
     if (beforeOrdinal === undefined) {
       void page.then(() => {
         queueMicrotask(() => this.nativeActivity.requestCheck(chatId, 'open'));

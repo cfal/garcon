@@ -56,6 +56,7 @@ import {
   type ChatExecutionService,
 } from '../chat-execution/chat-execution-coordinator.js';
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
+import { StaleTranscriptViewError } from '../ledger/errors.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
@@ -476,7 +477,12 @@ export default function createChatRoutes({
         );
       }
 
-      const page = await chatViews.page(chatId, limit, beforeOrdinal);
+      const page = await chatViews.page(
+        chatId,
+        limit,
+        beforeOrdinal,
+        expectedTranscriptViewId || undefined,
+      );
       if (
         expectedTranscriptViewId
         && page.transcriptViewId !== expectedTranscriptViewId
@@ -504,6 +510,14 @@ export default function createChatRoutes({
       } satisfies CompleteChatHistoryResponse);
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
+      if (error instanceof StaleTranscriptViewError) {
+        return jsonError(
+          'Transcript view changed while paging',
+          409,
+          'STALE_TRANSCRIPT_VIEW',
+          false,
+        );
+      }
       if (error instanceof DomainError && error.code === 'CARRYOVER_HISTORY_UNAVAILABLE') {
         return Response.json({
           historyState: {
