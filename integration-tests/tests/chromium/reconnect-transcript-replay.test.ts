@@ -8,6 +8,13 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const MESSAGE_SELECTOR = '[data-chat-message-type]';
+const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
+const ITEM_SELECTOR = '[data-chat-virtual-item]';
+const EXPECTED_RECONNECT_BROWSER_ERRORS = [
+  /^console\.error: WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/ws\?v=\d+' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED$/,
+  /^console\.error: WebSocket error: \{readyState: 3, visibilityState: visible, online: true\}$/,
+  /^console\.error: Failed to load resource: net::ERR_CONNECTION_REFUSED$/,
+];
 
 interface ReplayGate {
   armed: boolean;
@@ -18,7 +25,31 @@ interface ReplayGate {
   subscribeCount: number;
 }
 
-type ReplayGateScope = typeof globalThis & { __garconReplayGate?: ReplayGate };
+interface DetachedReplayAnchor {
+  key: string;
+  offset: number;
+  rowId: string;
+  text: string;
+}
+
+interface DetachedReplayFrame {
+  connected: boolean;
+  offset: number | null;
+  rowId: string | null;
+  sameNode: boolean;
+  text: string | null;
+}
+
+interface DetachedReplaySampler {
+  active: boolean;
+  done: boolean;
+  frames: DetachedReplayFrame[];
+}
+
+type ReplayGateScope = typeof globalThis & {
+  __garconDetachedReplaySampler?: DetachedReplaySampler;
+  __garconReplayGate?: ReplayGate;
+};
 
 async function installReplayGate(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
@@ -144,6 +175,152 @@ function replayRows(count: number, finalContent: string): LedgerRowDraft[] {
   });
 }
 
+function appendLedgerRows(
+  workspace: string,
+  chatId: string,
+  rows: readonly LedgerRowDraft[],
+): void {
+  const store = new TranscriptLedgerStore(join(workspace, 'transcript-ledgers'));
+  try {
+    const view = store.currentView(chatId);
+    if (!view) throw new Error('Reconnect fixture lost its transcript view.');
+    store.append(chatId, view.viewId, rows);
+  } finally {
+    store.close();
+  }
+}
+
+function assertNoUnexpectedReconnectBrowserErrors(errors: readonly string[]): void {
+  expect(errors.filter((error) => (
+    !EXPECTED_RECONNECT_BROWSER_ERRORS.some((pattern) => pattern.test(error))
+  ))).toEqual([]);
+}
+
+async function revealEarlierRows(page: Page): Promise<{
+  expandedModelCount: number;
+  initialModelCount: number;
+}> {
+  await page.locator(`${FEED_SELECTOR}[aria-busy="false"]`).waitFor();
+  const initialModelCount = await page.locator(SIZER_SELECTOR).evaluate(async (sizerElement) => {
+    const sizer = sizerElement as HTMLElement;
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    let previous = -1;
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      await frame();
+      const current = Number(sizer.dataset.chatVirtualModelCount ?? 0);
+      stableFrames = current > 0 && current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 12) return current;
+    }
+    throw new Error('The bounded reconnect transcript did not settle.');
+  });
+  await page.locator(FEED_SELECTOR).focus();
+  for (let press = 0; press < 32; press += 1) {
+    const modelCount = await page.locator(SIZER_SELECTOR).evaluate(
+      (sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0),
+    );
+    if (modelCount > initialModelCount) break;
+    await page.keyboard.press('PageUp');
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  }
+  await page.waitForFunction(
+    ({ selector, previous }) =>
+      Number(document.querySelector<HTMLElement>(selector)?.dataset.chatVirtualModelCount ?? 0)
+        > previous,
+    { selector: SIZER_SELECTOR, previous: initialModelCount },
+  );
+  await page.locator(`${FEED_SELECTOR}[aria-busy="false"]`).waitFor();
+  await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+    feed.scrollTop = Math.max(1, (feed.scrollHeight - feed.clientHeight) / 2);
+    feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+    for (let index = 0; index < 6; index += 1) await frame();
+  });
+  await page.waitForFunction(
+    (selector) =>
+      document.querySelector<HTMLElement>(selector)?.dataset.chatPinnedToBottom === 'false',
+    FEED_SELECTOR,
+  );
+  const expandedModelCount = await page.locator(SIZER_SELECTOR).evaluate(
+    (sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0),
+  );
+  return { expandedModelCount, initialModelCount };
+}
+
+async function captureDetachedAnchor(page: Page): Promise<DetachedReplayAnchor> {
+  return page.locator(FEED_SELECTOR).evaluate((feedElement, itemSelector) => {
+    const feed = feedElement as HTMLElement;
+    const viewport = feed.getBoundingClientRect();
+    const wrapper = [...feed.querySelectorAll<HTMLElement>(itemSelector)].find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.bottom > viewport.top + 1
+        && rect.top < viewport.bottom - 1
+        && candidate.querySelector('[data-chat-row-id]');
+    });
+    const row = wrapper?.querySelector<HTMLElement>('[data-chat-row-id]');
+    const key = wrapper?.dataset.chatVirtualItem;
+    const rowId = row?.dataset.chatRowId;
+    if (!wrapper || !row || !key || !rowId) {
+      throw new Error('No detached reconnect reading anchor is mounted.');
+    }
+    return {
+      key,
+      offset: wrapper.getBoundingClientRect().top - viewport.top,
+      rowId,
+      text: row.textContent ?? '',
+    };
+  }, ITEM_SELECTOR);
+}
+
+async function startDetachedReplaySampler(page: Page, anchor: DetachedReplayAnchor): Promise<void> {
+  await page.evaluate(({ feedSelector, itemSelector, target }) => {
+    const scope = globalThis as ReplayGateScope;
+    const feed = document.querySelector<HTMLElement>(feedSelector);
+    const original = [...document.querySelectorAll<HTMLElement>(itemSelector)].find(
+      (item) => item.dataset.chatVirtualItem === target.key,
+    );
+    if (!feed || !original) throw new Error('Detached replay sampler could not resolve its anchor.');
+    const sampler: DetachedReplaySampler = { active: true, done: false, frames: [] };
+    scope.__garconDetachedReplaySampler = sampler;
+    const sample = () => {
+      if (!sampler.active) {
+        sampler.done = true;
+        return;
+      }
+      const current = [...document.querySelectorAll<HTMLElement>(itemSelector)].find(
+        (item) => item.dataset.chatVirtualItem === target.key,
+      );
+      const row = current?.querySelector<HTMLElement>('[data-chat-row-id]');
+      sampler.frames.push({
+        connected: current?.isConnected === true,
+        offset: current ? current.getBoundingClientRect().top - feed.getBoundingClientRect().top : null,
+        rowId: row?.dataset.chatRowId ?? null,
+        sameNode: current === original,
+        text: row?.textContent ?? null,
+      });
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, { feedSelector: FEED_SELECTOR, itemSelector: ITEM_SELECTOR, target: anchor });
+}
+
+async function finishDetachedReplaySampler(page: Page): Promise<DetachedReplayFrame[]> {
+  await page.evaluate(() => {
+    const sampler = (globalThis as ReplayGateScope).__garconDetachedReplaySampler;
+    if (!sampler) throw new Error('Detached replay sampler is unavailable.');
+    sampler.active = false;
+  });
+  await page.waitForFunction(
+    () => (globalThis as ReplayGateScope).__garconDetachedReplaySampler?.done === true,
+  );
+  return page.evaluate(
+    () => (globalThis as ReplayGateScope).__garconDetachedReplaySampler?.frames ?? [],
+  );
+}
+
 describe('Chromium reconnect transcript replay', () => {
   test('finishes a fixed replay before applying live rows without a snapshot fallback', async () => {
     await withChromiumFixture('reconnect-live-replay-order', async (fixture, markPhase) => {
@@ -185,16 +362,11 @@ describe('Chromium reconnect transcript replay', () => {
       await fixture.integration.crashAndRestartGarcon({
         reusePort: true,
         beforeStart: async () => {
-          const store = new TranscriptLedgerStore(
-            join(fixture.integration.dirs.workspace, 'transcript-ledgers'),
+          appendLedgerRows(
+            fixture.integration.dirs.workspace,
+            chatId,
+            replayRows(450, replayMarker),
           );
-          try {
-            const view = store.currentView(chatId);
-            if (!view) throw new Error('Reconnect fixture lost its transcript view.');
-            store.append(chatId, view.viewId, replayRows(450, replayMarker));
-          } finally {
-            store.close();
-          }
         },
       });
       await waitForHeldContinuation(fixture.page, connectionCount);
@@ -248,7 +420,114 @@ describe('Chromium reconnect transcript replay', () => {
       ]);
       expect(tail[0]!.ordinal).toBeLessThan(tail[1]!.ordinal);
       expect(tail[1]!.ordinal).toBeLessThan(tail[2]!.ordinal);
-      fixture.assertNoBrowserErrors();
+      assertNoUnexpectedReconnectBrowserErrors(fixture.browserErrors);
+    });
+  }, 180_000);
+
+  test('keeps an expanded detached reading interval through bounded reconnect replay', async () => {
+    await withChromiumFixture('reconnect-detached-expanded-history', async (fixture, markPhase) => {
+      await installReplayGate(fixture.context);
+      await fixture.page.setViewportSize({ width: 390, height: 700 });
+
+      markPhase('creating history beyond the bounded initial window');
+      const chatId = fixture.integration.newChatId();
+      const initial = await fixture.integration.client.startDirectChat({
+        chatId,
+        content: 'detached-reconnect-initial',
+        projectPath: fixture.integration.dirs.project,
+        agent: fixture.integration.directAgents.openAi,
+      });
+      await fixture.integration.client.waitForTurnTerminal(chatId, initial.turnId);
+      for (let index = 1; index < 75; index += 1) {
+        const turn = await fixture.integration.client.runDirectChat({
+          chatId,
+          content: `detached-reconnect-history-${index}`,
+          agent: fixture.integration.directAgents.openAi,
+        });
+        await fixture.integration.client.waitForTurnTerminal(chatId, turn.turnId);
+      }
+
+      markPhase('expanding and detaching the visible interval');
+      await fixture.page.goto(
+        `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+      );
+      await fixture.page.locator(FEED_SELECTOR).waitFor();
+      await fixture.page.waitForFunction(
+        () => ((globalThis as ReplayGateScope).__garconReplayGate?.openCount ?? 0) > 0,
+      );
+      const { expandedModelCount, initialModelCount } = await revealEarlierRows(fixture.page);
+      expect(expandedModelCount).toBeGreaterThan(initialModelCount);
+      const anchor = await captureDetachedAnchor(fixture.page);
+      await startDetachedReplaySampler(fixture.page, anchor);
+
+      const connectionCount = await replayGateOpenCount(fixture.page);
+      await armReplayGate(fixture.page);
+      const replayMarker = 'detached-reconnect-final-marker';
+      markPhase('replaying a multi-page missed range while detached');
+      await fixture.integration.crashAndRestartGarcon({
+        reusePort: true,
+        beforeStart: async () => {
+          appendLedgerRows(
+            fixture.integration.dirs.workspace,
+            chatId,
+            replayRows(450, replayMarker),
+          );
+        },
+      });
+      await waitForHeldContinuation(fixture.page, connectionCount);
+      await releaseHeldContinuation(fixture.page);
+      await fixture.page.waitForFunction(
+        ({ selector, expected }) =>
+          Number(document.querySelector<HTMLElement>(selector)?.dataset.chatVirtualModelCount ?? 0)
+            === expected,
+        { selector: SIZER_SELECTOR, expected: expandedModelCount + 450 },
+      );
+      await fixture.page.locator(`${FEED_SELECTOR}[aria-busy="false"]`).waitFor();
+
+      const frames = await finishDetachedReplaySampler(fixture.page);
+      expect(frames.length).toBeGreaterThan(2);
+      expect(frames.filter((frame) => (
+        !frame.connected
+        || !frame.sameNode
+        || frame.offset === null
+        || frame.rowId !== anchor.rowId
+        || frame.text !== anchor.text
+      ))).toEqual([]);
+      expect(Math.max(...frames.map((frame) => (
+        frame.offset === null
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(frame.offset - anchor.offset)
+      )))).toBeLessThanOrEqual(1);
+
+      const retainedAnchor = await captureDetachedAnchor(fixture.page);
+      expect(retainedAnchor).toEqual(expect.objectContaining({
+        key: anchor.key,
+        rowId: anchor.rowId,
+        text: anchor.text,
+      }));
+      expect(Math.abs(retainedAnchor.offset - anchor.offset)).toBeLessThanOrEqual(1);
+      expect(await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count())
+        .toBe(0);
+
+      markPhase('verifying the replayed live edge without pruning the interval');
+      await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+        const feed = feedElement as HTMLElement;
+        feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 600 }));
+        feed.scrollTop = feed.scrollHeight;
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+      await fixture.page.waitForFunction(
+        ({ selector, content }) => [...document.querySelectorAll<HTMLElement>(selector)]
+          .filter((element) => (element.textContent ?? '').includes(content)).length === 1,
+        { selector: MESSAGE_SELECTOR, content: replayMarker },
+      );
+      const canonical = await fixture.integration.client.getMessages(chatId, { limit: 10 });
+      expect(canonical.messages.at(-1)?.message).toMatchObject({
+        type: 'assistant-message',
+        content: replayMarker,
+      });
+      assertNoUnexpectedReconnectBrowserErrors(fixture.browserErrors);
     });
   }, 180_000);
 });
