@@ -381,6 +381,7 @@ local testing.
 | TLV5-PERM.08 | The browser renders concurrent occurrences independently and invokes only the selected live capability.        | Component, Chromium              |
 | TLV5-PERM.09 | A permission event without a concrete provider operation is dropped with one structured, content-free warning. | Adapter unit, provider unit      |
 | TLV5-PERM.10 | A failed provider response abandons only the exact claim, appends no resolution, and permits retry through the same live capability. | Core unit                 |
+| TLV5-PERM.11 | A requested fact arriving after its run ended remains durable but creates no transient control or claimable capability. | Core/transient unit       |
 
 ### Search
 
@@ -481,7 +482,7 @@ The status below describes test coverage, not implementation completion.
 | Risk                                          | Requirements                                          | Current evidence                                                                                    | State   |
 | --------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------- |
 | R1 publisher routing                          | TLV5-L07.03 through TLV5-L07.10                       | Broad provider units; Codex stale-event black-box cases                                             | Partial |
-| R2 permission occurrence identity             | TLV5-PERM.01 through TLV5-PERM.10                     | Core occurrence suite, shared round trips, provider units                                           | Partial |
+| R2 permission occurrence identity             | TLV5-PERM.01 through TLV5-PERM.11                     | Core occurrence suite, shared round trips, provider units                                           | Partial |
 | R3 Codex native tail reconciliation           | TLV5-L02.02, TLV5-L05.02, TLV5-L10.01                 | Codex architecture guard, app-server unit, scripted interrupt                                       | Covered |
 | R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state units and strict Chromium cases                                                        | Partial |
 | R5 search full replacement on append          | TLV5-SEARCH.01                                        | Search controller suffix and linearity tests                                                        | Covered |
@@ -550,6 +551,7 @@ Key current evidence:
 | TLV5-PERM.08 | Component identity cases exist; no real-browser concurrent-occurrence action case.                                               | Missing Chromium case |
 | TLV5-PERM.09 | Shared adapter, Claude, Codex, and OpenCode cases require one structured content-free drop.                                     | Covered oracle        |
 | TLV5-PERM.10 | Runtime-router retry invokes the same live capability after a failed first response and appends one resolution only on success. | Covered               |
+| TLV5-PERM.11 | Ledger-to-transient integration keeps a late requested fact durable while suppressing actionability after run end.            | Covered               |
 
 The core suites in `server/ledger/__tests__/permission-occurrence.test.js` and
 `server/agents/__tests__/runtime-router-permission-retry.test.js` are the
@@ -745,6 +747,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PERM.05-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `applies a delayed cancellation only to its exact reused occurrence`                             | PERM.05                     |
 | TLV5-PERM.07-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `keeps permission history but restores no actionability after restart`                           | PERM.07                     |
 | TLV5-PERM.10-CORE-UNIT-01      | `server/agents/__tests__/runtime-router-permission-retry.test.js`: retries the exact live capability after provider response failure                      | PERM.10                     |
+| TLV5-PERM.11-CORE-TRANSIENT-01 | `server/chats/__tests__/late-permission-transient.test.js`: late requested history remains durable without a transient control                            | PERM.11                     |
 | TLV5-ADOPT.04-CONTRACT-01      | `common/__tests__/transcript-notice-contract.test.js`: exact quarantine detail parser and round trip                                                      | ADOPT.04                    |
 | TLV5-ADOPT.05-CORE-MATRIX-01   | `server/ledger/__tests__/quarantine-notice.test.js`: frozen-only preservation and read-fold exclusion                                                     | ADOPT.05                    |
 | TLV5-ADOPT.06-CORE-UNIT-01     | `server/ledger/__tests__/reload.test.js`: Reload carries quarantine while dropping ordinary notices                                                       | ADOPT.06                    |

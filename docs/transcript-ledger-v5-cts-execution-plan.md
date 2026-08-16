@@ -290,6 +290,7 @@ creating a distinct public occurrence UUID and response capability each time:
 - delayed first terminal after the second request;
 - delayed first user response after the second request;
 - provider response failure and claim restoration;
+- requested history arriving after run end without transient actionability;
 - run end, sink close, reload, handoff, deletion, and restart;
 - JSON and WebSocket round trips with no provider-native ID;
 - old `{requestId, incarnation}` durable payload reopen and new
