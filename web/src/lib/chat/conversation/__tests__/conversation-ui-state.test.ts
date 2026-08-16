@@ -5,7 +5,7 @@ import type {
 	ChatQueueState,
 	PendingPermissionRequest,
 } from '$lib/types/chat';
-import { BashToolUseMessage } from '$shared/chat-types';
+import { BashToolUseMessage, ExitPlanModeToolUseMessage } from '$shared/chat-types';
 
 function makeQueue(overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 	return {
@@ -50,6 +50,18 @@ function makePermissionRequest(id: string, chatId: string | null = null): Pendin
 	};
 }
 
+function makeExitPlanRequest(id: string): PendingPermissionRequest {
+	return {
+		permissionRequestId: id,
+		incarnation: `incarnation-${id}`,
+		requestedTool: new ExitPlanModeToolUseMessage(
+			'2026-07-15T00:00:00.000Z',
+			`tool-${id}`,
+			'Implement the plan.',
+		),
+	};
+}
+
 describe('ConversationUiState', () => {
 	it('updates pending permission requests through values or updater functions', () => {
 		const store = new ConversationUiState();
@@ -75,7 +87,8 @@ describe('ConversationUiState', () => {
 		const store = new ConversationUiState();
 		store.setPendingPermissionRequests([
 			makePermissionRequest('tool-request'),
-			makePermissionRequest('plan-exit-confirmation'),
+			makePermissionRequest('plan-exit-provider-collision'),
+			makeExitPlanRequest('plan-exit-confirmation'),
 		]);
 
 		store.clearTurnPermissionRequests();
