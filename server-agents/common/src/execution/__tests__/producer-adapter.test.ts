@@ -47,8 +47,7 @@ describe('createAgentProducerAdapter', () => {
     const fixture = createFixture(({ publish, runId }) => {
       const tool = new BashToolUseMessage(TS, 'tool-1', 'pwd');
       publish({
-        type: 'messages',
-        runId,
+        type: 'rows',
         rows: runtimeRows([new AssistantMessage(TS, 'before')]),
       });
       publish({
@@ -63,8 +62,7 @@ describe('createAgentProducerAdapter', () => {
         lifecycle: permissionCancellation('permission-1', 'incarnation-1'),
       });
       publish({
-        type: 'messages',
-        runId,
+        type: 'rows',
         rows: runtimeRows([new AssistantMessage(TS, 'after')]),
       });
     });
@@ -102,7 +100,7 @@ describe('createAgentProducerAdapter', () => {
     });
   });
 
-	it('[TLV5-PERM.02-ADAPTER-UNIT-01] preserves the exact permission occurrence when a request id is reused', async () => {
+  it('[TLV5-PERM.02-ADAPTER-UNIT-01] preserves the exact permission occurrence when a request id is reused', async () => {
     const firstDecision = permissionDecision('shared-request', 'first-occurrence');
     const secondDecision = permissionDecision('shared-request', 'second-occurrence');
     const fixture = createFixture(({ publish, runId }) => {
@@ -191,19 +189,17 @@ describe('createAgentProducerAdapter', () => {
     expect(correlations.every((runId) => typeof runId === 'string' && runId !== 'run-1')).toBeTrue();
   });
 
-	it('[TLV5-L07.08-ADAPTER-UNIT-01] drops provider events for an unavailable sink without failing its event stream', async () => {
+  it('[TLV5-L07.08-ADAPTER-UNIT-01] drops provider events for an unavailable sink without failing its event stream', async () => {
     const fixture = createFixture(({ publish }) => {
       fixture.closeSink();
       publish({
-        type: 'messages',
-        runId: 'run-1',
+        type: 'rows',
         rows: runtimeRows([new AssistantMessage(TS, 'after close')]),
       });
       publish({
         type: 'run-ended',
         runId: 'run-1',
         outcome: 'finished',
-        exitCode: 0,
       });
     });
 
@@ -270,8 +266,7 @@ it('publishes a runExisting operation through the same capability as a run', asy
     async (request, publish) => {
       expect(request).not.toHaveProperty('sink');
       publish({
-        type: 'messages',
-        runId: 'run-1',
+        type: 'rows',
         rows: runtimeRows([new AssistantMessage(TS, 'compacted')]),
       });
       published = true;
@@ -305,8 +300,7 @@ it('keeps a delayed callback on its own sink after a replacement takes over the 
     async start(request, publish) {
       if (request.runId === 'run-a') {
         delayed = () => publish({
-          type: 'messages',
-          runId: 'run-a',
+          type: 'rows',
           rows: runtimeRows([new AssistantMessage(TS, 'from the replaced generation')]),
         });
       }
@@ -369,15 +363,13 @@ function createFixture(
       if (afterSession) afterSession({ publish, runId: request.runId });
       else {
         publish({
-          type: 'messages',
-          runId: request.runId,
+          type: 'rows',
           rows: runtimeRows([new AssistantMessage(TS, 'answer')]),
         });
         publish({
           type: 'run-ended',
           runId: request.runId,
           outcome: 'finished',
-          exitCode: 0,
         });
       }
       return session;
