@@ -714,6 +714,68 @@ describe('ActiveTranscriptState', () => {
 		]);
 	});
 
+	it('places durable rows between the optimistic submissions they separate', () => {
+		const chat = new ActiveTranscriptState();
+		applyMessages(chat, 'chat-1', 'generation-1', [
+			entry(1, new AssistantMessage('2099-01-01T00:00:00.000Z', 'durable first')),
+		]);
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-first',
+			content: 'first submitted',
+			createdAt: '2000-01-01T00:00:00.000Z',
+		}));
+
+		applyMessages(chat, 'chat-1', 'generation-1', [
+			entry(2, new AssistantMessage('1990-01-01T00:00:00.000Z', 'durable between')),
+		]);
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-second',
+			content: 'second submitted',
+			createdAt: '1980-01-01T00:00:00.000Z',
+		}));
+
+		expect(chat.displayMessages.map(contentOf)).toEqual([
+			'durable first',
+			'first submitted',
+			'durable between',
+			'second submitted',
+		]);
+		expect(chat.visibleRows.map((row) => row.id)).toEqual([
+			'generation-1:1',
+			'optimistic:msg-first',
+			'generation-1:2',
+			'optimistic:msg-second',
+		]);
+	});
+
+	it('updates an optimistic retry without changing its submission position', () => {
+		const chat = new ActiveTranscriptState();
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-first',
+			content: 'first submitted',
+		}));
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-second',
+			content: 'second submitted',
+		}));
+
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-first',
+			content: 'first retry',
+			createdAt: '2099-01-01T00:00:00.000Z',
+			delivery: 'delivered',
+		}));
+
+		expect(chat.displayMessages.map(contentOf)).toEqual([
+			'first retry',
+			'second submitted',
+		]);
+		expect(chat.visibleRows.map((row) => row.id)).toEqual([
+			'optimistic:msg-first',
+			'optimistic:msg-second',
+		]);
+	});
+
 	it('renders local messages as transient display-only rows', () => {
 		const chat = new ActiveTranscriptState();
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, user('server'))]);
