@@ -100,7 +100,7 @@ describe('ClaudeAgentIntegration', () => {
     });
   });
 
-  it('[TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01] rejects an incomplete selected session and retries the repaired source', async () => {
+  it('[TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01] rejects incomplete selected records and recognized content payloads before retry', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-claude-native-import-'));
     const nativePath = join(root, 'session.jsonl');
     await writeFile(
@@ -114,8 +114,63 @@ describe('ClaudeAgentIntegration', () => {
     try {
       await expect(importedRows(integration.nativeHistoryImport, reference)).rejects.toThrow();
 
+      const invalidParts = [
+        ['text missing', 'user', { type: 'text' }],
+        ['text non-string', 'user', { type: 'text', text: 17 }],
+        ['thinking missing', 'assistant', { type: 'thinking' }],
+        ['thinking non-string', 'assistant', { type: 'thinking', thinking: false }],
+      ];
+      const outcomes = [];
+      for (const [label, role, part] of invalidParts) {
+        await writeFile(nativePath, `${JSON.stringify({
+          sessionId: 'session-1',
+          type: role,
+          uuid: 'invalid-part',
+          timestamp: '2026-08-16T00:00:00.000Z',
+          message: { role, content: [part] },
+        })}\n`, 'utf8');
+        try {
+          await importedRows(integration.nativeHistoryImport, reference);
+          outcomes.push([label, 'fulfilled']);
+        } catch {
+          outcomes.push([label, 'rejected']);
+        }
+      }
+
+      await writeFile(nativePath, [
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'queue-operation',
+          uuid: 'housekeeping',
+          timestamp: '2026-08-16T00:00:00.000Z',
+          operation: 'dequeue',
+        }),
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'user',
+          uuid: 'empty-user',
+          timestamp: '2026-08-16T00:00:01.000Z',
+          message: { role: 'user', content: [{ type: 'text', text: '' }] },
+        }),
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'assistant',
+          uuid: 'empty-assistant',
+          timestamp: '2026-08-16T00:00:02.000Z',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '' },
+              { type: 'thinking', thinking: '' },
+            ],
+          },
+        }),
+      ].join('\n') + '\n', 'utf8');
+      await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toEqual([]);
+
       await writeFile(nativePath, '', 'utf8');
       await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toEqual([]);
+      expect(outcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
     } finally {
       await integration.lifecycle.stop();
       await rm(root, { recursive: true, force: true });

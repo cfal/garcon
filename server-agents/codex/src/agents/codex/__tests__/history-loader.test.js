@@ -18,7 +18,7 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('loadCodexChatMessages', () => {
-  it('[TLV5-ADOPT.07-CODEX-UNIT-01] rejects an incomplete assistant record and retries the repaired source', async () => {
+  it('[TLV5-ADOPT.07-CODEX-UNIT-01] rejects incomplete records and recognized content payloads before retry', async () => {
     const invalidEntry = JSON.stringify({
       type: 'response_item',
       timestamp: '2026-01-01T00:00:00.000Z',
@@ -29,10 +29,54 @@ describe('loadCodexChatMessages', () => {
         throwOnError: true,
       })).rejects.toThrow();
 
+      const invalidParts = [
+        ['input_text missing', 'user', { type: 'input_text' }],
+        ['input_text non-string', 'user', { type: 'input_text', text: 17 }],
+        ['output_text missing', 'assistant', { type: 'output_text' }],
+        ['output_text non-string', 'assistant', { type: 'output_text', text: false }],
+        ['text missing', 'assistant', { type: 'text' }],
+        ['text non-string', 'assistant', { type: 'text', text: null }],
+      ];
+      const outcomes = [];
+      for (const [label, role, part] of invalidParts) {
+        await fs.writeFile(filePath, `${JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          payload: { type: 'message', role, content: [part] },
+        })}\n`, 'utf8');
+        try {
+          await loadCodexChatMessages(filePath, undefined, { throwOnError: true });
+          outcomes.push([label, 'fulfilled']);
+        } catch {
+          outcomes.push([label, 'rejected']);
+        }
+      }
+
+      await fs.writeFile(filePath, [
+        JSON.stringify({
+          type: 'session_meta',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          payload: { id: 'thread-1' },
+        }),
+        ...[
+          ['user', { type: 'input_text', text: '' }],
+          ['assistant', { type: 'output_text', text: '' }],
+          ['assistant', { type: 'text', text: '' }],
+        ].map(([role, part], index) => JSON.stringify({
+          type: 'response_item',
+          timestamp: `2026-01-01T00:00:0${index + 1}.000Z`,
+          payload: { type: 'message', role, content: [part] },
+        })),
+      ].join('\n') + '\n', 'utf8');
+      await expect(loadCodexChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).resolves.toEqual([]);
+
       await fs.writeFile(filePath, '', 'utf8');
       await expect(loadCodexChatMessages(filePath, undefined, {
         throwOnError: true,
       })).resolves.toEqual([]);
+      expect(outcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
     });
   });
 

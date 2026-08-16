@@ -39,7 +39,7 @@ describe('Factory history import', () => {
     }
   });
 
-  it('[TLV5-ADOPT.07-FACTORY-UNIT-01] retries the same source after an invalid provider event', async () => {
+  it('[TLV5-ADOPT.07-FACTORY-UNIT-01] rejects invalid events and recognized content payloads before retry', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-factory-legacy-import-'));
     roots.push(root);
     const integration = new FactoryAgentIntegration(createHost(root));
@@ -62,14 +62,57 @@ describe('Factory history import', () => {
       });
       await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
 
+      const invalidParts = [
+        ['text missing', { type: 'text' }],
+        ['text non-string', { type: 'text', text: 17 }],
+        ['thinking missing', { type: 'thinking' }],
+        ['thinking non-string', { type: 'thinking', thinking: false }],
+      ];
+      const partOutcomes = [];
+      for (const [label, part] of invalidParts) {
+        await writeFile(invalidPath, `${JSON.stringify({
+          type: 'message',
+          timestamp: '2026-08-16T00:00:00.000Z',
+          message: { role: 'assistant', content: [part] },
+        })}\n`, 'utf8');
+        try {
+          await importedRows(integration.legacyHistoryImport, reference);
+          partOutcomes.push([label, 'fulfilled']);
+        } catch {
+          partOutcomes.push([label, 'rejected']);
+        }
+      }
+
+      await writeFile(invalidPath, [
+        JSON.stringify({
+          type: 'session_start',
+          id: 'factory-invalid',
+          timestamp: '2026-08-16T00:00:00.000Z',
+        }),
+        JSON.stringify({
+          type: 'message',
+          timestamp: '2026-08-16T00:00:01.000Z',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '' },
+              { type: 'thinking', thinking: '' },
+            ],
+          },
+        }),
+      ].join('\n') + '\n', 'utf8');
+      await expect(importedRows(integration.legacyHistoryImport, reference))
+        .resolves.toEqual(expect.any(Array));
+
       await writeFile(invalidPath, '', 'utf8');
       await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
+      expect(partOutcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
     } finally {
       await integration.lifecycle.stop();
     }
   });
 
-  it('[TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01] distinguishes valid empty native history from selected-source failures', async () => {
+  it('[TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01] rejects selected-source failures and incomplete content payloads', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-factory-native-import-'));
     roots.push(root);
     const emptyPath = join(root, 'sessions', 'empty.jsonl');
@@ -110,9 +153,52 @@ describe('Factory history import', () => {
       await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
         .rejects.toThrow();
 
+      const invalidParts = [
+        ['text missing', { type: 'text' }],
+        ['text non-string', { type: 'text', text: 17 }],
+        ['thinking missing', { type: 'thinking' }],
+        ['thinking non-string', { type: 'thinking', thinking: false }],
+      ];
+      const partOutcomes = [];
+      for (const [label, part] of invalidParts) {
+        await writeFile(incompletePath, `${JSON.stringify({
+          type: 'message',
+          timestamp: '2026-08-16T00:00:00.000Z',
+          message: { role: 'assistant', content: [part] },
+        })}\n`, 'utf8');
+        try {
+          await importedRows(integration.nativeHistoryImport, incompleteReference);
+          partOutcomes.push([label, 'fulfilled']);
+        } catch {
+          partOutcomes.push([label, 'rejected']);
+        }
+      }
+
+      await writeFile(incompletePath, [
+        JSON.stringify({
+          type: 'session_start',
+          id: 'factory-incomplete',
+          timestamp: '2026-08-16T00:00:00.000Z',
+        }),
+        JSON.stringify({
+          type: 'message',
+          timestamp: '2026-08-16T00:00:01.000Z',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '' },
+              { type: 'thinking', thinking: '' },
+            ],
+          },
+        }),
+      ].join('\n') + '\n', 'utf8');
+      await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
+        .resolves.toEqual(expect.any(Array));
+
       await writeFile(incompletePath, '', 'utf8');
       await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
         .resolves.toEqual([]);
+      expect(partOutcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
     } finally {
       await integration.lifecycle.stop();
     }

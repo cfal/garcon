@@ -368,7 +368,7 @@ local testing.
 | TLV5-ADOPT.07  | Core remains provider-neutral; Direct migration is adoption-only with no Reload, and OpenCode discovery remains directory-scoped.  | Static, SACS capability    |
 | TLV5-ADOPT.08  | A selected native source must be successfully opened: missing, NotFound, read, parse, sanitation, or incomplete evidence fails while validly empty succeeds; Reload preserves the current view and native-fidelity fork seeding remains fatal on failure. | Provider unit, SACS, core unit |
 | TLV5-ADOPT.09  | Genesis adoption consumes the complete lossless frozen display prefix in exact order, including every ownership boundary, without model-projection filtering, truncation, or byte caps. | Store unit, static, server black-box |
-| TLV5-ADOPT.10  | Adoption source failures expose only a fixed safe retryable error and structured content-free provider/phase/reason diagnostics through downstream routes and logs. | Core and route unit |
+| TLV5-ADOPT.10  | Adoption source failures expose only a fixed safe retryable error with no source-bearing cause and structured content-free provider/phase/reason diagnostics through downstream routes and logs. | Core and route unit |
 | TLV5-ADOPT.11  | Legacy relocation and source discovery distinguish positive absence from skipped relocation or a present invalid/mismatched candidate; ambiguity fails without fallback and remains retryable after repair. | Shared and provider unit |
 
 ### Permission Occurrences
@@ -577,13 +577,14 @@ row, and asserts exact addresses and provider callbacks throughout.
 | TLV5-ADOPT.07 | Core-neutrality, interface, seven-driver SACS, Direct/OpenCode, and Amp/Factory/Cursor provider oracles are locked. | Intentional red     |
 | TLV5-ADOPT.08 | Shared native-capability SACS, provider units, Reload preservation, sanitation, and native-fork fatality distinguish selected-source failure from valid empty. | Intentional red |
 | TLV5-ADOPT.09 | Small-cap source discrimination, lossless server wiring, frozen ownership-boundary mapping, and multi-segment black-box order are locked. | Covered |
-| TLV5-ADOPT.10 | Source warning, propagated integration error, route logging, and HTTP error surfaces are locked against transcript-content leakage. | Covered |
+| TLV5-ADOPT.10 | Source warning, propagated integration error including its cause, route logging, and HTTP error surfaces are locked against transcript-content leakage. | Intentional red |
 | TLV5-ADOPT.11 | Direct relocation and Codex/Cursor source-selection ambiguity fail closed while true absence and repaired retry remain viable. | Intentional red |
 
 The remaining intentional-red families cover genesis facet and initialization
 semantics, quarantine handling, strict provider-source conversion, selected
-native evidence, and relocation/discovery ambiguity. Each case records its own
-failure signature; a completed empty source remains a distinct green control.
+native evidence, relocation/discovery ambiguity, and propagated-error cause
+hygiene. Each case records its own failure signature; a completed empty source
+remains a distinct green control.
 
 ## Read-Fold Matrix
 
@@ -771,12 +772,12 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.07-SACS-DIRECT-ANTHROPIC-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: Direct Anthropic released JSONL is adoption-only and later context is ledger-derived | ADOPT.07                    |
 | TLV5-ADOPT.07-SACS-OPENCODE-SCOPED-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: OpenCode imports only the recorded project-directory source                              | ADOPT.07                    |
 | TLV5-ADOPT.07-SACS-OPENCODE-NOTFOUND-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: scoped OpenCode NotFound is positive legacy absence without unscoped fallback        | ADOPT.07                    |
-| TLV5-ADOPT.07-OPENCODE-UNIT-01 | `server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js`: OpenCode rejects a malformed stored part and retries the same repaired scoped source | ADOPT.07 |
+| TLV5-ADOPT.07-OPENCODE-UNIT-01 | `server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js`: strict OpenCode legacy import rejects missing/non-string text and reasoning payloads, accepts either reasoning string carrier even when the other is non-string plus empty strings/housekeeping, and retries the same scoped source | ADOPT.02, ADOPT.07 |
 | TLV5-ADOPT.07-AMP-READ-FAILURE-UNIT-01 | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp distinguishes positive absence from provider read failure and retries the same repaired source | ADOPT.07 |
 | TLV5-ADOPT.07-AMP-UNIT-01      | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp rejects an incomplete user text part and retries the same repaired source             | ADOPT.07                    |
-| TLV5-ADOPT.07-CLAUDE-UNIT-01   | `server-agents/claude/src/agents/claude/__tests__/history-loader.test.js`: strict Claude import rejects an incomplete user record and retries the same repaired source | ADOPT.07                |
-| TLV5-ADOPT.07-CODEX-UNIT-01    | `server-agents/codex/src/agents/codex/__tests__/history-loader.test.js`: strict Codex import rejects an incomplete assistant response item and retries the same repaired source | ADOPT.07             |
-| TLV5-ADOPT.07-FACTORY-UNIT-01  | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: Factory rejects a structurally invalid valid-JSON provider event and retries the same repaired source | ADOPT.07            |
+| TLV5-ADOPT.07-CLAUDE-UNIT-01   | `server-agents/claude/src/agents/claude/__tests__/history-loader.test.js`: strict Claude legacy import rejects incomplete records plus missing/non-string text/thinking payloads, accepts empty strings/housekeeping, and retries the same source | ADOPT.02, ADOPT.07 |
+| TLV5-ADOPT.07-CODEX-UNIT-01    | `server-agents/codex/src/agents/codex/__tests__/history-loader.test.js`: strict Codex legacy import rejects incomplete records plus missing/non-string input_text/output_text/text payloads, accepts empty strings/housekeeping, and retries the same source | ADOPT.02, ADOPT.07 |
+| TLV5-ADOPT.07-FACTORY-UNIT-01  | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: strict Factory legacy import rejects invalid events plus missing/non-string text/thinking payloads, accepts empty strings/housekeeping, and retries the same source | ADOPT.02, ADOPT.07 |
 | TLV5-ADOPT.07-FACTORY-READ-FAILURE-UNIT-01 | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: Factory distinguishes positive absence from unreadable source failure and retries the same repaired path | ADOPT.07 |
 | TLV5-ADOPT.07-CURSOR-UNIT-01   | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: Cursor rejects an incomplete user text part in a valid store and retries the same repaired store | ADOPT.07                |
 | TLV5-ADOPT.07-CURSOR-READ-FAILURE-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: Cursor distinguishes positive absence from unreadable store failure and retries the same repaired store | ADOPT.07 |
@@ -787,11 +788,11 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.08-SACS-NATIVE-READ-FAILURE-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted native importer rejects unreadable selected evidence and preserves the view | ADOPT.08 |
 | TLV5-ADOPT.08-SACS-NATIVE-EMPTY-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted native importer accepts a successfully opened validly empty source | ADOPT.08 |
 | TLV5-ADOPT.08-AMP-NATIVE-UNIT-01 | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp rejects an incomplete selected-thread user record, then retries the same repaired source as valid empty | ADOPT.08 |
-| TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01 | `server-agents/claude/src/__tests__/integration.test.js`: Claude's native facet rejects an incomplete selected-session user record, then retries the same repaired source as valid empty | ADOPT.08 |
-| TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01 | `server-agents/codex/src/__tests__/integration.test.js`: Codex's native facet rejects an incomplete selected-session assistant record, then retries the same repaired source as valid empty | ADOPT.08 |
-| TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01 | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: Factory rejects an incomplete selected-session message event, then retries the same repaired source as valid empty | ADOPT.08 |
+| TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01 | `server-agents/claude/src/__tests__/integration.test.js`: Claude's native facet rejects incomplete selected records plus missing/non-string text/thinking payloads, accepts empty strings/housekeeping, and retries valid empty on the same source | ADOPT.08 |
+| TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01 | `server-agents/codex/src/__tests__/integration.test.js`: Codex's native facet rejects incomplete selected records plus missing/non-string input_text/output_text/text payloads, accepts empty strings/housekeeping, and retries valid empty on the same source | ADOPT.08 |
+| TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01 | `server-agents/factory/src/__tests__/legacy-history-import.test.js`: Factory's native facet rejects incomplete selected events plus missing/non-string text/thinking payloads, accepts empty strings/housekeeping, and retries valid empty on the same source | ADOPT.08 |
 | TLV5-ADOPT.08-CURSOR-NATIVE-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: Cursor rejects an incomplete selected-session user record, then retries the same repaired store as valid empty | ADOPT.08 |
-| TLV5-ADOPT.08-OPENCODE-NATIVE-UNIT-01 | `server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js`: OpenCode's required native loader rejects an incomplete selected part, then retries the same repaired source as valid empty | ADOPT.08 |
+| TLV5-ADOPT.08-OPENCODE-NATIVE-UNIT-01 | `server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js`: OpenCode's native facet rejects missing/non-string text and reasoning payloads, accepts either reasoning string carrier even when the other is non-string plus empty strings/housekeeping, and retries valid empty on the same source | ADOPT.08 |
 | TLV5-ADOPT.08-NATIVE-WRAPPER-UNIT-01 | `server-agents/common/src/native-session/__tests__/native-history-import.test.ts`: shared import wrapper preserves valid-empty and selected-source failure outcomes | ADOPT.08 |
 | TLV5-ADOPT.08-RELOAD-CORE-UNIT-01 | `server/ledger/__tests__/reload.test.js`: selected-native failure preserves the exact current view and rows | ADOPT.08 |
 | TLV5-ADOPT.08-RELOAD-CORE-UNIT-02 | `server/ledger/__tests__/reload.test.js`: successfully opened validly empty native source cuts over | ADOPT.08 |
@@ -804,7 +805,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.09-SERVER-STATIC-01 | `server/ledger/__tests__/adoption-architecture.test.js`: server genesis wiring uses the lossless carryover source and never the capped model projection | ADOPT.09 |
 | TLV5-ADOPT.09-SERVER-MULTI-SEGMENT-01 | `integration-tests/tests/server/carryover-bootstrap-migration.test.ts`: pre-V5 multi-segment adoption preserves exact rendered order and durable ownership-boundary kinds | ADOPT.09 |
 | TLV5-ADOPT.10-RUN-ROUTE-UNIT-01 | `server/routes/__tests__/chats-command-routes.test.js`: command-admission adoption failure maps to typed retryable POST `/chats/run` without scheduling or command side effects, then retries | ADOPT.10 |
-| TLV5-ADOPT.10-SOURCE-FAILURE-ROUTE-UNIT-01 | `server/routes/__tests__/chats-messages.test.js`: a source-message sentinel reaches neither the structured adoption warning, propagated integration error, route logger, nor HTTP error | ADOPT.10 |
+| TLV5-ADOPT.10-SOURCE-FAILURE-ROUTE-UNIT-01 | `server/routes/__tests__/chats-messages.test.js`: a source-message sentinel reaches neither the structured adoption warning, propagated integration error or cause, route logger, nor HTTP error | ADOPT.10 |
 | TLV5-ADOPT.11-CODEX-DISCOVERED-UNIT-01 | `server-agents/codex/src/agents/codex/__tests__/transcript.test.js`: a mismatched discovered rollout fails legacy import and the repaired candidate retries | ADOPT.11 |
 | TLV5-ADOPT.11-CODEX-STORED-UNIT-01 | `server-agents/codex/src/agents/codex/__tests__/transcript.test.js`: ENOENT plus discovery miss is positive absence; ENOTDIR and invalid stored metadata reject a valid discovery fallback and retry from the same repaired reference | ADOPT.11 |
 | TLV5-ADOPT.11-CURSOR-PREFERRED-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: an invalid preferred ACP store blocks fallback until the preferred candidate is repaired or removed | ADOPT.11 |

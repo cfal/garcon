@@ -19,17 +19,74 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('Claude strict history import', () => {
-  it('[TLV5-ADOPT.07-CLAUDE-UNIT-01] rejects an incomplete user record and retries the repaired source', async () => {
+  it('[TLV5-ADOPT.07-CLAUDE-UNIT-01] rejects incomplete records and recognized content payloads before retry', async () => {
     const invalidEntry = JSON.stringify({ sessionId: 'session-1', type: 'user' });
     await withTempJsonl([invalidEntry], async (filePath) => {
       await expect(loadClaudeChatMessages(filePath, undefined, {
         throwOnError: true,
       })).rejects.toThrow();
 
+      const invalidParts = [
+        ['text missing', 'user', { type: 'text' }],
+        ['text non-string', 'user', { type: 'text', text: 17 }],
+        ['thinking missing', 'assistant', { type: 'thinking' }],
+        ['thinking non-string', 'assistant', { type: 'thinking', thinking: false }],
+      ];
+      const outcomes = [];
+      for (const [label, role, part] of invalidParts) {
+        await fs.writeFile(filePath, `${JSON.stringify({
+          sessionId: 'session-1',
+          type: role,
+          uuid: 'invalid-part',
+          timestamp: '2026-08-16T00:00:00.000Z',
+          message: { role, content: [part] },
+        })}\n`, 'utf8');
+        try {
+          await loadClaudeChatMessages(filePath, undefined, { throwOnError: true });
+          outcomes.push([label, 'fulfilled']);
+        } catch {
+          outcomes.push([label, 'rejected']);
+        }
+      }
+
+      await fs.writeFile(filePath, [
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'queue-operation',
+          uuid: 'housekeeping',
+          timestamp: '2026-08-16T00:00:00.000Z',
+          operation: 'dequeue',
+        }),
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'user',
+          uuid: 'empty-user',
+          timestamp: '2026-08-16T00:00:01.000Z',
+          message: { role: 'user', content: [{ type: 'text', text: '' }] },
+        }),
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'assistant',
+          uuid: 'empty-assistant',
+          timestamp: '2026-08-16T00:00:02.000Z',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '' },
+              { type: 'thinking', thinking: '' },
+            ],
+          },
+        }),
+      ].join('\n') + '\n', 'utf8');
+      await expect(loadClaudeChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).resolves.toEqual([]);
+
       await fs.writeFile(filePath, '', 'utf8');
       await expect(loadClaudeChatMessages(filePath, undefined, {
         throwOnError: true,
       })).resolves.toEqual([]);
+      expect(outcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
     });
   });
 });

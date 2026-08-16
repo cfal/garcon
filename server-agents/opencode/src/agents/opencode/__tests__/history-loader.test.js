@@ -20,6 +20,22 @@ import { convertOpenCodeEventToChatMessages } from '../event-converter.js';
 let originalError;
 let originalWarn;
 
+const invalidImportPartCases = [
+  ['text missing', 'user', { type: 'text' }],
+  ['text non-string', 'user', { type: 'text', text: 17 }],
+  ['reasoning payloads missing', 'assistant', { type: 'reasoning' }],
+  ['reasoning non-string', 'assistant', { type: 'reasoning', reasoning: false }],
+  ['reasoning fallback text non-string', 'assistant', { type: 'reasoning', text: 17 }],
+  ['reasoning carriers non-string', 'assistant', { type: 'reasoning', reasoning: false, text: 17 }],
+];
+
+function storedImportMessage(id, role, parts) {
+  return {
+    info: { id, role, time: { created: '2026-08-16T00:00:00.000Z' } },
+    parts,
+  };
+}
+
 beforeEach(() => {
   originalError = console.error;
   originalWarn = console.warn;
@@ -366,7 +382,7 @@ describe('OpenCode history loader', () => {
     await expect(loadOpenCodeChatMessages('session-1', getClient)).resolves.toEqual([]);
   });
 
-  it('[TLV5-ADOPT.07-OPENCODE-UNIT-01] rejects an invalid stored part and retries the repaired source', async () => {
+  it('[TLV5-ADOPT.07-OPENCODE-UNIT-01] rejects invalid stored parts and recognized content payloads before retry', async () => {
     let storedMessages = [{
       info: { id: 'message-1', role: 'user' },
       parts: [{}],
@@ -379,15 +395,42 @@ describe('OpenCode history loader', () => {
       directory: '/tmp',
     })).rejects.toThrow();
 
+    const outcomes = [];
+    for (const [label, role, part] of invalidImportPartCases) {
+      storedMessages = [storedImportMessage(`message-${label}`, role, [part])];
+      try {
+        await loadLegacyOpenCodeChatMessages('session-1', getClient, { directory: '/tmp' });
+        outcomes.push([label, 'fulfilled']);
+      } catch {
+        outcomes.push([label, 'rejected']);
+      }
+    }
+
+    storedMessages = [
+      storedImportMessage('empty-user', 'user', [{ type: 'text', text: '' }]),
+      storedImportMessage('empty-assistant', 'assistant', [
+        { type: 'text', text: '' },
+        { type: 'reasoning', reasoning: '' },
+        { type: 'reasoning', text: '' },
+        { type: 'reasoning', reasoning: false, text: '' },
+        { type: 'reasoning', reasoning: '', text: 17 },
+        { type: 'step-start' },
+      ]),
+    ];
+    await expect(loadLegacyOpenCodeChatMessages('session-1', getClient, {
+      directory: '/tmp',
+    })).resolves.toEqual([]);
+
     storedMessages = [];
     await expect(loadLegacyOpenCodeChatMessages('session-1', getClient, {
       directory: '/tmp',
     })).resolves.toEqual([]);
-    expect(get).toHaveBeenCalledTimes(2);
-    expect(messages).toHaveBeenCalledTimes(2);
+    expect(outcomes).toEqual(invalidImportPartCases.map(([label]) => [label, 'rejected']));
+    expect(get).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
+    expect(messages).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
   });
 
-  it('[TLV5-ADOPT.08-OPENCODE-NATIVE-UNIT-01] rejects an invalid selected part and retries the repaired source', async () => {
+  it('[TLV5-ADOPT.08-OPENCODE-NATIVE-UNIT-01] rejects invalid selected parts and recognized content payloads before retry', async () => {
     let storedMessages = [{
       info: { id: 'message-1', role: 'user' },
       parts: [{}],
@@ -400,12 +443,39 @@ describe('OpenCode history loader', () => {
       directory: '/tmp',
     })).rejects.toThrow();
 
+    const outcomes = [];
+    for (const [label, role, part] of invalidImportPartCases) {
+      storedMessages = [storedImportMessage(`message-${label}`, role, [part])];
+      try {
+        await loadRequiredOpenCodeChatMessages('session-1', getClient, { directory: '/tmp' });
+        outcomes.push([label, 'fulfilled']);
+      } catch {
+        outcomes.push([label, 'rejected']);
+      }
+    }
+
+    storedMessages = [
+      storedImportMessage('empty-user', 'user', [{ type: 'text', text: '' }]),
+      storedImportMessage('empty-assistant', 'assistant', [
+        { type: 'text', text: '' },
+        { type: 'reasoning', reasoning: '' },
+        { type: 'reasoning', text: '' },
+        { type: 'reasoning', reasoning: false, text: '' },
+        { type: 'reasoning', reasoning: '', text: 17 },
+        { type: 'step-start' },
+      ]),
+    ];
+    await expect(loadRequiredOpenCodeChatMessages('session-1', getClient, {
+      directory: '/tmp',
+    })).resolves.toEqual([]);
+
     storedMessages = [];
     await expect(loadRequiredOpenCodeChatMessages('session-1', getClient, {
       directory: '/tmp',
     })).resolves.toEqual([]);
-    expect(get).toHaveBeenCalledTimes(2);
-    expect(messages).toHaveBeenCalledTimes(2);
+    expect(outcomes).toEqual(invalidImportPartCases.map(([label]) => [label, 'rejected']));
+    expect(get).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
+    expect(messages).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
   });
 
   it('passes directory when loading transcript messages', async () => {

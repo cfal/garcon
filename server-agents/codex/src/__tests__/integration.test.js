@@ -76,7 +76,7 @@ describe('CodexAgentIntegration', () => {
     });
   });
 
-  it('[TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01] rejects an incomplete selected session and retries the repaired source', async () => {
+  it('[TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01] rejects incomplete selected records and recognized content payloads before retry', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-codex-native-import-'));
     const nativePath = join(root, 'rollout.jsonl');
     const sessionMetadata = JSON.stringify({
@@ -96,8 +96,49 @@ describe('CodexAgentIntegration', () => {
     try {
       await expect(importedRows(integration.nativeHistoryImport, reference)).rejects.toThrow();
 
+      const invalidParts = [
+        ['input_text missing', 'user', { type: 'input_text' }],
+        ['input_text non-string', 'user', { type: 'input_text', text: 17 }],
+        ['output_text missing', 'assistant', { type: 'output_text' }],
+        ['output_text non-string', 'assistant', { type: 'output_text', text: false }],
+        ['text missing', 'assistant', { type: 'text' }],
+        ['text non-string', 'assistant', { type: 'text', text: null }],
+      ];
+      const outcomes = [];
+      for (const [label, role, part] of invalidParts) {
+        const message = JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-08-16T00:00:01.000Z',
+          payload: { type: 'message', role, content: [part] },
+        });
+        await writeFile(nativePath, `${sessionMetadata}\n${message}\n`, 'utf8');
+        try {
+          await importedRows(integration.nativeHistoryImport, reference);
+          outcomes.push([label, 'fulfilled']);
+        } catch {
+          outcomes.push([label, 'rejected']);
+        }
+      }
+
+      const validEmptyMessages = [
+        ['user', { type: 'input_text', text: '' }],
+        ['assistant', { type: 'output_text', text: '' }],
+        ['assistant', { type: 'text', text: '' }],
+      ].map(([role, part], index) => JSON.stringify({
+        type: 'response_item',
+        timestamp: `2026-08-16T00:00:0${index + 1}.000Z`,
+        payload: { type: 'message', role, content: [part] },
+      }));
+      await writeFile(
+        nativePath,
+        `${sessionMetadata}\n${validEmptyMessages.join('\n')}\n`,
+        'utf8',
+      );
+      await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toEqual([]);
+
       await writeFile(nativePath, `${sessionMetadata}\n`, 'utf8');
       await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toEqual([]);
+      expect(outcomes).toEqual(invalidParts.map(([label]) => [label, 'rejected']));
     } finally {
       await integration.lifecycle.stop();
       await rm(root, { recursive: true, force: true });

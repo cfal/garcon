@@ -415,6 +415,7 @@ describe('GET /api/v1/chats/messages', () => {
         },
       ]]);
       expect(propagatedError).toBeInstanceOf(AgentIntegrationError);
+      expect(propagatedError?.cause).toBeUndefined();
       expect(observedSurfaces.propagatedError).toEqual({
         name: 'AgentIntegrationError',
         code: 'TRANSCRIPT_UNAVAILABLE',
