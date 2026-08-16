@@ -152,6 +152,7 @@ describe('ActiveTranscriptState', () => {
 			'generation-old',
 			[entry(1, assistant('stale'))],
 			1,
+			null,
 		);
 		vi.mocked(getChatMessages).mockResolvedValueOnce({
 			historyState: {
@@ -486,23 +487,124 @@ describe('ActiveTranscriptState', () => {
 
 	it('[TLV5-PAGE.09-WEB-UNIT-01] crosses several hidden raw budgets before delivering visible earlier rows', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
-			lastOrdinal: 300,
-			pageOldestOrdinal: 251,
-			pageNewestOrdinal: 300,
-			nextBeforeOrdinal: 251,
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(2_001, 2_050), {
+			lastOrdinal: 2_050,
+			pageOldestOrdinal: 2_001,
+			pageNewestOrdinal: 2_050,
+			nextBeforeOrdinal: 2_001,
 			hasMore: true,
 		});
+		const entriesBeforeLoad = chat.entries;
+		const revisionBeforeLoad = chat.feedMutationClock.dataRevision;
+		const sparseVisibleOrdinals: number[] = [];
+		const rawContinuations: number[] = [];
+		vi.mocked(getChatMessages).mockImplementation(async (request) => {
+			expect(chat.entries).toBe(entriesBeforeLoad);
+			const limit = request.limit ?? 50;
+			const pageNewestOrdinal = (request.beforeOrdinal ?? 0) - 1;
+			const nextBeforeOrdinal = pageNewestOrdinal - limit + 1;
+			sparseVisibleOrdinals.push(pageNewestOrdinal);
+			rawContinuations.push(nextBeforeOrdinal);
+			return {
+				chatId: 'chat-1',
+				limit,
+				...page({
+					messages: [entry(pageNewestOrdinal, assistant(`sparse-${pageNewestOrdinal}`))],
+					lastOrdinal: 2_050,
+					pageOldestOrdinal: pageNewestOrdinal,
+					pageNewestOrdinal,
+					nextBeforeOrdinal,
+					hasMore: true,
+				}),
+			};
+		});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+
+		const requests = vi.mocked(getChatMessages).mock.calls.map(([request]) => request);
+		expect(requests).toHaveLength(50);
+		expect(requests.map((request) => request.limit)).toEqual(
+			Array.from({ length: 50 }, (_, index) => 50 - index),
+		);
+		expect(requests[0]?.beforeOrdinal).toBe(2_001);
+		for (let index = 1; index < requests.length; index += 1) {
+			expect(requests[index]?.beforeOrdinal).toBe(rawContinuations[index - 1]);
+		}
+		expect(rawContinuations.at(-1)).toBe(726);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual([
+			...[...sparseVisibleOrdinals].reverse(),
+			...Array.from({ length: 50 }, (_, index) => index + 2_001),
+		]);
+		expect(chat.nextBeforeOrdinal).toBe(726);
+		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.feedMutationClock.dataRevision).toBe(revisionBeforeLoad + 1);
+	});
+
+	it('[TLV5-PAGE.09-WEB-UNIT-03] fills one later-page action across sparse raw budgets before mutating the interval', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 50), {
+			lastOrdinal: 2_000,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 50,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		chat.hasLaterMessages = true;
+		const entriesBeforeLoad = chat.entries;
+		const revisionBeforeLoad = chat.feedMutationClock.dataRevision;
+		const sparseVisibleOrdinals: number[] = [];
+		vi.mocked(getChatMessages).mockImplementation(async (request) => {
+			expect(chat.entries).toBe(entriesBeforeLoad);
+			const limit = request.limit ?? 50;
+			const pageNewestOrdinal = (request.beforeOrdinal ?? 0) - 1;
+			const nextBeforeOrdinal = pageNewestOrdinal - limit + 1;
+			sparseVisibleOrdinals.push(pageNewestOrdinal);
+			return {
+				chatId: 'chat-1',
+				limit,
+				...page({
+					messages: [entry(pageNewestOrdinal, assistant(`sparse-${pageNewestOrdinal}`))],
+					lastOrdinal: 2_000,
+					pageOldestOrdinal: pageNewestOrdinal,
+					pageNewestOrdinal,
+					nextBeforeOrdinal,
+					hasMore: true,
+				}),
+			};
+		});
+
+		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
+
+		const requests = vi.mocked(getChatMessages).mock.calls.map(([request]) => request);
+		expect(requests).toHaveLength(50);
+		expect(requests.map((request) => request.limit)).toEqual(
+			Array.from({ length: 50 }, (_, index) => 50 - index),
+		);
+		expect(requests[0]?.beforeOrdinal).toBe(101);
+		expect(sparseVisibleOrdinals.at(-1)).toBe(1_325);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual([
+			...Array.from({ length: 50 }, (_, index) => index + 1),
+			...sparseVisibleOrdinals,
+		]);
+		expect(chat.loadedThroughOrdinal).toBe(1_325);
+		expect(chat.hasLaterMessages).toBe(true);
+		expect(chat.feedMutationClock.dataRevision).toBe(revisionBeforeLoad + 1);
+	});
+
+	it('[TLV5-PAGE.09-WEB-UNIT-04] loads a newest visible target across trailing hidden raw budgets', async () => {
+		const chat = new ActiveTranscriptState();
+		const revisionBeforeLoad = chat.feedMutationClock.dataRevision;
 		vi.mocked(getChatMessages)
 			.mockResolvedValueOnce({
 				chatId: 'chat-1',
 				limit: 50,
 				...page({
 					messages: [],
-					lastOrdinal: 300,
+					lastOrdinal: 150,
 					pageOldestOrdinal: 0,
-					pageNewestOrdinal: 250,
-					nextBeforeOrdinal: 201,
+					pageNewestOrdinal: 150,
+					nextBeforeOrdinal: 101,
 					hasMore: true,
 				}),
 			})
@@ -511,10 +613,10 @@ describe('ActiveTranscriptState', () => {
 				limit: 50,
 				...page({
 					messages: [],
-					lastOrdinal: 300,
+					lastOrdinal: 150,
 					pageOldestOrdinal: 0,
-					pageNewestOrdinal: 200,
-					nextBeforeOrdinal: 151,
+					pageNewestOrdinal: 100,
+					nextBeforeOrdinal: 51,
 					hasMore: true,
 				}),
 			})
@@ -522,25 +624,30 @@ describe('ActiveTranscriptState', () => {
 				chatId: 'chat-1',
 				limit: 50,
 				...page({
-					messages: assistantEntries(101, 150),
-					lastOrdinal: 300,
-					pageOldestOrdinal: 101,
-					pageNewestOrdinal: 150,
-					nextBeforeOrdinal: 101,
-					hasMore: true,
+					messages: assistantEntries(1, 50),
+					lastOrdinal: 150,
+					pageOldestOrdinal: 1,
+					pageNewestOrdinal: 50,
+					nextBeforeOrdinal: null,
+					hasMore: false,
 				}),
 			});
 
-		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		await expect(chat.loadMessages('chat-1')).resolves.toHaveLength(50);
 
-		expect(vi.mocked(getChatMessages).mock.calls.map(([request]) => request.beforeOrdinal))
-			.toEqual([251, 201, 151]);
-		expect(chat.entries.map((message) => message.ordinal)).toEqual([
-			...Array.from({ length: 50 }, (_, index) => index + 101),
-			...Array.from({ length: 50 }, (_, index) => index + 251),
+		expect(vi.mocked(getChatMessages).mock.calls.map(([request]) => request)).toEqual([
+			{ chatId: 'chat-1', limit: 50 },
+			{ chatId: 'chat-1', limit: 50, beforeOrdinal: 101, transcriptViewId: 'generation-1' },
+			{ chatId: 'chat-1', limit: 50, beforeOrdinal: 51, transcriptViewId: 'generation-1' },
 		]);
-		expect(chat.hasEarlierMessages).toBe(true);
-		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 50 }, (_, index) => index + 1),
+		);
+		expect(chat.loadedThroughOrdinal).toBe(150);
+		expect(chat.nextBeforeOrdinal).toBeNull();
+		expect(chat.hasEarlierMessages).toBe(false);
+		expect(chat.feedMutationClock.dataRevision).toBe(revisionBeforeLoad + 1);
+		expect(chat.transcriptCache.get('chat-1')?.nextBeforeOrdinal).toBeNull();
 	});
 
 	it('[TLV5-PAGE.10-WEB-UNIT-01] rejects a stalled raw continuation before mutating the loaded interval', async () => {
@@ -723,7 +830,7 @@ describe('ActiveTranscriptState', () => {
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
 		expect(chat.pageStates.earlier).toMatchObject({
 			status: 'error',
-			error: 'Earlier transcript page did not advance the loaded window',
+			error: 'Transcript page did not make valid bounded progress',
 		});
 		expect(chat.chatMessages).toHaveLength(1);
 	});
@@ -746,7 +853,7 @@ describe('ActiveTranscriptState', () => {
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
 		expect(chat.pageStates.earlier).toMatchObject({
 			status: 'error',
-			error: 'Earlier transcript page did not advance the loaded window',
+			error: 'Transcript page did not make valid bounded progress',
 		});
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
@@ -1983,63 +2090,35 @@ describe('ActiveTranscriptState', () => {
 			assistantEntries(firstOrdinal, lastOrdinal, (ordinal) =>
 				ordinal === 475 ? repeatedContent : `message-${ordinal}`,
 			).filter((message) => !hiddenOrdinals.has(message.ordinal));
-		vi.mocked(getChatMessages)
-			.mockResolvedValueOnce({
+		const requestBoundaries: number[] = [];
+		vi.mocked(getChatMessages).mockImplementation(async (request) => {
+			const limit = request.limit ?? 50;
+			const pageNewestOrdinal = (request.beforeOrdinal ?? 0) - 1;
+			const pageFirstRawOrdinal = pageNewestOrdinal - limit + 1;
+			const messages = laterPage(pageFirstRawOrdinal, pageNewestOrdinal);
+			requestBoundaries.push(request.beforeOrdinal ?? 0);
+			return {
 				chatId: 'chat-1',
-				limit: 50,
+				limit,
 				...page({
-					messages: laterPage(301, 350),
+					messages,
 					lastOrdinal: 500,
-					pageOldestOrdinal: 301,
-					pageNewestOrdinal: 350,
+					pageOldestOrdinal: messages[0]?.ordinal ?? 0,
+					pageNewestOrdinal,
+					nextBeforeOrdinal: pageFirstRawOrdinal,
 					hasMore: true,
 				}),
-			})
-			.mockResolvedValueOnce({
-				chatId: 'chat-1',
-				limit: 50,
-				...page({
-					messages: laterPage(351, 400),
-					lastOrdinal: 500,
-					pageOldestOrdinal: 352,
-					pageNewestOrdinal: 400,
-					hasMore: true,
-				}),
-			})
-			.mockResolvedValueOnce({
-				chatId: 'chat-1',
-				limit: 50,
-				...page({
-					messages: laterPage(401, 450),
-					lastOrdinal: 500,
-					pageOldestOrdinal: 401,
-					pageNewestOrdinal: 450,
-					hasMore: true,
-				}),
-			})
-			.mockResolvedValueOnce({
-				chatId: 'chat-1',
-				limit: 50,
-				...page({
-					messages: laterPage(451, 500),
-					lastOrdinal: 500,
-					pageOldestOrdinal: 451,
-					pageNewestOrdinal: 500,
-					hasMore: true,
-				}),
-			});
+			};
+		});
 
 		for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
 			await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
 		}
 
-		for (const [index, beforeOrdinal] of [351, 401, 451, 501].entries()) {
-			expect(vi.mocked(getChatMessages)).toHaveBeenNthCalledWith(index + 1, {
-				chatId: 'chat-1',
-				beforeOrdinal,
-				limit: 50,
-				transcriptViewId: 'generation-1',
-			});
+		expect(requestBoundaries[0]).toBe(351);
+		expect(requestBoundaries.length).toBeGreaterThan(4);
+		for (let index = 1; index < requestBoundaries.length; index += 1) {
+			expect(requestBoundaries[index]).toBeGreaterThan(requestBoundaries[index - 1]!);
 		}
 		const expectedOrdinals = Array.from({ length: 400 }, (_, index) => index + 101)
 			.filter((ordinal) => !hiddenOrdinals.has(ordinal));
@@ -2102,9 +2181,10 @@ describe('ActiveTranscriptState', () => {
 			[501, 502],
 		] as const;
 		for (const [firstOrdinal, lastOrdinal] of laterPages) {
+			const limit = lastOrdinal - firstOrdinal + 1;
 			vi.mocked(getChatMessages).mockResolvedValueOnce({
 				chatId: 'chat-1',
-				limit: 50,
+				limit,
 				...page({
 					messages: assistantEntries(
 						firstOrdinal,
@@ -2123,11 +2203,17 @@ describe('ActiveTranscriptState', () => {
 			await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
 		}
 
-		for (const [index, beforeOrdinal] of [351, 401, 451, 501, 503].entries()) {
+		for (const [index, { beforeOrdinal, limit }] of [
+			{ beforeOrdinal: 351, limit: 50 },
+			{ beforeOrdinal: 401, limit: 50 },
+			{ beforeOrdinal: 451, limit: 50 },
+			{ beforeOrdinal: 501, limit: 50 },
+			{ beforeOrdinal: 503, limit: 2 },
+		].entries()) {
 			expect(vi.mocked(getChatMessages)).toHaveBeenNthCalledWith(index + 1, {
 				chatId: 'chat-1',
 				beforeOrdinal,
-				limit: 50,
+				limit,
 				transcriptViewId: 'generation-1',
 			});
 		}
@@ -2845,13 +2931,15 @@ describe('ActiveTranscriptState', () => {
 			})
 			.mockResolvedValueOnce({
 				chatId: 'chat-1',
-				limit: 50,
+				limit: 20,
 				...page({
-					messages: Array.from({ length: 50 }, (_, index) =>
-						entry(index + 71, assistant(`message-${index + 71}`)),
+					messages: Array.from({ length: 20 }, (_, index) =>
+						entry(index + 101, assistant(`message-${index + 101}`)),
 					),
 					lastOrdinal: 120,
-					pageOldestOrdinal: 71,
+					pageOldestOrdinal: 101,
+					pageNewestOrdinal: 120,
+					nextBeforeOrdinal: 101,
 					hasMore: true,
 				}),
 			});
@@ -2873,7 +2961,7 @@ describe('ActiveTranscriptState', () => {
 
 		expect(getChatMessages).toHaveBeenNthCalledWith(3, {
 			chatId: 'chat-1',
-			limit: 50,
+			limit: 20,
 			beforeOrdinal: 121,
 			transcriptViewId: 'generation-1',
 		});
@@ -2920,13 +3008,15 @@ describe('ActiveTranscriptState', () => {
 			})
 			.mockResolvedValueOnce({
 				chatId: 'chat-1',
-				limit: 50,
+				limit: 2,
 				...page({
-					messages: Array.from({ length: 50 }, (_, index) =>
-						entry(index + 53, assistant(`message-${index + 53}`)),
+					messages: Array.from({ length: 2 }, (_, index) =>
+						entry(index + 101, assistant(`message-${index + 101}`)),
 					),
 					lastOrdinal: 102,
-					pageOldestOrdinal: 53,
+					pageOldestOrdinal: 101,
+					pageNewestOrdinal: 102,
+					nextBeforeOrdinal: 101,
 					hasMore: true,
 				}),
 			});
@@ -3039,6 +3129,8 @@ describe('ActiveTranscriptState', () => {
 					),
 					lastOrdinal: 100,
 					pageOldestOrdinal: 51,
+					nextBeforeOrdinal: 51,
+					hasMore: true,
 				}),
 			});
 
@@ -3089,6 +3181,8 @@ describe('ActiveTranscriptState', () => {
 
 		await expect(initial).resolves.toBe('loaded');
 		expect(chat.hasLaterMessages).toBe(true);
+		expect(chat.lastOrdinal).toBe(101);
+		expect(chat.loadedThroughOrdinal).toBe(100);
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 100 });
 		expect(chat.transcriptCache.get('chat-1')?.lastOrdinal).toBe(100);
 

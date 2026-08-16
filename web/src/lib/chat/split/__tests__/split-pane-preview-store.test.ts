@@ -42,6 +42,21 @@ function page(messages: TranscriptMessage[], transcriptViewId = 'generation-1') 
 	};
 }
 
+function boundedNewestPage(
+	messages: TranscriptMessage[],
+	pageNewestOrdinal: number,
+	nextBeforeOrdinal: number | null,
+) {
+	return {
+		...page(messages),
+		lastOrdinal: 150,
+		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
+		pageNewestOrdinal,
+		nextBeforeOrdinal,
+		hasMore: nextBeforeOrdinal !== null,
+	};
+}
+
 describe('SplitPanePreviewStore', () => {
 	beforeEach(() => {
 		localStorage.clear();
@@ -87,6 +102,36 @@ describe('SplitPanePreviewStore', () => {
 		expect(restored?.lastOrdinal).toBe(1);
 	});
 
+	it('[TLV5-PAGE.09-WEB-SPLIT-01] fills a split preview across trailing hidden raw budgets', async () => {
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce(boundedNewestPage([], 150, 101))
+			.mockResolvedValueOnce(boundedNewestPage([], 100, 51))
+			.mockResolvedValueOnce(
+				boundedNewestPage(
+					Array.from({ length: 50 }, (_, index) => entry(index + 1, `message-${index + 1}`)),
+					50,
+					null,
+				),
+			);
+		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
+		const replaceFromPage = vi.spyOn(transcriptCache, 'replaceFromPage');
+		const store = new SplitPanePreviewStore(transcriptCache);
+
+		await store.loadSnapshot('chat-1');
+
+		expect(vi.mocked(getChatMessages).mock.calls.map(([request]) => request)).toEqual([
+			{ chatId: 'chat-1', limit: 50 },
+			{ chatId: 'chat-1', limit: 50, beforeOrdinal: 101, transcriptViewId: 'generation-1' },
+			{ chatId: 'chat-1', limit: 50, beforeOrdinal: 51, transcriptViewId: 'generation-1' },
+		]);
+		expect(replaceFromPage).toHaveBeenCalledOnce();
+		expect(store.entry('chat-1').messages.map((item) => item.ordinal)).toEqual(
+			Array.from({ length: 50 }, (_, index) => index + 1),
+		);
+		expect(store.entry('chat-1').lastOrdinal).toBe(150);
+		expect(transcriptCache.get('chat-1')?.nextBeforeOrdinal).toBeNull();
+	});
+
 	it('shows degraded history without exposing a preview cursor', async () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
 		transcriptCache.replaceFromPage('chat-1', page([entry(1, 'stale')]));
@@ -116,7 +161,7 @@ describe('SplitPanePreviewStore', () => {
 
 	it('applies contiguous messages and windows the preview', () => {
 		const store = new SplitPanePreviewStore();
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1, null);
 
 		const applied = store.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 2, 2);
 
@@ -129,7 +174,7 @@ describe('SplitPanePreviewStore', () => {
 
 	it('marks stale when incoming messages belong to another generation', () => {
 		const store = new SplitPanePreviewStore();
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1, null);
 
 		const applied = store.applyMessages('chat-1', 'generation-2', [entry(2, 'second')], 2, 2);
 
@@ -139,7 +184,7 @@ describe('SplitPanePreviewStore', () => {
 
 	it('marks stale when incoming messages have a ordinal gap', () => {
 		const store = new SplitPanePreviewStore();
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1, null);
 
 		const applied = store.applyMessages('chat-1', 'generation-1', [entry(3, 'third')], 3, 3);
 
@@ -150,7 +195,7 @@ describe('SplitPanePreviewStore', () => {
 
 	it('advances across a hidden ledger row after the visible append', () => {
 		const store = new SplitPanePreviewStore();
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1, null);
 
 		const applied = store.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 2, 3);
 
@@ -190,7 +235,7 @@ describe('SplitPanePreviewStore', () => {
 			}),
 		);
 		const store = new SplitPanePreviewStore();
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1, null);
 
 		const load = store.loadSnapshot('chat-1');
 		expect(store.applyMessages('chat-1', 'generation-1', [entry(2, 'live')], 2, 2)).toBe(true);
@@ -207,8 +252,8 @@ describe('SplitPanePreviewStore', () => {
 		const storage = new LocalChatTranscriptStorage();
 		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
 		const store = new SplitPanePreviewStore(transcriptCache);
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'kept')], 1);
-		store.replaceSnapshot('chat-2', 'generation-2', [entry(1, 'removed')], 1);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'kept')], 1, null);
+		store.replaceSnapshot('chat-2', 'generation-2', [entry(1, 'removed')], 1, null);
 		transcriptCache.flush();
 
 		store.prune(['chat-1']);
@@ -220,8 +265,16 @@ describe('SplitPanePreviewStore', () => {
 		expect(transcriptCache.get('chat-2')?.transcriptViewId).toBe('generation-2');
 		expect(storage.listCursors()).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 1 }),
-				expect.objectContaining({ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 1 }),
+				expect.objectContaining({
+					chatId: 'chat-1',
+					transcriptViewId: 'generation-1',
+					lastOrdinal: 1,
+				}),
+				expect.objectContaining({
+					chatId: 'chat-2',
+					transcriptViewId: 'generation-2',
+					lastOrdinal: 1,
+				}),
 			]),
 		);
 	});
@@ -229,7 +282,7 @@ describe('SplitPanePreviewStore', () => {
 	it('keeps pruned cache entries contiguous for later stream batches', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
 		const store = new SplitPanePreviewStore(transcriptCache);
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1, null);
 
 		store.prune([]);
 		const result = transcriptCache.applyMessages('chat-1', 'generation-1', {
@@ -246,7 +299,7 @@ describe('SplitPanePreviewStore', () => {
 		const storage = new LocalChatTranscriptStorage();
 		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
 		const store = new SplitPanePreviewStore(transcriptCache);
-		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'deleted')], 1);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'deleted')], 1, null);
 		transcriptCache.flush();
 
 		store.remove('chat-1');

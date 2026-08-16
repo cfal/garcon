@@ -450,7 +450,7 @@ cache restoration.
 | TLV5-PAGE.06   | Page errors require explicit retry and cannot tight-loop.                                   | State and controller unit              |
 | TLV5-PAGE.07   | Normal paging is automatic and exposes no ordinary boundary button.                         | Component, browser behavior            |
 | TLV5-PAGE.08   | One request performs one bounded raw query and returns the exact clamped interval ceiling and continuation. | Store static, server and web contract |
-| TLV5-PAGE.09   | Hidden-only ranges advance across several raw budgets and the raw continuation survives cache switch and hydration. | Contract, server and web unit |
+| TLV5-PAGE.09   | Client-owned earlier, later, and newest visible demand advances across sparse raw budgets; newest active/background/split loads share the demand helper, and raw continuation survives cache switch and hydration. | Contract, server and web unit |
 | TLV5-PAGE.10   | Malformed or stalled raw continuation is rejected before mutation and cannot loop.          | Contract and web unit                  |
 | TLV5-REPLAY.01 | The first replay page captures a fixed high watermark.                                      | Contract, server black-box             |
 | TLV5-REPLAY.02 | Every continuation repeats the watermark and advances raw ordinal coverage.                 | Contract, server black-box             |
@@ -826,10 +826,15 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PAGE.08-SERVER-UNIT-02    | `server/ledger/__tests__/view-reader.test.js`: an ordinal-one boundary performs one empty raw scan and reports ceiling zero with no continuation          | PAGE.08                     |
 | TLV5-PAGE.08-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: a request beyond the watermark accepts the clamped raw ceiling and exact continuation                 | PAGE.08                     |
 | TLV5-PAGE.09-SERVER-UNIT-01    | `server/ledger/__tests__/view-reader.test.js`: one hidden-only raw page returns no messages and advances without a presentation scan loop                 | PAGE.09                     |
+| TLV5-PAGE.09-WEB-BACKGROUND-01 | `web/src/lib/chat/transcript/__tests__/background-transcript-loader.test.ts`: background newest loading crosses two hidden raw budgets and installs the aggregated bounded snapshot once | PAGE.09 |
 | TLV5-PAGE.09-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: the client contract accepts an empty presented page with a strict raw continuation                    | PAGE.09                     |
+| TLV5-PAGE.09-WEB-SPLIT-01      | `web/src/lib/chat/split/__tests__/split-pane-preview-store.test.ts`: split preview loading crosses two hidden raw budgets before installing its visible target | PAGE.09                  |
+| TLV5-PAGE.09-WEB-STATIC-01     | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: active, background, and split newest paths call the shared visible-demand helper | PAGE.09, supplementary |
 | TLV5-PAGE.09-WEB-STORAGE-01    | `web/src/lib/chat/transcript/__tests__/chat-transcript-cache.test.ts`: cache hydration preserves the raw earlier continuation independently of visible rows | PAGE.09                  |
-| TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: several hidden raw budgets strictly advance before eventual visible delivery      | PAGE.09                     |
+| TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one earlier action aggregates fifty sparse bounded pages before one interval mutation with the exact cursor | PAGE.09 |
 | TLV5-PAGE.09-WEB-UNIT-02       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switch invalidation restores the bounded tail and resumes from its raw cursor      | PAGE.09, UX.17              |
+| TLV5-PAGE.09-WEB-UNIT-03       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one later action fills its sparse visible target by raw ceiling before one interval mutation | PAGE.09 |
+| TLV5-PAGE.09-WEB-UNIT-04       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: active newest loading crosses two trailing hidden raw budgets before installing the visible target | PAGE.09 |
 | TLV5-PAGE.10-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: null, zero, stalled, and hasMore-inconsistent raw continuations reject                               | PAGE.10                     |
 | TLV5-PAGE.10-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: a stalled hidden continuation fails before changing the loaded interval           | PAGE.10                     |
 | TLV5-UX.01-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `preserves virtual transcript geometry across paging, appends, and scale`           | R4                          |

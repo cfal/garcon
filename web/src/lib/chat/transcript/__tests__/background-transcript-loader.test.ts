@@ -3,6 +3,11 @@ import { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-tran
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage, CompleteChatHistoryResponse } from '$shared/chat-view';
+import { getChatMessages } from '$lib/api/chats.js';
+
+vi.mock('$lib/api/chats.js', () => ({
+	getChatMessages: vi.fn(),
+}));
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -29,7 +34,7 @@ function page(
 		nextBeforeOrdinal: null,
 		hasMore: false,
 		resendCandidates: [],
-		limit: 50,
+		limit: 100,
 	};
 }
 
@@ -37,9 +42,56 @@ function seqs(cache: ChatTranscriptCache, chatId = 'chat-1'): number[] {
 	return cache.get(chatId)?.messages.map((item) => item.ordinal) ?? [];
 }
 
+function boundedNewestPage(
+	messages: TranscriptMessage[],
+	pageNewestOrdinal: number,
+	nextBeforeOrdinal: number | null,
+): CompleteChatHistoryResponse {
+	return {
+		...page('generation-1', messages, 250),
+		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
+		pageNewestOrdinal,
+		nextBeforeOrdinal,
+		hasMore: nextBeforeOrdinal !== null,
+		limit: 100,
+	};
+}
+
 describe('BackgroundTranscriptLoader', () => {
 	beforeEach(() => {
 		localStorage.clear();
+		vi.mocked(getChatMessages).mockReset();
+	});
+
+	it('[TLV5-PAGE.09-WEB-BACKGROUND-01] fills a cached newest snapshot across trailing hidden raw budgets', async () => {
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce(boundedNewestPage([], 250, 151))
+			.mockResolvedValueOnce(boundedNewestPage([], 150, 51))
+			.mockResolvedValueOnce(
+				boundedNewestPage(
+					Array.from({ length: 50 }, (_, index) => entry(index + 1, `message-${index + 1}`)),
+					50,
+					null,
+				),
+			);
+		const cache = new ChatTranscriptCache({ limit: 50 });
+		const replaceFromPage = vi.spyOn(cache, 'replaceFromPage');
+		const loader = new BackgroundTranscriptLoader({ cache });
+
+		loader.queueLoad('chat-1');
+		await loader.waitForIdle('chat-1');
+
+		expect(vi.mocked(getChatMessages).mock.calls.map(([request]) => request)).toEqual([
+			{ chatId: 'chat-1', limit: 100 },
+			{ chatId: 'chat-1', limit: 100, beforeOrdinal: 151, transcriptViewId: 'generation-1' },
+			{ chatId: 'chat-1', limit: 100, beforeOrdinal: 51, transcriptViewId: 'generation-1' },
+		]);
+		expect(replaceFromPage).toHaveBeenCalledOnce();
+		expect(seqs(cache)).toEqual(Array.from({ length: 50 }, (_, index) => index + 1));
+		expect(cache.get('chat-1')).toMatchObject({
+			lastOrdinal: 250,
+			nextBeforeOrdinal: null,
+		});
 	});
 
 	it('coalesces repeated loads for the same chat', async () => {

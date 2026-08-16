@@ -93,7 +93,7 @@ describe('buildRouterStores', () => {
 
 	it('warms background transcripts through the shared transcript cache', () => {
 		const deps = depsFor(chatRecord());
-		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1);
+		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1, null);
 		const stores = buildRouterStores(deps);
 
 		const applied = stores.chatState.warmBackgroundTranscript('chat-2', 'generation-2', [

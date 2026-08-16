@@ -423,9 +423,11 @@ HTTP cases cover wrong chat, wrong view, wrong limit, descending or duplicate
 rows, impossible metadata, overlap, held old-view work, error retry, and the
 absence of an ordinary paging button. Revision 18 additionally requires one
 bounded raw query, the exact clamped interval ceiling, an advancing empty
-rendered page, a hidden run spanning several budgets, strict raw-cursor
-progress, deterministic stall rejection, and raw-cursor persistence independent
-of the oldest visible ordinal.
+rendered page, sparse earlier/later/newest demand spanning several budgets,
+strict raw-cursor progress, deterministic stall rejection, and raw-cursor
+persistence independent of the oldest visible ordinal. Active, background, and
+split newest loads share the client demand helper rather than relying on
+viewport geometry to discover missing visible rows.
 
 The section 5.4 test-first checkpoint registers these coordinates:
 
@@ -435,10 +437,15 @@ The section 5.4 test-first checkpoint registers these coordinates:
 | `TLV5-PAGE.08-SERVER-UNIT-02` | The ordinal-one interval performs one empty scan and returns ceiling zero with no continuation |
 | `TLV5-PAGE.08-WEB-CONTRACT-01` | The client accepts the clamped raw ceiling and continuation when the request exceeds the watermark |
 | `TLV5-PAGE.09-SERVER-UNIT-01` | One hidden-only server page advances without scanning for visible content |
+| `TLV5-PAGE.09-WEB-BACKGROUND-01` | A background newest load crosses two hidden raw budgets and installs one aggregated bounded-cache snapshot |
 | `TLV5-PAGE.09-WEB-CONTRACT-01` | An empty presented page with a strict raw continuation is valid |
+| `TLV5-PAGE.09-WEB-SPLIT-01` | A split preview crosses two hidden raw budgets and installs one aggregated visible target |
+| `TLV5-PAGE.09-WEB-STATIC-01` | Active, background, and split newest paths invoke the shared visible-demand helper |
 | `TLV5-PAGE.09-WEB-STORAGE-01` | Cache persistence and hydration retain the raw cursor independently of visible ordinals |
-| `TLV5-PAGE.09-WEB-UNIT-01` | The client crosses several bounded hidden ranges before delivering visible rows |
+| `TLV5-PAGE.09-WEB-UNIT-01` | One earlier action fills its visible target across sparse bounded pages, then mutates once with the exact raw cursor |
 | `TLV5-PAGE.09-WEB-UNIT-02` | Chat switch restores the bounded tail and resumes from the hidden-only raw continuation |
+| `TLV5-PAGE.09-WEB-UNIT-03` | One later action follows raw ceilings until its sparse visible target is full, then mutates once |
+| `TLV5-PAGE.09-WEB-UNIT-04` | An active newest load crosses two trailing hidden raw budgets before installing the visible target |
 | `TLV5-PAGE.10-WEB-CONTRACT-01` | Malformed, stalled, and hasMore-inconsistent continuations reject at the API boundary |
 | `TLV5-PAGE.10-WEB-UNIT-01` | A stalled hidden continuation fails before active-state mutation or retry looping |
 
