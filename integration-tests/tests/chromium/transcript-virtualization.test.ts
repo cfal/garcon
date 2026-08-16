@@ -3837,6 +3837,75 @@ async function verifyPermissionDraftPersistence(
   fixture.assertNoBrowserErrors();
 }
 
+async function verifyHistoricalPermissionIsInertAfterRestart(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+): Promise<void> {
+  environment.model.scriptTurn([
+    claudeToolUse('toolu_chromium_historical_ask', 'AskUserQuestion', {
+      questions: [
+        {
+          question: 'Which durable store?',
+          header: 'Database',
+          multiSelect: false,
+          options: [
+            { label: 'Postgres', description: 'Use the durable database.' },
+            { label: 'SQLite', description: 'Use the embedded database.' },
+          ],
+        },
+      ],
+    }),
+  ]);
+  const chatId = fixture.integration.newChatId();
+  const cursor = fixture.integration.client.markEvents();
+  await fixture.integration.client.startChat(
+    liveClaudeStartRequest({
+      chatId,
+      projectPath: fixture.integration.dirs.project,
+      command: 'ask a permission that survives restart',
+      permissionMode: 'bypassPermissions',
+    }),
+  );
+  const permission = await fixture.integration.client.waitForTransientPermission(
+    chatId,
+    () => true,
+    { afterIndex: cursor, timeoutMs: 30_000 },
+  );
+  if (permission.message.type !== 'permission-request') {
+    throw new Error('The scripted historical permission request was not published.');
+  }
+  const permissionRequestId = permission.message.permissionRequestId;
+  const permissionIncarnation = permission.message.incarnation;
+
+  await fixture.integration.restartGarcon();
+  const response = await fixture.page.goto(
+    `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
+  await waitForTranscriptReady(fixture.page);
+
+  const snapshot = await fixture.integration.client.getChatSnapshot(chatId, 50);
+  expect(snapshot.transientFeed.rows).toEqual([]);
+  expect(snapshot.transcript.availability).toBe('available');
+  if (snapshot.transcript.availability !== 'available') {
+    throw new Error('The restarted permission transcript is unavailable.');
+  }
+  expect(snapshot.transcript.messages.some((entry) => (
+    entry.message.type === 'permission-request'
+    && entry.message.permissionRequestId === permissionRequestId
+    && entry.message.incarnation === permissionIncarnation
+  ))).toBe(true);
+
+  const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
+  await postgres.waitFor({ state: 'visible' });
+  expect(await postgres.isDisabled()).toBe(true);
+  expect(await fixture.page.getByRole('button', { name: /Submit answer/ }).count()).toBe(0);
+  expect(await fixture.page.getByRole('button', { name: /^Skip$/ }).count()).toBe(0);
+  environment.model.assertSettled();
+  fixture.assertNoBrowserErrors();
+}
+
 describe('Chromium transcript virtualization', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;
   let browser: Browser | undefined;
@@ -4021,6 +4090,21 @@ describe('Chromium transcript virtualization', () => {
         await verifyHiddenPortalCleanup(fixture, chatId);
         markPhase('verifying permission draft persistence outside overscan');
         await verifyPermissionDraftPersistence(fixture, testEnvironment);
+      },
+      diagnostics,
+      { serverEnvironment: testEnvironment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('keeps historical permission rows inert after a server restart', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    await withChromiumFixture(
+      'transcript-historical-permission-restart',
+      async (fixture, markPhase) => {
+        markPhase('restarting with a durable permission and no transient capability');
+        await verifyHistoricalPermissionIsInertAfterRestart(fixture, testEnvironment);
       },
       diagnostics,
       { serverEnvironment: testEnvironment.serverEnvironment },
