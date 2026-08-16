@@ -273,24 +273,13 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		}
 		const previousLastOrdinal = this.lastOrdinal;
 		const append = { firstOrdinal, lastOrdinal, messages };
+		const bufferedBatch = { transcriptViewId, ...append, noticeRevision, resendCandidates };
 		if (this.#snapshotBuffer) {
 			this.transcriptCache.applyMessages(chatId, transcriptViewId, append);
-			this.#snapshotBuffer.push({
-				transcriptViewId,
-				...append,
-				noticeRevision,
-				resendCandidates,
-			});
+			this.#snapshotBuffer.push(bufferedBatch);
 			return 'applied';
 		}
-		if (
-			this.#reconnectReplay.buffer(chatId, {
-				transcriptViewId,
-				...append,
-				noticeRevision,
-				resendCandidates,
-			})
-		) {
+		if (this.#reconnectReplay.buffer(chatId, bufferedBatch)) {
 			return 'applied';
 		}
 		if (this.transcriptViewId && transcriptViewId !== this.transcriptViewId) {
