@@ -17,7 +17,7 @@ import { TranscriptLedgerStore } from '../store.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptLedgerService', () => {
-  it('commits producer events synchronously and notifies after publish returns', async () => {
+  it('[TLV5-L03.01-CORE-UNIT-01] commits producer events synchronously and notifies after publish returns', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
       const lease = ledger.openProducer('chat-1', 'test');
@@ -229,7 +229,7 @@ describe('TranscriptLedgerService', () => {
     }, { onListenerError: (error) => errors.push(error) });
   });
 
-  it('uses the sink object as the ownership fence', async () => {
+  it('[TLV5-L07.01-CORE-UNIT-01] uses the sink object as the ownership fence', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
       const old = ledger.openProducer('chat-1', 'test');

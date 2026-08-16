@@ -15,7 +15,7 @@ const REQUEST_ID = 'permission-1';
 const TS = '2026-08-15T00:00:00.000Z';
 
 describe('transcript permission occurrences', () => {
-  it('applies a delayed cancellation only to its exact reused occurrence', async () => {
+  it('[TLV5-PERM.05-CORE-UNIT-01] applies a delayed cancellation only to its exact reused occurrence', async () => {
     await withLedger((ledger) => {
       const lease = startRun(ledger);
       const firstDecision = permissionDecision('incarnation-1');

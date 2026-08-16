@@ -177,7 +177,7 @@ const turn = {
 };
 
 describe('server event wiring', () => {
-  it('broadcasts committed rows before terminal-driven lifecycle state', async () => {
+  it('[TLV5-L03.02-CORE-UNIT-01] broadcasts committed rows before terminal-driven lifecycle state', async () => {
     const fixture = createFixture();
 
     fixture.agent.transcript(providerCommit());

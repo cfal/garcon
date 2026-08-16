@@ -34,7 +34,7 @@ afterEach(async () => {
 });
 
 describe('TranscriptLedgerStore', () => {
-  it('commits atomic batches with dense view-local ordinals', () => {
+  it('[TLV5-L02.01-STORE-UNIT-01] commits atomic batches with dense view-local ordinals', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
       contentStartOrdinal: 1,
@@ -768,7 +768,7 @@ describe('TranscriptLedgerStore', () => {
     }
   });
 
-  it('attributes an eviction close failure and retries that handle on shutdown', () => {
+  it('[TLV5-L11.04-STORE-UNIT-01] attributes an eviction close failure and retries that handle on shutdown', () => {
     store.close();
     store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
     store.initializeCurrentView('chat-one', {
