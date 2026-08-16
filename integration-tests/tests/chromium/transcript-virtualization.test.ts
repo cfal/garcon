@@ -3253,6 +3253,187 @@ async function verifyDetachedNativeReload(
   fixture.assertNoBrowserErrors();
 }
 
+async function verifyHeldEarlierPageNativeReload(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+): Promise<void> {
+  const viewport = TRANSCRIPT_VIEWPORTS[0]!;
+  const chatId = fixture.integration.newChatId();
+  const baseUserContent = 'held-page-native-reload-base-user';
+  const baseAssistantContent = 'held-page-native-reload-base-assistant';
+  environment.model.scriptTurn([claudeText(baseAssistantContent)]);
+  const started = await fixture.integration.client.startChat(
+    liveClaudeStartRequest({
+      chatId,
+      projectPath: fixture.integration.dirs.project,
+      command: baseUserContent,
+      permissionMode: 'bypassPermissions',
+    }),
+  );
+  expect((await fixture.integration.client.waitForTurnTerminal(chatId, started.turnId)).type).toBe(
+    'agent-run-finished',
+  );
+  environment.model.assertSettled();
+  const seeded = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
+  const injected = mixedOrderingRows(seeded.lastOrdinal + 1);
+  await appendLedgerRows(fixture, chatId, seeded.transcriptViewId, injected.drafts);
+  const beforeReload = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
+  expect(beforeReload.transcriptViewId).toBe(seeded.transcriptViewId);
+  expect(beforeReload.hasMore).toBe(true);
+
+  let releaseEarlierPage!: () => void;
+  const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
+  let resolveEarlierRequest!: () => void;
+  const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
+  let earlierRequestCount = 0;
+  let heldRequestView = '';
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
+      const response = await route.fetch();
+      earlierRequestCount += 1;
+      if (earlierRequestCount === 1) {
+        heldRequestView = url.searchParams.get('transcriptViewId') ?? '';
+        resolveEarlierRequest();
+        await earlierPageGate;
+      }
+      await route.fulfill({ response });
+      return;
+    }
+    await route.continue();
+  });
+
+  try {
+    await fixture.page.setViewportSize(viewport);
+    await prepareTranscript(fixture, chatId, 1);
+    await fixture.page.evaluate((heldChatId) => {
+      const browserGlobal = globalThis as typeof globalThis & {
+        __restoreHeldEarlierReloadFetch?: () => void;
+      };
+      const originalFetch = globalThis.fetch;
+      browserGlobal.__restoreHeldEarlierReloadFetch = () => {
+        globalThis.fetch = originalFetch;
+        delete browserGlobal.__restoreHeldEarlierReloadFetch;
+      };
+      globalThis.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(
+          typeof input === 'string' || input instanceof URL ? input : input.url,
+          location.href,
+        );
+        if (
+          url.pathname === '/api/v1/chats/messages' &&
+          url.searchParams.get('chatId') === heldChatId &&
+          url.searchParams.has('beforeOrdinal')
+        ) {
+          return originalFetch(input, { ...init, signal: undefined });
+        }
+        return originalFetch(input, init);
+      }, originalFetch);
+    }, chatId);
+    await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+      const feed = feedElement as HTMLElement;
+      feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -80 }));
+      feed.scrollTop = Math.min(
+        Math.max(0, feed.scrollHeight - feed.clientHeight),
+        feed.clientHeight * 0.75,
+      );
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    await withDiagnosticTimeout('the held pre-reload earlier page', earlierRequest);
+    await fixture.page.locator(`${FEED_SELECTOR}[aria-busy="true"]`).waitFor({ state: 'visible' });
+    expect(heldRequestView).toBe(beforeReload.transcriptViewId);
+
+    const native = await claudeNativeTranscript(fixture, chatId);
+    const externalContent = 'held-page-native-reload-final-assistant';
+    await appendFile(
+      native.path,
+      `${JSON.stringify({
+        sessionId: native.agentSessionId,
+        type: 'assistant',
+        uuid: crypto.randomUUID(),
+        timestamp: new Date(Date.now() + 1_000).toISOString(),
+        cwd: fixture.integration.dirs.project,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: externalContent }],
+        },
+      })}\n`,
+      'utf8',
+    );
+
+    const reloaded = await fixture.integration.client.reloadChat(chatId);
+    expect(reloaded.transcriptViewId).not.toBe(beforeReload.transcriptViewId);
+    await waitForSurfaceIdentity(fixture.page, `${chatId}:${reloaded.transcriptViewId}`);
+    await waitForTranscriptReady(fixture.page);
+    const replacementRevision = await virtualDataRevision(fixture.page);
+    const replacementEntryCount = await transcriptEntryCount(fixture.page);
+
+    releaseEarlierPage();
+    await fixture.page.evaluate(async () => {
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+
+    expect(earlierRequestCount).toBe(1);
+    expect(await surfaceIdentity(fixture.page)).toBe(`${chatId}:${reloaded.transcriptViewId}`);
+    expect(await virtualDataRevision(fixture.page)).toBe(replacementRevision);
+    expect(await transcriptEntryCount(fixture.page)).toBe(replacementEntryCount);
+    const canonical = await fixture.integration.client.getMessages(chatId, {
+      limit: 200,
+    });
+    expect(canonical.transcriptViewId).toBe(reloaded.transcriptViewId);
+    expect(canonical.messages.at(-1)).toMatchObject({
+      message: { type: 'assistant-message', content: externalContent },
+    });
+    expect(canonical.messages.map(exactTranscriptRow)).toEqual([
+      expect.objectContaining({ type: 'user-message', text: baseUserContent }),
+      expect.objectContaining({ type: 'assistant-message', text: baseAssistantContent }),
+      expect.objectContaining({ type: 'assistant-message', text: externalContent }),
+    ]);
+    expect(JSON.stringify(canonical.messages)).not.toContain(
+      'mixed-final-assistant-after-all-tools',
+    );
+    await loadCompleteTranscript(fixture.page, canonical.messages.length);
+    const renderedExpected = canonical.messages.filter(
+      (entry) => entry.message.type !== 'tool-result',
+    );
+    const scan = await scanLoadedTranscript(fixture.page);
+    expect(scan.rows.map((row) => row.rowId)).toEqual(
+      renderedExpected.map((entry) => `${canonical.transcriptViewId}:${entry.ordinal}`),
+    );
+    expect(scan.rows.map((row) => row.messageType)).toEqual(
+      renderedExpected.map((entry) => entry.message.type),
+    );
+    expect(scan.rows.map((row) => row.text)).toEqual(
+      renderedExpected.map((entry) => exactTranscriptText(entry.message)),
+    );
+    expect(scan.rows.at(-1)).toMatchObject({
+      messageType: 'assistant-message',
+      rowId: `${canonical.transcriptViewId}:${canonical.messages.at(-1)?.ordinal}`,
+      text: externalContent,
+    });
+    fixture.assertNoBrowserErrors();
+  } finally {
+    releaseEarlierPage();
+    await fixture.page
+      .evaluate(() => {
+        (
+          globalThis as typeof globalThis & {
+            __restoreHeldEarlierReloadFetch?: () => void;
+          }
+        ).__restoreHeldEarlierReloadFetch?.();
+      })
+      .catch(() => undefined);
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
 async function verifyDirectChatHidesNativeReload(fixture: ChromiumFixture): Promise<void> {
   const chatId = await seedTranscript(fixture.integration, 15, 'chromium-no-native-reload-base');
   await prepareTranscript(fixture, chatId, 20);
@@ -4261,6 +4442,21 @@ describe('Chromium transcript virtualization', () => {
       );
     }, 180_000);
   }
+
+  test('ignores a held old-view page after native history replaces the transcript', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    await withChromiumFixture(
+      'transcript-held-page-native-reload',
+      async (fixture, markPhase) => {
+        markPhase('releasing an old-view page after native transcript replacement');
+        await verifyHeldEarlierPageNativeReload(fixture, testEnvironment);
+      },
+      diagnostics,
+      { serverEnvironment: testEnvironment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
 
   test('renders mixed paged transcripts in exact ledger order on compact and wide layouts', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
