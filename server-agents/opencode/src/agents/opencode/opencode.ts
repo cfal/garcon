@@ -194,7 +194,9 @@ export class OpenCodeRuntime {
   readonly #instanceCreations: OpenCodeInstanceCreationTracker;
   #idlePurger = new IdleSessionPurger<OpenCodeSession>({
     sessions: () => this.#sessions.entries(),
-    isRunning: (session) => session.status === 'running',
+    isRunning: (session) => (
+      session.status === 'running' || session.providerWorkRequiresQuiescence
+    ),
     lastActivityAt: (session) => session.lastActivityAt,
     purge: (sessionId, session) => {
       this.#sessions.delete(sessionId);

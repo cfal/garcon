@@ -1336,7 +1336,7 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
-  it('routes late named content from a stream-failed turn while its successor works', async () => {
+  it('retains a stream-failed turn through idle purging until successor quiescence', async () => {
     const firstStream = createEventStream();
     const secondStream = createEventStream();
     const streams = [firstStream, secondStream];
@@ -1366,6 +1366,23 @@ describe('OpenCodeRuntime abort', () => {
     firstStream.close();
     await waitFor(() => failureMessages(firstPublished.events).length === 1);
     expect(runtime.isRunning('session-1')).toBe(false);
+
+    const originalSetInterval = globalThis.setInterval;
+    const originalDateNow = Date.now;
+    let purgeIdleSessions;
+    try {
+      globalThis.setInterval = mock((callback) => {
+        purgeIdleSessions = callback;
+        return 1;
+      });
+      const idleSince = Date.now();
+      Date.now = mock(() => idleSince + 31 * 60 * 1000);
+      runtime.startPurgeTimer();
+      purgeIdleSessions();
+    } finally {
+      Date.now = originalDateNow;
+      globalThis.setInterval = originalSetInterval;
+    }
 
     const successorPublished = collectOperation('run-b');
     const successor = runtime.runTurn({
