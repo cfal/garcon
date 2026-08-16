@@ -485,6 +485,45 @@ describe('chat WebSocket handler', () => {
     });
   });
 
+  it('rejects a replay row that cannot fit in one bounded response frame', async () => {
+    mockChatViews.readReplay.mockReturnValueOnce({
+      transcriptViewId: 'view-1',
+      messages: [{
+        ordinal: 2,
+        message: {
+          type: 'assistant-message',
+          content: 'x'.repeat(1024 * 1024),
+          timestamp: '2024-01-01T00:00:00Z',
+        },
+      }],
+      firstOrdinal: 2,
+      lastOrdinal: 2,
+      nextAfterOrdinal: 2,
+      throughOrdinal: 2,
+      hasMore: false,
+    });
+
+    await chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-oversized-row',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 1,
+    });
+
+    expect(sendWebSocketJson).toHaveBeenCalledTimes(1);
+    expect(lastSentPayload()).toMatchObject({
+      type: 'client-request-error',
+      clientRequestId: 'req-sub-oversized-row',
+      requestType: 'chat-subscribe',
+      code: 'HISTORY_LOAD_FAILED',
+      retryable: false,
+      chatId: '123',
+      message: 'A transcript replay row exceeds the WebSocket response limit',
+    });
+    expect(Buffer.byteLength(JSON.stringify(lastSentPayload()), 'utf8')).toBeLessThan(1024);
+  });
+
   it('rejects a replay request when its response is dropped by the socket', async () => {
     sendWebSocketJson.mockImplementation(() => false);
 
