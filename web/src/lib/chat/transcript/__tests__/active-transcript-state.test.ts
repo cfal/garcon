@@ -691,6 +691,29 @@ describe('ActiveTranscriptState', () => {
 		]);
 	});
 
+	it('preserves optimistic submission order despite timestamp skew', () => {
+		const chat = new ActiveTranscriptState();
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-first',
+			content: 'first submitted',
+			createdAt: '2099-01-01T00:00:00.000Z',
+		}));
+		chat.upsertOptimisticUserInput(optimisticInput({
+			clientMessageId: 'msg-second',
+			content: 'second submitted',
+			createdAt: '2000-01-01T00:00:00.000Z',
+		}));
+
+		expect(chat.displayMessages.map(contentOf)).toEqual([
+			'first submitted',
+			'second submitted',
+		]);
+		expect(chat.visibleRows.map((row) => row.id)).toEqual([
+			'optimistic:msg-first',
+			'optimistic:msg-second',
+		]);
+	});
+
 	it('renders local messages as transient display-only rows', () => {
 		const chat = new ActiveTranscriptState();
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(1, user('server'))]);
