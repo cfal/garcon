@@ -1,5 +1,4 @@
 import type { ApiProtocol } from '@garcon/common/api-providers';
-import type { AgentLogger } from '@garcon/server-agent-interface';
 import {
   AnthropicCompatibleChatRuntime,
   runAnthropicCompatibleSingleQuery,
@@ -21,7 +20,6 @@ import type {
   DirectStartedSession,
   DirectStartRequest,
 } from './runtime-types.js';
-import type { DirectSessionPaths } from './session-paths.js';
 
 export interface DirectCompatibleRuntime {
   startSession(request: DirectStartRequest): Promise<DirectStartedSession>;
@@ -145,10 +143,7 @@ export class DirectEndpointRouterRuntime<
 }
 
 export interface DirectRuntimeFamilyOptions {
-  readonly runtimeId: string;
   readonly runtimeLabel: string;
-  readonly sessionPaths: DirectSessionPaths;
-  readonly logger?: AgentLogger;
 }
 
 export function createDirectOpenAiChatRuntime(
@@ -202,29 +197,14 @@ export function createDirectAnthropicRuntime(
   });
 }
 
-function endpointModels(endpoint: DirectEndpointRuntime) {
-  return [{
-    value: endpoint.selection.model,
-    label: endpoint.selection.model,
-  }];
-}
-
 export function buildDirectOpenAiConfig(args: DirectRuntimeFamilyOptions & {
   readonly endpoint: DirectEndpointRuntime;
 }): OpenAiCompatibleChatRuntimeConfig {
   return {
-    runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
-    fallbackModels: endpointModels(args.endpoint),
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
-      args.endpoint.selection.endpointId,
-      sessionId,
-    ),
-    logger: args.logger,
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',
@@ -236,17 +216,10 @@ export function buildDirectOpenAiResponsesConfig(args: DirectRuntimeFamilyOption
   readonly endpoint: DirectEndpointRuntime;
 }): OpenAiCompatibleResponsesRuntimeConfig {
   return {
-    runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
-    fallbackModels: endpointModels(args.endpoint),
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
-      args.endpoint.selection.endpointId,
-      sessionId,
-    ),
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',
@@ -258,16 +231,9 @@ export function buildDirectAnthropicConfig(args: DirectRuntimeFamilyOptions & {
   readonly endpoint: DirectEndpointRuntime;
 }): AnthropicCompatibleChatRuntimeConfig {
   return {
-    runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
-    fallbackModels: endpointModels(args.endpoint),
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
-      args.endpoint.selection.endpointId,
-      sessionId,
-    ),
   };
 }

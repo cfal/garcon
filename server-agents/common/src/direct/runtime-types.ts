@@ -36,12 +36,10 @@ export interface DirectStartRequest extends DirectExecutionRequest {
 
 export interface DirectResumeRequest extends DirectExecutionRequest {
   readonly agentSessionId: string;
-  readonly nativePath?: string | null;
 }
 
 export interface DirectStartedSession {
   readonly agentSessionId: string;
-  readonly nativePath: string;
 }
 
 export function assertDirectExecutionOpen(

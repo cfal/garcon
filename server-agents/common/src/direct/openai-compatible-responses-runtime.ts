@@ -1,12 +1,10 @@
 // Implements Direct over OpenAI-compatible Responses APIs.
 // Keeps Responses request/stream parsing separate from chat completions.
 
-import type { SharedModelOption } from '@garcon/common/models';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import {
   DirectChatRuntimeBase,
   type DirectRuntimeSession,
-  type DirectUserTurn,
 } from "./direct-chat-runtime-base.js";
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
@@ -40,14 +38,10 @@ interface ResponsesInputMessage {
 }
 
 export interface OpenAiCompatibleResponsesRuntimeConfig {
-  runtimeId: string;
   runtimeLabel: string;
   defaultModel: string;
-  fallbackModels: SharedModelOption[];
   getApiKey: () => string;
   getBaseUrl: () => string;
-  getSessionDir: () => string;
-  getSessionFilePath: (sessionId: string) => string;
   buildHeaders?: (apiKey: string) => Record<string, string>;
 }
 
@@ -284,15 +278,12 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
     super(config);
   }
 
-  protected buildUserTurn(
+  protected buildUserMessage(
     command: string,
     images?: readonly AgentAttachment[],
-  ): DirectUserTurn<ResponsesInputMessage> {
+  ): ResponsesInputMessage {
     const content = buildOpenAiResponsesUserContent(command, images);
-    return {
-      message: { role: 'user', content },
-      persistedContent: extractOpenAiResponsesTextContent(content),
-    };
+    return { role: 'user', content };
   }
 
   protected buildAssistantMessage(content: string): ResponsesInputMessage {

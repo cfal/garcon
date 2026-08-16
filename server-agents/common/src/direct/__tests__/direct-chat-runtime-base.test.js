@@ -1,41 +1,23 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import { DirectChatRuntimeBase } from '../direct-chat-runtime-base.ts';
-import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 
-const createdDirs = [];
 const runtimes = [];
-
-async function tempDir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-direct-base-runtime-'));
-  createdDirs.push(dir);
-  return dir;
-}
 
 class CapturingDirectRuntime extends DirectChatRuntimeBase {
   captured = [];
   responses = [];
 
-  constructor(dir) {
+  constructor() {
     super({
-      runtimeId: 'capturing-direct',
       runtimeLabel: 'Capturing Direct',
       defaultModel: 'default-model',
-      fallbackModels: [],
-      getSessionDir: () => dir,
-      getSessionFilePath: (sessionId) => path.join(dir, `${sessionId}.jsonl`),
     });
     runtimes.push(this);
   }
 
-  buildUserTurn(command) {
-    return {
-      message: { role: 'user', content: command },
-      persistedContent: command,
-    };
+  buildUserMessage(command) {
+    return { role: 'user', content: command };
   }
 
   buildAssistantMessage(content) {
@@ -113,13 +95,10 @@ function resumeRequest(agentSessionId, overrides = {}) {
 describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
   afterEach(async () => {
     for (const runtime of runtimes.splice(0)) runtime.shutdown();
-    for (const dir of createdDirs.splice(0)) {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
   });
 
   it('captures effort before initial provider work', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
+    const runtime = new CapturingDirectRuntime();
     const observed = capturingOperation('run-high');
 
     await runtime.startSession(startRequest({ thinkingMode: 'high', operation: observed.operation }));
@@ -131,23 +110,8 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     }]);
   });
 
-  it('emits the persisted assistant turn identity despite timestamp drift', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
-    const observed = capturingOperation('turn-1');
-
-    await runtime.startSession(startRequest({ operation: observed.operation }));
-    await observed.terminal;
-    const emitted = observed.events[0].rows.map((row) => row.message);
-
-    expect(emitted).toHaveLength(1);
-    expect(getNativeMessageRevisionSource(emitted[0])).toEqual({
-      entryId: 'direct-turn:turn-1',
-      withinSourceOrdinal: 1,
-    });
-  });
-
   it('replaces effort on every in-memory resume, including Default', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
+    const runtime = new CapturingDirectRuntime();
     const first = capturingOperation('run-first');
     const started = await runtime.startSession(startRequest({
       thinkingMode: 'high',
@@ -189,10 +153,9 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
   });
 
   it('uses the current resume effort with supplied ledger context', async () => {
-    const dir = await tempDir();
     const sessionId = 'persisted-session';
 
-    const runtime = new CapturingDirectRuntime(dir);
+    const runtime = new CapturingDirectRuntime();
     await runtime.runTurn(resumeRequest(sessionId, {
       command: 'resumed message',
       thinkingMode: 'max',
@@ -213,7 +176,7 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
   });
 
   it('normalizes invalid untyped effort to Default', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
+    const runtime = new CapturingDirectRuntime();
     const observed = capturingOperation('run-invalid');
 
     await runtime.startSession(startRequest({
@@ -226,7 +189,7 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
   });
 
   it('[TLV5-L05.03-DIRECT-UNIT-01] admits a successor immediately after best-effort abort and preserves late output', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
+    const runtime = new CapturingDirectRuntime();
     const firstResponse = deferred();
     runtime.responses.push(firstResponse.promise, 'second response');
     const first = capturingOperation('run-first');
@@ -251,7 +214,7 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
   });
 
   it('publishes a delayed response through the request that started it', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
+    const runtime = new CapturingDirectRuntime();
     const firstResponse = deferred();
     runtime.responses.push(firstResponse.promise, 'second response');
     const first = capturingOperation('run-1');

@@ -1,7 +1,4 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
   OpenAiCompatibleResponsesRuntime,
@@ -12,7 +9,6 @@ import {
   runOpenAiResponsesSingleQuery,
 } from '../openai-compatible-responses-runtime.ts';
 
-const createdDirs = [];
 const originalFetch = globalThis.fetch;
 
 function streamResponse(chunks, options = {}) {
@@ -33,22 +29,12 @@ function streamResponse(chunks, options = {}) {
   });
 }
 
-async function tempDir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-openai-responses-runtime-'));
-  createdDirs.push(dir);
-  return dir;
-}
-
-function runtimeConfig(dir, overrides = {}) {
+function runtimeConfig(overrides = {}) {
   return {
-    runtimeId: 'direct-openai-responses-compatible',
     runtimeLabel: 'Direct (Responses)',
     defaultModel: 'fallback-model',
-    fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
     getApiKey: () => 'sk-test',
     getBaseUrl: () => 'https://api.example.test/v1',
-    getSessionDir: () => dir,
-    getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
     ...overrides,
   };
 }
@@ -79,9 +65,6 @@ function capturedMessages(capture) {
 describe('OpenAiCompatibleResponsesRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
-    for (const dir of createdDirs.splice(0)) {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
   });
 
   it('builds text and image input content for the Responses API', () => {
@@ -145,8 +128,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
       ]);
     });
 
-    const dir = await tempDir();
-    const result = await runOpenAiResponsesSingleQuery(runtimeConfig(dir), 'hi', {
+    const result = await runOpenAiResponsesSingleQuery(runtimeConfig(), 'hi', {
       model: 'selected-model',
       thinkingMode: 'ultra',
       timeoutMs: 110_000,
@@ -354,7 +336,6 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
   });
 
   it('streams Direct Responses turns and emits assistant text', async () => {
-    const dir = await tempDir();
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
@@ -365,7 +346,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
       ]);
     });
 
-    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig());
     const capture = captureOperation('run-stream');
 
     await runtime.startSession({
@@ -391,9 +372,8 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
   });
 
   it('accepts a buffered JSON response for an interactive Responses session', async () => {
-    const dir = await tempDir();
     globalThis.fetch = mock(async () => Response.json({ output_text: 'session response' }));
-    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig());
     const capture = captureOperation('run-json');
 
     await runtime.startSession({
@@ -412,12 +392,11 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
   });
 
   it('does not emit partial session output after a stream failure', async () => {
-    const dir = await tempDir();
     globalThis.fetch = mock(async () => streamResponse([
       { type: 'response.output_text.delta', delta: 'partial' },
       { type: 'response.failed', response: { error: { message: 'failed' } } },
     ], { complete: false }));
-    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig());
     const capture = captureOperation('run-failed');
 
     await runtime.startSession({
@@ -438,7 +417,6 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
   });
 
   it('forwards the current interactive effort and removes it for Default', async () => {
-    const dir = await tempDir();
     const requestBodies = [];
     globalThis.fetch = mock(async (_url, init) => {
       requestBodies.push(JSON.parse(init.body));
@@ -446,7 +424,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
         { type: 'response.output_text.delta', delta: 'done' },
       ]);
     });
-    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig());
     const first = captureOperation('run-first');
 
     const started = await runtime.startSession({
@@ -491,7 +469,6 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
   });
 
   it('hydrates an unknown session from the supplied ledger context', async () => {
-    const dir = await tempDir();
     const sessionId = 'persisted-session';
 
     let requestBody;
@@ -502,7 +479,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
       ]);
     });
 
-    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig());
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: sessionId,

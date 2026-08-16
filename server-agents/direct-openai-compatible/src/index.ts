@@ -12,20 +12,13 @@ import {
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { classifyDirectIntegrationError } from '@garcon/server-agent-common/direct/errors';
 import { DirectExecution } from '@garcon/server-agent-common/direct/execution';
-import { relocateLegacySessionDirectory } from '@garcon/server-agent-common/direct/legacy-session-relocation';
 import { createDirectOpenAiChatRuntime } from '@garcon/server-agent-common/direct/router';
-import { createDirectSessionPaths } from '@garcon/server-agent-common/direct/session-paths';
-import { createDirectNativeEvidence } from '@garcon/server-agent-common/direct/transcript';
-import { createDirectCompatibleTranscriptSource } from '@garcon/server-agent-common/direct/transcript-source';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
-import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-
-const SESSIONS_LABEL = 'openai-compatible-sessions';
 
 const DESCRIPTOR = {
   id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -67,24 +60,8 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
-    const nativeSessions = createPathNativeSessionCodec(
-      DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-    );
-    const sessionPaths = createDirectSessionPaths(
-      host.storage.rootDirectory,
-      SESSIONS_LABEL,
-    );
     const runtime = createDirectOpenAiChatRuntime({
-      runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
       runtimeLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
-      sessionPaths,
-      logger: host.logger,
-    });
-    const reader = createDirectCompatibleTranscriptSource({
-      agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-      sessionLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
-      findSessionFilePath: sessionPaths.findSessionFilePath,
-      logger: host.logger,
     });
 
     this.settings = createVersionedSettings({
@@ -98,10 +75,6 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };
     this.execution = createAgentProducerAdapter(providerExecution, host.logger).execution;
-    const nativeEvidence = createDirectNativeEvidence({
-      reader,
-      nativeSessions,
-    });
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',
@@ -109,7 +82,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       requiresStrictModelDiscovery: false,
       generation: { priority: 50, model: '' },
     });
-    this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
+    this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions: null });
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();
@@ -149,7 +122,6 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       },
     };
     this.lifecycle = createIntegrationLifecycle({
-      migrateOwnedStorage: (store) => relocateLegacySessionDirectory(host, store, SESSIONS_LABEL),
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
         runtime.shutdown();

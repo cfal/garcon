@@ -4,9 +4,6 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import { AssistantMessage, type ChatMessage } from '@garcon/common/chat-types';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { directMessageNativeSource } from './direct-message-native-source.js';
-import type { SharedModelOption } from '@garcon/common/models';
 import {
   assertDirectExecutionOpen,
   markDirectExecutionStarted,
@@ -36,18 +33,9 @@ export interface DirectRuntimeSession<TMessage> {
   operation: AgentRuntimeOperation;
 }
 
-export interface DirectUserTurn<TMessage> {
-  message: TMessage;
-  persistedContent: string;
-}
-
 export interface DirectChatRuntimeBaseConfig {
-  runtimeId: string;
   runtimeLabel: string;
   defaultModel: string;
-  fallbackModels: SharedModelOption[];
-  getSessionDir: () => string;
-  getSessionFilePath: (sessionId: string) => string;
   maxMessagesPerSession?: number;
 }
 
@@ -72,7 +60,7 @@ export abstract class DirectChatRuntimeBase<
     this.#maxMessagesPerSession = config.maxMessagesPerSession ?? DEFAULT_MAX_MESSAGES_PER_SESSION;
   }
 
-  protected abstract buildUserTurn(command: string, images?: readonly AgentAttachment[]): DirectUserTurn<TMessage>;
+  protected abstract buildUserMessage(command: string, images?: readonly AgentAttachment[]): TMessage;
 
   protected abstract buildAssistantMessage(content: string): TMessage;
 
@@ -83,7 +71,7 @@ export abstract class DirectChatRuntimeBase<
   async startSession(request: DirectStartRequest): Promise<DirectStartedSession> {
     assertDirectExecutionOpen(request);
     const sessionId = crypto.randomUUID();
-    const userTurn = this.buildUserTurn(request.command, request.images);
+    const userMessage = this.buildUserMessage(request.command, request.images);
     const now = Date.now();
     const session: DirectRuntimeSession<TMessage> = {
       abortController: null,
@@ -92,7 +80,7 @@ export abstract class DirectChatRuntimeBase<
       id: sessionId,
       isFinalizing: false,
       isRunning: false,
-      messages: [...this.#contextMessages(request.priorContext), userTurn.message],
+      messages: [...this.#contextMessages(request.priorContext), userMessage],
       model: request.model || this.config.defaultModel,
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
@@ -102,10 +90,7 @@ export abstract class DirectChatRuntimeBase<
 
     assertDirectExecutionOpen(request);
     this.#sessions.set(sessionId, session);
-    const started = {
-      agentSessionId: sessionId,
-      nativePath: this.config.getSessionFilePath(sessionId),
-    };
+    const started = { agentSessionId: sessionId };
     request.onSessionActivated?.(started);
     void this.#runTurnInternal(session, request).catch(() => undefined);
 
@@ -127,7 +112,7 @@ export abstract class DirectChatRuntimeBase<
     session.thinkingMode = normalizeThinkingMode(request.thinkingMode);
     session.operation = request.operation;
 
-    const userTurn = this.buildUserTurn(request.command, request.images);
+    const userMessage = this.buildUserMessage(request.command, request.images);
     this.#markSessionRunning(session);
     try {
       assertDirectExecutionOpen(request);
@@ -135,7 +120,7 @@ export abstract class DirectChatRuntimeBase<
       if (session.messages.length >= this.#maxMessagesPerSession) {
         session.messages = session.messages.slice(-(this.#maxMessagesPerSession - 1));
       }
-      session.messages.push(userTurn.message);
+      session.messages.push(userMessage);
 
       session.chatId = request.chatId;
       await this.#runTurnInternal(session, request);
@@ -167,10 +152,6 @@ export abstract class DirectChatRuntimeBase<
         startedAt: new Date(session.startTime).toISOString(),
         status: 'running',
       }));
-  }
-
-  async getModels(): Promise<SharedModelOption[]> {
-    return this.config.fallbackModels;
   }
 
   startPurgeTimer(): void {
@@ -262,12 +243,7 @@ export abstract class DirectChatRuntimeBase<
 
       session.isFinalizing = true;
       session.messages.push(this.buildAssistantMessage(response));
-      // The live row carries the same turn-scoped identity the importer derives, so
-      // reloaded history and streamed history dedupe against one key.
-      const liveMessage = attachNativeMessageSource(
-        new AssistantMessage(new Date().toISOString(), response),
-        directMessageNativeSource({ role: 'assistant', turnId: operation.runId }),
-      );
+      const liveMessage = new AssistantMessage(new Date().toISOString(), response);
       operation.publish({ type: 'rows', rows: runtimeRows([liveMessage]) });
       this.#markSessionIdle(session);
       operation.publish({ type: 'run-ended', runId: operation.runId, outcome: 'finished' });

@@ -66,7 +66,6 @@ describe('DirectExecution', () => {
   test('sends frozen history as context and keeps the new prompt separate', async () => {
     const startSession = mock(async () => ({
       agentSessionId: 'session-1',
-      nativePath: '/tmp/session-1.json',
     }));
     const runtime = { startSession };
     const execution = new DirectExecution(host(), runtime as never);
@@ -103,7 +102,7 @@ describe('DirectExecution', () => {
       startSession: mock(async (input: { operation: AgentRuntimeOperation }) => {
         operations.push(input.operation);
         if (operations.length === 2) throw new Error('replacement failed');
-        return { agentSessionId: 'session-1', nativePath: '/tmp/session-1.json' };
+        return { agentSessionId: 'session-1' };
       }),
     };
     const execution = new DirectExecution(host(), runtime as never);
@@ -131,7 +130,6 @@ describe('DirectExecution', () => {
     const runtime = {
       startSession: mock(async () => ({
         agentSessionId: 'session-1',
-        nativePath: '/tmp/session-1.json',
       })),
     };
     const execution = new DirectExecution(host(), runtime as never);

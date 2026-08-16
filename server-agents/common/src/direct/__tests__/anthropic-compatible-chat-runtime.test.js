@@ -1,7 +1,4 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
   AnthropicCompatibleChatRuntime,
@@ -12,7 +9,6 @@ import {
 } from '../anthropic-compatible-chat-runtime.ts';
 
 const originalFetch = globalThis.fetch;
-const createdDirs = [];
 
 function streamResponse(chunks, options = {}) {
   const encoder = new TextEncoder();
@@ -32,28 +28,18 @@ function streamResponse(chunks, options = {}) {
   });
 }
 
-async function tempDir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-anthropic-runtime-'));
-  createdDirs.push(dir);
-  return dir;
-}
-
-function runtimeConfig(dir, overrides = {}) {
+function runtimeConfig(overrides = {}) {
   return {
-    runtimeId: 'direct-anthropic-compatible',
     runtimeLabel: 'Direct (Anthropic)',
     defaultModel: 'acme-sonnet',
-    fallbackModels: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
     getApiKey: () => 'sk-ant',
     getBaseUrl: () => 'https://api.example.test',
-    getSessionDir: () => dir,
-    getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
     ...overrides,
   };
 }
 
-function makeRuntime(dir, overrides = {}) {
-  return new AnthropicCompatibleChatRuntime(runtimeConfig(dir, overrides));
+function makeRuntime(overrides = {}) {
+  return new AnthropicCompatibleChatRuntime(runtimeConfig(overrides));
 }
 
 function captureOperation(runId) {
@@ -82,9 +68,6 @@ function capturedMessages(capture) {
 describe('AnthropicCompatibleChatRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
-    for (const dir of createdDirs.splice(0)) {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
   });
 
   it('builds Anthropic endpoint URLs from root and v1 base URLs', () => {
@@ -153,7 +136,6 @@ describe('AnthropicCompatibleChatRuntime', () => {
   });
 
   it('streams text deltas and emits the final assistant message', async () => {
-    const dir = await tempDir();
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
@@ -164,7 +146,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       ]);
     });
 
-    const runtime = makeRuntime(dir);
+    const runtime = makeRuntime();
     const capture = captureOperation('run-stream');
 
     await runtime.startSession({
@@ -192,7 +174,6 @@ describe('AnthropicCompatibleChatRuntime', () => {
   });
 
   it('accepts buffered JSON for an interactive Anthropic session', async () => {
-    const dir = await tempDir();
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
@@ -203,7 +184,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
         ],
       });
     });
-    const runtime = makeRuntime(dir);
+    const runtime = makeRuntime();
     const capture = captureOperation('run-json');
 
     await runtime.startSession({
@@ -223,7 +204,6 @@ describe('AnthropicCompatibleChatRuntime', () => {
   });
 
   it('forwards the current interactive effort and removes it for Default', async () => {
-    const dir = await tempDir();
     const requestBodies = [];
     globalThis.fetch = mock(async (_url, init) => {
       requestBodies.push(JSON.parse(init.body));
@@ -231,7 +211,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
         { type: 'content_block_delta', delta: { type: 'text_delta', text: 'done' } },
       ]);
     });
-    const runtime = makeRuntime(dir);
+    const runtime = makeRuntime();
     const first = captureOperation('run-first');
 
     const started = await runtime.startSession({
@@ -276,7 +256,6 @@ describe('AnthropicCompatibleChatRuntime', () => {
   });
 
   it('hydrates an unknown session from the supplied ledger context', async () => {
-    const dir = await tempDir();
     const sessionId = 'persisted-session';
 
     let requestBody;
@@ -287,9 +266,8 @@ describe('AnthropicCompatibleChatRuntime', () => {
       ]);
     });
 
-    const runtime = makeRuntime(dir, {
+    const runtime = makeRuntime({
       defaultModel: 'fallback-model',
-      fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
     });
 
     await runtime.runTurn({
@@ -498,12 +476,11 @@ describe('AnthropicCompatibleChatRuntime', () => {
   });
 
   it('rejects partial streamed text followed by an Anthropic error event', async () => {
-    const dir = await tempDir();
     globalThis.fetch = mock(async () => streamResponse([
       { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
       { type: 'error', error: { message: 'generation failed' } },
     ]));
-    const runtime = makeRuntime(dir);
+    const runtime = makeRuntime();
     const capture = captureOperation('run-error');
 
     await runtime.startSession({
@@ -523,11 +500,10 @@ describe('AnthropicCompatibleChatRuntime', () => {
   });
 
   it('rejects a valid partial stream that closes before message_stop', async () => {
-    const dir = await tempDir();
     globalThis.fetch = mock(async () => streamResponse([
       { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
     ], { complete: false }));
-    const runtime = makeRuntime(dir);
+    const runtime = makeRuntime();
     const capture = captureOperation('run-truncated');
 
     await runtime.startSession({

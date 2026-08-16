@@ -7,10 +7,11 @@ import type { PathNativeSessionCodec } from '../native-session/path-native-sessi
 
 export function createVersion1RecordMigration(options: {
   readonly settings: AgentSettings;
-  readonly nativeSessions: PathNativeSessionCodec;
+  readonly nativeSessions: PathNativeSessionCodec | null;
 }): AgentMigration {
   return {
     async translateLegacyNativeSession(request) {
+      if (!options.nativeSessions) return null;
       return options.nativeSessions.encode({
         path: request.legacyNativePath,
         agentSessionId: request.agentSessionId,
