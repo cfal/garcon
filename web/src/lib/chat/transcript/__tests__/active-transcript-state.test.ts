@@ -2245,6 +2245,42 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', ordinal: 1 });
 	});
 
+	it('preserves a partially expanded visible start across a same-view snapshot', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 200), {
+			lastOrdinal: 200,
+			pageOldestOrdinal: 1,
+			hasMore: false,
+		});
+		applyMessages(chat, 'chat-1', 'generation-1', assistantEntries(201, 300));
+		chat.isUserScrolledUp = true;
+
+		expect(chat.revealEarlierLoadedRows()).toBe(true);
+		expect(chat.visibleMessageCount).toBe(200);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:101', ordinal: 101 });
+
+		const snapshotEpoch = chat.beginSnapshotLoad();
+		expect(chat.setFromPage(
+			'chat-1',
+			page({
+				transcriptViewId: 'generation-1',
+				messages: assistantEntries(201, 400),
+				lastOrdinal: 400,
+				pageOldestOrdinal: 201,
+				pageNewestOrdinal: 400,
+				hasMore: true,
+			}),
+			snapshotEpoch,
+		)).toBe('applied');
+
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 400 }, (_, index) => index + 1),
+		);
+		expect(chat.visibleMessageCount).toBe(300);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:101', ordinal: 101 });
+		expect(chat.visibleRows.at(-1)).toMatchObject({ id: 'generation-1:400', ordinal: 400 });
+	});
+
 	it('does not re-arm expanded-window growth from replacement-generation count slack', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration(
