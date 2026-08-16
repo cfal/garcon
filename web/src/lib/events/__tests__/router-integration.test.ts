@@ -666,6 +666,54 @@ describe('event router integration', () => {
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
+	it('does not restore a transient snapshot from a replaced server instance', async () => {
+		let resolveSnapshot!: (snapshot: ChatSnapshotResponse) => void;
+		const pendingSnapshot = new Promise<ChatSnapshotResponse>((resolve) => {
+			resolveSnapshot = resolve;
+		});
+		vi.mocked(getChatSnapshot).mockReturnValue(pendingSnapshot);
+		const stores = createStores();
+		const applySnapshot = vi.spyOn(stores.conversationUi, 'setTransientFeedFromSnapshot');
+		expect(stores.conversationUi.setTransientFeedFromSnapshot({
+			...transientFeed('generation-current'),
+			serverInstanceId: 'server-old',
+		})).toMatchObject({ kind: 'applied' });
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-transient-feed-mutation',
+					...transientFeed('generation-current', 2),
+					serverInstanceId: 'server-old',
+					mutation: { kind: 'clear-run', runId: 'run-old' },
+				},
+			],
+			stores,
+		);
+
+		await vi.waitFor(() => expect(getChatSnapshot).toHaveBeenCalledWith('chat-a', 1));
+		expect(stores.conversationUi.setTransientFeedFromSnapshot({
+			...transientFeed('generation-current'),
+			serverInstanceId: 'server-new',
+		})).toMatchObject({ kind: 'applied' });
+
+		resolveSnapshot({
+			...chatSnapshot('generation-current'),
+			transientFeed: {
+				...transientFeed('generation-current', 2),
+				serverInstanceId: 'server-old',
+			},
+		});
+		await pendingSnapshot;
+		await vi.waitFor(() => expect(applySnapshot).toHaveBeenCalledTimes(3));
+
+		expect(stores.conversationUi.getTransientFeed('chat-a')).toMatchObject({
+			serverInstanceId: 'server-new',
+			transcriptViewId: 'generation-current',
+			transientRevision: 0,
+		});
+	});
+
 	it('preserves streamed output order before same-drain stop messages', () => {
 		let currentRows: Array<{ noticeType?: LocalNoticeType; content: string }> = [];
 		const defaults = createStores();
