@@ -27,8 +27,10 @@ describe('Claude strict history import', () => {
       })).rejects.toThrow();
 
       const invalidParts = [
-        ['text missing', 'user', { type: 'text' }],
-        ['text non-string', 'user', { type: 'text', text: 17 }],
+        ['user text missing', 'user', { type: 'text' }],
+        ['user text non-string', 'user', { type: 'text', text: 17 }],
+        ['assistant text missing', 'assistant', { type: 'text' }],
+        ['assistant text non-string', 'assistant', { type: 'text', text: 17 }],
         ['thinking missing', 'assistant', { type: 'thinking' }],
         ['thinking non-string', 'assistant', { type: 'thinking', thinking: false }],
       ];

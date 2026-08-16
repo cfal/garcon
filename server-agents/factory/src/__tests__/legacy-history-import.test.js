@@ -63,17 +63,19 @@ describe('Factory history import', () => {
       await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
 
       const invalidParts = [
-        ['text missing', { type: 'text' }],
-        ['text non-string', { type: 'text', text: 17 }],
-        ['thinking missing', { type: 'thinking' }],
-        ['thinking non-string', { type: 'thinking', thinking: false }],
+        ['assistant text missing', 'assistant', { type: 'text' }],
+        ['assistant text non-string', 'assistant', { type: 'text', text: 17 }],
+        ['user text missing', 'user', { type: 'text' }],
+        ['user text non-string', 'user', { type: 'text', text: 17 }],
+        ['thinking missing', 'assistant', { type: 'thinking' }],
+        ['thinking non-string', 'assistant', { type: 'thinking', thinking: false }],
       ];
       const partOutcomes = [];
-      for (const [label, part] of invalidParts) {
+      for (const [label, role, part] of invalidParts) {
         await writeFile(invalidPath, `${JSON.stringify({
           type: 'message',
           timestamp: '2026-08-16T00:00:00.000Z',
-          message: { role: 'assistant', content: [part] },
+          message: { role, content: [part] },
         })}\n`, 'utf8');
         try {
           await importedRows(integration.legacyHistoryImport, reference);
@@ -92,6 +94,11 @@ describe('Factory history import', () => {
         JSON.stringify({
           type: 'message',
           timestamp: '2026-08-16T00:00:01.000Z',
+          message: { role: 'user', content: [{ type: 'text', text: '' }] },
+        }),
+        JSON.stringify({
+          type: 'message',
+          timestamp: '2026-08-16T00:00:02.000Z',
           message: {
             role: 'assistant',
             content: [
@@ -102,7 +109,7 @@ describe('Factory history import', () => {
         }),
       ].join('\n') + '\n', 'utf8');
       await expect(importedRows(integration.legacyHistoryImport, reference))
-        .resolves.toEqual(expect.any(Array));
+        .resolves.toEqual([]);
 
       await writeFile(invalidPath, '', 'utf8');
       await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
@@ -154,17 +161,19 @@ describe('Factory history import', () => {
         .rejects.toThrow();
 
       const invalidParts = [
-        ['text missing', { type: 'text' }],
-        ['text non-string', { type: 'text', text: 17 }],
-        ['thinking missing', { type: 'thinking' }],
-        ['thinking non-string', { type: 'thinking', thinking: false }],
+        ['assistant text missing', 'assistant', { type: 'text' }],
+        ['assistant text non-string', 'assistant', { type: 'text', text: 17 }],
+        ['user text missing', 'user', { type: 'text' }],
+        ['user text non-string', 'user', { type: 'text', text: 17 }],
+        ['thinking missing', 'assistant', { type: 'thinking' }],
+        ['thinking non-string', 'assistant', { type: 'thinking', thinking: false }],
       ];
       const partOutcomes = [];
-      for (const [label, part] of invalidParts) {
+      for (const [label, role, part] of invalidParts) {
         await writeFile(incompletePath, `${JSON.stringify({
           type: 'message',
           timestamp: '2026-08-16T00:00:00.000Z',
-          message: { role: 'assistant', content: [part] },
+          message: { role, content: [part] },
         })}\n`, 'utf8');
         try {
           await importedRows(integration.nativeHistoryImport, incompleteReference);
@@ -183,6 +192,11 @@ describe('Factory history import', () => {
         JSON.stringify({
           type: 'message',
           timestamp: '2026-08-16T00:00:01.000Z',
+          message: { role: 'user', content: [{ type: 'text', text: '' }] },
+        }),
+        JSON.stringify({
+          type: 'message',
+          timestamp: '2026-08-16T00:00:02.000Z',
           message: {
             role: 'assistant',
             content: [
@@ -193,7 +207,7 @@ describe('Factory history import', () => {
         }),
       ].join('\n') + '\n', 'utf8');
       await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
-        .resolves.toEqual(expect.any(Array));
+        .resolves.toEqual([]);
 
       await writeFile(incompletePath, '', 'utf8');
       await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
