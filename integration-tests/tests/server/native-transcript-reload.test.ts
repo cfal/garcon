@@ -166,23 +166,39 @@ describe('native transcript reload', () => {
         externalContent,
       ]);
       expect(messagesOfType(reloaded.messages, 'transcript-notice')).toEqual([]);
+
+      await reloadFromNativeHistory(fixture, chatId);
+      const reloadedAgain = await fixture.client.getMessages(chatId);
+      expect(reloadedAgain.transcriptViewId).not.toBe(reloaded.transcriptViewId);
+      expect(reloadedAgain.messages).toEqual(reloaded.messages);
+      expect(userContents(reloadedAgain.messages)).toEqual([
+        'native-reload-baseline',
+        HELD_PROMPT,
+      ]);
+      expect(assistantContents(reloadedAgain.messages)).toEqual([
+        'echo:native-reload-baseline',
+        `echo:${HELD_PROMPT}`,
+        externalContent,
+      ]);
       const sharedAfterReload = await fixture.client.get<GetSharedChatResponse>(
         `/api/v1/shared?token=${encodeURIComponent(share.shareToken)}&limit=100`,
       );
       expect(sharedAfterReload).toEqual(sharedBeforeReload);
       expect(JSON.stringify(sharedAfterReload.snapshot.messages)).not.toContain(externalContent);
-      await expect(fixture.client.subscribe(
-        chatId,
-        beforeDrift.transcriptViewId,
-        beforeDrift.lastOrdinal,
-      )).rejects.toMatchObject({
-        response: {
-          requestType: 'chat-subscribe',
-          code: 'STALE_TRANSCRIPT_VIEW',
-          retryable: false,
+      for (const replaced of [beforeDrift, reloaded]) {
+        await expect(fixture.client.subscribe(
           chatId,
-        },
-      });
+          replaced.transcriptViewId,
+          replaced.lastOrdinal,
+        )).rejects.toMatchObject({
+          response: {
+            requestType: 'chat-subscribe',
+            code: 'STALE_TRANSCRIPT_VIEW',
+            retryable: false,
+            chatId,
+          },
+        });
+      }
 
       let staleSubmission: unknown;
       try {
@@ -209,9 +225,9 @@ describe('native transcript reload', () => {
         },
       });
       const afterStaleSubmission = await fixture.client.getMessages(chatId);
-      expect(afterStaleSubmission.transcriptViewId).toBe(reloaded.transcriptViewId);
-      expect(afterStaleSubmission.lastOrdinal).toBe(reloaded.lastOrdinal);
-      expect(afterStaleSubmission.messages).toEqual(reloaded.messages);
+      expect(afterStaleSubmission.transcriptViewId).toBe(reloadedAgain.transcriptViewId);
+      expect(afterStaleSubmission.lastOrdinal).toBe(reloadedAgain.lastOrdinal);
+      expect(afterStaleSubmission.messages).toEqual(reloadedAgain.messages);
 
       const resumed = await fixture.client.runChat({
         clientRequestId: crypto.randomUUID(),
