@@ -166,6 +166,38 @@ describe('TranscriptViewReader', () => {
     });
   });
 
+  it('rejects a rendering snapshot when adoption races a view replacement', async () => {
+    await withReader(async ({ ledger, viewId }) => {
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId,
+        message: new UserMessage(TS, 'old view'),
+        attachments: [],
+        clientMessageId: 'message-1',
+        steer: false,
+      });
+      const replacementViewId = transcriptViewId('view-2');
+      const reader = new TranscriptViewReader(ledger, {
+        ensure: async () => {
+          const observedView = ledger.currentView('chat-1');
+          ledger.stageView('chat-1', [{
+            kind: 'provider-row',
+            at: TS,
+            message: new AssistantMessage(TS, 'replacement view'),
+          }], 1, replacementViewId);
+          ledger.replaceCurrentView('chat-1', viewId, replacementViewId);
+          return observedView;
+        },
+      });
+
+      await expect(reader.renderingSnapshot('chat-1')).rejects.toMatchObject({
+        code: 'SOURCE_REVISION_CHANGED',
+        status: 409,
+        retryable: true,
+      });
+    });
+  });
+
   it('presents a fenced ledger as typed degraded history', async () => {
     await withReader(async ({ ledger }) => {
       const reader = new TranscriptViewReader(ledger, {
