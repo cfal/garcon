@@ -1,7 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import CodexAgentIntegration from '../index.js';
 
-function createHost() {
+function createHost(root = '/tmp/garcon-codex-integration-test') {
   return {
     agentId: 'codex',
     logger: {
@@ -11,8 +14,8 @@ function createHost() {
       error: mock(() => undefined),
     },
     storage: {
-      rootDirectory: '/tmp/garcon-codex-integration-test',
-      directory: mock(() => Promise.resolve('/tmp/garcon-codex-integration-test/search')),
+      rootDirectory: root,
+      directory: mock(() => Promise.resolve(join(root, 'search'))),
       claimLegacyWorkspaceDirectory: mock(() => Promise.resolve({ moved: 0, skipped: 0 })),
     },
     environment: { get: mock(() => undefined) },
@@ -72,4 +75,59 @@ describe('CodexAgentIntegration', () => {
       },
     });
   });
+
+  it('[TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01] rejects an incomplete selected session and retries the repaired source', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-codex-native-import-'));
+    const nativePath = join(root, 'rollout.jsonl');
+    const sessionMetadata = JSON.stringify({
+      type: 'session_meta',
+      timestamp: '2026-08-16T00:00:00.000Z',
+      payload: { id: 'thread-1', history_mode: 'legacy' },
+    });
+    const incompleteMessage = JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-08-16T00:00:01.000Z',
+      payload: { type: 'message', role: 'assistant' },
+    });
+    await writeFile(nativePath, `${sessionMetadata}\n${incompleteMessage}\n`, 'utf8');
+    const integration = new CodexAgentIntegration(createHost(root));
+    const reference = nativeChat(integration, nativePath);
+
+    try {
+      await expect(importedRows(integration.nativeHistoryImport, reference)).rejects.toThrow();
+
+      await writeFile(nativePath, `${sessionMetadata}\n`, 'utf8');
+      await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toEqual([]);
+    } finally {
+      await integration.lifecycle.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
+
+function nativeChat(integration, nativePath) {
+  return {
+    chatId: 'codex-native-import',
+    agentId: 'codex',
+    agentSessionId: 'thread-1',
+    projectPath: '/tmp',
+    model: 'gpt-5.4',
+    nativeSession: {
+      ownerId: 'codex',
+      schemaVersion: 1,
+      value: { path: nativePath, agentSessionId: 'thread-1' },
+    },
+    carryOverRevision: '',
+    nativeSeedReceipt: null,
+    settings: integration.settings.defaults(),
+  };
+}
+
+async function importedRows(importer, chat) {
+  const rows = [];
+  for await (const batch of importer.load({
+    chat,
+    signal: new AbortController().signal,
+  })) rows.push(...batch);
+  return rows;
+}

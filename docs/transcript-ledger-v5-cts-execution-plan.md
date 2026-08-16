@@ -320,9 +320,35 @@ integration advertising the facet. Direct's three drivers share the module and
 still advertise no native Reload; OpenCode remains directory-scoped and receives
 no unscoped fallback case. Strict Claude, Codex, OpenCode, Amp, Factory, and
 Cursor provider boundaries reject known content-bearing records with incomplete
-message or part structure, then repair and retry the same source. Provider
-housekeeping records remain ignorable, and preview/runtime readers remain
-lenient.
+message or part structure through both applicable history occasions, then
+repair and retry the same source. Provider housekeeping records remain
+ignorable, and preview/runtime readers remain lenient. Separate Amp, Factory,
+and Cursor legacy cases retain the absence versus unreadable-source distinction
+and repair the same source before retry; native-facet evidence does not replace
+that legacy-wrapper obligation.
+
+Genesis adoption receives the lossless carryover source rather than the capped
+model projection. A deterministic small-cap fixture distinguishes those
+sources, static wiring rejects the projection loader, and a multi-segment
+pre-V5 black-box case preserves exact rendered order plus durable
+`agent-switch` row kinds. Frozen-draft units lock user identity, provider rows,
+ownership boundaries, the typed quarantine notice exception, ordinary notice
+and permission-lifecycle exclusion, and null provider metadata.
+
+Source failures carry no transcript content through either diagnostic surface.
+One route-level sentinel case preserves the structured adoption warning's
+provider, phase, and safe reason while requiring a fixed retryable
+`TRANSCRIPT_UNAVAILABLE` message through the route logger and HTTP mapping. A
+separate POST `/chats/run` case requires the same typed retryable response when
+adoption fails during command admission.
+
+Legacy discovery also classifies absence explicitly. A shared Direct relocation
+case rejects every skipped claim without advancing its migration version, then
+retries the retained source after repair. Codex rejects invalid metadata on a
+stored or discovered rollout while keeping true missing-path plus discovery
+miss as positive legacy absence. Cursor rejects a present invalid preferred ACP
+candidate before considering its valid stream-json fallback, then retries the
+fallback after the invalid preferred candidate is removed.
 
 Native-import occasion evidence is independently gated by the nullable
 `nativeHistoryImport` SACS capability rather than the native-session codec or
@@ -330,18 +356,36 @@ legacy facet:
 
 | Case ID | Boundary |
 | --- | --- |
+| `TLV5-ADOPT.07-AMP-READ-FAILURE-UNIT-01` | Amp legacy absence, provider read failure, and same-source repair retry |
+| `TLV5-ADOPT.07-FACTORY-READ-FAILURE-UNIT-01` | Factory legacy absence, unreadable file, and same-path repair retry |
+| `TLV5-ADOPT.07-CURSOR-READ-FAILURE-UNIT-01` | Cursor legacy absence, unreadable store, and same-store repair retry |
 | `TLV5-ADOPT.08-SACS-CAPABILITY-01` | The scripted roster declares native import independently from legacy import and the session-reference codec |
 | `TLV5-ADOPT.08-SACS-NATIVE-MISSING-01` | Claude, Codex, Pi, and OpenCode selected native source missing while Reload preserves the view |
 | `TLV5-ADOPT.08-SACS-NATIVE-READ-FAILURE-01` | The same scripted drivers reject unreadable selected native evidence without cutover |
 | `TLV5-ADOPT.08-SACS-NATIVE-EMPTY-01` | The same scripted drivers accept a successfully opened validly empty source |
-| `TLV5-ADOPT.08-AMP-NATIVE-UNIT-01` | Amp selected-thread missing/malformed versus valid-empty provider boundary |
-| `TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01` | Factory selected JSONL missing/malformed versus valid-empty provider boundary |
-| `TLV5-ADOPT.08-CURSOR-NATIVE-UNIT-01` | Cursor selected store missing/unreadable versus valid-empty provider boundary |
+| `TLV5-ADOPT.08-AMP-NATIVE-UNIT-01` | Amp rejects incomplete selected-thread content and retries the same source as valid empty |
+| `TLV5-ADOPT.08-CLAUDE-NATIVE-UNIT-01` | Claude's native facet rejects incomplete selected-session content and retries the same source as valid empty |
+| `TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01` | Codex's native facet rejects incomplete selected-session content and retries the same source as valid empty |
+| `TLV5-ADOPT.08-FACTORY-NATIVE-UNIT-01` | Factory rejects incomplete selected-session content and retries the same source as valid empty |
+| `TLV5-ADOPT.08-CURSOR-NATIVE-UNIT-01` | Cursor rejects incomplete selected-session content and retries the same store as valid empty |
+| `TLV5-ADOPT.08-OPENCODE-NATIVE-UNIT-01` | OpenCode's required native loader rejects an incomplete selected part and retries the same source as valid empty |
 | `TLV5-ADOPT.08-NATIVE-WRAPPER-UNIT-01` | Shared importer preserves source success and failure outcomes |
 | `TLV5-ADOPT.08-RELOAD-CORE-UNIT-01` | Reload failure retains the exact current view and rows |
 | `TLV5-ADOPT.08-RELOAD-CORE-UNIT-02` | Reload cuts over from a validly empty selected source |
 | `TLV5-ADOPT.08-NATIVE-SEED-SANITATION-UNIT-01` | Invalid native seed evidence is fatal before ledger drafts |
 | `TLV5-ADOPT.08-NATIVE-FORK-CORE-UNIT-01` | Native-fidelity import failure discards artifacts without registration or fallback feed |
+| `TLV5-ADOPT.09-CARRYOVER-UNIT-01` | A small injected cap proves the model projection differs from the complete frozen source |
+| `TLV5-ADOPT.09-FROZEN-CONVERSATION-UNIT-01` | Frozen users retain identity and provider-rendered rows retain exact payload with null provider metadata |
+| `TLV5-ADOPT.09-FROZEN-DRAFT-UNIT-01` | Frozen ownership boundaries map to durable `agent-switch` drafts |
+| `TLV5-ADOPT.09-FROZEN-NOTICE-UNIT-01` | Frozen projection preserves only the typed quarantine notice from core/lifecycle presentation |
+| `TLV5-ADOPT.09-SERVER-STATIC-01` | Genesis wiring selects the lossless carryover source, never model projection |
+| `TLV5-ADOPT.09-SERVER-MULTI-SEGMENT-01` | Multi-segment pre-V5 adoption preserves exact rendered and durable boundary order |
+| `TLV5-ADOPT.10-RUN-ROUTE-UNIT-01` | Retryable adoption failure maps to the typed retryable POST `/chats/run` response |
+| `TLV5-ADOPT.10-SOURCE-FAILURE-ROUTE-UNIT-01` | Adoption source content is absent from structured warnings, propagated errors, route logs, and HTTP errors |
+| `TLV5-ADOPT.11-CODEX-DISCOVERED-UNIT-01` | Codex rejects a mismatched discovered rollout and retries the repaired candidate |
+| `TLV5-ADOPT.11-CODEX-STORED-UNIT-01` | Codex distinguishes ENOENT/ENOTDIR stored rollouts from present invalid metadata and retries repair |
+| `TLV5-ADOPT.11-CURSOR-PREFERRED-UNIT-01` | Cursor rejects an invalid preferred ACP candidate without falling back, then retries after repair |
+| `TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01` | Direct skipped relocation leaves version/source intact and repaired retry commits exactly once |
 
 ### T7 HTTP Paging and WebSocket Replay
 

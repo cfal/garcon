@@ -156,12 +156,8 @@ describe('resolveCodexNativePath', () => {
           { agentSessionId: 'thread-1', nativePath: storedPath },
           options(async () => discoveredPath, logger),
         ),
-      ).resolves.toBeNull();
-      expect(entries.filter((entry) => entry.level === 'warn')).toHaveLength(2);
-      expect(entries.map((entry) => entry.fields?.reason)).toEqual([
-        'thread-mismatch',
-        'thread-mismatch',
-      ]);
+      ).rejects.toThrow();
+      expect(entries.some((entry) => entry.fields?.reason === 'thread-mismatch')).toBeTrue();
     });
   });
 

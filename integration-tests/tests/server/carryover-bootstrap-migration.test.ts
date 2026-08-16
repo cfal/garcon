@@ -5,12 +5,13 @@ import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 } from '../../../common/agents.js';
-import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import {
-  assistantContents,
-  messagesOfType,
-  userContents,
-} from '../../support/chat-assertions.js';
+  AssistantMessage,
+  type ChatMessage,
+  UserMessage,
+} from '../../../common/chat-types.js';
+import { transcriptViewId } from '../../../server/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
   type IntegrationDirectories,
   type IntegrationFixture,
@@ -21,7 +22,7 @@ const CHAT_ID = '1786120000000001';
 const TIMESTAMP = '2026-08-07T00:00:00.000Z';
 
 describe('carryover bootstrap migration', () => {
-  test('boots a v3 workspace, preserves multi-segment history, and finalizes on restart', async () => {
+  test('[TLV5-ADOPT.09-SERVER-MULTI-SEGMENT-01] boots a v3 workspace with its complete ordered ownership history', async () => {
     await withIntegrationFixture(
       'carryover-bootstrap-migration',
       async (fixture) => {
@@ -225,12 +226,63 @@ async function expectMigratedHistory(
   fixture: IntegrationFixture,
 ): Promise<void> {
   const history = await fixture.client.getMessages(CHAT_ID);
-  expect(userContents(history.messages)).toEqual(['legacy-a-user', 'legacy-b-user']);
-  expect(assistantContents(history.messages)).toEqual([
-    'legacy-a-assistant',
-    'legacy-b-assistant',
+  expect(history.messages.map(({ message }) => renderedIdentity(message))).toEqual([
+    { type: 'user-message', content: 'legacy-a-user' },
+    { type: 'assistant-message', content: 'legacy-a-assistant' },
+    {
+      type: 'agent-switch',
+      fromAgentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+      toAgentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      fromModel: 'legacy-openai-model',
+      toModel: 'legacy-anthropic-model',
+    },
+    { type: 'user-message', content: 'legacy-b-user' },
+    { type: 'assistant-message', content: 'legacy-b-assistant' },
+    {
+      type: 'agent-switch',
+      fromAgentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      toAgentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+      fromModel: 'legacy-anthropic-model',
+      toModel: 'legacy-openai-model',
+    },
   ]);
-  expect(messagesOfType(history.messages, 'agent-switch')).toEqual([]);
+
+  const ledger = new TranscriptLedgerStore(
+    join(fixture.dirs.workspace, 'transcript-ledgers'),
+  );
+  try {
+    const rows = ledger.page(
+      CHAT_ID,
+      transcriptViewId(history.transcriptViewId),
+      20,
+    ).rows;
+    expect(rows.map((row) => row.kind)).toEqual([
+      'user-input',
+      'provider-row',
+      'agent-switch',
+      'user-input',
+      'provider-row',
+      'agent-switch',
+    ]);
+  } finally {
+    ledger.close();
+  }
+}
+
+function renderedIdentity(message: ChatMessage) {
+  if (message.type === 'agent-switch') {
+    return {
+      type: message.type,
+      fromAgentId: message.fromAgentId,
+      toAgentId: message.toAgentId,
+      fromModel: message.fromModel,
+      toModel: message.toModel,
+    };
+  }
+  if (message.type === 'user-message' || message.type === 'assistant-message') {
+    return { type: message.type, content: message.content };
+  }
+  throw new Error(`Unexpected frozen-prefix message ${message.type}`);
 }
 
 async function migratedCarryOverFiles(

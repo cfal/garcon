@@ -1,4 +1,7 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE } from '../../lib/domain-error.js';
 
@@ -14,6 +17,9 @@ mock.module('../../chats/fork-chat.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
+import { TranscriptAdoptionService } from '../../ledger/adoption.ts';
+import { TranscriptLedgerService } from '../../ledger/service.ts';
+import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import {
   createRouteChatListProjector,
   createRouteCommandLedger,
@@ -309,5 +315,133 @@ describe('GET /api/v1/chats/messages', () => {
       errorCode: 'TRANSCRIPT_UNAVAILABLE',
       retryable: true,
     });
+  });
+
+  it('[TLV5-ADOPT.10-SOURCE-FAILURE-ROUTE-UNIT-01] keeps adoption source failures content-free through route logging and response', async () => {
+    const transcriptSentinel = 'PRIVATE_TRANSCRIPT_SENTINEL_9e806c88';
+    const root = await mkdtemp(join(tmpdir(), 'garcon-adoption-source-privacy-'));
+    const store = new TranscriptLedgerStore(root);
+    const ledger = new TranscriptLedgerService(store);
+    const warnings = [];
+    const entry = {
+      agentId: 'test-provider',
+      agentSessionId: null,
+      nativeSession: null,
+      nativeSeedReceipt: null,
+      agentOwnershipEpoch: 'owner-1',
+      agentSettingsById: {
+        'test-provider': { ownerId: 'test-provider', schemaVersion: 1, values: {} },
+      },
+      projectPath: '/tmp/project',
+      model: 'model',
+      permissionMode: 'default',
+      thinkingMode: 'medium',
+      carryOverSegments: [],
+      carryOverMigrationQuarantine: null,
+    };
+    const sourceError = Object.assign(
+      new SyntaxError(`Invalid provider row containing ${transcriptSentinel}`),
+      { code: 'LEGACY_JSON_PARSE_FAILED' },
+    );
+    const adoption = new TranscriptAdoptionService({
+      ledger,
+      registry: {
+        getChat: (chatId) => chatId === CHAT_ID ? entry : null,
+        updateChat: () => entry,
+      },
+      integrations: {
+        require: () => ({
+          descriptor: { id: 'test-provider' },
+          settings: {
+            defaults: () => entry.agentSettingsById['test-provider'],
+            parse: (value) => value,
+          },
+          legacyHistoryImport: {
+            async *load() {
+              throw sourceError;
+            },
+          },
+          nativeHistoryImport: null,
+        }),
+      },
+      getCarryOverRevision: () => 'carryover-1',
+      loadFrozenPrefix: async () => [],
+      logger: { warn: (message, fields) => warnings.push([message, fields]) },
+    });
+    let propagatedError;
+    const chatViews = {
+      page: mock(async () => {
+        try {
+          return await adoption.ensure(CHAT_ID);
+        } catch (error) {
+          propagatedError = error;
+          throw error;
+        }
+      }),
+    };
+    const routeLogMessage = `sessions: error reading messages for ${CHAT_ID}:`;
+    const originalConsoleError = console.error;
+    const routeError = spyOn(console, 'error').mockImplementation((...args) => {
+      if (args[1] !== routeLogMessage) originalConsoleError(...args);
+    });
+
+    try {
+      const { routes } = createRoutesFixture({ chatViews });
+      const url = new URL(`http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`);
+      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+      const body = await response.json();
+      const sourceRouteErrors = routeError.mock.calls.filter((args) => args[1] === routeLogMessage);
+      const observedSurfaces = {
+        warnings,
+        propagatedError: {
+          name: propagatedError?.name,
+          code: propagatedError?.code,
+          message: propagatedError?.message,
+          retryable: propagatedError?.retryable,
+          details: propagatedError?.details,
+        },
+        routeErrors: sourceRouteErrors,
+        response: body,
+      };
+
+      expect(JSON.stringify(observedSurfaces)).not.toContain(transcriptSentinel);
+      expect(warnings).toEqual([[
+        'Transcript adoption source failed.',
+        {
+          chatId: CHAT_ID,
+          provider: 'test-provider',
+          phase: 'legacy-history-import',
+          reason: 'LEGACY_JSON_PARSE_FAILED',
+        },
+      ]]);
+      expect(propagatedError).toBeInstanceOf(AgentIntegrationError);
+      expect(observedSurfaces.propagatedError).toEqual({
+        name: 'AgentIntegrationError',
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        message: 'Transcript adoption source failed',
+        retryable: true,
+        details: {
+          provider: 'test-provider',
+          phase: 'legacy-history-import',
+        },
+      });
+      expect(sourceRouteErrors).toEqual([[
+        '[routes:chats]',
+        routeLogMessage,
+        'Transcript adoption source failed',
+      ]]);
+      expect(response.status).toBe(503);
+      expect(body).toMatchObject({
+        success: false,
+        error: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
+        errorCode: 'TRANSCRIPT_UNAVAILABLE',
+        retryable: true,
+      });
+      expect(ledger.currentView(CHAT_ID)).toBeNull();
+    } finally {
+      routeError.mockRestore();
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

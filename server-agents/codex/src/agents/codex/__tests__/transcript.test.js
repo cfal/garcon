@@ -251,4 +251,76 @@ describe('createCodexNativeEvidence', () => {
       expect(fixture.calls.discover).toBe(0);
     });
   });
+
+  it('[TLV5-ADOPT.11-CODEX-STORED-UNIT-01] distinguishes a missing stored rollout from invalid metadata and retries after repair', async () => {
+    await withDirectory(async (directory) => {
+      const nativePath = path.join(directory, 'stored.jsonl');
+      const codec = createPathNativeSessionCodec('codex');
+      const fixture = createFixture(
+        directory,
+        codec.encode({
+          path: nativePath,
+          agentSessionId: 'thread-1',
+          modelEndpointId: null,
+        }),
+      );
+
+      await expect(
+        fixture.transcript.loadLegacy({ chat: fixture.chat, signal }),
+      ).resolves.toEqual({ messages: [] });
+
+      const nonDirectoryPath = path.join(directory, 'not-a-directory');
+      await fs.writeFile(nonDirectoryPath, 'not a directory');
+      const enotdirFixture = createFixture(
+        directory,
+        codec.encode({
+          path: path.join(nonDirectoryPath, 'rollout.jsonl'),
+          agentSessionId: 'thread-1',
+          modelEndpointId: null,
+        }),
+      );
+      await expect(
+        enotdirFixture.transcript.loadLegacy({ chat: enotdirFixture.chat, signal }),
+      ).resolves.toEqual({ messages: [] });
+
+      await fs.writeFile(nativePath, `${JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-07-24T00:00:00.000Z',
+        payload: {},
+      })}\n`);
+      await expect(
+        fixture.transcript.loadLegacy({ chat: fixture.chat, signal }),
+      ).rejects.toThrow();
+
+      await writeTranscript(directory, 'stored.jsonl', 'thread-1');
+      await expect(
+        fixture.transcript.loadLegacy({ chat: fixture.chat, signal }),
+      ).resolves.toMatchObject({ messages: [{ content: 'native message' }] });
+    });
+  });
+
+  it('[TLV5-ADOPT.11-CODEX-DISCOVERED-UNIT-01] rejects a mismatched discovered rollout and retries the repaired candidate', async () => {
+    await withDirectory(async (directory) => {
+      const discoveredPath = await writeTranscript(directory, 'discovered.jsonl', 'other-thread');
+      const codec = createPathNativeSessionCodec('codex');
+      const fixture = createFixture(
+        directory,
+        codec.encode({
+          path: null,
+          agentSessionId: 'thread-1',
+          modelEndpointId: null,
+        }),
+        { discoveredPath },
+      );
+
+      await expect(
+        fixture.transcript.loadLegacy({ chat: fixture.chat, signal }),
+      ).rejects.toThrow();
+
+      await writeTranscript(directory, 'discovered.jsonl', 'thread-1');
+      await expect(
+        fixture.transcript.loadLegacy({ chat: fixture.chat, signal }),
+      ).resolves.toMatchObject({ messages: [{ content: 'native message' }] });
+    });
+  });
 });

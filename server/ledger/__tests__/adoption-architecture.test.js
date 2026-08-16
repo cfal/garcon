@@ -111,6 +111,18 @@ describe('transcript adoption architecture', () => {
       expect(integration.nativeHistoryImport, Integration.integrationId).toBeNull();
     }
   });
+
+  it('[TLV5-ADOPT.09-SERVER-STATIC-01] wires genesis adoption to the lossless frozen-prefix source', () => {
+    const server = readFileSync(new URL('../../server.ts', import.meta.url), 'utf8');
+    const start = server.indexOf('async loadFrozenPrefix(');
+    const end = server.indexOf('\n      },', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const wiring = server.slice(start, end);
+
+    expect(wiring).toContain('carryOver.loadAll(');
+    expect(wiring).not.toContain('loadProjectionSource');
+  });
 });
 
 function withoutAllowedDirectRegistrations(relative, source) {

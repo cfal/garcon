@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 let testBasePath;
 let workspaceDir;
@@ -55,6 +56,7 @@ import {
   DomainError,
   QueueEntrySteerError,
   SteerDeliveryError,
+  TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
 } from '../../lib/domain-error.js';
 import {
   QueueEntryMutationError,
@@ -607,6 +609,29 @@ describe('REST chat command routes', () => {
     );
 
     resolveRun();
+  });
+
+  it('[TLV5-ADOPT.10-RUN-ROUTE-UNIT-01] maps retryable transcript adoption failure to the typed run response', async () => {
+    const agent = createRouteAgent();
+    agent.queue.scheduleDirectInput.mockRejectedValue(new AgentIntegrationError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Transcript adoption source failed',
+      true,
+      { provider: 'claude', phase: 'legacy-history-import' },
+    ));
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody(),
+    );
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      success: false,
+      error: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: true,
+    });
   });
 
   it('POST /run deduplicates same payload retries without re-running side effects', async () => {

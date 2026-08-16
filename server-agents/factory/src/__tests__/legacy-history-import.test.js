@@ -11,6 +11,34 @@ afterEach(async () => {
 });
 
 describe('Factory history import', () => {
+  it('[TLV5-ADOPT.07-FACTORY-READ-FAILURE-UNIT-01] retries the same source after an unreadable legacy file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-factory-legacy-read-failure-'));
+    roots.push(root);
+    const integration = new FactoryAgentIntegration(createHost(root));
+    const unreadablePath = join(root, 'sessions', 'unreadable.jsonl');
+    await mkdir(unreadablePath, { recursive: true });
+    const reference = chat(integration, {
+      agentSessionId: 'factory-unreadable',
+      nativeSession: {
+        ownerId: 'factory',
+        schemaVersion: 1,
+        value: { path: unreadablePath, agentSessionId: 'factory-unreadable' },
+      },
+    });
+
+    try {
+      await expect(importedRows(integration.legacyHistoryImport, chat(integration))).resolves
+        .toEqual([]);
+      await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
+
+      await rm(unreadablePath, { recursive: true, force: true });
+      await writeFile(unreadablePath, '', 'utf8');
+      await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
+    } finally {
+      await integration.lifecycle.stop();
+    }
+  });
+
   it('[TLV5-ADOPT.07-FACTORY-UNIT-01] retries the same source after an invalid provider event', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-factory-legacy-import-'));
     roots.push(root);
@@ -47,9 +75,11 @@ describe('Factory history import', () => {
     const emptyPath = join(root, 'sessions', 'empty.jsonl');
     const missingPath = join(root, 'sessions', 'missing.jsonl');
     const malformedPath = join(root, 'sessions', 'malformed.jsonl');
+    const incompletePath = join(root, 'sessions', 'incomplete.jsonl');
     await mkdir(dirname(emptyPath), { recursive: true });
     await writeFile(emptyPath, '', 'utf8');
     await writeFile(malformedPath, '{"type":\n', 'utf8');
+    await writeFile(incompletePath, '{"type":"message"}\n', 'utf8');
     const integration = new FactoryAgentIntegration(createHost(root));
 
     try {
@@ -71,6 +101,18 @@ describe('Factory history import', () => {
       expect(outcomes[0]).toEqual({ status: 'fulfilled', value: [] });
       expect(outcomes[1]?.status).toBe('rejected');
       expect(outcomes[2]?.status).toBe('rejected');
+
+      const incompleteReference = nativeChat(
+        integration,
+        'factory-incomplete',
+        incompletePath,
+      );
+      await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
+        .rejects.toThrow();
+
+      await writeFile(incompletePath, '', 'utf8');
+      await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
+        .resolves.toEqual([]);
     } finally {
       await integration.lifecycle.stop();
     }

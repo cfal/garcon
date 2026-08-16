@@ -278,6 +278,30 @@ describe('CarryOverTranscriptStore', () => {
     expect(source.length).toBeLessThan(messages.length);
     expect(source.at(-1)).toEqual(messages.at(-1));
   });
+
+  it('[TLV5-ADOPT.09-CARRYOVER-UNIT-01] keeps the lossless frozen source complete when model projection hits a small cap', async () => {
+    const messages = [
+      new UserMessage(TIME, 'the request'),
+      new AssistantMessage(TIME, `first answer ${'x'.repeat(300)}`),
+      new ToolResultMessage(TIME, 'tool-1', { output: 'kept display evidence' }, false),
+      new AssistantMessage(TIME, `latest answer ${'y'.repeat(300)}`),
+    ];
+    await commit(store, FIRST, messages);
+    const refs = [
+      ref(FIRST, 'a', 'model-a', messages.length, { agentId: 'b', model: 'model-b' }),
+    ];
+
+    const cappedProjection = await store.loadProjectionSource({ refs, maxBytes: 200 });
+    const frozenPrefix = await store.loadAll(refs);
+
+    expect(cappedProjection.length).toBeLessThan(frozenPrefix.length);
+    expect(cappedProjection.some((message) => message.type === 'tool-result')).toBeFalse();
+    expect(cappedProjection.some((message) => message.type === 'agent-switch')).toBeFalse();
+    expect(frozenPrefix).toEqual([
+      ...messages,
+      new AgentSwitchMessage(TIME, 'a', 'b', 'model-a', 'model-b'),
+    ]);
+  });
 });
 
 async function commit(store, id, messages) {

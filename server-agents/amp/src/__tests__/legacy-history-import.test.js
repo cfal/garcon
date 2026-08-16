@@ -11,6 +11,27 @@ afterEach(async () => {
 });
 
 describe('Amp history import', () => {
+  it('[TLV5-ADOPT.07-AMP-READ-FAILURE-UNIT-01] retries the same source after a provider read failure', async () => {
+    const root = await temporaryRoot();
+    const binary = join(root, 'amp-unreadable-legacy-fixture');
+    const integration = new AmpAgentIntegration(createHost(root, binary));
+    const reference = chat(integration, { agentSessionId: 'repairable-amp-thread' });
+
+    try {
+      await expect(importedRows(integration.legacyHistoryImport, chat(integration))).resolves
+        .toEqual([]);
+      await expect(importedRows(integration.legacyHistoryImport, reference)).rejects.toThrow();
+
+      await writeFile(binary, `#!${process.execPath}
+console.log(JSON.stringify({ messages: [] }));
+`, 'utf8');
+      await chmod(binary, 0o755);
+      await expect(importedRows(integration.legacyHistoryImport, reference)).resolves.toEqual([]);
+    } finally {
+      await integration.lifecycle.stop();
+    }
+  });
+
   it('[TLV5-ADOPT.07-AMP-UNIT-01] retries the same source after an invalid user record', async () => {
     const root = await temporaryRoot();
     const binary = join(root, 'amp-legacy-fixture');
@@ -53,6 +74,13 @@ if (threadId === 'malformed-thread') {
   console.log('{');
   process.exit(0);
 }
+if (threadId === 'incomplete-thread') {
+  console.log(JSON.stringify({
+    created: '2026-08-16T00:00:00.000Z',
+    messages: [{ role: 'user', messageId: 1, content: [{ type: 'text' }] }],
+  }));
+  process.exit(0);
+}
 console.log(JSON.stringify({ messages: [] }));
 `, 'utf8');
     await chmod(binary, 0o755);
@@ -76,6 +104,20 @@ console.log(JSON.stringify({ messages: [] }));
       expect(empty).toEqual({ status: 'fulfilled', value: [] });
       expect(missing.status).toBe('rejected');
       expect(malformed.status).toBe('rejected');
+
+      const incompleteReference = chat(integration, {
+        agentSessionId: 'incomplete-thread',
+        nativeSession: nativeSession('incomplete-thread'),
+      });
+      await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
+        .rejects.toThrow();
+
+      await writeFile(binary, `#!${process.execPath}
+console.log(JSON.stringify({ messages: [] }));
+`, 'utf8');
+      await chmod(binary, 0o755);
+      await expect(importedRows(integration.nativeHistoryImport, incompleteReference))
+        .resolves.toEqual([]);
     } finally {
       await integration.lifecycle.stop();
     }
