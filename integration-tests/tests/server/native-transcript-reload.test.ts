@@ -8,6 +8,7 @@ import type {
   GetSharedChatResponse,
   ShareChatResponse,
 } from '../../../common/share-types.js';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
   assistantContents,
@@ -101,6 +102,20 @@ describe('native transcript reload', () => {
         },
       })}\n`, 'utf8');
 
+      const driftCursor = fixture.client.markEvents();
+      const servedWhileProbing = await fixture.client.getMessages(chatId);
+      expect(servedWhileProbing.transcriptViewId).toBe(beforeDrift.transcriptViewId);
+      expect(assistantContents(servedWhileProbing.messages)).not.toContain(externalContent);
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'transcript-notice'
+            && entry.message.action === 'reload-native-history'),
+        'native drift notice publication',
+        { afterIndex: driftCursor },
+      );
       const drifted = await fixture.client.getMessages(chatId);
       expect(drifted.transcriptViewId).toBe(beforeDrift.transcriptViewId);
       expect(assistantContents(drifted.messages)).not.toContain(externalContent);
