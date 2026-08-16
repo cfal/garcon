@@ -19,7 +19,7 @@ function createRuntime(host = createHost()) {
     if (!route || route.chatId !== chatId) {
       host.logger.warn('Dropped a Codex provider event with no owning operation', {
         chatId,
-        turnId: operationId,
+        runId: operationId,
         eventType,
       });
       return;
@@ -29,7 +29,7 @@ function createRuntime(host = createHost()) {
     } catch (error) {
       host.logger.warn('Dropped a Codex provider event at an unavailable sink', {
         chatId,
-        turnId: route.runId,
+        runId: route.runId,
         eventType,
         reason: error instanceof Error ? error.message : String(error),
       });
@@ -180,8 +180,6 @@ describe('CodexExecution', () => {
     });
     expect(request.admission.markStarted).toHaveBeenCalledTimes(1);
     expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
-      clientRequestId: 'run-1',
-      turnId: 'run-1',
       operation: expect.objectContaining({
         chatId: 'chat-1',
         runId: 'run-1',
@@ -478,7 +476,7 @@ describe('CodexExecution', () => {
       expect.stringMatching(/drop.*Codex.*event/i),
       expect.objectContaining({
         chatId: 'chat-1',
-        turnId: 'run-1',
+        runId: 'run-1',
         eventType: 'rows',
       }),
     );

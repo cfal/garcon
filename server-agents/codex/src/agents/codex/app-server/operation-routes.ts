@@ -19,12 +19,12 @@ import type { CodexRuntimeOperation } from '../runtime-types.js';
 export type CodexOperation = CodexRuntimeOperation;
 
 export function codexOperation(
-  request: { chatId: string; runId?: string; clientRequestId?: string; turnId?: string },
+  request: { readonly chatId: string; readonly runId: string },
   publish: AgentRuntimePublisher,
 ): CodexOperation {
   return Object.freeze({
     chatId: request.chatId,
-    runId: request.runId ?? request.turnId ?? request.clientRequestId ?? '',
+    runId: request.runId,
     publish,
   });
 }

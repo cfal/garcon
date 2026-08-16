@@ -179,8 +179,6 @@ function executionFields(
     model: request.model,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
-    clientRequestId: request.runId,
-    turnId: request.runId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),

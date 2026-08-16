@@ -28,9 +28,7 @@ export interface CodexExecutionRequest {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
-  readonly clientRequestId?: string;
   readonly clientMessageId?: string;
-  readonly turnId?: string;
   readonly executionAdmission?: CodexExecutionAdmission;
   readonly command: string;
   readonly codexGoalCommand?: CodexGoalCommand;

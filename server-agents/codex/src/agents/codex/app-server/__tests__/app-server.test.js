@@ -87,10 +87,7 @@ function makeRequest(overrides = {}) {
   if (request.operation) return request;
   return {
     ...request,
-    operation: collectOperation(
-      request.chatId,
-      request.turnId ?? request.clientRequestId ?? 'run-default',
-    ).operation,
+    operation: collectOperation(request.chatId).operation,
   };
 }
 
@@ -5353,19 +5350,15 @@ describe('CodexAppServerRuntime', () => {
     );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
-      clientRequestId: 'request-a',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
-      turnId: 'turn-a',
       operation: predecessor.operation,
     }));
 
     const first = provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
-      clientRequestId: 'request-b',
       command: 'First input',
       nativePath: null,
-      turnId: 'turn-b',
       operation: successor.operation,
     }), async () => {
       fake.emit('notification', {
@@ -6652,7 +6645,7 @@ describe('CodexAppServerRuntime', () => {
     expect(permissionEvents(published.events)).toHaveLength(1);
   });
 
-  it('cancels each pending approval through the operation that created it', async () => {
+  it('cancels approvals for one native turn through its captured turn operation', async () => {
     const nativePath = path.join(tmpDir, 'approval-routing-thread.jsonl');
     let goal = null;
     let fake;
@@ -6682,8 +6675,6 @@ describe('CodexAppServerRuntime', () => {
     const first = collectOperation('chat-1', 'run-a');
     const second = collectOperation('chat-1', 'run-b');
     await provider.startSession(makeRequest({
-      clientRequestId: 'run-a',
-      turnId: 'run-a',
       command: 'Keep working',
       codexGoalCommand: { kind: 'set', objective: 'Keep working' },
       operation: first.operation,
@@ -6697,8 +6688,6 @@ describe('CodexAppServerRuntime', () => {
     await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       nativePath,
-      clientRequestId: 'run-b',
-      turnId: 'run-b',
       codexGoalCommand: { kind: 'status' },
       operation: second.operation,
     }));
@@ -6775,16 +6764,12 @@ describe('CodexAppServerRuntime', () => {
     const second = collectOperation('chat-1', 'run-b');
 
     await provider.startSession(makeRequest({
-      clientRequestId: 'run-a',
-      turnId: 'run-a',
       codexGoalCommand: { kind: 'set', objective: 'Keep working' },
       operation: first.operation,
     }));
     await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       nativePath,
-      clientRequestId: 'run-b',
-      turnId: 'run-b',
       codexGoalCommand: { kind: 'resume' },
       operation: second.operation,
     }));
@@ -6860,8 +6845,6 @@ describe('CodexAppServerRuntime', () => {
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation('chat-1', 'run-a');
     await provider.startSession(makeRequest({
-      clientRequestId: 'run-a',
-      turnId: 'run-a',
       operation: published.operation,
     }));
 
@@ -6922,14 +6905,10 @@ describe('CodexAppServerRuntime', () => {
     const second = collectOperation('chat-b', 'run-b');
     await provider.startSession(makeRequest({
       chatId: 'chat-a',
-      clientRequestId: 'run-a',
-      turnId: 'run-a',
       operation: first.operation,
     }));
     await provider.startSession(makeRequest({
       chatId: 'chat-b',
-      clientRequestId: 'run-b',
-      turnId: 'run-b',
       operation: second.operation,
     }));
 
@@ -6982,8 +6961,6 @@ describe('CodexAppServerRuntime', () => {
     const first = collectOperation('chat-1', 'run-a');
     const second = collectOperation('chat-1', 'run-b');
     await provider.startSession(makeRequest({
-      clientRequestId: 'run-a',
-      turnId: 'run-a',
       command: 'Keep working',
       codexGoalCommand: { kind: 'set', objective: 'Keep working' },
       operation: first.operation,
@@ -6991,8 +6968,6 @@ describe('CodexAppServerRuntime', () => {
     await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       nativePath,
-      clientRequestId: 'run-b',
-      turnId: 'run-b',
       codexGoalCommand: { kind: 'status' },
       operation: second.operation,
     }));
@@ -7022,8 +6997,6 @@ describe('CodexAppServerRuntime', () => {
     await provider.compact(makeRequest({
       agentSessionId: 'thread-1',
       nativePath: null,
-      clientRequestId: 'run-compact',
-      turnId: 'run-compact',
       operation: published.operation,
     }));
     fake.emit('notification', {
