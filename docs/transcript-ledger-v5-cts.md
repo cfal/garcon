@@ -551,7 +551,7 @@ Key current evidence:
 | TLV5-PERM.08 | Component identity cases exist; no real-browser concurrent-occurrence action case.                                               | Missing Chromium case |
 | TLV5-PERM.09 | Shared adapter, Claude, Codex, and OpenCode cases require one structured content-free drop.                                     | Covered oracle        |
 | TLV5-PERM.10 | Runtime-router retry invokes the same live capability after a failed first response and appends one resolution only on success. | Covered               |
-| TLV5-PERM.11 | Ledger-to-transient integration suppresses late actionability; notifier coverage preserves the later idle notice.             | Covered               |
+| TLV5-PERM.11 | Ledger-to-transient integration suppresses late actionability without disturbing a colliding live control; notifier coverage preserves the later idle notice. | Covered |
 
 The core suites in `server/ledger/__tests__/permission-occurrence.test.js` and
 `server/agents/__tests__/runtime-router-permission-retry.test.js` are the
@@ -749,6 +749,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PERM.10-CORE-UNIT-01      | `server/agents/__tests__/runtime-router-permission-retry.test.js`: retries the exact live capability after provider response failure                      | PERM.10                     |
 | TLV5-PERM.11-CORE-TRANSIENT-01 | `server/chats/__tests__/late-permission-transient.test.js`: late requested history remains durable without a transient control                            | PERM.11                     |
 | TLV5-PERM.11-NOTIFIER-UNIT-01  | `server/notifications/__tests__/late-permission-attention.test.js`: inert late permission history neither notifies nor suppresses idle attention          | PERM.11                     |
+| TLV5-PERM.11-TRANSIENT-COLLISION-UNIT-01 | `server/chats/__tests__/late-permission-transient.test.js`: an inert duplicate occurrence preserves the existing live control                  | PERM.11                     |
 | TLV5-ADOPT.04-CONTRACT-01      | `common/__tests__/transcript-notice-contract.test.js`: exact quarantine detail parser and round trip                                                      | ADOPT.04                    |
 | TLV5-ADOPT.05-CORE-MATRIX-01   | `server/ledger/__tests__/quarantine-notice.test.js`: frozen-only preservation and read-fold exclusion                                                     | ADOPT.05                    |
 | TLV5-ADOPT.06-CORE-UNIT-01     | `server/ledger/__tests__/reload.test.js`: Reload carries quarantine while dropping ordinary notices                                                       | ADOPT.06                    |

@@ -87,6 +87,58 @@ it('[TLV5-PERM.11-CORE-TRANSIENT-01] keeps a late permission fact durable but in
   }
 });
 
+it('[TLV5-PERM.11-TRANSIENT-COLLISION-UNIT-01] preserves a live control when an inert commit repeats its occurrence', () => {
+  const transientFeed = new ChatTransientFeedStore('server-1');
+
+  expect(transientFeed.apply(permissionCommit(RUN_ID, 1))).toMatchObject({
+    kind: 'mutation',
+    value: { mutation: { kind: 'upsert' } },
+  });
+  expect(transientFeed.apply(permissionCommit(null, 2))).toEqual({ kind: 'unchanged' });
+
+  const rows = transientFeed.currentSnapshot(CHAT_ID)?.rows ?? [];
+  expect(rows.map((row) => ({
+    permissionOccurrenceId: row.permissionOccurrenceId,
+    runId: row.runId,
+    afterOrdinal: row.transcript.afterOrdinal,
+  }))).toEqual([{
+    permissionOccurrenceId: OCCURRENCE_ID,
+    runId: RUN_ID,
+    afterOrdinal: 1,
+  }]);
+  expect(transientFeed.validateAction(permissionControl())).toBe(rows[0]);
+});
+
+function permissionCommit(runId, ordinal) {
+  return {
+    type: 'permission',
+    chatId: CHAT_ID,
+    viewId: 'view-1',
+    runId,
+    row: {
+      kind: 'permission-requested',
+      ordinal,
+      at: AT,
+      providerMeta: null,
+      lifecycle: {
+        kind: 'requested',
+        permissionOccurrenceId: OCCURRENCE_ID,
+        requestedTool: new BashToolUseMessage(AT, 'tool-1', 'pwd'),
+        options: [],
+      },
+    },
+  };
+}
+
+function permissionControl() {
+  return {
+    serverInstanceId: 'server-1',
+    chatId: CHAT_ID,
+    runId: RUN_ID,
+    permissionOccurrenceId: OCCURRENCE_ID,
+  };
+}
+
 function flushCommitEvents() {
   return new Promise((resolve) => queueMicrotask(resolve));
 }
