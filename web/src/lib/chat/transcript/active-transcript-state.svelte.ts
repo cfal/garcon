@@ -306,7 +306,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.transcriptCache.markStale(chatId);
 			return 'gap-detected';
 		}
-		const previousLoadedThroughOrdinal = Math.min(this.loadedThroughOrdinal, this.lastOrdinal);
+		const appliedFrontierOrdinal = Math.min(this.loadedThroughOrdinal, this.lastOrdinal);
 		const append = { firstOrdinal, lastOrdinal, messages };
 		const bufferedBatch = { transcriptViewId, ...append, noticeRevision, resendCandidates };
 		if (this.#snapshotBuffer) {
@@ -338,18 +338,19 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			);
 			return 'gap-detected';
 		}
-		const responseMessageTypes = responseMessageTypesAfter(messages, previousLoadedThroughOrdinal);
-		const cursorAdvanced = result.lastOrdinal > this.lastOrdinal;
+		const responseMessageTypes = responseMessageTypesAfter(messages, appliedFrontierOrdinal);
+		const cacheCursorAdvanced = result.lastOrdinal > this.lastOrdinal;
 		this.lastOrdinal = Math.max(this.lastOrdinal, result.lastOrdinal);
-		if (this.hasLaterMessages && firstOrdinal > previousLoadedThroughOrdinal + 1) {
+		if (this.hasLaterMessages && firstOrdinal > appliedFrontierOrdinal + 1) {
+			const cacheStateChanged = result.changed || cacheCursorAdvanced;
 			this.transcriptViewId = transcriptViewId;
-			if (result.changed || cursorAdvanced) {
+			if (cacheStateChanged) {
 				this.clearLocalNotices(noticeRevision);
 			}
 			if (this.entries.length > 0 && this.loadStatus !== 'error') {
 				this.loadStatus = 'loaded';
 			}
-			if (result.changed || cursorAdvanced) {
+			if (cacheStateChanged) {
 				this.#feedMutations.record('live-append', responseMessageTypes);
 			}
 			this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
@@ -357,7 +358,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'applied';
 		}
 		const previousEntryCount = this.entries.length;
-		const applied = applyTranscriptAppend(this.entries, append, previousLoadedThroughOrdinal);
+		const applied = applyTranscriptAppend(this.entries, append, appliedFrontierOrdinal);
 		let entriesChanged = applied.status === 'applied' && applied.changed;
 		if (applied.status === 'applied') {
 			this.transcriptViewId = transcriptViewId;

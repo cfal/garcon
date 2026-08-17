@@ -471,7 +471,7 @@ export class ConversationSessionController {
 			this.#requestBottomRestore(chatId);
 		}
 
-		const initialSnapshot = getChatSnapshot(chatId, 1).catch(() => null);
+		const initialSnapshotPromise = getChatSnapshot(chatId, 1).catch(() => null);
 		await deps.chatState.loadMessages(chatId, {
 			minimumLimit: minimumMessageLimit,
 		});
@@ -489,14 +489,14 @@ export class ConversationSessionController {
 			deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
 		}
 
-		const snapshot = await initialSnapshot;
+		const initialSnapshot = await initialSnapshotPromise;
 		if (
 			deps.sessions.selectedChatId === chatId &&
-			snapshot?.chat.id === chatId &&
-			snapshot.transcript.availability === 'available' &&
-			snapshot.transcript.transcriptViewId === deps.chatState.getCursor().transcriptViewId
+			initialSnapshot?.chat.id === chatId &&
+			initialSnapshot.transcript.availability === 'available' &&
+			initialSnapshot.transcript.transcriptViewId === deps.chatState.getCursor().transcriptViewId
 		) {
-			deps.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
+			deps.conversationUi.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
 		}
 	}
 
