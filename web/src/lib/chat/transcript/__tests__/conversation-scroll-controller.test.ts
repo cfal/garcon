@@ -730,6 +730,46 @@ describe('ConversationScrollController', () => {
 		expect(loadEarlierPage).toHaveBeenCalledOnce();
 	});
 
+	it('does not reaffirm expired user ownership after an active earlier page publishes geometry', async () => {
+		let now = 100;
+		vi.spyOn(performance, 'now').mockImplementation(() => now);
+		let resolveLayout!: (result: 'settled') => void;
+		const waitForLayout = vi.fn<ConversationViewportPort['waitForLayout']>(
+			() => new Promise<'settled'>((resolve) => (resolveLayout = resolve)),
+		);
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const invalidatePendingWindowNavigation = vi.fn();
+		const fixture = controllerFixture({
+			viewport: fakeViewport({ waitForLayout }),
+			state: {
+				canLoadEarlier: true,
+				invalidatePendingWindowNavigation,
+				loadEarlierPage,
+			},
+			scroller: { clientHeight: 400, scrollTop: 590 },
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		const request = fixture.controller.requestPage('earlier', 'scroll');
+		await vi.waitFor(() => expect(waitForLayout).toHaveBeenCalledOnce());
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
+		fixture.viewport.cancelForUserIntent.mockClear();
+		const invalidationCount = invalidatePendingWindowNavigation.mock.calls.length;
+
+		now = 100 + 2_001;
+		fixture.scroller.scrollTop = 8_490;
+		fixture.controller.handleScroll();
+		fixture.scroller.scrollTop = 8_484;
+		fixture.controller.handleScroll();
+		expect(fixture.viewport.cancelForUserIntent).not.toHaveBeenCalled();
+		expect(invalidatePendingWindowNavigation).toHaveBeenCalledTimes(invalidationCount);
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+
+		resolveLayout('settled');
+		await expect(request).resolves.toBe('loaded');
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+	});
+
 	it('does not chain an earlier page after its initiating intent expires', async () => {
 		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
 		let resolveFirstPage!: (result: 'loaded') => void;
