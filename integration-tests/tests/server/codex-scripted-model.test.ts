@@ -4,7 +4,6 @@ import {
   messagesOfType,
   userContents,
 } from '../../support/chat-assertions.js';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
   codexAssistantMessage,
   codexExecCommandCall,
@@ -171,37 +170,11 @@ describe('Codex against a scripted model', () => {
         chatId,
         command: continuedPrompt,
       }));
-      await held.requested;
+      const heldRequest = await held.requested;
       try {
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => (
-            event.type === 'chat-messages'
-            && event.chatId === chatId
-            && messagesOfType(event.messages, 'tool-result')
-              .some((message) => message.toolId === commandCallId)
-          ),
-          'pre-terminal Codex command messages',
-          { afterIndex: continuedCursor },
-        );
-        const running = await fixture.client.getMessages(chatId);
-        expect(userContents(running.messages).filter((content) => content === continuedPrompt))
-          .toHaveLength(1);
-        expect(messagesOfType(running.messages, 'bash-tool-use')
-          .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
-        expect(messagesOfType(running.messages, 'tool-result')
-          .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
-
-        const emitted = fixture.client.eventsSince(continuedCursor)
-          .flatMap((event) => (
-            event.type === 'chat-messages'
-            && event.chatId === chatId
-              ? event.messages
-              : []
-          ));
-        expect(messagesOfType(emitted, 'bash-tool-use')
-          .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
-        expect(messagesOfType(emitted, 'tool-result')
-          .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
+        expect(heldRequest.functionCallOutputs).toHaveLength(1);
+        expect(heldRequest.functionCallOutputs[0]?.callId).toBe(commandCallId);
+        expect(heldRequest.functionCallOutputs[0]?.output).toContain(commandMarker);
       } finally {
         held.release();
       }
@@ -214,8 +187,26 @@ describe('Codex against a scripted model', () => {
         afterIndex: continuedCursor,
       });
       const settled = await fixture.client.getMessages(chatId);
+      expect(userContents(settled.messages).filter((content) => content === continuedPrompt))
+        .toHaveLength(1);
+      expect(messagesOfType(settled.messages, 'bash-tool-use')
+        .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
+      expect(messagesOfType(settled.messages, 'tool-result')
+        .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
       expect(assistantContents(settled.messages).filter((content) => content === continuedReply))
         .toHaveLength(1);
+
+      const emitted = fixture.client.eventsSince(continuedCursor)
+        .flatMap((event) => (
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+            ? event.messages
+            : []
+        ));
+      expect(messagesOfType(emitted, 'bash-tool-use')
+        .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
+      expect(messagesOfType(emitted, 'tool-result')
+        .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
