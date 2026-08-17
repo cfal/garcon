@@ -911,8 +911,8 @@ in-memory registry cache, schedules the asynchronous registry file
 flush, and broadcasts `ChatSessionCreatedMessage`. Opening a chat
 repairs the registry cache from the authoritative row, closing the
 commit-versus-flush crash window. There is no second value to validate
-for agreement; the V4 registry write from the return path
-(`server/agents/runtime-router.ts:182`) is removed. Startup fences
+for agreement; the V4 session-metadata registry write from `RuntimeRouter`'s
+start return path (`server/agents/runtime-router.ts`) is removed. Startup fences
 orphan provider processes (unchanged policy).
 
 ## 7. Inputs and Resend
@@ -2028,9 +2028,10 @@ V4 was never deployed and has no dual-format serving period. The core ledger,
 producer cutover, view-qualified addressing, native Reload, and V4 deletion
 precede this revision. Released pre-V5 chats still require a one-time migration
 path, but revision 18 separates that occasion from Reload and closes the final
-stabilization defects. The detailed remaining work, owners, case IDs, and gate
-status live in `TRANSCRIPT_LEDGER_V5_RELEASE_STABILIZATION_PLAN.md`; this
-section fixes the architectural order.
+stabilization defects. The current case inventory, execution checklist, and
+gate status live in `docs/transcript-ledger-v5-cts.md` and
+`docs/transcript-ledger-v5-cts-execution-plan.md`; this section fixes the
+architectural order.
 
 1. **Lock regressions before each production boundary moves.** Register the
    CTS and SACS cases for one permission UUID, codec compatibility, migration

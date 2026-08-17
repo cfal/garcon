@@ -4,12 +4,10 @@ Status: Revision 18 integrated execution plan, dogfood validation and release ac
 
 Companion specification: `docs/transcript-ledger-v5-cts.md`
 
-Governing artifacts:
+Governing artifact:
 
-- `TRANSCRIPT_LEDGER_V5_DESIGN.md`, revision 18, SHA-256
-  `3037343ebe1d3aee9d10ea5ca664d24187dca39cad931babc738a3714b94961d`
-- `TRANSCRIPT_LEDGER_V5_RELEASE_STABILIZATION_PLAN.md`, SHA-256
-  `50edbc7bc81452f8347683a07dd058712b9061697d3d06f04a328c5e6a3430d3`
+- `docs/transcript-ledger-v5-design.md`, revision 18, SHA-256
+  `74ebbf2ce3c3e2b1acf0bc20942c4c60b97cb646ef3f23a118bcca86419fe994`
 
 Inventory baseline: integrated checkpoint
 `21cc82a1530edd6811e52a735c23f6b9de4ee9ed` with 256 discovered stable IDs.
