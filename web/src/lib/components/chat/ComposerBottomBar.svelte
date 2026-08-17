@@ -11,6 +11,8 @@
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
+	import Square from '@lucide/svelte/icons/square';
 	import Send from '@lucide/svelte/icons/send';
 	import * as m from '$lib/paraglide/messages.js';
 	import ComposerAddMenu from './ComposerAddMenu.svelte';
@@ -21,6 +23,9 @@
 		onAddImage: () => void;
 		onOpenSnippetPalette?: () => void;
 		onOpenExpandedEditor?: () => void;
+		onRefinePrompt?: () => void;
+		canRefinePrompt?: boolean;
+		isPromptRefinementPending?: boolean;
 		permissionOptions: ComposerModeOption<PermissionMode>[];
 		selectedPermission: PermissionMode;
 		onPermissionSelect: (mode: PermissionMode) => void;
@@ -39,6 +44,7 @@
 		showSendButton?: boolean;
 		addMenuDisabled?: boolean;
 		isPromptTransformPending?: boolean;
+		promptTransformStatus?: string;
 	}
 
 	let {
@@ -47,6 +53,9 @@
 		onAddImage,
 		onOpenSnippetPalette = () => undefined,
 		onOpenExpandedEditor,
+		onRefinePrompt,
+		canRefinePrompt = false,
+		isPromptRefinementPending = false,
 		permissionOptions,
 		selectedPermission,
 		onPermissionSelect,
@@ -65,10 +74,19 @@
 		showSendButton = true,
 		addMenuDisabled = false,
 		isPromptTransformPending = false,
+		promptTransformStatus = m.snippets_expanding(),
 	}: Props = $props();
 
 	const activePermission = $derived(
 		permissionOptions.find((option) => option.value === selectedPermission) ?? permissionOptions[0],
+	);
+	const promptRefinementActionLabel = $derived(
+		isPromptRefinementPending
+			? m.chat_composer_cancel_prompt_refinement()
+			: m.chat_composer_refine_prompt(),
+	);
+	const sendActionLabel = $derived(
+		isPromptTransformPending ? promptTransformStatus : sendTitle,
 	);
 	const activeThinking = $derived(
 		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0],
@@ -189,14 +207,33 @@
 				</button>
 			{/if}
 
+			{#if onRefinePrompt}
+				<button
+					type="button"
+					onclick={onRefinePrompt}
+					disabled={!isPromptRefinementPending && (!canRefinePrompt || isPromptTransformPending)}
+					class="inline-flex size-9 items-center justify-center rounded-lg border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 {isPromptRefinementPending
+						? 'border-accent bg-accent text-accent-foreground hover:bg-accent/80'
+						: 'border-border bg-background text-foreground hover:bg-muted'}"
+					title={promptRefinementActionLabel}
+					aria-label={promptRefinementActionLabel}
+				>
+					{#if isPromptRefinementPending}
+						<Square class="size-4" aria-hidden="true" />
+					{:else}
+						<Sparkles class="size-4" aria-hidden="true" />
+					{/if}
+				</button>
+			{/if}
+
 			{#if showSendButton}
 				<button
 					type="button"
 					onclick={onSend}
 					disabled={!canSend || isPromptTransformPending}
 					class="inline-flex size-9 items-center justify-center rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed {sendButtonClass}"
-					title={isPromptTransformPending ? m.snippets_expanding() : sendTitle}
-					aria-label={isPromptTransformPending ? m.snippets_expanding() : sendTitle}
+					title={sendActionLabel}
+					aria-label={sendActionLabel}
 				>
 					{#if isPromptTransformPending}
 						<Loader2 class="size-4 animate-spin" aria-hidden="true" />
@@ -209,5 +246,5 @@
 	</div>
 </div>
 <span class="sr-only" aria-live="polite">
-	{isPromptTransformPending ? m.snippets_expanding() : ''}
+	{isPromptTransformPending ? promptTransformStatus : ''}
 </span>

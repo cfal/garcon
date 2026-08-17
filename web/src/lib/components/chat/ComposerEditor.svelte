@@ -12,22 +12,31 @@
 		text: string;
 		selection: ComposerEditorSelection;
 		focusRequestId: number;
+		readOnly: boolean;
 		ariaLabel: string;
 		onTextChange: (text: string) => void;
 		onSelectionChange: (selection: ComposerEditorSelection) => void;
 	}
 
-	let { text, selection, focusRequestId, ariaLabel, onTextChange, onSelectionChange }: Props =
-		$props();
+	let {
+		text,
+		selection,
+		focusRequestId,
+		readOnly,
+		ariaLabel,
+		onTextChange,
+		onSelectionChange,
+	}: Props = $props();
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	let controller = $state<ComposerEditorController | null>(null);
 
 	const attachEditor: Attachment<HTMLDivElement> = (element) => {
-		const initial = untrack(() => ({ text, selection, ariaLabel }));
+		const initial = untrack(() => ({ text, selection, readOnly, ariaLabel }));
 		const options: ComposerEditorControllerOptions = {
 			initialText: initial.text,
 			initialSelection: initial.selection,
 			ariaLabel: initial.ariaLabel,
+			readOnly: initial.readOnly,
 			workspaceShortcuts,
 			onTextChange: (nextText) => onTextChange(nextText),
 			onSelectionChange: (nextSelection) => onSelectionChange(nextSelection),
@@ -44,7 +53,13 @@
 	$effect(() => {
 		const activeController = controller;
 		const nextText = text;
-		activeController?.syncText(nextText);
+		const nextSelection = selection;
+		activeController?.syncText(nextText, nextSelection);
+	});
+
+	$effect(() => {
+		const activeController = controller;
+		activeController?.setReadOnly(readOnly);
 	});
 
 	$effect(() => {

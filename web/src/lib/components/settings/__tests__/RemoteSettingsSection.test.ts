@@ -16,6 +16,11 @@ import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelt
 import { makeTestGhCapability, setTestGhCapability } from './gh-capability-test-context';
 import { setTestRemoteSettingsStore } from './remote-settings-test-context';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
+import {
+	DEFAULT_COMMIT_MESSAGE_PROMPT,
+	DEFAULT_PROMPT_REFINEMENT_PROMPT,
+	GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
+} from '$shared/generation-prompts';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -131,6 +136,16 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 					thinkingMode: 'none',
 				}),
 				...patch.ui.commitMessage,
+			};
+		}
+		if (patch.ui?.promptRefinement) {
+			nextUiEffective.promptRefinement = {
+				...(current.uiEffective.promptRefinement ?? {
+					agentId: 'claude',
+					model: 'opus',
+					thinkingMode: 'none',
+				}),
+				...patch.ui.promptRefinement,
 			};
 		}
 		return {
@@ -259,7 +274,7 @@ describe('RemoteSettingsSection', () => {
 		).toBeTruthy();
 	});
 
-	it('renders commit message settings directly below chat title generation', async () => {
+	it('renders prompt refinement after commit generation without an enabled switch', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
 			makeSnapshot({
@@ -281,7 +296,7 @@ describe('RemoteSettingsSection', () => {
 		const chatTitle = screen.getByText('Automatically generate chat titles');
 		const compactionToggle = screen.getByText('Enable agent switch compaction');
 		const commitModel = screen.getByText('Commit message model');
-		// The compaction card sits above the commit-message card.
+		const refinementModel = screen.getByText('Prompt refinement model');
 		expect(
 			compactionToggle.compareDocumentPosition(commitModel)
 				& Node.DOCUMENT_POSITION_FOLLOWING,
@@ -289,10 +304,16 @@ describe('RemoteSettingsSection', () => {
 		expect(
 			chatTitle.compareDocumentPosition(commitModel) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+		expect(
+			commitModel.compareDocumentPosition(refinementModel)
+				& Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		expect(screen.queryByText('Generate commit messages')).toBeNull();
 		expect(screen.getByText('Add common directory prefix')).toBeTruthy();
-		expect(screen.getByText('Generation prompt')).toBeTruthy();
-		expect(screen.getAllByRole('button', { name: 'Test model' })).toHaveLength(2);
+		expect(screen.queryByRole('textbox', { name: /generation prompt/i })).toBeNull();
+		expect(screen.getAllByRole('button', { name: 'Edit generation prompt' })).toHaveLength(2);
+		expect(screen.getAllByRole('button', { name: 'Test model' })).toHaveLength(3);
+		expect(refinementModel.parentElement?.parentElement?.querySelector('[role="switch"]')).toBeNull();
 	});
 
 	it('keeps direct agents available in title and commit generation selectors', async () => {
@@ -313,7 +334,9 @@ describe('RemoteSettingsSection', () => {
 
 		render(RemoteSettingsSectionTestHost);
 
-		const titleTrigger = screen.getByRole('button', { name: /Claude .* Opus .* Default/ });
+		const [titleTrigger] = screen.getAllByRole('button', {
+			name: /Claude .* Opus .* Default/,
+		});
 		await fireEvent.click(titleTrigger);
 		let groupHeaders = Array.from(
 			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
@@ -335,7 +358,7 @@ describe('RemoteSettingsSection', () => {
 		expect(groupHeaders.map((header) => header.textContent?.trim())).toEqual(['Direct', 'Agents']);
 	});
 
-	it('tests title and commit generation models independently', async () => {
+	it('tests title, commit, and prompt-refinement models independently', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
 			makeSnapshot({
@@ -351,6 +374,11 @@ describe('RemoteSettingsSection', () => {
 						model: 'gpt-5.4',
 						thinkingMode: 'max',
 					},
+					promptRefinement: {
+						agentId: 'amp',
+						model: 'smart',
+						thinkingMode: 'none',
+					},
 				},
 			}),
 		);
@@ -359,11 +387,14 @@ describe('RemoteSettingsSection', () => {
 			.mockResolvedValueOnce({ success: true, target: 'chatTitle', durationMs: 8_432 })
 			.mockRejectedValueOnce(
 				new ApiError(422, 'unsupported', 'GENERATION_TEST_UNSUPPORTED_EFFORT'),
+			)
+			.mockRejectedValueOnce(
+				new ApiError(422, 'unsafe', 'GENERATION_TEST_UNSAFE_AGENT'),
 			);
 
 		render(RemoteSettingsSectionTestHost);
 
-		const [titleTestButton, commitTestButton] = screen.getAllByRole('button', {
+		const [titleTestButton, commitTestButton, refinementTestButton] = screen.getAllByRole('button', {
 			name: 'Test model',
 		});
 		const [titleTestStatus] = screen.getAllByRole('status');
@@ -376,6 +407,12 @@ describe('RemoteSettingsSection', () => {
 		await fireEvent.click(commitTestButton);
 		await screen.findByText('This agent cannot use the selected effort for one-shot generation.');
 		expect(testGenerationModel).toHaveBeenNthCalledWith(2, 'commitMessage', expect.any(String));
+
+		await fireEvent.click(refinementTestButton);
+		await screen.findByText(
+			'This agent can run tools without asking permission. Choose a safer agent for prompt refinement.',
+		);
+		expect(testGenerationModel).toHaveBeenNthCalledWith(3, 'promptRefinement', expect.any(String));
 	});
 
 	it('tests an out-of-catalog Direct selection with its displayed endpoint metadata', async () => {
@@ -465,7 +502,9 @@ describe('RemoteSettingsSection', () => {
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost);
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus .* Default/ }));
+		await fireEvent.click(
+			screen.getAllByRole('button', { name: /Claude .* Opus .* Default/ })[0],
+		);
 		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenCalledWith({
@@ -680,7 +719,7 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
-	it('persists and restores the commit generation prompt', async () => {
+	it('edits the commit generation prompt transactionally in a dialog', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
 			makeSnapshot({
@@ -707,9 +746,23 @@ describe('RemoteSettingsSection', () => {
 
 		render(RemoteSettingsSectionTestHost);
 
-		const prompt = screen.getByLabelText('Generation prompt');
-		await fireEvent.input(prompt, { target: { value: 'Summarize {{files}} with {{diff}}' } });
-		await fireEvent.blur(prompt);
+		const [editCommitPrompt] = screen.getAllByRole('button', {
+			name: 'Edit generation prompt',
+		});
+		await fireEvent.click(editCommitPrompt);
+
+		const prompt = screen.getByRole('textbox', { name: 'Edit commit generation prompt' });
+		expect((prompt as HTMLTextAreaElement).value).toBe(DEFAULT_COMMIT_MESSAGE_PROMPT);
+		expect(screen.getByText('{{files}}')).toBeTruthy();
+		expect(screen.getByText('{{diff}}')).toBeTruthy();
+		expect(
+			(screen.getByRole('button', { name: 'Restore default' }) as HTMLButtonElement).disabled,
+		).toBe(true);
+
+		await fireEvent.input(prompt, {
+			target: { value: 'Summarize {{files}} with {{diff}}' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenCalledWith({
@@ -720,24 +773,140 @@ describe('RemoteSettingsSection', () => {
 				},
 			});
 		});
+		await waitFor(() => {
+			expect(screen.queryByRole('dialog')).toBeNull();
+		});
 
-		const restoreButton = await screen.findByRole('button', { name: 'Restore default prompt' });
-		const prefixLabel = screen.getByText('Add common directory prefix');
+		await fireEvent.click(editCommitPrompt);
 		expect(
-			restoreButton.compareDocumentPosition(prefixLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
+			(screen.getByRole('textbox', {
+				name: 'Edit commit generation prompt',
+			}) as HTMLTextAreaElement).value,
+		).toBe('Summarize {{files}} with {{diff}}');
+		vi.mocked(updateRemoteSettings).mockClear();
+
+		const reopenedPrompt = screen.getByRole('textbox', {
+			name: 'Edit commit generation prompt',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Restore default' }));
+		expect((reopenedPrompt as HTMLTextAreaElement).value).toBe(DEFAULT_COMMIT_MESSAGE_PROMPT);
+		expect(updateRemoteSettings).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(updateRemoteSettings).not.toHaveBeenCalled();
+	});
+
+	it('validates and persists prompt-refinement instructions', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				ui: {
+					promptRefinement: {
+						agentId: 'claude',
+						model: 'opus',
+						customPrompt: '',
+					},
+				},
+				uiEffective: {
+					promptRefinement: {
+						agentId: 'claude',
+						model: 'opus',
+						thinkingMode: 'none',
+						customPrompt: '',
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost);
+
+		const [, editRefinementPrompt] = screen.getAllByRole('button', {
+			name: 'Edit generation prompt',
+		});
+		await fireEvent.click(editRefinementPrompt);
+		const prompt = screen.getByRole('textbox', {
+			name: 'Edit prompt refinement instructions',
+		});
+		expect((prompt as HTMLTextAreaElement).value).toBe(DEFAULT_PROMPT_REFINEMENT_PROMPT);
+		expect(screen.getByText('{{USER_PROMPT}}')).toBeTruthy();
+
+		await fireEvent.input(prompt, { target: { value: 'Rewrite this draft.' } });
+		expect(
+			screen.getByText('The generation prompt must include {{USER_PROMPT}}.'),
+		).toBeTruthy();
+		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
+
+		await fireEvent.input(prompt, {
+			target: { value: 'x'.repeat(GENERATION_PROMPT_TEMPLATE_MAX_LENGTH + 1) },
+		});
+		expect(
+			screen.getByText('The generation prompt cannot exceed 32000 characters.'),
 		).toBeTruthy();
 
-		await fireEvent.click(restoreButton);
-
+		await fireEvent.input(prompt, { target: { value: 'Rewrite: {{USER_PROMPT}}' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => {
-			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
 				ui: {
-					commitMessage: expect.objectContaining({
-						customPrompt: '',
+					promptRefinement: expect.objectContaining({
+						customPrompt: 'Rewrite: {{USER_PROMPT}}',
 					}),
 				},
 			});
 		});
+	});
+
+	it('keeps a failed prompt save in the dialog for retry', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		vi.mocked(updateRemoteSettings).mockRejectedValueOnce(new Error('Settings are unavailable.'));
+		render(RemoteSettingsSectionTestHost);
+
+		const [editCommitPrompt] = screen.getAllByRole('button', {
+			name: 'Edit generation prompt',
+		});
+		await fireEvent.click(editCommitPrompt);
+		const prompt = screen.getByRole('textbox', { name: 'Edit commit generation prompt' });
+		await fireEvent.input(prompt, { target: { value: 'Keep this private draft.' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(await screen.findByText('Settings are unavailable.')).toBeTruthy();
+		expect((prompt as HTMLTextAreaElement).value).toBe('Keep this private draft.');
+		expect(screen.getByRole('dialog')).toBeTruthy();
+	});
+
+	it('keeps the generation prompt dialog open when Escape is pressed during save', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		let rejectUpdate!: (reason?: unknown) => void;
+		const updatePromise = new Promise<Awaited<ReturnType<typeof updateRemoteSettings>>>(
+			(_resolve, reject) => {
+				rejectUpdate = reject;
+			},
+		);
+		vi.mocked(updateRemoteSettings).mockReturnValueOnce(updatePromise);
+		render(RemoteSettingsSectionTestHost);
+
+		const [editCommitPrompt] = screen.getAllByRole('button', {
+			name: 'Edit generation prompt',
+		});
+		await fireEvent.click(editCommitPrompt);
+		const prompt = screen.getByRole('textbox', { name: 'Edit commit generation prompt' });
+		await fireEvent.input(prompt, { target: { value: 'Keep this private draft.' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		const dialog = screen.getByRole('dialog');
+		await screen.findByRole('button', { name: 'Saving...' });
+		await fireEvent.keyDown(dialog, { key: 'Escape' });
+		expect(dialog.isConnected).toBe(true);
+
+		rejectUpdate(new Error('Settings are unavailable.'));
+		expect(await screen.findByText('Settings are unavailable.')).toBeTruthy();
+		expect((prompt as HTMLTextAreaElement).value).toBe('Keep this private draft.');
+		expect(screen.getByRole('dialog')).toBe(dialog);
 	});
 
 	it('saves the Telegram bot token and applies the redacted settings snapshot', async () => {

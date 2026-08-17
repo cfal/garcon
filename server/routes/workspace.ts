@@ -18,9 +18,14 @@ import {
   normalizeAgentSwitchCompactionUiSettings,
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
+  normalizePromptRefinementUiSettings,
   type RemoteSettingsSnapshot,
   type RemoteUiEffectiveSettings,
 } from '../../common/settings.js';
+import {
+  GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
+  PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
+} from '../../common/generation-prompts.js';
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
 import { isGenerationTestTarget } from '../../common/generation-test-contracts.js';
@@ -58,12 +63,14 @@ function asPlainObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function resolveCommitMessageUiConfig(
+function resolveUntoggledGenerationUiConfig<
+  T extends 'commitMessage' | 'promptRefinement',
+>(
   input: Parameters<typeof resolveEffectiveGenerationUiConfig>[0],
-): NonNullable<RemoteUiEffectiveSettings['commitMessage']> {
+): NonNullable<RemoteUiEffectiveSettings[T]> {
   const config = { ...resolveEffectiveGenerationUiConfig(input) };
   delete (config as { enabled?: boolean }).enabled;
-  return config as NonNullable<RemoteUiEffectiveSettings['commitMessage']>;
+  return config as NonNullable<RemoteUiEffectiveSettings[T]>;
 }
 
 export async function buildRemoteSettingsSnapshot({
@@ -83,10 +90,10 @@ export async function buildRemoteSettingsSnapshot({
   const pinnedChatIds = settingsSource.pinnedChatIds;
   const recentAgentSettings = settingsSource.recentAgentSettings;
   const executionDefaults = settingsSource.executionDefaults;
-  const [chatTitleContext, compactionContext, commitMessageContext] =
+  const [chatTitleContext, compactionContext, commitMessageContext, promptRefinementContext] =
     await resolveGenerationContextsForSelections(
       agents,
-      [ui?.chatTitle, ui?.agentSwitchCompaction, ui?.commitMessage],
+      [ui?.chatTitle, ui?.agentSwitchCompaction, ui?.commitMessage, ui?.promptRefinement],
     );
 
   const uiEffective = {
@@ -98,9 +105,13 @@ export async function buildRemoteSettingsSnapshot({
       persisted: asPlainObject(ui?.agentSwitchCompaction),
       ...compactionContext,
     }),
-    commitMessage: resolveCommitMessageUiConfig({
+    commitMessage: resolveUntoggledGenerationUiConfig<'commitMessage'>({
       persisted: asPlainObject(ui?.commitMessage),
       ...commitMessageContext,
+    }),
+    promptRefinement: resolveUntoggledGenerationUiConfig<'promptRefinement'>({
+      persisted: asPlainObject(ui?.promptRefinement),
+      ...promptRefinementContext,
     }),
   };
 
@@ -179,6 +190,11 @@ export default function createWorkspaceRoutes(
       if (commitMessage) patch.commitMessage = commitMessage;
       else delete patch.commitMessage;
     }
+    if ('promptRefinement' in patch) {
+      const promptRefinement = normalizePromptRefinementUiSettings(patch.promptRefinement);
+      if (promptRefinement) patch.promptRefinement = promptRefinement;
+      else delete patch.promptRefinement;
+    }
     const notifications = asPlainObject(patch.notifications);
     const rawTelegram = notifications.telegram;
     if (rawTelegram && typeof rawTelegram === 'object' && !Array.isArray(rawTelegram)) {
@@ -190,6 +206,31 @@ export default function createWorkspaceRoutes(
       patch.notifications = Object.keys(telegram).length > 0 ? { telegram } : {};
     }
     return Object.keys(patch).length > 0 ? patch : null;
+  }
+
+  function generationPromptPatchError(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const ui = raw as Record<string, unknown>;
+    for (const target of ['commitMessage', 'promptRefinement'] as const) {
+      const value = ui[target];
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const targetPatch = value as Record<string, unknown>;
+      if (!Object.hasOwn(targetPatch, 'customPrompt')) continue;
+      if (typeof targetPatch.customPrompt !== 'string') {
+        return `${target}.customPrompt must be a string.`;
+      }
+      if (targetPatch.customPrompt.length > GENERATION_PROMPT_TEMPLATE_MAX_LENGTH) {
+        return `${target}.customPrompt must be at most ${GENERATION_PROMPT_TEMPLATE_MAX_LENGTH} characters.`;
+      }
+      if (
+        target === 'promptRefinement'
+        && targetPatch.customPrompt.trim()
+        && !targetPatch.customPrompt.includes(PROMPT_REFINEMENT_USER_PROMPT_TOKEN)
+      ) {
+        return `promptRefinement.customPrompt must include ${PROMPT_REFINEMENT_USER_PROMPT_TOKEN}.`;
+      }
+    }
+    return null;
   }
 
   async function putSessionNameHandler(body: JsonBody): Promise<Response> {
@@ -225,6 +266,10 @@ export default function createWorkspaceRoutes(
   async function putAppSettings(body: JsonBody): Promise<Response> {
     try {
       const input = asJsonBody(body);
+      const promptPatchError = generationPromptPatchError(input.ui);
+      if (promptPatchError) {
+        return jsonError(promptPatchError, 400, 'INVALID_REMOTE_SETTINGS', false);
+      }
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
       const transcriptSearchEnabled = transcriptSearchEnabledPatch(input);
       if (transcriptSearchEnabled === null) {

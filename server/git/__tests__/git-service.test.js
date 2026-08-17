@@ -404,6 +404,26 @@ describe("commit message generation", () => {
     expect(diffExcerpt).not.toContain(marker);
   });
 
+  it("preserves replacement metacharacters in commit context", async () => {
+    let capturedPrompt = "";
+
+    await generateCommitMessage(
+      ["src/$&-$1.ts"],
+      "diff with $& and $1 and $$",
+      "claude",
+      "/tmp",
+      (prompt) => {
+        capturedPrompt = prompt;
+        return Promise.resolve("chore: stub");
+      },
+      { customPrompt: "Files:\n{{files}}\nDiff:\n{{diff}}" },
+    );
+
+    expect(capturedPrompt).toBe(
+      "Files:\n- src/$&-$1.ts\nDiff:\ndiff with $& and $1 and $$",
+    );
+  });
+
   it("returns the server-applied directory prefix with generated messages", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-commit-message-prefix-"),

@@ -98,6 +98,10 @@
 
 	const composer = new ComposerState();
 	const transcript = new ActiveTranscriptState();
+
+	export function getComposerContentRevision(): number {
+		return composer.contentRevision;
+	}
 	const agent = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const appShell = new AppShellStore();
@@ -257,11 +261,11 @@
 			id: agentId,
 			label: labelForAgent(agentId),
 			description: '',
-				supportsFork: agentId !== 'amp',
-				supportsForkAtMessage: agentId !== 'amp',
-				supportsForkWhileRunning: agentId !== 'amp',
-				supportsSteering: agentId === 'codex',
-				supportsGoals: agentId === 'codex',
+			supportsFork: agentId !== 'amp',
+			supportsForkAtMessage: agentId !== 'amp',
+			supportsForkWhileRunning: agentId !== 'amp',
+			supportsSteering: agentId === 'codex',
+			supportsGoals: agentId === 'codex',
 			supportsUpdateProjectPath: true,
 			supportsImages: true,
 			acceptsApiProviderEndpoints: true,
@@ -289,10 +293,10 @@
 		getModelForSelection: modelForSelection,
 		supportsImages: (agentId: string, model: string) =>
 			modelForSelection(agentId, model)?.supportsImages ?? true,
-			supportsFork: (agentId: string) => agentId !== 'amp',
-			supportsForkWhileRunning: () => true,
-			supportsSteering: (agentId: string) => agentId === 'codex',
-			supportsGoals: (agentId: string) => agentId === 'codex',
+		supportsFork: (agentId: string) => agentId !== 'amp',
+		supportsForkWhileRunning: () => true,
+		supportsSteering: (agentId: string) => agentId === 'codex',
+		supportsGoals: (agentId: string) => agentId === 'codex',
 		selectionFor: (_agentId: string, model: string) => ({
 			model,
 			apiProviderId: null,
@@ -393,6 +397,7 @@
 >
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
+<div data-testid="composer-attachment-count">{composer.images.length}</div>
 {#each notifications.items as notification (notification.id)}
 	<div data-testid="notification">{notification.message}</div>
 {/each}

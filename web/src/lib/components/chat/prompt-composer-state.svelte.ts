@@ -81,6 +81,17 @@ export class PromptComposerUiState {
 		this.composerEditorSelection = selection;
 	}
 
+	requestComposerEditorFocus(): void {
+		if (!this.composerEditorOpen) return;
+		this.composerEditorFocusRequestId += 1;
+	}
+
+	moveComposerEditorCaretToEnd(chatId: string, textLength: number): void {
+		if (!this.composerEditorOpen || this.composerEditorChatId !== chatId) return;
+		this.composerEditorSelection = { anchor: textLength, head: textLength };
+		this.composerEditorFocusRequestId += 1;
+	}
+
 	closeComposerEditor(): void {
 		this.composerEditorOpen = false;
 		this.composerEditorChatId = null;

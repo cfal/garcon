@@ -146,4 +146,45 @@ describe('ComposerEditorController', () => {
 		expect(halfPageDown.defaultPrevented).toBe(false);
 		controller.destroy();
 	});
+
+	it('reconfigures read-only mode without remounting or moving the selection', () => {
+		const host = parent();
+		const controller = new ComposerEditorController(host, {
+			initialText: 'one\ntwo',
+			initialSelection: { anchor: 5, head: 5 },
+			ariaLabel: 'Expanded composer text',
+			workspaceShortcuts: { registerLocalShortcutOwner: () => () => undefined },
+			onTextChange: () => undefined,
+			onSelectionChange: () => undefined,
+		});
+		const editor = host.querySelector<HTMLElement>('.cm-editor');
+		const content = host.querySelector<HTMLElement>('.cm-content');
+		if (!editor || !content) throw new Error('Expected CodeMirror elements');
+		const view = EditorView.findFromDOM(editor);
+		if (!view) throw new Error('Expected the CodeMirror view');
+		view.scrollDOM.scrollTop = 24;
+
+		controller.setReadOnly(true);
+		expect(host.querySelector('.cm-editor')).toBe(editor);
+		expect(view.state.readOnly).toBe(true);
+		expect(content.getAttribute('contenteditable')).toBe('false');
+		expect(content.getAttribute('aria-readonly')).toBe('true');
+		expect(view.state.selection.main.anchor).toBe(5);
+		expect(view.scrollDOM.scrollTop).toBe(24);
+
+		content.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'k',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		expect(view.state.doc.toString()).toBe('one\ntwo');
+
+		controller.setReadOnly(false);
+		expect(view.state.readOnly).toBe(false);
+		expect(content.getAttribute('contenteditable')).toBe('true');
+		controller.destroy();
+	});
 });

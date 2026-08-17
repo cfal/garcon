@@ -27,7 +27,6 @@
 		chatAttachmentAccept,
 		ImageAttachmentState,
 		isImageAttachment,
-		isSupportedChatAttachment,
 		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import {
@@ -98,6 +97,8 @@
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import ResendCandidateChips from './ResendCandidateChips.svelte';
+	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
+	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	interface Props {
 		onsubmit: () => void;
 		onSteerPreferredSubmit: () => void;
@@ -141,7 +142,6 @@
 		composerEditorOpenRequestId = 0,
 	}: Props = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
-
 	const composerState = getComposerState();
 	const transcriptState = getActiveTranscriptState();
 	const lifecycle = getConversationLifecycle();
@@ -169,7 +169,7 @@
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let expandedEditor: { open: () => boolean } | undefined = $state();
-	let fileInput: HTMLInputElement | undefined = $state();
+	let destroyed = false;
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let nextFocusRequestId = 0;
@@ -212,6 +212,36 @@
 
 	// Ephemeral UI state extracted to companion class.
 	const ui = new PromptComposerUiState();
+	const promptRefinement = new PromptComposerRefinementController({
+		composer: composerState,
+		sessions,
+		notifications,
+		ui,
+		transientLayers,
+		get textarea() {
+			return textarea;
+		},
+		get visible() {
+			return isVisible;
+		},
+		get presented() {
+			return isPresented;
+		},
+		get startBlocked() {
+			return isDisabled || directAdmissionPending || snippetExpansion.pending;
+		},
+		resizeTextarea: autoResize,
+	});
+	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	const attachmentController = new PromptComposerAttachmentController({
+		composer: composerState,
+		get promptTransformPending() {
+			return promptTransformPending;
+		},
+		get attachmentSupport() {
+			return attachmentSupport;
+		},
+	});
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
 
@@ -221,6 +251,7 @@
 		const changed = ui.resetOnChatSwitch(chatId);
 		if (!changed) return;
 		snippetExpansion.cancel();
+		promptRefinement.abort();
 		composerState.isDragActive = false;
 		requestComposerFocusForChat(chatId);
 	});
@@ -277,7 +308,9 @@
 	});
 
 	onDestroy(() => {
+		destroyed = true;
 		snippetExpansion.cancel();
+		promptRefinement.destroy();
 		composerState.flushDraftSave();
 		imageAttachments.revokeAll();
 	});
@@ -351,7 +384,7 @@
 	}
 
 	async function insertSlashCommand(name: string) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		const trigger =
 			ui.slashCommandTrigger ??
 			findSlashCommandTrigger(
@@ -373,7 +406,7 @@
 	}
 
 	async function insertFileMention(path: string) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		const trigger =
 			ui.fileMentionTrigger ??
 			findFileMentionTrigger(
@@ -410,9 +443,10 @@
 
 	async function restoreComposerFocus(caret?: number): Promise<void> {
 		await tick();
+		if (destroyed || !isVisible) return;
 		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
 		autoResize();
-		textarea?.focus();
+		textarea?.focus({ preventScroll: true });
 	}
 
 	async function focusPendingSnippetExpansion(): Promise<void> {
@@ -425,7 +459,7 @@
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (snippetExpansion.pending || !textarea) return 'cancelled';
+		if (promptTransformPending || !textarea) return 'cancelled';
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
@@ -540,7 +574,7 @@
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		if (handleCompletionKeyDown(event)) return;
 		if (event.key !== 'Enter') return;
 		const action = resolveComposerKeydownAction(event, {
@@ -555,7 +589,7 @@
 	}
 
 	function handleFormSubmit(action: Exclude<ComposerEnterAction, 'newline'> = 'submit') {
-		if (!canSubmit || snippetExpansion.pending) return;
+		if (!canSubmit || promptTransformPending) return;
 		const command = parseSnippetCommand(composerState.inputText);
 		if (command.kind === 'invalid') {
 			notifications.error(
@@ -574,7 +608,13 @@
 	}
 
 	function handleInput(event: Event) {
-		const value = (event.currentTarget as HTMLTextAreaElement).value;
+		const target = event.currentTarget as HTMLTextAreaElement;
+		if (isDisabled || promptTransformPending) {
+			target.value = composerState.inputText;
+			return;
+		}
+		const value = target.value;
+		composerState.inputText = value;
 		autoResize();
 		const caret = textarea?.selectionStart ?? value.length;
 		ui.updateTriggers(
@@ -584,58 +624,6 @@
 			(event as InputEvent).isComposing,
 		);
 		queueCurrentDraft(value);
-	}
-
-	function handleImagePick() {
-		if (snippetExpansion.pending) return;
-		fileInput?.click();
-	}
-
-	function handleFileChange(event: Event) {
-		const input = event.target as HTMLInputElement;
-		if (!input.files) return;
-		composerState.addImages(Array.from(input.files), attachmentSupport);
-		input.value = '';
-	}
-
-	// Drag-and-drop handlers for file attachment.
-	function handleDragOver(event: DragEvent) {
-		event.preventDefault();
-		if (snippetExpansion.pending) return;
-		composerState.isDragActive = true;
-	}
-
-	function handleDragLeave() {
-		composerState.isDragActive = false;
-	}
-
-	function handleDrop(event: DragEvent) {
-		event.preventDefault();
-		if (snippetExpansion.pending) return;
-		composerState.isDragActive = false;
-		const files = event.dataTransfer?.files;
-		if (!files) return;
-		const attachments = Array.from(files).filter((file) =>
-			isSupportedChatAttachment(file, attachmentSupport),
-		);
-		composerState.addImages(attachments, attachmentSupport);
-	}
-
-	// Paste handler for images from clipboard.
-	function handlePaste(event: ClipboardEvent) {
-		if (snippetExpansion.pending) return;
-		const items = event.clipboardData?.items;
-		if (!items) return;
-		const imageFiles: File[] = [];
-		for (const item of items) {
-			if (item.type.startsWith('image/')) {
-				const file = item.getAsFile();
-				if (file) imageFiles.push(file);
-			}
-		}
-		if (imageFiles.length > 0) {
-			composerState.addImages(imageFiles, attachmentSupport);
-		}
 	}
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
@@ -649,10 +637,13 @@
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			isDisabled || directAdmissionPending || snippetExpansion.pending,
+			isDisabled || directAdmissionPending || promptTransformPending,
 			composerState.inputText,
 			composerState.images.length,
 		),
+	);
+	const promptTransformStatus = $derived(
+		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
 	);
 	const permissionOptions = $derived(
 		buildPermissionOptions(modelCatalog.getPermissionModes(agentState.agentId)),
@@ -660,9 +651,16 @@
 	const thinkingOptions = $derived(
 		buildThinkingOptions(modelCatalog.getThinkingModes(agentState.agentId), agentState.model),
 	);
-	const canAttachImages = $derived(modelCatalog.supportsImages(agentState.agentId, agentState.model));
-	const fileAttachmentMimeTypes = $derived(modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES);
-	const attachmentSupport = $derived({ allowImages: canAttachImages, fileMimeTypes: fileAttachmentMimeTypes });
+	const canAttachImages = $derived(
+		modelCatalog.supportsImages(agentState.agentId, agentState.model),
+	);
+	const fileAttachmentMimeTypes = $derived(
+		modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
+	);
+	const attachmentSupport = $derived({
+		allowImages: canAttachImages,
+		fileMimeTypes: fileAttachmentMimeTypes,
+	});
 	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
 	const quickCommitRunningActionVisible = $derived(
@@ -726,8 +724,12 @@
 	<div
 		data-composer
 		class={composerSurfaceClass}
-		aria-busy={snippetExpansion.pending}
+		aria-busy={promptTransformPending}
 		{@attach snippetExpansion.pending && snippetExpansionLayer}
+		{@attach promptRefinement.pending &&
+			!ui.composerEditorOpen &&
+			isPresented &&
+			promptRefinement.layerAttachment}
 	>
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
@@ -803,13 +805,17 @@
 											<img src={url} alt={file.name} class="w-full h-full object-cover" />
 										{/if}
 									{:else}
-									<div class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground">
+										<div
+											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
+										>
 											{#if isVideoChatAttachment(file)}
 												<FileVideo class="h-5 w-5" aria-hidden="true" />
 											{:else}
 												<FileText class="h-5 w-5" aria-hidden="true" />
 											{/if}
-										<span class="w-full truncate text-center text-[10px] leading-tight">{file.name}</span>
+											<span class="w-full truncate text-center text-[10px] leading-tight"
+												>{file.name}</span
+											>
 										</div>
 									{/if}
 								</div>
@@ -818,8 +824,10 @@
 									aria-label={m.chat_composer_remove_image({ name: file.name })}
 									title={m.chat_composer_remove_image({ name: file.name })}
 									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-									onclick={() => composerState.removeImage(idx)}
-									disabled={snippetExpansion.pending}
+									onclick={() => {
+										if (!promptTransformPending) composerState.removeImage(idx);
+									}}
+									disabled={promptTransformPending}
 								>
 									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
@@ -830,35 +838,36 @@
 			{/if}
 
 			<input
-				bind:this={fileInput}
+				bind:this={attachmentController.fileInput}
 				type="file"
 				accept={attachmentAccept}
 				multiple
+				disabled={promptTransformPending}
 				class="hidden"
-				onchange={handleFileChange}
+				onchange={(event) => attachmentController.handleFileChange(event)}
 			/>
 
 			<!-- svelte-ignore a11y_no_static_element_interactions -- labeled region accepts native file drops; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 			<div
 				class="relative bg-transparent focus-within:ring-0 transition-all duration-200 overflow-hidden"
-				ondragover={handleDragOver}
-				ondragleave={handleDragLeave}
-				ondrop={handleDrop}
+				ondragover={(event) => attachmentController.handleDragOver(event)}
+				ondragleave={() => attachmentController.handleDragLeave()}
+				ondrop={(event) => attachmentController.handleDrop(event)}
 				role="region"
 				aria-label={m.chat_composer_message_input_area()}
 			>
 				<div class="relative z-10">
 					<textarea
 						bind:this={textarea}
-						bind:value={composerState.inputText}
+						value={composerState.inputText}
 						onkeydown={handleKeyDown}
 						oninput={handleInput}
-						onpaste={handlePaste}
+						onpaste={(event) => attachmentController.handlePaste(event)}
 						onfocus={() => appShell.requestSidebarRecenterToSelected()}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
-						readonly={snippetExpansion.pending}
-						aria-busy={snippetExpansion.pending}
+						readonly={promptTransformPending}
+						aria-busy={promptTransformPending}
 						class={textareaClass}
 						style:height={`${composerHeight.renderedHeight}px`}></textarea>
 				</div>
@@ -867,11 +876,15 @@
 			<ComposerBottomBar
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
-				onAddImage={handleImagePick}
+				onAddImage={() => attachmentController.pick()}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
+				onRefinePrompt={() => promptRefinement.handleAction()}
+				canRefinePrompt={promptRefinement.canStart}
+				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
-				isPromptTransformPending={snippetExpansion.pending}
+				isPromptTransformPending={promptTransformPending}
+				{promptTransformStatus}
 				{permissionOptions}
 				selectedPermission={agentState.permissionMode}
 				onPermissionSelect={(mode) => {
@@ -986,7 +999,10 @@
 	{isVisible}
 	{isPresented}
 	{isDisabled}
-	promptTransformPending={snippetExpansion.pending}
+	{promptTransformPending}
+	isPromptRefinementPending={promptRefinement.pending}
+	canRefinePrompt={promptRefinement.canStart}
+	onRefinePrompt={() => promptRefinement.handleAction()}
 	openRequestId={composerEditorOpenRequestId}
 	resizeTextarea={autoResize}
 />

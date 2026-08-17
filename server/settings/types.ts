@@ -12,6 +12,7 @@ import type {
   AppIdentityUiSettings,
   ChatTitleUiSettings,
   CommitMessageUiSettings,
+  PromptRefinementUiSettings,
   TranscriptSearchFeatureSettings,
   AgentSwitchCompactionUiSettings,
 } from '../../common/settings.js';
@@ -21,6 +22,7 @@ export interface UiSettings {
   chatTitle?: ChatTitleUiSettings;
   agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;
+  promptRefinement?: PromptRefinementUiSettings;
   appIdentity?: AppIdentityUiSettings;
   [key: string]: unknown;
 }

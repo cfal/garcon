@@ -22,13 +22,21 @@
 		text: string;
 		selection: ComposerEditorSelection;
 		focusRequestId: number;
+		readOnly: boolean;
 		ariaLabel: string;
 		onTextChange: (text: string) => void;
 		onSelectionChange: (selection: ComposerEditorSelection) => void;
 	}
 
-	let { text, selection, focusRequestId, ariaLabel, onTextChange, onSelectionChange }: Props =
-		$props();
+	let {
+		text,
+		selection,
+		focusRequestId,
+		readOnly,
+		ariaLabel,
+		onTextChange,
+		onSelectionChange,
+	}: Props = $props();
 	let editor = $state<HTMLTextAreaElement | null>(null);
 
 	$effect(() => {
@@ -46,13 +54,16 @@
 	$effect(() => {
 		const target = editor;
 		focusRequestId;
-		target?.focus();
+		if (!target) return;
+		restoreComposerEditorSelection(target, selection);
+		target.focus();
 	});
 </script>
 
 <textarea
 	bind:this={editor}
 	value={text}
+	readonly={readOnly}
 	aria-label={ariaLabel}
 	oninput={(event) => onTextChange(event.currentTarget.value)}
 	onpointerup={(event) =>

@@ -15,6 +15,7 @@ import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-inte
 import type { AgentId } from './agents';
 import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
+import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from './generation-prompts';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
 export const DEFAULT_APP_TITLE = 'Garcon';
@@ -33,10 +34,15 @@ export interface ChatTitleUiSettings extends GenerationSelectionUiSettings {
   enabled?: boolean;
 }
 
-export interface CommitMessageUiSettings extends GenerationSelectionUiSettings {
+export interface PromptGenerationUiSettings extends GenerationSelectionUiSettings {
   customPrompt?: string;
+}
+
+export interface CommitMessageUiSettings extends PromptGenerationUiSettings {
   useCommonDirPrefix?: boolean;
 }
+
+export type PromptRefinementUiSettings = PromptGenerationUiSettings;
 
 // Names the model that compacts a carried-over transcript when a chat hands off
 // to another agent, or continues in a new chat through `/handoff`.
@@ -68,6 +74,7 @@ export interface RemoteUiSettings {
   chatTitle?: ChatTitleUiSettings;
   agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;
+  promptRefinement?: PromptRefinementUiSettings;
   appIdentity?: AppIdentityUiSettings;
   notifications?: {
     telegram?: TelegramNotificationSettings;
@@ -80,8 +87,11 @@ type EffectiveGenerationSelection = {
   modelProtocol?: ApiProtocol | null;
 };
 
-type EffectiveCommitMessageExtras = EffectiveGenerationSelection & {
+type EffectivePromptGenerationExtras = EffectiveGenerationSelection & {
   customPrompt?: string;
+};
+
+type EffectiveCommitMessageExtras = EffectivePromptGenerationExtras & {
   useCommonDirPrefix?: boolean;
 };
 
@@ -93,6 +103,9 @@ export interface RemoteUiEffectiveSettings {
   > & EffectiveGenerationSelection;
   commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveCommitMessageExtras;
+  promptRefinement?: Required<
+    Pick<PromptRefinementUiSettings, 'agentId' | 'model' | 'thinkingMode'>
+  > & EffectivePromptGenerationExtras;
 }
 
 export interface RemotePathSettings {
@@ -221,6 +234,16 @@ export function normalizeAgentSwitchCompactionUiSettings(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+function normalizeGenerationPromptTemplate(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string'
+    || value.length > GENERATION_PROMPT_TEMPLATE_MAX_LENGTH
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 export function normalizeCommitMessageUiSettings(
   value: unknown,
 ): CommitMessageUiSettings | undefined {
@@ -230,10 +253,25 @@ export function normalizeCommitMessageUiSettings(
   const normalized: CommitMessageUiSettings = {
     ...normalizeGenerationSelection(raw),
   };
-  if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
   }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+export function normalizePromptRefinementUiSettings(
+  value: unknown,
+): PromptRefinementUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+
+  const normalized: PromptRefinementUiSettings = {
+    ...normalizeGenerationSelection(raw),
+  };
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
@@ -255,15 +293,40 @@ function normalizeEffectiveGenerationSelection(
   if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
 }
 
+function normalizeEffectivePromptGenerationExtras(
+  raw: Record<string, unknown>,
+  normalized: EffectivePromptGenerationExtras,
+): void {
+  normalizeEffectiveGenerationSelection(raw, normalized);
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
+}
+
 function normalizeEffectiveCommitMessageExtras(
   raw: Record<string, unknown>,
   normalized: EffectiveCommitMessageExtras,
 ): void {
-  normalizeEffectiveGenerationSelection(raw, normalized);
-  if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
+  normalizeEffectivePromptGenerationExtras(raw, normalized);
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
   }
+}
+
+function normalizePromptRefinementUiEffectiveSettings(
+  value: unknown,
+): RemoteUiEffectiveSettings['promptRefinement'] | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  if (!isAgentId(raw.agentId)) return undefined;
+  if (typeof raw.model !== 'string') return undefined;
+
+  const normalized: NonNullable<RemoteUiEffectiveSettings['promptRefinement']> = {
+    agentId: raw.agentId,
+    model: raw.model,
+    thinkingMode: normalizeThinkingMode(raw.thinkingMode),
+  };
+  normalizeEffectivePromptGenerationExtras(raw, normalized);
+  return normalized;
 }
 
 function normalizeChatTitleUiEffectiveSettings(
@@ -339,6 +402,9 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
   const commitMessage = normalizeCommitMessageUiSettings(raw.commitMessage);
   if (commitMessage) normalized.commitMessage = commitMessage;
 
+  const promptRefinement = normalizePromptRefinementUiSettings(raw.promptRefinement);
+  if (promptRefinement) normalized.promptRefinement = promptRefinement;
+
   const appIdentity = normalizeAppIdentityUiSettings(raw.appIdentity);
   if (appIdentity) normalized.appIdentity = appIdentity;
 
@@ -372,6 +438,9 @@ function normalizeRemoteUiEffectiveSettings(value: unknown): RemoteUiEffectiveSe
 
   const commitMessage = normalizeCommitMessageUiEffectiveSettings(raw.commitMessage);
   if (commitMessage) normalized.commitMessage = commitMessage;
+
+  const promptRefinement = normalizePromptRefinementUiEffectiveSettings(raw.promptRefinement);
+  if (promptRefinement) normalized.promptRefinement = promptRefinement;
 
   return normalized;
 }
