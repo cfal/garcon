@@ -582,9 +582,13 @@ describe('reconnect and transcript stability', () => {
       let reconstructed = [...page.messages];
       let pageCount = 1;
       while (page.hasMore) {
+        const nextBeforeOrdinal = page.nextBeforeOrdinal;
+        if (nextBeforeOrdinal === null) {
+          throw new Error('A paginated transcript page is missing its raw continuation cursor.');
+        }
         page = await fixture.client.getMessages(chatId, {
           limit: 2,
-          beforeOrdinal: page.pageOldestOrdinal,
+          beforeOrdinal: nextBeforeOrdinal,
           transcriptViewId: viewId,
         });
         expect(page.transcriptViewId).toBe(viewId);

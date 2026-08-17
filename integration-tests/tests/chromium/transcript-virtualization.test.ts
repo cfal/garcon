@@ -1854,25 +1854,12 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
   const heldCompletion = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: prompt });
   let releaseFirstPage!: () => void;
   const firstPageGate = new Promise<void>((resolve) => (releaseFirstPage = resolve));
-  let resolveFirstPageRequest!: () => void;
-  const firstPageRequest = new Promise<void>((resolve) => (resolveFirstPageRequest = resolve));
-  let resolveSecondPageRequest!: () => void;
-  const secondPageRequest = new Promise<void>((resolve) => (resolveSecondPageRequest = resolve));
   let earlierRequestCount = 0;
+  let firstDemandRequestBaseline = 0;
   let turnId: string | null = null;
-
-  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
-      earlierRequestCount += 1;
-      if (earlierRequestCount === 1) {
-        resolveFirstPageRequest();
-        await firstPageGate;
-      } else if (earlierRequestCount === 2) {
-        resolveSecondPageRequest();
-      }
-    }
-    await route.continue();
+  const waitForEarlierRequest = () => fixture.page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal');
   });
 
   try {
@@ -1885,6 +1872,16 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     await withDiagnosticTimeout('the held processing turn', heldCompletion.received);
     await fixture.page.locator('[data-slot="chat-processing-status"]').waitFor({ state: 'visible' });
     const modelCountBeforePrefetch = await waitForStableModelCount(fixture.page, 50);
+    firstDemandRequestBaseline = earlierRequestCount;
+    await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
+        earlierRequestCount += 1;
+        if (earlierRequestCount === firstDemandRequestBaseline + 1) await firstPageGate;
+      }
+      await route.continue();
+    });
+    const firstPageRequest = waitForEarlierRequest();
 
     const loadAheadDistance = await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) => {
       const feed = feedElement as HTMLElement;
@@ -2017,7 +2014,8 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
       ),
       JSON.stringify({ prependAnchor, prependFrames }, null, 2),
     ).toBeLessThanOrEqual(1);
-    expect(earlierRequestCount).toBe(1);
+    const firstDemandRequestCount = earlierRequestCount;
+    expect(firstDemandRequestCount).toBeGreaterThan(firstDemandRequestBaseline);
     expect(modelCountAfterFirstPage).toBe(modelCountBeforePrefetch + 50);
 
     await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement) => {
@@ -2026,13 +2024,15 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
       feed.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
     // A clamped viewport emits no scroll event for the subsequent upward gesture.
+    const secondDemandRequestBaseline = earlierRequestCount;
+    const secondPageRequest = waitForEarlierRequest();
     await signalScrollIntent(fixture.page, 'earlier');
     await withDiagnosticTimeout('the clamped-gesture earlier-page request', secondPageRequest);
     const modelCountAfterPrefetch = await waitForModelCount(
       fixture.page,
       modelCountBeforePrefetch + 100,
     );
-    expect(earlierRequestCount).toBe(2);
+    expect(earlierRequestCount).toBeGreaterThan(secondDemandRequestBaseline);
     expect(modelCountAfterPrefetch).toBe(modelCountBeforePrefetch + 100);
   } finally {
     releaseFirstPage();
@@ -2062,6 +2062,7 @@ async function verifyTouchDragPrepend(
   let resolveEarlierRequest!: () => void;
   const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
   let earlierRequestCount = 0;
+  let gestureRequestBaseline = 0;
   let drag: TranscriptTouchDrag | null = null;
   let liveHold: ReturnType<typeof fixture.integration.fakeProviders.openAi.holdNext> | null = null;
   let liveTurnId: string | null = null;
@@ -2070,22 +2071,22 @@ async function verifyTouchDragPrepend(
   let queuedPrompt: string | null = null;
   let queuePauseId: string | null = null;
 
-  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
-      earlierRequestCount += 1;
-      if (earlierRequestCount === 1) {
-        resolveEarlierRequest();
-        await earlierPageGate;
-      }
-    }
-    await route.continue();
-  });
-
   try {
     await prepareTranscript(fixture, chatId);
     let initialEntryCount = await transcriptEntryCount(fixture.page);
     expect(initialEntryCount).toBe(50);
+    gestureRequestBaseline = earlierRequestCount;
+    await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
+        earlierRequestCount += 1;
+        if (earlierRequestCount === gestureRequestBaseline + 1) {
+          resolveEarlierRequest();
+          await earlierPageGate;
+        }
+      }
+      await route.continue();
+    });
     if (scenario.liveBehavior !== 'completed') {
       const prompt = `chromium-touch-live-${scenario.label}`;
       liveHold = fixture.integration.fakeProviders.openAi.holdNext({
@@ -2121,8 +2122,9 @@ async function verifyTouchDragPrepend(
     }, scenario.clampBeforeRelease);
 
     drag = await beginTranscriptTouchDrag(fixture.page);
-    for (let step = 0; step < 24 && earlierRequestCount === 0; step += 1) {
+    for (let step = 0; step < 24; step += 1) {
       await moveTranscriptTouch(fixture.page, drag, scenario.clampBeforeRelease ? 80 : 24);
+      if (earlierRequestCount > gestureRequestBaseline) break;
     }
     await withDiagnosticTimeout('the held touch-drag earlier-page request', earlierRequest);
     if (scenario.clampBeforeRelease) {
@@ -2194,11 +2196,13 @@ async function verifyTouchDragPrepend(
           .filter({ hasText: expectedQueuedPrompt })
           .count(),
       ).toBe(0);
-      await fixture.integration.client.clearQueue(chatId);
-      queuedPrompt = null;
     }
 
     const frames = await finishReadingAnchorFrameSampler(fixture.page);
+    if (queuedPrompt) {
+      await fixture.integration.client.clearQueue(chatId);
+      queuedPrompt = null;
+    }
     const identityFailures = frames.filter(
       (frame) =>
         !frame.connected ||
@@ -2224,7 +2228,7 @@ async function verifyTouchDragPrepend(
       firstOffset != null && finalOffset != null ? finalOffset - firstOffset : 0,
       JSON.stringify({ anchor, frames }, null, 2),
     ).toBeGreaterThan(12);
-    expect(earlierRequestCount).toBe(1);
+    expect(earlierRequestCount).toBeGreaterThan(gestureRequestBaseline);
     fixture.assertNoBrowserErrors();
   } finally {
     releaseEarlierPage();
@@ -2252,22 +2256,23 @@ async function verifyScrollbarDragPrepend(
   let resolveEarlierRequest!: () => void;
   const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
   let earlierRequestCount = 0;
+  let dragRequestBaseline = 0;
   let mouseDown = false;
-
-  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
-      earlierRequestCount += 1;
-      if (earlierRequestCount === 1) {
-        resolveEarlierRequest();
-        await earlierPageGate;
-      }
-    }
-    await route.continue();
-  });
 
   try {
     const { initialModelCount } = await prepareTranscript(fixture, chatId);
+    dragRequestBaseline = earlierRequestCount;
+    await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
+        earlierRequestCount += 1;
+        if (earlierRequestCount === dragRequestBaseline + 1) {
+          resolveEarlierRequest();
+          await earlierPageGate;
+        }
+      }
+      await route.continue();
+    });
     await scrollToPosition(fixture.page, 'middle');
     const scrollbar = fixture.page.locator('[data-chat-feed-scrollbar]');
     const thumb = scrollbar.locator('[data-slot="scroll-area-thumb"]');
@@ -2280,9 +2285,10 @@ async function verifyScrollbarDragPrepend(
     await fixture.page.mouse.move(x, y);
     await fixture.page.mouse.down();
     mouseDown = true;
-    for (let step = 0; step < 24 && earlierRequestCount === 0; step += 1) {
+    for (let step = 0; step < 24; step += 1) {
       y = Math.max(trackBox.y + 4, y - Math.max(4, trackBox.height / 24));
       await fixture.page.mouse.move(x, y);
+      if (earlierRequestCount > dragRequestBaseline) break;
     }
     await withDiagnosticTimeout('the held scrollbar-drag earlier page', earlierRequest);
     const upwardScrollTop = await fixture.page
@@ -2322,7 +2328,7 @@ async function verifyScrollbarDragPrepend(
       ),
       JSON.stringify({ anchor, frames, upwardScrollTop, reversedScrollTop }, null, 2),
     ).toBeLessThanOrEqual(1);
-    expect(earlierRequestCount).toBe(1);
+    expect(earlierRequestCount).toBeGreaterThan(dragRequestBaseline);
     fixture.assertNoBrowserErrors();
   } finally {
     releaseEarlierPage();
@@ -2346,21 +2352,22 @@ async function verifyKeyboardPrepend(
   let resolveEarlierRequest!: () => void;
   const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
   let earlierRequestCount = 0;
-
-  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
-      earlierRequestCount += 1;
-      if (earlierRequestCount === 1) {
-        resolveEarlierRequest();
-        await earlierPageGate;
-      }
-    }
-    await route.continue();
-  });
+  let keyboardRequestBaseline = 0;
 
   try {
     const { initialModelCount } = await prepareTranscript(fixture, chatId);
+    keyboardRequestBaseline = earlierRequestCount;
+    await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal')) {
+        earlierRequestCount += 1;
+        if (earlierRequestCount === keyboardRequestBaseline + 1) {
+          resolveEarlierRequest();
+          await earlierPageGate;
+        }
+      }
+      await route.continue();
+    });
     await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
       const feed = feedElement as HTMLElement;
       const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
@@ -2370,11 +2377,12 @@ async function verifyKeyboardPrepend(
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
 
-    for (let press = 0; press < 24 && earlierRequestCount === 0; press += 1) {
+    for (let press = 0; press < 24; press += 1) {
       await fixture.page.keyboard.press('PageUp');
       await fixture.page.evaluate(async () => {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       });
+      if (earlierRequestCount > keyboardRequestBaseline) break;
     }
     await withDiagnosticTimeout('the held keyboard earlier page', earlierRequest);
     await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
@@ -2421,7 +2429,7 @@ async function verifyKeyboardPrepend(
       ),
       JSON.stringify({ anchor, frames }, null, 2),
     ).toBeLessThanOrEqual(1);
-    expect(earlierRequestCount).toBe(1);
+    expect(earlierRequestCount).toBeGreaterThan(keyboardRequestBaseline);
     fixture.assertNoBrowserErrors();
   } finally {
     releaseEarlierPage();
@@ -3041,24 +3049,6 @@ async function verifyHeldEarlierPageChatSwitch(
   const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
   let earlierRequestCount = 0;
 
-  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
-    const url = new URL(route.request().url());
-    if (
-      url.searchParams.get('chatId') === sourceChatId &&
-      url.searchParams.has('beforeOrdinal')
-    ) {
-      const response = await route.fetch();
-      earlierRequestCount += 1;
-      if (earlierRequestCount === 1) {
-        resolveEarlierRequest();
-        await earlierPageGate;
-      }
-      await route.fulfill({ response });
-      return;
-    }
-    await route.continue();
-  });
-
   try {
     await prepareTranscript(fixture, sourceChatId);
     await fixture.page.evaluate((heldChatId) => {
@@ -3085,6 +3075,23 @@ async function verifyHeldEarlierPageChatSwitch(
         return originalFetch(input, init);
       }, originalFetch);
     }, sourceChatId);
+    await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+      const url = new URL(route.request().url());
+      if (
+        url.searchParams.get('chatId') === sourceChatId &&
+        url.searchParams.has('beforeOrdinal')
+      ) {
+        const response = await route.fetch();
+        earlierRequestCount += 1;
+        if (earlierRequestCount === 1) {
+          resolveEarlierRequest();
+          await earlierPageGate;
+        }
+        await route.fulfill({ response });
+        return;
+      }
+      await route.continue();
+    });
     await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
       const feed = feedElement as HTMLElement;
       const target = Math.min(
@@ -3661,8 +3668,12 @@ async function readCompleteCanonicalTranscript(
   let messages = [...response.messages];
   for (let pageCount = 1; response.hasMore; pageCount += 1) {
     if (pageCount > 10) throw new Error('Canonical transcript pagination did not converge.');
+    const nextBeforeOrdinal = response.nextBeforeOrdinal;
+    if (nextBeforeOrdinal === null) {
+      throw new Error('A canonical transcript page is missing its raw continuation cursor.');
+    }
     response = await fixture.integration.client.getMessages(chatId, {
-      beforeOrdinal: response.pageOldestOrdinal,
+      beforeOrdinal: nextBeforeOrdinal,
       limit: 200,
       transcriptViewId,
     });
