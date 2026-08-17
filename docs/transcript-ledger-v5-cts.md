@@ -1,14 +1,21 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 18 integrated catalog; dogfood validation and release acceptance complete at f6da04bda97454255a9dfe73753f39c1cd45aa16
+Status: Revision 18 integrated catalog; dogfood validation and release acceptance
+complete in the executable tree squash-merged as
+`80540fc80399957ebcfe18cb2c2a741938e5cf64`.
 
 Governing artifact:
 
 - `docs/transcript-ledger-v5-design.md`, revision 18, SHA-256
-  `74ebbf2ce3c3e2b1acf0bc20942c4c60b97cb646ef3f23a118bcca86419fe994`
+  `2de530a0d5e0de0ef334b57f076c77b0d6afc1a68fa5bb731cfff506d282f6bf`
 
-Inventory baseline: integrated checkpoint
-`21cc82a1530edd6811e52a735c23f6b9de4ee9ed` with 256 discovered stable IDs.
+Current inventory: 262 discovered stable IDs. PR #500 was squash-merged, so its
+source-branch release and inventory checkpoints are not ancestors of the
+reachable merge object above. The merge contains the validated executable
+tree; subsequent source-branch changes were CTS documentation and removal of
+the completed execution plan. The squash merge is therefore the durable
+lineage anchor.
+
 Coverage state records whether an oracle exists; it does not claim that
 production already satisfies an intentional-red case.
 
@@ -29,8 +36,7 @@ restart, and wire contracts at both sender and receiver.
 
 The suite uses native test titles plus a flat stable-ID inventory. The inventory
 validator checks discovery only; Bun, Vitest, Lightpanda, and Chromium remain
-the execution engines. The staged migration is defined in
-`docs/transcript-ledger-v5-cts-execution-plan.md`.
+the execution engines.
 
 ## Conformance Rules
 
@@ -393,9 +399,10 @@ local testing.
 | ID             | Obligation                                                                              | Required evidence              |
 | -------------- | --------------------------------------------------------------------------------------- | ------------------------------ |
 | TLV5-SEARCH.01 | Ordinary commits index only their ordered suffix and never schedule a full replacement. | Unit, performance              |
-| TLV5-SEARCH.02 | Rejected or stalled detached work is absorbed per chat and later work continues.        | Unit, server black-box         |
+| TLV5-SEARCH.02 | Rejected or stalled detached work is absorbed per chat and later work continues.        | Controller unit, real-service unit |
 | TLV5-SEARCH.03 | View replacement deletes old entries before admitting results for the new current view. | Unit, server black-box         |
 | TLV5-SEARCH.04 | Long append series performs work linear in appended rows.                               | Deterministic performance gate |
+| TLV5-SEARCH.05 | Index health is current-view/frontier-qualified: pending until acknowledgement, failed after terminal rejection, and indexed after acknowledged repair, including valid views with no searchable rows. | Core unit, service unit |
 
 ### Handoff
 
@@ -491,12 +498,12 @@ The status below describes test coverage, not implementation completion.
 | R3 Codex native tail reconciliation           | TLV5-L02.02, TLV5-L05.02, TLV5-L10.01                 | Codex architecture guard, app-server unit, scripted interrupt                                       | Covered |
 | R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state, controller, static, and strict Chromium cases; timer machinery deleted                 | Covered |
 | R5 search full replacement on append          | TLV5-SEARCH.01                                        | Search controller suffix and linearity tests                                                        | Covered |
-| R6 detached search rejection                  | TLV5-SEARCH.02                                        | Same-chat and cross-chat rejection tests                                                            | Covered |
+| R6 detached search rejection                  | TLV5-SEARCH.02                                        | Controller rejection plus real-service stalled-ack and exclusive-prune isolation                    | Covered |
 | R7 blocking native probe                      | TLV5-L09.03 through TLV5-L09.05                       | Core timeout, coalescing, identity-change units                                                     | Partial |
 | R8 serial handoff recovery                    | TLV5-HANDOFF.05                                       | Unit and repeated-handoff server integration                                                        | Covered |
 | R9 duplicate handoff marker                   | TLV5-HANDOFF.06                                       | Matching, conflicting, and duplicate marker units                                                   | Covered |
 | R10 silent handoff fork fallback              | TLV5-FORK.01 through TLV5-FORK.04                     | Core fork units; no complete browser consent workflow                                               | Partial |
-| R11 unbounded reconnect replay                | TLV5-REPLAY.01 through TLV5-REPLAY.07                 | Contract, 50,000-row server, and Chromium replay cases; no exact mid-replay browser disconnect case | Partial |
+| R11 unbounded reconnect replay                | TLV5-REPLAY.01 through TLV5-REPLAY.07                 | Contract, 50,000-row server, and Chromium replay including exact mid-replay disconnect               | Covered |
 | R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Bounded server, contract, multi-budget state, cache, and held-page browser cases                     | Covered |
 | R13 LRU failure attribution                   | TLV5-L11.04                                           | Store and close-recovery units                                                                      | Covered |
 | R14 duplicate prepared input                  | TLV5-L04.04                                           | Ledger, coordinator, and handler units                                                              | Covered |
@@ -604,7 +611,7 @@ useful but do not replace this cross-surface matrix.
 | Surface             | Required fold                                                             | Current evidence                                | State                   |
 | ------------------- | ------------------------------------------------------------------------- | ----------------------------------------------- | ----------------------- |
 | Rendering           | conversational, notice, switch, specialized permission; terminal as state | Ledger presentation and browser mixed ordering  | Covered                 |
-| Search              | conversational only                                                       | Search controller and search worker tests       | Covered                 |
+| Search              | conversational only                                                       | Search controller, worker, lazy-adoption server, and frontier-health tests | Covered |
 | Preview             | latest conversational only                                                | Registry cache and metadata tests               | Covered                 |
 | Model context       | conversational excluding current prompt                                   | Canonical all-kind matrix with current-prompt exclusion | Covered          |
 | Carryover           | conversational, switch, and quarantine-notice frozen projection rules      | Canonical all-kind matrix plus handoff, fork, and reload tests | Covered |
@@ -675,7 +682,7 @@ becomes a separate environment requirement rather than another semantic test.
 | TLV5-REPLAY.03 | Server row/byte bounds and oversized-row rejection cases.                                        | Covered |
 | TLV5-REPLAY.04 | View-reader, coordinator, and server hidden-range cases.                                         | Covered |
 | TLV5-REPLAY.05 | Coordinator, server, and Chromium live-during-replay cases.                                      | Covered |
-| TLV5-REPLAY.06 | Coordinator restart unit; no exact browser disconnect while a continuation is partially applied. | Partial |
+| TLV5-REPLAY.06 | Coordinator restart unit plus compact Chromium disconnect after one applied page with the continuation held. | Covered |
 | TLV5-REPLAY.07 | Contract, server stale-view, and Chromium fallback cases.                                        | Covered |
 
 The 50,000-row server case and strict Chromium reconnect cases are the primary
@@ -734,7 +741,7 @@ Static negative guards should reject reintroduction of:
 | Search worker stalls                                                 | Other chats proceed; stalled chat preserves operation order               | Covered                                         |
 | Search watermark mismatches                                          | One explicit resync, no normal-append full scans                          | Covered                                         |
 | Native probe never resolves                                          | Request and dispatch remain responsive; probe aborts and leaves no notice | Partial black-box evidence                      |
-| WebSocket closes or drops send between replay pages                  | Partial replay discarded; next reconnect restarts safely                  | Covered unit, partial black-box fault placement |
+| WebSocket closes or drops send between replay pages                  | Partial replay discarded; next reconnect restarts safely                  | Covered unit and exact Chromium fault placement |
 | Handoff registry, journal, checkpoint, reopen, or notification fails | Only affected chat fenced; independent recovery and shutdown cleanup      | Partial full-stage matrix                       |
 | Evicted ledger checkpoint or close fails                             | Failure belongs to evicted chat; requested chat opens                     | Covered                                         |
 | Permission response fails after claim                                | Claim restored only while exact occurrence remains actionable             | Covered                                         |
@@ -758,6 +765,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L11.04-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `attributes an eviction close failure and retries that handle on shutdown`                                       | L11.04                      |
 | TLV5-L09.04-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: `drops a pending native result when the transcript view is replaced`                                   | L09.04                      |
 | TLV5-L01.02-CORE-MATRIX-01     | `server/ledger/__tests__/read-fold-matrix.test.js`: one all-kind fixture projects ordinary and quarantine notices, late/repeated content, switch, permission, session, and terminal rows exactly across rendering, context, carryover, snapshot, search, preview, and broadcast | L01.02 |
+| TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01 | `integration-tests/tests/server/transcript-search-lazy-adoption.test.ts`: first successful lazy adoption converges into an already-enabled index without a later commit, restart, toggle, or native request | L01.02, ADOPT.01 |
 | TLV5-PERM.05-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `applies a delayed cancellation only to its exact reused occurrence`                             | PERM.05                     |
 | TLV5-PERM.07-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `keeps permission history but restores no actionability after restart`                           | PERM.07                     |
 | TLV5-PERM.08-BROWSER-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `keeps reused permission occurrences independently actionable`                     | PERM.05, PERM.06, PERM.08  |
@@ -829,11 +837,16 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-R03-CODEX-SCRIPTED-01     | `integration-tests/tests/server/codex-scripted-interrupt.test.ts`: `imports a long native tool tail before exactly one final assistant message`           | L02.02, L10.01              |
 | TLV5-SEARCH.01-CORE-UNIT-01    | `server/chats/search/__tests__/controller.test.js`: `indexes repeated ordinary commits only as ordered suffixes`                                          | R5                          |
 | TLV5-SEARCH.02-CORE-UNIT-01    | `server/chats/search/__tests__/controller.test.js`: `absorbs a rejected indexing job and continues same-chat and cross-chat queues`                       | R6, L11.03                  |
+| TLV5-SEARCH.02-SERVICE-UNIT-01 | `server/chats/search/__tests__/controller-service.test.js`: a held chat-A acknowledgement permits chat B to finish, preserves A ordering, and gives prune an exclusive barrier | SEARCH.02, L11.03 |
+| TLV5-SEARCH.05-CORE-UNIT-01    | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: index health is qualified by the current view and authoritative frontier | SEARCH.05 |
+| TLV5-SEARCH.05-SERVICE-UNIT-01 | `server/chats/search/__tests__/controller-service.test.js`: terminal failure records bounded failed state and acknowledged full repair clears it | SEARCH.05 |
+| TLV5-SEARCH.05-ZERO-ROW-CORE-UNIT-01 | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: a valid zero-searchable-row view is indexed at its frontier and later same-view content remains searchable | SEARCH.05, L01.02 |
 | TLV5-HANDOFF.05-SERVER-01      | `integration-tests/tests/server/repeated-agent-handoff.test.ts`: `recovers one pending handoff while another chat remains fenced`                         | R8, L11.03                  |
 | TLV5-L11.01-SERVER-01          | `integration-tests/tests/server/transcript-corruption-isolation.test.ts`: `fences only the chat whose SQLite ledger is corrupt`                           | L11.01                      |
 | TLV5-REPLAY.01-SERVER-01       | `integration-tests/tests/server/reconnect-transcript.test.ts`: `replays fifty thousand mixed rows in bounded fixed-watermark pages`                       | REPLAY.01 through REPLAY.05 |
 | TLV5-UX.11-CHROMIUM-REPLAY-01  | `integration-tests/tests/chromium/reconnect-transcript-replay.test.ts`: `keeps an expanded detached reading interval through bounded reconnect replay`    | REPLAY.05, UX.11            |
 | TLV5-REPLAY.06-WEB-UNIT-01     | `web/src/lib/ws/__tests__/reconnect-coordinator.test.ts`: `abandons a partial replay on disconnect and restarts with a fresh watermark`                   | REPLAY.06                   |
+| TLV5-REPLAY.06-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/reconnect-transcript-replay.test.ts`: an expanded detached compact transcript closes with its continuation held, restarts at the applied cursor with a fresh watermark, and applies every addressed row once without HTTP snapshot fallback | REPLAY.06, UX.11 |
 | TLV5-PAGE.08-SERVER-UNIT-01    | `server/ledger/__tests__/view-reader.test.js`: one request performs one clamped raw scan and returns its visible fold plus raw continuation               | PAGE.08                     |
 | TLV5-PAGE.08-SERVER-UNIT-02    | `server/ledger/__tests__/view-reader.test.js`: an ordinal-one boundary performs one empty raw scan and reports ceiling zero with no continuation          | PAGE.08                     |
 | TLV5-PAGE.08-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: a request beyond the watermark accepts the clamped raw ceiling and exact continuation                 | PAGE.08                     |
@@ -866,8 +879,8 @@ for each atomic requirement and records any required complementary tier.
 
 ## Cataloged Follow-up and Release Procedures
 
-The remaining `Partial` and `Missing` provider-routing, native-probe, replay,
-browser, failure-injection, and accepted-loss rows are explicit catalog or
+The remaining `Partial` and `Missing` provider-routing, native-probe, browser,
+failure-injection, and accepted-loss rows are explicit catalog or
 nightly follow-up. They do not block dogfood or the active Revision 18 release
 gate unless a current release red promotes one into that gate. Their statements
 remain here so later coverage cannot silently weaken or disappear.
@@ -921,14 +934,6 @@ the remaining five provider matrix rows.
 > Given a compact feed with a physical touch drag still active, when reconnect
 > replay publishes a bounded page, then the touch origin remains valid, the
 > address-keyed anchor stays within one pixel, and no row is duplicated.
-
-`TLV5-REPLAY.06-COMPACT-CHROMIUM-01`
-
-> Given a detached compact transcript has applied one bounded replay page and
-> is holding the next continuation, when that socket closes and a replacement
-> connection starts, then the partial replay is abandoned, the replacement
-> captures a fresh watermark, every addressed row appears once, and the
-> reading anchor remains within one pixel.
 
 ### Release-only Replays
 
@@ -1014,7 +1019,7 @@ registered cases and gaps promoted by a current release red enter those gates.
 - The complete validation command sequence is recorded with environment data.
 - The worktree contains no temporary diagnostics or untracked release output.
 
-## Catalog Completion Work
+## Remaining Catalog Completion Work
 
 The next documentation pass should:
 
@@ -1022,8 +1027,6 @@ The next documentation pass should:
   gap;
 - split any test that currently claims unrelated obligations;
 - record negative-control commits for production regressions;
-- add the flat stable-ID inventory and existence check after the primary cases
-  are selected;
 - decide whether Safari is a supported environment before adding a WebKit tier.
 
-No production change is required to complete that inventory.
+No production change is required to complete the remaining catalog work.

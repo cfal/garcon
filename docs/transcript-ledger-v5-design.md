@@ -1,6 +1,6 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 18, stabilization in progress. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
+Status: revision 18, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
@@ -1137,6 +1137,9 @@ matrix. "Conversational rows" below means `user-input` rows plus
   deleting a replaced view's entries cannot be followed by a delayed
   old-view insert; the derived index may delete replaced views' entries,
   and query admission is current-view-qualified regardless.
+  Index status is current-view/frontier-qualified: pending until
+  acknowledgement, failed after terminal indexing rejection, and indexed
+  after acknowledged repair, including valid views with no searchable rows.
 - **Preview** selects the latest conversational row; notices and
   lifecycle state are separate UI signals, never preview text.
 - **Model context and carryover** are the conversational fold, minus the
@@ -1771,13 +1774,11 @@ Every deliberate gap, in one place, so it is not "fixed" later:
 
 ## 17. Testing Strategy
 
-Normative case identifiers and cross-tier traceability live in
-`docs/transcript-ledger-v5-cts.md`; the execution checklist lives in
-`docs/transcript-ledger-v5-cts-execution-plan.md`. Shared Agent Server
-Conformance Suite coverage lives under `integration-tests/tests/sacs/` and
-tests provider-interface compatibility rather than duplicating the CTS
-inventory. Those documents must cite this revision, but their inventories are
-not repeated here.
+Normative case identifiers, cross-tier traceability, and gate status live in
+`docs/transcript-ledger-v5-cts.md`. Shared Agent Server Conformance Suite
+coverage lives under `integration-tests/tests/sacs/` and tests
+provider-interface compatibility rather than duplicating the CTS inventory.
+The catalog cites this revision, but its inventory is not repeated here.
 
 - **Publisher routing (per provider)**: an event delayed until after its
   sink was closed and replaced reaches its own closed sink and is dropped
@@ -2028,10 +2029,8 @@ V4 was never deployed and has no dual-format serving period. The core ledger,
 producer cutover, view-qualified addressing, native Reload, and V4 deletion
 precede this revision. Released pre-V5 chats still require a one-time migration
 path, but revision 18 separates that occasion from Reload and closes the final
-stabilization defects. The current case inventory, execution checklist, and
-gate status live in `docs/transcript-ledger-v5-cts.md` and
-`docs/transcript-ledger-v5-cts-execution-plan.md`; this section fixes the
-architectural order.
+stabilization defects. The current case inventory and gate status live in
+`docs/transcript-ledger-v5-cts.md`; this section fixes the architectural order.
 
 1. **Lock regressions before each production boundary moves.** Register the
    CTS and SACS cases for one permission UUID, codec compatibility, migration
