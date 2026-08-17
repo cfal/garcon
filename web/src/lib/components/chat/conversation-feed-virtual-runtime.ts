@@ -32,6 +32,7 @@ export interface ConversationVirtualAnchor {
 
 export interface ConversationVirtualAnchorSettlePort {
 	readonly options: { readonly scrollMargin: number };
+	cancelScroll(): void;
 	getVirtualItems(): VirtualItem[];
 	scrollToIndex(index: number, options: { align: 'start'; behavior: 'auto' }): void;
 	scrollToOffset(offset: number, options: { behavior: 'auto' }): void;
@@ -379,6 +380,7 @@ export async function settleConversationVirtualAnchor(input: {
 					),
 			) <= GEOMETRY_TOLERANCE_PX
 		) {
+			input.instance.cancelScroll();
 			return true;
 		}
 	}

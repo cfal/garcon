@@ -54,6 +54,45 @@ import {
 } from '../conversation-feed-virtual-runtime';
 import ConversationFeedVirtualControllerTestHost from './ConversationFeedVirtualControllerTestHost.svelte';
 
+function createAnchorSettleFixture(options: {
+	readScrollOffset(): number | null;
+	isCurrent(): boolean;
+	onScrollToOffset?(offset: number): void;
+}) {
+	const mountedItems = new ConversationMountedVirtualItems();
+	const element = document.createElement('div');
+	element.dataset.index = '0';
+	element.dataset.chatVirtualItem = 'anchor';
+	document.body.append(element);
+	mountedItems.add(element);
+	const cancelScroll = vi.fn();
+	const scrollToOffset = vi.fn(options.onScrollToOffset);
+	const instance = {
+		options: { scrollMargin: 0 },
+		cancelScroll,
+		getVirtualItems: () => [{ index: 0, key: 'anchor', start: 100, size: 50, end: 150, lane: 0 }],
+		scrollToIndex: vi.fn(),
+		scrollToOffset,
+	} satisfies ConversationVirtualAnchorSettlePort;
+
+	return {
+		cancelScroll,
+		destroy: () => element.remove(),
+		scrollToOffset,
+		settle: () =>
+			settleConversationVirtualAnchor({
+				instance,
+				mountedItems,
+				configuredKeys: ['anchor'],
+				key: 'anchor',
+				index: 0,
+				viewportOffset: 0,
+				readScrollOffset: options.readScrollOffset,
+				isCurrent: options.isCurrent,
+			}),
+	};
+}
+
 describe('ConversationFeedVirtualController helpers', () => {
 	it('invalidates superseded programmatic scroll ownership epochs', () => {
 		const ownership = new ConversationProgrammaticScrollOwnership();
@@ -101,36 +140,19 @@ describe('ConversationFeedVirtualController helpers', () => {
 				callback(performance.now());
 				return animationFrame;
 			});
-		const mountedItems = new ConversationMountedVirtualItems();
-		const element = document.createElement('div');
-		element.dataset.index = '0';
-		element.dataset.chatVirtualItem = 'anchor';
-		document.body.append(element);
-		mountedItems.add(element);
-		const scrollToOffset = vi.fn();
-		const instance = {
-			options: { scrollMargin: 0 },
-			getVirtualItems: () => [{ index: 0, key: 'anchor', start: 100, size: 50, end: 150, lane: 0 }],
-			scrollToIndex: vi.fn(),
-			scrollToOffset,
-		} satisfies ConversationVirtualAnchorSettlePort;
+		const fixture = createAnchorSettleFixture({
+			readScrollOffset: () => 100.25,
+			isCurrent: () => current,
+		});
 
 		try {
-			await expect(settleConversationVirtualAnchor({
-				instance,
-				mountedItems,
-				configuredKeys: ['anchor'],
-				key: 'anchor',
-				index: 0,
-				viewportOffset: 0,
-				readScrollOffset: () => 100.25,
-				isCurrent: () => current,
-			})).resolves.toBe(false);
-			expect(scrollToOffset).not.toHaveBeenCalled();
+			await expect(fixture.settle()).resolves.toBe(false);
+			expect(fixture.scrollToOffset).not.toHaveBeenCalled();
+			expect(fixture.cancelScroll).not.toHaveBeenCalled();
 			expect(animationFrame).toBe(2);
 		} finally {
 			requestAnimationFrame.mockRestore();
-			element.remove();
+			fixture.destroy();
 		}
 	});
 
@@ -141,39 +163,67 @@ describe('ConversationFeedVirtualController helpers', () => {
 				callback(performance.now());
 				return 1;
 			});
-		const mountedItems = new ConversationMountedVirtualItems();
-		const element = document.createElement('div');
-		element.dataset.index = '0';
-		element.dataset.chatVirtualItem = 'anchor';
-		document.body.append(element);
-		mountedItems.add(element);
 		let scrollOffset = 99;
-		const scrollToOffset = vi.fn((offset: number) => {
-			scrollOffset = offset;
+		const fixture = createAnchorSettleFixture({
+			readScrollOffset: () => scrollOffset,
+			isCurrent: () => true,
+			onScrollToOffset: (offset) => {
+				scrollOffset = offset;
+			},
 		});
-		const instance = {
-			options: { scrollMargin: 0 },
-			getVirtualItems: () => [{ index: 0, key: 'anchor', start: 100, size: 50, end: 150, lane: 0 }],
-			scrollToIndex: vi.fn(),
-			scrollToOffset,
-		} satisfies ConversationVirtualAnchorSettlePort;
 
 		try {
-			await expect(settleConversationVirtualAnchor({
-				instance,
-				mountedItems,
-				configuredKeys: ['anchor'],
-				key: 'anchor',
-				index: 0,
-				viewportOffset: 0,
-				readScrollOffset: () => scrollOffset,
-				isCurrent: () => true,
-			})).resolves.toBe(true);
-			expect(scrollToOffset).toHaveBeenCalledOnce();
-			expect(scrollToOffset).toHaveBeenCalledWith(100, { behavior: 'auto' });
+			await expect(fixture.settle()).resolves.toBe(true);
+			expect(fixture.scrollToOffset).toHaveBeenCalledOnce();
+			expect(fixture.scrollToOffset).toHaveBeenCalledWith(100, { behavior: 'auto' });
+			expect(fixture.cancelScroll).toHaveBeenCalledOnce();
 		} finally {
 			requestAnimationFrame.mockRestore();
-			element.remove();
+			fixture.destroy();
+		}
+	});
+
+	it('cancels reconciliation after a current anchor settles without an offset write', async () => {
+		const requestAnimationFrame = vi
+			.spyOn(window, 'requestAnimationFrame')
+			.mockImplementation((callback) => {
+				callback(performance.now());
+				return 1;
+			});
+		const fixture = createAnchorSettleFixture({
+			readScrollOffset: () => 100.25,
+			isCurrent: () => true,
+		});
+
+		try {
+			await expect(fixture.settle()).resolves.toBe(true);
+			expect(fixture.scrollToOffset).not.toHaveBeenCalled();
+			expect(fixture.cancelScroll).toHaveBeenCalledOnce();
+		} finally {
+			requestAnimationFrame.mockRestore();
+			fixture.destroy();
+		}
+	});
+
+	it('does not cancel reconciliation while anchor geometry remains unsettled', async () => {
+		const requestAnimationFrame = vi
+			.spyOn(window, 'requestAnimationFrame')
+			.mockImplementation((callback) => {
+				callback(performance.now());
+				return 1;
+			});
+		const fixture = createAnchorSettleFixture({
+			readScrollOffset: () => 99,
+			isCurrent: () => true,
+		});
+
+		try {
+			await expect(fixture.settle()).resolves.toBe(false);
+			expect(fixture.scrollToOffset).toHaveBeenCalled();
+			expect(fixture.cancelScroll).not.toHaveBeenCalled();
+		} finally {
+			requestAnimationFrame.mockRestore();
+			fixture.destroy();
 		}
 	});
 
