@@ -74,36 +74,6 @@ export async function* streamGlobalEvents(
     : 'OpenCode event stream ended before server.connected');
 }
 
-// Non-retryable provider failures are published as session.error with a structured error
-// union; the data message is the most specific human-readable detail.
-// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/sdk/js/src/v2/gen/types.gen.ts#L6672-L6680
-export function openCodeSessionError(event: SSEEvent): string | null {
-  if (event.type !== 'session.error') return null;
-  const error = isRecord(event.properties?.error) ? event.properties.error : null;
-  const data = error && isRecord(error.data) ? error.data : null;
-  if (typeof data?.message === 'string' && data.message.trim()) return data.message.trim();
-  if (typeof error?.name === 'string' && error.name.trim()) return error.name.trim();
-  return 'OpenCode session failed';
-}
-
-// Context overflow is provisional when OpenCode auto-compaction is enabled. OpenCode emits
-// session.compacted and continues the turn after recovery; without that event, the next idle
-// makes the saved error terminal.
-// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/processor.ts#L607-L617
-export function isOpenCodeContextOverflowError(event: SSEEvent): boolean {
-  if (event.type !== 'session.error') return false;
-  const error = isRecord(event.properties?.error) ? event.properties.error : null;
-  return error?.name === 'ContextOverflowError';
-}
-
-// Garcon owns aborts: its abort path retires the turn before OpenCode's abort unwind
-// publishes MessageAbortedError, so a late unwind must never fail a successor turn.
-export function isOpenCodeAbortError(event: SSEEvent): boolean {
-  if (event.type !== 'session.error') return false;
-  const error = isRecord(event.properties?.error) ? event.properties.error : null;
-  return error?.name === 'MessageAbortedError';
-}
-
 export function openCodeAssistantTerminal(event: SSEEvent): OpenCodeAssistantTerminal | null {
   if (event.type !== 'message.updated') return null;
   const info = isRecord(event.properties?.info) ? event.properties.info : null;
