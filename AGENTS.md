@@ -5,6 +5,7 @@ This is the operating model for how engineers design, implement, review, and evo
 ## Key Directives
 
 - If there was a design doc, ALWAYS re-read it after compaction.
+- `docs/transcript-ledger-v5-design.md` is the governing transcript design; re-read it before changing transcript, ledger, history migration, provider publication, paging, replay, or transcript UX behavior.
 - Always git clone dependencies into /tmp to inspect if necessary
 - ALWAYS refer to Svelte 5, either docs or by cloning the repo, to make sure we're following best practices and canonical patterns
 - DO NOT add to tech debt. It is CRITICAL that we keep the architecture clean and rational, even if that means taking longer to fix or refactor what we're working on.
