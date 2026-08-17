@@ -37,13 +37,6 @@ export interface AmpThreadExport {
   messages?: AmpThreadMessage[];
 }
 
-export interface AmpPreview {
-  firstMessage: string;
-  lastMessage: string;
-  lastActivity: string | null;
-  createdAt: string | null;
-}
-
 function toIsoString(value: number | string | undefined): string | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return new Date(value).toISOString();
@@ -75,10 +68,6 @@ function getTextParts(content: AmpContentPart[]): string[] {
 
 function getUserText(content: AmpContentPart[]): string {
   return getTextParts(content).join('\n');
-}
-
-function getAssistantText(content: AmpContentPart[]): string {
-  return getTextParts(content).at(-1) || '';
 }
 
 interface ToolResultPayload {
@@ -215,44 +204,4 @@ function appendAmpSource(
       withinSourceOrdinal,
     }));
   });
-}
-
-export function getAmpPreview(threadExport: AmpThreadExport): AmpPreview | null {
-  if (!threadExport || typeof threadExport !== 'object') return null;
-
-  const createdAt = toIsoString(threadExport.created);
-  const messages = getSortedMessages(threadExport);
-
-  let firstMessage: string | null = null;
-  let lastMessage = '';
-  let lastActivity = createdAt;
-
-  for (const message of messages) {
-    const timestamp = getMessageTimestamp(message, createdAt || new Date().toISOString());
-    if (timestamp && (!lastActivity || timestamp > lastActivity)) {
-      lastActivity = timestamp;
-    }
-
-    const content: AmpContentPart[] = Array.isArray(message.content) ? message.content : [];
-
-    if (!firstMessage && message.role === 'user') {
-      const userText = getUserText(content);
-      if (userText) firstMessage = userText;
-    }
-
-    if (message.role === 'user') {
-      const userText = getUserText(content);
-      if (userText) lastMessage = '> ' + userText;
-    } else if (message.role === 'assistant') {
-      const assistantText = getAssistantText(content);
-      if (assistantText) lastMessage = assistantText;
-    }
-  }
-
-  return {
-    firstMessage: firstMessage || threadExport.title || 'Unknown Amp Session',
-    lastMessage,
-    lastActivity: lastActivity || null,
-    createdAt: createdAt || null,
-  };
 }

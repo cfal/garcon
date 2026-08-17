@@ -4,7 +4,6 @@ import os from 'os';
 import path from 'path';
 
 import {
-  getPiPreviewFromSessionPath,
   loadPiChatMessages,
   loadPiChatMessagesBySessionId,
 } from '../history-loader.js';
@@ -184,34 +183,7 @@ describe('Pi history loader', () => {
       .toEqual(['active content']);
   });
 
-  it('builds previews from normalized Pi history', async () => {
-    const sessionPath = await writeJsonl('preview.jsonl', [
-      { type: 'session', version: 3, id: 'session-preview', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
-      {
-        type: 'message',
-        id: 'user-1',
-        parentId: null,
-        timestamp: '2026-01-01T00:00:01.000Z',
-        message: { role: 'user', content: 'first prompt', timestamp: 1767225601000 },
-      },
-      {
-        type: 'message',
-        id: 'assistant-1',
-        parentId: 'user-1',
-        timestamp: '2026-01-01T00:00:02.000Z',
-        message: assistantMessage([{ type: 'text', text: 'last answer' }], 1767225602000),
-      },
-    ]);
-
-    await expect(getPiPreviewFromSessionPath(sessionPath)).resolves.toMatchObject({
-      createdAt: '2026-01-01T00:00:00.000Z',
-      firstMessage: 'first prompt',
-      lastMessage: 'last answer',
-      lastActivity: '2026-01-01T00:00:02.000Z',
-    });
-  });
-
-  it('loads persisted Pi history and preview from a real native path', async () => {
+  it('loads persisted Pi history from a real native path', async () => {
     const sessionPath = await writeJsonl('2026-01-01T00-00-00-000Z_session-agent-real.jsonl', [
       { type: 'session', version: 3, id: 'session-agent-real', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
       {
@@ -230,13 +202,8 @@ describe('Pi history loader', () => {
       },
     ]);
     const messages = await loadPiChatMessages(sessionPath);
-    const preview = await getPiPreviewFromSessionPath(sessionPath);
 
     expect(messages.map((message) => message.content)).toEqual(['restore real path', 'restored answer']);
-    expect(preview).toMatchObject({
-      firstMessage: 'restore real path',
-      lastMessage: 'restored answer',
-    });
   });
 
   it('resolves Pi history by session id', async () => {

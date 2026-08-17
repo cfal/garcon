@@ -1,10 +1,3 @@
-// Wraps OpenCode SDK API calls to match the interface expected by
-// the metadata and chat event loaders. Reads session history and
-// preview data via the SDK rather than JSONL files.
-//
-// Both exported functions accept a getClient callback: () => Promise<client>.
-// The composition root binds this to the OpenCodeRuntime instance.
-
 import {
   UserMessage,
   AssistantMessage,
@@ -34,8 +27,6 @@ const SILENT_LOGGER: AgentLogger = Object.freeze({
   warn() {},
   error() {},
 });
-
-const PREVIEW_TAIL_MESSAGE_LIMIT = 20;
 
 interface OpenCodeSession {
   directory?: string;
@@ -92,13 +83,6 @@ type OpenCodeStoredMessagesResult =
   | { readonly kind: 'found'; readonly messages: OpenCodeMessage[] }
   | { readonly kind: 'not-found' };
 
-interface OpenCodePreview {
-  firstMessage: string;
-  lastMessage: string;
-  lastActivity: string | null;
-  createdAt: string | null;
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -109,87 +93,6 @@ function dateToIso(value: string | number | Date | undefined): string | null {
   if (value === undefined) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-// Returns preview metadata for a session (title, last message, etc.).
-export async function getOpenCodePreviewFromSessionId(
-  sessionId: string | null | undefined,
-  getClient: OpenCodeClientGetter,
-  options: OpenCodeHistoryLoadOptions = {},
-): Promise<OpenCodePreview | null> {
-  const logger = options.logger ?? SILENT_LOGGER;
-  if (!sessionId) {
-    logger.error('OpenCode preview fetch requires a session ID');
-    return null;
-  }
-  try {
-    const client = await getClient();
-    const scope = createOpenCodeRequestScope(options.directory);
-    const result = await client.session.get(
-      withOpenCodeRequestScope({ sessionID: sessionId }, scope),
-    );
-    if (isOpenCodeNotFoundResult(result)) return null;
-    if (hasOpenCodeResultError(result)) {
-      logger.warn('OpenCode preview fetch failed', {
-        sessionId,
-        error: openCodeResultErrorMessage(result, 'OpenCode preview fetch failed'),
-      });
-      return null;
-    }
-    const session = result.data;
-    if (!session) return null;
-    const messageResult = await client.session.messages(
-      withOpenCodeRequestScope({
-        sessionID: sessionId,
-        limit: PREVIEW_TAIL_MESSAGE_LIMIT,
-      }, scope),
-    );
-    if (isOpenCodeNotFoundResult(messageResult)) return null;
-    if (hasOpenCodeResultError(messageResult)) {
-      logger.warn('OpenCode preview message fetch failed', {
-        sessionId,
-        error: openCodeResultErrorMessage(messageResult, 'OpenCode preview message fetch failed'),
-      });
-      return null;
-    }
-    const messages = visibleOpenCodeStoredMessages(
-      Array.isArray(messageResult.data) ? messageResult.data : [],
-    );
-    let lastMessage = '';
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
-      const info = message.info || {};
-      if (info.role === 'user') {
-        const text = extractUserTextFromParts(message.parts || []);
-        lastMessage = text.trim();
-      } else if (info.role === 'assistant') {
-        const parts = Array.isArray(message.parts) ? message.parts : [];
-        for (const rawPart of parts) {
-          const part = asRecord(rawPart);
-          if (part.type === 'text') {
-            const text = typeof part.text === 'string' ? part.text.trim() : '';
-            lastMessage = text || '';
-          }
-        }
-      }
-      if (lastMessage) break;
-    }
-
-    return {
-      // TODO: this is incorrect, we should be returning the first user message instead of the generated title.
-      // TODO: is there a way to disable OpenCode title generation?
-      firstMessage: session.title || 'Unknown OpenCode Session',
-      lastMessage,
-      lastActivity: dateToIso(session.time?.updated),
-      createdAt: dateToIso(session.time?.created),
-    };
-  } catch (err) {
-    logger.error('OpenCode preview fetch failed', {
-      sessionId,
-      error: errorMessage(err),
-    });
-    return null;
-  }
 }
 
 function extractUserTextFromParts(parts: unknown[] | string): string {

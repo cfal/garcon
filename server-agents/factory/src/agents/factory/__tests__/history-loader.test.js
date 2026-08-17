@@ -9,7 +9,6 @@ import {
 } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   findFactorySessionFileBySessionId,
-  getFactoryPreviewFromSessionPath,
   loadFactoryChatMessages,
 } from '../history-loader.js';
 
@@ -124,14 +123,6 @@ describe('factory history loader', () => {
     expect(getNativeMessageSource(messages[4])).toMatchObject({ lineNumber: 4 });
     expect(messages.map((message) => getNativeMessageRevisionSource(message)?.withinSourceOrdinal))
       .toEqual([0, 1, 2, 0, 1, 0]);
-
-    const preview = await getFactoryPreviewFromSessionPath(sessionPath);
-    expect(preview).toEqual({
-      createdAt: '2026-03-29T00:59:00.000Z',
-      firstMessage: 'Continue with the review.',
-      lastActivity: '2026-03-29T01:00:02.000Z',
-      lastMessage: 'Done.',
-    });
   });
 
   it('keeps malformed native transcript content out of diagnostics', async () => {

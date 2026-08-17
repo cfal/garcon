@@ -35,13 +35,6 @@ export interface CursorMessageBlob {
 const USER_QUERY_OPEN_TAG = '<user_query>';
 const USER_QUERY_CLOSE_TAG = '</user_query>';
 
-export interface CursorPreview {
-  createdAt: string | null;
-  firstMessage: string;
-  lastActivity: string | null;
-  lastMessage: string;
-}
-
 export class CursorTranscriptNotFoundError extends Error {
   constructor(readonly sourcePath: string) {
     super('Cursor transcript database not found');
@@ -547,37 +540,4 @@ function hasNodeErrorCode(error: unknown, code: string): boolean {
   return error instanceof Error
     && 'code' in error
     && (error as NodeJS.ErrnoException).code === code;
-}
-
-function previewText(message: ChatMessage): string {
-  switch (message.type) {
-    case 'user-message':
-    case 'assistant-message':
-    case 'thinking':
-      return message.content;
-    default:
-      return '';
-  }
-}
-
-export async function getCursorPreviewFromSessionId(
-  sessionId: string,
-  projectPath: string,
-  cursorHome?: string,
-): Promise<CursorPreview | null> {
-  const messages = await loadCursorChatMessagesBySessionId(sessionId, projectPath, cursorHome);
-  if (messages.length === 0) return null;
-
-  const visibleMessages = messages.filter((message) =>
-    message.type === 'user-message' || message.type === 'assistant-message');
-  const firstUser = visibleMessages.find((message) => message.type === 'user-message');
-  const lastVisible = [...visibleMessages].reverse()[0];
-  const lastActivity = [...messages].reverse().find((message) => typeof message.timestamp === 'string');
-
-  return {
-    createdAt: messages[0]?.timestamp ?? null,
-    firstMessage: firstUser ? previewText(firstUser) : 'Unknown Cursor Session',
-    lastActivity: lastActivity?.timestamp ?? null,
-    lastMessage: lastVisible ? previewText(lastVisible) : 'Unknown Cursor Session',
-  };
 }
