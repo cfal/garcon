@@ -847,10 +847,12 @@ describe('ConversationFeedVirtualController', () => {
 			await preparePendingEarlierPrepend((current, index) =>
 				current.stageLatchedEarlierPrependWithTail(index),
 			);
+		const cancelScroll = vi.spyOn(exposure.instance, 'cancelScroll');
 		scrollToIndex.mockClear();
 		scrollToOffset.mockClear();
 		viewport.scrollTop = 80;
 		exposure.controller.cancelForUserIntent('earlier');
+		expect(cancelScroll).not.toHaveBeenCalled();
 		await exposure.releaseWithheldEndItem();
 
 		await waitFor(() =>
@@ -1031,18 +1033,52 @@ describe('ConversationFeedVirtualController', () => {
 		await waitFor(() => expect(scrollToOffset).toHaveBeenCalled());
 	});
 
-	it('cancels TanStack reconciliation only when user intent supersedes owned scrolling', async () => {
+	it('cancels TanStack reconciliation after controller ownership has settled', async () => {
 		const { exposure } = await renderController();
+		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+		if (!viewport) throw new Error('Expected the controller viewport');
+		await waitFor(() => expect(exposure.controller.ownsScrollPosition()).toBe(false));
+		let nextAnimationFrameId = 1;
+		const animationFrames = new Map<number, FrameRequestCallback>();
+		const requestAnimationFrame = vi
+			.spyOn(window, 'requestAnimationFrame')
+			.mockImplementation((callback) => {
+				const id = nextAnimationFrameId++;
+				animationFrames.set(id, callback);
+				return id;
+			});
+		const cancelAnimationFrame = vi
+			.spyOn(window, 'cancelAnimationFrame')
+			.mockImplementation((id) => {
+				animationFrames.delete(id);
+			});
 		const cancelScroll = vi.spyOn(exposure.instance, 'cancelScroll');
+		const scrollToFn = vi.fn();
 
-		exposure.controller.cancelForUserIntent(null);
-		expect(cancelScroll).not.toHaveBeenCalled();
+		try {
+			exposure.instance.setOptions({ ...exposure.instance.options, scrollToFn });
+			exposure.instance.scrollToOffset(100, { behavior: 'auto' });
+			expect(exposure.controller.ownsScrollPosition()).toBe(false);
+			expect(scrollToFn).toHaveBeenCalledOnce();
+			expect(animationFrames.size).toBeGreaterThan(0);
+			scrollToFn.mockClear();
 
-		exposure.controller.scrollToEnd();
-		expect(exposure.controller.ownsScrollPosition()).toBe(true);
-		exposure.controller.cancelForUserIntent(null);
+			exposure.controller.cancelForUserIntent('later');
+			viewport.scrollTop = 94;
+			viewport.dispatchEvent(new Event('scroll'));
+			for (let iteration = 0; iteration < 8 && animationFrames.size > 0; iteration += 1) {
+				const callbacks = [...animationFrames.values()];
+				animationFrames.clear();
+				for (const callback of callbacks) callback(performance.now());
+			}
 
-		expect(cancelScroll).toHaveBeenCalledOnce();
+			expect(cancelScroll).toHaveBeenCalledOnce();
+			expect(animationFrames.size).toBe(0);
+			expect(scrollToFn).not.toHaveBeenCalled();
+		} finally {
+			cancelAnimationFrame.mockRestore();
+			requestAnimationFrame.mockRestore();
+		}
 	});
 
 	it('releases the initial paint gate after bounded streaming geometry', async () => {
