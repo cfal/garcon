@@ -169,6 +169,7 @@ describe('Codex against a scripted model', () => {
       const continued = await fixture.client.runChat(liveCodexRunRequest({
         chatId,
         command: continuedPrompt,
+        permissionMode: 'bypassPermissions',
       }));
       const heldRequest = await held.requested;
       try {
