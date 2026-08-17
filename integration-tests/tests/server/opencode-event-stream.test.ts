@@ -176,6 +176,118 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
+
+  test('[TLV5-L07.08-OPENCODE-CROSS-CHAT-SCRIPTED-01] absorbs a stale publish without failing another chat', async () => {
+    const testEnvironment = requireEnvironment();
+    const staleReply = marker('CROSS_CHAT_STALE_REPLY');
+    const liveReply = marker('CROSS_CHAT_LIVE_REPLY');
+    const handoffReply = marker('CROSS_CHAT_HANDOFF_REPLY');
+    const stale = testEnvironment.model.scriptHeldTurn([chatCompletionsText(staleReply)]);
+
+    await withIntegrationFixture('opencode-cross-chat-stale-publish', async (fixture) => {
+      const controller = OpenCodeTransportController.forFixture(fixture.dirs);
+      const staleChatId = fixture.newChatId();
+      const staleCursor = fixture.client.markEvents();
+      await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId: staleChatId,
+        projectPath: fixture.dirs.project,
+        command: marker('CROSS_CHAT_STALE_PROMPT'),
+      }));
+      await stale.requested;
+
+      const sharedConnection = await controller.activeGlobalConnectionId();
+      await controller.holdGlobalStreamThroughMarkers(
+        sharedConnection,
+        staleReply,
+        liveReply,
+      );
+      stale.release();
+      await controller.waitForStartMarkerHeld(sharedConnection);
+      const dropLogCursor = fixture.garcon.logs.length;
+
+      const stopCursor = fixture.client.markEvents();
+      expect(await fixture.client.stopChat({
+        chatId: staleChatId,
+        clientRequestId: crypto.randomUUID(),
+      })).toMatchObject({ outcome: 'interrupt-requested' });
+      await fixture.client.waitForProcessing(staleChatId, false, { afterIndex: stopCursor });
+
+      const handoffRequest = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const handoffCursor = fixture.client.markEvents();
+      const handoffPromise = fixture.client.handoffDirectChat({
+        chatId: staleChatId,
+        content: marker('CROSS_CHAT_HANDOFF_PROMPT'),
+        agent: fixture.directAgents.openAi,
+      });
+      await handoffRequest.received;
+      expect(handoffRequest.releaseText(handoffReply)).toBe(true);
+      const handoff = await handoffPromise;
+      await waitForVisibleResponse({
+        fixture,
+        chatId: staleChatId,
+        turnId: handoff.turnId,
+        marker: handoffReply,
+        afterIndex: handoffCursor,
+      });
+
+      testEnvironment.model.scriptTurn([chatCompletionsText(liveReply)]);
+      const liveChatId = fixture.newChatId();
+      const liveCursor = fixture.client.markEvents();
+      const liveTurn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId: liveChatId,
+        projectPath: fixture.dirs.project,
+        command: marker('CROSS_CHAT_LIVE_PROMPT'),
+      }));
+      await controller.waitForEndMarkerBuffered(sharedConnection);
+
+      expect((await controller.connections())).toEqual([
+        expect.objectContaining({
+          id: sharedConnection,
+          markerHeld: true,
+          endMarkerObserved: true,
+          released: false,
+          reset: false,
+          closed: false,
+        }),
+      ]);
+      await controller.releaseGlobalConnection(sharedConnection);
+      await waitForVisibleResponse({
+        fixture,
+        chatId: liveChatId,
+        turnId: liveTurn.turnId,
+        marker: liveReply,
+        afterIndex: liveCursor,
+      });
+      const dropLogs = fixture.garcon.logs.slice(dropLogCursor).join('\n');
+      expect(dropLogs).toContain(
+        '[agent-integration:opencode] Dropped a provider event for an unavailable transcript sink',
+      );
+      expect(dropLogs).toContain(`chatId: "${staleChatId}"`);
+      expect(dropLogs).toContain('eventType: "rows"');
+      expect(dropLogs).not.toContain(staleReply);
+
+      expect(JSON.stringify((await fixture.client.getMessages(staleChatId)).messages))
+        .not.toContain(staleReply);
+      const liveMessages = JSON.stringify((await fixture.client.getMessages(liveChatId)).messages);
+      expect(liveMessages).not.toContain(staleReply);
+      expect(liveMessages.match(new RegExp(liveReply, 'g'))).toHaveLength(1);
+      expect((await controller.connections())).toEqual([
+        expect.objectContaining({
+          id: sharedConnection,
+          released: true,
+          reset: false,
+          closed: false,
+        }),
+      ]);
+      expect(fixture.client.eventsSince(staleCursor).some((event) =>
+        event.type === 'agent-run-failed'
+        && event.chatId === liveChatId
+      )).toBe(false);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
 });
 
 function requireEnvironment(): ScriptedOpenCodeTestEnvironment {

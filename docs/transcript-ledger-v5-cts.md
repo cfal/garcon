@@ -522,7 +522,7 @@ Additional design-required rows not present in the plan's six-row matrix:
 | Required scenario                                                      | Required providers          | State                    |
 | ---------------------------------------------------------------------- | --------------------------- | ------------------------ |
 | identical native operation names cannot cross clients or chats         | Claude, Codex, OpenCode, Pi | Partial                  |
-| shared-stream stale rejection cannot stop another chat                 | Codex, OpenCode             | Missing at scripted tier |
+| shared-stream stale rejection cannot stop another chat                 | Codex, OpenCode             | Covered                  |
 | `runExisting` and compaction retain the creating publisher             | Supporting providers        | Partial                  |
 | approval, cancellation, and error events retain the creating publisher | Permission providers        | Partial                  |
 | route and callback counts return to baseline after repeated retirement | All                         | Missing soak coverage    |
@@ -531,6 +531,9 @@ Key current evidence:
 
 - `integration-tests/tests/server/codex-producer-routing.test.ts` proves stale
   Codex approval and content containment through server boundaries.
+- The Codex and OpenCode cross-chat scripted cases hold a stale chat A event
+  ahead of chat B's named event and prove B commits on the same surviving
+  provider stream.
 - `server-agents/claude/src/agents/claude/__tests__/cli-runtime.test.js` proves
   sequential concrete operations and continuation routing at unit tier.
 - `server-agents/opencode/src/agents/opencode/__tests__/operation-routing.test.js`
@@ -811,6 +814,8 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.11-CURSOR-PREFERRED-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: an invalid preferred ACP store blocks fallback until the preferred candidate is repaired or removed | ADOPT.11 |
 | TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01 | `server-agents/common/src/direct/__tests__/legacy-session-relocation.test.js`: mixed moved/skipped relocation commits no version, retains the skipped source, and a repaired retry commits once | ADOPT.11 |
 | TLV5-L07.03-CODEX-SCRIPTED-01  | `integration-tests/tests/server/codex-producer-routing.test.ts`: `drops content emitted by the old native client after transcript replacement`            | L07.03, L07.08              |
+| TLV5-L07.08-CODEX-CROSS-CHAT-SCRIPTED-01 | `integration-tests/tests/server/codex-producer-routing.test.ts`: a stale chat A publish is absorbed before chat B commits exactly once through its independently named native client | L07.08 |
+| TLV5-L07.08-OPENCODE-CROSS-CHAT-SCRIPTED-01 | `integration-tests/tests/server/opencode-event-stream.test.ts`: a held stale chat A event reaches its closed sink before chat B commits on the same unchanged global stream | L07.08 |
 | TLV5-L07.08-OPENCODE-SCRIPTED-01 | `integration-tests/tests/server/opencode-event-stream.test.ts`: a reset retires the active route, absorbs its late event, and leaves the replacement global stream usable | L07.08 |
 | TLV5-A07-SERVER-RESTART-01     | `integration-tests/tests/server/persistence-lifecycle.test.ts`: restart preserves the durable input and recomputes its resend candidacy without ephemeral exclusion state | A07 |
 | TLV5-A07-WEB-UNIT-01           | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: a fresh transcript state restores candidates excluded only by the prior client | A07 |
@@ -872,16 +877,6 @@ These are the first missing cases to implement after the catalog is reviewed.
 Equivalent cases are required for OpenCode and Pi. Codex retains its existing
 black-box case. Each reference provider also needs explicit scripted cases for
 the remaining five provider matrix rows.
-
-`TLV5-L07.08-OPENCODE-CROSS-CHAT-SCRIPTED-01` and
-`TLV5-L07.08-CODEX-CROSS-CHAT-SCRIPTED-01`
-
-> Given two chats share one provider event stream, when chat A's stale route
-> publishes into a closed sink, then chat B's named event still commits and the
-> shared event stream remains alive.
-
-The registered OpenCode reset case and Codex replacement case prove same-chat
-successor usability, not the required cross-chat isolation.
 
 ### Native Activity
 

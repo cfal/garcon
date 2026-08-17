@@ -9,6 +9,7 @@ import { assistantContents } from '../../support/chat-assertions.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { reloadFromNativeHistory } from '../../support/live-agent.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 const FAKE_CODEX = fileURLToPath(new URL(
   '../../support/fake-codex-app-server.ts',
@@ -397,6 +398,120 @@ describe('Codex producer routing', () => {
       },
     });
   }, 30_000);
+
+  test('[TLV5-L07.08-CODEX-CROSS-CHAT-SCRIPTED-01] absorbs a stale publish without failing another chat', async () => {
+    let controlDirectory = '';
+    let turnReleasePath = '';
+    await withIntegrationFixture('codex-cross-chat-stale-publish', async (fixture) => {
+      const codex = await codexAgent(fixture);
+      const staleChatId = fixture.newChatId();
+      const stalePrompt = `stale-chat-${randomUUID()}`;
+      await fixture.client.startChat(startRequest(fixture, codex, staleChatId, stalePrompt));
+      await waitForAssistant(fixture, staleChatId, `codex-live2-${stalePrompt}`);
+      const staleThreadId = await agentSessionId(fixture, staleChatId);
+
+      const stopCursor = fixture.client.markEvents();
+      expect(await fixture.client.stopChat({
+        clientRequestId: randomUUID(),
+        chatId: staleChatId,
+      })).toMatchObject({ outcome: 'interrupt-requested' });
+      await fixture.client.waitForProcessing(staleChatId, false, { afterIndex: stopCursor });
+      const staleViewId = (await fixture.client.getMessages(staleChatId)).transcriptViewId;
+      await reloadFromNativeHistory(fixture, staleChatId);
+      expect((await fixture.client.getMessages(staleChatId)).transcriptViewId)
+        .not.toBe(staleViewId);
+
+      const liveChatId = fixture.newChatId();
+      const livePrompt = `live-chat-${randomUUID()}`;
+      const liveCursor = fixture.client.markEvents();
+      const liveTurn = await fixture.client.startChat(
+        startRequest(fixture, codex, liveChatId, livePrompt),
+      );
+      await waitForAssistant(fixture, liveChatId, `codex-live2-${livePrompt}`);
+      const liveThreadId = await agentSessionId(fixture, liveChatId);
+      expect(liveThreadId).not.toBe(staleThreadId);
+
+      const dropLogCursor = fixture.garcon.logs.length;
+      const staleContent = `cross-chat-stale-${randomUUID()}`;
+      const staleControl = 'cross-chat-stale.message.json';
+      await writeFile(join(controlDirectory, staleControl), JSON.stringify({
+        target: 'started',
+        targetThreadId: staleThreadId,
+        content: staleContent,
+      }));
+      await waitForPath(join(controlDirectory, `${staleControl}.sent`));
+
+      const barrierCommand = `cross-chat-stale-barrier-${randomUUID()}`;
+      const barrierControl = 'cross-chat-stale-barrier.request.json';
+      await writeFile(join(controlDirectory, barrierControl), JSON.stringify({
+        target: 'started',
+        targetThreadId: staleThreadId,
+        requestId: 7_003,
+        command: barrierCommand,
+        method: 'integration/testBarrier',
+      }));
+      expect(await waitForApprovalOutcome(
+        fixture,
+        join(controlDirectory, `${barrierControl}.response.json`),
+        staleChatId,
+        barrierCommand,
+        liveCursor,
+      )).toEqual({
+        kind: 'denied',
+        response: {
+          result: null,
+          error: {
+            code: -32601,
+            message: 'Unsupported Codex app-server request: integration/testBarrier',
+          },
+        },
+      });
+
+      const liveContent = `cross-chat-live-${randomUUID()}`;
+      const liveControl = 'cross-chat-live.message.json';
+      await writeFile(join(controlDirectory, liveControl), JSON.stringify({
+        target: 'started',
+        targetThreadId: liveThreadId,
+        content: liveContent,
+      }));
+      await waitForPath(join(controlDirectory, `${liveControl}.sent`));
+      await waitForAssistant(fixture, liveChatId, liveContent);
+
+      expect(JSON.stringify((await fixture.client.getMessages(staleChatId)).messages))
+        .not.toContain(staleContent);
+      expect(JSON.stringify((await fixture.client.getMessages(liveChatId)).messages))
+        .not.toContain(staleContent);
+      expect(assistantContents((await fixture.client.getMessages(liveChatId)).messages)
+        .filter((content) => content === liveContent)).toHaveLength(1);
+
+      await writeFile(turnReleasePath, 'release');
+      await fixture.client.waitForTurnTerminal(liveChatId, liveTurn.turnId, {
+        afterIndex: liveCursor,
+      });
+      const dropLogs = fixture.garcon.logs.slice(dropLogCursor).join('\n');
+      expect(dropLogs).toContain(
+        '[agent-integration:codex] Dropped a provider event for an unavailable transcript sink',
+      );
+      expect(dropLogs).toContain(`chatId: "${staleChatId}"`);
+      expect(dropLogs).toContain('eventType: "rows"');
+      expect(dropLogs).not.toContain(staleContent);
+    }, {
+      resolveServerEnvironment(directories) {
+        controlDirectory = join(directories.root, 'codex-cross-chat-routing-controls');
+        turnReleasePath = join(directories.root, 'codex-cross-chat-turn-release');
+        return {
+          GARCON_CODEX_CLI: FAKE_CODEX,
+          PATH: SYSTEM_PATH,
+          INTEGRATION_CODEX_ROUTING_CONTROL_DIR: controlDirectory,
+          INTEGRATION_CODEX_STREAMING_TURN: '1',
+          INTEGRATION_CODEX_TURN_RELEASE: turnReleasePath,
+        };
+      },
+      async prepareWorkspace() {
+        await mkdir(controlDirectory, { recursive: true });
+      },
+    });
+  }, 30_000);
 });
 
 function startRequest(
@@ -436,6 +551,18 @@ async function codexAgent(fixture: IntegrationFixture): Promise<AgentCatalogEntr
   const codex = (await fixture.client.listAgentCatalog()).agents.find((agent) => agent.id === 'codex');
   if (!codex) throw new Error('Codex integration is missing from the agent catalog');
   return codex;
+}
+
+async function agentSessionId(fixture: IntegrationFixture, chatId: string): Promise<string> {
+  const chat = await waitForPersistedNativeSession({
+    directories: fixture.dirs,
+    chatId,
+    agentId: 'codex',
+  });
+  if (typeof chat.agentSessionId !== 'string' || !chat.agentSessionId) {
+    throw new Error(`Codex chat ${chatId} has no native session.`);
+  }
+  return chat.agentSessionId;
 }
 
 async function waitForAssistant(

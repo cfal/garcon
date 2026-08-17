@@ -573,20 +573,30 @@ function publishControlledApprovals(): void {
     try {
       const control = JSON.parse(readFileSync(join(routingControlDirectory, entry), 'utf8')) as {
         target?: unknown;
+        targetThreadId?: unknown;
         requestId?: unknown;
         command?: unknown;
+        method?: unknown;
       };
       if (control.target !== processRole) continue;
+      if (control.targetThreadId !== undefined && control.targetThreadId !== processThreadId) continue;
       if (typeof control.requestId !== 'number' || !Number.isSafeInteger(control.requestId)) continue;
       if (typeof control.command !== 'string' || !control.command) continue;
+      if (control.method !== undefined && (typeof control.method !== 'string' || !control.method)) continue;
       emittedApprovalControls.add(entry);
       answeredApprovalControls.set(control.requestId, entry);
-      notifyServerRequest(control.requestId, 'item/commandExecution/requestApproval', {
-        threadId: processThreadId,
-        turnId: processTurnId,
-        itemId: entry.slice(0, -'.request.json'.length),
-        command: control.command,
-      });
+      notifyServerRequest(
+        control.requestId,
+        typeof control.method === 'string'
+          ? control.method
+          : 'item/commandExecution/requestApproval',
+        {
+          threadId: processThreadId,
+          turnId: processTurnId,
+          itemId: entry.slice(0, -'.request.json'.length),
+          command: control.command,
+        },
+      );
       writeFileSync(join(routingControlDirectory, `${entry}.sent`), '');
     } catch {
       continue;
@@ -607,9 +617,11 @@ function publishControlledMessages(): void {
     try {
       const control = JSON.parse(readFileSync(join(routingControlDirectory, entry), 'utf8')) as {
         target?: unknown;
+        targetThreadId?: unknown;
         content?: unknown;
       };
       if (control.target !== processRole) continue;
+      if (control.targetThreadId !== undefined && control.targetThreadId !== processThreadId) continue;
       if (typeof control.content !== 'string' || !control.content) continue;
       emittedMessageControls.add(entry);
       notify('item/completed', {

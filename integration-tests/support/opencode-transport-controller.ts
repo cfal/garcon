@@ -1,5 +1,5 @@
 // Test-side control of the supervisor's optional reverse proxy. The controller appends
-// directives (hold the next connected frame, release it, reset an exact active global
+// directives (hold selected stream frames, release them, or reset an exact active global
 // connection) and waits on proxy observations; both files are atomic JSON snapshots below the
 // fixture proxy directory. Tests synchronize on observed state, never on guessed sleeps.
 
@@ -10,8 +10,10 @@ import { readJsonFile, writeJsonAtomic } from './opencode-process-supervisor.js'
 
 interface TransportDirective {
   seq: number;
-  action: 'hold' | 'release' | 'reset';
+  action: 'hold' | 'hold-through-markers' | 'release' | 'reset';
   connectionId?: number;
+  startMarker?: string;
+  endMarker?: string;
 }
 
 interface TransportDirectives {
@@ -23,6 +25,8 @@ export interface GlobalConnectionObservation {
   path: string;
   held: boolean;
   released: boolean;
+  markerHeld: boolean;
+  endMarkerObserved: boolean;
   reset: boolean;
   closed: boolean;
 }
@@ -72,6 +76,48 @@ export class OpenCodeTransportController {
   }
 
   async releaseConnectedFrame(connectionId: number): Promise<void> {
+    await this.releaseGlobalConnection(connectionId);
+  }
+
+  async holdGlobalStreamThroughMarkers(
+    connectionId: number,
+    startMarker: string,
+    endMarker: string,
+  ): Promise<void> {
+    const seq = await this.#append({
+      action: 'hold-through-markers',
+      connectionId,
+      startMarker,
+      endMarker,
+    });
+    await this.#waitForObservation(
+      (observations) => observations.appliedSeq >= seq ? observations.appliedSeq : null,
+      `marker hold directive ${seq} was never applied`,
+      DEFAULT_TIMEOUT_MS,
+    );
+  }
+
+  async waitForStartMarkerHeld(connectionId: number): Promise<void> {
+    await this.#waitForObservation(
+      (observations) => observations.connections.find(
+        (entry) => entry.id === connectionId && entry.markerHeld,
+      ),
+      `connection ${connectionId} never held the start marker`,
+      DEFAULT_TIMEOUT_MS,
+    );
+  }
+
+  async waitForEndMarkerBuffered(connectionId: number): Promise<void> {
+    await this.#waitForObservation(
+      (observations) => observations.connections.find(
+        (entry) => entry.id === connectionId && entry.endMarkerObserved,
+      ),
+      `connection ${connectionId} never buffered the end marker`,
+      DEFAULT_TIMEOUT_MS,
+    );
+  }
+
+  async releaseGlobalConnection(connectionId: number): Promise<void> {
     await this.#append({ action: 'release', connectionId });
     await this.#waitForObservation(
       (observations) => observations.connections.find(

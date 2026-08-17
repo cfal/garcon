@@ -1,8 +1,8 @@
 // Test-only supervisor between Garcon and the pinned OpenCode binary. The fixture PATH shim
 // executes this module; it verifies the pinned binary hermetically, records the exact provider
 // process tree, and stops every recorded descendant when a crashed Garcon parent disappears.
-// It optionally reverse-proxies the real server so transport tests can hold the connected
-// frame or reset the real /global/event socket. It records and signals only PIDs it created.
+// It optionally reverse-proxies the real server so transport tests can hold selected stream
+// frames or reset the real /global/event socket. It records and signals only PIDs it created.
 
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
@@ -51,8 +51,10 @@ export interface BackendReadinessProcess {
 
 interface TransportDirective {
   seq: number;
-  action: 'hold' | 'release' | 'reset';
+  action: 'hold' | 'hold-through-markers' | 'release' | 'reset';
   connectionId?: number;
+  startMarker?: string;
+  endMarker?: string;
 }
 
 interface TransportDirectives {
@@ -64,6 +66,8 @@ interface GlobalConnectionObservation {
   path: string;
   held: boolean;
   released: boolean;
+  markerHeld: boolean;
+  endMarkerObserved: boolean;
   reset: boolean;
   closed: boolean;
 }
@@ -73,7 +77,13 @@ interface GlobalConnectionObservation {
 interface GlobalConnectionRuntime {
   observation: GlobalConnectionObservation;
   holdsConnectedFrame: boolean;
+  markerHold: {
+    startMarker: string;
+    endMarker: string;
+    observedText: string;
+  } | null;
   buffered: Buffer[];
+  holdThroughMarkers(startMarker: string, endMarker: string): void;
   release(): void;
   reset(): void;
 }
@@ -744,6 +754,11 @@ function startTransportProxy(input: {
       } else {
         const runtime = runtimes.get(directive.connectionId ?? -1);
         if (runtime) {
+          if (
+            directive.action === 'hold-through-markers'
+            && typeof directive.startMarker === 'string'
+            && typeof directive.endMarker === 'string'
+          ) runtime.holdThroughMarkers(directive.startMarker, directive.endMarker);
           if (directive.action === 'release') runtime.release();
           if (directive.action === 'reset') runtime.reset();
         }
@@ -784,6 +799,8 @@ function startTransportProxy(input: {
         path,
         held: false,
         released: false,
+        markerHeld: false,
+        endMarkerObserved: false,
         reset: false,
         closed: false,
       };
@@ -791,12 +808,21 @@ function startTransportProxy(input: {
       const runtime: GlobalConnectionRuntime = {
         observation: connection,
         holdsConnectedFrame: holdArmed,
+        markerHold: null,
         buffered: [],
+        holdThroughMarkers(startMarker, endMarker) {
+          if (connection.released || connection.closed) return;
+          runtime.markerHold = { startMarker, endMarker, observedText: '' };
+          connection.markerHeld = false;
+          connection.endMarkerObserved = false;
+          markObservationsDirty();
+        },
         release() {
           if (connection.released || connection.closed) return;
           connection.released = true;
           for (const held of runtime.buffered) response.write(held);
           runtime.buffered = [];
+          runtime.markerHold = null;
           markObservationsDirty();
         },
         reset() {
@@ -822,6 +848,26 @@ function startTransportProxy(input: {
           observedText += chunk.toString('utf8');
           if (!connection.held && observedText.includes('server.connected')) {
             connection.held = true;
+            markObservationsDirty();
+          }
+          return;
+        }
+        if (runtime.markerHold && !connection.released) {
+          runtime.buffered.push(chunk);
+          runtime.markerHold.observedText += chunk.toString('utf8');
+          if (
+            !connection.markerHeld
+            && runtime.markerHold.observedText.includes(runtime.markerHold.startMarker)
+          ) {
+            connection.markerHeld = true;
+            markObservationsDirty();
+          }
+          if (
+            connection.markerHeld
+            && !connection.endMarkerObserved
+            && runtime.markerHold.observedText.includes(runtime.markerHold.endMarker)
+          ) {
+            connection.endMarkerObserved = true;
             markObservationsDirty();
           }
           return;
