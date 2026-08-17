@@ -18,12 +18,10 @@ interface TranscriptPageHost {
 	transcriptViewId: string;
 	entries: TranscriptMessage[];
 	lastOrdinal: number;
-	oldestOrdinal: number;
 	nextBeforeOrdinal: number | null;
 	loadedThroughOrdinal: number;
 	hasEarlierMessages: boolean;
 	hasLaterMessages: boolean;
-	totalMessages: number;
 	visibleMessageCount: number;
 	readonly displayMessageCount: number;
 	pageStates: Record<TranscriptPageDirection, TranscriptPageState>;
@@ -215,8 +213,6 @@ export class TranscriptPageLoader {
 
 	#applyEarlierMessages(messages: TranscriptMessage[]): TranscriptPageLoadResult {
 		this.host.entries = [...messages, ...this.host.entries];
-		this.host.oldestOrdinal = messages[0].ordinal;
-		this.host.totalMessages = this.host.entries.length;
 		this.host.visibleMessageCount += messages.length;
 		this.options.onPageApplied('earlier');
 		return 'loaded';
@@ -236,8 +232,6 @@ export class TranscriptPageLoader {
 		}
 
 		this.host.entries = [...this.host.entries, ...messages];
-		this.host.oldestOrdinal = this.host.entries[0]?.ordinal ?? 0;
-		this.host.totalMessages = this.host.entries.length;
 		this.host.visibleMessageCount += messages.length;
 		if (reachesLatest) {
 			this.host.visibleMessageCount = Math.min(

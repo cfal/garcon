@@ -214,7 +214,7 @@
 			chatState.pageStates.earlier.status === 'error' ||
 			(chatState.pageStates.earlier.status === 'loading' &&
 				chatState.pageStates.earlier.error !== null),
-		showLaterBoundary: chatState.canLoadLater || chatState.pageStates.later.status !== 'idle',
+		showLaterBoundary: chatState.hasLaterMessages || chatState.pageStates.later.status !== 'idle',
 		reserveComposerTraySpace,
 		transcriptViewId: chatState.getCursor().transcriptViewId,
 		pendingPermissions:

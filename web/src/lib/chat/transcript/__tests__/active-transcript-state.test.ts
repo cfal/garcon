@@ -258,7 +258,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages).toHaveLength(messageCount);
 		expect(contentOf(chat.chatMessages[0])).toBe('message-1');
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: messageCount });
-		expect(chat.oldestOrdinal).toBe(1);
 		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
@@ -281,7 +280,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.entries).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		expect(chat.entries[0]?.ordinal).toBe(26);
 		expect(chat.entries.at(-1)?.ordinal).toBe(messageCount);
-		expect(chat.oldestOrdinal).toBe(26);
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
 
@@ -303,7 +301,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.entries).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		expect(chat.entries[0]?.ordinal).toBe(26);
 		expect(chat.entries.at(-1)?.ordinal).toBe(messageCount);
-		expect(chat.oldestOrdinal).toBe(26);
 		expect(chat.hasEarlierMessages).toBe(true);
 	});
 
@@ -335,7 +332,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
 		expect(contentOf(chat.chatMessages[0])).toBe('message-1');
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 50);
-		expect(chat.oldestOrdinal).toBe(1);
 		expect(chat.hasEarlierMessages).toBe(false);
 	});
 
@@ -917,7 +913,6 @@ describe('ActiveTranscriptState', () => {
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`stale-${index + 1}`)),
 		);
-		chat.oldestOrdinal = 1;
 		chat.lastOrdinal = 50;
 		expect(applyMessages(chat, 'chat-1', 'generation-1', [entry(101, assistant('live'))])).toBe(
 			'applied',
@@ -2073,7 +2068,6 @@ describe('ActiveTranscriptState', () => {
 			}),
 			snapshotEpoch,
 		)).toBe('applied');
-		expect(chat.oldestOrdinal).toBe(151);
 		expect(chat.hasEarlierMessages).toBe(true);
 
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
@@ -2131,7 +2125,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.entries.map((message) => message.ordinal)).toEqual(
 			Array.from({ length: 200 }, (_, index) => index + 101),
 		);
-		expect(chat.oldestOrdinal).toBe(101);
 		expect(chat.loadedThroughOrdinal).toBe(300);
 		expect(chat.lastOrdinal).toBe(500);
 		expect(chat.hasLaterMessages).toBe(true);
@@ -3345,7 +3338,6 @@ describe('ActiveTranscriptState', () => {
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`initial-${index + 1}`)),
 		);
-		chat.oldestOrdinal = 1;
 		chat.hasEarlierMessages = false;
 		chat.hasLaterMessages = true;
 		chat.visibleMessageCount = 50;
@@ -3396,7 +3388,6 @@ describe('ActiveTranscriptState', () => {
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`initial-${index + 1}`)),
 		);
-		chat.oldestOrdinal = 1;
 		chat.hasEarlierMessages = false;
 		chat.hasLaterMessages = true;
 		chat.visibleMessageCount = 50;
@@ -3490,7 +3481,6 @@ describe('ActiveTranscriptState', () => {
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`initial-${index + 1}`)),
 		);
-		chat.oldestOrdinal = 1;
 		chat.loadedThroughOrdinal = 50;
 		chat.hasEarlierMessages = false;
 		chat.hasLaterMessages = true;
@@ -3538,7 +3528,6 @@ describe('ActiveTranscriptState', () => {
 		chat.entries = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 1, assistant(`initial-${index + 1}`)),
 		);
-		chat.oldestOrdinal = 1;
 		chat.loadedThroughOrdinal = 50;
 		chat.hasEarlierMessages = false;
 		chat.hasLaterMessages = true;
@@ -3637,7 +3626,6 @@ describe('ActiveTranscriptState', () => {
 			chat.entries = Array.from({ length: 50 }, (_, index) =>
 				entry(index + 1, assistant(`initial-${index + 1}`)),
 			);
-			chat.oldestOrdinal = 1;
 			chat.hasEarlierMessages = false;
 			chat.visibleMessageCount = 50;
 			let resolveLatest!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;

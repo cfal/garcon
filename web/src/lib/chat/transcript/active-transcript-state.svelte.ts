@@ -82,7 +82,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	transcriptViewId = $state('');
 	windowRevision = $state(0);
 	lastOrdinal = $state(0);
-	oldestOrdinal = $state(0);
 	nextBeforeOrdinal = $state<number | null>(null);
 	loadedThroughOrdinal = $state(0);
 	hasLaterMessages = $state(false);
@@ -93,7 +92,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		earlier: idlePageState(),
 		later: idlePageState(),
 	});
-	totalMessages = $state(0);
 	isUserScrolledUp = $state(false);
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
@@ -222,24 +220,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return messagesFromDisplayRows(this.#visibleRows);
 	}
 
-	get newestLoadedOrdinal(): number {
-		return this.entries.at(-1)?.ordinal ?? 0;
-	}
-
 	get hasEarlierRowsToReveal(): boolean {
 		return hasEarlierTranscriptRowsToReveal(this.#visibleRows, this.entries);
 	}
 
 	get canLoadEarlier(): boolean {
 		return this.hasEarlierRowsToReveal || this.hasEarlierMessages;
-	}
-
-	get canAutoFillEarlier(): boolean {
-		return this.hasEarlierRowsToReveal || this.hasEarlierMessages;
-	}
-
-	get canLoadLater(): boolean {
-		return this.hasLaterMessages;
 	}
 
 	get visibleOptimisticInputs(): OptimisticUserInput[] {
@@ -339,10 +325,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'gap-detected';
 		}
 		const responseMessageTypes = responseMessageTypesAfter(messages, appliedFrontierOrdinal);
-		const cacheCursorAdvanced = result.lastOrdinal > this.lastOrdinal;
+		const observedHeadAdvanced = result.lastOrdinal > this.lastOrdinal;
 		this.lastOrdinal = Math.max(this.lastOrdinal, result.lastOrdinal);
 		if (this.hasLaterMessages && firstOrdinal > appliedFrontierOrdinal + 1) {
-			const cacheStateChanged = result.changed || cacheCursorAdvanced;
+			const cacheStateChanged = result.changed || observedHeadAdvanced;
 			this.transcriptViewId = transcriptViewId;
 			if (cacheStateChanged) {
 				this.clearLocalNotices(noticeRevision);
@@ -365,7 +351,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (applied.messages !== this.entries) this.entries = applied.messages;
 			this.loadedThroughOrdinal = applied.lastOrdinal;
 			this.hasLaterMessages = this.loadedThroughOrdinal < this.lastOrdinal;
-			this.oldestOrdinal = this.entries[0]?.ordinal ?? 0;
 			if (entriesChanged && this.isUserScrolledUp) {
 				const appendedCount = Math.max(0, this.entries.length - previousEntryCount);
 				this.visibleMessageCount = Math.min(
@@ -381,14 +366,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.transcriptViewId = restored.transcriptViewId;
 			this.entries = retainTranscriptEntries(restored.messages, 'later');
 			this.lastOrdinal = restored.lastOrdinal;
-			this.oldestOrdinal = this.entries[0]?.ordinal ?? 0;
 			this.nextBeforeOrdinal = restored.nextBeforeOrdinal;
 			this.hasEarlierMessages = restored.nextBeforeOrdinal !== null;
 		}
 		if (entriesChanged) {
 			this.clearLocalNotices(noticeRevision);
 		}
-		this.totalMessages = this.entries.length;
 		if (entriesChanged) this.#growExpandedVisibleWindow();
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
 			this.loadStatus = 'loaded';
@@ -480,11 +463,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.entries = retainedMessages;
 		this.lastOrdinal = options.lastOrdinal;
 		this.loadedThroughOrdinal = pageNewestOrdinal;
-		this.oldestOrdinal = retainedMessages[0]?.ordinal ?? 0;
 		this.nextBeforeOrdinal = nextBeforeOrdinal;
 		this.hasEarlierMessages = nextBeforeOrdinal !== null;
 		this.hasLaterMessages = pageNewestOrdinal < options.lastOrdinal;
-		this.totalMessages = retainedMessages.length;
 		this.#optimisticInputs.clearAll();
 		this.setResendCandidates(options.resendCandidates ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
@@ -501,14 +482,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		epoch: number,
 	): PageApplyResult {
 		return this.#installSnapshotPage(chatId, page, epoch);
-	}
-
-	#replaceFromNavigationPage(
-		chatId: string,
-		page: ActiveTranscriptSnapshot,
-		epoch: number,
-	): PageApplyResult {
-		return this.#installSnapshotPage(chatId, page, epoch, 'replace');
 	}
 
 	#installSnapshotPage(
@@ -595,11 +568,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.entries = mergedEntries;
 		this.lastOrdinal = mergedLastOrdinal;
 		this.loadedThroughOrdinal = mergedLoadedThroughOrdinal;
-		this.oldestOrdinal = mergedEntries[0]?.ordinal ?? 0;
 		this.nextBeforeOrdinal = nextBeforeOrdinal;
 		this.hasEarlierMessages = nextBeforeOrdinal !== null;
 		this.hasLaterMessages = mergedLoadedThroughOrdinal < mergedLastOrdinal;
-		this.totalMessages = mergedEntries.length;
 		this.#growExpandedVisibleWindow();
 		this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
 
@@ -649,11 +620,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.entries = retainedMessages;
 		this.lastOrdinal = page.lastOrdinal;
 		this.loadedThroughOrdinal = page.pageNewestOrdinal;
-		this.oldestOrdinal = retainedMessages[0]?.ordinal ?? 0;
 		this.nextBeforeOrdinal = nextBeforeOrdinal;
 		this.hasEarlierMessages = nextBeforeOrdinal !== null;
 		this.hasLaterMessages = page.pageNewestOrdinal < page.lastOrdinal;
-		this.totalMessages = retainedMessages.length;
 		if (replacesTranscriptView) this.#optimisticInputs.clearAll();
 		else this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
 		this.#feedMutations.record('replacement');
@@ -795,7 +764,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.entries = [];
 		this.transcriptViewId = '';
 		this.lastOrdinal = 0;
-		this.oldestOrdinal = 0;
 		this.nextBeforeOrdinal = null;
 		this.loadedThroughOrdinal = 0;
 		this.#optimisticInputs.clearAll();
@@ -803,7 +771,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#notices.reset();
 		this.hasEarlierMessages = false;
 		this.hasLaterMessages = false;
-		this.totalMessages = 0;
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
@@ -879,7 +846,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 					this.transcriptCache.get(chatId),
 					this.#resend.all,
 				);
-				return this.#replaceFromNavigationPage(chatId, latestPage, loadEpoch) === 'applied'
+				return this.#installSnapshotPage(chatId, latestPage, loadEpoch, 'replace') === 'applied'
 					? 'loaded'
 					: 'invalidated';
 			}
@@ -894,12 +861,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			);
 			this.entries = retainedMessages;
 			this.lastOrdinal = page.lastOrdinal;
-			this.oldestOrdinal = retainedMessages[0]?.ordinal ?? 0;
 			this.nextBeforeOrdinal = nextBeforeOrdinal;
 			this.loadedThroughOrdinal = page.pageNewestOrdinal;
 			this.hasEarlierMessages = nextBeforeOrdinal !== null;
 			this.hasLaterMessages = page.pageNewestOrdinal < page.lastOrdinal;
-			this.totalMessages = retainedMessages.length;
 			this.visibleMessageCount = retainedMessages.length;
 			if (this.hasLaterMessages) {
 				this.isUserScrolledUp = true;
@@ -959,9 +924,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.transcriptViewId = restored.transcriptViewId;
 		this.lastOrdinal = restored.lastOrdinal;
 		this.loadedThroughOrdinal = restored.lastOrdinal;
-		this.oldestOrdinal = retainedMessages[0]?.ordinal ?? 0;
 		this.nextBeforeOrdinal = restored.nextBeforeOrdinal;
-		this.totalMessages = retainedMessages.length;
 		// Preserves the earlier boundary across cache restore so validation cannot insert it after paint.
 		this.hasEarlierMessages = restored.nextBeforeOrdinal !== null;
 		this.hasLaterMessages = false;

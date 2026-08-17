@@ -38,9 +38,7 @@ interface DeferredLiveEdgeIntent {
 
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
-	| 'canAutoFillEarlier'
 	| 'canLoadEarlier'
-	| 'canLoadLater'
 	| 'displayMessageCount'
 	| 'feedMutationClock'
 	| 'transcriptViewId'
@@ -523,7 +521,7 @@ export class ConversationScrollController {
 				if (this.deps.chatState.hasLaterMessages) {
 					if (!this.#canRequestPage('later')) return;
 					result = await this.#mutatePage('later', () => this.deps.chatState.loadLaterPage(chatId));
-				} else if (this.deps.chatState.canAutoFillEarlier) {
+				} else if (this.deps.chatState.canLoadEarlier) {
 					if (!this.#canRequestPage('earlier')) return;
 					if (this.deps.chatState.revealEarlierLoadedRows()) {
 						result = await this.#waitForCurrentLayout('loaded');
@@ -697,7 +695,7 @@ export class ConversationScrollController {
 		}
 		return direction === 'earlier'
 			? this.deps.chatState.canLoadEarlier
-			: this.deps.chatState.canLoadLater;
+			: this.deps.chatState.hasLaterMessages;
 	}
 
 	#syncBoundaryLatch(direction: TranscriptPageDirection): void {

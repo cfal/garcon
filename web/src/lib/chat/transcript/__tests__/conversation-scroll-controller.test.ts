@@ -39,9 +39,7 @@ function scrollState(
 	overrides: Partial<ConversationScrollState> = {},
 ): MutableConversationScrollState {
 	return {
-		canAutoFillEarlier: false,
 		canLoadEarlier: false,
-		canLoadLater: false,
 		displayMessageCount: 1,
 		feedMutationClock: mutationClock(),
 		transcriptViewId: 'generation-1',
@@ -478,7 +476,6 @@ describe('ConversationScrollController', () => {
 		const { controller, state } = controllerFixture({
 			viewport,
 			state: {
-				canLoadLater: true,
 				hasLaterMessages: true,
 				isUserScrolledUp: true,
 				loadLaterPage,
@@ -721,7 +718,7 @@ describe('ConversationScrollController', () => {
 		const viewport = fakeViewport({ waitForLayout });
 		const { controller } = controllerFixture({
 			viewport,
-			state: { canLoadLater: true, loadLaterPage: vi.fn(async () => 'loaded' as const) },
+			state: { hasLaterMessages: true, loadLaterPage: vi.fn(async () => 'loaded' as const) },
 		});
 		expect(await controller.requestPage('later', 'button')).toBe('invalidated');
 	});
@@ -857,7 +854,7 @@ describe('ConversationScrollController', () => {
 		const viewport = fakeViewport({ measureViewportFill });
 		const { controller } = controllerFixture({
 			viewport,
-			state: { canAutoFillEarlier: true, canLoadEarlier: true, revealEarlierLoadedRows },
+			state: { canLoadEarlier: true, revealEarlierLoadedRows },
 		});
 		await controller.fillUnderfilledViewport();
 		expect(revealEarlierLoadedRows).toHaveBeenCalledOnce();
@@ -869,7 +866,7 @@ describe('ConversationScrollController', () => {
 			.fn<ConversationViewportPort['measureViewportFill']>()
 			.mockResolvedValueOnce('underfilled')
 			.mockResolvedValueOnce('overflow');
-		const state = { hasLaterMessages: true, canLoadLater: true };
+		const state = { hasLaterMessages: true };
 		const loadLaterPage = vi.fn(async () => {
 			state.hasLaterMessages = false;
 			return 'loaded' as const;
@@ -890,7 +887,7 @@ describe('ConversationScrollController', () => {
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const { controller } = controllerFixture({
 			viewport,
-			state: { canAutoFillEarlier: true, loadEarlierPage },
+			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
 		expect(loadEarlierPage).not.toHaveBeenCalled();
@@ -905,7 +902,6 @@ describe('ConversationScrollController', () => {
 				),
 			}),
 			state: {
-				canAutoFillEarlier: true,
 				canLoadEarlier: true,
 				loadEarlierPage,
 				pageStates: {
@@ -929,7 +925,6 @@ describe('ConversationScrollController', () => {
 				),
 			}),
 			state: {
-				canAutoFillEarlier: true,
 				canLoadEarlier: true,
 				loadEarlierPage,
 				pageStates: {
@@ -966,7 +961,7 @@ describe('ConversationScrollController', () => {
 		});
 		const { controller } = controllerFixture({
 			viewport,
-			state: { canAutoFillEarlier: true, canLoadEarlier: true, loadEarlierPage },
+			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 
 		const fill = controller.fillUnderfilledViewport();
@@ -998,7 +993,7 @@ describe('ConversationScrollController', () => {
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const { controller } = controllerFixture({
 			viewport: fakeViewport({ isAtEnd: vi.fn(() => true), measureViewportFill, scrollToTarget }),
-			state: { canAutoFillEarlier: true, canLoadEarlier: true, loadEarlierPage },
+			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 
 		const navigation = controller.jumpToDomAnchor('tool-input-9');
@@ -1022,7 +1017,7 @@ describe('ConversationScrollController', () => {
 		});
 		const { controller, state } = controllerFixture({
 			viewport,
-			state: { canAutoFillEarlier: true, canLoadEarlier: true, loadEarlierPage },
+			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 
 		await expect(controller.jumpToDomAnchor('tool-input-9')).resolves.toBe(true);

@@ -107,7 +107,6 @@ describe('UserMessageNavigatorController', () => {
 					entry(99, user('recent prompt')),
 					entry(100, assistant('recent response')),
 				];
-				transcript.oldestOrdinal = 99;
 				transcript.hasEarlierMessages = true;
 			}
 			return restored;

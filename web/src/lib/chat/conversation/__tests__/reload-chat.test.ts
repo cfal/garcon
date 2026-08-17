@@ -70,7 +70,6 @@ describe('reloadChatFromNative', () => {
 			chatId: 'chat-1',
 		});
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-2', lastOrdinal: 4 });
-		expect(chat.oldestOrdinal).toBe(3);
 		expect(chat.hasEarlierMessages).toBe(true);
 		expect(chat.nextBeforeOrdinal).toBe(3);
 		expect(chat.chatMessages[0]).toBeInstanceOf(AssistantMessage);
