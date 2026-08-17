@@ -1043,6 +1043,78 @@ describe('ConversationScrollController', () => {
 		expect(ResizeObserverStub.instances[0].disconnected).toBe(true);
 	});
 
+	it('defers and coalesces detached queue compensation until content touch ends', () => {
+		const { controller, viewport } = controllerFixture({ queue: { offsetHeight: 100 } });
+		controller.setPinnedToBottom(false);
+		const cleanup = controller.observeQueueResize();
+
+		controller.beginContentTouch();
+		ResizeObserverStub.instances[0].emit(140);
+		ResizeObserverStub.instances[0].emit(160);
+		expect(viewport.scrollBy).not.toHaveBeenCalled();
+		controller.endContentTouch();
+		expect(viewport.scrollBy).toHaveBeenCalledOnce();
+		expect(viewport.scrollBy).toHaveBeenCalledWith(60);
+
+		controller.beginContentTouch();
+		ResizeObserverStub.instances[0].emit(140);
+		ResizeObserverStub.instances[0].emit(160);
+		controller.endContentTouch();
+		expect(viewport.scrollBy).toHaveBeenCalledOnce();
+		cleanup?.();
+	});
+
+	it('uses the current pinned policy for deferred queue compensation', () => {
+		const { controller, viewport } = controllerFixture({ queue: { offsetHeight: 100 } });
+		controller.setPinnedToBottom(false);
+		const cleanup = controller.observeQueueResize();
+
+		controller.beginContentTouch();
+		ResizeObserverStub.instances[0].emit(140);
+		ResizeObserverStub.instances[0].emit(160);
+		controller.setPinnedToBottom(true);
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+		controller.endContentTouch();
+
+		expect(viewport.scrollBy).not.toHaveBeenCalled();
+		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+		cleanup?.();
+	});
+
+	it('discards an old queue correction when touch teardown precedes queue cleanup', () => {
+		const { controller, viewport, sessions } = controllerFixture({ queue: { offsetHeight: 100 } });
+		controller.setPinnedToBottom(false);
+		controller.beginContentTouch();
+		const cleanup = controller.observeQueueResize();
+		ResizeObserverStub.instances[0].emit(140);
+
+		sessions.selectedChatId = 'chat-2';
+		controller.resetContentTouch();
+		ResizeObserverStub.instances[0].emit(160);
+		controller.endContentTouch();
+		expect(viewport.scrollBy).not.toHaveBeenCalled();
+		cleanup?.();
+	});
+
+	it('keeps a rebound queue observer valid when its cleanup precedes touch teardown', () => {
+		const { controller, viewport, sessions } = controllerFixture({ queue: { offsetHeight: 100 } });
+		controller.setPinnedToBottom(false);
+		controller.beginContentTouch();
+		const firstCleanup = controller.observeQueueResize();
+		ResizeObserverStub.instances[0].emit(140);
+		sessions.selectedChatId = 'chat-2';
+		firstCleanup?.();
+
+		const secondCleanup = controller.observeQueueResize();
+		ResizeObserverStub.instances[1].emit(120);
+		controller.resetContentTouch();
+		ResizeObserverStub.instances[1].emit(140);
+		controller.endContentTouch();
+		expect(viewport.scrollBy).toHaveBeenCalledOnce();
+		expect(viewport.scrollBy).toHaveBeenCalledWith(20);
+		secondCleanup?.();
+	});
+
 	it('defers automatic queue compensation during target navigation', async () => {
 		let resolveTarget!: (result: 'completed') => void;
 		const viewport = fakeViewport({

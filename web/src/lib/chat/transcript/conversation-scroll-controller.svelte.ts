@@ -36,6 +36,14 @@ interface DeferredLiveEdgeIntent {
 	epoch: number;
 }
 
+interface DeferredQueueResize {
+	binding: number;
+	chatId: string | null;
+	host: HTMLDivElement;
+	scrollContainer: HTMLDivElement | null;
+	delta: number;
+}
+
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
 	| 'canLoadEarlier'
@@ -81,6 +89,9 @@ export class ConversationScrollController {
 	#viewportOperationEpoch = 0;
 	#deferredLiveEdgeIntent: DeferredLiveEdgeIntent | null = null;
 	#isPageMutationInProgress = false;
+	#isContentTouchActive = false;
+	#deferredQueueResize: DeferredQueueResize | null = null;
+	#queueResizeBinding = 0;
 	#activeTargetNavigations = $state(0);
 	#resumeAutoFillAfterTargets = false;
 	#lastObservedFeedChatId: string | null;
@@ -205,6 +216,25 @@ export class ConversationScrollController {
 				this.#handleBoundaryProximity(direction, this.#isNearPageBoundary(direction));
 			});
 		}
+	}
+
+	beginContentTouch(): void {
+		this.#isContentTouchActive = true;
+	}
+
+	endContentTouch(): void {
+		if (!this.#isContentTouchActive) return;
+		this.#isContentTouchActive = false;
+		const deferred = this.#deferredQueueResize;
+		this.#deferredQueueResize = null;
+		if (deferred && this.#isCurrentQueueResizeBinding(deferred)) {
+			this.#applyQueueResizeCompensation(deferred.delta);
+		}
+	}
+
+	resetContentTouch(): void {
+		this.#isContentTouchActive = false;
+		this.#deferredQueueResize = null;
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {
@@ -546,21 +576,52 @@ export class ConversationScrollController {
 	}
 
 	observeQueueResize(): (() => void) | undefined {
+		const binding = ++this.#queueResizeBinding;
+		this.#deferredQueueResize = null;
 		const host = this.deps.getQueueContainer();
 		if (!host || typeof ResizeObserver === 'undefined') return undefined;
+		const scrollContainer = this.deps.getScrollContainer();
+		const chatId = this.deps.sessions.selectedChatId;
 		let previousHeight = host.offsetHeight;
 		const observer = new ResizeObserver((entries) => {
 			const nextHeight = entries[0]?.contentRect.height ?? host.offsetHeight;
 			const delta = nextHeight - previousHeight;
 			previousHeight = nextHeight;
-			if (!this.#isViewportVisible || this.#activeTargetNavigations > 0 || delta === 0) return;
-			const viewport = this.deps.getViewport();
-			if (!viewport) return;
-			if (this.isPinnedToBottom) this.scrollToBottom();
-			else viewport.scrollBy(delta);
+			const resize = { binding, chatId, host, scrollContainer, delta };
+			if (delta === 0 || !this.#isCurrentQueueResizeBinding(resize)) return;
+			if (this.#isContentTouchActive) {
+				const previousDelta = this.#deferredQueueResize?.binding === binding
+					? this.#deferredQueueResize.delta
+					: 0;
+				this.#deferredQueueResize = { ...resize, delta: previousDelta + delta };
+				return;
+			}
+			this.#applyQueueResizeCompensation(delta);
 		});
 		observer.observe(host);
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			if (binding !== this.#queueResizeBinding) return;
+			this.#queueResizeBinding += 1;
+			this.#deferredQueueResize = null;
+		};
+	}
+
+	#isCurrentQueueResizeBinding(resize: Omit<DeferredQueueResize, 'delta'>): boolean {
+		return (
+			resize.binding === this.#queueResizeBinding
+			&& resize.chatId === this.deps.sessions.selectedChatId
+			&& resize.host === this.deps.getQueueContainer()
+			&& resize.scrollContainer === this.deps.getScrollContainer()
+		);
+	}
+
+	#applyQueueResizeCompensation(delta: number): void {
+		if (!this.#isViewportVisible || this.#activeTargetNavigations > 0 || delta === 0) return;
+		const viewport = this.deps.getViewport();
+		if (!viewport) return;
+		if (this.isPinnedToBottom) this.scrollToBottom();
+		else viewport.scrollBy(delta);
 	}
 
 	observeScrollContainerResize(): (() => void) | undefined {

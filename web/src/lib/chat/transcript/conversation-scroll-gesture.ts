@@ -5,7 +5,12 @@ export interface ConversationTouchPoint {
 	clientY: number;
 }
 
-export type ConversationScrollIntentReporter = (direction: TranscriptPageDirection | null) => void;
+export interface ConversationScrollGestureHandlers {
+	onScrollIntent(direction: TranscriptPageDirection | null): void;
+	onContentTouchStart(): void;
+	onContentTouchEnd(): void;
+	onContentTouchReset(): void;
+}
 
 export class ConversationTouchScrollGesture {
 	#identifier: number | null = null;
@@ -72,38 +77,52 @@ export function conversationWheelScrollDirection(deltaY: number): TranscriptPage
 
 export function observeConversationViewportScrollGestures(
 	node: HTMLElement,
-	report: ConversationScrollIntentReporter,
+	handlers: ConversationScrollGestureHandlers,
 ): () => void {
 	const touchGesture = new ConversationTouchScrollGesture();
-	const touchPoints = (event: TouchEvent): ConversationTouchPoint[] =>
-		Array.from(event.touches, (touch) => ({
+	const contentTouchIdentifiers = new Set<number>();
+	const touchPoints = (touches: TouchList): ConversationTouchPoint[] =>
+		Array.from(touches, (touch) => ({
 			identifier: touch.identifier,
 			clientY: touch.clientY,
 		}));
+	const contentTouchPoints = (event: TouchEvent): ConversationTouchPoint[] =>
+		touchPoints(event.touches).filter((touch) => contentTouchIdentifiers.has(touch.identifier));
 	const handleWheel = (event: WheelEvent) => {
 		const direction = conversationWheelScrollDirection(event.deltaY);
-		if (direction) report(direction);
+		if (direction) handlers.onScrollIntent(direction);
 	};
 	const handleTouchStart = (event: TouchEvent) => {
-		if (touchGesture.begin(touchPoints(event))) report(null);
+		const wasActive = contentTouchIdentifiers.size > 0;
+		for (const touch of touchPoints(event.changedTouches)) {
+			contentTouchIdentifiers.add(touch.identifier);
+		}
+		if (!wasActive && contentTouchIdentifiers.size > 0) handlers.onContentTouchStart();
+		const touches = contentTouchPoints(event);
+		if (touchGesture.begin(touches)) handlers.onScrollIntent(null);
 	};
 	const handleTouchMove = (event: TouchEvent) => {
-		const direction = touchGesture.move(touchPoints(event));
-		if (direction) report(direction);
+		const direction = touchGesture.move(contentTouchPoints(event));
+		if (direction) handlers.onScrollIntent(direction);
 	};
 	const handleTouchEnd = (event: TouchEvent) => {
-		touchGesture.end(touchPoints(event));
+		const wasActive = contentTouchIdentifiers.size > 0;
+		for (const touch of touchPoints(event.changedTouches)) {
+			contentTouchIdentifiers.delete(touch.identifier);
+		}
+		touchGesture.end(contentTouchPoints(event));
+		if (wasActive && contentTouchIdentifiers.size === 0) handlers.onContentTouchEnd();
 	};
 	const handlePointerDown = (event: PointerEvent) => {
-		if (event.button === 0 && event.pointerType !== 'touch') report(null);
+		if (event.button === 0 && event.pointerType !== 'touch') handlers.onScrollIntent(null);
 	};
 	const handleKeydown = (event: KeyboardEvent) => {
 		if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
-			report('earlier');
+			handlers.onScrollIntent('earlier');
 		} else if (event.key === ' ') {
-			report(event.shiftKey ? 'earlier' : 'later');
+			handlers.onScrollIntent(event.shiftKey ? 'earlier' : 'later');
 		} else if (event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === 'End') {
-			report('later');
+			handlers.onScrollIntent('later');
 		}
 	};
 
@@ -123,5 +142,7 @@ export function observeConversationViewportScrollGestures(
 		node.removeEventListener('touchcancel', handleTouchEnd, { capture: true });
 		node.removeEventListener('pointerdown', handlePointerDown, { capture: true });
 		node.removeEventListener('keydown', handleKeydown, { capture: true });
+		if (contentTouchIdentifiers.size > 0) handlers.onContentTouchReset();
+		contentTouchIdentifiers.clear();
 	};
 }
