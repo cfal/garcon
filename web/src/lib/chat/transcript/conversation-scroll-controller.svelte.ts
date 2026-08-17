@@ -287,7 +287,10 @@ export class ConversationScrollController {
 	handleScroll(): void {
 		const node = this.deps.getScrollContainer();
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
-		this.#isViewportAtStart = node.scrollTop <= FEED_START_THRESHOLD_PX;
+		const isViewportAtStart = node.scrollTop <= FEED_START_THRESHOLD_PX;
+		if (this.#isViewportAtStart !== isViewportAtStart) {
+			this.#isViewportAtStart = isViewportAtStart;
+		}
 		const inferredDirection = this.#inferScrollDirection(node.scrollTop);
 		if (this.#isPageMutationInProgress) {
 			const shouldReaffirmUserOwnership =
