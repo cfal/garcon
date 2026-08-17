@@ -1,5 +1,5 @@
 diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
-index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..605458399a19e02e28467b6ea633afc4518c54dc 100644
+index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..c010e750ab7c49fc844b7ff95d15f64c1154226b 100644
 --- a/dist/cjs/index.cjs
 +++ b/dist/cjs/index.cjs
 @@ -218,6 +218,10 @@ class Virtualizer {
@@ -38,8 +38,37 @@ index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..605458399a19e02e28467b6ea633afc4
        let cachedSize;
        let itemStart;
        let key;
+@@ -990,6 +996,16 @@ class Virtualizer {
+         align
+       ];
+     };
++    this.cancelScroll = () => {
++      this.scrollState = null;
++      this._intendedScrollOffset = null;
++      this._iosDeferredAdjustment = 0;
++      this.scrollAdjustments = 0;
++      if (this.rafId != null) {
++        this.targetWindow?.cancelAnimationFrame(this.rafId);
++        this.rafId = null;
++      }
++    };
+     this.scrollToOffset = (toOffset, { align = "start", behavior = "auto" } = {}) => {
+       this._iosDeferredAdjustment = 0;
+       const offset = this.getOffsetForAlignment(toOffset, align);
+diff --git a/dist/esm/index.d.ts b/dist/esm/index.d.ts
+index 610db97bfdfb0005cf998aa7dd497951b36c27b7..fe37001f898168fa64df3888c466d1524591ce9a 100644
+--- a/dist/esm/index.d.ts
++++ b/dist/esm/index.d.ts
+@@ -169,6 +169,7 @@ export declare class Virtualizer<TScrollElement extends Element | Window, TItemE
+     isAtEnd: (threshold?: number) => boolean;
+     getOffsetForAlignment: (toOffset: number, align: ScrollAlignment, itemSize?: number) => number;
+     getOffsetForIndex: (index: number, align?: ScrollAlignment) => readonly [number, "auto"] | readonly [number, "start" | "center" | "end"] | undefined;
++    cancelScroll: () => void;
+     scrollToOffset: (toOffset: number, { align, behavior }?: ScrollToOffsetOptions) => void;
+     scrollToIndex: (index: number, { align: initialAlign, behavior, }?: ScrollToIndexOptions) => void;
+     scrollBy: (delta: number, { behavior }?: ScrollToOffsetOptions) => void;
 diff --git a/dist/esm/index.js b/dist/esm/index.js
-index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..f8630eb37a03ca0aa54c989f688bd5ef6e45b4b4 100644
+index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..ceb8dfcc4044fbc4121fd698c62511374e33bf68 100644
 --- a/dist/esm/index.js
 +++ b/dist/esm/index.js
 @@ -216,6 +216,10 @@ class Virtualizer {
@@ -78,8 +107,25 @@ index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..f8630eb37a03ca0aa54c989f688bd5ef
        let cachedSize;
        let itemStart;
        let key;
+@@ -988,6 +994,16 @@ class Virtualizer {
+         align
+       ];
+     };
++    this.cancelScroll = () => {
++      this.scrollState = null;
++      this._intendedScrollOffset = null;
++      this._iosDeferredAdjustment = 0;
++      this.scrollAdjustments = 0;
++      if (this.rafId != null) {
++        this.targetWindow?.cancelAnimationFrame(this.rafId);
++        this.rafId = null;
++      }
++    };
+     this.scrollToOffset = (toOffset, { align = "start", behavior = "auto" } = {}) => {
+       this._iosDeferredAdjustment = 0;
+       const offset = this.getOffsetForAlignment(toOffset, align);
 diff --git a/src/index.ts b/src/index.ts
-index e209208a6d1b4e0713f78deab96598819ed697ad..db55892a3e966a300bbc2058872a92d1fa593844 100644
+index e209208a6d1b4e0713f78deab96598819ed697ad..a5f3610419c2008fdcf69f3270b405b8f69595fe 100644
 --- a/src/index.ts
 +++ b/src/index.ts
 @@ -489,6 +489,14 @@ export class Virtualizer<
@@ -125,3 +171,21 @@ index e209208a6d1b4e0713f78deab96598819ed697ad..db55892a3e966a300bbc2058872a92d1
  
      // Fast field reads. For lanes===1 we read raw start/size from the flat
      // typed array, avoiding a Proxy.get + VirtualItem allocation per call.
+@@ -1767,6 +1780,17 @@ export class Virtualizer<
+     ] as const
+   }
+
++  cancelScroll = () => {
++    this.scrollState = null
++    this._intendedScrollOffset = null
++    this._iosDeferredAdjustment = 0
++    this.scrollAdjustments = 0
++    if (this.rafId != null) {
++      this.targetWindow?.cancelAnimationFrame(this.rafId)
++      this.rafId = null
++    }
++  }
++
+   scrollToOffset = (
+     toOffset: number,
+     { align = 'start', behavior = 'auto' }: ScrollToOffsetOptions = {},

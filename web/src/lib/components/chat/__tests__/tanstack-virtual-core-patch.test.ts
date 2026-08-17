@@ -1,9 +1,17 @@
-import { Virtualizer, type VirtualizerOptions } from '@tanstack/virtual-core';
+import {
+	_resetIOSDetectionForTests,
+	Virtualizer,
+	type VirtualizerOptions,
+} from '@tanstack/virtual-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 interface VirtualizerHarness {
 	virtualizer: Virtualizer<HTMLDivElement, HTMLElement>;
+	scrollElement: HTMLDivElement;
+	scrollToFn: ReturnType<typeof vi.fn>;
 	emitResize(node: HTMLElement, height: number): void;
+	emitScrollOffset(offset: number, isScrolling?: boolean): void;
+	runAnimationFrames(): void;
 	setKeys(keys: readonly string[]): void;
 }
 
@@ -18,6 +26,17 @@ function virtualElement(index: number, height = 50): HTMLElement {
 function createVirtualizerHarness(initialKeys: readonly string[]): VirtualizerHarness {
 	let keys = initialKeys;
 	let resizeCallback: ResizeObserverCallback | null = null;
+	let offsetCallback: ((offset: number, isScrolling: boolean) => void) | null = null;
+	let nextAnimationFrameId = 1;
+	const animationFrames = new Map<number, FrameRequestCallback>();
+	vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+		const id = nextAnimationFrameId++;
+		animationFrames.set(id, callback);
+		return id;
+	});
+	vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+		animationFrames.delete(id);
+	});
 	const resizeObserver = {
 		observe: () => {},
 		unobserve: () => {},
@@ -42,16 +61,18 @@ function createVirtualizerHarness(initialKeys: readonly string[]): VirtualizerHa
 		offsetHeight: { configurable: true, value: 600 },
 	});
 	document.body.append(scrollElement);
+	const scrollToFn = vi.fn();
 	const stableOptions = {
 		estimateSize: () => 50,
 		getItemKey: (index: number) => keys[index] ?? `missing:${index}`,
 		getScrollElement: () => scrollElement,
-		scrollToFn: vi.fn(),
+		scrollToFn,
 		observeElementRect: (_instance, callback) => {
 			callback({ width: 400, height: 600 });
 			return () => {};
 		},
 		observeElementOffset: (_instance, callback) => {
+			offsetCallback = callback;
 			callback(0, false);
 			return () => {};
 		},
@@ -65,6 +86,8 @@ function createVirtualizerHarness(initialKeys: readonly string[]): VirtualizerHa
 
 	return {
 		virtualizer,
+		scrollElement,
+		scrollToFn,
 		emitResize(node, height) {
 			if (!resizeCallback) {
 				throw new Error('The virtualizer did not create a ResizeObserver.');
@@ -79,6 +102,18 @@ function createVirtualizerHarness(initialKeys: readonly string[]): VirtualizerHa
 			} satisfies ResizeObserverEntry;
 			resizeCallback([entry], resizeObserver);
 		},
+		emitScrollOffset(offset, isScrolling = false) {
+			if (!offsetCallback) throw new Error('The virtualizer did not observe scroll offsets.');
+			offsetCallback(offset, isScrolling);
+		},
+		runAnimationFrames() {
+			for (let iteration = 0; iteration < 20 && animationFrames.size > 0; iteration += 1) {
+				const callbacks = [...animationFrames.values()];
+				animationFrames.clear();
+				for (const callback of callbacks) callback(performance.now());
+			}
+			if (animationFrames.size > 0) throw new Error('Virtualizer animation frames did not settle.');
+		},
 		setKeys(nextKeys) {
 			keys = nextKeys;
 			virtualizer.setOptions(options());
@@ -87,6 +122,9 @@ function createVirtualizerHarness(initialKeys: readonly string[]): VirtualizerHa
 }
 
 afterEach(() => {
+	_resetIOSDetectionForTests();
+	vi.useRealTimers();
+	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 	document.body.replaceChildren();
 });
@@ -116,5 +154,50 @@ describe('TanStack virtual-core patch contract', () => {
 		harness.emitResize(removed, 900);
 
 		expect(harness.virtualizer.itemSizeCache.get('survivor')).toBe(60);
+	});
+
+	it('cancels an armed reconciliation without restoring a later user offset', () => {
+		const harness = createVirtualizerHarness(['only']);
+		harness.scrollToFn.mockClear();
+		harness.virtualizer.scrollToOffset(100);
+		expect(harness.scrollToFn).toHaveBeenCalledOnce();
+
+		harness.virtualizer.cancelScroll();
+		harness.scrollToFn.mockClear();
+		harness.emitScrollOffset(94, true);
+		harness.runAnimationFrames();
+		expect(harness.scrollToFn).not.toHaveBeenCalled();
+
+		harness.virtualizer.scrollToOffset(160);
+		expect(harness.scrollToFn).toHaveBeenCalledOnce();
+		expect(harness.scrollToFn.mock.calls[0]?.[0]).toBe(160);
+	});
+
+	it('discards an iOS adjustment deferred before user ownership', () => {
+		vi.useFakeTimers();
+		vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('iPhone');
+		_resetIOSDetectionForTests();
+		const harness = createVirtualizerHarness(['only']);
+		harness.virtualizer.getVirtualItems();
+		harness.emitScrollOffset(100);
+		harness.scrollElement.dispatchEvent(new Event('touchstart'));
+		harness.scrollToFn.mockClear();
+
+		harness.virtualizer.resizeItem(0, 60);
+		expect(harness.scrollToFn).not.toHaveBeenCalled();
+		harness.scrollElement.dispatchEvent(new Event('touchend'));
+		vi.advanceTimersByTime(151);
+		expect(harness.scrollToFn).toHaveBeenCalledOnce();
+		harness.emitScrollOffset(110);
+
+		harness.scrollElement.dispatchEvent(new Event('touchstart'));
+		harness.scrollToFn.mockClear();
+		harness.virtualizer.resizeItem(0, 70);
+		expect(harness.scrollToFn).not.toHaveBeenCalled();
+		harness.virtualizer.cancelScroll();
+		harness.scrollElement.dispatchEvent(new Event('touchend'));
+		vi.advanceTimersByTime(151);
+
+		expect(harness.scrollToFn).not.toHaveBeenCalled();
 	});
 });

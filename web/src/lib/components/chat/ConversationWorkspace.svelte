@@ -519,12 +519,9 @@
 	$effect(() => {
 		const node = scrollContainer;
 		if (!node) return;
-		return observeConversationViewportScrollGestures(node, {
-			onScrollIntent: (direction) => scroll.noteUserScrollIntent(direction),
-			onContentTouchStart: () => scroll.beginContentTouch(),
-			onContentTouchEnd: () => scroll.endContentTouch(),
-			onContentTouchReset: () => scroll.resetContentTouch(),
-		});
+		return observeConversationViewportScrollGestures(node, (direction) =>
+			scroll.noteUserScrollIntent(direction),
+		);
 	});
 
 	// Scrolls to bottom when the scroll container becomes available.

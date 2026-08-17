@@ -46,8 +46,11 @@ import {
 	ConversationEarlierPrependAnchorOwnership,
 	ConversationPreCommitAnchorBuffer,
 	ConversationProgrammaticScrollOwnership,
+	ConversationMountedVirtualItems,
+	type ConversationVirtualAnchorSettlePort,
 	positionCommittedConversationAnchor,
 	positionPendingConversationAnchor,
+	settleConversationVirtualAnchor,
 } from '../conversation-feed-virtual-runtime';
 import ConversationFeedVirtualControllerTestHost from './ConversationFeedVirtualControllerTestHost.svelte';
 
@@ -85,6 +88,93 @@ describe('ConversationFeedVirtualController helpers', () => {
 
 		expect(viewportOffset).toBe(429);
 		expect(conversationAnchorScrollOffset(1_808, 59.8, viewportOffset)).toBeCloseTo(1_319.2);
+	});
+
+	it('skips a settled anchor write while retaining the post-frame cancellation check', async () => {
+		let animationFrame = 0;
+		let current = true;
+		const requestAnimationFrame = vi
+			.spyOn(window, 'requestAnimationFrame')
+			.mockImplementation((callback) => {
+				animationFrame += 1;
+				if (animationFrame === 2) current = false;
+				callback(performance.now());
+				return animationFrame;
+			});
+		const mountedItems = new ConversationMountedVirtualItems();
+		const element = document.createElement('div');
+		element.dataset.index = '0';
+		element.dataset.chatVirtualItem = 'anchor';
+		document.body.append(element);
+		mountedItems.add(element);
+		const scrollToOffset = vi.fn();
+		const instance = {
+			options: { scrollMargin: 0 },
+			getVirtualItems: () => [{ index: 0, key: 'anchor', start: 100, size: 50, end: 150, lane: 0 }],
+			scrollToIndex: vi.fn(),
+			scrollToOffset,
+		} satisfies ConversationVirtualAnchorSettlePort;
+
+		try {
+			await expect(settleConversationVirtualAnchor({
+				instance,
+				mountedItems,
+				configuredKeys: ['anchor'],
+				key: 'anchor',
+				index: 0,
+				viewportOffset: 0,
+				readScrollOffset: () => 100.25,
+				isCurrent: () => current,
+			})).resolves.toBe(false);
+			expect(scrollToOffset).not.toHaveBeenCalled();
+			expect(animationFrame).toBe(2);
+		} finally {
+			requestAnimationFrame.mockRestore();
+			element.remove();
+		}
+	});
+
+	it('writes an anchor outside tolerance and validates the settled geometry', async () => {
+		const requestAnimationFrame = vi
+			.spyOn(window, 'requestAnimationFrame')
+			.mockImplementation((callback) => {
+				callback(performance.now());
+				return 1;
+			});
+		const mountedItems = new ConversationMountedVirtualItems();
+		const element = document.createElement('div');
+		element.dataset.index = '0';
+		element.dataset.chatVirtualItem = 'anchor';
+		document.body.append(element);
+		mountedItems.add(element);
+		let scrollOffset = 99;
+		const scrollToOffset = vi.fn((offset: number) => {
+			scrollOffset = offset;
+		});
+		const instance = {
+			options: { scrollMargin: 0 },
+			getVirtualItems: () => [{ index: 0, key: 'anchor', start: 100, size: 50, end: 150, lane: 0 }],
+			scrollToIndex: vi.fn(),
+			scrollToOffset,
+		} satisfies ConversationVirtualAnchorSettlePort;
+
+		try {
+			await expect(settleConversationVirtualAnchor({
+				instance,
+				mountedItems,
+				configuredKeys: ['anchor'],
+				key: 'anchor',
+				index: 0,
+				viewportOffset: 0,
+				readScrollOffset: () => scrollOffset,
+				isCurrent: () => true,
+			})).resolves.toBe(true);
+			expect(scrollToOffset).toHaveBeenCalledOnce();
+			expect(scrollToOffset).toHaveBeenCalledWith(100, { behavior: 'auto' });
+		} finally {
+			requestAnimationFrame.mockRestore();
+			element.remove();
+		}
 	});
 
 	it('does not carry directionless press origins into later gestures', () => {
@@ -665,7 +755,7 @@ describe('ConversationFeedVirtualController', () => {
 		expect(exposure.controller.ownsScrollPosition()).toBe(false);
 	});
 
-	it('positions a mounted edge anchor directly without first aligning it to the top', async () => {
+	it('keeps a mounted edge anchor settled without first aligning it to the top', async () => {
 		const { exposure } = await renderController();
 		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
 		if (!viewport) throw new Error('Expected the controller viewport');
@@ -685,19 +775,21 @@ describe('ConversationFeedVirtualController', () => {
 		const scrollToOffset = vi.spyOn(exposure.instance, 'scrollToOffset');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Prepend' }));
-		await waitFor(() => expect(scrollToOffset).toHaveBeenCalled());
-
-		expect(scrollToIndex).not.toHaveBeenCalled();
-		const repositionedItem = exposure.instance
-			.getVirtualItems()
-			.find((item) => item.key === readingItem.key);
+		await waitFor(() =>
+			expect(
+				exposure.instance.getVirtualItems().find((item) => item.key === readingItem.key)?.index,
+			).toBe(readingItem.index + 4),
+		);
+		const repositionedItem = exposure.instance.getVirtualItems().find((item) => item.key === readingItem.key);
 		if (!repositionedItem) throw new Error('Expected the reading item after the prepend');
 		const expectedScrollOffset = conversationAnchorScrollOffset(
 			repositionedItem.start,
 			exposure.instance.options.scrollMargin,
 			readingOffset,
 		);
-		expect(scrollToOffset.mock.calls[0]?.[0]).toBeCloseTo(expectedScrollOffset);
+		expect(viewport.scrollTop).toBeCloseTo(expectedScrollOffset);
+		expect(scrollToIndex).not.toHaveBeenCalled();
+		expect(scrollToOffset).not.toHaveBeenCalled();
 	});
 
 	it('keeps a clamped prepend latched through a tail publication', async () => {
@@ -887,6 +979,20 @@ describe('ConversationFeedVirtualController', () => {
 		// The uncancelled control restore proves the deferred write lands without the gesture.
 		exposure.controller.restoreInitialEnd();
 		await waitFor(() => expect(scrollToOffset).toHaveBeenCalled());
+	});
+
+	it('cancels TanStack reconciliation only when user intent supersedes owned scrolling', async () => {
+		const { exposure } = await renderController();
+		const cancelScroll = vi.spyOn(exposure.instance, 'cancelScroll');
+
+		exposure.controller.cancelForUserIntent(null);
+		expect(cancelScroll).not.toHaveBeenCalled();
+
+		exposure.controller.scrollToEnd();
+		expect(exposure.controller.ownsScrollPosition()).toBe(true);
+		exposure.controller.cancelForUserIntent(null);
+
+		expect(cancelScroll).toHaveBeenCalledOnce();
 	});
 
 	it('releases the initial paint gate after bounded streaming geometry', async () => {
