@@ -267,6 +267,14 @@ export class ConversationScrollController {
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
 		const inferredDirection = this.#inferScrollDirection(node.scrollTop);
 		if (this.#isPageMutationInProgress) {
+			const shouldReaffirmUserOwnership =
+				inferredDirection !== null &&
+				this.#userScrollIntent.direction === inferredDirection &&
+				this.#hasRecentUserScrollIntent();
+			this.#applyInferredIntentDirection(inferredDirection);
+			if (shouldReaffirmUserOwnership) {
+				this.deps.getViewport()?.cancelForUserIntent(inferredDirection);
+			}
 			this.#preserveHistoryBrowsing();
 			return;
 		}
