@@ -11,10 +11,6 @@ mock.module('../../chats/title-generator.js', () => ({
   TitleGenerationError: class TitleGenerationError extends Error {},
 }));
 
-mock.module('../../chats/fork-chat.js', () => ({
-  forkChatFileCopy: mock(() => Promise.resolve({})),
-}));
-
 import createChatRoutes from '../chats.js';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
 import { TranscriptAdoptionService } from '../../ledger/adoption.ts';
