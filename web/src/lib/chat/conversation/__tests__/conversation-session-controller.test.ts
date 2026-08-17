@@ -6,6 +6,7 @@ import {
 	forkChat,
 	forkRunChat,
 	getChatExecutionControl,
+	getChatSnapshot,
 	interruptAndSendChat,
 	pauseChatQueue,
 	resumeChatQueue,
@@ -26,10 +27,21 @@ import {
 	type SessionControllerDeps,
 } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { AssistantMessage, BashToolUseMessage, type ChatMessage } from '$shared/chat-types';
+import {
+	AssistantMessage,
+	BashToolUseMessage,
+	PermissionRequestMessage,
+	type ChatMessage,
+} from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
-import type { ChatTransientControlAction } from '$shared/chat-transient-feed';
+import type {
+	ChatTransientControlAction,
+	ChatTransientFeedMutation,
+	ChatTransientFeedSnapshot,
+	TransientFeedRow,
+} from '$shared/chat-transient-feed';
 import type { CommandAcceptedResponse } from '$shared/chat-command-contracts';
+import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import type {
@@ -43,6 +55,7 @@ import {
 	type LoadingStatus,
 } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
@@ -51,6 +64,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	forkRunChat: vi.fn(),
 	selfHandoffRunChat: vi.fn(),
 	getChatExecutionControl: vi.fn(),
+	getChatSnapshot: vi.fn(),
 	interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
@@ -73,6 +87,7 @@ vi.mock('$lib/api/scheduled-prompts.js', () => ({
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
 const mockGetChatExecutionControl = vi.mocked(getChatExecutionControl);
+const mockGetChatSnapshot = vi.mocked(getChatSnapshot);
 const mockInterruptAndSendChat = vi.mocked(interruptAndSendChat);
 const mockPauseChatQueue = vi.mocked(pauseChatQueue);
 const mockResumeChatQueue = vi.mocked(resumeChatQueue);
@@ -175,6 +190,89 @@ function emptyControl(): ChatExecutionControlState {
 		},
 		version: 0,
 		updatedAt: null,
+	};
+}
+
+function transientPermission(
+	permissionOccurrenceId: string,
+	runId: string,
+	displayOrder: number,
+	transcriptViewId = 'generation-1',
+): TransientFeedRow {
+	return {
+		permissionOccurrenceId,
+		runId,
+		transcript: { transcriptViewId, afterOrdinal: displayOrder },
+		displayOrder,
+		message: new PermissionRequestMessage(
+			'2026-08-17T00:00:00.000Z',
+			permissionOccurrenceId,
+			new BashToolUseMessage(
+				'2026-08-17T00:00:00.000Z',
+				`tool-${permissionOccurrenceId}`,
+				'bun test',
+			),
+		),
+	};
+}
+
+function transientFeed(
+	rows: readonly TransientFeedRow[],
+	transientRevision: number,
+	transcriptViewId = 'generation-1',
+): ChatTransientFeedSnapshot {
+	return {
+		serverInstanceId: 'server-instance-test',
+		chatId: 'chat-1',
+		transcriptViewId,
+		transientRevision,
+		rows,
+	};
+}
+
+function chatSnapshot(
+	transientFeedSnapshot: ChatTransientFeedSnapshot,
+	messages: TranscriptMessage[] = [],
+): ChatSnapshotResponse {
+	const pageOldestOrdinal = messages[0]?.ordinal ?? 0;
+	const pageNewestOrdinal = messages.at(-1)?.ordinal ?? 0;
+	const nextBeforeOrdinal = pageOldestOrdinal > 1 ? pageOldestOrdinal : null;
+	return {
+		observedAt: '2026-08-17T00:00:00.000Z',
+		messageLimit: 1,
+		chat: {
+			id: 'chat-1',
+			title: 'Unread chat',
+			agentId: 'claude',
+			agentOwnershipEpoch: 'epoch-1',
+			carryOverRevision: 'carryover-1',
+			model: 'sonnet',
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			projectPath: '/workspace/project',
+			tags: [],
+			canReloadFromNativeHistory: false,
+			activity: {
+				createdAt: null,
+				lastActivityAt: '2026-03-27T08:00:00.000Z',
+			},
+		},
+		processingPhase: 'running',
+		control: emptyControl(),
+		transientFeed: transientFeedSnapshot,
+		transcript: {
+			availability: 'available',
+			transcriptViewId: transientFeedSnapshot.transcriptViewId,
+			messages,
+			lastOrdinal: pageNewestOrdinal,
+			pageOldestOrdinal,
+			pageNewestOrdinal,
+			nextBeforeOrdinal,
+			hasMore: nextBeforeOrdinal !== null,
+		},
 	};
 }
 
@@ -291,6 +389,10 @@ function createDeps(chat = createRunningChat()) {
 		activateTransientFeed: vi.fn((chatId: string | null) => {
 			if (!chatId) conversationUi.pendingPermissionRequests = [];
 		}),
+		setTransientFeedFromSnapshot: vi.fn((snapshot: ChatTransientFeedSnapshot) => ({
+			kind: 'applied' as const,
+			snapshot,
+		})),
 		setPendingPermissionRequests: vi.fn(
 			(
 				update:
@@ -462,6 +564,8 @@ describe('ConversationSessionController', () => {
 		mockForkChat.mockReset();
 		mockForkRunChat.mockReset();
 		mockGetChatExecutionControl.mockReset();
+		mockGetChatSnapshot.mockReset();
+		mockGetChatSnapshot.mockResolvedValue(chatSnapshot(transientFeed([], 0)));
 		mockInterruptAndSendChat.mockReset();
 		mockPauseChatQueue.mockReset();
 		mockResumeChatQueue.mockReset();
@@ -745,6 +849,106 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
+	});
+
+	it('restores a selected chat live permission capability with its initial snapshot', async () => {
+		const permission = transientPermission('permission-live', 'run-live', 28);
+		mockGetChatSnapshot.mockResolvedValue(chatSnapshot(
+			transientFeed([permission], 1),
+			[{ ordinal: 28, message: permission.message }],
+		));
+		const conversationUi = new ConversationUiState();
+		conversationUi.activateTransientFeed('chat-1');
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.chatState.loadMessages = vi.fn(async () => {
+			deps.chatState.chatMessages = [permission.message];
+			return [permission.message];
+		});
+		const controller = new ConversationSessionController({ ...deps, conversationUi });
+
+		await controller.loadChat('chat-1');
+
+		expect(deps.chatState.chatMessages).toEqual([permission.message]);
+		expect(mockGetChatSnapshot).toHaveBeenCalledWith('chat-1', 1);
+		expect(conversationUi.pendingPermissionRequests).toMatchObject([
+			{
+				permissionOccurrenceId: 'permission-live',
+				chatId: 'chat-1',
+				control: {
+					serverInstanceId: 'server-instance-test',
+					chatId: 'chat-1',
+					runId: 'run-live',
+					permissionOccurrenceId: 'permission-live',
+				},
+				transcript: { transcriptViewId: 'generation-1', afterOrdinal: 28 },
+			},
+		]);
+	});
+
+	it('does not let a delayed initial snapshot overwrite a newer live transient mutation', async () => {
+		const initialPermission = transientPermission('permission-initial', 'run-live', 28);
+		const newerPermission = transientPermission('permission-newer', 'run-live', 29);
+		const delayedSnapshot = deferred<ChatSnapshotResponse>();
+		mockGetChatSnapshot.mockReturnValue(delayedSnapshot.promise);
+		const conversationUi = new ConversationUiState();
+		conversationUi.activateTransientFeed('chat-1');
+		expect(conversationUi.setTransientFeedFromSnapshot(
+			transientFeed([initialPermission], 1),
+		)).toMatchObject({ kind: 'applied' });
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.chatState.loadMessages = vi.fn().mockResolvedValue([initialPermission.message]);
+		const controller = new ConversationSessionController({ ...deps, conversationUi });
+
+		const load = controller.loadChat('chat-1');
+		await flushPromises();
+		const mutation: ChatTransientFeedMutation = {
+			serverInstanceId: 'server-instance-test',
+			chatId: 'chat-1',
+			transcriptViewId: 'generation-1',
+			transientRevision: 2,
+			mutation: { kind: 'upsert', row: newerPermission },
+		};
+		expect(conversationUi.applyTransientFeedMutation(mutation)).toMatchObject({ kind: 'applied' });
+		delayedSnapshot.resolve(chatSnapshot(
+			transientFeed([initialPermission], 1),
+			[{ ordinal: 28, message: initialPermission.message }],
+		));
+		await load;
+
+		expect(conversationUi.getTransientFeed('chat-1')).toMatchObject({
+			transientRevision: 2,
+			rows: [
+				{ permissionOccurrenceId: 'permission-initial' },
+				{ permissionOccurrenceId: 'permission-newer' },
+			],
+		});
+		expect(conversationUi.pendingPermissionRequests.map((request) => (
+			request.permissionOccurrenceId
+		))).toEqual(['permission-initial', 'permission-newer']);
+
+		const replacedViewPermission = transientPermission(
+			'permission-replaced-view',
+			'run-replaced',
+			28,
+			'generation-replaced',
+		);
+		mockGetChatSnapshot.mockResolvedValue(chatSnapshot(
+			transientFeed([replacedViewPermission], 1, 'generation-replaced'),
+			[{ ordinal: 28, message: replacedViewPermission.message }],
+		));
+		await controller.loadChat('chat-1');
+
+		expect(conversationUi.getTransientFeed('chat-1')).toMatchObject({
+			transcriptViewId: 'generation-1',
+			transientRevision: 2,
+			rows: [
+				{ permissionOccurrenceId: 'permission-initial' },
+				{ permissionOccurrenceId: 'permission-newer' },
+			],
+		});
+		expect(mockGetChatSnapshot).toHaveBeenNthCalledWith(1, 'chat-1', 1);
+		expect(mockGetChatSnapshot).toHaveBeenNthCalledWith(2, 'chat-1', 1);
+		expect(mockGetChatSnapshot).toHaveBeenCalledTimes(2);
 	});
 
 	it('does not restore the bottom after the user navigates during transcript revalidation', async () => {
