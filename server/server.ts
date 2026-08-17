@@ -327,6 +327,7 @@ export async function startServer(): Promise<void> {
     let carryOverWarnings: ((chatId: string, message: string) => void) | null = null;
     let agentRegistry!: AgentRegistry;
     let executionQueries: Pick<ChatExecutionCoordinator, 'ownsExecution'> | null = null;
+    let chatSearch: TranscriptSearchController | null = null;
     const transcriptAdoption = new TranscriptAdoptionService({
       ledger: transcriptLedger,
       registry: chatRegistry,
@@ -338,6 +339,9 @@ export async function startServer(): Promise<void> {
       ),
       async loadFrozenPrefix(_chatId, entry, signal) {
         return carryOver.loadAll(entry.carryOverSegments ?? [], signal);
+      },
+      onAdopted(chatId) {
+        chatSearch?.catalogMayHaveChanged(chatId);
       },
     });
     const nativeTranscriptActivity = new NativeTranscriptActivityService({
@@ -406,7 +410,7 @@ export async function startServer(): Promise<void> {
       workspaceDirectory: workspaceDir,
       logger,
     });
-    const chatSearch = new TranscriptSearchController({
+    chatSearch = new TranscriptSearchController({
       service: transcriptSearchService,
       ledger: transcriptLedger,
       listChatIds: () => Object.keys(chatRegistry.listAllChats()),
