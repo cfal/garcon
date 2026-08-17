@@ -1,6 +1,6 @@
 # Transcript Ledger V5 CTS Migration Plan
 
-Status: Revision 18 integrated execution plan, dogfood validation and release acceptance pending
+Status: Revision 18 integrated execution plan; dogfood validation and release acceptance complete at f6da04bda97454255a9dfe73753f39c1cd45aa16
 
 Companion specification: `docs/transcript-ledger-v5-cts.md`
 
@@ -583,6 +583,7 @@ Each scoped commit runs its focused file and owning package. Before a test
 series is handed back to the release branch, run:
 
 ```sh
+bun run test:transcript-inventory
 git diff --check origin/main...HEAD
 bun run typecheck
 bun run check

@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 18 integrated catalog, dogfood validation and release acceptance pending
+Status: Revision 18 integrated catalog; dogfood validation and release acceptance complete at f6da04bda97454255a9dfe73753f39c1cd45aa16
 
 Governing artifact:
 
@@ -217,15 +217,16 @@ release-only replay and hygiene evidence below.
 
 | Order | Command                               | Reported scope                                                               |
 | ----- | ------------------------------------- | ---------------------------------------------------------------------------- |
-| 1     | `git diff --check origin/main...HEAD` | Patch hygiene                                                                |
-| 2     | `bun run typecheck`                   | Provider packages, server, CLI, web, and integration contracts               |
-| 3     | `bun run check`                       | ESLint and Svelte diagnostics                                                |
-| 4     | `bun run test`                        | Common, scripts, every provider unit, server unit, CLI, and web Vitest cases |
-| 5     | `bun run test:integration:server`     | Server black-box and required provider-scripted cases                        |
-| 6     | `bun run test:integration:e2e`        | Lightpanda browser behavior                                                  |
-| 7     | `bun run test:integration:chromium`   | Strict browser geometry and reconnect cases                                  |
-| 8     | `bun run build`                       | Production build                                                             |
-| 9     | `timeout 30s bun run start --port 0`  | Isolated random-port startup                                                 |
+| 1     | `bun run test:transcript-inventory`   | Stable-ID discovery and inventory integrity                                  |
+| 2     | `git diff --check origin/main...HEAD` | Patch hygiene                                                                |
+| 3     | `bun run typecheck`                   | Provider packages, server, CLI, web, and integration contracts               |
+| 4     | `bun run check`                       | ESLint and Svelte diagnostics                                                |
+| 5     | `bun run test`                        | Common, scripts, every provider unit, server unit, CLI, and web Vitest cases |
+| 6     | `bun run test:integration:server`     | Server black-box and required provider-scripted cases                        |
+| 7     | `bun run test:integration:e2e`        | Lightpanda browser behavior                                                  |
+| 8     | `bun run test:integration:chromium`   | Strict browser geometry and reconnect cases                                  |
+| 9     | `bun run build`                       | Production build                                                             |
+| 10    | `timeout 30s bun run start --port 0`  | Isolated random-port startup                                                 |
 
 Credential-backed `bun run test:live:claude` and
 `bun run test:live:codex` remain separate CI-only compatibility gates. Exact
