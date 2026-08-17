@@ -1,7 +1,7 @@
 // Owns chat lifecycle, submission, permission, queue, and mode transitions.
 // Delegates all viewport operations through the dependency interface.
 
-import { interruptAndSendChat, stopChat } from '$lib/api/chats.js';
+import { getChatSnapshot, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
 import {
 	isStopSatisfied,
 	type ChatImage,
@@ -135,6 +135,7 @@ type SessionConversationUiState = Pick<
 	| 'isExecutionControlSocketInstanceConfirmed'
 	| 'setPendingPermissionRequests'
 	| 'setPreviousPermissionMode'
+	| 'setTransientFeedFromSnapshot'
 >;
 
 type SessionStartupCoordinator = Pick<StartupCoordinator, 'beginLocalStartup' | 'completeStartup'>;
@@ -470,6 +471,7 @@ export class ConversationSessionController {
 			this.#requestBottomRestore(chatId);
 		}
 
+		const initialSnapshot = getChatSnapshot(chatId, 1).catch(() => null);
 		await deps.chatState.loadMessages(chatId, {
 			minimumLimit: minimumMessageLimit,
 		});
@@ -485,6 +487,16 @@ export class ConversationSessionController {
 		) {
 			deps.readReceiptOutbox.enqueue(chatId, record.lastActivityAt);
 			deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
+		}
+
+		const snapshot = await initialSnapshot;
+		if (
+			deps.sessions.selectedChatId === chatId &&
+			snapshot?.chat.id === chatId &&
+			snapshot.transcript.availability === 'available' &&
+			snapshot.transcript.transcriptViewId === deps.chatState.getCursor().transcriptViewId
+		) {
+			deps.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
 		}
 	}
 
