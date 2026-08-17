@@ -110,7 +110,7 @@ import {
 // Route factory
 import createAllRoutes from './routes/index.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
-import { createLogger } from './lib/log.js';
+import { createLogger, type Logger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
@@ -130,6 +130,33 @@ import {
 } from './lib/http-route-types.js';
 
 const logger = createLogger('server');
+const CARRY_OVER_MIGRATION_LOG_INTERVAL_MS = 10_000;
+
+export async function runCarryOverMigrationAtStartup(
+  migrate: () => Promise<void>,
+  progressLogger: Pick<Logger, 'info'>,
+): Promise<void> {
+  const startedAt = Date.now();
+  const elapsedSeconds = () => Math.floor((Date.now() - startedAt) / 1_000);
+
+  progressLogger.info(
+    'Workspace history migration started. This one-time upgrade may take several minutes.',
+  );
+  const heartbeat = setInterval(() => {
+    progressLogger.info(
+      `Workspace history migration is still running (${elapsedSeconds()}s elapsed).`,
+    );
+  }, CARRY_OVER_MIGRATION_LOG_INTERVAL_MS);
+
+  try {
+    await migrate();
+  } finally {
+    clearInterval(heartbeat);
+  }
+  progressLogger.info(
+    `Workspace history migration completed (${elapsedSeconds()}s elapsed).`,
+  );
+}
 
 interface WsConnectionData {
   connectionId: string;
@@ -237,7 +264,12 @@ export async function startServer(): Promise<void> {
     }));
     await workspaceMigrations.run('carryover-node-migration', async () => undefined);
     await workspaceMigrations.run('carryover-segment-migration', async () => {
-      await migrateLegacyCarryOverWorkspace(workspaceDir);
+      await runCarryOverMigrationAtStartup(
+        async () => {
+          await migrateLegacyCarryOverWorkspace(workspaceDir);
+        },
+        logger,
+      );
     });
     await chatRegistry.init();
     await settings.init();
