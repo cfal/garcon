@@ -1,19 +1,18 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 18 regression catalog, stabilization in progress
+Status: Revision 18 integrated catalog, dogfood validation and release acceptance pending
 
 Governing artifacts:
 
 - `TRANSCRIPT_LEDGER_V5_DESIGN.md`, revision 18, SHA-256
-  `a46a0f53bfd1eacaafe755853cf87f0652640656156f9aceb44e25a7b1419d91`
+  `3037343ebe1d3aee9d10ea5ca664d24187dca39cad931babc738a3714b94961d`
 - `TRANSCRIPT_LEDGER_V5_RELEASE_STABILIZATION_PLAN.md`, SHA-256
-  `8ab51427369e12c3faa1ce3c039494cc4ee3c365288f63e0610a20733c39dff3`
+  `50edbc7bc81452f8347683a07dd058712b9061697d3d06f04a328c5e6a3430d3`
 
-Inventory baseline: `fix/codex-newest-line-duplication` at
-`1c293cb33ede268a54dc61af55827960c832eaf0`, plus the registered test-owner
-working tree described by the execution plan. Coverage state records whether an
-oracle exists; it does not claim that production already satisfies an
-intentional-red case.
+Inventory baseline: integrated checkpoint
+`21cc82a1530edd6811e52a735c23f6b9de4ee9ed` with 256 discovered stable IDs.
+Coverage state records whether an oracle exists; it does not claim that
+production already satisfies an intentional-red case.
 
 ## Purpose
 
@@ -213,8 +212,10 @@ remain human-reviewed in this catalog.
 
 ### Current Command Inventory
 
-The release gate invokes these commands in order. The inventory command runs
-before them so a deleted or duplicated conformance case fails before execution.
+The integrated dogfood gate invokes these commands in order. The inventory
+command runs before them so a deleted or duplicated conformance case fails
+before execution. Formal release reuses the recorded sequence and adds the
+release-only replay and hygiene evidence below.
 
 | Order | Command                               | Reported scope                                                               |
 | ----- | ------------------------------------- | ---------------------------------------------------------------------------- |
@@ -864,11 +865,17 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: disable flag and route deletion                               | OPENCODE.02                 |
 | TLV5-PAGE.07-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |
 
-## Required New Cases
+## Cataloged Follow-up and Release Procedures
 
-These are the first missing cases to implement after the catalog is reviewed.
+The remaining `Partial` and `Missing` provider-routing, native-probe, replay,
+browser, failure-injection, and accepted-loss rows are explicit catalog or
+nightly follow-up. They do not block dogfood or the active Revision 18 release
+gate unless a current release red promotes one into that gate. Their statements
+remain here so later coverage cannot silently weaken or disappear.
 
-### Provider Routing
+The two Codex rollout procedures are separately assigned to release acceptance.
+
+### Provider Routing Follow-up
 
 `TLV5-L07.03-CLAUDE-SCRIPTED-01`
 
@@ -881,7 +888,7 @@ Equivalent cases are required for OpenCode and Pi. Codex retains its existing
 black-box case. Each reference provider also needs explicit scripted cases for
 the remaining five provider matrix rows.
 
-### Native Activity
+### Native Activity Follow-up
 
 `TLV5-L09.03-SERVER-01`
 
@@ -895,7 +902,7 @@ the remaining five provider matrix rows.
 > then provider dispatch starts without waiting and the late probe cannot append
 > after execution ownership changes.
 
-### Browser Covering Cases
+### Browser Covering Follow-up
 
 `TLV5-UX.03-COMPACT-WHEEL-BURST-01`
 
@@ -924,7 +931,7 @@ the remaining five provider matrix rows.
 > captures a fresh watermark, every addressed row appears once, and the
 > reading anchor remains within one pixel.
 
-### Release Replays
+### Release-only Replays
 
 `TLV5-RELEASE-CODEX-20260810-01` and
 `TLV5-RELEASE-CODEX-20260812-01` record:
@@ -964,14 +971,18 @@ held work, and late content after terminal.
 
 ## Gate Classes
 
-### Merge Gate
+Gate assignment is explicit. A `Partial` or `Missing` catalog row does not
+inherit the merge or release gate merely from its evidence tier; only active
+registered cases and gaps promoted by a current release red enter those gates.
+
+### Merge and Dogfood Readiness Gate
 
 - Static architecture and contract cases.
 - Core and provider unit cases.
 - Full server black-box suite.
-- Required scripted tiers for Claude, Codex, OpenCode, and Pi.
-- Lightpanda transcript workflow.
-- Strict Chromium covering array.
+- Active scripted cases for Claude, Codex, OpenCode, and Pi.
+- Active Lightpanda transcript workflows.
+- Active Chromium geometry and reconnect cases.
 - Typecheck, check, build, and bounded startup.
 
 ### Nightly Gate
@@ -990,7 +1001,8 @@ held work, and late content after terminal.
 
 ### Release Acceptance
 
-- Every required catalog case reports pass with no undocumented skip.
+- Every case assigned to the active Revision 18 release gate, including any
+  gap promoted by a current release red, reports pass with no undocumented skip.
 - Both exact Codex rollout replays report the expected final row and tail order.
 - The complete validation command sequence is recorded with environment data.
 - The worktree contains no temporary diagnostics or untracked release output.
