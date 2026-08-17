@@ -441,6 +441,7 @@ describe('Codex producer routing', () => {
       }));
       await waitForPath(join(controlDirectory, `${staleControl}.sent`));
 
+      // The unsupported request acts as a same-client JSON-RPC barrier after the controlled row.
       const barrierCommand = `cross-chat-stale-barrier-${randomUUID()}`;
       const barrierControl = 'cross-chat-stale-barrier.request.json';
       await writeFile(join(controlDirectory, barrierControl), JSON.stringify({
@@ -484,17 +485,19 @@ describe('Codex producer routing', () => {
       expect(assistantContents((await fixture.client.getMessages(liveChatId)).messages)
         .filter((content) => content === liveContent)).toHaveLength(1);
 
+      const dropLogLines = fixture.garcon.logs.slice(dropLogCursor);
+      const dropLogs = dropLogLines.join('\n');
+      expect(dropLogLines.filter((line) => line.includes(
+        '[agent-integration:codex] Dropped a provider event for an unavailable transcript sink',
+      ))).toHaveLength(1);
+      expect(dropLogs).toContain(`chatId: "${staleChatId}"`);
+      expect(dropLogs).toContain('eventType: "rows"');
+      expect(dropLogs).not.toContain(staleContent);
+
       await writeFile(turnReleasePath, 'release');
       await fixture.client.waitForTurnTerminal(liveChatId, liveTurn.turnId, {
         afterIndex: liveCursor,
       });
-      const dropLogs = fixture.garcon.logs.slice(dropLogCursor).join('\n');
-      expect(dropLogs).toContain(
-        '[agent-integration:codex] Dropped a provider event for an unavailable transcript sink',
-      );
-      expect(dropLogs).toContain(`chatId: "${staleChatId}"`);
-      expect(dropLogs).toContain('eventType: "rows"');
-      expect(dropLogs).not.toContain(staleContent);
     }, {
       resolveServerEnvironment(directories) {
         controlDirectory = join(directories.root, 'codex-cross-chat-routing-controls');

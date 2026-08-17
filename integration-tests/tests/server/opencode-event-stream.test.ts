@@ -260,10 +260,14 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
         marker: liveReply,
         afterIndex: liveCursor,
       });
-      const dropLogs = fixture.garcon.logs.slice(dropLogCursor).join('\n');
-      expect(dropLogs).toContain(
+      const dropLogLines = fixture.garcon.logs.slice(dropLogCursor);
+      const dropLogs = dropLogLines.join('\n');
+      expect(dropLogLines.flatMap((line, index) => line.includes(
         '[agent-integration:opencode] Dropped a provider event for an unavailable transcript sink',
-      );
+      ) ? [dropLogLines.slice(index, index + 6).join('\n')] : []).filter((block) => (
+        block.includes(`chatId: "${staleChatId}"`)
+        && block.includes('eventType: "rows"')
+      ))).toHaveLength(1);
       expect(dropLogs).toContain(`chatId: "${staleChatId}"`);
       expect(dropLogs).toContain('eventType: "rows"');
       expect(dropLogs).not.toContain(staleReply);

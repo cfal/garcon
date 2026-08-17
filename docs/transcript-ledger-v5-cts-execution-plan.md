@@ -265,7 +265,8 @@ provider-scripted tier:
 - source retirement releases routing state;
 - unnamed event drops;
 - identical native operation names cannot cross clients or chats;
-- a stale rejection cannot terminate a shared event stream;
+- for providers whose transport shares an event stream, a stale rejection
+  cannot terminate that stream or an unrelated chat;
 - provider-specific compaction, approval, cancellation, and error paths retain
   the creating publisher where applicable.
 

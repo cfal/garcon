@@ -522,7 +522,7 @@ Additional design-required rows not present in the plan's six-row matrix:
 | Required scenario                                                      | Required providers          | State                    |
 | ---------------------------------------------------------------------- | --------------------------- | ------------------------ |
 | identical native operation names cannot cross clients or chats         | Claude, Codex, OpenCode, Pi | Partial                  |
-| shared-stream stale rejection cannot stop another chat                 | Codex, OpenCode             | Covered                  |
+| shared-stream stale rejection cannot stop another chat                 | OpenCode                    | Covered                  |
 | `runExisting` and compaction retain the creating publisher             | Supporting providers        | Partial                  |
 | approval, cancellation, and error events retain the creating publisher | Permission providers        | Partial                  |
 | route and callback counts return to baseline after repeated retirement | All                         | Missing soak coverage    |
@@ -531,9 +531,12 @@ Key current evidence:
 
 - `integration-tests/tests/server/codex-producer-routing.test.ts` proves stale
   Codex approval and content containment through server boundaries.
-- The Codex and OpenCode cross-chat scripted cases hold a stale chat A event
-  ahead of chat B's named event and prove B commits on the same surviving
-  provider stream.
+- The Codex cross-chat scripted case proves stale closed-sink absorption in
+  one runtime across independent app-server clients and processes while chat B
+  commits.
+- The OpenCode cross-chat scripted case holds a stale chat A event ahead of
+  chat B's named event and proves B commits on the same unchanged global
+  stream.
 - `server-agents/claude/src/agents/claude/__tests__/cli-runtime.test.js` proves
   sequential concrete operations and continuation routing at unit tier.
 - `server-agents/opencode/src/agents/opencode/__tests__/operation-routing.test.js`
@@ -814,7 +817,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.11-CURSOR-PREFERRED-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: an invalid preferred ACP store blocks fallback until the preferred candidate is repaired or removed | ADOPT.11 |
 | TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01 | `server-agents/common/src/direct/__tests__/legacy-session-relocation.test.js`: mixed moved/skipped relocation commits no version, retains the skipped source, and a repaired retry commits once | ADOPT.11 |
 | TLV5-L07.03-CODEX-SCRIPTED-01  | `integration-tests/tests/server/codex-producer-routing.test.ts`: `drops content emitted by the old native client after transcript replacement`            | L07.03, L07.08              |
-| TLV5-L07.08-CODEX-CROSS-CHAT-SCRIPTED-01 | `integration-tests/tests/server/codex-producer-routing.test.ts`: a stale chat A publish is absorbed before chat B commits exactly once through its independently named native client | L07.08 |
+| TLV5-L07.08-CODEX-CROSS-CHAT-SCRIPTED-01 | `integration-tests/tests/server/codex-producer-routing.test.ts`: one Codex runtime absorbs a stale chat A publish from its closed sink while chat B commits exactly once through an independent app-server client and process; supplementary cross-chat isolation evidence, not shared-stream coverage | L07.08 |
 | TLV5-L07.08-OPENCODE-CROSS-CHAT-SCRIPTED-01 | `integration-tests/tests/server/opencode-event-stream.test.ts`: a held stale chat A event reaches its closed sink before chat B commits on the same unchanged global stream | L07.08 |
 | TLV5-L07.08-OPENCODE-SCRIPTED-01 | `integration-tests/tests/server/opencode-event-stream.test.ts`: a reset retires the active route, absorbs its late event, and leaves the replacement global stream usable | L07.08 |
 | TLV5-A07-SERVER-RESTART-01     | `integration-tests/tests/server/persistence-lifecycle.test.ts`: restart preserves the durable input and recomputes its resend candidacy without ephemeral exclusion state | A07 |
