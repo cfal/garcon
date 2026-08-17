@@ -1318,6 +1318,57 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 2 });
 	});
 
+	it('merges a contiguous buffered suffix past a sparse snapshot ceiling', () => {
+		const chat = new ActiveTranscriptState();
+		const current = assistantEntries(177, 226);
+		chat.replaceGeneration('chat-1', 'generation-1', current, {
+			lastOrdinal: 226,
+			pageOldestOrdinal: 177,
+			nextBeforeOrdinal: 177,
+			hasMore: true,
+		});
+		const epoch = chat.beginSnapshotLoad();
+
+		expect(
+			chat.applyMessages(
+				'chat-1',
+				'generation-1',
+				[entry(227, user('live user')), entry(228, assistant('live assistant'))],
+				227,
+				229,
+			),
+		).toBe('applied');
+		expect(
+			chat.setFromPage(
+				'chat-1',
+				page({
+					messages: current,
+					lastOrdinal: 229,
+					pageOldestOrdinal: 177,
+					pageNewestOrdinal: 226,
+					hasMore: true,
+				}),
+				epoch,
+			),
+		).toBe('applied');
+
+		expect(
+			chat.entries.slice(-2).map((message) => ({
+				ordinal: message.ordinal,
+				content: contentOf(message.message),
+			})),
+		).toEqual([
+			{ ordinal: 227, content: 'live user' },
+			{ ordinal: 228, content: 'live assistant' },
+		]);
+		expect(chat.lastOrdinal).toBe(229);
+		expect(chat.loadedThroughOrdinal).toBe(229);
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.feedMutationClock.lastResponseRevisionByMessageType['assistant-message']).toBe(
+			chat.feedMutationClock.lastRevisionByKind['live-append'],
+		);
+	});
+
 	it('preserves notices created after buffered live messages across successful snapshots', () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
@@ -3028,6 +3079,15 @@ describe('ActiveTranscriptState', () => {
 				entry(102, assistant('message-102')),
 			]),
 		).toBe('applied');
+		expect(chat.entries.at(-1)).toMatchObject({ ordinal: 50 });
+		expect(chat.loadedThroughOrdinal).toBe(50);
+		expect(chat.lastOrdinal).toBe(102);
+		expect(chat.hasLaterMessages).toBe(true);
+		const cachedAfterLive = chat.transcriptCache.get('chat-1');
+		expect(cachedAfterLive?.lastOrdinal).toBe(102);
+		expect(cachedAfterLive?.messages.slice(-2).map((message) => message.ordinal)).toEqual([
+			101, 102,
+		]);
 
 		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
 		expect(chat.entries.at(-1)).toMatchObject({ ordinal: 100 });
