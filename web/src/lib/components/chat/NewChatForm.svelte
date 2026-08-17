@@ -21,7 +21,13 @@
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
+	import {
+		composerEditorSelectionFromTextarea,
+		restoreComposerEditorSelection,
+		type ComposerEditorSelection,
+	} from '$lib/chat/composer/composer-editor-selection.js';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import ComposerEditorDialog from './ComposerEditorDialog.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
@@ -63,6 +69,8 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
+	import { NewChatComposerEditorState } from './new-chat-composer-editor-state.svelte.js';
+	import { NewChatPromptRefinementController } from './new-chat-prompt-refinement-controller.js';
 
 	interface Props {
 		prefill?: string;
@@ -92,7 +100,9 @@
 		},
 	});
 	const canAttachImages = $derived(modelCatalog.supportsImages(form.agentId, form.modelValue));
-	const fileAttachmentMimeTypes = $derived(modelCatalog.fileAttachmentMimeTypes?.(form.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES);
+	const fileAttachmentMimeTypes = $derived(
+		modelCatalog.fileAttachmentMimeTypes?.(form.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
+	);
 	const attachmentSupport = $derived({
 		allowImages: canAttachImages,
 		fileMimeTypes: fileAttachmentMimeTypes,
@@ -127,6 +137,25 @@
 	);
 
 	const snippetPalette = new SnippetPaletteTriggerState();
+	const composerEditor = new NewChatComposerEditorState();
+	const promptRefinement = new NewChatPromptRefinementController({
+		form,
+		notifications,
+		transientLayers,
+		editor: composerEditor,
+		get textarea() {
+			return textareaRef;
+		},
+		get startBlocked() {
+			return !form.settingsLoaded || snippetExpansion.pending;
+		},
+		closePromptSurfaces: () => snippetPalette.dismiss(),
+		resizeTextarea: autoResizeTextarea,
+	});
+	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	const promptTransformStatus = $derived(
+		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
+	);
 
 	function canFocusTextarea(): boolean {
 		return (
@@ -136,6 +165,8 @@
 
 	function reseed(): void {
 		snippetExpansion.cancel();
+		promptRefinement.abort();
+		composerEditor.reset();
 		snippetInteractionGeneration += 1;
 		snippetPalette.reset();
 		form.reseed(prefill);
@@ -219,23 +250,28 @@
 
 	onDestroy(() => {
 		snippetExpansion.cancel();
+		promptRefinement.destroy();
 		form.revokeAllImageUrls();
 	});
 
 	function openImagePicker(): void {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		imageInputRef?.click();
 	}
 
 	function handleImageInputChange(event: Event): void {
 		const input = event.target as HTMLInputElement;
+		if (promptTransformPending) {
+			input.value = '';
+			return;
+		}
 		if (!input.files) return;
 		form.addImages(Array.from(input.files), attachmentSupport);
 		input.value = '';
 	}
 
 	function handleMessagePaste(event: ClipboardEvent): void {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
 		const pastedImages: File[] = [];
@@ -254,9 +290,14 @@
 	}
 
 	function handleMessageInput(event: Event): void {
+		const input = event.currentTarget as HTMLTextAreaElement;
+		if (promptTransformPending) {
+			input.value = form.firstMessage;
+			return;
+		}
+		form.firstMessage = input.value;
 		autoResizeTextarea();
 		if ((event as InputEvent).isComposing) return;
-		const input = event.currentTarget as HTMLTextAreaElement;
 		snippetPalette.updateDetectedTrigger(
 			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
 			input.value,
@@ -273,6 +314,33 @@
 		if (caret !== undefined) textareaRef?.setSelectionRange(caret, caret);
 		autoResizeTextarea();
 		textareaRef?.focus();
+	}
+
+	function openExpandedEditor(): void {
+		if (promptTransformPending || !textareaRef) return;
+		snippetPalette.dismiss();
+		const selection = composerEditorSelectionFromTextarea(textareaRef);
+		textareaRef.focus({ preventScroll: true });
+		composerEditor.show(selection);
+	}
+
+	async function closeExpandedEditor(): Promise<void> {
+		const selection = composerEditor.selection;
+		composerEditor.close();
+		await tick();
+		if (!textareaRef) return;
+		restoreComposerEditorSelection(textareaRef, selection);
+		autoResizeTextarea();
+		textareaRef.focus({ preventScroll: true });
+	}
+
+	function handleExpandedTextChange(text: string): void {
+		if (promptTransformPending || !composerEditor.open || form.firstMessage === text) return;
+		form.firstMessage = text;
+	}
+
+	function handleExpandedSelectionChange(selection: ComposerEditorSelection): void {
+		composerEditor.updateSelection(selection);
 	}
 
 	async function focusPendingSnippetExpansion(): Promise<void> {
@@ -292,7 +360,7 @@
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (snippetExpansion.pending || !textareaRef) return 'cancelled';
+		if (promptTransformPending || !textareaRef) return 'cancelled';
 		const context = expansionContext();
 		if (!context) {
 			await restoreTextareaFocus();
@@ -347,6 +415,7 @@
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
+		if (promptTransformPending) return;
 		const context = expansionContext();
 		if (!context) return;
 		const sourceText = form.firstMessage;
@@ -383,7 +452,7 @@
 	}
 
 	function handleSubmit(): void {
-		if (!form.canSubmit || snippetExpansion.pending) return;
+		if (!form.canSubmit || promptTransformPending) return;
 		const command = parseSnippetCommand(form.firstMessage);
 		if (command.kind === 'invalid') {
 			notifications.error(
@@ -402,7 +471,7 @@
 	}
 
 	function handleKeyDown(e: KeyboardEvent): void {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		if (
 			e.key === 'Enter' &&
 			shouldSubmitOnEnter({
@@ -421,8 +490,14 @@
 		if (e.key === 'Escape' && onCancel) {
 			e.preventDefault();
 			e.stopPropagation();
-			onCancel();
+			cancelForm();
 		}
+	}
+
+	function cancelForm(): void {
+		promptRefinement.abort();
+		composerEditor.close();
+		onCancel?.();
 	}
 
 	const permissionOptions = $derived(buildPermissionOptions(form.permissionModes));
@@ -450,7 +525,11 @@
 	}
 </script>
 
-<div class="p-2 sm:p-4" {@attach snippetExpansion.pending && snippetExpansionLayer}>
+<div
+	class="p-2 sm:p-4"
+	{@attach snippetExpansion.pending && snippetExpansionLayer}
+	{@attach promptRefinement.pending && !composerEditor.open && promptRefinement.layerAttachment}
+>
 	<div class="relative">
 		<div
 			class="space-y-6"
@@ -524,7 +603,7 @@
 						{#if onCancel}
 							<button
 								type="button"
-								onclick={onCancel}
+								onclick={cancelForm}
 								class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
 								title={m.editor_actions_close()}
 								aria-label={m.editor_actions_close()}
@@ -595,25 +674,26 @@
 
 			<div
 				class="relative min-h-[120px] border border-border rounded-lg"
-				aria-busy={snippetExpansion.pending}
+				aria-busy={promptTransformPending}
 			>
 				<input
 					bind:this={imageInputRef}
 					type="file"
 					accept={attachmentAccept}
 					multiple
+					disabled={promptTransformPending}
 					class="hidden"
 					onchange={handleImageInputChange}
 				/>
 				<textarea
 					bind:this={textareaRef}
-					bind:value={form.firstMessage}
+					value={form.firstMessage}
 					onkeydown={handleKeyDown}
 					oninput={handleMessageInput}
 					onpaste={handleMessagePaste}
 					placeholder={form.placeholder}
-					readonly={snippetExpansion.pending}
-					aria-busy={snippetExpansion.pending}
+					readonly={promptTransformPending}
+					aria-busy={promptTransformPending}
 					class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
 					rows="2"></textarea>
 
@@ -622,7 +702,12 @@
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
 					onOpenSnippetPalette={() => snippetPalette.openFromMenu()}
-					isPromptTransformPending={snippetExpansion.pending}
+					onOpenExpandedEditor={openExpandedEditor}
+					onRefinePrompt={() => promptRefinement.handleAction()}
+					canRefinePrompt={promptRefinement.canStart}
+					isPromptRefinementPending={promptRefinement.pending}
+					isPromptTransformPending={promptTransformPending}
+					{promptTransformStatus}
 					{permissionOptions}
 					selectedPermission={form.permissionMode}
 					onPermissionSelect={(mode) => {
@@ -633,7 +718,7 @@
 					onThinkingSelect={(mode) => {
 						form.setThinkingMode(mode);
 					}}
-					canSend={form.canSubmit}
+					canSend={form.canSubmit && !promptTransformPending}
 					onSend={handleSubmit}
 					sendTitle={m.chat_new_chat_start_session()}
 					{sendButtonClass}
@@ -722,8 +807,10 @@
 									aria-label={m.chat_composer_remove_image({ name: file.name })}
 									title={m.chat_composer_remove_image({ name: file.name })}
 									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-									onclick={() => form.removeImage(idx)}
-									disabled={snippetExpansion.pending}
+									onclick={() => {
+										if (!promptTransformPending) form.removeImage(idx);
+									}}
+									disabled={promptTransformPending}
 								>
 									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
@@ -762,5 +849,21 @@
 			void form.loadWorktrees();
 		}}
 		onClose={() => form.closeWorktreeModal()}
+	/>
+{/if}
+
+{#if composerEditor.open}
+	<ComposerEditorDialog
+		text={form.firstMessage}
+		selection={composerEditor.selection}
+		attachmentCount={form.attachedImages.length}
+		focusRequestId={composerEditor.focusRequestId}
+		readOnly={promptTransformPending}
+		canRefinePrompt={promptRefinement.canStart}
+		isPromptRefinementPending={promptRefinement.pending}
+		onTextChange={handleExpandedTextChange}
+		onSelectionChange={handleExpandedSelectionChange}
+		onRefinePrompt={() => promptRefinement.handleAction()}
+		onClose={() => void closeExpandedEditor()}
 	/>
 {/if}
