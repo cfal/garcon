@@ -2085,8 +2085,8 @@ describe('ClaudeCliRuntime steering', () => {
     let runtime;
 
     try {
-      const initialMessageId = '019ff704-7b0c-70a1-b062-875461e5b578';
-      const steeringMessageId = '019ff704-7b0c-70a1-b062-875461e5b579';
+      const initialMessageId = '00000000-0000-4000-8000-000000000001';
+      const steeringMessageId = '00000000-0000-4000-8000-000000000002';
       runtime = createRuntime(logger);
       const run = runtime.startClaudeCliSession(startOptions({
         clientMessageId: initialMessageId,
@@ -2235,7 +2235,7 @@ describe('ClaudeCliRuntime steering', () => {
         operation: published.operation,
       }));
       const original = await enqueueInputStarted(fake);
-      const sharedMessageId = '019ff704-7b0c-70a1-b062-875461e5b578';
+      const sharedMessageId = '00000000-0000-4000-8000-000000000001';
       const first = runtime.steer(steerRequest(
         runtime.captureSteerTarget('expected-session'),
         { input: 'first', clientMessageId: sharedMessageId },
