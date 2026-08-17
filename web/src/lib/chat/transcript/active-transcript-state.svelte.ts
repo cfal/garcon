@@ -306,7 +306,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.transcriptCache.markStale(chatId);
 			return 'gap-detected';
 		}
-		const previousLastOrdinal = this.lastOrdinal;
+		const previousLoadedThroughOrdinal = Math.min(this.loadedThroughOrdinal, this.lastOrdinal);
 		const append = { firstOrdinal, lastOrdinal, messages };
 		const bufferedBatch = { transcriptViewId, ...append, noticeRevision, resendCandidates };
 		if (this.#snapshotBuffer) {
@@ -338,11 +338,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			);
 			return 'gap-detected';
 		}
-		const responseMessageTypes = responseMessageTypesAfter(messages, previousLastOrdinal);
-		const cursorAdvanced = result.lastOrdinal > previousLastOrdinal;
-		if (this.hasLaterMessages) {
+		const responseMessageTypes = responseMessageTypesAfter(messages, previousLoadedThroughOrdinal);
+		const cursorAdvanced = result.lastOrdinal > this.lastOrdinal;
+		this.lastOrdinal = Math.max(this.lastOrdinal, result.lastOrdinal);
+		if (this.hasLaterMessages && firstOrdinal > previousLoadedThroughOrdinal + 1) {
 			this.transcriptViewId = transcriptViewId;
-			this.lastOrdinal = result.lastOrdinal;
 			if (result.changed || cursorAdvanced) {
 				this.clearLocalNotices(noticeRevision);
 			}
@@ -357,13 +357,13 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'applied';
 		}
 		const previousEntryCount = this.entries.length;
-		const applied = applyTranscriptAppend(this.entries, append, this.lastOrdinal);
+		const applied = applyTranscriptAppend(this.entries, append, previousLoadedThroughOrdinal);
 		let entriesChanged = applied.status === 'applied' && applied.changed;
 		if (applied.status === 'applied') {
 			this.transcriptViewId = transcriptViewId;
 			if (applied.messages !== this.entries) this.entries = applied.messages;
-			this.lastOrdinal = applied.lastOrdinal;
 			this.loadedThroughOrdinal = applied.lastOrdinal;
+			this.hasLaterMessages = this.loadedThroughOrdinal < this.lastOrdinal;
 			this.oldestOrdinal = this.entries[0]?.ordinal ?? 0;
 			if (entriesChanged && this.isUserScrolledUp) {
 				const appendedCount = Math.max(0, this.entries.length - previousEntryCount);
