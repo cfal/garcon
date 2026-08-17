@@ -529,7 +529,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.loadVisibleChatPreview).toHaveBeenCalledWith('chat-b');
 	});
 
-	it('flushes queued messages before handling selected generation reset', () => {
+	it('flushes queued messages before handling selected transcript-view replacement', () => {
 		const calls: string[] = [];
 		const defaults = createStores();
 		const stores = createStores({

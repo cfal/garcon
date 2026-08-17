@@ -320,7 +320,7 @@ describe('loadCodexChatMessages', () => {
     expect(getNativeMessageSource(messages[0])).toEqual({ byteOffset: 0, lineNumber: 1 });
   });
 
-  it('loads legacy user-message client ids for exact pending-input reconciliation', async () => {
+  it('loads legacy user-message client ids as imported submission identity', async () => {
     const messages = await withTempJsonl([
       JSON.stringify({
         type: 'event_msg',

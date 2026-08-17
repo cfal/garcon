@@ -1210,7 +1210,7 @@ describe('PiRpcRuntime', () => {
     expect(fakes[0].commands.some((command) =>
       command.type === 'steer' && command.message === 'do this instead')).toBe(true);
 
-    // Delivery evidence then settle: the session stays warm and reusable.
+    // Provider acknowledgement then settle: the session stays warm and reusable.
     fakes[0].state.steering = [];
     fakes[0].pushEvent({ type: 'queue_update', steering: [], followUp: [] });
     fakes[0].pushEvent({

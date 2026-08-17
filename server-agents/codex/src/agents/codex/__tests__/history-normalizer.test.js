@@ -163,7 +163,7 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(result.fallbackThinking).toEqual([]);
     });
 
-    it('preserves the native client id as reconciliation evidence', () => {
+    it('preserves the native client id as imported submission identity', () => {
       const result = normalizeCodexJsonlEntry({
         type: 'event_msg',
         timestamp: ts,
