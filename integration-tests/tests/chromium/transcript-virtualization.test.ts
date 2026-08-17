@@ -2632,6 +2632,7 @@ async function verifyLaterPageReadingPosition(
   await initialPrompt.click();
   await waitForVirtualDataRevisionAfter(fixture.page, initialWindowRevision);
   await waitForTranscriptReady(fixture.page);
+  await initialPrompt.waitFor({ state: 'hidden' });
 
   await signalScrollIntent(fixture.page, 'earlier');
   const prefetchPosition = await positionNearLaterPageBoundary(fixture.page);
@@ -2654,9 +2655,35 @@ async function verifyLaterPageReadingPosition(
 
   const returnToLatest = fixture.page.locator('button[title="Scroll to bottom"]');
   await returnToLatest.waitFor({ state: 'visible' });
-  const latestWindowRevision = await virtualDataRevision(fixture.page);
-  await returnToLatest.click();
-  await waitForVirtualDataRevisionAfter(fixture.page, latestWindowRevision);
+  let releaseLatestRequest!: () => void;
+  const latestRequestGate = new Promise<void>((resolve) => (releaseLatestRequest = resolve));
+  let resolveLatestRequestStarted!: () => void;
+  const latestRequestStarted = new Promise<void>((resolve) => (resolveLatestRequestStarted = resolve));
+  let heldLatestRequest = false;
+  await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (
+      !heldLatestRequest
+      && url.searchParams.get('chatId') === chatId
+      && !url.searchParams.has('beforeOrdinal')
+    ) {
+      heldLatestRequest = true;
+      resolveLatestRequestStarted();
+      await latestRequestGate;
+    }
+    await route.continue();
+  });
+  try {
+    const latestWindowRevision = await virtualDataRevision(fixture.page);
+    await returnToLatest.click();
+    await withDiagnosticTimeout('the held latest-window request', latestRequestStarted);
+    await returnToLatest.locator('svg.animate-spin').waitFor({ state: 'visible' });
+    releaseLatestRequest();
+    await waitForVirtualDataRevisionAfter(fixture.page, latestWindowRevision);
+  } finally {
+    releaseLatestRequest();
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
   await waitForStablePinnedTranscriptLayout(fixture.page, 'return-to-latest');
   await appendTurn(fixture.integration, chatId, 'chromium-later-window-live-append');
   await fixture.page

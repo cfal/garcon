@@ -1305,6 +1305,31 @@ describe('ConversationScrollController', () => {
 		expect(state.isUserScrolledUp).toBe(true);
 	});
 
+	it('stops offering top navigation after reaching the initial viewport start', async () => {
+		let resolveNavigation!: (result: 'loaded') => void;
+		const navigateToWindow = vi.fn(
+			() => new Promise<'loaded'>((resolve) => (resolveNavigation = resolve)),
+		);
+		const fixture = controllerFixture({
+			scroller: { scrollTop: 240 },
+			state: { canLoadEarlier: true, isUserScrolledUp: true, navigateToWindow },
+		});
+		fixture.controller.setPinnedToBottom(false);
+
+		const navigation = fixture.controller.scrollToTop();
+		await vi.waitFor(() => expect(navigateToWindow).toHaveBeenCalledOnce());
+		expect(fixture.controller.canScrollToTop).toBe(true);
+
+		fixture.state.canLoadEarlier = false;
+		resolveNavigation('loaded');
+		await navigation;
+
+		expect(fixture.controller.canScrollToTop).toBe(false);
+		fixture.scroller.scrollTop = 20;
+		fixture.controller.handleScroll();
+		expect(fixture.controller.canScrollToTop).toBe(true);
+	});
+
 	it('preserves committed initial-window policy when layout settling is superseded', async () => {
 		const observed: {
 			controller: ConversationScrollController | null;
@@ -1349,6 +1374,37 @@ describe('ConversationScrollController', () => {
 		expect(navigateToWindow).toHaveBeenCalledWith('chat-1', 'latest');
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 		expect(chatState.entries.map((entry) => entry.ordinal)).toEqual(expectedOrdinals);
+	});
+
+	it('reports bottom navigation busy until the latest viewport is filled', async () => {
+		let resolveNavigation!: (result: 'loaded') => void;
+		let resolveFill!: (result: 'overflow') => void;
+		const navigateToWindow = vi.fn(
+			() => new Promise<'loaded'>((resolve) => (resolveNavigation = resolve)),
+		);
+		const viewport = fakeViewport({
+			measureViewportFill: vi.fn(
+				() => new Promise<'overflow'>((resolve) => (resolveFill = resolve)),
+			),
+		});
+		const fixture = controllerFixture({
+			viewport,
+			state: { hasLaterMessages: true, isUserScrolledUp: true, navigateToWindow },
+		});
+		fixture.controller.setPinnedToBottom(false);
+
+		const navigation = fixture.controller.scrollToLatestAndFill();
+		await vi.waitFor(() => expect(navigateToWindow).toHaveBeenCalledOnce());
+		expect(fixture.controller.isScrollingToBottom).toBe(true);
+
+		fixture.state.hasLaterMessages = false;
+		resolveNavigation('loaded');
+		await vi.waitFor(() => expect(viewport.measureViewportFill).toHaveBeenCalledOnce());
+		expect(fixture.controller.isScrollingToBottom).toBe(true);
+
+		resolveFill('overflow');
+		await navigation;
+		expect(fixture.controller.isScrollingToBottom).toBe(false);
 	});
 
 	it('scrolls to an already-loaded latest edge without trimming the expanded interval', async () => {

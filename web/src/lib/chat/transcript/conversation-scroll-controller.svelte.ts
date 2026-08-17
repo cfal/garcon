@@ -15,6 +15,7 @@ const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 const MIN_PAGE_PREFETCH_DISTANCE_PX = 100;
 const EARLIER_PAGE_PREFETCH_VIEWPORTS = 2;
 const LIVE_END_REPIN_THRESHOLD_PX = 50;
+const FEED_START_THRESHOLD_PX = 1;
 
 // Buffers extra earlier history while preserving one-viewport later paging.
 function pagePrefetchDistance(direction: TranscriptPageDirection, viewportHeight: number): number {
@@ -67,7 +68,9 @@ export interface ScrollControllerDeps {
 export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
 	isScrollingToTop = $state(false);
+	isScrollingToBottom = $state(false);
 	#isAutoFillingViewport = $state(false);
+	#isViewportAtStart = $state(true);
 	#refillViewportAfterCurrentFill = false;
 	#isViewportVisible = true;
 	#initialBottomRestoreChatId = $state<string | null>(null);
@@ -91,6 +94,8 @@ export class ConversationScrollController {
 		this.#lastObservedFeedChatId = deps.sessions.selectedChatId;
 		this.#lastObservedTranscriptViewId = deps.chatState.transcriptViewId;
 		this.#lastObservedFeedDataRevision = deps.chatState.feedMutationClock.dataRevision;
+		const scrollTop = deps.getScrollContainer()?.scrollTop;
+		if (scrollTop !== undefined) this.#isViewportAtStart = scrollTop <= FEED_START_THRESHOLD_PX;
 	}
 
 	isNearBottom(): boolean {
@@ -105,10 +110,15 @@ export class ConversationScrollController {
 		);
 	}
 
+	get canScrollToTop(): boolean {
+		return this.isScrollingToTop || this.deps.chatState.canLoadEarlier || !this.#isViewportAtStart;
+	}
+
 	scrollToBottom(): void {
 		const viewport = this.deps.getViewport();
 		if (!viewport) return;
 		viewport.scrollToEnd();
+		this.#isViewportAtStart = false;
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
 		this.deps.chatState.isUserScrolledUp = false;
 		this.setPinnedToBottom(true);
@@ -126,6 +136,17 @@ export class ConversationScrollController {
 		);
 		if (result === 'invalidated') return;
 		this.scrollToBottom();
+	}
+
+	async scrollToLatestAndFill(): Promise<void> {
+		if (this.isScrollingToBottom) return;
+		this.isScrollingToBottom = true;
+		try {
+			await this.scrollToLatest();
+			await this.fillUnderfilledViewport();
+		} finally {
+			this.isScrollingToBottom = false;
+		}
 	}
 
 	async restoreLatestWindow(chatId: string): Promise<boolean> {
@@ -246,7 +267,7 @@ export class ConversationScrollController {
 
 	async scrollToTop(): Promise<void> {
 		const chatId = this.deps.sessions.selectedChatId;
-		if (!chatId) return;
+		if (!chatId || this.isScrollingToTop) return;
 
 		this.isScrollingToTop = true;
 		try {
@@ -256,6 +277,7 @@ export class ConversationScrollController {
 			if (result === 'invalidated') return;
 			this.noteUserScrollIntent('earlier');
 			this.deps.getViewport()?.scrollToStart();
+			this.#isViewportAtStart = true;
 			await this.fillUnderfilledViewport();
 		} finally {
 			this.isScrollingToTop = false;
@@ -265,6 +287,7 @@ export class ConversationScrollController {
 	handleScroll(): void {
 		const node = this.deps.getScrollContainer();
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
+		this.#isViewportAtStart = node.scrollTop <= FEED_START_THRESHOLD_PX;
 		const inferredDirection = this.#inferScrollDirection(node.scrollTop);
 		if (this.#isPageMutationInProgress) {
 			const shouldReaffirmUserOwnership =
