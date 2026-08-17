@@ -848,7 +848,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide live-edge expansion survives the retired delay and later growth in canonical order with the final row visible    | R4 wide geometry    |
 | TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: context exhaustion fails visibly without continuation                             | OPENCODE.01                 |
 | TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: disable flag and route deletion                               | OPENCODE.02                 |
-| TLV5-PAGE.05-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |
+| TLV5-PAGE.07-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |
 
 ## Required New Cases
 
