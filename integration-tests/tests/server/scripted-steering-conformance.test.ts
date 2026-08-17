@@ -32,7 +32,9 @@ import {
 } from '../../support/scripted-opencode.js';
 
 interface HeldModelTurn {
-  readonly requested: Promise<unknown>;
+  readonly requested: Promise<{
+    readonly userTexts: readonly string[];
+  }>;
   release(): void;
 }
 
@@ -198,10 +200,14 @@ function defineSteeringConformance(
       const firstPrompt = marker(driver.id, 'STOP_FIRST_PROMPT');
       const steerPrompt = marker(driver.id, 'STOP_STEER_PROMPT');
       const cancelledReply = marker(driver.id, 'STOP_CANCELLED_REPLY');
+      const lateSteerReply = marker(driver.id, 'STOP_LATE_STEER_REPLY');
       const recoveryPrompt = marker(driver.id, 'STOP_RECOVERY_PROMPT');
       const recoveryReply = marker(driver.id, 'STOP_RECOVERY_REPLY');
       const requestCursor = driver.markRequests();
       const held = driver.holdReply(cancelledReply);
+      const lateSteerHeld = driver.emitsTurnTerminalOnStop === false
+        ? driver.holdReply(lateSteerReply)
+        : undefined;
 
       try {
         await withIntegrationFixture(`${driver.id}-scripted-steering-stop`, async (fixture) => {
@@ -220,6 +226,11 @@ function defineSteeringConformance(
             chatId,
             content: steerPrompt,
           })).toMatchObject({ status: 'accepted', turnId: active.turnId });
+          if (lateSteerHeld) {
+            held.release();
+            const lateSteerRequest = await lateSteerHeld.requested;
+            expect(lateSteerRequest.userTexts).toEqual([firstPrompt, steerPrompt]);
+          }
 
           const stopCursor = fixture.client.markEvents();
           expect(await fixture.client.stopChat({
@@ -252,6 +263,7 @@ function defineSteeringConformance(
           }
 
           held.release();
+          lateSteerHeld?.release();
           driver.scriptReply(recoveryReply);
           const recoveryCursor = fixture.client.markEvents();
           const recovery = await fixture.client.runChat(driver.runRequest({
@@ -281,6 +293,7 @@ function defineSteeringConformance(
         });
       } finally {
         held.release();
+        lateSteerHeld?.release();
         driver.reset();
       }
     }, 120_000);
