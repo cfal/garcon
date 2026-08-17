@@ -3,7 +3,6 @@ import path from 'path';
 import mime from 'mime-types';
 import { withJsonBody } from '../lib/json-route.js';
 import {
-  listDirectoryLegacy,
   listDirectoryNames,
   listDirectoryStrict,
 } from './projects.utils.js';
@@ -51,7 +50,6 @@ import {
   type FileTreeBreadcrumb,
   type FileTreeEntry,
   type FileTreeResponse,
-  type LegacyFileTreeEntry,
 } from '../../common/file-contracts.ts';
 
 const logger = createLogger('routes:files');
@@ -161,13 +159,11 @@ function isOmittableFileTreeEntryError(error: unknown): boolean {
 
 interface FilesRouteDependencies {
   listTreeDirectory: typeof listDirectoryStrict;
-  listLegacyTreeDirectory: typeof listDirectoryLegacy;
   resolveSaveTarget: typeof resolveRealWithinBase;
 }
 
 const defaultFilesRouteDependencies: FilesRouteDependencies = {
   listTreeDirectory: listDirectoryStrict,
-  listLegacyTreeDirectory: listDirectoryLegacy,
   resolveSaveTarget: resolveRealWithinBase,
 };
 
@@ -290,61 +286,6 @@ export default function createFilesRoutes(
       logger.error('files: file tree error:', errorMessage(error));
       return jsonErrorFromUnknown(error);
     }
-  }
-
-  async function handleLegacyTree(
-    _request: Request,
-    url: URL,
-  ): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
-
-    try {
-      const requestedPath = url.searchParams.get('path');
-      const targetDirectory = requestedPath
-        ? await resolveRealWithinBase(projectPath, requestedPath)
-        : projectPath;
-      const entries = await dependencies.listLegacyTreeDirectory(
-        targetDirectory,
-        true,
-      );
-      const resolvedEntries = await Promise.all(
-        entries.map(async (entry): Promise<LegacyFileTreeEntry | null> => {
-          try {
-            await resolveRealWithinBase(projectPath, entry.path);
-            return {
-              ...entry,
-              relativePath: portableRelativePath(projectPath, entry.path),
-            };
-          } catch (error) {
-            if (isOmittableFileTreeEntryError(error)) return null;
-            throw error;
-          }
-        }),
-      );
-      const response = resolvedEntries.filter(
-        (entry): entry is LegacyFileTreeEntry => entry !== null,
-      );
-      return Response.json(response);
-    } catch (error) {
-      if (isProjectBoundaryError(error)) {
-        return Response.json(
-          { error: 'Path must be under project root' },
-          { status: 403 },
-        );
-      }
-      logger.error('files: legacy file tree error:', errorMessage(error));
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
-    }
-  }
-
-  function handleTree(request: Request, url: URL): Promise<Response> {
-    const usesLegacySelector =
-      url.searchParams.has('chatId') || url.searchParams.has('projectPath');
-    return usesLegacySelector
-      ? handleLegacyTree(request, url)
-      : handleBaseTree(request, url);
   }
 
   async function handleList(_request: Request, url: URL): Promise<Response> {
@@ -696,7 +637,7 @@ export default function createFilesRoutes(
   }
 
   return {
-    '/api/v1/files/tree': { GET: handleTree },
+    '/api/v1/files/tree': { GET: handleBaseTree },
     '/api/v1/files/list': { GET: handleList },
     '/api/v1/files/identity': { GET: handleIdentity },
     '/api/v1/files/revision': { GET: handleRevision },

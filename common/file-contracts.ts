@@ -69,16 +69,6 @@ export interface FileTreeResponse {
   entries: FileTreeEntry[];
 }
 
-export interface LegacyFileTreeEntry {
-  name: string;
-  path: string;
-  relativePath: string;
-  type: FileTreeEntryType;
-  size?: number;
-  modified?: string | null;
-  permissionsRwx?: string;
-}
-
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
