@@ -45,12 +45,15 @@ export class TranscriptViewReader {
         signal,
       );
     } catch (error) {
+      // L11 fences a chat for the process lifetime with no retry protocol, so the wire flag must
+      // not invite a retry that can never succeed. The cause is preserved for the diagnostic
+      // sanitizer at the HTTP boundary and is never serialized into the response.
       if (error instanceof LedgerFencedError) {
         throw new TranscriptHistoryUnavailableError({
           kind: 'degraded',
           errorCode: 'LEDGER_FENCED',
-          retryable: true,
-        });
+          retryable: false,
+        }, { cause: error });
       }
       throw error;
     }

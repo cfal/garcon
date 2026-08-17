@@ -54,7 +54,7 @@ import {
   type ChatExecutionService,
 } from '../chat-execution/chat-execution-coordinator.js';
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
-import { StaleTranscriptViewError } from '../ledger/errors.js';
+import { safeFenceDiagnostic, StaleTranscriptViewError } from '../ledger/errors.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
@@ -500,6 +500,20 @@ export default function createChatRoutes({
         limit,
       } satisfies CompleteChatHistoryResponse);
     } catch (error: unknown) {
+      // A fenced ledger is permanent for the process, and its cause can carry a database path or
+      // chat identity. It reports one fixed line with sanitized identifiers and returns before the
+      // generic diagnostic below, which logs the raw message.
+      if (
+        error instanceof TranscriptHistoryUnavailableError
+        && error.historyState.errorCode === 'LEDGER_FENCED'
+      ) {
+        logger.warn('Transcript ledger read is fenced.', safeFenceDiagnostic(error.cause));
+        return Response.json({
+          historyState: error.historyState,
+          chatId,
+          messages: [],
+        } satisfies UnavailableChatHistoryResponse);
+      }
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
       if (error instanceof StaleTranscriptViewError) {
         return jsonError(

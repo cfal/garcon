@@ -56,7 +56,7 @@ describe('transcript corruption isolation', () => {
         historyState: {
           kind: 'degraded',
           errorCode: 'LEDGER_FENCED',
-          retryable: true,
+          retryable: false,
         },
       });
 
