@@ -45,6 +45,16 @@ export interface TranscriptSearchIndexInput {
   readonly rows: readonly HistoricalSearchMessageRow[];
 }
 
+export class TranscriptSearchWorkerError extends Error {
+  constructor(
+    readonly code: string,
+    readonly retryable: boolean,
+  ) {
+    super(code);
+    this.name = 'TranscriptSearchWorkerError';
+  }
+}
+
 export class TranscriptSearchService {
   readonly #searchDirectory: string;
   readonly #dbPath: string;
@@ -118,18 +128,14 @@ export class TranscriptSearchService {
   }
 
   replaceChat(input: Omit<TranscriptSearchIndexInput, 'expectedAfterOrdinal'>): Promise<void> {
-    return this.#trackWrite(async () => {
-      await this.#requestIndexerFrames(indexFrames('replace', {
-        ...input,
-        expectedAfterOrdinal: 0,
-      }));
-    });
+    return this.#trackWrite(() => this.#indexChat('replace', {
+      ...input,
+      expectedAfterOrdinal: 0,
+    }));
   }
 
   appendRows(input: TranscriptSearchIndexInput): Promise<void> {
-    return this.#trackWrite(async () => {
-      await this.#requestIndexerFrames(indexFrames('append', input));
-    });
+    return this.#trackWrite(() => this.#indexChat('append', input));
   }
 
   deleteChat(chatId: string): Promise<void> {
@@ -220,6 +226,30 @@ export class TranscriptSearchService {
   async #drainWrites(): Promise<void> {
     await this.#admissionGate;
     await Promise.allSettled([...this.#inFlightWrites]);
+  }
+
+  async #indexChat(
+    mode: 'replace' | 'append',
+    input: TranscriptSearchIndexInput,
+  ): Promise<void> {
+    try {
+      await this.#requestIndexerFrames(indexFrames(mode, input));
+    } catch (error) {
+      if (!isRepairableIndexPositionError(error)) {
+        await this.#recordFailure(input, indexFailureCode(error)).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  async #recordFailure(input: TranscriptSearchIndexInput, errorCode: string): Promise<void> {
+    if (!this.#enabled || this.#closed) return;
+    await this.#requestIndexer({
+      type: 'mark-failed',
+      chatId: input.chatId,
+      transcriptViewId: input.transcriptViewId,
+      errorCode,
+    });
   }
 
   #requestIndexer(
@@ -316,5 +346,20 @@ function searchFrames(
 }
 
 function workerEventError(event: IndexerEvent | ReaderEvent): Error | null {
-  return event.type === 'error' ? new Error(event.code) : null;
+  return event.type === 'error'
+    ? new TranscriptSearchWorkerError(event.code, event.retryable)
+    : null;
+}
+
+function indexFailureCode(error: unknown): string {
+  if (error instanceof TranscriptSearchWorkerError) return error.code;
+  if (error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)) {
+    return error.message;
+  }
+  return 'SEARCH_INDEX_UNAVAILABLE';
+}
+
+function isRepairableIndexPositionError(error: unknown): boolean {
+  const code = indexFailureCode(error);
+  return code === 'SEARCH_INDEX_GAP' || code === 'SEARCH_VIEW_MISMATCH';
 }

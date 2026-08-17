@@ -29,7 +29,7 @@ export interface TranscriptSearchControllerDeps {
   readonly listChatIds: () => readonly string[];
   readonly ledger: Pick<
     TranscriptLedgerService,
-    'currentView' | 'currentRows' | 'subscribe'
+    'currentView' | 'currentRows' | 'highWatermark' | 'subscribe'
   >;
   readonly service: TranscriptSearchService;
   readonly logger: Pick<AgentLogger, 'warn'>;
@@ -111,24 +111,29 @@ export class TranscriptSearchController {
     timeout.unref?.();
     try {
       const allowedViews = new Map<string, TranscriptViewId>();
+      const allowedChats = [];
       const fencedChatIds = new Set<string>();
       for (const chatId of options.allowedChatIds) {
-        let view: TranscriptView | null;
         try {
-          view = this.#deps.ledger.currentView(chatId);
+          const view = this.#deps.ledger.currentView(chatId);
+          if (!view) continue;
+          const watermark = this.#deps.ledger.highWatermark(chatId);
+          if (watermark.viewId !== view.viewId) continue;
+          allowedViews.set(chatId, view.viewId);
+          allowedChats.push({
+            chatId,
+            transcriptViewId: view.viewId,
+            throughOrdinal: watermark.ordinal,
+          });
         } catch (error) {
           if (!(error instanceof LedgerFencedError)) throw error;
           fencedChatIds.add(chatId);
           continue;
         }
-        if (view) allowedViews.set(chatId, view.viewId);
       }
       const response = await this.#deps.service.search({
         query: compileQuery(options.query, options.textTokens),
-        allowedChats: [...allowedViews].map(([chatId, transcriptViewId]) => ({
-          chatId,
-          transcriptViewId,
-        })),
+        allowedChats,
         limit: clampLimit(options.limit),
         signal: abort.signal,
       });

@@ -26,6 +26,20 @@ describe('transcript search Worker protocol', () => {
       rows: [{ ordinal: 3, role: 'assistant', timestamp: null, body: 'hello' }],
       done: true,
     })).toBe(true);
+    expect(isIndexerRequest({
+      ...base,
+      type: 'mark-failed',
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      errorCode: 'SEARCH_INDEX_REJECTED',
+    })).toBe(true);
+    expect(isReaderRequest({
+      ...base,
+      type: 'search-allowlist-chunk',
+      chunkIndex: 0,
+      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1', throughOrdinal: 3 }],
+      done: true,
+    })).toBe(true);
   });
 
   it('rejects malformed and oversized requests', () => {
@@ -48,8 +62,30 @@ describe('transcript search Worker protocol', () => {
       allowedChats: Array.from({ length: 2_001 }, (_, index) => ({
         chatId: String(index),
         transcriptViewId: 'view-1',
+        throughOrdinal: 1,
       })),
       done: true,
+    })).toBe(false);
+    expect(isReaderRequest({
+      ...base,
+      type: 'search-allowlist-chunk',
+      chunkIndex: 0,
+      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1' }],
+      done: true,
+    })).toBe(false);
+    expect(isReaderRequest({
+      ...base,
+      type: 'search-allowlist-chunk',
+      chunkIndex: 0,
+      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1', throughOrdinal: -1 }],
+      done: true,
+    })).toBe(false);
+    expect(isIndexerRequest({
+      ...base,
+      type: 'mark-failed',
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      errorCode: 'provider error text',
     })).toBe(false);
     expect(isReaderRequest({
       ...base,

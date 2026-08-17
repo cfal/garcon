@@ -3,11 +3,92 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { UserMessage } from '../../../../common/chat-types.js';
-import { TranscriptSearchService } from '../../../../server-agents/common/src/search/transcript-search-service.ts';
+import {
+  TranscriptSearchService,
+  TranscriptSearchWorkerError,
+} from '../../../../server-agents/common/src/search/transcript-search-service.ts';
 import { TranscriptSearchController } from '../controller.js';
 
 function indexKey(chatId, throughOrdinal) {
   return `${chatId}:${throughOrdinal}`;
+}
+
+class ControlledSearchIndex {
+  chats = new Map();
+
+  index(build) {
+    const current = this.chats.get(build.chatId);
+    if (build.mode === 'append') {
+      if (!current || current.transcriptViewId !== build.transcriptViewId) {
+        throw new Error('SEARCH_VIEW_MISMATCH');
+      }
+      if (current.throughOrdinal !== build.expectedAfterOrdinal) {
+        throw new Error('SEARCH_INDEX_GAP');
+      }
+    }
+    const rows = build.mode === 'append' ? [...current.rows, ...build.rows] : [...build.rows];
+    this.chats.set(build.chatId, {
+      transcriptViewId: build.transcriptViewId,
+      throughOrdinal: build.throughOrdinal,
+      status: 'indexed',
+      rows,
+    });
+  }
+
+  markFailed(request) {
+    const current = this.chats.get(request.chatId);
+    const sameView = current?.transcriptViewId === request.transcriptViewId;
+    this.chats.set(request.chatId, {
+      transcriptViewId: request.transcriptViewId,
+      throughOrdinal: sameView ? current.throughOrdinal : 0,
+      status: 'failed',
+      rows: sameView ? current.rows : [],
+    });
+  }
+
+  search(query, allowedChats) {
+    const index = {
+      indexedChatCount: 0,
+      pendingChatCount: 0,
+      failedChatCount: 0,
+      unsupportedChatCount: 0,
+    };
+    const results = [];
+    const tokens = query.clauses.flatMap((clause) => clause.tokens.map((token) => token.normalized));
+    for (const allowed of allowedChats) {
+      const current = this.chats.get(allowed.chatId);
+      if (!current || current.transcriptViewId !== allowed.transcriptViewId) {
+        index.pendingChatCount += 1;
+        continue;
+      }
+      if (current.status === 'failed') {
+        index.failedChatCount += 1;
+        continue;
+      }
+      if (current.throughOrdinal < allowed.throughOrdinal) {
+        index.pendingChatCount += 1;
+        continue;
+      }
+      index.indexedChatCount += 1;
+      const matches = current.rows.filter((row) => (
+        tokens.every((token) => row.body.toLowerCase().includes(token))
+      ));
+      if (matches.length === 0 || tokens.length === 0) continue;
+      results.push({
+        chatId: allowed.chatId,
+        transcriptViewId: allowed.transcriptViewId,
+        score: 1,
+        matchedMessageCount: matches.length,
+        snippets: matches.slice(0, 3).map((row) => ({
+          ordinal: row.ordinal,
+          role: row.role,
+          timestamp: row.timestamp,
+          text: row.body,
+        })),
+      });
+    }
+    return { results, index };
+  }
 }
 
 class ControlledIndexerWorker {
@@ -15,24 +96,35 @@ class ControlledIndexerWorker {
   onerror = null;
   onmessageerror = null;
   requests = [];
+  readonlyState;
   #builds = new Map();
   #receivedIndexes = new Set();
+  #failures = new Map();
   #heldIndexes = new Set();
   #heldIndexRequests = new Map();
   #holdPrune = false;
   #heldPruneRequest = null;
 
+  constructor(state) {
+    this.readonlyState = state;
+  }
+
   holdIndex(chatId, throughOrdinal) {
     this.#heldIndexes.add(indexKey(chatId, throughOrdinal));
+  }
+
+  rejectNextIndex(chatId, throughOrdinal, code, retryable) {
+    this.#failures.set(indexKey(chatId, throughOrdinal), { code, retryable });
   }
 
   releaseIndex(chatId, throughOrdinal) {
     const key = indexKey(chatId, throughOrdinal);
     this.#heldIndexes.delete(key);
-    const request = this.#heldIndexRequests.get(key);
-    if (!request) return;
+    const held = this.#heldIndexRequests.get(key);
+    if (!held) return;
     this.#heldIndexRequests.delete(key);
-    this.#emit({ type: 'ack', ...identity(request) });
+    this.readonlyState.index(held.build);
+    this.#emit({ type: 'ack', ...identity(held.request) });
   }
 
   holdPrune() {
@@ -47,8 +139,8 @@ class ControlledIndexerWorker {
   }
 
   releaseAll() {
-    for (const request of this.#heldIndexRequests.values()) {
-      this.#emit({ type: 'ack', ...identity(request) });
+    for (const held of this.#heldIndexRequests.values()) {
+      this.#emit({ type: 'ack', ...identity(held.request) });
     }
     this.#heldIndexes.clear();
     this.#heldIndexRequests.clear();
@@ -70,16 +162,34 @@ class ControlledIndexerWorker {
         this.#emit({ type: 'opened', ...identity(request) });
         return;
       case 'index-start':
-        this.#builds.set(request.requestId, request);
+        this.#builds.set(request.requestId, { ...request, rows: [] });
         return;
       case 'index-chunk': {
         const build = this.#builds.get(request.requestId);
-        if (!build || !request.done) return;
-        this.#builds.delete(request.requestId);
-        const key = indexKey(build.chatId, build.throughOrdinal);
+        build?.rows.push(...request.rows);
+        if (!request.done) return;
+        const key = indexKey(build?.chatId, build?.throughOrdinal);
         this.#receivedIndexes.add(key);
+        this.#builds.delete(request.requestId);
         if (this.#heldIndexes.has(key)) {
-          this.#heldIndexRequests.set(key, request);
+          this.#heldIndexRequests.set(key, { request, build });
+          return;
+        }
+        const failure = this.#failures.get(key);
+        if (failure) {
+          this.#failures.delete(key);
+          this.#emit({ type: 'error', ...identity(request), ...failure });
+          return;
+        }
+        try {
+          this.readonlyState.index(build);
+        } catch (error) {
+          this.#emit({
+            type: 'error',
+            ...identity(request),
+            code: error.message,
+            retryable: false,
+          });
           return;
         }
         this.#emit({ type: 'ack', ...identity(request) });
@@ -93,6 +203,11 @@ class ControlledIndexerWorker {
         this.#emit({ type: 'ack', ...identity(request) });
         return;
       case 'delete-chat':
+        this.readonlyState.chats.delete(request.chatId);
+        this.#emit({ type: 'ack', ...identity(request) });
+        return;
+      case 'mark-failed':
+        this.readonlyState.markFailed(request);
         this.#emit({ type: 'ack', ...identity(request) });
         return;
       case 'close':
@@ -114,20 +229,46 @@ class ControlledReaderWorker {
   onmessage = null;
   onerror = null;
   onmessageerror = null;
+  #state;
+  #searches = new Map();
+
+  constructor(state) {
+    this.#state = state;
+  }
 
   postMessage(request) {
-    if (request.type === 'open') {
-      this.onmessage?.({ data: { type: 'opened', ...identity(request) } });
-      return;
+    switch (request.type) {
+      case 'open':
+        this.#emit({ type: 'opened', ...identity(request) });
+        return;
+      case 'search-start':
+        this.#searches.set(request.requestId, { query: request.query, allowedChats: [] });
+        return;
+      case 'search-allowlist-chunk': {
+        const search = this.#searches.get(request.requestId);
+        search.allowedChats.push(...request.allowedChats);
+        if (!request.done) return;
+        this.#searches.delete(request.requestId);
+        this.#emit({
+          type: 'search-result',
+          ...identity(request),
+          ...this.#state.search(search.query, search.allowedChats),
+        });
+        return;
+      }
+      case 'close':
+        this.#emit({ type: 'closed', ...identity(request) });
+        return;
+      default:
+        throw new Error(`Unexpected reader request: ${request.type}`);
     }
-    if (request.type === 'close') {
-      this.onmessage?.({ data: { type: 'closed', ...identity(request) } });
-      return;
-    }
-    throw new Error(`Unexpected reader request: ${request.type}`);
   }
 
   terminate() {}
+
+  #emit(data) {
+    this.onmessage?.({ data });
+  }
 }
 
 function identity(request) {
@@ -162,8 +303,9 @@ async function requireEventually(predicate, message) {
 }
 
 function createHarness(root) {
-  const indexer = new ControlledIndexerWorker();
-  const reader = new ControlledReaderWorker();
+  const state = new ControlledSearchIndex();
+  const indexer = new ControlledIndexerWorker(state);
+  const reader = new ControlledReaderWorker(state);
   const service = new TranscriptSearchService({
     workspaceDirectory: root,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
@@ -183,6 +325,7 @@ function createHarness(root) {
     ledger: {
       currentView: (chatId) => views.get(chatId) ?? null,
       currentRows: () => [],
+      highWatermark: (chatId) => ({ viewId: views.get(chatId).viewId, ordinal: 0 }),
       subscribe(candidate) {
         listener = candidate;
         return () => { listener = null; };
@@ -197,6 +340,7 @@ function createHarness(root) {
     indexer,
     service,
     servicePromises,
+    state,
     views,
   };
 }
@@ -298,6 +442,108 @@ describe('TranscriptSearchController with the real search service', () => {
         await testHarness.controller.close();
       } finally {
         process.off('unhandledRejection', onUnhandled);
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('[TLV5-SEARCH.05-SERVICE-UNIT-01] records terminal failure and clears it after full repair', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-health-'));
+    const testHarness = createHarness(root);
+    const input = {
+      chatId: 'chat-health',
+      transcriptViewId: 'view-health',
+      throughOrdinal: 2,
+      rows: [searchRow(2, 'synthetic needle')],
+    };
+    const query = {
+      version: 1,
+      clauses: [{
+        kind: 'all-words',
+        tokens: [{ text: 'needle', normalized: 'needle', match: 'prefix' }],
+      }],
+    };
+    try {
+      await testHarness.controller.initialize(true);
+      testHarness.indexer.rejectNextIndex(
+        input.chatId,
+        input.throughOrdinal,
+        'SEARCH_WRITE_REJECTED',
+        false,
+      );
+
+      await expect(testHarness.service.replaceChat(input)).rejects.toEqual(
+        expect.objectContaining({
+          name: TranscriptSearchWorkerError.name,
+          code: 'SEARCH_WRITE_REJECTED',
+          retryable: false,
+          message: 'SEARCH_WRITE_REJECTED',
+        }),
+      );
+      expect(testHarness.indexer.requests
+        .filter((request) => request.type === 'mark-failed')
+        .map(({ chatId, transcriptViewId, errorCode }) => ({
+          chatId,
+          transcriptViewId,
+          errorCode,
+        }))).toEqual([{
+        chatId: 'chat-health',
+        transcriptViewId: 'view-health',
+        errorCode: 'SEARCH_WRITE_REJECTED',
+      }]);
+
+      const allowedChats = [{
+        chatId: 'chat-health',
+        transcriptViewId: 'view-health',
+        throughOrdinal: 2,
+      }];
+      const failed = await testHarness.service.search({
+        query,
+        allowedChats,
+        limit: 20,
+        signal: new AbortController().signal,
+      });
+      expect(failed).toEqual({
+        results: [],
+        index: {
+          indexedChatCount: 0,
+          pendingChatCount: 0,
+          failedChatCount: 1,
+          unsupportedChatCount: 0,
+        },
+      });
+
+      await testHarness.service.replaceChat(input);
+      const repaired = await testHarness.service.search({
+        query,
+        allowedChats,
+        limit: 20,
+        signal: new AbortController().signal,
+      });
+      expect(repaired).toEqual({
+        results: [{
+          chatId: 'chat-health',
+          transcriptViewId: 'view-health',
+          score: 1,
+          matchedMessageCount: 1,
+          snippets: [{
+            ordinal: 2,
+            role: 'user',
+            timestamp: null,
+            text: 'synthetic needle',
+          }],
+        }],
+        index: {
+          indexedChatCount: 1,
+          pendingChatCount: 0,
+          failedChatCount: 0,
+          unsupportedChatCount: 0,
+        },
+      });
+    } finally {
+      try {
+        await testHarness.controller.close();
+      } finally {
         await rm(root, { recursive: true, force: true });
       }
     }

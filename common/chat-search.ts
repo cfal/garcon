@@ -29,6 +29,7 @@ export interface ChatSearchRequest {
 export interface TranscriptSearchAllowedChat {
   readonly chatId: string;
   readonly transcriptViewId: string;
+  readonly throughOrdinal: number;
 }
 
 export interface ChatSearchSnippet {
