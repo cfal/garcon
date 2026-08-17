@@ -550,9 +550,14 @@ Existing Bun, Vitest, Lightpanda, and Chromium output already preserves the
 case ID in the native test title. No result adapter is added. A rerun never
 erases an earlier failure from the recorded release evidence.
 
-Release-only Codex rollout replay records file hashes, source row model,
-ledger addresses, HTTP page relations, and the final browser tail without
-committing private transcripts.
+The release-only Codex rollout procedure locally verifies source identity and
+digest, loader count and final source line number, one ledger view and its
+ordinal count, every HTTP page relation, and a content-free structural browser
+tail. Real paths, digest values, identifiers, timestamps, content, tool
+payloads, and raw records never enter Git, durable diagnostics, or reports;
+only content-free counts and pass/fail facts leave the disposable procedure.
+Any reusable fixture uses deterministic generic content and synthetic
+identities rather than minimized real-derived values.
 
 ## Per-Case Workflow
 

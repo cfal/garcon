@@ -125,7 +125,7 @@ test does not rename it.
 | Provider scripted | Real pinned provider binary or protocol with deterministic model  | Server integration suite |
 | Browser behavior  | Browser workflow without strict rendering-frame geometry          | Lightpanda               |
 | Browser geometry  | Mounted rows, DOM order, and per-frame pixel invariants           | Chromium                 |
-| Release replay    | Exact diagnostic rollout replay with file hash and expected model | Release-only command     |
+| Release replay    | Local-only exact rollout replay with an ephemeral source check and structural model | Release-only command     |
 | Soak/property     | Repeated cycles and seeded state-machine exploration              | Nightly                  |
 
 A stronger tier may satisfy a weaker requirement only when it exercises the
@@ -936,16 +936,24 @@ the remaining five provider matrix rows.
 `TLV5-RELEASE-CODEX-20260810-01` and
 `TLV5-RELEASE-CODEX-20260812-01` record:
 
-- exact source path and SHA-256;
-- loader row count and final `(type, source line, exact text hash)`;
-- ledger import view and ordinal count;
-- every HTTP page range and relation;
-- final browser DOM tuple list around the tail;
+- local-only source identity and SHA-256 verification, without recording either
+  value in Git, durable artifacts, diagnostics, or reports;
+- loader row count and final `(type, source line number, exact-text digest
+  match)`, with only the match result leaving the local procedure;
+- one ledger import view and its ordinal count, without recording the generated
+  view identifier;
+- every HTTP page's content-free raw ordinal range and required relation fields;
+- a content-free browser DOM tuple list around the tail containing only a
+  normalized view label, ordinal, message type, mounted/visible state, and local
+  exact-text-match result;
 - the final assistant present once at the greatest conversational ordinal;
 - no earlier tool row appended after it.
 
-The rollout files remain local release fixtures. Committed CI uses minimized
-fixtures with the same structural tail.
+The rollout files, paths, bytes, digests, identifiers, timestamps, content, and
+tool payloads remain strictly local and never enter Git or durable diagnostics.
+Any committed CI fixture is fully synthetic: it uses deterministic generic
+content and synthetic identities while preserving only required structural
+ordering and cardinality. A minimized real-derived fixture is prohibited.
 
 ## Outside-Design Robustness Requirements
 
