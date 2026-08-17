@@ -487,7 +487,7 @@ The status below describes test coverage, not implementation completion.
 | Risk                                          | Requirements                                          | Current evidence                                                                                    | State   |
 | --------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------- |
 | R1 publisher routing                          | TLV5-L07.03 through TLV5-L07.10                       | Broad provider units; Codex stale-event black-box cases                                             | Partial |
-| R2 permission occurrence identity             | TLV5-PERM.01 through TLV5-PERM.11                     | Core occurrence suite, shared round trips, provider units                                           | Partial |
+| R2 permission occurrence identity             | TLV5-PERM.01 through TLV5-PERM.11                     | Core occurrence suite, shared round trips, provider units/scripted cases, and concurrent Chromium    | Covered |
 | R3 Codex native tail reconciliation           | TLV5-L02.02, TLV5-L05.02, TLV5-L10.01                 | Codex architecture guard, app-server unit, scripted interrupt                                       | Covered |
 | R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state, controller, static, and strict Chromium cases; timer machinery deleted                 | Covered |
 | R5 search full replacement on append          | TLV5-SEARCH.01                                        | Search controller suffix and linearity tests                                                        | Covered |
@@ -550,20 +550,20 @@ Key current evidence:
 | TLV5-PERM.02 | Producer-adapter matching plus provider requested/terminal reuse cases.                                                        | Covered               |
 | TLV5-PERM.03 | Shared lifecycle round trips plus old-payload reopen/new-encode codec coverage.                                                | Covered               |
 | TLV5-PERM.04 | Provider-local reused-native-ID cases hold two occurrences unresolved; Codex also runs at scripted tier.                         | Covered               |
-| TLV5-PERM.05 | Core delayed-cancellation and exact surviving-capability cases; provider-scripted terminal permutations are incomplete.          | Partial               |
-| TLV5-PERM.06 | Runtime-router and ledger claim fences; no single black-box stale-response matrix.                                               | Partial               |
+| TLV5-PERM.05 | Core delayed-cancellation cases plus pinned Claude Chromium choreography delay A's terminal until reused-ID occurrence B is live. | Covered               |
+| TLV5-PERM.06 | The same browser case submits stale A after its terminal, observes typed 409 with zero provider callbacks, then invokes B once.    | Covered               |
 | TLV5-PERM.07 | Core sink, view, run, deletion, cancellation, expiry, close, and Claude scripted restart cases.                                  | Covered               |
-| TLV5-PERM.08 | Component identity cases exist; no real-browser concurrent-occurrence action case.                                               | Missing Chromium case |
+| TLV5-PERM.08 | Component identity cases plus real-browser distinct addresses/UUIDs, A-terminal/B-actionable state, and exact B callback routing.  | Covered               |
 | TLV5-PERM.09 | Shared adapter, Claude, Codex, and OpenCode cases require one structured content-free drop.                                     | Covered oracle        |
 | TLV5-PERM.10 | Runtime-router retry invokes the same live capability after a failed first response and appends one resolution only on success. | Covered               |
 | TLV5-PERM.11 | Ledger-to-transient integration suppresses late actionability without disturbing a colliding live control; notifier coverage preserves the later idle notice. | Covered |
 
 The core suites in `server/ledger/__tests__/permission-occurrence.test.js` and
 `server/agents/__tests__/runtime-router-permission-retry.test.js` are the
-primary authority evidence. The missing browser acceptance case starts with two
-visible occurrences backed by a reused integration-private native ID, terminals
-the first occurrence, keeps the second actionable, responds through the second
-row, and asserts exact addresses and provider callbacks throughout.
+primary authority evidence. `TLV5-PERM.08-BROWSER-CHROMIUM-01` complements them
+through the pinned Claude CLI: two visible occurrences share one private native
+ID, a delayed provider terminal closes only A, stale A reaches typed rejection
+with no provider callback, and the actionable B row invokes exactly B's input.
 
 ## Genesis Adoption Coverage
 
@@ -754,6 +754,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L09.04-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: `drops a pending native result when the transcript view is replaced`                                   | L09.04                      |
 | TLV5-PERM.05-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `applies a delayed cancellation only to its exact reused occurrence`                             | PERM.05                     |
 | TLV5-PERM.07-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `keeps permission history but restores no actionability after restart`                           | PERM.07                     |
+| TLV5-PERM.08-BROWSER-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `keeps reused permission occurrences independently actionable`                     | PERM.05, PERM.06, PERM.08  |
 | TLV5-PERM.10-CORE-UNIT-01      | `server/agents/__tests__/runtime-router-permission-retry.test.js`: retries the exact live capability after provider response failure                      | PERM.10                     |
 | TLV5-PERM.11-CORE-TRANSIENT-01 | `server/chats/__tests__/late-permission-transient.test.js`: late requested history remains durable without a transient control                            | PERM.11                     |
 | TLV5-PERM.11-NOTIFIER-UNIT-01  | `server/notifications/__tests__/late-permission-attention.test.js`: inert late permission history neither notifies nor suppresses idle attention          | PERM.11                     |
@@ -874,15 +875,6 @@ the remaining five provider matrix rows.
 > and the shared event stream remains alive.
 
 Codex needs the equivalent shared-client isolation case.
-
-### Permission Occurrences
-
-`TLV5-PERM.08-BROWSER-CHROMIUM-01`
-
-> Given two durable permission occurrences with distinct UUIDs are visible and
-> actionable together, when a delayed terminal closes the first and the user
-> answers the second, then only the first row becomes terminal, only the second
-> capability is invoked, and both addressed rows remain distinct.
 
 ### Read Folds
 

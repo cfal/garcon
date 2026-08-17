@@ -596,8 +596,6 @@ The five Revision 18 oracle families are registered. The test owner now:
   as its production scope lands;
 - adds only capability-matrix SACS coverage needed to run the same assertions
   for an advertised nullable facet;
-- completes the missing Chromium concurrent-permission action case after its
-  browser fixture can hold both live capabilities simultaneously;
 - records negative controls for production regressions before final release
   acceptance.
 

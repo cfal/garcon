@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { appendFile } from 'node:fs/promises';
+import { appendFile, chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Browser, CDPSession, Page } from 'playwright';
 import {
   AssistantMessage,
@@ -22,7 +23,11 @@ import {
   type ChromiumFixture,
 } from '../../support/chromium-fixture.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
-import { liveClaudeRunRequest, liveClaudeStartRequest } from '../../support/live-claude.js';
+import {
+  CLAUDE_BINARY,
+  liveClaudeRunRequest,
+  liveClaudeStartRequest,
+} from '../../support/live-claude.js';
 import {
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
@@ -33,6 +38,11 @@ const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
 const ITEM_SELECTOR = '[data-chat-virtual-item]';
 const RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS = 180_000;
+const REUSED_PERMISSION_CLAUDE_PROXY = fileURLToPath(
+  new URL('../../support/reused-permission-claude-proxy.ts', import.meta.url),
+);
+const PERMISSION_OCCURRENCE_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TRANSCRIPT_VIEWPORTS = [
   { label: 'compact', height: 700, width: 390 },
   { label: 'wide', height: 900, width: 1280 },
@@ -4190,6 +4200,342 @@ async function verifyHistoricalPermissionIsInertAfterRestart(
   fixture.assertNoBrowserErrors();
 }
 
+interface ReusedPermissionFixturePaths {
+  callbackLog: string;
+  cancelRelease: string;
+  requestLog: string;
+}
+
+interface ReusedPermissionScenario {
+  finalReply: string;
+  firstCommand: string;
+  firstToolUseId: string;
+  prompt: string;
+  secondCommand: string;
+  secondToolUseId: string;
+}
+
+type PermissionLifecycleMessage = Extract<
+  ChatMessage,
+  {
+    type:
+      | 'permission-request'
+      | 'permission-cancelled'
+      | 'permission-resolved'
+      | 'permission-expired';
+  }
+>;
+
+function isPermissionLifecycleMessage(message: ChatMessage): message is PermissionLifecycleMessage {
+  return message.type === 'permission-request'
+    || message.type === 'permission-cancelled'
+    || message.type === 'permission-resolved'
+    || message.type === 'permission-expired';
+}
+
+async function readJsonLineLog(path: string): Promise<Record<string, unknown>[]> {
+  let contents: string;
+  try {
+    contents = await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  return contents
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const value = JSON.parse(line) as unknown;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error(`Invalid reused-permission log line: ${line}`);
+      }
+      return value as Record<string, unknown>;
+    });
+}
+
+async function waitForJsonLineLog(
+  path: string,
+  description: string,
+  predicate: (records: readonly Record<string, unknown>[]) => boolean,
+): Promise<Record<string, unknown>[]> {
+  return await withDiagnosticTimeout(description, (async () => {
+    for (;;) {
+      const records = await readJsonLineLog(path);
+      if (predicate(records)) return records;
+      await Bun.sleep(20);
+    }
+  })(), 30_000);
+}
+
+function permissionRequestForCommand(
+  messages: readonly TranscriptMessage[],
+  command: string,
+): TranscriptMessage {
+  const request = messages.find((entry) => (
+    entry.message.type === 'permission-request'
+    && entry.message.requestedTool.type === 'bash-tool-use'
+    && entry.message.requestedTool.command === command
+  ));
+  if (!request) throw new Error(`Permission request was not committed for ${command}.`);
+  return request;
+}
+
+async function waitForPermissionTranscript(
+  fixture: ChromiumFixture,
+  chatId: string,
+  predicate: (messages: readonly TranscriptMessage[]) => boolean,
+  description: string,
+): Promise<Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>> {
+  return await withDiagnosticTimeout(description, (async () => {
+    for (;;) {
+      const page = await fixture.integration.client.getMessages(chatId, { limit: 100 });
+      if (predicate(page.messages)) return page;
+      await Bun.sleep(20);
+    }
+  })(), 30_000);
+}
+
+async function verifyReusedPermissionOccurrence(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+  paths: ReusedPermissionFixturePaths,
+  scenario: ReusedPermissionScenario,
+): Promise<void> {
+  environment.model.scriptTurn([
+    claudeToolUse(scenario.firstToolUseId, 'Bash', { command: scenario.firstCommand }),
+  ]);
+  environment.model.scriptTurn([claudeText(scenario.finalReply)]);
+
+  const chatId = fixture.integration.newChatId();
+  const eventCursor = fixture.integration.client.markEvents();
+  const turn = await fixture.integration.client.startChat(liveClaudeStartRequest({
+    chatId,
+    projectPath: fixture.integration.dirs.project,
+    command: scenario.prompt,
+  }));
+  const firstTransient = await fixture.integration.client.waitForTransientPermission(
+    chatId,
+    (row) => JSON.stringify(row.message).includes(scenario.firstCommand),
+    { afterIndex: eventCursor, timeoutMs: 30_000 },
+  );
+  const secondTransient = await fixture.integration.client.waitForTransientPermission(
+    chatId,
+    (row) => JSON.stringify(row.message).includes(scenario.secondCommand),
+    { afterIndex: eventCursor, timeoutMs: 30_000 },
+  );
+  if (
+    firstTransient.message.type !== 'permission-request'
+    || secondTransient.message.type !== 'permission-request'
+  ) {
+    throw new Error('The reused Claude permission requests were not published.');
+  }
+
+  const requestLog = await waitForJsonLineLog(
+    paths.requestLog,
+    'the duplicated provider permission requests',
+    (records) => records.filter((record) => record.command !== undefined).length === 2,
+  );
+  const providerRequests = requestLog.filter((record) => record.command !== undefined);
+  expect(providerRequests).toHaveLength(2);
+  expect(providerRequests[0]).toEqual({
+    occurrence: 'first',
+    requestId: expect.any(String),
+    command: scenario.firstCommand,
+    toolUseId: scenario.firstToolUseId,
+  });
+  expect(providerRequests[1]).toEqual({
+    occurrence: 'second',
+    requestId: providerRequests[0]?.requestId,
+    command: scenario.secondCommand,
+    toolUseId: scenario.secondToolUseId,
+  });
+  const reusedNativeRequestId = providerRequests[0]?.requestId;
+  if (typeof reusedNativeRequestId !== 'string' || reusedNativeRequestId.length === 0) {
+    throw new Error('The provider permission request ID was not recorded.');
+  }
+
+  const beforeTerminal = await fixture.integration.client.getChatSnapshot(chatId, 100);
+  if (beforeTerminal.transcript.availability !== 'available') {
+    throw new Error('The reused permission transcript is unavailable.');
+  }
+  const firstRequest = permissionRequestForCommand(
+    beforeTerminal.transcript.messages,
+    scenario.firstCommand,
+  );
+  const secondRequest = permissionRequestForCommand(
+    beforeTerminal.transcript.messages,
+    scenario.secondCommand,
+  );
+  if (
+    firstRequest.message.type !== 'permission-request'
+    || secondRequest.message.type !== 'permission-request'
+  ) {
+    throw new Error('The committed reused permission rows changed type.');
+  }
+  const firstOccurrenceId = firstRequest.message.permissionOccurrenceId;
+  const secondOccurrenceId = secondRequest.message.permissionOccurrenceId;
+  expect(firstOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+  expect(secondOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+  expect(secondOccurrenceId).not.toBe(firstOccurrenceId);
+  expect(firstTransient.permissionOccurrenceId).toBe(firstOccurrenceId);
+  expect(secondTransient.permissionOccurrenceId).toBe(secondOccurrenceId);
+  expect(beforeTerminal.transientFeed.rows.map((row) => row.permissionOccurrenceId).sort())
+    .toEqual([firstOccurrenceId, secondOccurrenceId].sort());
+
+  const transcriptViewId = beforeTerminal.transcript.transcriptViewId;
+  const firstRowId = `${transcriptViewId}:${firstRequest.ordinal}`;
+  const secondRowId = `${transcriptViewId}:${secondRequest.ordinal}`;
+  expect(firstRowId).not.toBe(secondRowId);
+  expect(firstTransient.transcript.transcriptViewId).toBe(transcriptViewId);
+  expect(secondTransient.transcript.transcriptViewId).toBe(transcriptViewId);
+
+  const response = await fixture.page.goto(
+    `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
+  await waitForTranscriptReady(fixture.page);
+
+  const firstRow = fixture.page.locator(`[data-chat-row-id="${firstRowId}"]`);
+  const secondRow = fixture.page.locator(`[data-chat-row-id="${secondRowId}"]`);
+  await firstRow.waitFor({ state: 'visible' });
+  await secondRow.waitFor({ state: 'visible' });
+  await firstRow.locator('summary').click();
+  await secondRow.locator('summary').click();
+  expect(JSON.parse(await firstRow.locator('pre').innerText())).toEqual({
+    command: scenario.firstCommand,
+  });
+  expect(JSON.parse(await secondRow.locator('pre').innerText())).toEqual({
+    command: scenario.secondCommand,
+  });
+  const firstAllow = firstRow.getByRole('button', { name: /Allow once/ });
+  const secondAllow = secondRow.getByRole('button', { name: /Allow once/ });
+  await firstAllow.waitFor({ state: 'visible' });
+  await secondAllow.waitFor({ state: 'visible' });
+  expect(await firstAllow.isEnabled()).toBe(true);
+  expect(await secondAllow.isEnabled()).toBe(true);
+
+  await writeFile(paths.cancelRelease, 'cancel first occurrence');
+  await waitForJsonLineLog(
+    paths.requestLog,
+    'the delayed provider cancellation',
+    (records) => records.some((record) => record.terminal === 'cancelled'),
+  );
+  const afterCancellation = await waitForPermissionTranscript(
+    fixture,
+    chatId,
+    (messages) => messages.some((entry) => (
+      entry.message.type === 'permission-cancelled'
+      && entry.message.permissionOccurrenceId === firstOccurrenceId
+    )),
+    'the first permission occurrence cancellation',
+  );
+  const terminalRows = afterCancellation.messages.filter(
+    (entry): entry is TranscriptMessage & { message: PermissionLifecycleMessage } => (
+      entry.message.type === 'permission-cancelled'
+      || entry.message.type === 'permission-resolved'
+      || entry.message.type === 'permission-expired'
+    ),
+  );
+  expect(terminalRows.map((entry) => ({
+    type: entry.message.type,
+    permissionOccurrenceId: entry.message.permissionOccurrenceId,
+  }))).toEqual([{
+    type: 'permission-cancelled',
+    permissionOccurrenceId: firstOccurrenceId,
+  }]);
+  await firstAllow.waitFor({ state: 'hidden' });
+  await secondAllow.waitFor({ state: 'visible' });
+  expect(await secondAllow.isEnabled()).toBe(true);
+
+  const firstControl = {
+    serverInstanceId: beforeTerminal.transientFeed.serverInstanceId,
+    chatId,
+    runId: firstTransient.runId,
+    permissionOccurrenceId: firstOccurrenceId,
+  };
+  fixture.assertNoBrowserErrors();
+  const staleResponse = await fixture.page.evaluate(async (input) => {
+    const stale = await fetch('/api/v1/chats/permissions/decision', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    return { status: stale.status, body: await stale.json() as unknown };
+  }, {
+    clientRequestId: crypto.randomUUID(),
+    chatId,
+    permissionOccurrenceId: firstOccurrenceId,
+    allow: true,
+    alwaysAllow: false,
+    control: firstControl,
+  });
+  expect(staleResponse).toMatchObject({
+    status: 409,
+    body: { errorCode: 'VALIDATION_FAILED', retryable: false },
+  });
+  await fixture.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  expect(fixture.browserErrors.splice(0)).toEqual([
+    'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)',
+  ]);
+  expect(await readJsonLineLog(paths.callbackLog)).toEqual([]);
+  await secondAllow.waitFor({ state: 'visible' });
+  expect(await secondAllow.isEnabled()).toBe(true);
+
+  await secondAllow.click();
+  const callbacks = await waitForJsonLineLog(
+    paths.callbackLog,
+    'the second permission provider callback',
+    (records) => records.length === 1,
+  );
+  expect(callbacks).toEqual([{
+    requestId: reusedNativeRequestId,
+    subtype: 'success',
+    response: {
+      behavior: 'allow',
+      updatedInput: { command: scenario.secondCommand },
+    },
+  }]);
+
+  const terminal = await fixture.integration.client.waitForTurnTerminal(
+    chatId,
+    turn.turnId,
+    { afterIndex: eventCursor, timeoutMs: 30_000 },
+  );
+  expect(terminal.type).toBe('agent-run-finished');
+  const completed = await fixture.integration.client.getMessages(chatId, { limit: 100 });
+  const permissionRows = completed.messages.filter(
+    (entry): entry is TranscriptMessage & { message: PermissionLifecycleMessage } => (
+      isPermissionLifecycleMessage(entry.message)
+    ),
+  );
+  expect(permissionRows.map((entry) => ({
+    ordinal: entry.ordinal,
+    type: entry.message.type,
+    permissionOccurrenceId: entry.message.permissionOccurrenceId,
+  }))).toEqual([
+    { ordinal: firstRequest.ordinal, type: 'permission-request', permissionOccurrenceId: firstOccurrenceId },
+    { ordinal: secondRequest.ordinal, type: 'permission-request', permissionOccurrenceId: secondOccurrenceId },
+    {
+      ordinal: expect.any(Number),
+      type: 'permission-cancelled',
+      permissionOccurrenceId: firstOccurrenceId,
+    },
+    {
+      ordinal: expect.any(Number),
+      type: 'permission-resolved',
+      permissionOccurrenceId: secondOccurrenceId,
+    },
+  ]);
+  expect(completed.messages.some((entry) => (
+    entry.message.type === 'assistant-message' && entry.message.content === scenario.finalReply
+  ))).toBe(true);
+  expect(await readJsonLineLog(paths.callbackLog)).toEqual(callbacks);
+  await secondAllow.waitFor({ state: 'hidden' });
+  environment.model.assertSettled();
+  fixture.assertNoBrowserErrors();
+}
+
 describe('Chromium transcript virtualization', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;
   let browser: Browser | undefined;
@@ -4403,6 +4749,63 @@ describe('Chromium transcript virtualization', () => {
       },
       diagnostics,
       { serverEnvironment: testEnvironment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('[TLV5-PERM.08-BROWSER-CHROMIUM-01] keeps reused permission occurrences independently actionable', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const firstMarker = crypto.randomUUID().replaceAll('-', '');
+    const secondMarker = crypto.randomUUID().replaceAll('-', '');
+    const scenario: ReusedPermissionScenario = {
+      finalReply: `reused permission complete ${crypto.randomUUID()}`,
+      firstCommand: `rm -f ./reused-permission-first-${firstMarker}`,
+      firstToolUseId: `toolu_reused_first_${firstMarker}`,
+      prompt: `request two reused permissions ${crypto.randomUUID()}`,
+      secondCommand: `rm -f ./reused-permission-second-${secondMarker}`,
+      secondToolUseId: `toolu_reused_second_${secondMarker}`,
+    };
+    let wrapperPath = '';
+    let paths: ReusedPermissionFixturePaths = {
+      callbackLog: '',
+      cancelRelease: '',
+      requestLog: '',
+    };
+    await withChromiumFixture(
+      'transcript-reused-permission-occurrences',
+      async (fixture, markPhase) => {
+        markPhase('routing reused provider permissions to distinct browser occurrences');
+        await verifyReusedPermissionOccurrence(fixture, testEnvironment, paths, scenario);
+      },
+      diagnostics,
+      {
+        serverEnvironment: testEnvironment.serverEnvironment,
+        resolveServerEnvironment(directories) {
+          wrapperPath = join(directories.root, 'reused-permission-claude');
+          paths = {
+            callbackLog: join(directories.root, 'reused-permission-callbacks.jsonl'),
+            cancelRelease: join(directories.root, 'reused-permission-cancel-release'),
+            requestLog: join(directories.root, 'reused-permission-requests.jsonl'),
+          };
+          return {
+            CLAUDE_BINARY: wrapperPath,
+            GARCON_REUSED_PERMISSION_CALLBACK_LOG: paths.callbackLog,
+            GARCON_REUSED_PERMISSION_CANCEL_RELEASE: paths.cancelRelease,
+            GARCON_REUSED_PERMISSION_CLAUDE_BINARY: CLAUDE_BINARY,
+            GARCON_REUSED_PERMISSION_REQUEST_LOG: paths.requestLog,
+            GARCON_REUSED_PERMISSION_SECOND_COMMAND: scenario.secondCommand,
+            GARCON_REUSED_PERMISSION_SECOND_TOOL_USE_ID: scenario.secondToolUseId,
+          };
+        },
+        async prepareWorkspace() {
+          await writeFile(
+            wrapperPath,
+            `#!/usr/bin/env bash\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(REUSED_PERMISSION_CLAUDE_PROXY)} "$@"\n`,
+          );
+          await chmod(wrapperPath, 0o755);
+        },
+      },
       browser,
     );
   }, 180_000);
