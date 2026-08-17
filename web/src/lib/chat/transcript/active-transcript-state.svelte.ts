@@ -72,6 +72,22 @@ type ActiveTranscriptSnapshot = TranscriptPage & { resendCandidates?: ResendCand
 export type MessageApplyResult = TranscriptReplayApplyResult;
 type PageApplyResult = MessageApplyResult | 'stale';
 
+function retainedWindow(
+	messages: TranscriptMessage[],
+	edge: 'earlier' | 'later',
+	nextBeforeOrdinal: number | null,
+): { retainedMessages: TranscriptMessage[]; nextBeforeOrdinal: number | null } {
+	const retainedMessages = retainTranscriptEntries(messages, edge);
+	return {
+		retainedMessages,
+		nextBeforeOrdinal: retainedEarlierPageCursor(
+			messages,
+			retainedMessages,
+			nextBeforeOrdinal,
+		),
+	};
+}
+
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
 export class ActiveTranscriptState implements ActiveTranscriptPort {
@@ -435,10 +451,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			resendCandidates?: ResendCandidate[];
 		},
 	): void {
-		const retainedMessages = retainTranscriptEntries(messages, 'later');
-		const nextBeforeOrdinal = retainedEarlierPageCursor(
+		const { retainedMessages, nextBeforeOrdinal } = retainedWindow(
 			messages,
-			retainedMessages,
+			'later',
 			options.nextBeforeOrdinal,
 		);
 		const pageNewestOrdinal = options.pageNewestOrdinal ?? options.lastOrdinal;
@@ -610,10 +625,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.#expandedVisibleStartOrdinal = null;
 			this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		}
-		const retainedMessages = retainTranscriptEntries(page.messages, 'later');
-		const nextBeforeOrdinal = retainedEarlierPageCursor(
+		const { retainedMessages, nextBeforeOrdinal } = retainedWindow(
 			page.messages,
-			retainedMessages,
+			'later',
 			page.nextBeforeOrdinal,
 		);
 		this.transcriptViewId = page.transcriptViewId;
@@ -853,10 +867,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 			this.#expandedVisibleStartOrdinal = null;
 			this.windowRevision += 1;
-			const retainedMessages = retainTranscriptEntries(page.messages, 'earlier');
-			const nextBeforeOrdinal = retainedEarlierPageCursor(
+			const { retainedMessages, nextBeforeOrdinal } = retainedWindow(
 				page.messages,
-				retainedMessages,
+				'earlier',
 				page.nextBeforeOrdinal,
 			);
 			this.entries = retainedMessages;

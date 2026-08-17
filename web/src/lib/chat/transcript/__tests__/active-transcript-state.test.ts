@@ -2068,6 +2068,7 @@ describe('ActiveTranscriptState', () => {
 			}),
 			snapshotEpoch,
 		)).toBe('applied');
+		expect(chat.entries[0]?.ordinal).toBe(151);
 		expect(chat.hasEarlierMessages).toBe(true);
 
 		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
