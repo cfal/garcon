@@ -18,7 +18,6 @@
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "pi",
-    "standaloneEntrypoints": {},
     "preMainModules": ["./src/build/prepare-compiled-runtime.ts"],
     "embeddedDependencyMetadata": ["@earendil-works/pi-coding-agent/package.json"]
   }

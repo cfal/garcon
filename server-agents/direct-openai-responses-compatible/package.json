@@ -8,7 +8,6 @@
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "direct-openai-responses-compatible",
-    "standaloneEntrypoints": {},
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }

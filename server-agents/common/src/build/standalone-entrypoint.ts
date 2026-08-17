@@ -8,7 +8,6 @@ export interface GarconEmbeddedSearchManifestV1 {
     readonly indexer: string;
     readonly reader: string;
   };
-  readonly integrations: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
 
 const COMPILED_MODE = Symbol.for('garcon.compiled-mode');
@@ -42,19 +41,6 @@ function requiredPath(value: unknown, label: string): string {
   return value;
 }
 
-export function resolveAgentStandaloneEntrypoint(input: {
-  readonly integrationId: string;
-  readonly name: string;
-  readonly sourceUrl: URL;
-}): string {
-  const manifest = compiledManifest();
-  if (!manifest) return input.sourceUrl.href;
-  return requiredPath(
-    manifest.integrations?.[input.integrationId]?.[input.name],
-    `${input.integrationId}/${input.name}`,
-  );
-}
-
 export function resolveSearchWorkerEntrypoints(input: {
   readonly indexerSourceUrl: URL;
   readonly readerSourceUrl: URL;
@@ -67,9 +53,4 @@ export function resolveSearchWorkerEntrypoints(input: {
     indexer: requiredPath(manifest.workers?.indexer, 'workers/indexer'),
     reader: requiredPath(manifest.workers?.reader, 'workers/reader'),
   };
-}
-
-export function isEmbeddedStandaloneEntrypoint(moduleUrl: string): boolean {
-  // Bun exposes compiled JavaScript entrypoints to module loaders but not fs.access.
-  return /(?:^|[/\\])\$bunfs(?:[/\\]|$)/.test(moduleUrl);
 }

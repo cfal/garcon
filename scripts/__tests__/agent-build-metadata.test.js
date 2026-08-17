@@ -23,7 +23,6 @@ async function createFixture(options = {}) {
   await mkdir(path.join(packageDir, 'src'), { recursive: true });
   await mkdir(dependencyDir, { recursive: true });
   await writeFile(path.join(packageDir, 'src', 'index.ts'), 'export default class Fixture {}\n');
-  await writeFile(path.join(packageDir, 'src', 'worker.ts'), 'postMessage({ type: "ready" });\n');
   await writeFile(path.join(packageDir, 'src', 'prepare.ts'), 'globalThis.__fixturePrepared = true;\n');
   await writeFile(path.join(dependencyDir, 'index.js'), 'export {};\n');
   await writeFile(path.join(dependencyDir, 'package.json'), JSON.stringify({
@@ -39,7 +38,6 @@ async function createFixture(options = {}) {
     garconBuild: options.garconBuild ?? {
       apiVersion: 2,
       integrationId: 'fixture',
-      standaloneEntrypoints: { 'fixture-worker': './src/worker.ts' },
       preMainModules: ['./src/prepare.ts'],
       embeddedDependencyMetadata: ['fixture-sdk/package.json'],
     },
@@ -69,21 +67,12 @@ describe('collectAgentBuildContributions', () => {
     });
     expect(contribution.integrationId).toBe('fixture');
     expect(contribution.packageRoot).toBe(fixture.packageDir);
-    expect(contribution.standaloneEntrypoints).toEqual({
-      'fixture-worker': path.join(fixture.packageDir, 'src', 'worker.ts'),
-    });
     expect(contribution.preMainModules).toEqual([
       path.join(fixture.packageDir, 'src', 'prepare.ts'),
     ]);
     expect(contribution.embeddedDependencyMetadata).toEqual([
       path.join(fixture.root, 'dependencies', 'fixture-sdk', 'package.json'),
     ]);
-    const result = await Bun.build({
-      entrypoints: Object.values(contribution.standaloneEntrypoints),
-      target: 'bun',
-      format: 'esm',
-    });
-    expect(result.success).toBe(true);
   });
 
   test('rejects undeclared embedded dependencies', async () => {
@@ -99,8 +88,7 @@ describe('collectAgentBuildContributions', () => {
       garconBuild: {
         apiVersion: 2,
         integrationId: 'fixture',
-        standaloneEntrypoints: { 'fixture-worker': './src/escaped.ts' },
-        preMainModules: [],
+        preMainModules: ['./src/escaped.ts'],
         embeddedDependencyMetadata: [],
       },
     });

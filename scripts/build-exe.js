@@ -68,39 +68,27 @@ function createVirtualMainEntrypoint(
   assetsEntrypoint,
   serverMainPath,
   preMainModules,
-  searchAssets,
+  transcriptSearchWorkers,
 ) {
   const entrypointUrl = (entry) => {
     const relativePath = toPosixPath(path.relative(repoRoot, entry.filePath));
     if (relativePath.startsWith('../')) {
-      throw new Error(`Standalone entrypoint is outside the compile root: ${entry.filePath}`);
+      throw new Error(`Transcript search Worker is outside the compile root: ${entry.filePath}`);
     }
     return `new URL(${JSON.stringify(`./${relativePath}`)}, import.meta.url).href`;
   };
   const workerUrl = (name) => {
-    const entry = searchAssets.entries.find((candidate) => (
-      candidate.kind === 'worker' && candidate.name === name
-    ));
+    const entry = transcriptSearchWorkers.entries.find((candidate) => candidate.name === name);
     if (!entry) throw new Error(`Missing transcript search ${name} Worker entrypoint.`);
     return entrypointUrl(entry);
   };
-  const integrationEntries = searchAssets.entries
-    .filter((entry) => entry.kind === 'integration')
-    .reduce((byIntegration, entry) => {
-      byIntegration[entry.integrationId] ??= {};
-      byIntegration[entry.integrationId][entry.name] = entrypointUrl(entry);
-      return byIntegration;
-    }, {});
   const manifestExpression = `{
     mode: 'compiled',
     apiVersion: 1,
     workers: {
       indexer: ${workerUrl('indexer')},
       reader: ${workerUrl('reader')},
-    },
-    integrations: {${Object.entries(integrationEntries).map(([integrationId, entries]) => (
-      `${JSON.stringify(integrationId)}:{${Object.entries(entries).map(([name, variable]) => `${JSON.stringify(name)}:${variable}`).join(',')}}`
-    )).join(',')}}
+    }
   }`;
   return [
     `import '${assetsEntrypoint}';`,
@@ -113,38 +101,13 @@ function createVirtualMainEntrypoint(
   ].join('\n');
 }
 
-async function bundleStandaloneEntrypoints(contributions) {
-  // Bun preserves paths relative to the compile root for standalone entrypoints.
-  const directory = await fs.mkdtemp(path.join(repoRoot, 'node_modules', '.garcon-agent-entrypoints-'));
-  const files = [];
+async function bundleTranscriptSearchWorkers() {
+  // Bun preserves paths relative to the compile root for Worker entrypoints.
+  const directory = await fs.mkdtemp(
+    path.join(repoRoot, 'node_modules', '.garcon-transcript-search-workers-'),
+  );
   const entries = [];
   try {
-    for (const contribution of contributions) {
-      for (const [name, entrypoint] of Object.entries(contribution.standaloneEntrypoints)) {
-        const result = await Bun.build({
-          entrypoints: [entrypoint],
-          target: 'bun',
-          format: 'esm',
-          minify: true,
-        });
-        if (!result.success || result.outputs.length !== 1) {
-          for (const log of result.logs) console.error(log);
-          throw new Error(`Agent standalone entrypoint bundle failed: ${entrypoint}`);
-        }
-        const filePath = path.join(
-          directory,
-          `${contribution.integrationId}-${name}.js`,
-        );
-        await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
-        files.push(filePath);
-        entries.push({
-          kind: 'integration',
-          integrationId: contribution.integrationId,
-          name,
-          filePath,
-        });
-      }
-    }
     for (const [name, entrypoint] of Object.entries({
       indexer: path.join(repoRoot, 'server-agents/common/src/search/indexer-main.ts'),
       reader: path.join(repoRoot, 'server-agents/common/src/search/reader-main.ts'),
@@ -156,17 +119,16 @@ async function bundleStandaloneEntrypoints(contributions) {
       }
       const filePath = path.join(directory, `transcript-search-${name}.js`);
       await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
-      files.push(filePath);
-      entries.push({ kind: 'worker', name, filePath });
+      entries.push({ name, filePath });
     }
-    return { directory, files, entries };
+    return { directory, entries };
   } catch (error) {
     await fs.rm(directory, { recursive: true, force: true });
     throw error;
   }
 }
 
-async function buildExecutable(targetId, embeddedFiles, contributions, searchAssets) {
+async function buildExecutable(targetId, embeddedFiles, contributions, transcriptSearchWorkers) {
   const assetsEntrypoint = '__garcon_embed_static_assets__.js';
   const mainEntrypoint = '__garcon_build_exe_main__.js';
   const serverMainPath = toPosixPath(path.join(repoRoot, 'server', 'main.js'));
@@ -184,7 +146,7 @@ async function buildExecutable(targetId, embeddedFiles, contributions, searchAss
   const result = await Bun.build({
     entrypoints: [
       mainEntrypoint,
-      ...searchAssets.entries.map((entry) => entry.filePath),
+      ...transcriptSearchWorkers.entries.map((entry) => entry.filePath),
     ],
     compile: { target: target.bunTarget, outfile: outFile },
     naming: { asset: '[dir]/[name].[ext]' },
@@ -194,7 +156,7 @@ async function buildExecutable(targetId, embeddedFiles, contributions, searchAss
         assetsEntrypoint,
         serverMainPath,
         contributions.flatMap((contribution) => contribution.preMainModules),
-        searchAssets,
+        transcriptSearchWorkers,
       ),
     },
   });
@@ -224,14 +186,14 @@ async function run() {
   const targetIds = parseRequestedTargets(Bun.argv.slice(2));
   const embeddedFiles = await collectEmbeddedAssetInputs();
   const contributions = await collectAgentBuildContributions({ repoRoot });
-  const agentAssets = await bundleStandaloneEntrypoints(contributions);
+  const transcriptSearchWorkers = await bundleTranscriptSearchWorkers();
   try {
     for (const targetId of targetIds) {
-      await buildExecutable(targetId, embeddedFiles, contributions, agentAssets);
+      await buildExecutable(targetId, embeddedFiles, contributions, transcriptSearchWorkers);
       await buildCliExecutable(targetId);
     }
   } finally {
-    await fs.rm(agentAssets.directory, { recursive: true, force: true });
+    await fs.rm(transcriptSearchWorkers.directory, { recursive: true, force: true });
   }
 }
 

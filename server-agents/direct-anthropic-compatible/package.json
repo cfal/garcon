@@ -8,7 +8,6 @@
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "direct-anthropic-compatible",
-    "standaloneEntrypoints": {},
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }

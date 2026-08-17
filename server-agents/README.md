@@ -212,7 +212,6 @@ Each provider package contains `package.json`, `tsconfig.json`, and
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "example",
-    "standaloneEntrypoints": {},
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }
@@ -220,9 +219,10 @@ Each provider package contains `package.json`, `tsconfig.json`, and
 ```
 
 `garconBuild` describes compile-time contributions, not runtime facets.
-Standalone entrypoints are separately bundled files such as a provider plugin;
-they are present only when the provider actually needs one. Paths are
-package-relative, begin with `./`, and remain inside the package.
+`preMainModules` load package initialization before the server main module, and
+`embeddedDependencyMetadata` keeps required package metadata in compiled
+executables. Paths are package-relative, begin with `./`, and remain inside the
+package.
 
 Provider SDKs, CLI wrappers, parsers, and native dependencies belong to the
 provider package. Run `bun install` after changing workspace dependencies.

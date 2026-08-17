@@ -13,7 +13,6 @@ describe('OpenCode V1 automatic compaction architecture', () => {
         OPENCODE_DISABLE_AUTOUPDATE: '0',
         OPENCODE_PURE: '1',
       },
-      'https://example.test/operation-identity-plugin.js',
     );
 
     expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? '{}')).not.toHaveProperty('plugin');
@@ -31,9 +30,8 @@ describe('OpenCode V1 automatic compaction architecture', () => {
 
     expect(serverInstance).toContain("OPENCODE_DISABLE_AUTOCOMPACT: '1'");
     expect(serverInstance).not.toContain('operation-identity-plugin');
-    expect(manifest.garconBuild?.standaloneEntrypoints ?? {}).not.toHaveProperty(
-      'operation-identity-plugin',
-    );
+    expect(manifest.garconBuild).not.toHaveProperty('standaloneEntrypoints');
+    expect(manifest.exports).not.toHaveProperty('./operation-identity-plugin');
     expect(existsSync(new URL('../operation-identity-plugin.js', import.meta.url))).toBe(false);
     expect(existsSync(new URL('../operation-identity-plugin-host.ts', import.meta.url))).toBe(false);
   });

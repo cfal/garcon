@@ -10,7 +10,6 @@
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "factory",
-    "standaloneEntrypoints": {},
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }
