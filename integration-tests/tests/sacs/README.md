@@ -1,53 +1,49 @@
 # Server Agent Compatibility Suite
 
-SACS defines provider-neutral behavior once and runs it unchanged against every
-server agent driver. Adding an integration means adding a thin driver, not
-copying the assertions into another provider suite.
+SACS owns provider-neutral contracts at two tiers. Interface conformance runs
+against every shipped integration. The black-box modules in this directory run
+unchanged against each registered scripted driver.
 
 The suite treats the public server-agent interface as the product boundary.
-Drivers may translate fixture controls into native provider actions, but they
-must not contain expected transcript, lifecycle, or error assertions. Those
-belong to the shared SACS cases.
+Black-box drivers may translate fixture controls into native provider actions,
+but they do not choose transcript, lifecycle, or error oracles.
 
-## Required Modules
+## Executed Modules
 
-Every integration runs the interface module from
-`@garcon/server-agent-interface/testing`. Integrations with a deterministic
-scripted tier also run the SACS black-box modules in this directory. Cursor
-remains unit-only by repository policy. Amp, Factory, and integrations without
-a scripted binary run equivalent SACS operation modules at their strongest
-non-live tier.
+Every shipped integration runs the conformance module from
+`@garcon/server-agent-interface/testing`. It validates required service-facet
+methods, nullable capability declarations and runtime shape, descriptor-value
+uniqueness, settings invariants, lifecycle idempotence, and running-session
+snapshot shape. The shipped-roster case observes idle snapshots; helper units
+lock nonempty item shape and duplicate rejection.
 
-The universal transcript module covers:
+`registry.test.ts` locks the required scripted-driver roster. Two shared
+black-box modules currently exist:
 
-- immediate input durability before provider dispatch;
-- steering durability before provider delivery;
-- exact observed transcript order across start and resume;
-- one session fact on start and no new session fact on resume;
-- no synthesized terminal or active run after process crash.
+- `transcript-lifecycle.test.ts` covers immediate input and steering durability,
+  duplicate non-redispatch, observed order, start/resume session facts,
+  interrupt/successor behavior, and crash non-recovery;
+- `legacy-history-adoption.test.ts` covers legacy absence, fail-closed import,
+  quarantine, native missing/read-failure/valid-empty behavior, and the
+  Direct/OpenCode source constraints represented by its registered drivers.
 
-Capability modules apply whenever the corresponding nullable facet or emitted
-event family is present:
+Cursor remains unit-only by repository policy. Amp and Factory retain their
+provider-owned strongest-tier tests; they do not run nonexistent equivalent
+SACS operation modules.
 
-- one integration-generated permission occurrence UUID, provider-native ID
-  privacy, exact response capability, delayed-terminal isolation, and restart
-  inertness;
-- adoption-only `legacyHistoryImport`, including fail-closed reads and recorded
-  quarantine, independently of the Reload-only `nativeHistoryImport` facet;
-- native history import missing/read-failure/valid-empty behavior, gated by its
-  own nullable driver facet rather than the session codec or legacy facet;
-- native activity probe and fork behavior;
-- steering, goals, compaction, and project-path updates;
-- shared-stream routing and per-chat sink-rejection isolation;
-- source retirement and route/callback cleanup.
+## Ownership Boundary
 
-An advertised capability may not skip its module. A null facet records an
-explicit not-applicable result. Provider-specific tests remain only for native
-translation, native storage formats, and behavior unique to that provider.
-When deterministic migration fixtures are registered, the three Direct drivers
-consume the same legacy-adoption module and advertise no native Reload.
-OpenCode supplies only directory-scoped fixtures; the shared module never
-invents a directoryless fallback.
+Interface conformance validates advertised facet shape. It universally invokes
+only `execution.runningSessions()` and an empty `settings.applyPatch`; it does
+not infer provider behavior from capability presence. The shared black-box
+modules own only the operations listed above.
+
+Permissions, native activity probes, fork, goals, compaction, project-path
+updates, shared-stream routing, source retirement, and route/callback cleanup
+remain owned by CTS and provider scripted or unit tiers. Native translation,
+storage formats, and provider-specific behavior remain provider-owned. A null
+facet records that the capability is not advertised; it does not manufacture a
+not-applicable behavioral result.
 
 ## Driver Contract
 
@@ -56,9 +52,10 @@ creation, deterministic model scripting, request observation, and cleanup. A
 driver establishes provider-native barriers and translates provider requests;
 it does not choose an oracle.
 
-The reference scripted drivers are Claude, Codex, OpenCode, and Pi. OpenCode's
-real-binary tier is Linux-only. New reference-tier integrations register in
-`drivers.ts`, after which every shared case runs automatically.
+The reference scripted drivers are Claude, Codex, OpenCode, Pi, and the three
+Direct integrations. OpenCode's real-binary tier is Linux-only. New
+reference-tier integrations register in `drivers.ts`, after which every shared
+case runs automatically.
 
 Transcript identity is always `(transcriptViewId, ordinal)`. Exact text checks
 payload fidelity only. SACS never uses content, timestamps, fuzzy matching, or

@@ -40,6 +40,7 @@ export interface AgentSettings {
   defaults(): AgentSettingsEnvelope;
   parse(input: AgentSettingsEnvelope): AgentSettingsEnvelope;
   migrate(input: AgentSettingsEnvelope): Promise<AgentSettingsEnvelope>;
+  // Preserves the semantic envelope without mutating current when patch is empty.
   applyPatch(current: AgentSettingsEnvelope, patch: JsonObject): AgentSettingsEnvelope;
 }
 

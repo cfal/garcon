@@ -29,6 +29,7 @@ export interface AgentExecutionAdmission {
 }
 
 export interface AgentRunningSession {
+  // Values are nonempty and unique within each runningSessions snapshot.
   readonly agentSessionId: string;
   // Provider-worded status for diagnostics surfaces only; never branch on it.
   readonly status: string | null;

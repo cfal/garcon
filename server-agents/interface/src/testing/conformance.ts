@@ -1,7 +1,33 @@
+import { isDeepStrictEqual } from 'node:util';
 import type {
   AgentIntegrationClass,
   AgentIntegration,
 } from '../index.js';
+
+const REQUIRED_FACET_METHODS = {
+  execution: ['start', 'resume', 'abort', 'runningSessions'],
+  catalog: ['snapshot'],
+  settings: ['describe', 'defaults', 'parse', 'migrate', 'applyPatch'],
+  lifecycle: ['start', 'stop', 'migrateOwnedStorage'],
+  migration: ['translateLegacyNativeSession', 'translateLegacySettings'],
+} as const;
+
+const NULLABLE_FACET_METHODS = {
+  auth: ['status'],
+  commands: ['discover'],
+  compaction: ['compact'],
+  forking: ['fork', 'discard'],
+  steering: ['captureTarget', 'steer'],
+  goals: ['submitControl'],
+  endpoints: ['validate'],
+  singleQuery: ['run'],
+  legacyHistoryImport: ['load'],
+  nativeHistoryImport: ['load'],
+  nativeActivity: ['lastActivity'],
+  nativeSessions: ['resolveNativeSession', 'describeSource', 'release'],
+  sessionConfiguration: ['apply'],
+  projectPathUpdates: ['prepare'],
+} as const;
 
 export interface AgentIntegrationConformanceOptions {
   readonly integrationClass: Pick<
@@ -15,6 +41,8 @@ export function validateAgentIntegration(
   options: AgentIntegrationConformanceOptions,
 ): void {
   const { integration, integrationClass } = options;
+  const integrationRecord = integration as unknown as Record<string, unknown>;
+  const agentId = integration.descriptor?.id ?? integrationClass.integrationId;
   if (integrationClass.apiVersion !== 5) {
     throw new Error(`Unsupported agent integration API version: ${integrationClass.apiVersion}`);
   }
@@ -23,53 +51,28 @@ export function validateAgentIntegration(
       `Agent integration ID mismatch: ${integrationClass.integrationId} != ${integration.descriptor.id}`,
     );
   }
-  if (!integration.execution) {
-    throw new Error(`Agent integration ${integration.descriptor.id} is missing a required facet`);
+  for (const [facet, methods] of Object.entries(REQUIRED_FACET_METHODS)) {
+    assertFacetMethods(agentId, facet, integrationRecord[facet], methods);
   }
-  if (typeof integration.execution.start !== 'function'
-      || typeof integration.execution.resume !== 'function'
-      || typeof integration.execution.abort !== 'function') {
-    throw new Error(`Agent integration ${integration.descriptor.id} has an invalid execution facet`);
-  }
-  if (!('legacyHistoryImport' in integration) || integration.legacyHistoryImport === undefined) {
-    throw new Error(`Agent integration ${integration.descriptor.id} is missing required legacyHistoryImport capability state`);
-  }
-  for (const facet of [
-    'nativeHistoryImport',
-    'nativeActivity',
-    'nativeSessions',
-    'sessionConfiguration',
-    'projectPathUpdates',
-  ] as const) {
-    if (!(facet in integration) || integration[facet] === undefined) {
-      throw new Error(`Agent integration ${integration.descriptor.id} is missing required ${facet} capability state`);
+  assertAttachmentsFacet(agentId, integrationRecord);
+  for (const [facet, methods] of Object.entries(NULLABLE_FACET_METHODS)) {
+    if (!(facet in integrationRecord) || integrationRecord[facet] === undefined) {
+      throw new Error(`Agent integration ${agentId} is missing required ${facet} capability state`);
     }
+    const value = integrationRecord[facet];
+    if (value !== null) assertFacetMethods(agentId, facet, value, methods);
   }
+  assertOptionalMethods(agentId, 'auth', integrationRecord.auth, [
+    'launchLogin',
+    'completeLogin',
+    'loginStatus',
+  ]);
+  assertSingleQueryOptions(agentId, integrationRecord.singleQuery);
   if ('transcriptSearch' in integration) {
-    throw new Error(`Agent integration ${integration.descriptor.id} exposes removed transcriptSearch state`);
-  }
-  if (!integration.catalog || !integration.settings || !integration.lifecycle || !integration.migration) {
-    throw new Error(`Agent integration ${integration.descriptor.id} is missing a required service facet`);
-  }
-  for (const facet of ['steering', 'goals'] as const) {
-    if (!(facet in integration) || integration[facet] === undefined) {
-      throw new Error(`Agent integration ${integration.descriptor.id} is missing required ${facet} capability state`);
-    }
-  }
-  if (
-    integration.steering !== null
-    && (
-      typeof integration.steering.captureTarget !== 'function'
-      || typeof integration.steering.steer !== 'function'
-    )
-  ) {
-    throw new Error(`Agent integration ${integration.descriptor.id} has an invalid steering facet`);
-  }
-  if (integration.goals !== null && typeof integration.goals.submitControl !== 'function') {
-    throw new Error(`Agent integration ${integration.descriptor.id} has an invalid goals facet`);
+    throw new Error(`Agent integration ${agentId} exposes removed transcriptSearch state`);
   }
   if ('submitActiveInput' in integration.execution) {
-    throw new Error(`Agent integration ${integration.descriptor.id} exposes removed execution.submitActiveInput`);
+    throw new Error(`Agent integration ${agentId} exposes removed execution.submitActiveInput`);
   }
   assertUniqueDescriptorValues(
     integration.descriptor.id,
@@ -86,6 +89,64 @@ export function validateAgentIntegration(
     'endpoint protocols',
     integration.descriptor.supportedEndpointProtocols,
   );
+}
+
+function assertFacetMethods(
+  agentId: string,
+  facet: string,
+  value: unknown,
+  methods: readonly string[],
+): void {
+  if (!value || typeof value !== 'object') {
+    throw new Error(`Agent integration ${agentId} has an invalid ${facet} facet`);
+  }
+  const record = value as Record<string, unknown>;
+  if (methods.some((method) => typeof record[method] !== 'function')) {
+    throw new Error(`Agent integration ${agentId} has an invalid ${facet} facet`);
+  }
+}
+
+function assertAttachmentsFacet(
+  agentId: string,
+  integration: Record<string, unknown>,
+): void {
+  if (!('attachments' in integration) || integration.attachments === undefined) {
+    throw new Error(`Agent integration ${agentId} is missing required attachments capability state`);
+  }
+  if (integration.attachments === null) return;
+  if (!integration.attachments || typeof integration.attachments !== 'object') {
+    throw new Error(`Agent integration ${agentId} has an invalid attachments facet`);
+  }
+  const fileMimeTypes = (integration.attachments as Record<string, unknown>).fileMimeTypes;
+  if (!Array.isArray(fileMimeTypes) || fileMimeTypes.some((value) => typeof value !== 'string')) {
+    throw new Error(`Agent integration ${agentId} has an invalid attachments facet`);
+  }
+}
+
+function assertOptionalMethods(
+  agentId: string,
+  facet: string,
+  value: unknown,
+  methods: readonly string[],
+): void {
+  if (value === null || value === undefined) return;
+  const record = value as Record<string, unknown>;
+  if (methods.some((method) => (
+    method in record && record[method] !== undefined && typeof record[method] !== 'function'
+  ))) {
+    throw new Error(`Agent integration ${agentId} has an invalid ${facet} facet`);
+  }
+}
+
+function assertSingleQueryOptions(agentId: string, value: unknown): void {
+  if (value === null || value === undefined) return;
+  const record = value as Record<string, unknown>;
+  if (
+    'runsToolsWithoutPermission' in record
+    && record.runsToolsWithoutPermission !== true
+  ) {
+    throw new Error(`Agent integration ${agentId} has an invalid singleQuery facet`);
+  }
 }
 
 function assertUniqueDescriptorValues(
@@ -120,11 +181,21 @@ export async function runAgentIntegrationConformance(
   const parsed = integration.settings.parse(defaults);
   assertSettingsEnvelope(agentId, parsed);
   const migrated = await integration.settings.migrate(parsed);
+  const migratedSnapshot = structuredClone(migrated);
   const migratedAgain = await integration.settings.migrate(migrated);
   assertSettingsEnvelope(agentId, migrated);
   assertSettingsEnvelope(agentId, migratedAgain);
-  if (JSON.stringify(migratedAgain) !== JSON.stringify(migrated)) {
+  if (!isDeepStrictEqual(migratedAgain, migratedSnapshot)) {
     throw new Error(`Agent integration ${agentId} settings migration is not idempotent`);
+  }
+  const patchInputSnapshot = structuredClone(migrated);
+  const patched = integration.settings.applyPatch(migrated, {});
+  assertSettingsEnvelope(agentId, patched);
+  if (
+    !isDeepStrictEqual(patched, patchInputSnapshot)
+    || !isDeepStrictEqual(migrated, patchInputSnapshot)
+  ) {
+    throw new Error(`Agent integration ${agentId} changed settings for an empty patch`);
   }
 
   let started = false;
@@ -132,11 +203,35 @@ export async function runAgentIntegrationConformance(
     await integration.lifecycle.start();
     started = true;
     await integration.lifecycle.start();
+    assertRunningSessions(agentId, integration.execution.runningSessions());
   } finally {
     if (started) {
       await integration.lifecycle.stop();
       await integration.lifecycle.stop();
     }
+  }
+}
+
+function assertRunningSessions(agentId: string, value: unknown): void {
+  if (!Array.isArray(value)) {
+    throw new Error(`Agent integration ${agentId} returned an invalid running session snapshot`);
+  }
+  const seen = new Set<string>();
+  for (const session of value) {
+    if (!session || typeof session !== 'object') {
+      throw new Error(`Agent integration ${agentId} returned an invalid running session snapshot`);
+    }
+    const record = session as Record<string, unknown>;
+    if (
+      typeof record.agentSessionId !== 'string'
+      || record.agentSessionId.length === 0
+      || (record.status !== null && typeof record.status !== 'string')
+      || (record.startedAt !== null && typeof record.startedAt !== 'string')
+      || seen.has(record.agentSessionId)
+    ) {
+      throw new Error(`Agent integration ${agentId} returned an invalid running session snapshot`);
+    }
+    seen.add(record.agentSessionId);
   }
 }
 
