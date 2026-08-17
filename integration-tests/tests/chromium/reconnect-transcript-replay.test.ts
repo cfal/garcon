@@ -24,6 +24,7 @@ interface ReplayGate {
   events: unknown[];
   forcedStaleView: boolean;
   held: boolean;
+  heldSocket: WebSocket | null;
   matchingRequests: Record<string, unknown>[];
   mode: 'force-stale-first' | 'hold-continuation' | null;
   openCount: number;
@@ -70,6 +71,7 @@ async function installReplayGate(context: BrowserContext): Promise<void> {
       events: [],
       forcedStaleView: false,
       held: false,
+      heldSocket: null,
       matchingRequests: [],
       mode: null,
       openCount: 0,
@@ -122,6 +124,7 @@ async function installReplayGate(context: BrowserContext): Promise<void> {
             }
             if (gate.mode === 'hold-continuation' && gate.matchingRequests.length === 2) {
               gate.held = true;
+              gate.heldSocket = socket;
               gate.release = () => {
                 gate.release = null;
                 send(data);
@@ -155,6 +158,7 @@ async function armReplayGate(
     gate.events = [];
     gate.forcedStaleView = false;
     gate.held = false;
+    gate.heldSocket = null;
     gate.matchingRequests = [];
     gate.mode = mode;
     gate.release = null;
@@ -225,6 +229,16 @@ async function releaseHeldContinuation(page: Page): Promise<void> {
     const release = (globalThis as ReplayGateScope).__garconReplayGate?.release;
     if (!release) throw new Error('No held reconnect continuation is available.');
     release();
+  });
+}
+
+async function closeHeldContinuationSocket(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const gate = (globalThis as ReplayGateScope).__garconReplayGate;
+    if (!gate?.heldSocket) throw new Error('No held replay socket is available.');
+    gate.heldSocket.close();
+    gate.heldSocket = null;
+    gate.release = null;
   });
 }
 
@@ -596,7 +610,7 @@ describe('Chromium reconnect transcript replay', () => {
     });
   }, 180_000);
 
-  test('[TLV5-UX.11-CHROMIUM-REPLAY-01] keeps an expanded detached reading interval through bounded reconnect replay', async () => {
+  test('[TLV5-UX.11-CHROMIUM-REPLAY-01][TLV5-REPLAY.06-COMPACT-CHROMIUM-01] keeps an expanded detached reading interval through bounded reconnect replay', async () => {
     await withChromiumFixture('reconnect-detached-expanded-history', async (fixture, markPhase) => {
       await installReplayGate(fixture.context);
       await fixture.page.setViewportSize({ width: 390, height: 700 });
@@ -617,6 +631,11 @@ describe('Chromium reconnect transcript replay', () => {
       const anchor = await captureDetachedAnchor(fixture.page);
       await startDetachedReplaySampler(fixture.page, anchor);
 
+      const transcriptReads: string[] = [];
+      fixture.page.on('request', (request) => {
+        const url = new URL(request.url());
+        if (url.pathname === '/api/v1/chats/messages') transcriptReads.push(url.toString());
+      });
       const connectionCount = await replayGateOpenCount(fixture.page);
       await armReplayGate(fixture.page, { chatId, mode: 'hold-continuation' });
       const replayMarker = 'detached-reconnect-final-marker';
@@ -632,14 +651,74 @@ describe('Chromium reconnect transcript replay', () => {
         },
       });
       await waitForHeldContinuation(fixture.page, connectionCount);
-      await releaseHeldContinuation(fixture.page);
+
+      markPhase('advancing the server frontier with a live turn while the continuation is held');
+      const liveTurnContent = 'detached-reconnect-live-turn';
+      const liveTurn = await fixture.integration.client.runDirectChat({
+        chatId,
+        content: liveTurnContent,
+        agent: fixture.integration.directAgents.openAi,
+      });
+      // The reply must be committed before the replacement replay's watermark.
+      await fixture.integration.client.waitForTurnTerminal(chatId, liveTurn.turnId);
+
+      markPhase('closing the held replay socket to restart from the applied cursor');
+      await closeHeldContinuationSocket(fixture.page);
+      await fixture.page.waitForFunction(
+        (previous) =>
+          ((globalThis as ReplayGateScope).__garconReplayGate?.openCount ?? 0) > previous,
+        connectionCount + 1,
+      );
+      await fixture.page.waitForFunction(
+        () =>
+          ((globalThis as ReplayGateScope).__garconReplayGate?.events ?? []).filter((event) => (
+            event !== null
+            && typeof event === 'object'
+            && !Array.isArray(event)
+            && (event as Record<string, unknown>).type === 'chat-subscribed'
+          )).length >= 2,
+      );
+
+      const replayCapture = await fixture.page.evaluate(() => {
+        const gate = (globalThis as ReplayGateScope).__garconReplayGate;
+        if (!gate) throw new Error('Reconnect replay gate is unavailable.');
+        return {
+          matchingRequests: gate.matchingRequests,
+          subscribed: gate.events.filter((event) => (
+            event !== null
+            && typeof event === 'object'
+            && !Array.isArray(event)
+            && (event as Record<string, unknown>).type === 'chat-subscribed'
+          )) as Record<string, unknown>[],
+        };
+      });
+      const heldContinuation = replayCapture.matchingRequests[1];
+      const replacementSubscribe = replayCapture.matchingRequests[2];
+      if (!heldContinuation || !replacementSubscribe) {
+        throw new Error(
+          `Expected the held continuation and its replacement subscribe: ${JSON.stringify(replayCapture.matchingRequests)}`,
+        );
+      }
+      expect(replacementSubscribe.afterOrdinal).toBe(heldContinuation.afterOrdinal);
+      expect(replacementSubscribe).not.toHaveProperty('throughOrdinal');
+      const firstResponse = replayCapture.subscribed[0];
+      const replacementResponse = replayCapture.subscribed[1];
+      if (!firstResponse || !replacementResponse) {
+        throw new Error('The replacement replay response did not arrive.');
+      }
+      expect(replacementResponse.throughOrdinal).toBeGreaterThan(
+        firstResponse.throughOrdinal as number,
+      );
+
+      const expectedModelCount = expandedModelCount + 450 + 2;
       await fixture.page.waitForFunction(
         ({ selector, expected }) =>
           Number(document.querySelector<HTMLElement>(selector)?.dataset.chatVirtualModelCount ?? 0)
             === expected,
-        { selector: SIZER_SELECTOR, expected: expandedModelCount + 450 },
+        { selector: SIZER_SELECTOR, expected: expectedModelCount },
       );
       await fixture.page.locator(`${FEED_SELECTOR}[aria-busy="false"]`).waitFor();
+      expect(transcriptReads).toEqual([]);
 
       const frames = await finishDetachedReplaySampler(fixture.page);
       expectStableDetachedFrames(frames, anchor);
@@ -662,15 +741,24 @@ describe('Chromium reconnect transcript replay', () => {
         feed.dispatchEvent(new Event('scroll', { bubbles: true }));
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       });
-      await fixture.page.waitForFunction(
-        ({ selector, content }) => [...document.querySelectorAll<HTMLElement>(selector)]
-          .filter((element) => (element.textContent ?? '').includes(content)).length === 1,
-        { selector: MESSAGE_SELECTOR, content: replayMarker },
-      );
+      const exactContents = [replayMarker, liveTurnContent, `echo:${liveTurnContent}`];
+      for (const content of exactContents) {
+        await fixture.page.waitForFunction(
+          ({ selector, expected }) => [...document.querySelectorAll<HTMLElement>(selector)]
+            .filter((element) => (element.textContent ?? '').trim() === expected).length === 1,
+          { selector: MESSAGE_SELECTOR, expected: content },
+        );
+      }
       const canonical = await fixture.integration.client.getMessages(chatId, { limit: 10 });
+      const tailContents = canonical.messages.map((entry) => (
+        'content' in entry.message ? String(entry.message.content) : ''
+      ));
+      for (const content of exactContents) {
+        expect(tailContents.filter((entry) => entry === content)).toHaveLength(1);
+      }
       expect(canonical.messages.at(-1)?.message).toMatchObject({
         type: 'assistant-message',
-        content: replayMarker,
+        content: `echo:${liveTurnContent}`,
       });
       assertNoUnexpectedReconnectBrowserErrors(fixture.browserErrors);
     });
