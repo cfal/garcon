@@ -600,17 +600,16 @@ useful but do not replace this cross-surface matrix.
 | Rendering           | conversational, notice, switch, specialized permission; terminal as state | Ledger presentation and browser mixed ordering  | Covered                 |
 | Search              | conversational only                                                       | Search controller and search worker tests       | Covered                 |
 | Preview             | latest conversational only                                                | Registry cache and metadata tests               | Covered                 |
-| Model context       | conversational excluding current prompt                                   | Direct persistence and execution tests          | Partial all-kind matrix |
-| Carryover           | conversational, switch, and quarantine-notice frozen projection rules      | Handoff, fork, quarantine, and reload tests     | Partial all-kind matrix |
+| Model context       | conversational excluding current prompt                                   | Canonical all-kind matrix with current-prompt exclusion | Covered          |
+| Carryover           | conversational, switch, and quarantine-notice frozen projection rules      | Canonical all-kind matrix plus handoff, fork, and reload tests | Covered |
 | Share               | rendering snapshot fixed at publish                                       | Native reload integration and share-store tests | Covered                 |
 | Fork lookup         | provider metadata passed unread to owner                                  | Fork units and scripted fork matrices           | Covered                 |
 | Command attribution | committed assistant output before terminal settlement                     | Server event-wiring tests                       | Covered                 |
 | User export         | no product surface exists                                                 | Design-bound future obligation                  | Not applicable          |
 | Support export      | no product surface exists                                                 | Design-bound future obligation                  | Not applicable          |
 
-Gap: there is no executable table that forces a new ledger row kind to declare
-its behavior on every surface. The CTS should make a missing cell a compile or
-test failure.
+`TLV5-L01.02-CORE-MATRIX-01` is the canonical executable table. A new ledger
+row kind must extend its fixture and every exact surface projection.
 
 ## Browser Behavior Matrix
 
@@ -699,13 +698,13 @@ deleted recovery architecture.
 | TLV5-A04 | Late old output may interleave with a later run and is never reconciled.                                             | Covered core, partial provider matrix   |
 | TLV5-A05 | Restart creates no inferred interruption row.                                                                        | Covered                                 |
 | TLV5-A06 | Future-turn queue disappears on restart with no ledger markers.                                                      | Covered                                 |
-| TLV5-A07 | Resend opt-out disappears on restart and the scan recomputes candidates.                                             | Partial, no restart acceptance case     |
+| TLV5-A07 | Resend opt-out disappears on restart and the scan recomputes candidates.                                             | Covered                                 |
 | TLV5-A08 | The resend scan may deliver an input again across failures and restart.                                              | Partial                                 |
 | TLV5-A09 | In-flight output after steer and visible failed runs stop later resend scanning.                                     | Covered unit                            |
 | TLV5-A10 | Native rewriting or unavailable timestamps may be silent.                                                            | Partial provider matrix                 |
 | TLV5-A11 | Undetected bit corruption is delegated to SQLite; detected corruption fences one chat.                               | Documentation only plus corruption test |
-| TLV5-A12 | Pi output lost before Pi persistence is not backfilled.                                                              | Missing negative scripted case          |
-| TLV5-A13 | Native activity after handoff is no longer adoptable into the frozen prefix.                                         | Missing explicit black-box case         |
+| TLV5-A12 | Pi output lost before Pi persistence is not backfilled.                                                              | Covered                                 |
+| TLV5-A13 | Native activity after handoff is no longer adoptable into the frozen prefix.                                         | Covered                                 |
 | TLV5-A14 | Manual reload deletes the replaced view with no undo.                                                                | Covered                                 |
 | TLV5-A15 | A pre-registration native fork crash may leave an orphan provider artifact; core does not invent a recovery journal. | Partial cleanup evidence                |
 
@@ -752,6 +751,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L08.02-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `atomically deletes the replaced view when promoting staging`                                                    | L08.02                      |
 | TLV5-L11.04-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `attributes an eviction close failure and retries that handle on shutdown`                                       | L11.04                      |
 | TLV5-L09.04-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: `drops a pending native result when the transcript view is replaced`                                   | L09.04                      |
+| TLV5-L01.02-CORE-MATRIX-01     | `server/ledger/__tests__/read-fold-matrix.test.js`: one all-kind fixture projects ordinary and quarantine notices, late/repeated content, switch, permission, session, and terminal rows exactly across rendering, context, carryover, snapshot, search, preview, and broadcast | L01.02 |
 | TLV5-PERM.05-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `applies a delayed cancellation only to its exact reused occurrence`                             | PERM.05                     |
 | TLV5-PERM.07-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `keeps permission history but restores no actionability after restart`                           | PERM.07                     |
 | TLV5-PERM.08-BROWSER-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `keeps reused permission occurrences independently actionable`                     | PERM.05, PERM.06, PERM.08  |
@@ -811,6 +811,11 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.11-CURSOR-PREFERRED-UNIT-01 | `server-agents/cursor/src/__tests__/legacy-history-import.test.js`: an invalid preferred ACP store blocks fallback until the preferred candidate is repaired or removed | ADOPT.11 |
 | TLV5-ADOPT.11-DIRECT-RELOCATION-UNIT-01 | `server-agents/common/src/direct/__tests__/legacy-session-relocation.test.js`: mixed moved/skipped relocation commits no version, retains the skipped source, and a repaired retry commits once | ADOPT.11 |
 | TLV5-L07.03-CODEX-SCRIPTED-01  | `integration-tests/tests/server/codex-producer-routing.test.ts`: `drops content emitted by the old native client after transcript replacement`            | L07.03, L07.08              |
+| TLV5-L07.08-OPENCODE-SCRIPTED-01 | `integration-tests/tests/server/opencode-event-stream.test.ts`: a reset retires the active route, absorbs its late event, and leaves the replacement global stream usable | L07.08 |
+| TLV5-A07-SERVER-RESTART-01     | `integration-tests/tests/server/persistence-lifecycle.test.ts`: restart preserves the durable input and recomputes its resend candidacy without ephemeral exclusion state | A07 |
+| TLV5-A07-WEB-UNIT-01           | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: a fresh transcript state restores candidates excluded only by the prior client | A07 |
+| TLV5-A12-PI-SCRIPTED-01        | `integration-tests/tests/server/pi-scripted-persistence.test.ts`: Pi output lost before core acceptance or native persistence is not synthesized after crash/restart | A12 |
+| TLV5-A13-SERVER-HANDOFF-01     | `integration-tests/tests/server/native-transcript-reload.test.ts`: old-owner native activity appended after handoff cannot enter the frozen prefix on later Reload | A13 |
 | TLV5-PERM.04-CODEX-SCRIPTED-01 | `integration-tests/tests/server/codex-producer-routing.test.ts`: `keeps reused native approval ids bound to their exact occurrences`                      | PERM.04, PERM.05            |
 | TLV5-L10.01-CODEX-STATIC-01    | `server-agents/codex/src/agents/codex/app-server/__tests__/architecture.test.js`: live runtime does not import the history loader                         | L10.01, R3                  |
 | TLV5-R03-CODEX-SCRIPTED-01     | `integration-tests/tests/server/codex-scripted-interrupt.test.ts`: `imports a long native tool tail before exactly one final assistant message`           | L02.02, L10.01              |
@@ -868,21 +873,15 @@ Equivalent cases are required for OpenCode and Pi. Codex retains its existing
 black-box case. Each reference provider also needs explicit scripted cases for
 the remaining five provider matrix rows.
 
-`TLV5-L07.08-OPENCODE-SCRIPTED-01`
+`TLV5-L07.08-OPENCODE-CROSS-CHAT-SCRIPTED-01` and
+`TLV5-L07.08-CODEX-CROSS-CHAT-SCRIPTED-01`
 
-> Given two chats share one OpenCode global event stream, when chat A's stale
-> route publishes into a closed sink, then chat B's named event still commits
-> and the shared event stream remains alive.
+> Given two chats share one provider event stream, when chat A's stale route
+> publishes into a closed sink, then chat B's named event still commits and the
+> shared event stream remains alive.
 
-Codex needs the equivalent shared-client isolation case.
-
-### Read Folds
-
-`TLV5-L01.02-CORE-MATRIX-01`
-
-> Given one view containing every ledger row kind and late repeated content,
-> when each read fold consumes it, then every surface returns exactly its
-> declared row-kind projection in ordinal order and no undeclared kind leaks.
+The registered OpenCode reset case and Codex replacement case prove same-chat
+successor usability, not the required cross-chat isolation.
 
 ### Native Activity
 
@@ -926,26 +925,6 @@ Codex needs the equivalent shared-client isolation case.
 > connection starts, then the partial replay is abandoned, the replacement
 > captures a fresh watermark, every addressed row appears once, and the
 > reading anchor remains within one pixel.
-
-### Accepted Losses
-
-`TLV5-A07-SERVER-RESTART-01`
-
-> Given the user excluded one resend candidate for the current composition,
-> when the process restarts, then the durable row remains, the exclusion is
-> absent, and the literal backward scan selects the candidate again.
-
-`TLV5-A13-SERVER-HANDOFF-01`
-
-> Given provider A's session becomes frozen by a durable handoff to provider B,
-> when A's native history later advances, then B's drift check and reload path
-> cannot import A's new rows into the frozen prefix.
-
-`TLV5-A12-PI-SCRIPTED-01`
-
-> Given Pi emits or begins output that is neither accepted by core nor persisted
-> natively before process loss, when Garcon restarts, then no row is synthesized
-> and no reconciliation reader backfills it.
 
 ### Release Replays
 

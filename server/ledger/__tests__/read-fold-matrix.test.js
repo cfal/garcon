@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  TranscriptNoticeMessage,
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { TranscriptSearchController } from '../../chats/search/controller.ts';
@@ -19,6 +20,13 @@ import { TranscriptViewReader } from '../view-reader.ts';
 const AT = '2026-08-16T00:00:00.000Z';
 const CHAT_ID = 'fold-matrix-chat';
 const VIEW_ID = transcriptViewId('fold-matrix-view');
+const QUARANTINE_DETAIL = {
+  type: 'carryover-migration-quarantine',
+  artifactId: 'artifact-1',
+  errorCode: 'CARRYOVER_PARSE_FAILED',
+};
+const QUARANTINE_NOTICE =
+  'Some earlier chat history could not be migrated. Quarantine reference: artifact-1.';
 
 describe('transcript ledger read-fold matrix', () => {
   it('[TLV5-L01.02-CORE-MATRIX-01] projects every row kind through its declared consumer fold', async () => {
@@ -41,15 +49,35 @@ describe('transcript ledger read-fold matrix', () => {
         [1, 'user-message', 'repeated payload'],
         [2, 'assistant-message', 'repeated payload'],
         [3, 'transcript-notice', null],
-        [4, 'agent-switch', null],
-        [5, 'permission-request', null],
-        [6, 'permission-cancelled', null],
-        [7, 'permission-request', null],
-        [8, 'permission-resolved', null],
-        [9, 'permission-expired', null],
-        [12, 'assistant-message', 'late provider output'],
-        [13, 'user-message', 'repeated payload'],
-        [14, 'assistant-message', 'repeated payload'],
+        [4, 'transcript-notice', null],
+        [5, 'agent-switch', null],
+        [6, 'permission-request', null],
+        [7, 'permission-cancelled', null],
+        [8, 'permission-request', null],
+        [9, 'permission-resolved', null],
+        [10, 'permission-expired', null],
+        [13, 'assistant-message', 'late provider output'],
+        [14, 'user-message', 'repeated payload'],
+        [15, 'assistant-message', 'repeated payload'],
+      ]);
+      expect(rendered.filter((entry) => entry.message.type === 'transcript-notice')).toEqual([
+        {
+          ordinal: 3,
+          message: new TranscriptNoticeMessage(
+            AT,
+            'Native history changed.',
+            'reload-native-history',
+          ),
+        },
+        {
+          ordinal: 4,
+          message: new TranscriptNoticeMessage(
+            AT,
+            QUARANTINE_NOTICE,
+            undefined,
+            QUARANTINE_DETAIL,
+          ),
+        },
       ]);
 
       const conversation = ledger.conversationRows(CHAT_ID);
@@ -59,11 +87,11 @@ describe('transcript ledger read-fold matrix', () => {
       ])).toEqual([
         [1, 'repeated payload'],
         [2, 'repeated payload'],
-        [12, 'late provider output'],
-        [13, 'repeated payload'],
+        [13, 'late provider output'],
         [14, 'repeated payload'],
+        [15, 'repeated payload'],
       ]);
-      expect(ledger.conversationMessages(CHAT_ID, new Set([13])).map(conversationalText)).toEqual([
+      expect(ledger.conversationMessages(CHAT_ID, new Set([14])).map(conversationalText)).toEqual([
         'repeated payload',
         'repeated payload',
         'late provider output',
@@ -76,29 +104,35 @@ describe('transcript ledger read-fold matrix', () => {
       ])).toEqual([
         ['user-input', 'repeated payload'],
         ['provider-row', 'repeated payload'],
+        ['notice', QUARANTINE_NOTICE],
         ['agent-switch', null],
         ['provider-row', 'late provider output'],
         ['user-input', 'repeated payload'],
         ['provider-row', 'repeated payload'],
       ]);
+      expect(frozenConversationDrafts(rows).filter((row) => row.kind === 'notice')).toEqual([{
+        kind: 'notice',
+        at: AT,
+        message: QUARANTINE_NOTICE,
+        detail: QUARANTINE_DETAIL,
+        providerMeta: null,
+      }]);
 
       const reader = new TranscriptViewReader(ledger, {
         ensure: async () => ledger.currentView(CHAT_ID),
       });
       const snapshot = await reader.renderingSnapshot(CHAT_ID);
       expect(snapshot.transcriptViewId).toBe(VIEW_ID);
-      expect(snapshot.lastOrdinal).toBe(14);
-      expect(snapshot.messages.map((message) => message.type)).toEqual(
-        rendered.map((entry) => entry.message.type),
-      );
+      expect(snapshot.lastOrdinal).toBe(15);
+      expect(snapshot.messages).toEqual(rendered.map((entry) => entry.message));
 
       const searchRows = await initializeSearchFold(ledger, rows);
       expect(searchRows.map((row) => [row.ordinal, row.role, row.body])).toEqual([
         [1, 'user', 'repeated payload'],
         [2, 'assistant', 'repeated payload'],
-        [12, 'assistant', 'late provider output'],
-        [13, 'user', 'repeated payload'],
-        [14, 'assistant', 'repeated payload'],
+        [13, 'assistant', 'late provider output'],
+        [14, 'user', 'repeated payload'],
+        [15, 'assistant', 'repeated payload'],
       ]);
 
       const metadataUpdates = [];
@@ -123,7 +157,7 @@ describe('transcript ledger read-fold matrix', () => {
       expect(broadcasts).toEqual([expect.objectContaining({
         transcriptViewId: VIEW_ID,
         firstOrdinal: 1,
-        lastOrdinal: 14,
+        lastOrdinal: 15,
         messages: rendered,
       })]);
     } finally {
@@ -158,6 +192,13 @@ function allRowKindDrafts() {
       providerMeta: null,
       message: 'Native history changed.',
       detail: { action: 'reload-native-history' },
+    },
+    {
+      kind: 'notice',
+      at: AT,
+      providerMeta: null,
+      message: QUARANTINE_NOTICE,
+      detail: QUARANTINE_DETAIL,
     },
     {
       kind: 'agent-switch',
@@ -301,5 +342,6 @@ function conversationalText(message) {
 function frozenDraftText(row) {
   if (row.kind === 'user-input') return row.detail.message.content;
   if (row.kind === 'provider-row') return row.message.content;
+  if (row.kind === 'notice') return row.message;
   return null;
 }
