@@ -218,29 +218,17 @@
 		notifications,
 		ui,
 		transientLayers,
-		get textarea() {
-			return textarea;
-		},
-		get visible() {
-			return isVisible;
-		},
-		get presented() {
-			return isPresented;
-		},
-		get startBlocked() {
-			return isDisabled || directAdmissionPending || snippetExpansion.pending;
-		},
+		get textarea() { return textarea; },
+		get visible() { return isVisible; },
+		get presented() { return isPresented; },
+		get startBlocked() { return isDisabled || directAdmissionPending || snippetExpansion.pending; },
 		resizeTextarea: autoResize,
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	const attachmentController = new PromptComposerAttachmentController({
 		composer: composerState,
-		get promptTransformPending() {
-			return promptTransformPending;
-		},
-		get attachmentSupport() {
-			return attachmentSupport;
-		},
+		get promptTransformPending() { return promptTransformPending; },
+		get attachmentSupport() { return attachmentSupport; },
 	});
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
