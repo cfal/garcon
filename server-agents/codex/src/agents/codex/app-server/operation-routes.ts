@@ -14,8 +14,8 @@ import type {
 } from '@garcon/server-agent-interface';
 import type { CodexRuntimeOperation } from '../runtime-types.js';
 
-// A Codex call together with the capability core handed it. The app-server multiplexes every chat
-// over one process-wide stream, so the operation carries the route and the event carries none.
+// A Codex call together with the capability core handed it. Each operation captures its own
+// publisher so later events cannot resolve through mutable session or chat state.
 export type CodexOperation = CodexRuntimeOperation;
 
 export function codexOperation(
@@ -102,10 +102,10 @@ export function publishFailed(
 }
 
 // The operation holds the only route it has to a transcript, so an event Codex did not name has
-// nowhere to go and is dropped rather than attributed to whatever is current. The chat is
-// validated rather than used to route: a Codex name means something only inside the chat that
-// issued it. A superseded operation still holds its own closed sink, which refuses the publish
-// here instead of failing the process-wide stream every chat shares.
+// nowhere to go and is dropped rather than attributed to mutable current state. The chat is
+// validated rather than used to route: an operation name is meaningful only inside the chat that
+// issued it. A superseded operation still reaches its own closed sink, and this boundary absorbs
+// that rejection without disrupting another session in the runtime.
 function publish(
   logger: AgentLogger,
   chatId: string,
