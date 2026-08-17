@@ -252,7 +252,7 @@ describe('ChatToolEventRenderer', () => {
 		expect(container.childElementCount).toBe(0);
 	});
 
-	it('renders Bash as one unframed highlighted shell command', async () => {
+	it('renders Bash as a highlighted shell command on the shared card surface', async () => {
 		const command = 'if true; then echo "ready"; fi';
 		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new BashToolUseMessage('', 'bash-1', command),
@@ -264,15 +264,24 @@ describe('ChatToolEventRenderer', () => {
 		expect(code?.classList.contains('text-xs')).toBe(true);
 		expect(code?.classList.contains('font-mono')).toBe(true);
 		expect(code?.classList.contains('block')).toBe(true);
+		expect(code?.classList.contains('leading-[1.25]')).toBe(true);
 		expect(code?.classList.contains('whitespace-pre-wrap')).toBe(true);
 		expect(code?.classList.contains('break-all')).toBe(true);
+		expect(code?.querySelector('span')?.classList.contains('w-5')).toBe(true);
+
+		const card = code?.closest('article');
+		expect(card?.classList.contains('rounded-xl')).toBe(true);
+		expect(card?.classList.contains('border')).toBe(true);
+		expect(card?.classList.contains('shadow-sm')).toBe(true);
+		expect(card?.classList.contains('bg-chat-bash-row')).toBe(true);
+		expect(card?.classList.contains('px-3')).toBe(true);
+		expect(card?.classList.contains('py-2')).toBe(true);
 		expect(container.querySelector('.markdown-code-block')).toBeNull();
 		expect(container.querySelector('pre')).toBeNull();
-		expect(container.querySelector('div')).toBeNull();
 		expect(container.querySelector('button')).toBeNull();
 		expect(screen.queryByText('Bash')).toBeNull();
 		expect(container.children).toHaveLength(1);
-		expect(container.firstElementChild?.tagName).toBe('CODE');
+		expect(container.firstElementChild?.classList.contains('my-0.5')).toBe(true);
 
 		await waitFor(
 			() => {

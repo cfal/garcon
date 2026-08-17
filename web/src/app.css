@@ -29,6 +29,7 @@
 	--color-chat-tabs-active: hsl(var(--chat-tabs-active-bg));
 	--color-chat-tabs-active-foreground: hsl(var(--chat-tabs-active-foreground));
 	--color-chat-tabs-active-border: hsl(var(--chat-tabs-active-border));
+	--color-chat-bash-row: hsl(var(--chat-bash-row-bg));
 
 	--color-sidebar: hsl(var(--sidebar-background));
 	--color-sidebar-foreground: hsl(var(--sidebar-foreground));
@@ -221,6 +222,7 @@
 	--chat-tabs-active-bg: 0 0% 18%;
 	--chat-tabs-active-foreground: 0 0% 98%;
 	--chat-tabs-active-border: 0 0% 18%;
+	--chat-bash-row-bg: 0 0% 94%;
 
 	--sidebar-background: 0 0% 98%;
 	--sidebar-foreground: 0 0% 5%;
@@ -437,6 +439,7 @@
 	--chat-tabs-active-bg: 0 0% 84%;
 	--chat-tabs-active-foreground: 0 0% 8%;
 	--chat-tabs-active-border: 0 0% 84%;
+	--chat-bash-row-bg: 0 0% 0%;
 
 	--sidebar-background: 0 0% 8%;
 	--sidebar-foreground: 0 0% 95%;

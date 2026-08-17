@@ -4,7 +4,15 @@
 
 	import type { Snippet } from 'svelte';
 
-	type Variant = 'default' | 'info' | 'success' | 'warning' | 'error' | 'neutral' | 'thinking';
+	type Variant =
+		| 'default'
+		| 'bash'
+		| 'info'
+		| 'success'
+		| 'warning'
+		| 'error'
+		| 'neutral'
+		| 'thinking';
 
 	interface Props {
 		variant?: Variant;
@@ -26,6 +34,8 @@
 
 	const variantClass = $derived.by(() => {
 		switch (variant) {
+			case 'bash':
+				return 'border-border bg-chat-bash-row text-foreground';
 			case 'info':
 				return 'border-status-info-border bg-status-info/20 text-status-info-foreground';
 			case 'success':
