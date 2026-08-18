@@ -36,27 +36,13 @@ export class TranscriptViewReader {
     expectedTranscriptViewId?: string,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<PresentedTranscriptPage> {
-    try {
-      return await this.#page(
-        chatId,
-        limit,
-        beforeOrdinal,
-        expectedTranscriptViewId,
-        signal,
-      );
-    } catch (error) {
-      // L11 fences a chat for the process lifetime with no retry protocol, so the wire flag must
-      // not invite a retry that can never succeed. The cause is preserved for the diagnostic
-      // sanitizer at the HTTP boundary and is never serialized into the response.
-      if (error instanceof LedgerFencedError) {
-        throw new TranscriptHistoryUnavailableError({
-          kind: 'degraded',
-          errorCode: 'LEDGER_FENCED',
-          retryable: false,
-        }, { cause: error });
-      }
-      throw error;
-    }
+    return readWithFenceTranslation(() => this.#page(
+      chatId,
+      limit,
+      beforeOrdinal,
+      expectedTranscriptViewId,
+      signal,
+    ));
   }
 
   async #page(
@@ -97,6 +83,22 @@ export class TranscriptViewReader {
     afterOrdinal: number,
     throughOrdinal?: number,
     signal: AbortSignal = new AbortController().signal,
+  ): Promise<TranscriptReplayResult> {
+    return readWithFenceTranslation(() => this.#replay(
+      chatId,
+      viewId,
+      afterOrdinal,
+      throughOrdinal,
+      signal,
+    ));
+  }
+
+  async #replay(
+    chatId: string,
+    viewId: TranscriptViewId,
+    afterOrdinal: number,
+    throughOrdinal: number | undefined,
+    signal: AbortSignal,
   ): Promise<TranscriptReplayResult> {
     signal.throwIfAborted();
     const currentView = await this.#adoption.ensure(chatId, signal);
@@ -150,6 +152,17 @@ export class TranscriptViewReader {
     readonly lastOrdinal: number;
     readonly messages: readonly ChatMessage[];
   }> {
+    return readWithFenceTranslation(() => this.#renderingSnapshot(chatId, signal));
+  }
+
+  async #renderingSnapshot(
+    chatId: string,
+    signal: AbortSignal,
+  ): Promise<{
+    readonly transcriptViewId: TranscriptViewId;
+    readonly lastOrdinal: number;
+    readonly messages: readonly ChatMessage[];
+  }> {
     const view = await this.#adoption.ensure(chatId, signal);
     signal.throwIfAborted();
     const watermark = this.#ledger.highWatermark(chatId);
@@ -167,6 +180,21 @@ export class TranscriptViewReader {
       lastOrdinal: watermark.ordinal,
       messages: ledgerRowsToMessages(rows),
     };
+  }
+}
+
+async function readWithFenceTranslation<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof LedgerFencedError) {
+      throw new TranscriptHistoryUnavailableError({
+        kind: 'degraded',
+        errorCode: 'LEDGER_FENCED',
+        retryable: false,
+      }, { cause: error });
+    }
+    throw error;
   }
 }
 

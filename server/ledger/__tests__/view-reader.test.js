@@ -373,7 +373,7 @@ describe('TranscriptViewReader', () => {
     });
   });
 
-  it('presents a fenced ledger as non-retryable degraded history preserving its cause', async () => {
+  it('[TLV5-L11.01-VIEW-READER-UNIT-01] presents every fenced ledger read as non-retryable degraded history', async () => {
     await withReader(async ({ ledger }) => {
       const sentinel = '/sentinel-root/chat-sentinel/ledger.sqlite';
       const underlying = Object.assign(new Error(`unable to open ${sentinel}`), {
@@ -386,29 +386,35 @@ describe('TranscriptViewReader', () => {
           throw fenced;
         },
       });
-      let failure;
-      try {
-        await reader.page('chat-1', 20);
-      } catch (error) {
-        failure = error;
-      }
+      for (const read of [
+        () => reader.page('chat-1', 20),
+        () => reader.replay('chat-1', transcriptViewId('view-1'), 0),
+        () => reader.renderingSnapshot('chat-1'),
+      ]) {
+        let failure;
+        try {
+          await read();
+        } catch (error) {
+          failure = error;
+        }
 
-      expect(failure).toBeInstanceOf(TranscriptHistoryUnavailableError);
-      expect(failure).toMatchObject({
-        name: 'DomainError',
-        code: 'TRANSCRIPT_UNAVAILABLE',
-        historyState: {
-          kind: 'degraded',
-          errorCode: 'LEDGER_FENCED',
-          retryable: false,
-        },
-      });
-      expect(failure.cause).toBe(fenced);
-      expect(safeFenceDiagnostic(failure.cause)).toEqual({
-        causeName: 'SQLiteError',
-        causeCode: 'SQLITE_CORRUPT',
-      });
-      expect(JSON.stringify(safeFenceDiagnostic(failure.cause))).not.toContain(sentinel);
+        expect(failure).toBeInstanceOf(TranscriptHistoryUnavailableError);
+        expect(failure).toMatchObject({
+          name: 'DomainError',
+          code: 'TRANSCRIPT_UNAVAILABLE',
+          historyState: {
+            kind: 'degraded',
+            errorCode: 'LEDGER_FENCED',
+            retryable: false,
+          },
+        });
+        expect(failure.cause).toBe(fenced);
+        expect(safeFenceDiagnostic(failure.cause)).toEqual({
+          causeName: 'SQLiteError',
+          causeCode: 'SQLITE_CORRUPT',
+        });
+        expect(JSON.stringify(safeFenceDiagnostic(failure.cause))).not.toContain(sentinel);
+      }
     });
   });
 

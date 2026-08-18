@@ -6,7 +6,7 @@ mock.module('../utils.js', () => ({
 
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
-import { ChatRunningError } from '../../chats/errors.js';
+import { ChatRunningError, TranscriptHistoryUnavailableError } from '../../chats/errors.js';
 import { StaleTranscriptViewError } from '../../ledger/errors.js';
 
 const chatViewMessage = {
@@ -619,6 +619,36 @@ describe('chat WebSocket handler', () => {
       code: 'STALE_TRANSCRIPT_VIEW',
       retryable: false,
     });
+  });
+
+  it('[TLV5-L11.01-WS-CONTRACT-01] reports a fenced replay with a fixed non-retryable error', async () => {
+    const sentinel = '/sentinel-root/chat-sentinel/ledger.sqlite';
+    mockChatViews.readReplay.mockRejectedValueOnce(
+      new TranscriptHistoryUnavailableError({
+        kind: 'degraded',
+        errorCode: 'LEDGER_FENCED',
+        retryable: false,
+      }, { cause: new Error(sentinel) }),
+    );
+
+    await chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-fenced',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 0,
+    });
+
+    expect(lastSentPayload()).toEqual({
+      type: 'client-request-error',
+      clientRequestId: 'req-sub-fenced',
+      requestType: 'chat-subscribe',
+      code: 'HISTORY_LOAD_FAILED',
+      message: 'The transcript ledger is unavailable',
+      retryable: false,
+      chatId: '123',
+    });
+    expect(JSON.stringify(lastSentPayload())).not.toContain(sentinel);
   });
 
   it('returns the replacement transcript after a manual native reload', async () => {
