@@ -46,6 +46,13 @@ class ControlledSearchIndex {
     });
   }
 
+  prune(chatIds) {
+    const retained = new Set(chatIds);
+    for (const chatId of this.chats.keys()) {
+      if (!retained.has(chatId)) this.chats.delete(chatId);
+    }
+  }
+
   search(query, allowedChats) {
     const index = {
       indexedChatCount: 0,
@@ -135,7 +142,10 @@ class ControlledIndexerWorker {
     this.#holdPrune = false;
     const request = this.#heldPruneRequest;
     this.#heldPruneRequest = null;
-    if (request) this.#emit({ type: 'ack', ...identity(request) });
+    if (request) {
+      this.readonlyState.prune(request.chatIds);
+      this.#emit({ type: 'ack', ...identity(request) });
+    }
   }
 
   releaseAll() {
@@ -200,6 +210,7 @@ class ControlledIndexerWorker {
           this.#heldPruneRequest = request;
           return;
         }
+        this.readonlyState.prune(request.chatIds);
         this.#emit({ type: 'ack', ...identity(request) });
         return;
       case 'delete-chat':
@@ -297,7 +308,7 @@ function searchRow(ordinal, body) {
 async function requireEventually(predicate, message) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) return;
-    await Promise.resolve();
+    await Bun.sleep(0);
   }
   throw new Error(message);
 }
@@ -311,6 +322,12 @@ function createHarness(root) {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     workerFactory: (role) => role === 'indexer' ? indexer : reader,
   });
+  let resyncHandler = null;
+  const setResyncHandler = service.setResyncHandler.bind(service);
+  service.setResyncHandler = (handler) => {
+    resyncHandler = handler;
+    setResyncHandler(handler);
+  };
   const servicePromises = new Map();
   const appendRows = service.appendRows.bind(service);
   service.appendRows = (input) => {
@@ -320,19 +337,23 @@ function createHarness(root) {
   };
   const views = new Map();
   let listener = null;
+  const warnings = [];
   const controller = new TranscriptSearchController({
     listChatIds: () => [...views.keys()],
     ledger: {
       currentView: (chatId) => views.get(chatId) ?? null,
-      currentRows: () => [],
-      highWatermark: (chatId) => ({ viewId: views.get(chatId).viewId, ordinal: 0 }),
+      currentRows: (chatId) => views.get(chatId)?.rows ?? [],
+      highWatermark: (chatId) => {
+        const view = views.get(chatId);
+        return { viewId: view.viewId, ordinal: view.rows?.at(-1)?.ordinal ?? 0 };
+      },
       subscribe(candidate) {
         listener = candidate;
         return () => { listener = null; };
       },
     },
     service,
-    logger: { warn() {} },
+    logger: { warn: (...args) => warnings.push(args) },
   });
   return {
     controller,
@@ -342,10 +363,110 @@ function createHarness(root) {
     servicePromises,
     state,
     views,
+    warnings,
+    resync: () => {
+      if (!resyncHandler) throw new Error('Search resync handler was not registered.');
+      return resyncHandler();
+    },
   };
 }
 
 describe('TranscriptSearchController with the real search service', () => {
+  test('[TLV5-SEARCH.02-RESYNC-SERVICE-UNIT-01] isolates rejected replacements during startup and restart resync', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-resync-'));
+    const testHarness = createHarness(root);
+    const query = 'resyncneedle';
+    try {
+      testHarness.views.set('chat-a', {
+        viewId: 'view-a',
+        contentStartOrdinal: 1,
+        rows: [ledgerRow('view-a', 1, 'rejected chat')],
+      });
+      testHarness.views.set('chat-b', {
+        viewId: 'view-b',
+        contentStartOrdinal: 1,
+        rows: [ledgerRow('view-b', 1, query)],
+      });
+      testHarness.indexer.rejectNextIndex('chat-a', 1, 'SEARCH_WRITE_REJECTED', false);
+
+      await testHarness.controller.initialize(true);
+      expect(await testHarness.controller.search({
+        query,
+        allowedChatIds: ['chat-a', 'chat-b'],
+      })).toMatchObject({
+        results: [{ chatId: 'chat-b', transcriptViewId: 'view-b' }],
+        index: { indexedChatCount: 1, failedChatCount: 1 },
+      });
+
+      testHarness.indexer.rejectNextIndex('chat-a', 1, 'SEARCH_WRITE_REJECTED', false);
+      await testHarness.resync();
+      expect(await testHarness.controller.search({
+        query,
+        allowedChatIds: ['chat-a', 'chat-b'],
+      })).toMatchObject({
+        results: [{ chatId: 'chat-b', transcriptViewId: 'view-b' }],
+        index: { indexedChatCount: 1, failedChatCount: 1 },
+      });
+      expect(testHarness.warnings.map(([, details]) => details.code)).toEqual([
+        'SEARCH_WRITE_REJECTED',
+        'SEARCH_WRITE_REJECTED',
+      ]);
+    } finally {
+      try {
+        await testHarness.controller.close();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('[TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01] retains a chat adopted during resync pruning', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-catalog-prune-'));
+    const testHarness = createHarness(root);
+    const query = 'adoptedneedle';
+    try {
+      testHarness.views.set('chat-a', {
+        viewId: 'view-a',
+        contentStartOrdinal: 1,
+        rows: [ledgerRow('view-a', 1, 'held startup chat')],
+      });
+      testHarness.indexer.holdIndex('chat-a', 1);
+      const initializing = testHarness.controller.initialize(true);
+      await requireEventually(
+        () => testHarness.indexer.receivedIndex('chat-a', 1),
+        'The startup replacement did not reach the indexer.',
+      );
+
+      testHarness.views.set('chat-b', {
+        viewId: 'view-b',
+        contentStartOrdinal: 1,
+        rows: [ledgerRow('view-b', 1, query)],
+      });
+      testHarness.controller.catalogMayHaveChanged('chat-b');
+      await requireEventually(
+        () => testHarness.state.chats.get('chat-b')?.throughOrdinal === 1,
+        'The adopted chat did not finish indexing during resync.',
+      );
+
+      testHarness.indexer.releaseIndex('chat-a', 1);
+      await initializing;
+      expect(await testHarness.controller.search({
+        query,
+        allowedChatIds: ['chat-b'],
+      })).toMatchObject({
+        results: [{ chatId: 'chat-b', transcriptViewId: 'view-b' }],
+        index: { indexedChatCount: 1, pendingChatCount: 0 },
+      });
+    } finally {
+      testHarness.indexer.releaseAll();
+      try {
+        await testHarness.controller.close();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('[TLV5-SEARCH.02-SERVICE-UNIT-01] isolates cross-chat writes while preserving chat order and exclusive pruning', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-service-'));
     const testHarness = createHarness(root);

@@ -192,8 +192,14 @@ export class TranscriptSearchController {
   async #syncAll(): Promise<void> {
     if (!this.#enabled || this.#closed) return;
     const chatIds = [...new Set(this.#deps.listChatIds())];
-    await Promise.all(chatIds.map((chatId) => this.#enqueue(chatId, () => this.#syncChat(chatId))));
-    await this.#deps.service.pruneChats(chatIds);
+    await Promise.all(chatIds.map(async (chatId) => {
+      try {
+        await this.#enqueue(chatId, () => this.#syncCurrentChat(chatId));
+      } catch (error) {
+        this.#warnIndexFailure(chatId, 'resync', error);
+      }
+    }));
+    await this.#deps.service.pruneChats([...new Set(this.#deps.listChatIds())]);
   }
 
   async #syncChat(chatId: string): Promise<void> {
@@ -203,6 +209,10 @@ export class TranscriptSearchController {
       await this.#deps.service.deleteChat(chatId);
       return;
     }
+    await this.#syncCurrentChat(chatId);
+  }
+
+  async #syncCurrentChat(chatId: string): Promise<void> {
     let view: TranscriptView | null;
     let rows: readonly LedgerRow[];
     try {
@@ -269,11 +279,15 @@ export class TranscriptSearchController {
 
   #schedule(chatId: string, operation: string, work: () => Promise<void>): void {
     void this.#enqueue(chatId, work).catch((error) => {
-      this.#deps.logger.warn('Transcript search indexing job failed', {
-        chatId,
-        operation,
-        code: searchFailureCode(error),
-      });
+      this.#warnIndexFailure(chatId, operation, error);
+    });
+  }
+
+  #warnIndexFailure(chatId: string, operation: string, error: unknown): void {
+    this.#deps.logger.warn('Transcript search indexing job failed', {
+      chatId,
+      operation,
+      code: searchFailureCode(error),
     });
   }
 
