@@ -8,6 +8,10 @@ interface ClickOptions {
   last?: boolean;
 }
 
+interface ResponsiveActionClickOptions {
+  within?: string;
+}
+
 type QueueRowAction = 'Edit queued message' | 'Remove from queue';
 type QueueMoveDirection = 'up' | 'down';
 type ComposerAction = 'Send message' | 'Queue message';
@@ -477,47 +481,46 @@ export class SpaDriver {
     await this.clickMenuItem(name);
   }
 
-  async clickResponsiveAction(name: string): Promise<void> {
+  async clickResponsiveAction(
+    name: string,
+    options: ResponsiveActionClickOptions = {},
+  ): Promise<void> {
+    const rootSelector = options.within
+      ? `${options.within} [data-responsive-surface-actions]`
+      : '[data-responsive-surface-actions]';
     try {
       await this.#page.waitForFunction(
-        (expected) => [...document.querySelectorAll<HTMLElement>(
-          '[data-responsive-surface-actions]',
-        )].some((root) => {
-          const hasMeasuredAction = [...root.querySelectorAll<HTMLButtonElement>(
-            '[data-surface-action-measure]',
-          )].some((button) =>
-            (button.getAttribute('aria-label') || button.textContent?.trim()) === expected);
-          if (!hasMeasuredAction) return false;
+        ({ expected, selector }) =>
+          [...document.querySelectorAll<HTMLElement>(selector)].some((root) => {
+            const hasMeasuredAction = [...root.querySelectorAll<HTMLButtonElement>(
+              '[data-surface-action-measure]',
+            )].some((button) =>
+              (button.getAttribute('aria-label') || button.textContent?.trim()) === expected);
+            if (!hasMeasuredAction) return false;
 
-          const hasVisibleAction = [...root.querySelectorAll<HTMLButtonElement>(
-            '[data-surface-action-id]',
-          )].some((button) =>
-            (button.getAttribute('aria-label') || button.textContent?.trim()) === expected);
-          return hasVisibleAction
-            || root.querySelector('[data-responsive-surface-menu-trigger]') !== null;
-        }),
+            const hasVisibleAction = [...root.querySelectorAll<HTMLButtonElement>(
+              '[data-surface-action-id]',
+            )].some((button) =>
+              (button.getAttribute('aria-label') || button.textContent?.trim()) === expected);
+            return hasVisibleAction
+              || root.querySelector('[data-responsive-surface-menu-trigger]') !== null;
+          }),
         { timeout: 20_000 },
-        name,
+        { expected: name, selector: rootSelector },
       );
     } catch (error) {
       if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
       throw new Error(`Missing responsive action: ${name}`, { cause: error });
     }
 
-    const result = await this.#page.evaluate((expected) => {
-      const roots = [...document.querySelectorAll<HTMLElement>('[data-responsive-surface-actions]')];
-      const matchingRoots = roots.flatMap((root) => {
-        const measuredAction = [...root.querySelectorAll<HTMLButtonElement>(
-          '[data-surface-action-measure]',
-        )].find((button) =>
-          (button.getAttribute('aria-label') || button.textContent?.trim()) === expected);
-        return measuredAction ? [{ root, measuredAction }] : [];
-      });
-      const match = matchingRoots.find(({ measuredAction }) =>
-        !measuredAction.disabled && measuredAction.getAttribute('aria-disabled') !== 'true')
-        ?? matchingRoots[0];
-      if (!match) return 'missing';
-      const { root } = match;
+    const result = await this.#page.evaluate(({ expected, selector }) => {
+      const roots = [...document.querySelectorAll<HTMLElement>(selector)];
+      const root = roots.find((element) =>
+        [...element.querySelectorAll<HTMLButtonElement>('[data-surface-action-measure]')].some(
+          (button) =>
+            (button.getAttribute('aria-label') || button.textContent?.trim()) === expected,
+        ));
+      if (!root) return 'missing';
 
       const button = [...root.querySelectorAll<HTMLButtonElement>('[data-surface-action-id]')].find(
         (element) =>
@@ -535,7 +538,7 @@ export class SpaDriver {
       if (!menuTrigger) return 'missing-menu';
       menuTrigger.click();
       return 'menu';
-    }, name);
+    }, { expected: name, selector: rootSelector });
 
     if (result === 'clicked') return;
     if (result === 'disabled') throw new Error(`Responsive action is disabled: ${name}`);

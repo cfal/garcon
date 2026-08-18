@@ -147,7 +147,7 @@ describe('Lightpanda prompt refinement', () => {
       });
 
       await app.fill(NEW_CHAT_COMPOSER_SELECTOR, draft);
-      await app.clickResponsiveAction('Refine prompt');
+      await app.clickResponsiveAction('Refine prompt', { within: '[role="dialog"]' });
       await held.received;
 
       expect(
