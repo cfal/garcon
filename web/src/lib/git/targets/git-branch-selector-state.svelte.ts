@@ -1,7 +1,13 @@
 import { getGitRefs, gitCheckoutRef, gitCreateBranch, type GitRefOption } from '$lib/api/git.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
+import {
+	DEFAULT_GIT_REF_SORT,
+	GIT_REF_RESULT_LIMITS,
+	type GitRefSort,
+	type GitRefSortKey,
+} from '$shared/git-refs';
 
 export type GitBranchMutation = 'switch' | 'create';
-const REF_RESULT_LIMIT = 200;
 
 export interface GitBranchSelectorStateOptions {
 	runMutation?: (
@@ -24,6 +30,7 @@ export class GitBranchSelectorState {
 	currentEffectiveProjectKey = $state<string | null>(null);
 	currentBranch = $state('');
 	refs = $state<GitRefOption[]>([]);
+	branchSort = $state<GitRefSort>({ ...DEFAULT_GIT_REF_SORT });
 	isLoadingBranches = $state(false);
 	showBranchDropdown = $state(false);
 	showNewBranchModal = $state(false);
@@ -43,6 +50,8 @@ export class GitBranchSelectorState {
 	private newBranchInvocationGeneration = 0;
 	private projectContextGeneration = 0;
 	private errorClearTimeout: ReturnType<typeof setTimeout> | null = null;
+	private branchRefsAbort: AbortController | null = null;
+	private newBranchRefsAbort: AbortController | null = null;
 
 	constructor(private readonly options: GitBranchSelectorStateOptions = {}) {}
 
@@ -81,7 +90,7 @@ export class GitBranchSelectorState {
 		effectiveProjectKey: string | null = projectPath,
 	): void {
 		this.projectContextGeneration += 1;
-		this.branchLoadGeneration += 1;
+		this.cancelBranchLoad();
 		this.closeNewBranchDialog();
 		this.currentProjectPath = projectPath;
 		this.currentEffectiveProjectKey = effectiveProjectKey;
@@ -94,9 +103,11 @@ export class GitBranchSelectorState {
 
 	closeBranchDropdown(): void {
 		this.showBranchDropdown = false;
+		this.cancelBranchLoad();
 	}
 
 	openNewBranchDialog(projectPath: string, surfaceId: string, effectiveProjectKey: string): void {
+		this.cancelNewBranchLoad();
 		const generation = ++this.newBranchInvocationGeneration;
 		this.newBranchProjectPath = projectPath;
 		this.newBranchEffectiveProjectKey = effectiveProjectKey;
@@ -116,7 +127,7 @@ export class GitBranchSelectorState {
 
 	closeNewBranchDialog(): void {
 		this.newBranchInvocationGeneration += 1;
-		this.newBranchLoadGeneration += 1;
+		this.cancelNewBranchLoad();
 		this.showNewBranchModal = false;
 		this.newBranchName = '';
 		this.newBranchBaseRef = '';
@@ -131,15 +142,44 @@ export class GitBranchSelectorState {
 
 	async openBranchDropdown(projectPath: string): Promise<void> {
 		this.showBranchDropdown = true;
-		if (!this.isLoadingBranches) await this.fetchRefs(projectPath);
+		await this.searchBranchRefs(projectPath);
 	}
 
 	async fetchRefs(projectPath: string, query = ''): Promise<void> {
+		await this.loadRefs(projectPath, query, DEFAULT_GIT_REF_SORT);
+	}
+
+	async searchBranchRefs(projectPath: string, query = ''): Promise<void> {
+		await this.loadRefs(projectPath, query, this.branchSort);
+	}
+
+	async toggleBranchSort(projectPath: string, key: GitRefSortKey, query = ''): Promise<void> {
+		const direction =
+			this.branchSort.key === key
+				? this.branchSort.direction === 'asc'
+					? 'desc'
+					: 'asc'
+				: key === 'updated'
+					? 'desc'
+					: 'asc';
+		this.branchSort = { key, direction };
+		await this.searchBranchRefs(projectPath, query);
+	}
+
+	private async loadRefs(projectPath: string, query: string, sort: GitRefSort): Promise<void> {
+		this.branchRefsAbort?.abort();
+		const controller = new AbortController();
+		this.branchRefsAbort = controller;
 		const generation = ++this.branchLoadGeneration;
 		this.isLoadingBranches = true;
 		try {
-			const data = await getGitRefs(projectPath, { query, limit: REF_RESULT_LIMIT });
-			if (generation !== this.branchLoadGeneration) return;
+			const data = await getGitRefs(projectPath, {
+				query,
+				limit: GIT_REF_RESULT_LIMITS.default,
+				sort,
+				signal: controller.signal,
+			});
+			if (controller.signal.aborted || generation !== this.branchLoadGeneration) return;
 			if (data.error) {
 				this.refs = [];
 				this.surfaceError(data.error);
@@ -151,29 +191,40 @@ export class GitBranchSelectorState {
 				if (current) this.currentBranch = current.name;
 			}
 		} catch (err) {
-			if (generation !== this.branchLoadGeneration) return;
+			if (
+				controller.signal.aborted ||
+				isAbortError(err) ||
+				generation !== this.branchLoadGeneration
+			)
+				return;
 			this.refs = [];
 			this.surfaceError(`Load refs failed: ${err instanceof Error ? err.message : String(err)}`);
 		} finally {
+			if (this.branchRefsAbort === controller) this.branchRefsAbort = null;
 			if (generation === this.branchLoadGeneration) {
 				this.isLoadingBranches = false;
 			}
 		}
 	}
 
-	async fetchBranches(projectPath: string): Promise<void> {
-		await this.fetchRefs(projectPath);
-	}
-
 	async searchNewBranchRefs(query: string): Promise<void> {
 		const projectPath = this.newBranchProjectPath;
 		const invocationGeneration = this.newBranchInvocationGeneration;
 		if (!projectPath) return;
+		this.newBranchRefsAbort?.abort();
+		const controller = new AbortController();
+		this.newBranchRefsAbort = controller;
 		const generation = ++this.newBranchLoadGeneration;
 		this.isLoadingNewBranchRefs = true;
 		try {
-			const data = await getGitRefs(projectPath, { query, limit: REF_RESULT_LIMIT });
+			const data = await getGitRefs(projectPath, {
+				query,
+				limit: GIT_REF_RESULT_LIMITS.default,
+				sort: DEFAULT_GIT_REF_SORT,
+				signal: controller.signal,
+			});
 			if (
+				controller.signal.aborted ||
 				generation !== this.newBranchLoadGeneration ||
 				invocationGeneration !== this.newBranchInvocationGeneration
 			)
@@ -186,6 +237,8 @@ export class GitBranchSelectorState {
 			this.newBranchRefs = data.refs ?? [];
 		} catch (err) {
 			if (
+				controller.signal.aborted ||
+				isAbortError(err) ||
 				generation !== this.newBranchLoadGeneration ||
 				invocationGeneration !== this.newBranchInvocationGeneration
 			)
@@ -193,6 +246,7 @@ export class GitBranchSelectorState {
 			this.newBranchRefs = [];
 			this.surfaceError(`Load refs failed: ${err instanceof Error ? err.message : String(err)}`);
 		} finally {
+			if (this.newBranchRefsAbort === controller) this.newBranchRefsAbort = null;
 			if (
 				generation === this.newBranchLoadGeneration &&
 				invocationGeneration === this.newBranchInvocationGeneration
@@ -221,8 +275,8 @@ export class GitBranchSelectorState {
 					this.currentEffectiveProjectKey === effectiveProjectKey
 				) {
 					this.currentBranch = refOption.name;
-					this.showBranchDropdown = false;
-					await this.fetchRefs(projectPath);
+					this.closeBranchDropdown();
+					await this.searchBranchRefs(projectPath);
 				}
 				await this.options.onMutation?.(projectPath, 'switch', effectiveProjectKey);
 				return true;
@@ -275,7 +329,7 @@ export class GitBranchSelectorState {
 					this.currentEffectiveProjectKey === effectiveProjectKey
 				) {
 					this.currentBranch = branch;
-					await this.fetchRefs(projectPath);
+					await this.searchBranchRefs(projectPath);
 				}
 				if (
 					projectContextGeneration === this.projectContextGeneration &&
@@ -302,11 +356,26 @@ export class GitBranchSelectorState {
 	}
 
 	destroy(): void {
+		this.closeBranchDropdown();
 		this.closeNewBranchDialog();
 		if (this.errorClearTimeout) {
 			clearTimeout(this.errorClearTimeout);
 			this.errorClearTimeout = null;
 		}
+	}
+
+	private cancelBranchLoad(): void {
+		this.branchRefsAbort?.abort();
+		this.branchRefsAbort = null;
+		this.branchLoadGeneration += 1;
+		this.isLoadingBranches = false;
+	}
+
+	private cancelNewBranchLoad(): void {
+		this.newBranchRefsAbort?.abort();
+		this.newBranchRefsAbort = null;
+		this.newBranchLoadGeneration += 1;
+		this.isLoadingNewBranchRefs = false;
 	}
 
 	private surfaceError(message: string): void {

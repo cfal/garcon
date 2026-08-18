@@ -111,6 +111,7 @@ describe('GitTargetSessionController', () => {
 		await session.activate();
 
 		expect(api.getGitTargetCandidates).toHaveBeenCalledOnce();
+		expect(api.getGitRefs).not.toHaveBeenCalled();
 		expect(changes).toEqual([
 			expect.objectContaining({
 				path: '/chat',

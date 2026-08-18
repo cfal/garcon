@@ -8,6 +8,39 @@ vi.mock('$lib/api/git.js', () => ({
 	gitCreateBranch: vi.fn(),
 }));
 
+const NAME_ASC = { key: 'name', direction: 'asc' } as const;
+const UPDATED_ASC = { key: 'updated', direction: 'asc' } as const;
+const UPDATED_DESC = { key: 'updated', direction: 'desc' } as const;
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((promiseResolve, promiseReject) => {
+		resolve = promiseResolve;
+		reject = promiseReject;
+	});
+	return { promise, resolve, reject };
+}
+
+function expectRefRequest(
+	projectPath: string,
+	query: string,
+	sort: { key: 'name' | 'updated'; direction: 'asc' | 'desc' },
+): void {
+	expect(getGitRefs).toHaveBeenLastCalledWith(projectPath, {
+		query,
+		limit: 200,
+		sort,
+		signal: expect.any(AbortSignal),
+	});
+}
+
+function requestSignal(index: number): AbortSignal {
+	const options = vi.mocked(getGitRefs).mock.calls[index]?.[1];
+	if (!options?.signal) throw new Error(`Missing request signal at call ${index}`);
+	return options.signal;
+}
+
 describe('GitBranchSelectorState', () => {
 	let branchSelector: GitBranchSelectorState;
 
@@ -58,10 +91,182 @@ describe('GitBranchSelectorState', () => {
 		expect(branchSelector.showBranchDropdown).toBe(false);
 	});
 
+	it('keeps sort preference across project resets', async () => {
+		expect(branchSelector.branchSort).toEqual(NAME_ASC);
+
+		await branchSelector.toggleBranchSort('/project-a', 'updated', 'release');
+		expect(branchSelector.branchSort).toEqual(UPDATED_DESC);
+		expectRefRequest('/project-a', 'release', UPDATED_DESC);
+
+		branchSelector.resetForProject('/project-b', 'main');
+
+		expect(branchSelector.branchSort).toEqual(UPDATED_DESC);
+	});
+
+	it('toggles active sort direction and gives each new key its preferred direction', async () => {
+		await branchSelector.toggleBranchSort('/project', 'updated', 'feat');
+		expect(branchSelector.branchSort).toEqual(UPDATED_DESC);
+		expectRefRequest('/project', 'feat', UPDATED_DESC);
+
+		await branchSelector.toggleBranchSort('/project', 'updated', 'feat');
+		expect(branchSelector.branchSort).toEqual(UPDATED_ASC);
+		expectRefRequest('/project', 'feat', UPDATED_ASC);
+
+		await branchSelector.toggleBranchSort('/project', 'name', 'feat');
+		expect(branchSelector.branchSort).toEqual(NAME_ASC);
+		expectRefRequest('/project', 'feat', NAME_ASC);
+
+		await branchSelector.toggleBranchSort('/project', 'name', 'feat');
+		expect(branchSelector.branchSort).toEqual({ key: 'name', direction: 'desc' });
+		expectRefRequest('/project', 'feat', { key: 'name', direction: 'desc' });
+	});
+
+	it('always reloads the branch dropdown using its current sort', async () => {
+		branchSelector.refs = [
+			{
+				name: 'cached',
+				ref: 'refs/heads/cached',
+				kind: 'local-branch',
+				updatedAt: null,
+			},
+		];
+		branchSelector.branchSort = { ...UPDATED_DESC };
+
+		await branchSelector.openBranchDropdown('/project');
+
+		expect(branchSelector.showBranchDropdown).toBe(true);
+		expectRefRequest('/project', '', UPDATED_DESC);
+	});
+
+	it('keeps generic ref loads on Name ascending without changing branch sort', async () => {
+		branchSelector.branchSort = { ...UPDATED_DESC };
+
+		await branchSelector.fetchRefs('/project', 'origin');
+
+		expectRefRequest('/project', 'origin', NAME_ASC);
+		expect(branchSelector.branchSort).toEqual(UPDATED_DESC);
+	});
+
+	it('aborts superseded branch loads and publishes only the latest response', async () => {
+		const stale = deferred<Awaited<ReturnType<typeof getGitRefs>>>();
+		const current = deferred<Awaited<ReturnType<typeof getGitRefs>>>();
+		vi.mocked(getGitRefs).mockReturnValueOnce(stale.promise).mockReturnValueOnce(current.promise);
+
+		const staleLoad = branchSelector.searchBranchRefs('/project', 'old');
+		const staleSignal = requestSignal(0);
+		const currentLoad = branchSelector.toggleBranchSort('/project', 'updated', 'new');
+
+		expect(staleSignal.aborted).toBe(true);
+		expect(requestSignal(1).aborted).toBe(false);
+		current.resolve({
+			refs: [
+				{
+					name: 'current',
+					ref: 'refs/heads/current',
+					kind: 'local-branch',
+					updatedAt: null,
+				},
+			],
+		});
+		await currentLoad;
+		stale.resolve({
+			refs: [
+				{
+					name: 'stale',
+					ref: 'refs/heads/stale',
+					kind: 'local-branch',
+					updatedAt: null,
+				},
+			],
+		});
+		await staleLoad;
+
+		expect(branchSelector.refs.map((ref) => ref.name)).toEqual(['current']);
+		expect(branchSelector.isLoadingBranches).toBe(false);
+		expect(branchSelector.lastError).toBeNull();
+	});
+
+	it.each([
+		['close', (selector: GitBranchSelectorState) => selector.closeBranchDropdown()],
+		['reset', (selector: GitBranchSelectorState) => selector.resetForProject('/other', 'develop')],
+		['destroy', (selector: GitBranchSelectorState) => selector.destroy()],
+	] as const)('silently aborts a branch load on %s', async (_name, cancel) => {
+		const surfaceError = vi.fn();
+		branchSelector = new GitBranchSelectorState({ surfaceError });
+		const pending = deferred<Awaited<ReturnType<typeof getGitRefs>>>();
+		vi.mocked(getGitRefs).mockReturnValueOnce(pending.promise);
+		const load = branchSelector.searchBranchRefs('/project');
+		const signal = requestSignal(0);
+
+		cancel(branchSelector);
+		pending.reject(new DOMException('aborted', 'AbortError'));
+		await load;
+
+		expect(signal.aborted).toBe(true);
+		expect(branchSelector.isLoadingBranches).toBe(false);
+		expect(branchSelector.lastError).toBeNull();
+		expect(surfaceError).not.toHaveBeenCalled();
+	});
+
+	it('uses independent request controllers for branch and new-branch refs', async () => {
+		const branchRequest = deferred<Awaited<ReturnType<typeof getGitRefs>>>();
+		const newBranchRequest = deferred<Awaited<ReturnType<typeof getGitRefs>>>();
+		const nextNewBranchRequest = deferred<Awaited<ReturnType<typeof getGitRefs>>>();
+		vi.mocked(getGitRefs)
+			.mockReturnValueOnce(branchRequest.promise)
+			.mockReturnValueOnce(newBranchRequest.promise)
+			.mockReturnValueOnce(nextNewBranchRequest.promise);
+		branchSelector.newBranchProjectPath = '/project/worktree';
+
+		const branchLoad = branchSelector.searchBranchRefs('/project', 'branch');
+		const newBranchLoad = branchSelector.searchNewBranchRefs('base');
+		const branchSignal = requestSignal(0);
+		const staleNewBranchSignal = requestSignal(1);
+		const currentNewBranchLoad = branchSelector.searchNewBranchRefs('new-base');
+
+		expect(branchSignal.aborted).toBe(false);
+		expect(staleNewBranchSignal.aborted).toBe(true);
+		expect(requestSignal(2).aborted).toBe(false);
+		expectRefRequest('/project/worktree', 'new-base', NAME_ASC);
+		nextNewBranchRequest.resolve({ refs: [] });
+		await currentNewBranchLoad;
+		newBranchRequest.reject(new DOMException('aborted', 'AbortError'));
+		await newBranchLoad;
+		branchSelector.closeBranchDropdown();
+		branchRequest.reject(new DOMException('aborted', 'AbortError'));
+		await branchLoad;
+
+		expect(branchSelector.lastError).toBeNull();
+	});
+
+	it.each([
+		['close', (selector: GitBranchSelectorState) => selector.closeNewBranchDialog()],
+		['reset', (selector: GitBranchSelectorState) => selector.resetForProject('/other', 'develop')],
+		['destroy', (selector: GitBranchSelectorState) => selector.destroy()],
+	] as const)('silently aborts a new-branch ref load on %s', async (_name, cancel) => {
+		const surfaceError = vi.fn();
+		branchSelector = new GitBranchSelectorState({ surfaceError });
+		branchSelector.newBranchProjectPath = '/project';
+		const pending = deferred<Awaited<ReturnType<typeof getGitRefs>>>();
+		vi.mocked(getGitRefs).mockReturnValueOnce(pending.promise);
+		const load = branchSelector.searchNewBranchRefs('base');
+		const signal = requestSignal(0);
+
+		cancel(branchSelector);
+		pending.reject(new DOMException('aborted', 'AbortError'));
+		await load;
+
+		expect(signal.aborted).toBe(true);
+		expect(branchSelector.isLoadingNewBranchRefs).toBe(false);
+		expect(branchSelector.lastError).toBeNull();
+		expect(surfaceError).not.toHaveBeenCalled();
+	});
+
 	it('switches branches, refreshes branches, and notifies after mutation', async () => {
 		const onMutation = vi.fn();
 		branchSelector = new GitBranchSelectorState({ onMutation });
 		branchSelector.setProject('/project', 'main', '/project');
+		branchSelector.branchSort = { ...UPDATED_DESC };
 		branchSelector.showBranchDropdown = true;
 		branchSelector.refs = [
 			{
@@ -94,7 +299,7 @@ describe('GitBranchSelectorState', () => {
 
 		expect(ok).toBe(true);
 		expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/heads/feature', 'local-branch');
-		expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
+		expectRefRequest('/project', '', UPDATED_DESC);
 		expect(onMutation).toHaveBeenCalledWith('/project', 'switch', '/project');
 		expect(branchSelector.currentBranch).toBe('feature');
 		expect(branchSelector.showBranchDropdown).toBe(false);
@@ -163,6 +368,7 @@ describe('GitBranchSelectorState', () => {
 		const onMutation = vi.fn();
 		branchSelector = new GitBranchSelectorState({ onMutation });
 		branchSelector.setProject('/project', 'main');
+		branchSelector.branchSort = { ...UPDATED_DESC };
 		branchSelector.openNewBranchDialog('/project', 'singleton:git', '/project');
 		branchSelector.newBranchName = '  feature/new-ui  ';
 		branchSelector.newBranchBaseRef = 'refs/remotes/origin/main';
@@ -185,7 +391,7 @@ describe('GitBranchSelectorState', () => {
 		expect(gitCreateBranch).toHaveBeenCalledWith('/project', 'feature/new-ui', {
 			baseRef: 'refs/remotes/origin/main',
 		});
-		expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
+		expectRefRequest('/project', '', UPDATED_DESC);
 		expect(onMutation).toHaveBeenCalledWith('/project', 'create', '/project');
 		expect(branchSelector.currentBranch).toBe('feature/new-ui');
 		expect(branchSelector.showNewBranchModal).toBe(false);
@@ -224,6 +430,8 @@ describe('GitBranchSelectorState', () => {
 		expect(getGitRefs).toHaveBeenCalledWith('/project/worktrees/feature', {
 			query: 'origin',
 			limit: 200,
+			sort: NAME_ASC,
+			signal: expect.any(AbortSignal),
 		});
 		expect(gitCreateBranch).toHaveBeenCalledWith('/project/worktrees/feature', 'captured-target', {
 			baseRef: undefined,
@@ -263,6 +471,8 @@ describe('GitBranchSelectorState', () => {
 		expect(getGitRefs).not.toHaveBeenCalledWith('/worktree-a', {
 			query: '',
 			limit: 200,
+			sort: NAME_ASC,
+			signal: expect.any(AbortSignal),
 		});
 	});
 

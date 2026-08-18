@@ -541,7 +541,6 @@ export class GitTargetSessionController implements PortableSingletonController {
 				effectiveProjectKey,
 			);
 		}
-		if (projectPath) void this.branches.fetchRefs(projectPath);
 		await this.deps.onTargetChanged(target, identity, reason, identityChanged);
 	}
 
