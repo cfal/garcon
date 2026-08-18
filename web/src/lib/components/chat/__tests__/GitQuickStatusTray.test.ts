@@ -167,6 +167,9 @@ describe('GitQuickStatusTray', () => {
 			},
 		});
 
+		const menuClass = document.querySelector('[data-slot="popover-content"]')?.className ?? '';
+		expect(menuClass).toContain('w-[min(36rem,calc(100vw-2rem))]');
+
 		const search = screen.getByRole('combobox', { name: 'Find a ref' });
 		await fireEvent.input(search, { target: { value: 'feature' } });
 		expect(screen.queryByText('Branches')).toBeNull();

@@ -138,7 +138,7 @@
 	);
 	const resolvedMenuClass = $derived(
 		cn(
-			'w-72 max-w-[calc(100vw-1rem)] max-h-[min(28rem,var(--bits-popover-content-available-height))] overflow-hidden rounded-lg border-border p-0 shadow-lg',
+			'w-[min(36rem,calc(100vw-1rem))] max-h-[min(28rem,var(--bits-popover-content-available-height))] overflow-hidden rounded-lg border-border p-0 shadow-lg',
 			menuClass,
 		),
 	);
