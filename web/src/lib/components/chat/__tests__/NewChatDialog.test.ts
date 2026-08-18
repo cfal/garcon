@@ -107,7 +107,7 @@ describe('NewChatDialog', () => {
 		vi.clearAllMocks();
 	});
 
-	it('uses centered dialog positioning on small screens', async () => {
+	it('keeps the small-screen dialog within the safe viewport', async () => {
 		render(NewChatDialogTestHost);
 
 		await waitFor(() => {
@@ -119,10 +119,8 @@ describe('NewChatDialog', () => {
 			?.getAttribute('class');
 
 		expect(contentClass).toContain('top-[var(--app-viewport-center-y)]');
-		expect(contentClass).toContain('left-[50%]');
-		expect(contentClass).toContain('translate-x-[-50%]');
 		expect(contentClass).toContain('translate-y-[-50%]');
-		expect(contentClass).toContain('w-[calc(100vw-1rem)]');
+		expect(contentClass).toContain('safe-viewport-dialog');
 		expect(contentClass).toContain('max-h-[calc(var(--app-height)-1rem)]');
 		expect(contentClass).toContain('sm:top-[50%]');
 		expect(contentClass).not.toContain('top-auto');

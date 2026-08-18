@@ -29,6 +29,16 @@ async function bounds(locator: Locator) {
   return box;
 }
 
+async function waitForAnimations(locator: Locator): Promise<void> {
+  await locator.evaluate(async (node) => {
+    await Promise.all(
+      node
+        .getAnimations()
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+  });
+}
+
 describe("Chromium New Chat composer layout", () => {
   test("keeps compact actions and floating surfaces inside constrained viewports", async () => {
     await withChromiumFixture(
@@ -38,6 +48,24 @@ describe("Chromium New Chat composer layout", () => {
         await fixture.page.setViewportSize({ width: 390, height: 844 });
         const dialog = await openNewChat(fixture);
         const bottomBar = dialog.locator('[data-slot="composer-bottom-bar"]');
+        await fixture.page.evaluate(() => {
+          document.documentElement.style.setProperty(
+            "--safe-area-inset-left",
+            "12px",
+          );
+          document.documentElement.style.setProperty(
+            "--safe-area-inset-right",
+            "28px",
+          );
+        });
+        await waitForAnimations(dialog);
+
+        markPhase("checking iPhone safe-area containment");
+        const dialogBoxAtPhoneWidth = await bounds(dialog);
+        expect(dialogBoxAtPhoneWidth.x).toBeGreaterThanOrEqual(16);
+        expect(
+          dialogBoxAtPhoneWidth.x + dialogBoxAtPhoneWidth.width,
+        ).toBeLessThanOrEqual(362);
 
         markPhase("checking responsive composer actions");
         await bottomBar
@@ -79,6 +107,60 @@ describe("Chromium New Chat composer layout", () => {
         expect(menuBox.x).toBeGreaterThanOrEqual(8);
         expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(382);
         await fixture.page.keyboard.press("Escape");
+
+        markPhase("checking the compact model selector");
+        await bottomBar.getByRole("button", { name: /Claude .* Opus/ }).click();
+        const compactSelector = fixture.page.locator(
+          '[data-slot="model-selector-compact"]',
+        );
+        await compactSelector.waitFor({ state: "visible" });
+        const modelDialog = fixture.page.getByRole("dialog").filter({
+          has: compactSelector,
+        });
+        await waitForAnimations(modelDialog);
+        const doneButton = modelDialog.getByRole("button", { name: "Done" });
+        const [modelDialogBox, doneButtonBox, overflow] = await Promise.all([
+          bounds(modelDialog),
+          bounds(doneButton),
+          modelDialog.evaluate((node) => {
+            const compact = node.querySelector<HTMLElement>(
+              '[data-slot="model-selector-compact"]',
+            );
+            const footer = node.querySelector<HTMLElement>(
+              '[data-slot="model-selector-compact-footer"]',
+            );
+            if (!compact || !footer)
+              throw new Error("Missing compact model-selector layout.");
+            return {
+              dialogFits: node.scrollWidth <= node.clientWidth,
+              compactFits: compact.scrollWidth <= compact.clientWidth,
+              footerFits: footer.scrollWidth <= footer.clientWidth,
+            };
+          }),
+        ]);
+        expect(modelDialogBox.x).toBeGreaterThanOrEqual(16);
+        expect(modelDialogBox.x + modelDialogBox.width).toBeLessThanOrEqual(
+          362,
+        );
+        expect(doneButtonBox.x + doneButtonBox.width).toBeLessThanOrEqual(
+          modelDialogBox.x + modelDialogBox.width - 8,
+        );
+        expect(overflow).toEqual({
+          dialogFits: true,
+          compactFits: true,
+          footerFits: true,
+        });
+        await doneButton.click();
+        await modelDialog.waitFor({ state: "detached" });
+
+        await fixture.page.evaluate(() => {
+          document.documentElement.style.removeProperty(
+            "--safe-area-inset-left",
+          );
+          document.documentElement.style.removeProperty(
+            "--safe-area-inset-right",
+          );
+        });
 
         markPhase(
           "checking model-selector collision margins at the sm boundary",

@@ -405,6 +405,14 @@
 	transform: translateY(var(--app-viewport-offset-top, 0px));
 }
 
+.safe-viewport-dialog {
+	inset-inline-start: max(1rem, var(--safe-area-inset-left, 0px));
+	inset-inline-end: max(1rem, var(--safe-area-inset-right, 0px));
+	width: auto;
+	margin-inline: auto;
+	translate: 0 -50%;
+}
+
 .dark {
 	--background: 0 0% 10%;
 	--foreground: 0 0% 95%;

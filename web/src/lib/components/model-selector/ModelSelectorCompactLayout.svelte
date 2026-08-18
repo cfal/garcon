@@ -191,7 +191,7 @@
 	{/each}
 {/snippet}
 
-<div data-slot="model-selector-compact" class="flex h-full min-h-0 flex-col">
+<div data-slot="model-selector-compact" class="flex h-full min-h-0 min-w-0 max-w-full flex-col">
 	<header class="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3">
 		<div class="min-w-0 flex-1">
 			<div
@@ -334,7 +334,7 @@
 
 	<footer
 		data-slot="model-selector-compact-footer"
-		class="flex min-h-12 shrink-0 items-center gap-2 border-t border-border px-2"
+		class="flex min-h-12 min-w-0 shrink-0 items-center gap-2 border-t border-border px-2"
 	>
 		{#if previousPane}
 			<button
@@ -346,7 +346,7 @@
 				{m.model_selector_back()}
 			</button>
 		{/if}
-		<div class="ml-auto flex items-center gap-2">
+		<div class="ml-auto flex min-w-0 items-center gap-2">
 			<button
 				type="button"
 				class="inline-flex h-8 items-center rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
