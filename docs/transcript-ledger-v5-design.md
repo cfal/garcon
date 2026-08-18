@@ -2078,10 +2078,10 @@ stabilization defects. The current case inventory and gate status live in
    work, not alternate release paths.
 7. **Close the remaining stabilization inventory.** Complete search, native
    probe, handoff, fork, replay, LRU, duplicate-input, adoption, and migration
-   checks in the durable stabilization plan; remove temporary diagnostics and
-   deprecated V4 paths within that plan's scope. Run focused package gates
-   after every boundary and the complete repository release gate only at the
-   final integrated HEAD.
+   checks recorded in the CTS catalog; remove temporary diagnostics and
+   deprecated V4 paths within that catalog's active gate scope. Run focused
+   package gates after every boundary and the complete repository release gate
+   only at the final integrated HEAD.
 
 ## 20. Resolved Decisions
 

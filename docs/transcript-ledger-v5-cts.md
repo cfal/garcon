@@ -1,20 +1,20 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 18 integrated catalog; dogfood validation and release acceptance
-complete in the executable tree squash-merged as
-`80540fc80399957ebcfe18cb2c2a741938e5cf64`.
+Status: Revision 18 integrated catalog. PR #500 release acceptance is anchored
+historically at squash merge
+`80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
+and evidence are the PR #518 review state.
 
 Governing artifact:
 
 - `docs/transcript-ledger-v5-design.md`, revision 18, SHA-256
-  `2de530a0d5e0de0ef334b57f076c77b0d6afc1a68fa5bb731cfff506d282f6bf`
+  `f073bd2dc17d169af79e8e9cb0180134cfa03c24fb2701928a9fa13b474c98a8`
 
-Current inventory: 262 discovered stable IDs. PR #500 was squash-merged, so its
-source-branch release and inventory checkpoints are not ancestors of the
-reachable merge object above. The merge contains the validated executable
-tree; subsequent source-branch changes were CTS documentation and removal of
-the completed execution plan. The squash merge is therefore the durable
-lineage anchor.
+Current inventory: 267 discovered stable IDs. The PR #500 squash merge above is
+the historical acceptance anchor and contains 256 of them. The current catalog
+adds eleven executable cases through PR #518. Because PR #518 is not yet
+merged, this document does not claim a merge-object anchor for its current
+executable state.
 
 Coverage state records whether an oracle exists; it does not claim that
 production already satisfies an intentional-red case.
@@ -498,7 +498,7 @@ The status below describes test coverage, not implementation completion.
 | R3 Codex native tail reconciliation           | TLV5-L02.02, TLV5-L05.02, TLV5-L10.01                 | Codex architecture guard, app-server unit, scripted interrupt                                       | Covered |
 | R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state, controller, static, and strict Chromium cases; timer machinery deleted                 | Covered |
 | R5 search full replacement on append          | TLV5-SEARCH.01                                        | Search controller suffix and linearity tests                                                        | Covered |
-| R6 detached search rejection                  | TLV5-SEARCH.02                                        | Controller rejection plus real-service stalled-ack and exclusive-prune isolation                    | Covered |
+| R6 detached search rejection                  | TLV5-SEARCH.02                                        | Controller rejection, stalled-ack isolation, rejected startup/restart replacements, and fresh-catalog exclusive pruning | Covered |
 | R7 blocking native probe                      | TLV5-L09.03 through TLV5-L09.05                       | Core timeout, coalescing, identity-change units                                                     | Partial |
 | R8 serial handoff recovery                    | TLV5-HANDOFF.05                                       | Unit and repeated-handoff server integration                                                        | Covered |
 | R9 duplicate handoff marker                   | TLV5-HANDOFF.06                                       | Matching, conflicting, and duplicate marker units                                                   | Covered |
@@ -511,9 +511,10 @@ The status below describes test coverage, not implementation completion.
 
 ## Provider Routing Matrix
 
-Required scenarios come from the stabilization plan. `Partial` means the
-provider has relevant unit evidence but lacks an explicit case at its required
-tier. No cell becomes covered through inference from a successful later turn.
+Required scenarios derive from the L7 routing obligations retained by this
+catalog. `Partial` means the provider has relevant unit evidence but lacks an
+explicit case at its required tier. No cell becomes covered through inference
+from a successful later turn.
 
 | Required scenario                 | Claude  | Codex   | OpenCode | Pi      | Amp     | Factory | Cursor  | Direct  |
 | --------------------------------- | ------- | ------- | -------- | ------- | ------- | ------- | ------- | ------- |
@@ -766,6 +767,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L09.04-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: `drops a pending native result when the transcript view is replaced`                                   | L09.04                      |
 | TLV5-L01.02-CORE-MATRIX-01     | `server/ledger/__tests__/read-fold-matrix.test.js`: one all-kind fixture projects ordinary and quarantine notices, late/repeated content, switch, permission, session, and terminal rows exactly across rendering, context, carryover, snapshot, search, preview, and broadcast | L01.02 |
 | TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01 | `integration-tests/tests/server/transcript-search-lazy-adoption.test.ts`: first successful lazy adoption converges into an already-enabled index without a later commit, restart, toggle, or native request | L01.02, ADOPT.01 |
+| TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01 | `server/chats/search/__tests__/controller-service.test.js`: a chat adopted while a resync replacement is held remains searchable after exclusive pruning refreshes the catalog | L01.02, ADOPT.01 |
 | TLV5-PERM.05-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `applies a delayed cancellation only to its exact reused occurrence`                             | PERM.05                     |
 | TLV5-PERM.07-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `keeps permission history but restores no actionability after restart`                           | PERM.07                     |
 | TLV5-PERM.08-BROWSER-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `keeps reused permission occurrences independently actionable`                     | PERM.05, PERM.06, PERM.08  |
@@ -837,12 +839,16 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-R03-CODEX-SCRIPTED-01     | `integration-tests/tests/server/codex-scripted-interrupt.test.ts`: `imports a long native tool tail before exactly one final assistant message`           | L02.02, L10.01              |
 | TLV5-SEARCH.01-CORE-UNIT-01    | `server/chats/search/__tests__/controller.test.js`: `indexes repeated ordinary commits only as ordered suffixes`                                          | R5                          |
 | TLV5-SEARCH.02-CORE-UNIT-01    | `server/chats/search/__tests__/controller.test.js`: `absorbs a rejected indexing job and continues same-chat and cross-chat queues`                       | R6, L11.03                  |
+| TLV5-SEARCH.02-RESYNC-SERVICE-UNIT-01 | `server/chats/search/__tests__/controller-service.test.js`: rejected chat-A replacements during startup and worker resync remain per-chat while chat B stays searchable | SEARCH.02, L11.03 |
 | TLV5-SEARCH.02-SERVICE-UNIT-01 | `server/chats/search/__tests__/controller-service.test.js`: a held chat-A acknowledgement permits chat B to finish, preserves A ordering, and gives prune an exclusive barrier | SEARCH.02, L11.03 |
 | TLV5-SEARCH.05-CORE-UNIT-01    | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: index health is qualified by the current view and authoritative frontier | SEARCH.05 |
 | TLV5-SEARCH.05-SERVICE-UNIT-01 | `server/chats/search/__tests__/controller-service.test.js`: terminal failure records bounded failed state and acknowledged full repair clears it | SEARCH.05 |
 | TLV5-SEARCH.05-ZERO-ROW-CORE-UNIT-01 | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: a valid zero-searchable-row view is indexed at its frontier and later same-view content remains searchable | SEARCH.05, L01.02 |
 | TLV5-HANDOFF.05-SERVER-01      | `integration-tests/tests/server/repeated-agent-handoff.test.ts`: `recovers one pending handoff while another chat remains fenced`                         | R8, L11.03                  |
 | TLV5-L11.01-SERVER-01          | `integration-tests/tests/server/transcript-corruption-isolation.test.ts`: `fences only the chat whose SQLite ledger is corrupt`                           | L11.01                      |
+| TLV5-L11.01-VIEW-READER-UNIT-01 | `server/ledger/__tests__/view-reader.test.js`: paging, replay, and rendering snapshots translate a ledger fence to one fixed non-retryable degraded-history error | L11.01 |
+| TLV5-L11.01-WS-CONTRACT-01     | `server/ws/__tests__/chat-contracts.test.js`: replay serializes a fixed non-retryable fence response without the underlying cause | L11.01 |
+| TLV5-L11.01-SHARE-ROUTE-UNIT-01 | `server/routes/__tests__/shares.test.js`: share capture returns a fixed safe domain response when rendering-snapshot access is fenced | L11.01 |
 | TLV5-REPLAY.01-SERVER-01       | `integration-tests/tests/server/reconnect-transcript.test.ts`: `replays fifty thousand mixed rows in bounded fixed-watermark pages`                       | REPLAY.01 through REPLAY.05 |
 | TLV5-UX.11-CHROMIUM-REPLAY-01  | `integration-tests/tests/chromium/reconnect-transcript-replay.test.ts`: `keeps an expanded detached reading interval through bounded reconnect replay`    | REPLAY.05, UX.11            |
 | TLV5-REPLAY.06-WEB-UNIT-01     | `web/src/lib/ws/__tests__/reconnect-coordinator.test.ts`: `abandons a partial replay on disconnect and restarts with a fresh watermark`                   | REPLAY.06                   |
