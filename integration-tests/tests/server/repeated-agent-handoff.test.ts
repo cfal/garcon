@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
 import {
@@ -11,6 +11,7 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { waitForPersistedChat } from '../../support/persisted-chat.js';
 
 interface RecordedProviderRequest {
   readonly lastUserText: string;
@@ -428,22 +429,17 @@ async function waitForChatOwner(
   agentId: string,
   agentOwnershipEpoch: string,
 ): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    const registry = JSON.parse(
-      await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
-    ) as {
-      sessions?: Record<string, { agentId?: unknown; agentOwnershipEpoch?: unknown }>;
-    };
-    const persisted = registry.sessions?.[chatId];
-    if (persisted?.agentId === agentId && persisted.agentOwnershipEpoch === agentOwnershipEpoch) {
-      const served = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId);
-      expect(served).toMatchObject({ agentId, agentOwnershipEpoch });
-      return;
-    }
-    await Bun.sleep(25);
-  }
-  throw new Error(`Chat ${chatId} did not complete its independent handoff recovery.`);
+  await waitForPersistedChat({
+    directories: fixture.dirs,
+    chatId,
+    timeoutMessage: `Chat ${chatId} did not complete its independent handoff recovery.`,
+    select: (chat) => chat.agentId === agentId
+      && chat.agentOwnershipEpoch === agentOwnershipEpoch
+      ? true
+      : null,
+  });
+  const served = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId);
+  expect(served).toMatchObject({ agentId, agentOwnershipEpoch });
 }
 
 async function handoffWithAnswer(input: {
