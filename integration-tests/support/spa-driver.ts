@@ -506,12 +506,18 @@ export class SpaDriver {
 
     const result = await this.#page.evaluate((expected) => {
       const roots = [...document.querySelectorAll<HTMLElement>('[data-responsive-surface-actions]')];
-      const root = roots.find((element) =>
-        [...element.querySelectorAll<HTMLButtonElement>('[data-surface-action-measure]')].some(
-          (button) =>
-            (button.getAttribute('aria-label') || button.textContent?.trim()) === expected,
-        ));
-      if (!root) return 'missing';
+      const matchingRoots = roots.flatMap((root) => {
+        const measuredAction = [...root.querySelectorAll<HTMLButtonElement>(
+          '[data-surface-action-measure]',
+        )].find((button) =>
+          (button.getAttribute('aria-label') || button.textContent?.trim()) === expected);
+        return measuredAction ? [{ root, measuredAction }] : [];
+      });
+      const match = matchingRoots.find(({ measuredAction }) =>
+        !measuredAction.disabled && measuredAction.getAttribute('aria-disabled') !== 'true')
+        ?? matchingRoots[0];
+      if (!match) return 'missing';
+      const { root } = match;
 
       const button = [...root.querySelectorAll<HTMLButtonElement>('[data-surface-action-id]')].find(
         (element) =>
