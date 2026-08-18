@@ -171,7 +171,8 @@
 	<div
 		role="group"
 		aria-label={m.git_branch_selector_sort_refs()}
-		class="grid h-8 shrink-0 grid-cols-[1rem_minmax(0,1fr)_5rem_4.5rem] items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground"
+		class="grid h-8 shrink-0 grid-cols-[1rem_minmax(0,1fr)_5rem_4.5rem] items-center gap-2 overflow-y-auto border-b border-border px-3 text-xs text-muted-foreground"
+		style:scrollbar-gutter="stable"
 	>
 		<span aria-hidden="true"></span>
 		<button
@@ -206,6 +207,7 @@
 		bind:this={viewportRef}
 		id={listboxId}
 		class="min-h-0 flex-1 overflow-y-auto py-1"
+		style:scrollbar-gutter="stable"
 		role="listbox"
 		aria-label={m.git_branch_selector_refs_label()}
 		aria-busy={isLoading}

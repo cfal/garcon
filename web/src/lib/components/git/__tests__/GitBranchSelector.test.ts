@@ -92,12 +92,16 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 		const updatedSort = screen.getByRole('button', {
 			name: 'Sort by Updated, newest first',
 		});
+		const sortGroup = screen.getByRole('group', { name: 'Sort refs' });
 		const listbox = screen.getByRole('listbox', { name: 'Refs' });
 
 		expect(nameSort.getAttribute('aria-pressed')).toBe('true');
 		expect(updatedSort.getAttribute('aria-pressed')).toBe('false');
 		expect(nameSort.hasAttribute('aria-sort')).toBe(false);
 		expect(listbox.contains(nameSort)).toBe(false);
+		expect(sortGroup.className).toContain('overflow-y-auto');
+		expect(sortGroup.style.getPropertyValue('scrollbar-gutter')).toBe('stable');
+		expect(listbox.style.getPropertyValue('scrollbar-gutter')).toBe('stable');
 
 		await fireEvent.click(updatedSort);
 		expect(onSortRefs).toHaveBeenCalledWith('updated', '');
