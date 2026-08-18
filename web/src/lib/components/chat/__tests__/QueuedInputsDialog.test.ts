@@ -277,6 +277,29 @@ describe('QueuedInputsDialog', () => {
 		expect(screen.getByText(m.chat_queue_move_success())).toBeTruthy();
 	});
 
+	it('restores move focus by entry ID after the authoritative order replaces the row', async () => {
+		const first = entry(0);
+		const second = entry(1);
+		const third = entry(2);
+		const pendingMove = deferred<void>();
+		const { component, onMove } = renderDialog(queue([first, second, third]));
+		onMove.mockReturnValueOnce(pendingMove.promise);
+		const moveUp = screen.getByRole('button', {
+			name: m.chat_queue_move_up({ position: 3 }),
+		});
+
+		await fireEvent.click(moveUp);
+		await waitFor(() => expect(onMove).toHaveBeenCalledOnce());
+		component.setQueue(queue([first, third, second], { reorderRevision: 1 }));
+		pendingMove.resolve();
+
+		await waitFor(() => {
+			const focused = document.activeElement as HTMLButtonElement | null;
+			expect(focused?.dataset.queueMoveId).toBe(third.id);
+			expect(focused?.dataset.queueMoveDirection).toBe('up');
+		});
+	});
+
 	it('reports reorder conflicts and refreshes the controls for another attempt', async () => {
 		const { onMove } = renderDialog(queue([entry(0), entry(1)]));
 		onMove.mockRejectedValueOnce(
@@ -290,7 +313,7 @@ describe('QueuedInputsDialog', () => {
 
 		await waitFor(() => expect(screen.getByText(m.chat_queue_move_conflict())).toBeTruthy());
 		expect(moveDown.getAttribute('aria-disabled')).toBe('false');
-		expect(document.activeElement).toBe(moveDown);
+		await waitFor(() => expect(document.activeElement).toBe(moveDown));
 	});
 
 	it('deletes the selected stable ID after an earlier row disappears', async () => {

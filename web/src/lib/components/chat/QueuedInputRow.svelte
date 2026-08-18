@@ -41,12 +41,15 @@
 		onEdit: (entry: QueueEntry) => void;
 		onDelete: (entryId: string) => void;
 		onMove: (entryId: string, delta: -1 | 1) => Promise<void>;
+		onMoveSettled: (
+			entryId: string,
+			preferredDirection: 'up' | 'down',
+		) => void;
 		onDrop: (
 			sourceEntryId: string,
 			targetEntryId: string,
 			placement: QueueEntryPlacement,
 		) => Promise<void>;
-		onFocusFallback: () => void;
 	}
 
 	let {
@@ -65,14 +68,12 @@
 		onEdit,
 		onDelete,
 		onMove,
+		onMoveSettled,
 		onDrop,
-		onFocusFallback,
 	}: Props = $props();
 
 	let rowElement: HTMLLIElement | null = $state(null);
 	let dragHandleElement: HTMLSpanElement | null = $state(null);
-	let upButtonElement: HTMLButtonElement | null = $state(null);
-	let downButtonElement: HTMLButtonElement | null = $state(null);
 	let requestedDirection = $state<-1 | 1 | null>(null);
 	let isDragging = $state(false);
 	let dropIndicatorEdge = $state<Edge | null>(null);
@@ -117,17 +118,14 @@
 
 	async function move(delta: -1 | 1): Promise<void> {
 		if (moveBlocked || (delta === -1 ? !canMoveUp : !canMoveDown)) return;
+		const entryId = entry.id;
 		requestedDirection = delta;
 		try {
-			await onMove(entry.id, delta);
+			await onMove(entryId, delta);
 		} finally {
 			requestedDirection = null;
 			await tick();
-			const requestedButton = delta === -1 ? upButtonElement : downButtonElement;
-			const fallbackButton = delta === -1 ? downButtonElement : upButtonElement;
-			if (requestedButton && !requestedButton.disabled) requestedButton.focus();
-			else if (fallbackButton && !fallbackButton.disabled) fallbackButton.focus();
-			else onFocusFallback();
+			onMoveSettled(entryId, delta === -1 ? 'up' : 'down');
 		}
 	}
 </script>
@@ -178,7 +176,6 @@
 	</div>
 	<div class="flex shrink-0 items-center gap-0.5">
 		<button
-			bind:this={upButtonElement}
 			type="button"
 			data-queue-move-id={entry.id}
 			data-queue-move-direction="up"
@@ -197,7 +194,6 @@
 			{/if}
 		</button>
 		<button
-			bind:this={downButtonElement}
 			type="button"
 			data-queue-move-id={entry.id}
 			data-queue-move-direction="down"
