@@ -5,11 +5,17 @@ import type {
   AgentStopCommandRequest,
   AgentStopResponse,
   AgentTurnCommandResponse,
-  CommandAcceptedResponse,
   StartChatCommandRequest,
   SteerCommandRequest,
   SteerCommandResponse,
 } from '@garcon/common/chat-command-contracts';
+import {
+  parseAddChatRowResponse,
+  parseChatRowTargetResponse,
+  type AddChatRowRequest,
+  type AddChatRowResponse,
+  type ChatRowTargetResponse,
+} from '@garcon/common/chat-row-contracts';
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import type { ChatListResponse } from '@garcon/common/chat-list';
@@ -299,10 +305,59 @@ export class GarconClient {
   stopChat(request: AgentStopCommandRequest, signal?: AbortSignal): Promise<AgentStopResponse> {
     return this.#submitCorrelated({
       route: '/api/v1/chats/stop',
-      commandType: 'agent-stop',
       request,
       parse: parseStopResponse,
+      correlates: (response, submitted) => (
+        response.commandType === 'agent-stop'
+        && response.clientRequestId === submitted.clientRequestId
+        && response.chatId === submitted.chatId
+      ),
       ambiguityDescription: `the stop command for chat ${request.chatId}`,
+    }, signal);
+  }
+
+  async getChatRowTarget(
+    chatId: string,
+    signal?: AbortSignal,
+  ): Promise<ChatRowTargetResponse> {
+    const query = new URLSearchParams({ chatId });
+    const value = await this.#request(
+      'submission',
+      'GET',
+      `/api/v1/chats/rows?${query.toString()}`,
+      undefined,
+      signal,
+    );
+    const target = parseChatRowTargetResponse(value);
+    if (!target || target.chatId !== chatId) {
+      throw new CliError('submission', 'server returned an invalid chat row target', 3);
+    }
+    return target;
+  }
+
+  addChatRow(
+    request: AddChatRowRequest,
+    signal?: AbortSignal,
+  ): Promise<AddChatRowResponse> {
+    return this.#submitCorrelated({
+      route: '/api/v1/chats/rows',
+      request,
+      parse(value) {
+        const response = parseAddChatRowResponse(value);
+        if (!response) {
+          throw new CliError('submission', 'server returned an invalid add-row response', 3);
+        }
+        return response;
+      },
+      correlates: (response, submitted) => (
+        response.commandType === 'chat-row-add'
+        && response.clientRequestId === submitted.clientRequestId
+        && response.clientMessageId === submitted.clientMessageId
+        && response.chatId === submitted.chatId
+        && response.transcriptViewId === submitted.transcriptViewId
+        && response.type === submitted.type
+      ),
+      ambiguityDescription: `the add-row command for chat ${request.chatId}`,
     }, signal);
   }
 
@@ -358,9 +413,13 @@ export class GarconClient {
   ): Promise<AgentTurnCommandResponse> {
     return this.#submitCorrelated({
       route,
-      commandType,
       request,
       parse: parseAcceptedResponse,
+      correlates: (response, submitted) => (
+        response.commandType === commandType
+        && response.clientRequestId === submitted.clientRequestId
+        && response.chatId === submitted.chatId
+      ),
       ambiguityDescription: `the command for chat ${request.chatId}`,
       ambiguous,
       timeoutMs,
@@ -369,13 +428,13 @@ export class GarconClient {
 
   // Repeats one logical command identity after an ambiguous transport result,
   // always after verifying that the server instance is unchanged. Exact request
-  // replay is safe for run and stop because the server ledger is idempotent.
-  async #submitCorrelated<TResponse extends CommandAcceptedResponse>(
+  // replay is safe because each receiving mutation contract is idempotent.
+  async #submitCorrelated<TRequest extends { readonly clientRequestId: string }, TResponse>(
     options: {
       route: string;
-      commandType: string;
-      request: { clientRequestId: string; chatId?: string };
+      request: TRequest;
       parse: (value: unknown) => TResponse;
+      correlates: (response: TResponse, request: TRequest) => boolean;
       ambiguityDescription: string;
       ambiguous?: (error: unknown) => boolean;
       timeoutMs?: number;
@@ -396,9 +455,7 @@ export class GarconClient {
           ),
         );
         if (
-          accepted.commandType !== options.commandType
-          || accepted.clientRequestId !== options.request.clientRequestId
-          || accepted.chatId !== options.request.chatId
+          !options.correlates(accepted, options.request)
         ) {
           throw new CliError('submission', 'server returned an uncorrelated command acceptance', 3);
         }

@@ -99,6 +99,30 @@ function controlSnapshotResponse(): Response {
   });
 }
 
+function chatRowTargetResponse(): Response {
+  return Response.json({
+    success: true,
+    chatId: CHAT_ID,
+    transcriptViewId: 'view-1',
+  });
+}
+
+function addChatRowResponse(init?: RequestInit): Response {
+  const body = JSON.parse(String(init?.body)) as Record<string, string>;
+  return Response.json({
+    success: true,
+    commandType: 'chat-row-add',
+    clientRequestId: body.clientRequestId,
+    clientMessageId: body.clientMessageId,
+    chatId: body.chatId,
+    transcriptViewId: body.transcriptViewId,
+    ordinal: 7,
+    type: body.type,
+    status: 'appended',
+    timestamp: '2026-08-18T12:00:00.000Z',
+  });
+}
+
 describe('main', () => {
   test('status reads one snapshot without reading stdin or resolving a project path', async () => {
     const capture = capturedOutput();
@@ -356,6 +380,150 @@ describe('main', () => {
     });
     expect(exitCode).toBe(2);
     expect(capture.diagnostics[0]).toContain('message read from stdin must not be empty');
+  });
+
+  test('add-row sends positional content only through the row endpoints', async () => {
+    const capture = capturedOutput();
+    const requests: Array<{ url: string; body: Record<string, string> | null }> = [];
+    const exitCode = await main([
+      'add-row', CHAT_ID, '--type', 'error', 'Synthetic failure detail.',
+    ], {
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push({
+          url,
+          body: init?.body ? JSON.parse(String(init.body)) as Record<string, string> : null,
+        });
+        return init?.method === 'POST' ? addChatRowResponse(init) : chatRowTargetResponse();
+      },
+      discoverRuntime: stubDiscovery,
+      readStdin: async () => { throw new Error('stdin must not be read'); },
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
+      '/api/v1/chats/rows',
+      '/api/v1/chats/rows',
+    ]);
+    expect(requests[0]!.body).toBeNull();
+    expect(requests[1]!.body).toMatchObject({
+      chatId: CHAT_ID,
+      transcriptViewId: 'view-1',
+      type: 'error',
+      content: 'Synthetic failure detail.',
+    });
+    expect(capture.results).toEqual([
+      [
+        `chat id: ${CHAT_ID}`,
+        'transcript view id: view-1',
+        'ordinal: 7',
+        'type: error',
+        'status: appended',
+      ].join('\n'),
+    ]);
+    expect(capture.results[0]).not.toContain('Synthetic failure detail.');
+    expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('add-row preserves stdin content and validates it before runtime discovery', async () => {
+    const capture = capturedOutput();
+    let submittedContent = '';
+    const exitCode = await main([
+      'add-row', CHAT_ID, '--type', 'notice', '-',
+    ], {
+      fetch: async (_input, init) => {
+        if (init?.method !== 'POST') return chatRowTargetResponse();
+        const body = JSON.parse(String(init.body)) as Record<string, string>;
+        submittedContent = body.content!;
+        return addChatRowResponse(init);
+      },
+      discoverRuntime: stubDiscovery,
+      readStdin: async () => 'Synthetic notice.\nSecond line.\n',
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(submittedContent).toBe('Synthetic notice.\nSecond line.\n');
+
+    let discovered = false;
+    const invalidCapture = capturedOutput();
+    const invalidExitCode = await main([
+      'add-row', CHAT_ID, '--type', 'notice', '-',
+    ], {
+      discoverRuntime: async () => {
+        discovered = true;
+        return stubDiscovery();
+      },
+      readStdin: async () => '\ud800',
+      output: invalidCapture.output,
+    });
+
+    expect(invalidExitCode).toBe(2);
+    expect(discovered).toBeFalse();
+    expect(invalidCapture.diagnostics).toEqual([
+      'arguments: content must contain well-formed Unicode',
+    ]);
+  });
+
+  test('add-row rejects malformed UTF-8 stdin before runtime discovery', async () => {
+    const cliEntry = path.join(import.meta.dir, '..', 'main.ts');
+    const child = Bun.spawn([
+      process.execPath,
+      cliEntry,
+      'add-row', CHAT_ID, '--type', 'notice', '-',
+    ], {
+      cwd: path.join(import.meta.dir, '..', '..'),
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    child.stdin.write(new Uint8Array([0xc3, 0x28]));
+    child.stdin.end();
+
+    expect(await child.exited).toBe(2);
+    expect(await new Response(child.stderr).text()).toContain(
+      'arguments: stdin must contain valid UTF-8',
+    );
+  });
+
+  test('interrupts a pending add-row submission with the mutation-aware diagnostic', async () => {
+    const controller = new AbortController();
+    const capture = capturedOutput();
+    let markPostStarted!: () => void;
+    const postStarted = new Promise<void>((resolve) => {
+      markPostStarted = resolve;
+    });
+    const result = main([
+      'add-row', CHAT_ID, '--type', 'notice', 'Synthetic notice.',
+    ], {
+      signal: controller.signal,
+      discoverRuntime: stubDiscovery,
+      fetch: async (_input, init) => {
+        if (init?.method !== 'POST') return chatRowTargetResponse();
+        markPostStarted();
+        await new Promise<never>((_resolve, reject) => {
+          if (init.signal?.aborted) {
+            reject(init.signal.reason);
+            return;
+          }
+          init.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        });
+      },
+      output: capture.output,
+    });
+
+    await postStarted;
+    controller.abort(new Error('terminal interrupted'));
+
+    await expect(result).resolves.toBe(130);
+    expect(capture.diagnostics).toEqual([
+      'terminal interrupted; the add-row command may have reached Garcon; inspect the chat before retrying',
+    ]);
   });
 
   test('stop exits 0 for a satisfied outcome', async () => {

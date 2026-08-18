@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { CLI_HELP, parseCliArgs, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
 import { sendChatAsync, stopChat } from './chat-control.js';
+import { runAddRow, validateAddRowContent } from './chat-row.js';
 import { runChatStatus } from './chat-status.js';
 import { runChatWait } from './chat-wait.js';
 import { runConsultation } from './consultation.js';
@@ -20,9 +21,11 @@ export interface MainOptions {
   discoverRuntime?: typeof discoverRuntime;
 }
 
-async function readDefaultStdin(signal?: AbortSignal): Promise<string> {
+async function readStdin(
+  decoder: TextDecoder,
+  signal?: AbortSignal,
+): Promise<string> {
   const reader = Bun.stdin.stream().getReader();
-  const decoder = new TextDecoder();
   let content = '';
   const onAbort = () => {
     void reader.cancel(signal?.reason).catch(() => undefined);
@@ -33,13 +36,33 @@ async function readDefaultStdin(signal?: AbortSignal): Promise<string> {
       signal?.throwIfAborted();
       const { done, value } = await reader.read();
       if (done) break;
-      content += decoder.decode(value, { stream: true });
+      content += decodeStdin(decoder, value, true);
     }
     signal?.throwIfAborted();
-    return content + decoder.decode();
+    return content + decodeStdin(decoder, undefined, false);
   } finally {
     signal?.removeEventListener('abort', onAbort);
     reader.releaseLock();
+  }
+}
+
+function readDefaultStdin(signal?: AbortSignal): Promise<string> {
+  return readStdin(new TextDecoder(), signal);
+}
+
+function readStrictUtf8Stdin(signal?: AbortSignal): Promise<string> {
+  return readStdin(new TextDecoder('utf-8', { fatal: true }), signal);
+}
+
+function decodeStdin(
+  decoder: TextDecoder,
+  value: Uint8Array | undefined,
+  stream: boolean,
+): string {
+  try {
+    return decoder.decode(value, { stream });
+  } catch (error) {
+    throw new CliError('arguments', 'stdin must contain valid UTF-8', 2, { cause: error });
   }
 }
 
@@ -61,10 +84,13 @@ async function readPromptFromStdin(
   }
 }
 
-async function readConfiguredStdin(options: MainOptions): Promise<string> {
+async function readConfiguredStdin(
+  options: MainOptions,
+  defaultReader: (signal?: AbortSignal) => Promise<string> = readDefaultStdin,
+): Promise<string> {
   return options.readStdin
     ? await readPromptFromStdin(options.readStdin, options.signal)
-    : await readDefaultStdin(options.signal);
+    : await defaultReader(options.signal);
 }
 
 async function canonicalProjectDirectory(cwd: string): Promise<string> {
@@ -96,6 +122,9 @@ async function connectedClient(
 function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
   // A one-shot control POST may have reached the server before the terminal was
   // interrupted, so a conservative ambiguity message prevents an unsafe retry.
+  if (command?.kind === 'add-row') {
+    return 'terminal interrupted; the add-row command may have reached Garcon; inspect the chat before retrying';
+  }
   return command !== undefined && (command.kind === 'send-async' || command.kind === 'stop')
     ? 'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying'
     : 'terminal interrupted; no Garcon agent was stopped';
@@ -150,6 +179,15 @@ export async function main(
         content: message,
         allowSteer: command.allowSteer,
       }, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'add-row') {
+      const content = command.readsContentFromStdin
+        ? await readConfiguredStdin(options, readStrictUtf8Stdin)
+        : command.content ?? '';
+      const validatedContent = validateAddRowContent(content);
+      const client = await connectedClient(command, options);
+      await runAddRow(command, validatedContent, client, output, options.signal);
       return 0;
     }
     const prompt = command.readsPromptFromStdin

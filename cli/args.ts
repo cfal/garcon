@@ -10,6 +10,7 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
+import type { ChatRowType } from '@garcon/common/chat-row-contracts';
 import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
 import {
   CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
@@ -24,6 +25,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] list <resource>
   garcon-cli [options] send-async <chat-id> [--allow-steer] <message>
   garcon-cli [options] stop <chat-id>
+  garcon-cli [connection options] add-row <chat-id> --type <notice|error> <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
 
@@ -34,6 +36,7 @@ saved execution settings, so it may edit files or run tools. Use - as the
 message to read UTF-8 text from stdin. stop uses the same command as the SPA
 Stop button and interrupts the active turn. If queued messages exist, stop
 pauses the queue; resume it in Garcon before sending a new direct turn.
+add-row appends one durable user-visible transcript row without contacting the agent.
 
 List resources:
   agents
@@ -60,12 +63,13 @@ Options:
   --allow-steer                With send-async, steer the active turn when busy; never queues
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
+  --type <notice|error>        Durable row type for add-row
   --json                       Print list, status, or wait results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list, send-async, stop, status, or wait.
+Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, or wait.
 The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
@@ -144,6 +148,14 @@ export interface StopCliCommand extends CliConnectionOptions {
   chatId: ChatId;
 }
 
+export interface AddRowCliCommand extends CliConnectionOptions {
+  readonly kind: 'add-row';
+  readonly chatId: ChatId;
+  readonly type: ChatRowType;
+  readonly content: string | null;
+  readonly readsContentFromStdin: boolean;
+}
+
 export interface WaitCliCommand extends CliConnectionOptions {
   kind: 'wait';
   chatId: ChatId;
@@ -164,6 +176,7 @@ export type ParsedCliCommand =
   | ListCliCommand
   | SendAsyncCliCommand
   | StopCliCommand
+  | AddRowCliCommand
   | StatusCliCommand
   | WaitCliCommand
   | CliInvocation;
@@ -183,6 +196,7 @@ const SINGLE_STRING_OPTIONS = [
   'resume',
   'turn',
   'messages',
+  'type',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -253,7 +267,7 @@ function startsReservedCommand(
   return terminator === undefined || positional.index < terminator.index;
 }
 
-type ControlCommandKind = 'send-async' | 'stop';
+type ControlCommandKind = 'send-async' | 'stop' | 'add-row';
 
 const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['cwd', '--cwd'],
@@ -294,6 +308,7 @@ function parseSendAsync(
   connection: CliConnectionOptions,
 ): SendAsyncCliCommand {
   rejectControlForbiddenOptions(values, 'send-async');
+  if (values.type !== undefined) throw argumentError('--type cannot be used with send-async');
   if (parsed.positionals.length !== 3) {
     throw argumentError('send-async requires a chat ID and one message');
   }
@@ -323,6 +338,7 @@ function parseStop(
   if (values['allow-steer'] !== undefined) {
     throw argumentError('--allow-steer cannot be used with stop');
   }
+  if (values.type !== undefined) throw argumentError('--type cannot be used with stop');
   if (parsed.positionals.length !== 2) {
     throw argumentError('stop requires exactly one chat ID');
   }
@@ -330,6 +346,36 @@ function parseStop(
     kind: 'stop',
     ...connection,
     chatId: parseControlChatId(parsed.positionals[1]!, 'stop'),
+  };
+}
+
+function parseAddRow(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): AddRowCliCommand {
+  rejectControlForbiddenOptions(values, 'add-row');
+  if (values['allow-steer'] !== undefined) {
+    throw argumentError('--allow-steer cannot be used with add-row');
+  }
+  if (parsed.positionals.length !== 3) {
+    throw argumentError('add-row requires a chat ID and one content argument');
+  }
+  if (values.type !== 'notice' && values.type !== 'error') {
+    throw argumentError('add-row requires --type notice or --type error');
+  }
+  const argument = parsed.positionals[2]!;
+  const readsContentFromStdin = argument === '-';
+  if (!readsContentFromStdin && argument.trim().length === 0) {
+    throw argumentError('the row content must not be empty');
+  }
+  return {
+    kind: 'add-row',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'add-row'),
+    type: values.type,
+    content: readsContentFromStdin ? null : argument,
+    readsContentFromStdin,
   };
 }
 
@@ -347,6 +393,7 @@ const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = 
   ['tag', '--tag'],
   ['resume', '--resume'],
   ['allow-steer', '--allow-steer'],
+  ['type', '--type'],
 ] as const;
 
 function rejectObservationMutationOptions(
@@ -463,6 +510,7 @@ export function parseCliArgs(
         resume: { type: 'string' },
         turn: { type: 'string' },
         messages: { type: 'string' },
+        type: { type: 'string' },
         'allow-steer': { type: 'boolean' },
         json: { type: 'boolean' },
         help: { type: 'boolean' },
@@ -528,6 +576,9 @@ export function parseCliArgs(
   if (startsReservedCommand(tokens, 'stop')) {
     return parseStop(parsed, values, connection);
   }
+  if (startsReservedCommand(tokens, 'add-row')) {
+    return parseAddRow(parsed, values, connection);
+  }
   if (startsReservedCommand(tokens, 'wait')) {
     return parseWait(parsed, values, connection);
   }
@@ -550,6 +601,7 @@ export function parseCliArgs(
     rejectListOption(values['allow-steer'], '--allow-steer');
     rejectListOption(values.turn, '--turn');
     rejectListOption(values.messages, '--messages');
+    rejectListOption(values.type, '--type');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
@@ -593,6 +645,7 @@ export function parseCliArgs(
   if (values['allow-steer'] !== undefined) {
     throw argumentError('--allow-steer can only be used with send-async');
   }
+  if (values.type !== undefined) throw argumentError('--type can only be used with add-row');
   const modes = parseModeOptions(values);
 
   if (endpointId !== undefined && providerId === undefined) {

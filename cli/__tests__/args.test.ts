@@ -412,3 +412,57 @@ describe('parseCliArgs', () => {
     }
   });
 });
+
+describe('add-row arguments', () => {
+  test('parses positional and stdin content with connection options', () => {
+    expect(parseCliArgs([
+      '--workspace', 'review',
+      'add-row', CHAT_ID,
+      '--type', 'notice',
+      '  exact content\n',
+    ], ENV)).toEqual({
+      kind: 'add-row',
+      workspace: 'review',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      type: 'notice',
+      content: '  exact content\n',
+      readsContentFromStdin: false,
+    });
+    expect(parseCliArgs([
+      'add-row', CHAT_ID, '-', '--type', 'error',
+    ], ENV)).toMatchObject({
+      kind: 'add-row',
+      type: 'error',
+      content: null,
+      readsContentFromStdin: true,
+    });
+    expect(parseCliArgs([
+      'add-row', CHAT_ID, '--type', 'notice', '--', '--starts-with-dash',
+    ], ENV)).toMatchObject({ content: '--starts-with-dash' });
+  });
+
+  test.each([
+    [['add-row', CHAT_ID, 'content'], 'requires --type notice or --type error'],
+    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type notice or --type error'],
+    [['add-row', CHAT_ID, '--type', 'notice', '--type', 'error', 'content'], 'only once'],
+    [['add-row', CHAT_ID, '--type', 'notice'], 'requires a chat ID and one content argument'],
+    [['add-row', CHAT_ID, '--type', 'notice', 'one', 'two'], 'requires a chat ID and one content argument'],
+    [['add-row', 'bad', '--type', 'notice', 'content'], 'valid Garcon chat ID'],
+    [['add-row', CHAT_ID, '--type', 'notice', '   '], 'row content must not be empty'],
+    [['add-row', CHAT_ID, '--type', 'notice', '--json', 'content'], '--json cannot be used with add-row'],
+    [['send-async', CHAT_ID, '--type', 'notice', 'content'], '--type cannot be used with send-async'],
+    [['stop', CHAT_ID, '--type', 'notice'], '--type cannot be used with stop'],
+    [['status', CHAT_ID, '--type', 'notice'], '--type cannot be used with status'],
+    [['list', 'agents', '--type', 'notice'], '--type cannot be used with list'],
+    [['--agent', 'codex', '--model', 'gpt', '--type', 'notice', 'prompt'], '--type can only be used with add-row'],
+  ])('rejects invalid add-row arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test('treats an option-terminated add-row token as a new-chat prompt', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex', '--model', 'gpt', '--', 'add-row', 'is', 'documented',
+    ], ENV)).toMatchObject({ kind: 'start', prompt: 'add-row is documented' });
+  });
+});

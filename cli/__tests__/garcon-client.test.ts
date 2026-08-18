@@ -679,3 +679,99 @@ describe('GarconClient', () => {
     expect(submissions).toBe(1);
   });
 });
+
+describe('GarconClient add-row', () => {
+  const addRequest = {
+    clientRequestId: 'row-request',
+    clientMessageId: 'row-message',
+    chatId: runRequest.chatId,
+    transcriptViewId: 'view-1',
+    type: 'error' as const,
+    content: 'durable error',
+  };
+
+  test('validates the target and correlates every mutation identity', async () => {
+    const seen: Array<{ url: string; body: string | null }> = [];
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        const url = String(input);
+        seen.push({ url, body: init?.body ? String(init.body) : null });
+        if (url.includes('?chatId=')) {
+          return Response.json({
+            success: true,
+            chatId: runRequest.chatId,
+            transcriptViewId: 'view-1',
+          });
+        }
+        const body = JSON.parse(String(init?.body));
+        return Response.json({
+          success: true,
+          commandType: 'chat-row-add',
+          ...body,
+          ordinal: 3,
+          status: 'appended',
+          timestamp: '2026-08-18T00:00:00.000Z',
+        });
+      },
+    });
+
+    await expect(client.getChatRowTarget(runRequest.chatId)).resolves.toMatchObject({
+      transcriptViewId: 'view-1',
+    });
+    await expect(client.addChatRow(addRequest)).resolves.toMatchObject({
+      ordinal: 3,
+      status: 'appended',
+    });
+    expect(seen[1]?.body).toBe(JSON.stringify(addRequest));
+  });
+
+  test('retries an ambiguous mutation with the byte-identical request body', async () => {
+    const bodies: string[] = [];
+    let postAttempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.includes('/api/v1/runtime?')) return runtimeResponse(input);
+        bodies.push(String(init?.body));
+        postAttempts += 1;
+        if (postAttempts === 1) throw new TypeError('connection reset');
+        return Response.json({
+          success: true,
+          commandType: 'chat-row-add',
+          ...addRequest,
+          ordinal: 3,
+          status: 'duplicate',
+          timestamp: '2026-08-18T00:00:00.000Z',
+        });
+      },
+    });
+
+    await expect(client.addChatRow(addRequest)).resolves.toMatchObject({ status: 'duplicate' });
+    expect(bodies).toEqual([JSON.stringify(addRequest), JSON.stringify(addRequest)]);
+  });
+
+  test('does not retry or refresh a definitive stale-view response', async () => {
+    let calls = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async () => {
+        calls += 1;
+        return Response.json({
+          success: false,
+          error: 'The transcript changed before the row was added.',
+          errorCode: 'STALE_TRANSCRIPT_VIEW',
+          retryable: false,
+        }, { status: 409 });
+      },
+    });
+
+    await expect(client.addChatRow(addRequest)).rejects.toMatchObject({
+      errorCode: 'STALE_TRANSCRIPT_VIEW',
+    });
+    expect(calls).toBe(1);
+  });
+});
