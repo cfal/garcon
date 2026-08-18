@@ -9,10 +9,6 @@ mock.module('../../lib/http-request.js', () => ({
   MalformedJsonError,
 }));
 
-mock.module('../../agents/claude/history-loader.js', () => ({
-  getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
   generateChatTitleFromMessage: mock(() => Promise.resolve({ chatId: '123', title: 'Generated Title' })),
