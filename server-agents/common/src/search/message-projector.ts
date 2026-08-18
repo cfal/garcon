@@ -9,6 +9,7 @@ const MAX_TOOL_RESULT_TAIL_CHARS = 512;
 const MAX_RECURSIVE_CHARS = 4_000;
 const MAX_RECURSIVE_DEPTH = 8;
 const MAX_RECURSIVE_NODES = 512;
+const MAX_TIMESTAMP_BYTES = 256;
 
 interface ExtractionBudget {
   remaining: number;
@@ -19,6 +20,30 @@ interface ExtractionBudget {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled transcript search message type: ${String(value)}`);
+}
+
+function hasWellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      if (index + 1 >= value.length) return false;
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return false;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function normalizeSearchTimestamp(value: unknown): string | null {
+  return typeof value === 'string'
+    && value.length > 0
+    && hasWellFormedUtf16(value)
+    && Buffer.byteLength(value, 'utf8') <= MAX_TIMESTAMP_BYTES
+    ? value
+    : null;
 }
 
 function appendText(parts: string[], value: unknown, budget: ExtractionBudget): void {
@@ -296,7 +321,7 @@ function projectOne(message: ChatMessage): {
     truncated: budget.truncated,
     row: body ? {
       role: roleForMessage(message),
-      timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
+      timestamp: normalizeSearchTimestamp(message.timestamp),
       body,
     } : null,
   };
