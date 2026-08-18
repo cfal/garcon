@@ -11,7 +11,7 @@ import type {
 	ConversationViewportTargetResult,
 	HiddenReadingRestoreResult,
 } from '$lib/chat/transcript/conversation-viewport-port.js';
-import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
+import type { ConversationNativeScrollActivity } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
 import type { ConversationVirtualGeometrySnapshot } from './ConversationFeedProjectionState.svelte.js';
 import {
 	CHAT_GEOMETRY_END_THRESHOLD_PX,
@@ -99,7 +99,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#initialEndRestoreEpoch = 0;
 	#activeTargetScrolls = 0;
 	#userIntentEpoch = 0;
-	#activeNativeTouch = false;
+	#nativeScrollActivity: ConversationNativeScrollActivity = 'idle';
 	#scrollMargin = 0;
 	#observeElementRect = createConversationElementRectObserver({
 		width: 0,
@@ -479,10 +479,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		return 'cancelled';
 	}
 
-	noteNativeTouchLifecycle(phase: ConversationNativeTouchPhase): void {
-		// Only a direction-bearing move owns settlement; a fresh stateless press or a terminal
-		// end/cancel explicitly releases it so no stale ownership survives a rebinding.
-		this.#activeNativeTouch = phase === 'move';
+	setNativeScrollActivity(activity: ConversationNativeScrollActivity): void {
+		this.#nativeScrollActivity = activity;
 	}
 
 	async scrollToTarget(
@@ -804,7 +802,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					token === this.#layoutMutationToken &&
 					this.#programmaticScroll.isCurrent(operationEpoch) &&
 					this.isReady() &&
-					!this.#activeNativeTouch,
+					this.#nativeScrollActivity === 'idle',
 			});
 		} finally {
 			release();

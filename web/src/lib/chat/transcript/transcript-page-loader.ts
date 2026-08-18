@@ -6,6 +6,7 @@ import {
 import { loadTranscriptPageDemand } from './transcript-page-demand.js';
 import {
 	idlePageState,
+	type TranscriptPageApplicationGate,
 	type TranscriptPageDirection,
 	type TranscriptPageLoadResult,
 	type TranscriptPageState,
@@ -56,6 +57,7 @@ export class TranscriptPageLoader {
 	load(
 		direction: TranscriptPageDirection,
 		chatId: string,
+		applicationGate?: TranscriptPageApplicationGate,
 	): Promise<TranscriptPageLoadResult> {
 		if (this.#loadPromise) {
 			if (this.#loadingDirection === direction && this.#loadingChatId === chatId) {
@@ -80,6 +82,7 @@ export class TranscriptPageLoader {
 			operationEpoch,
 			loadedThroughOrdinal,
 			lastOrdinal,
+			applicationGate,
 		);
 		this.#loadPromise = loadPromise;
 		this.#loadingChatId = chatId;
@@ -108,6 +111,7 @@ export class TranscriptPageLoader {
 		operationEpoch: number,
 		loadedThroughOrdinal: number,
 		lastOrdinal: number,
+		applicationGate: TranscriptPageApplicationGate | undefined,
 	): Promise<TranscriptPageLoadResult> {
 		try {
 			if (direction === 'earlier') {
@@ -115,6 +119,7 @@ export class TranscriptPageLoader {
 					chatId,
 					transcriptViewId,
 					operationEpoch,
+					applicationGate,
 				);
 			}
 			return await this.#performLaterLoad(
@@ -123,9 +128,10 @@ export class TranscriptPageLoader {
 				operationEpoch,
 				loadedThroughOrdinal,
 				lastOrdinal,
+				applicationGate,
 			);
 		} catch (error) {
-			if (this.#isCurrent(chatId, transcriptViewId, operationEpoch)) {
+			if (await this.#canApply(chatId, transcriptViewId, operationEpoch, applicationGate)) {
 				this.host.pageStates[direction] = {
 					status: 'error',
 					error: error instanceof Error ? error.message : 'Page load failed',
@@ -140,6 +146,7 @@ export class TranscriptPageLoader {
 		chatId: string,
 		transcriptViewId: string,
 		operationEpoch: number,
+		applicationGate: TranscriptPageApplicationGate | undefined,
 	): Promise<TranscriptPageLoadResult> {
 		const requestBeforeOrdinal = this.host.nextBeforeOrdinal;
 		if (requestBeforeOrdinal === null) return 'exhausted';
@@ -158,6 +165,9 @@ export class TranscriptPageLoader {
 			},
 		});
 		if (demand.kind === 'invalidated') return 'invalidated';
+		if (!(await this.#canApply(chatId, transcriptViewId, operationEpoch, applicationGate))) {
+			return 'invalidated';
+		}
 		if (demand.kind === 'unavailable') {
 			this.options.onHistoryUnavailable(chatId, demand.response.historyState);
 			return 'invalidated';
@@ -183,6 +193,7 @@ export class TranscriptPageLoader {
 		operationEpoch: number,
 		loadedThroughOrdinal: number,
 		lastOrdinal: number,
+		applicationGate: TranscriptPageApplicationGate | undefined,
 	): Promise<TranscriptPageLoadResult> {
 		const demand = await loadTranscriptPageDemand({
 			direction: 'later',
@@ -194,6 +205,9 @@ export class TranscriptPageLoader {
 			isCurrent: () => this.#isCurrent(chatId, transcriptViewId, operationEpoch),
 		});
 		if (demand.kind === 'invalidated') return 'invalidated';
+		if (!(await this.#canApply(chatId, transcriptViewId, operationEpoch, applicationGate))) {
+			return 'invalidated';
+		}
 		if (demand.kind === 'unavailable') {
 			this.options.onHistoryUnavailable(chatId, demand.response.historyState);
 			return 'invalidated';
@@ -249,6 +263,17 @@ export class TranscriptPageLoader {
 			&& this.host.activeChatId === chatId
 			&& this.host.transcriptViewId === transcriptViewId
 		);
+	}
+
+	async #canApply(
+		chatId: string,
+		transcriptViewId: string,
+		operationEpoch: number,
+		applicationGate: TranscriptPageApplicationGate | undefined,
+	): Promise<boolean> {
+		if (!this.#isCurrent(chatId, transcriptViewId, operationEpoch)) return false;
+		if (applicationGate && (await applicationGate()) !== 'apply') return false;
+		return this.#isCurrent(chatId, transcriptViewId, operationEpoch);
 	}
 
 	#finish(

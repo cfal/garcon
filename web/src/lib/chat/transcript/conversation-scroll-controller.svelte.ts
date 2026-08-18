@@ -1,10 +1,13 @@
 import { tick } from 'svelte';
 import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type {
+	TranscriptPageApplicationGate,
 	TranscriptPageDirection,
 	TranscriptPageLoadResult,
 	TranscriptWindowTarget,
 } from '$lib/chat/transcript/transcript-page-progress.js';
+import { ConversationNativeScrollSettlement } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
+import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 import type {
 	ConversationViewportIntentCancellationResult,
 	ConversationViewportPort,
@@ -27,6 +30,8 @@ function pagePrefetchDistance(direction: TranscriptPageDirection, viewportHeight
 }
 
 type PageRequestReason = 'scroll' | 'button';
+type PageApplicationPolicy = 'immediate' | 'after-native-scroll';
+type UserScrollIntentSource = 'native-touch' | 'other';
 type WindowNavigationResult = 'settled' | 'committed-unsettled' | 'invalidated';
 
 interface UserScrollIntent {
@@ -53,6 +58,7 @@ export type ConversationScrollState = Pick<
 	| 'feedMutationClock'
 	| 'transcriptViewId'
 	| 'hasLaterMessages'
+	| 'hasEarlierRowsToReveal'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
 	| 'invalidatePendingHistoryLoad'
@@ -93,6 +99,7 @@ export class ConversationScrollController {
 	#viewportOperationEpoch = 0;
 	#deferredLiveEdgeIntent: DeferredLiveEdgeIntent | null = null;
 	#nativeScrollHandoff: NativeScrollHandoff | null = null;
+	#nativeScrollSettlement: ConversationNativeScrollSettlement;
 	#isPageMutationInProgress = false;
 	#activeTargetNavigations = $state(0);
 	#resumeAutoFillAfterTargets = false;
@@ -101,6 +108,9 @@ export class ConversationScrollController {
 	#lastObservedFeedDataRevision: number;
 
 	constructor(private deps: ScrollControllerDeps) {
+		this.#nativeScrollSettlement = new ConversationNativeScrollSettlement((activity) => {
+			this.deps.getViewport()?.setNativeScrollActivity(activity);
+		});
 		this.#lastObservedFeedChatId = deps.sessions.selectedChatId;
 		this.#lastObservedTranscriptViewId = deps.chatState.transcriptViewId;
 		this.#lastObservedFeedDataRevision = deps.chatState.feedMutationClock.dataRevision;
@@ -203,7 +213,20 @@ export class ConversationScrollController {
 		}
 	}
 
-	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
+	noteNativeTouchLifecycle(phase: ConversationNativeTouchPhase): void {
+		this.#nativeScrollSettlement.noteTouch(phase);
+	}
+
+	cancelNativeScroll(viewport = this.deps.getViewport()): void {
+		this.#nativeScrollSettlement.cancel();
+		viewport?.setNativeScrollActivity('idle');
+	}
+
+	noteUserScrollIntent(
+		direction: TranscriptPageDirection | null = null,
+		source: UserScrollIntentSource = 'other',
+	): void {
+		if (source === 'other') this.cancelNativeScroll();
 		this.#deferredLiveEdgeIntent = null;
 		this.#nativeScrollHandoff = null;
 		const cancellation = this.deps.getViewport()?.cancelForUserIntent(direction);
@@ -244,6 +267,7 @@ export class ConversationScrollController {
 		// The next chat's paint gate must not be completed by a deferred end restore
 		// that still belongs to the prior virtual surface.
 		this.deps.getViewport()?.cancelPendingLayoutMutation();
+		this.cancelNativeScroll();
 		this.#cancelViewportOperations();
 		this.#resetPagingContext();
 		this.#initialBottomRestoreChatId = chatId;
@@ -281,6 +305,7 @@ export class ConversationScrollController {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId || this.isScrollingToTop) return;
 
+		this.cancelNativeScroll();
 		this.isScrollingToTop = true;
 		try {
 			const result = await this.#navigateToWindow(chatId, 'initial', () =>
@@ -299,6 +324,7 @@ export class ConversationScrollController {
 	handleScroll(): void {
 		const node = this.deps.getScrollContainer();
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
+		this.#nativeScrollSettlement.noteScroll();
 		const inferredDirection = this.#inferScrollDirection(node.scrollTop);
 		const viewport = this.deps.getViewport();
 		const resumedNativeScroll = this.#resumeNativeScrollHandoff(inferredDirection, viewport);
@@ -382,14 +408,19 @@ export class ConversationScrollController {
 		let result: TranscriptPageLoadResult;
 		let continuedPageIntent: boolean;
 		try {
-			result = await this.#mutatePage(direction, () => {
-				if (direction === 'earlier' && this.deps.chatState.revealEarlierLoadedRows()) {
-					return 'loaded';
-				}
-				return direction === 'earlier'
-					? this.deps.chatState.loadEarlierPage(chatId)
-					: this.deps.chatState.loadLaterPage(chatId);
-			});
+			result = await this.#mutatePage(
+				direction,
+				async (applicationGate) => {
+					if (direction === 'earlier' && this.deps.chatState.hasEarlierRowsToReveal) {
+						if (applicationGate && (await applicationGate()) !== 'apply') return 'invalidated';
+						if (this.deps.chatState.revealEarlierLoadedRows()) return 'loaded';
+					}
+					return direction === 'earlier'
+						? this.deps.chatState.loadEarlierPage(chatId, applicationGate)
+						: this.deps.chatState.loadLaterPage(chatId, applicationGate);
+				},
+				reason === 'scroll' ? 'after-native-scroll' : 'immediate',
+			);
 		} finally {
 			const latestIntentEpoch = this.#userScrollIntent.epoch;
 			continuedPageIntent =
@@ -621,6 +652,7 @@ export class ConversationScrollController {
 	setViewportVisible(isVisible: boolean): void {
 		if (isVisible === this.#isViewportVisible) return;
 		this.#isViewportVisible = isVisible;
+		if (!isVisible) this.cancelNativeScroll();
 		this.#cancelViewportOperations();
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? null;
 		if (!isVisible) return;
@@ -640,7 +672,10 @@ export class ConversationScrollController {
 
 	async #mutatePage(
 		direction: TranscriptPageDirection,
-		mutate: () => Promise<TranscriptPageLoadResult> | TranscriptPageLoadResult,
+		mutate: (
+			applicationGate: TranscriptPageApplicationGate | undefined,
+		) => Promise<TranscriptPageLoadResult> | TranscriptPageLoadResult,
+		applicationPolicy: PageApplicationPolicy = 'immediate',
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.sessions.selectedChatId;
 		const viewport = this.deps.getViewport();
@@ -648,7 +683,8 @@ export class ConversationScrollController {
 		const operationEpoch = this.#beginViewportOperation();
 		const userIntentEpoch = this.#userScrollIntent.epoch;
 		const windowRevision = this.deps.chatState.windowRevision;
-		const result = await mutate();
+		const applicationGate = this.#pageApplicationGate(chatId, operationEpoch, applicationPolicy);
+		const result = await mutate(applicationGate);
 		if (
 			result === 'invalidated' ||
 			this.deps.chatState.windowRevision !== windowRevision ||
@@ -671,6 +707,26 @@ export class ConversationScrollController {
 		return layout === 'settled' || this.#hasContinuedPageIntent(direction, userIntentEpoch)
 			? result
 			: 'invalidated';
+	}
+
+	#pageApplicationGate(
+		chatId: string,
+		operationEpoch: number,
+		policy: PageApplicationPolicy,
+	): TranscriptPageApplicationGate | undefined {
+		if (policy === 'immediate') return undefined;
+		let decision: ReturnType<TranscriptPageApplicationGate> | null = null;
+		return () => {
+			decision ??= (async () => {
+				const settlement = await this.#nativeScrollSettlement.waitUntilIdle();
+				return settlement === 'settled' &&
+					this.#isViewportVisible &&
+					this.#isCurrentViewportOperation(chatId, operationEpoch)
+					? 'apply'
+					: 'invalidated';
+			})();
+			return decision;
+		};
 	}
 
 	async #waitForCurrentLayout(result: TranscriptPageLoadResult): Promise<TranscriptPageLoadResult> {

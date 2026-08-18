@@ -7,6 +7,7 @@ import {
 import type { ConversationFeedMutationClock } from '../conversation-feed-mutations';
 import type { ConversationViewportPort } from '../conversation-viewport-port';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
+import { NATIVE_SCROLL_SETTLE_DELAY_MS } from '../conversation-native-scroll-settlement.js';
 import { AssistantMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { mountInitialBottomRestoreEffect } from './conversation-scroll-controller-effect-harness.svelte';
@@ -44,6 +45,7 @@ function scrollState(
 		feedMutationClock: mutationClock(),
 		transcriptViewId: 'generation-1',
 		hasLaterMessages: false,
+		hasEarlierRowsToReveal: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
 		invalidatePendingHistoryLoad: vi.fn(),
@@ -98,8 +100,8 @@ interface FakeViewport extends ConversationViewportPort {
 	>;
 	cancelPendingLayoutMutation: ReturnType<typeof vi.fn<() => void>>;
 	cancelForUserIntent: ReturnType<typeof vi.fn<ConversationViewportPort['cancelForUserIntent']>>;
-	noteNativeTouchLifecycle: ReturnType<
-		typeof vi.fn<ConversationViewportPort['noteNativeTouchLifecycle']>
+	setNativeScrollActivity: ReturnType<
+		typeof vi.fn<ConversationViewportPort['setNativeScrollActivity']>
 	>;
 	scrollToTarget: ReturnType<typeof vi.fn<ConversationViewportPort['scrollToTarget']>>;
 }
@@ -118,7 +120,7 @@ function fakeViewport(overrides: Partial<ConversationViewportPort> = {}): FakeVi
 		restoreHiddenReadingPosition: vi.fn(async () => 'restored'),
 		cancelPendingLayoutMutation: vi.fn(),
 		cancelForUserIntent: vi.fn(() => 'cancelled'),
-		noteNativeTouchLifecycle: vi.fn(),
+		setNativeScrollActivity: vi.fn(),
 		scrollToTarget: vi.fn(async () => 'completed'),
 		...overrides,
 	} as FakeViewport;
@@ -562,6 +564,97 @@ describe('ConversationScrollController', () => {
 		controller.handleScroll();
 
 		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
+	it('fetches immediately but defers page application through post-touch momentum', async () => {
+		vi.useFakeTimers();
+		let applied = false;
+		const clock = mutationClock();
+		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>(
+			async (_chatId, applicationGate) => {
+				expect(applicationGate).toBeDefined();
+				const application = applicationGate?.();
+				expect(applicationGate?.()).toBe(application);
+				if ((await application) !== 'apply') return 'invalidated';
+				applied = true;
+				clock.dataRevision += 1;
+				return 'loaded';
+			},
+		);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, feedMutationClock: clock, loadEarlierPage },
+			scroller: { clientHeight: 400, scrollTop: 700 },
+		});
+
+		fixture.controller.noteNativeTouchLifecycle('move');
+		fixture.controller.noteUserScrollIntent('earlier', 'native-touch');
+		const request = fixture.controller.requestPage('earlier', 'scroll');
+
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+		expect(applied).toBe(false);
+		fixture.controller.noteNativeTouchLifecycle('end');
+		await vi.advanceTimersByTimeAsync(NATIVE_SCROLL_SETTLE_DELAY_MS - 1);
+		expect(applied).toBe(false);
+
+		fixture.scroller.scrollTop = 680;
+		fixture.controller.handleScroll();
+		await vi.advanceTimersByTimeAsync(NATIVE_SCROLL_SETTLE_DELAY_MS - 1);
+		expect(applied).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+
+		await expect(request).resolves.toBe('loaded');
+		expect(applied).toBe(true);
+		expect(fixture.viewport.setNativeScrollActivity.mock.calls).toEqual([
+			['dragging'],
+			['coasting'],
+			['idle'],
+		]);
+	});
+
+	it('invalidates a staged page when its viewport is hidden', async () => {
+		let applied = false;
+		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>(
+			async (_chatId, applicationGate) => {
+				if ((await applicationGate?.()) !== 'apply') return 'invalidated';
+				applied = true;
+				return 'loaded';
+			},
+		);
+		const fixture = controllerFixture({
+			state: { canLoadEarlier: true, loadEarlierPage },
+		});
+		fixture.controller.noteNativeTouchLifecycle('move');
+		fixture.controller.noteUserScrollIntent('earlier', 'native-touch');
+		const request = fixture.controller.requestPage('earlier', 'scroll');
+
+		fixture.controller.setViewportVisible(false);
+
+		await expect(request).resolves.toBe('invalidated');
+		expect(applied).toBe(false);
+	});
+
+	it('defers revealing already loaded rows until native scrolling settles', async () => {
+		vi.useFakeTimers();
+		const revealEarlierLoadedRows = vi.fn(() => true);
+		const fixture = controllerFixture({
+			state: {
+				canLoadEarlier: true,
+				hasEarlierRowsToReveal: true,
+				revealEarlierLoadedRows,
+			},
+		});
+		fixture.controller.noteNativeTouchLifecycle('move');
+		fixture.controller.noteUserScrollIntent('earlier', 'native-touch');
+
+		const request = fixture.controller.requestPage('earlier', 'scroll');
+		expect(revealEarlierLoadedRows).not.toHaveBeenCalled();
+
+		fixture.controller.noteNativeTouchLifecycle('end');
+		await vi.advanceTimersByTimeAsync(NATIVE_SCROLL_SETTLE_DELAY_MS);
+
+		await expect(request).resolves.toBe('loaded');
+		expect(revealEarlierLoadedRows).toHaveBeenCalledOnce();
+		expect(fixture.state.loadEarlierPage).not.toHaveBeenCalled();
 	});
 
 	it('does not carry earlier intent across a paging-context reset', async () => {

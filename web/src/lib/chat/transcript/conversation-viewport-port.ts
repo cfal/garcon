@@ -1,4 +1,4 @@
-import type { ConversationNativeTouchPhase } from './conversation-scroll-gesture.js';
+import type { ConversationNativeScrollActivity } from './conversation-native-scroll-settlement.js';
 
 export type ConversationViewportTarget =
 	{ kind: 'row'; id: string } | { kind: 'dom-anchor'; id: string };
@@ -30,7 +30,7 @@ export interface ConversationViewportPort {
 		direction: 'earlier' | 'later' | null,
 		source?: ConversationViewportIntentSource,
 	): ConversationViewportIntentCancellationResult;
-	noteNativeTouchLifecycle(phase: ConversationNativeTouchPhase): void;
+	setNativeScrollActivity(activity: ConversationNativeScrollActivity): void;
 	scrollToTarget(
 		target: ConversationViewportTarget,
 		options?: { align?: 'center' | 'start' | 'end' },

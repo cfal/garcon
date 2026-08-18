@@ -2,6 +2,8 @@ import type { TranscriptMessage } from '$shared/chat-view';
 
 export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
 export type TranscriptPageDirection = 'earlier' | 'later';
+export type TranscriptPageApplicationDecision = 'apply' | 'invalidated';
+export type TranscriptPageApplicationGate = () => Promise<TranscriptPageApplicationDecision>;
 export type TranscriptPageStatus = 'idle' | 'loading' | 'error';
 export type TranscriptWindowLoadResult = 'loaded' | 'invalidated' | 'failed';
 export type TranscriptWindowTarget = 'initial' | 'latest';

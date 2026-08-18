@@ -901,7 +901,6 @@ describe('ConversationFeedVirtualController', () => {
 		expect(exposure.controller.cancelForUserIntent('earlier')).toBe(
 			'preserved-earlier-prepend',
 		);
-		exposure.controller.noteNativeTouchLifecycle('start');
 		await exposure.releaseWithheldEndItem();
 
 		await waitFor(() =>
@@ -928,26 +927,29 @@ describe('ConversationFeedVirtualController', () => {
 		expect(scrollToOffset).not.toHaveBeenCalled();
 	});
 
-	it('suppresses the counter-direction settle write while a native touch owns the viewport', async () => {
-		const { exposure, viewport, scrollToIndex, scrollToOffset } =
-			await preparePendingEarlierPrepend((current, index) =>
-				current.stageEarlierPrependWithTail(index),
-			);
-		scrollToIndex.mockClear();
-		scrollToOffset.mockClear();
-		viewport.scrollTop = 0;
-		exposure.controller.noteNativeTouchLifecycle('move');
-		await exposure.releaseWithheldEndItem();
-		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
+	it.each(['dragging', 'coasting'] as const)(
+		'suppresses the counter-direction settle write while native scrolling is %s',
+		async (activity) => {
+			const { exposure, viewport, scrollToIndex, scrollToOffset } =
+				await preparePendingEarlierPrepend((current, index) =>
+					current.stageEarlierPrependWithTail(index),
+				);
+			scrollToIndex.mockClear();
+			scrollToOffset.mockClear();
+			viewport.scrollTop = 0;
+			exposure.controller.setNativeScrollActivity(activity);
+			await exposure.releaseWithheldEndItem();
+			for (let frame = 0; frame < 10; frame += 1) await nextFrame();
 
-		expect(scrollToIndex).not.toHaveBeenCalled();
-		expect(scrollToOffset).not.toHaveBeenCalled();
+			expect(scrollToIndex).not.toHaveBeenCalled();
+			expect(scrollToOffset).not.toHaveBeenCalled();
 
-		exposure.controller.noteNativeTouchLifecycle('end');
-		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
-		expect(scrollToIndex).not.toHaveBeenCalled();
-		expect(scrollToOffset).not.toHaveBeenCalled();
-	});
+			exposure.controller.setNativeScrollActivity('idle');
+			for (let frame = 0; frame < 10; frame += 1) await nextFrame();
+			expect(scrollToIndex).not.toHaveBeenCalled();
+			expect(scrollToOffset).not.toHaveBeenCalled();
+		},
+	);
 
 	it('uses an index target when a retained virtual anchor has no committed wrapper', async () => {
 		const { exposure } = await renderController();

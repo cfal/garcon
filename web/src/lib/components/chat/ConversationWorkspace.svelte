@@ -523,12 +523,17 @@
 		const viewport = conversationViewport;
 		if (!node) return;
 		const stop = observeConversationViewportScrollGestures(node, (intent) => {
-			if (intent.touch !== null) viewport?.noteNativeTouchLifecycle(intent.touch);
-			if (intent.touch !== 'end') scroll.noteUserScrollIntent(intent.direction);
+			if (intent.touch !== null) scroll.noteNativeTouchLifecycle(intent.touch);
+			if (intent.touch !== 'end') {
+				scroll.noteUserScrollIntent(
+					intent.direction,
+					intent.touch === null ? 'other' : 'native-touch',
+				);
+			}
 		});
 		return () => {
 			stop();
-			viewport?.noteNativeTouchLifecycle('end');
+			scroll.cancelNativeScroll(viewport);
 		};
 	});
 

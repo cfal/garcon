@@ -24,6 +24,7 @@ import {
 	mergeTranscriptEntriesByOrdinal,
 	retainTranscriptEntries,
 	retainedEarlierPageCursor,
+	type TranscriptPageApplicationGate,
 	type TranscriptPageDirection,
 	type TranscriptPageLoadResult,
 	type TranscriptPageState,
@@ -699,12 +700,18 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		throw new Error(this.loadError);
 	}
 
-	async loadEarlierPage(chatId: string): Promise<TranscriptPageLoadResult> {
-		return this.#pageLoader.load('earlier', chatId);
+	async loadEarlierPage(
+		chatId: string,
+		applicationGate?: TranscriptPageApplicationGate,
+	): Promise<TranscriptPageLoadResult> {
+		return this.#pageLoader.load('earlier', chatId, applicationGate);
 	}
 
-	async loadLaterPage(chatId: string): Promise<TranscriptPageLoadResult> {
-		return this.#pageLoader.load('later', chatId);
+	async loadLaterPage(
+		chatId: string,
+		applicationGate?: TranscriptPageApplicationGate,
+	): Promise<TranscriptPageLoadResult> {
+		return this.#pageLoader.load('later', chatId, applicationGate);
 	}
 
 	invalidatePendingHistoryLoad(): void {

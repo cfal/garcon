@@ -481,6 +481,145 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleMessageCount).toBe(total);
 	});
 
+	it('stages a fetched earlier page until its application gate opens', async () => {
+		const chat = new ActiveTranscriptState();
+		const current = assistantEntries(51, 100);
+		chat.replaceGeneration('chat-1', 'generation-1', current, {
+			lastOrdinal: 100,
+			pageOldestOrdinal: 51,
+			pageNewestOrdinal: 100,
+			nextBeforeOrdinal: 51,
+			hasMore: true,
+		});
+		const entriesBeforeLoad = chat.entries;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(1, 50),
+				lastOrdinal: 100,
+				pageOldestOrdinal: 1,
+				pageNewestOrdinal: 50,
+				nextBeforeOrdinal: null,
+				hasMore: false,
+			}),
+		});
+		let releaseApplication!: (decision: 'apply' | 'invalidated') => void;
+		let applicationGateStarted!: () => void;
+		const gateStarted = new Promise<void>((resolve) => (applicationGateStarted = resolve));
+		const application = new Promise<'apply' | 'invalidated'>((resolve) => {
+			releaseApplication = resolve;
+		});
+		const revision = chat.feedMutationClock.dataRevision;
+
+		const load = chat.loadEarlierPage('chat-1', async () => {
+			applicationGateStarted();
+			return application;
+		});
+		await gateStarted;
+
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(chat.entries).toBe(entriesBeforeLoad);
+		expect(chat.nextBeforeOrdinal).toBe(51);
+		expect(chat.feedMutationClock.dataRevision).toBe(revision);
+		expect(chat.pageStates.earlier.status).toBe('loading');
+
+		releaseApplication('apply');
+		await expect(load).resolves.toBe('loaded');
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 100 }, (_, index) => index + 1),
+		);
+		expect(chat.nextBeforeOrdinal).toBeNull();
+		expect(chat.feedMutationClock.dataRevision).toBe(revision + 1);
+	});
+
+	it('stages a fetched later page until its application gate opens', async () => {
+		const chat = new ActiveTranscriptState();
+		const current = assistantEntries(1, 50);
+		chat.replaceGeneration('chat-1', 'generation-1', current, {
+			lastOrdinal: 100,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 50,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		const entriesBeforeLoad = chat.entries;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(51, 100),
+				lastOrdinal: 100,
+				pageOldestOrdinal: 51,
+				pageNewestOrdinal: 100,
+				nextBeforeOrdinal: 51,
+				hasMore: true,
+			}),
+		});
+		let releaseApplication!: () => void;
+		let applicationGateStarted!: () => void;
+		const gateStarted = new Promise<void>((resolve) => (applicationGateStarted = resolve));
+		const application = new Promise<'apply'>((resolve) => {
+			releaseApplication = () => resolve('apply');
+		});
+		const revision = chat.feedMutationClock.dataRevision;
+
+		const load = chat.loadLaterPage('chat-1', async () => {
+			applicationGateStarted();
+			return application;
+		});
+		await gateStarted;
+
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(chat.entries).toBe(entriesBeforeLoad);
+		expect(chat.loadedThroughOrdinal).toBe(50);
+		expect(chat.feedMutationClock.dataRevision).toBe(revision);
+		expect(chat.pageStates.later.status).toBe('loading');
+
+		releaseApplication();
+		await expect(load).resolves.toBe('loaded');
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 100 }, (_, index) => index + 1),
+		);
+		expect(chat.loadedThroughOrdinal).toBe(100);
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.feedMutationClock.dataRevision).toBe(revision + 1);
+	});
+
+	it('discards a fetched page whose application gate is invalidated', async () => {
+		const chat = new ActiveTranscriptState();
+		const current = assistantEntries(51, 100);
+		chat.replaceGeneration('chat-1', 'generation-1', current, {
+			lastOrdinal: 100,
+			pageOldestOrdinal: 51,
+			pageNewestOrdinal: 100,
+			nextBeforeOrdinal: 51,
+			hasMore: true,
+		});
+		const entriesBeforeLoad = chat.entries;
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: assistantEntries(1, 50),
+				lastOrdinal: 100,
+				pageOldestOrdinal: 1,
+				pageNewestOrdinal: 50,
+				nextBeforeOrdinal: null,
+				hasMore: false,
+			}),
+		});
+
+		await expect(chat.loadEarlierPage('chat-1', async () => 'invalidated')).resolves.toBe(
+			'invalidated',
+		);
+
+		expect(chat.entries).toBe(entriesBeforeLoad);
+		expect(chat.nextBeforeOrdinal).toBe(51);
+		expect(chat.hasEarlierMessages).toBe(true);
+		expect(chat.pageStates.earlier.status).toBe('idle');
+	});
+
 	it('[TLV5-PAGE.09-WEB-UNIT-01] crosses several hidden raw budgets before delivering visible earlier rows', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(2_001, 2_050), {
