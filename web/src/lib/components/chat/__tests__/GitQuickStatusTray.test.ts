@@ -209,7 +209,7 @@ describe('GitQuickStatusTray', () => {
 		expect(onToggle).toHaveBeenCalledOnce();
 	});
 
-	it('truncates long branch names in the switch confirmation dialog', async () => {
+	it('widens the switch confirmation dialog while preserving narrow-screen truncation', async () => {
 		const longBranch =
 			'feature/some-extremely-long-branch-name-that-should-never-wrap-the-confirmation-dialog';
 		render(GitQuickStatusTray, {
@@ -236,6 +236,13 @@ describe('GitQuickStatusTray', () => {
 			name: `Switch to branch ${longBranch}?`,
 		});
 		const branchText = within(heading).getByText(longBranch);
+		const dialogClass = heading.closest('[data-slot="dialog-content"]')?.className ?? '';
+		const headerClass = heading.closest('[data-slot="dialog-header"]')?.className ?? '';
+		expect(dialogClass).toContain('w-[calc(100%-2rem)]');
+		expect(dialogClass).toContain('sm:max-w-2xl');
+		expect(headerClass).toContain('min-w-0');
+		expect(headerClass).toContain('max-w-full');
+		expect(heading.className).toContain('max-w-full');
 		expect(branchText.className).toContain('truncate');
 	});
 

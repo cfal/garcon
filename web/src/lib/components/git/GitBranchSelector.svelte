@@ -435,18 +435,19 @@
 	}}
 >
 	<Dialog.Content
+		class="w-[calc(100%-2rem)] sm:max-w-2xl"
 		showCloseButton={!isSwitchingBranch}
 		onCloseAutoFocus={handleSwitchDialogCloseAutoFocus}
 	>
 		{#if pendingSwitchRef}
-			<Dialog.Header>
-				<div class="flex min-w-0 items-center">
+			<Dialog.Header class="min-w-0 max-w-full">
+				<div class="flex min-w-0 max-w-full items-center">
 					<div class="mr-3 shrink-0 rounded-full bg-diff-modified p-2">
 						<GitBranch class="h-5 w-5 text-diff-modified-foreground" />
 					</div>
 					<Dialog.Title
 						aria-label={switchBranchTitle}
-						class="flex min-w-0 flex-1 items-baseline overflow-hidden text-left whitespace-nowrap"
+						class="flex min-w-0 max-w-full flex-1 items-baseline overflow-hidden text-left whitespace-nowrap"
 					>
 						<span aria-hidden="true" class="shrink-0"
 							>{pendingSwitchRef.kind === 'local-branch'
