@@ -216,6 +216,7 @@
 			{align}
 			{side}
 			sideOffset={8}
+			collisionPadding={8}
 			class={cn(
 				contentWidthClass,
 				contentHeightClass,
