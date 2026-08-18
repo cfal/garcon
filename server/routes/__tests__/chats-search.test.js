@@ -1,13 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
 
-mock.module('../../chats/title-generator.js', () => ({
-  maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
-}));
-
-mock.module('../../chats/fork-chat.js', () => ({
-  forkChatFileCopy: mock(() => Promise.resolve({})),
-}));
-
 import createChatRoutes from '../chats.js';
 import { TranscriptSearchUnavailableError } from '../../chats/search/errors.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
