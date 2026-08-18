@@ -5,6 +5,7 @@ import type { StoredChatExecutionControlState } from '../chat-execution/control-
 import type { TranscriptSnapshotReservation } from '../chat-execution/types.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
+import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import { TranscriptLedgerService } from './service.js';
 import { frozenConversationDrafts } from './projection.js';
@@ -24,6 +25,7 @@ export interface TranscriptReloadServiceOptions {
   readonly execution: ReloadExecutionPort;
   readonly reopenProducer: (chatId: string) => void;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
+  readonly chatMutationLock: KeyedPromiseLock;
   readonly now?: () => string;
 }
 
@@ -36,22 +38,24 @@ export class TranscriptReloadService {
 
   async reload(chatId: string, signal = new AbortController().signal): Promise<TranscriptView> {
     await this.options.adoption.ensure(chatId, signal);
-    const reservation = this.#reserve(chatId);
-    try {
-      const queue = await this.options.execution.readChatExecutionControl(chatId);
-      if (queue.entries.length > 0) {
-        throw new DomainError(
-          'CHAT_RUNNING',
-          'Run or remove queued messages before reloading from native history.',
-          409,
-          false,
-        );
+    return this.options.chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
+      const reservation = this.#reserve(chatId);
+      try {
+        const queue = await this.options.execution.readChatExecutionControl(chatId);
+        if (queue.entries.length > 0) {
+          throw new DomainError(
+            'CHAT_RUNNING',
+            'Run or remove queued messages before reloading from native history.',
+            409,
+            false,
+          );
+        }
+        signal.throwIfAborted();
+        return await this.#reloadReserved(chatId, signal);
+      } finally {
+        await this.options.execution.releaseTranscriptSnapshot(reservation);
       }
-      signal.throwIfAborted();
-      return await this.#reloadReserved(chatId, signal);
-    } finally {
-      await this.options.execution.releaseTranscriptSnapshot(reservation);
-    }
+    });
   }
 
   #reserve(chatId: string): TranscriptSnapshotReservation {

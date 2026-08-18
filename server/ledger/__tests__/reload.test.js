@@ -2,11 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, UserMessage } from '../../../common/chat-types.ts';
+import { AssistantMessage, ErrorMessage, UserMessage } from '../../../common/chat-types.ts';
 import { TranscriptAdoptionService } from '../adoption.ts';
 import { TranscriptReloadService } from '../reload.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
+import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
 
@@ -204,6 +205,110 @@ describe('TranscriptReloadService', () => {
       ],
     });
   });
+
+  it('drops chat rows and provider errors from frozen and current bindings during native reload', async () => {
+    await withReload(async ({ ledger, reload, lease }) => {
+      const currentView = ledger.currentView('chat-1');
+      ledger.appendChatRow({
+        chatId: 'chat-1',
+        viewId: currentView.viewId,
+        clientMessageId: 'current-notice',
+        type: 'notice',
+        content: 'current notice',
+      });
+      ledger.appendChatRow({
+        chatId: 'chat-1',
+        viewId: currentView.viewId,
+        clientMessageId: 'current-error',
+        type: 'error',
+        content: 'current error',
+      });
+      lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: new ErrorMessage(TS, 'current provider error') }],
+      });
+
+      const replacement = await reload.reload('chat-1');
+      const rows = ledger.currentRows('chat-1');
+
+      expect(replacement.contentStartOrdinal).toBe(3);
+      expect(rows.some((row) => row.kind === 'notice' && row.detail.type === 'chat-row')).toBe(false);
+      expect(JSON.stringify(rows)).not.toContain('frozen notice');
+      expect(JSON.stringify(rows)).not.toContain('frozen error');
+      expect(JSON.stringify(rows)).not.toContain('frozen provider error');
+      expect(JSON.stringify(rows)).not.toContain('current notice');
+      expect(JSON.stringify(rows)).not.toContain('current error');
+      expect(JSON.stringify(rows)).not.toContain('current provider error');
+    }, {
+      frozenDrafts: [
+        {
+          kind: 'notice',
+          at: TS,
+          providerMeta: null,
+          message: 'frozen notice',
+          detail: {
+            type: 'chat-row',
+            clientMessageId: 'frozen-notice',
+            presentation: 'notice',
+          },
+        },
+        {
+          kind: 'notice',
+          at: TS,
+          providerMeta: null,
+          message: 'frozen error',
+          detail: {
+            type: 'chat-row',
+            clientMessageId: 'frozen-error',
+            presentation: 'error',
+          },
+        },
+        {
+          kind: 'provider-row',
+          at: TS,
+          providerMeta: null,
+          message: new ErrorMessage(TS, 'frozen provider error'),
+        },
+      ],
+    });
+  });
+
+  it('[TLV5-CHAT-ROW.04-RELOAD-INTERLEAVING-CORE-UNIT-01] holds the shared mutation lock through reload cleanup', async () => {
+    await withReload(async ({ reload, integration, execution, chatMutationLock }) => {
+      const importStarted = deferred();
+      const allowImport = deferred();
+      const releaseStarted = deferred();
+      const allowRelease = deferred();
+      integration.nativeHistoryImport.load = async function* () {
+        importStarted.resolve();
+        await allowImport.promise;
+        yield [];
+      };
+      execution.releaseTranscriptSnapshot = async () => {
+        releaseStarted.resolve();
+        await allowRelease.promise;
+      };
+
+      const reloading = reload.reload('chat-1');
+      await importStarted.promise;
+      let admitted = false;
+      const competing = chatMutationLock.runExclusive('chat:chat-1', async () => {
+        admitted = true;
+      });
+      await Promise.resolve();
+      expect(admitted).toBe(false);
+
+      allowImport.resolve();
+      await releaseStarted.promise;
+      await Promise.resolve();
+      expect(admitted).toBe(false);
+
+      allowRelease.resolve();
+      await reloading;
+      await competing;
+      expect(admitted).toBe(true);
+    });
+  });
 });
 
 async function withReload(run, options = {}) {
@@ -289,6 +394,7 @@ async function withReload(run, options = {}) {
     loadLegacyCurrent: async () => [],
   });
   const replacementLease = { current: null };
+  const chatMutationLock = new KeyedPromiseLock();
   const reload = new TranscriptReloadService({
     ledger,
     adoption,
@@ -299,6 +405,7 @@ async function withReload(run, options = {}) {
       replacementLease.current = ledger.openProducer('chat-1', 'test');
     },
     getCarryOverRevision: () => 'carry-v1:0',
+    chatMutationLock,
     now: () => TS,
   });
   try {
@@ -310,11 +417,18 @@ async function withReload(run, options = {}) {
       execution,
       integration,
       oldViewId: old.viewId,
+      chatMutationLock,
     });
   } finally {
     ledger.close();
     await rm(root, { recursive: true, force: true });
   }
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((value) => { resolve = value; });
+  return { promise, resolve };
 }
 
 function inputDraft(content, clientMessageId) {

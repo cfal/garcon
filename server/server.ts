@@ -44,6 +44,7 @@ import {
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
+import { ChatRowService } from './chats/chat-row-service.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { AgentRegistry } from './agents/index.js';
@@ -486,6 +487,15 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine,
       ),
+      chatMutationLock,
+    });
+    const chatRows = new ChatRowService({
+      registry: chatRegistry,
+      adoption: transcriptAdoption,
+      ledger: transcriptLedger,
+      ownershipJournal: agentOwnership,
+      chatMutationLock,
+      logger,
     });
     const chatProcessingActivity = new ChatProcessingActivity(agentRegistry, queue);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
@@ -646,6 +656,7 @@ export async function startServer(): Promise<void> {
       runtimeState,
       commandLedger,
       transientFeeds,
+      chatRows,
     });
 
     const chatHandler = new ChatHandler({

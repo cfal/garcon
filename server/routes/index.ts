@@ -17,6 +17,7 @@ import createPromptRefinementRoutes from './prompt-refinement.js';
 import { createRuntimeRoutes } from './runtime.js';
 import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
 import { createChatSnapshotRoutes } from './chat-snapshot.js';
+import { createChatRowRoutes } from './chat-rows.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -44,6 +45,7 @@ import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { CommandLedger } from '../commands/command-ledger.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
+import type { ChatRowService } from '../chats/chat-row-service.js';
 
 export default function createAllRoutes({
   registry,
@@ -72,6 +74,7 @@ export default function createAllRoutes({
   runtimeState,
   commandLedger,
   transientFeeds,
+  chatRows,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -99,6 +102,7 @@ export default function createAllRoutes({
   runtimeState: ServerRuntimeState;
   commandLedger: CommandLedger;
   transientFeeds: ChatTransientFeedStore;
+  chatRows: ChatRowService;
 }): RouteMap {
   return {
     ...createRuntimeRoutes(runtimeState),
@@ -109,6 +113,7 @@ export default function createAllRoutes({
       chatViews,
       transientFeeds,
     }),
+    ...createChatRowRoutes(chatRows),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
