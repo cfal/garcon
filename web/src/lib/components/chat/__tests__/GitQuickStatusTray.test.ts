@@ -212,6 +212,37 @@ describe('GitQuickStatusTray', () => {
 		expect(onToggle).toHaveBeenCalledOnce();
 	});
 
+	it('expands the branch control on wide screens without wrapping on narrow screens', () => {
+		const longBranch = 'feature/a-long-current-branch-name';
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary({ branch: longBranch }),
+				isRefreshing: false,
+				branchSelector: {
+					refs: refsFromNames([longBranch]),
+					isOpen: false,
+					isLoading: false,
+					onToggle: vi.fn(),
+					onClose: vi.fn(),
+					onCreateBranch: vi.fn(),
+					onSwitchBranch: vi.fn(),
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		const trigger = screen.getByRole('button', {
+			name: new RegExp(`current ref ${longBranch}`, 'i'),
+		});
+		const label = within(trigger).getByText(longBranch);
+		expect(trigger.className).toContain('max-w-44');
+		expect(trigger.className).toContain('sm:max-w-80');
+		expect(label.className).toContain('max-w-32');
+		expect(label.className).toContain('sm:max-w-64');
+		expect(label.className).toContain('truncate');
+	});
+
 	it('widens the switch confirmation dialog while preserving narrow-screen truncation', async () => {
 		const longBranch =
 			'feature/some-extremely-long-branch-name-that-should-never-wrap-the-confirmation-dialog';

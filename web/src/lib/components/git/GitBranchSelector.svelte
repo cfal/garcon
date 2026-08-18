@@ -127,7 +127,11 @@
 	);
 	const resolvedIconClass = $derived(cn('text-muted-foreground w-4 h-4', iconClass));
 	const resolvedLabelClass = $derived(
-		cn('text-sm font-medium truncate', isMobile ? 'max-w-[6rem]' : 'max-w-[140px]', labelClass),
+		cn(
+			'text-sm font-medium truncate sm:max-w-64',
+			isMobile ? 'max-w-[6rem]' : 'max-w-[140px]',
+			labelClass,
+		),
 	);
 	const resolvedChevronClass = $derived(
 		cn(

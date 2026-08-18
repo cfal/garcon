@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitSurfaceToolbarTestHost from './GitSurfaceToolbarTestHost.svelte';
 import { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
@@ -47,6 +47,28 @@ describe('GitSurfaceToolbar', () => {
 		expect(folder.getAttribute('title')).toBe('/very/long/workspace/project/path');
 		expect(folder.textContent).toContain('...');
 		expect(screen.getByRole('button', { name: /current ref HEAD/i })).toBeTruthy();
+	});
+
+	it('expands the branch control on wide screens without wrapping on narrow screens', () => {
+		const longBranch = 'feature/a-long-current-branch-name';
+		const controller = target();
+		controller.branches.currentBranch = longBranch;
+		render(GitSurfaceToolbarTestHost, {
+			props: {
+				target: controller,
+				presentation: 'main',
+			},
+		});
+
+		const trigger = screen.getByRole('button', {
+			name: new RegExp(`current ref ${longBranch}`, 'i'),
+		});
+		const label = within(trigger).getByText(longBranch);
+		expect(trigger.className).toContain('max-w-40');
+		expect(trigger.className).toContain('sm:max-w-80');
+		expect(label.className).toContain('max-w-24');
+		expect(label.className).toContain('sm:max-w-64');
+		expect(label.className).toContain('truncate');
 	});
 
 	it('opens the shared target dialog from the folder control', async () => {
