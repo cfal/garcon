@@ -1063,6 +1063,58 @@ async function finishTranscriptTouchDrag(drag: TranscriptTouchDrag): Promise<voi
   }
 }
 
+async function startTranscriptMomentum(page: Page): Promise<void> {
+  await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatMomentum?: { active: boolean; frame: number };
+    };
+    const feed = feedElement as HTMLElement;
+    const momentum = { active: true, frame: 0 };
+    browserGlobal.__chatMomentum = momentum;
+    const step = () => {
+      if (!momentum.active) return;
+      feed.scrollTop = Math.max(0, feed.scrollTop - 8);
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      momentum.frame += 1;
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  await page.waitForFunction(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatMomentum?: { frame: number };
+    };
+    return (browserGlobal.__chatMomentum?.frame ?? 0) >= 2;
+  });
+}
+
+async function waitForTranscriptMomentumFrames(page: Page, additionalFrames: number): Promise<void> {
+  const target = await page.evaluate((frames) => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatMomentum?: { frame: number };
+    };
+    return (browserGlobal.__chatMomentum?.frame ?? 0) + frames;
+  }, additionalFrames);
+  await page.waitForFunction((minimum) => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatMomentum?: { frame: number };
+    };
+    return (browserGlobal.__chatMomentum?.frame ?? 0) >= minimum;
+  }, target);
+}
+
+async function stopTranscriptMomentum(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatMomentum?: { active: boolean };
+    };
+    if (browserGlobal.__chatMomentum) browserGlobal.__chatMomentum.active = false;
+  });
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+  );
+}
+
 async function finishReadingAnchorFrameSampler(page: Page): Promise<ReadingAnchorFrameSample[]> {
   return page.evaluate(async () => {
     const browserGlobal = globalThis as typeof globalThis & {
@@ -2172,18 +2224,25 @@ async function verifyTouchDragPrepend(
     }
     releaseEarlierPage();
 
+    for (let frame = 0; frame < 12; frame += 1) {
+      if (drag.y < drag.maximumY) await moveTranscriptTouch(fixture.page, drag, 6);
+    }
+    expect(await transcriptEntryCount(fixture.page)).toBeLessThan(expectedEntryCount);
+    await finishTranscriptTouchDrag(drag);
+    drag = null;
+
     let growthFrame: number | null = null;
     for (let frame = 0; frame < 40; frame += 1) {
-      if (drag.y < drag.maximumY) await moveTranscriptTouch(fixture.page, drag, 6);
       if ((await transcriptEntryCount(fixture.page)) >= expectedEntryCount) {
         growthFrame ??= frame;
         if (frame >= growthFrame + 6) break;
       }
+      await fixture.page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+      );
     }
     expect(growthFrame).not.toBeNull();
     await waitForStableModelCount(fixture.page, expectedEntryCount);
-    await finishTranscriptTouchDrag(drag);
-    drag = null;
     if (stopLiveTurn) {
       expect((await stopLiveTurn).outcome).toBe('interrupt-requested');
       await liveAbort;
@@ -2232,12 +2291,15 @@ async function verifyTouchDragPrepend(
     });
     expect(identityFailures, JSON.stringify({ anchor, frames }, null, 2)).toEqual([]);
     expect(reverseMovement, JSON.stringify({ anchor, frames }, null, 2)).toEqual([]);
-    const firstOffset = frames.find((frame) => frame.offset !== null)?.offset;
-    const finalOffset = frames.findLast((frame) => frame.offset !== null)?.offset;
-    expect(
-      firstOffset != null && finalOffset != null ? finalOffset - firstOffset : 0,
-      JSON.stringify({ anchor, frames }, null, 2),
-    ).toBeGreaterThan(12);
+      const firstOffset = frames.find((frame) => frame.offset !== null)?.offset;
+      const finalOffset = frames.findLast((frame) => frame.offset !== null)?.offset;
+      const forwardMovement =
+        firstOffset != null && finalOffset != null ? finalOffset - firstOffset : 0;
+      if (scenario.clampBeforeRelease) {
+        expect(forwardMovement, JSON.stringify({ anchor, frames }, null, 2)).toBeLessThanOrEqual(1);
+      } else {
+        expect(forwardMovement, JSON.stringify({ anchor, frames }, null, 2)).toBeGreaterThan(12);
+      }
     expect(earlierRequestCount).toBeGreaterThan(gestureRequestBaseline);
     fixture.assertNoBrowserErrors();
   } finally {
@@ -2247,6 +2309,113 @@ async function verifyTouchDragPrepend(
     if (liveAbort) await liveAbort.catch(() => undefined);
     if (queuedPrompt) await fixture.integration.client.clearQueue(chatId).catch(() => undefined);
     liveHold?.releaseEcho();
+    await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
+async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise<void> {
+  await fixture.context.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      get: () =>
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) '
+        + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+    });
+  });
+  await fixture.page.setViewportSize({ width: 390, height: 700 });
+  const chatId = await seedTranscript(fixture.integration, 90, 'chromium-touch-momentum');
+  let releaseEarlierPage!: () => void;
+  const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
+  let resolveEarlierRequest!: () => void;
+  const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
+  let drag: TranscriptTouchDrag | null = null;
+
+  try {
+    await prepareTranscript(fixture, chatId);
+    expect(await fixture.page.evaluate(() => navigator.userAgent)).toContain('iPhone');
+    const initialEntryCount = await transcriptEntryCount(fixture.page);
+    expect(initialEntryCount).toBe(50);
+    let heldRequest = false;
+    await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+      const url = new URL(route.request().url());
+      if (
+        !heldRequest
+        && url.searchParams.get('chatId') === chatId
+        && url.searchParams.has('beforeOrdinal')
+      ) {
+        heldRequest = true;
+        resolveEarlierRequest();
+        await earlierPageGate;
+      }
+      await route.continue();
+    });
+    await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+      const feed = feedElement as HTMLElement;
+      feed.scrollTop = Math.min(
+        feed.clientHeight * 2.5,
+        Math.max(0, feed.scrollHeight - feed.clientHeight),
+      );
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    drag = await beginTranscriptTouchDrag(fixture.page);
+    for (let step = 0; step < 24; step += 1) {
+      await moveTranscriptTouch(fixture.page, drag, 24);
+      if (heldRequest) break;
+    }
+    await withDiagnosticTimeout('the held post-touch earlier-page request', earlierRequest);
+    await finishTranscriptTouchDrag(drag);
+    drag = null;
+
+    await startTranscriptMomentum(fixture.page);
+    const response = fixture.page.waitForResponse((candidate) => {
+      const url = new URL(candidate.url());
+      return (
+        url.pathname === '/api/v1/chats/messages'
+        && url.searchParams.get('chatId') === chatId
+        && url.searchParams.has('beforeOrdinal')
+      );
+    });
+    releaseEarlierPage();
+    await (await response).finished();
+    await waitForTranscriptMomentumFrames(fixture.page, 12);
+
+    expect(await transcriptEntryCount(fixture.page)).toBe(initialEntryCount);
+    expect(await fixture.page.locator(FEED_SELECTOR).getAttribute('aria-busy')).toBe('true');
+
+    await stopTranscriptMomentum(fixture.page);
+    const anchor = await readingAnchor(fixture.page);
+    await startReadingAnchorFrameSampler(fixture.page, anchor);
+    await waitForStableModelCount(fixture.page, initialEntryCount + 50);
+    expect(await fixture.page.locator(FEED_SELECTOR).getAttribute('aria-busy')).toBe('false');
+    expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+    expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
+    const frames = await finishReadingAnchorFrameSampler(fixture.page);
+    expect(
+      frames.filter(
+        (frame) =>
+          !frame.connected
+          || !frame.sameNode
+          || frame.offset === null
+          || frame.rowId !== anchor.rowId
+          || frame.text !== anchor.text,
+      ),
+      JSON.stringify({ anchor, frames }, null, 2),
+    ).toEqual([]);
+    expect(
+      Math.max(
+        ...frames.map((frame) =>
+          frame.offset === null ? Number.POSITIVE_INFINITY : Math.abs(frame.offset - anchor.offset),
+        ),
+      ),
+      JSON.stringify({ anchor, frames }, null, 2),
+    ).toBeLessThanOrEqual(1);
+    fixture.assertNoBrowserErrors();
+  } finally {
+    releaseEarlierPage();
+    await stopTranscriptMomentum(fixture.page).catch(() => undefined);
+    if (drag) await finishTranscriptTouchDrag(drag);
     await fixture.page.unroute('**/api/v1/chats/messages?**');
   }
 }
@@ -4683,6 +4852,20 @@ describe('Chromium transcript virtualization', () => {
       );
     }, 180_000);
   }
+
+  test('stages an earlier-page prepend until post-touch momentum settles', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-post-touch-momentum-prepend',
+      async (fixture, markPhase) => {
+        markPhase('continuing mobile momentum while an earlier page finishes loading');
+        await verifyPostTouchMomentumPrepend(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
 
   for (const scenario of [
     {
