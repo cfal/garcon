@@ -10,17 +10,17 @@ import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { LedgerRow, LedgerRowDraft } from '../ledger/contracts.js';
+import { isPresentationOnlyProviderRow } from '../ledger/contracts.js';
 import { frozenConversationDrafts } from '../ledger/projection.js';
 import type { JsonObject } from '../../common/json.js';
 
 const logger = createLogger('chats:fork');
 
-// The nearest provider row at or before the point owns the native position. Core-authored rows
-// carry no provider identity by construction and resolve back to it, but a provider row resolves
-// to itself even when the provider has not correlated it yet: handing the facet that row's empty
-// identity is what lets the integration refuse, and skipping past it would silently fork from
-// somewhere the user did not choose. Rows below the content start belong to an earlier binding
-// and anchor nothing.
+// The nearest conversational provider row at or before the point owns the native position.
+// Core-authored rows and presentation-only errors resolve back to it. A conversational provider
+// row resolves to itself even when the provider has not correlated it yet: handing the facet that
+// row's empty identity is what lets the integration refuse. Rows below the content start belong
+// to an earlier binding and anchor nothing.
 function nativeForkAnchor(
   rows: readonly LedgerRow[],
   contentStartOrdinal: number,
@@ -28,7 +28,7 @@ function nativeForkAnchor(
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     const row = rows[index]!;
     if (row.ordinal < contentStartOrdinal) return null;
-    if (row.kind === 'provider-row') return row;
+    if (row.kind === 'provider-row' && !isPresentationOnlyProviderRow(row)) return row;
   }
   return null;
 }

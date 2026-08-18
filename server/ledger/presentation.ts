@@ -1,5 +1,6 @@
 import {
   AgentSwitchMessage,
+  ErrorMessage,
   PermissionCancelledMessage,
   PermissionExpiredMessage,
   PermissionRequestMessage,
@@ -10,7 +11,7 @@ import {
   type ChatMessage,
 } from '../../common/chat-types.js';
 import type { TranscriptMessage } from '../../common/chat-view.js';
-import type { LedgerRow } from './contracts.js';
+import { isLedgerChatRowNoticeDetail, type LedgerRow } from './contracts.js';
 
 export function ledgerRowsToMessages(rows: readonly LedgerRow[]): ChatMessage[] {
   return rows.flatMap((row) => {
@@ -42,12 +43,16 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
         : row.detail.message;
     case 'provider-row':
       return row.message;
-    case 'notice':
+    case 'notice': {
+      if (isLedgerChatRowNoticeDetail(row.detail) && row.detail.presentation === 'error') {
+        return new ErrorMessage(row.at, row.message);
+      }
       return new TranscriptNoticeMessage(
         row.at,
         row.message,
         isCarryoverMigrationQuarantineNoticeDetail(row.detail) ? row.detail : undefined,
       );
+    }
     case 'agent-switch':
       return new AgentSwitchMessage(
         row.at,

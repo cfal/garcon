@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  ErrorMessage,
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { ChatRegistry } from '../../chats/store.ts';
@@ -36,6 +37,7 @@ describe('AgentRegistry session cache', () => {
     });
     ledger = new TranscriptLedgerService(
       new TranscriptLedgerStore(path.join(root, 'transcript-ledgers')),
+      { now: () => AT },
     );
     ledger.initializeChat(CHAT_ID);
   });
@@ -124,7 +126,7 @@ describe('AgentRegistry session cache', () => {
     expect(chats.getChatByAgentSessionId('native-late')?.[0]).toBe(CHAT_ID);
   });
 
-  it('selects preview text only from the conversational ledger fold', async () => {
+  it('keeps chat rows and provider errors out of the conversational preview fold', async () => {
     const viewId = ledger.currentView(CHAT_ID).viewId;
     ledger.appendInputAndCompose({
       chatId: CHAT_ID,
@@ -168,6 +170,10 @@ describe('AgentRegistry session cache', () => {
       rows: [{ message: new AssistantMessage(AT, 'preview-late-answer') }],
     });
     producer.sink.publish({
+      type: 'rows',
+      rows: [{ message: new ErrorMessage('2099-01-01T00:00:00.000Z', 'provider error') }],
+    });
+    producer.sink.publish({
       type: 'permission',
       runId: 'preview-run',
       lifecycle: {
@@ -175,6 +181,20 @@ describe('AgentRegistry session cache', () => {
         permissionOccurrenceId: 'preview-incarnation',
         reason: 'already ended',
       },
+    });
+    ledger.appendChatRow({
+      chatId: CHAT_ID,
+      viewId,
+      clientMessageId: 'preview-notice-row',
+      type: 'notice',
+      content: 'preview-hidden-notice',
+    });
+    ledger.appendChatRow({
+      chatId: CHAT_ID,
+      viewId,
+      clientMessageId: 'preview-error-row',
+      type: 'error',
+      content: 'preview-hidden-error',
     });
     await Promise.resolve();
     const registry = createRegistry({

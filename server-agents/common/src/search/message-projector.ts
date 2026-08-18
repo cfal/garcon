@@ -156,8 +156,9 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'user-message':
     case 'assistant-message':
     case 'thinking':
-    case 'error':
       return joinBounded(MAX_BODY_CHARS, [message.content], budget);
+    case 'error':
+      return '';
     case 'compaction':
       return joinBounded(MAX_BODY_CHARS, [message.summary], budget);
     case 'agent-switch':

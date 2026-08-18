@@ -5,6 +5,7 @@ import {
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ResendCandidate } from '../../common/chat-view.js';
 import type { TranscriptCommitEvent } from './service.js';
+import { isConversationalLedgerRow } from './contracts.js';
 import {
   ledgerRowsToMessages,
   ledgerRowsToTranscriptMessages,
@@ -46,9 +47,7 @@ function applyTranscriptEvent(
 
   const rows = event.type === 'rows' ? event.rows : [event.row];
   const messages = ledgerRowsToTranscriptMessages(rows);
-  const conversationalMessages = ledgerRowsToMessages(rows.filter((row) => (
-    row.kind === 'user-input' || row.kind === 'provider-row'
-  )));
+  const conversationalMessages = ledgerRowsToMessages(rows.filter(isConversationalLedgerRow));
   if (conversationalMessages.length > 0) {
     deps.updateMetadata(event.chatId, conversationalMessages);
   }

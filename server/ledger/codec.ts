@@ -15,12 +15,14 @@ import type {
 } from '@garcon/server-agent-interface';
 import type {
   LedgerAgentSwitchDetail,
+  LedgerChatRowNoticeDetail,
   LedgerPermissionRow,
   LedgerRow,
   LedgerRowDraft,
   LedgerUserInputDetail,
   TranscriptViewId,
 } from './contracts.js';
+import { isLedgerChatRowNoticeDetail } from './contracts.js';
 
 export interface StoredLedgerRow {
   readonly view_id: string;
@@ -42,7 +44,9 @@ export function encodeLedgerDraft(draft: LedgerRowDraft): {
 } {
   const clientMessageId = draft.kind === 'user-input'
     ? draft.detail.clientMessageId
-    : null;
+    : draft.kind === 'notice' && isLedgerChatRowNoticeDetail(draft.detail)
+      ? draft.detail.clientMessageId
+      : null;
   const value = draftValue(draft);
   return {
     clientMessageId,
@@ -74,11 +78,24 @@ export function decodeLedgerRow(row: StoredLedgerRow): LedgerRow {
       return { ...base, kind: 'provider-row', message: parseMessage(payload.value) };
     case 'notice': {
       const value = record(payload.value, 'notice payload');
+      const message = nonEmptyString(value.message, 'notice message');
+      const detail = jsonObject(value.detail, 'notice detail');
+      const chatRowDetail = parseLedgerChatRowNoticeDetail(detail);
+      if (chatRowDetail) {
+        if (chatRowDetail.clientMessageId !== row.client_message_id) {
+          throw new TypeError('Stored chat row identity does not match its payload');
+        }
+        if (payload.providerMeta !== null) {
+          throw new TypeError('Stored chat row provider metadata must be null');
+        }
+      } else if (row.client_message_id !== null) {
+        throw new TypeError('Stored notice has an unexpected client message identity');
+      }
       return {
         ...base,
         kind: 'notice',
-        message: nonEmptyString(value.message, 'notice message'),
-        detail: jsonObject(value.detail, 'notice detail'),
+        message,
+        detail: chatRowDetail ?? detail,
       };
     }
     case 'agent-switch':
@@ -123,6 +140,13 @@ export function submissionFingerprint(detail: LedgerUserInputDetail): string {
   });
 }
 
+export function chatRowFingerprint(
+  message: string,
+  detail: LedgerChatRowNoticeDetail,
+): string {
+  return stableJsonStringify({ type: detail.presentation, content: message });
+}
+
 function draftValue(draft: LedgerRowDraft): unknown {
   switch (draft.kind) {
     case 'user-input':
@@ -146,6 +170,16 @@ function draftValue(draft: LedgerRowDraft): unknown {
     case 'permission-expired':
       return encodePermissionLifecycle(draft.lifecycle);
   }
+}
+
+export function parseLedgerChatRowNoticeDetail(
+  detail: JsonObject,
+): LedgerChatRowNoticeDetail | null {
+  if (detail.type !== 'chat-row') return null;
+  if (!isLedgerChatRowNoticeDetail(detail)) {
+    throw new TypeError('Stored chat row detail is invalid');
+  }
+  return detail;
 }
 
 function parsePayload(value: string): StoredPayload {

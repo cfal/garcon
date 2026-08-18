@@ -1,5 +1,6 @@
 import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/chat-types.js';
 import type { LedgerRow, LedgerRowDraft } from './contracts.js';
+import { isPresentationOnlyProviderRow } from './contracts.js';
 
 export function frozenConversationDrafts(rows: readonly LedgerRow[]): LedgerRowDraft[] {
   return rows.flatMap((row): readonly LedgerRowDraft[] => {
@@ -12,6 +13,7 @@ export function frozenConversationDrafts(rows: readonly LedgerRow[]): LedgerRowD
       return [{ kind: 'agent-switch', at: row.at, detail: row.detail, providerMeta: null }];
     }
     if (row.kind === 'provider-row') {
+      if (isPresentationOnlyProviderRow(row)) return [];
       return [{ kind: 'provider-row', at: row.at, message: row.message, providerMeta: null }];
     }
     if (

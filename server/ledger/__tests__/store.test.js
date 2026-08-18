@@ -169,6 +169,78 @@ describe('TranscriptLedgerStore', () => {
     expect(store.append('chat-one', view.viewId, [provider('healthy')])).toHaveLength(1);
   });
 
+  it('[TLV5-CHAT-ROW.02-STORE-UNIT-01] appends and deduplicates chat rows without fencing', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const message = '  notice content\n';
+    const notice = chatRowDetail('chat-row-1', 'notice');
+
+    const first = store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message,
+      detail: notice,
+    });
+    const retry = store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at: '2026-08-12T00:00:01.000Z',
+      message,
+      detail: notice,
+    });
+
+    expect(first).toMatchObject({ inserted: true, row: { ordinal: 1, at, message, detail: notice } });
+    expect(retry).toMatchObject({ inserted: false, row: { ordinal: 1, at, message, detail: notice } });
+    expect(() => store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message: 'changed',
+      detail: chatRowDetail('chat-row-1', 'error'),
+    })).toThrow(SubmissionConflictError);
+    expect(() => store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('chat-row-1', 'user collision'),
+    })).toThrow(SubmissionConflictError);
+
+    const second = store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message,
+      detail: chatRowDetail('chat-row-2', 'notice'),
+    });
+    expect(second).toMatchObject({ inserted: true, row: { ordinal: 2 } });
+    expect(store.currentRows('chat-one')).toHaveLength(2);
+
+    store.close();
+    store = new TranscriptLedgerStore(root);
+    expect(store.currentRows('chat-one')).toMatchObject([
+      { kind: 'notice', ordinal: 1, message, detail: notice },
+      { kind: 'notice', ordinal: 2, message, detail: { clientMessageId: 'chat-row-2' } },
+    ]);
+  });
+
+  it('rejects a chat row collision with an existing user input without fencing', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'user input'),
+    });
+
+    expect(() => store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message: 'error content',
+      detail: chatRowDetail('message-one', 'error'),
+    })).toThrow(SubmissionConflictError);
+    expect(store.append('chat-one', view.viewId, [provider('still healthy')])).toHaveLength(1);
+  });
+
   it('qualifies submission retries by canonical attachment identity', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
@@ -915,6 +987,10 @@ function inputDetail(clientMessageId, content, attachments = []) {
 
 function userDraft(clientMessageId, content) {
   return { kind: 'user-input', at, detail: inputDetail(clientMessageId, content) };
+}
+
+function chatRowDetail(clientMessageId, presentation) {
+  return { type: 'chat-row', clientMessageId, presentation };
 }
 
 function provider(content) {

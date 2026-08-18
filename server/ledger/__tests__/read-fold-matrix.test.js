@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  ErrorMessage,
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../common/chat-types.ts';
@@ -18,6 +19,7 @@ import { transcriptViewId } from '../contracts.ts';
 import { TranscriptViewReader } from '../view-reader.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
+const CHAT_ROW_AT = '2026-08-16T00:01:00.000Z';
 const CHAT_ID = 'fold-matrix-chat';
 const VIEW_ID = transcriptViewId('fold-matrix-view');
 const QUARANTINE_DETAIL = {
@@ -157,6 +159,108 @@ describe('transcript ledger read-fold matrix', () => {
         firstOrdinal: 1,
         lastOrdinal: 15,
         messages: rendered,
+      })]);
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('[TLV5-CHAT-ROW.03-READ-FOLDS-CORE-UNIT-01] keeps notices and every error presentation-only across ledger folds', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-row-fold-matrix-'));
+    const store = new TranscriptLedgerStore(root, {
+      createViewId: () => VIEW_ID,
+      now: () => AT,
+    });
+    const ledger = new TranscriptLedgerService(store, { now: () => CHAT_ROW_AT });
+    try {
+      const view = ledger.initializeChat(CHAT_ID);
+      ledger.appendInputAndCompose({
+        chatId: CHAT_ID,
+        viewId: view.viewId,
+        message: new UserMessage(AT, 'pending user input'),
+        attachments: [],
+        clientMessageId: 'pending-input',
+        steer: false,
+      });
+      const notice = ledger.appendChatRow({
+        chatId: CHAT_ID,
+        viewId: view.viewId,
+        clientMessageId: 'chat-row-notice',
+        type: 'notice',
+        content: 'presentation notice',
+      });
+      const error = ledger.appendChatRow({
+        chatId: CHAT_ID,
+        viewId: view.viewId,
+        clientMessageId: 'chat-row-error',
+        type: 'error',
+        content: 'chat row error',
+      });
+      const producer = ledger.openProducer(CHAT_ID, 'test');
+      producer.sink.publish({
+        type: 'rows',
+        rows: [{ message: new ErrorMessage(AT, 'provider error') }],
+      });
+      const rows = ledger.currentRows(CHAT_ID);
+
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 4,
+        at: AT,
+      });
+
+      expect(ledgerRowsToTranscriptMessages(rows).map(({ ordinal, message }) => [
+        ordinal,
+        message.type,
+        'content' in message ? message.content : null,
+      ])).toEqual([
+        [1, 'user-message', 'pending user input'],
+        [2, 'transcript-notice', 'presentation notice'],
+        [3, 'error', 'chat row error'],
+        [4, 'error', 'provider error'],
+      ]);
+      expect(ledger.conversationMessages(CHAT_ID)).toEqual([
+        expect.objectContaining({ type: 'user-message', content: 'pending user input' }),
+      ]);
+      expect(ledger.resendCandidates(CHAT_ID).map(({ content }) => content)).toEqual([
+        'pending user input',
+      ]);
+
+      expect(frozenConversationDrafts(rows)).toEqual([
+        expect.objectContaining({ kind: 'user-input' }),
+      ]);
+
+      const searchRows = await initializeSearchFold(ledger, rows);
+      expect(searchRows).toEqual([
+        { ordinal: 1, role: 'user', body: 'pending user input', timestamp: AT },
+      ]);
+
+      const metadataUpdates = [];
+      const broadcasts = [];
+      const fanout = createTranscriptEventFanout({
+        chatExists: () => true,
+        schedule: (_chatId, task) => task(),
+        broadcast: (message) => broadcasts.push(message),
+        updateMetadata: (_chatId, messages) => metadataUpdates.push(...messages),
+        replaceMetadata: () => undefined,
+        resendCandidates: () => [],
+      });
+      fanout({
+        type: 'rows',
+        chatId: CHAT_ID,
+        viewId: VIEW_ID,
+        rows: [notice.row, error.row, rows[3]],
+      });
+
+      expect(metadataUpdates).toEqual([]);
+      expect(broadcasts).toEqual([expect.objectContaining({
+        firstOrdinal: 2,
+        lastOrdinal: 4,
+        messages: [
+          { ordinal: 2, message: new TranscriptNoticeMessage(CHAT_ROW_AT, 'presentation notice') },
+          { ordinal: 3, message: new ErrorMessage(CHAT_ROW_AT, 'chat row error') },
+          { ordinal: 4, message: new ErrorMessage(AT, 'provider error') },
+        ],
       })]);
     } finally {
       ledger.close();

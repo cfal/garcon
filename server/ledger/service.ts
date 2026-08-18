@@ -7,25 +7,27 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
+import type { ChatRowType } from '../../common/chat-row-contracts.js';
 import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { ResendCandidate } from '../../common/chat-view.js';
 import type {
+  AppendChatRowResult,
   InputComposition,
   LedgerAgentSwitchRow,
+  LedgerConversationRow,
   LedgerPermissionRow,
   LedgerRow,
   LedgerRowDraft,
   LedgerRunEndedRow,
   LedgerSessionRow,
-  LedgerUserInputRow,
   TranscriptPage,
   TranscriptNativeActivityState,
   TranscriptView,
   TranscriptViewId,
   TranscriptWatermark,
 } from './contracts.js';
-import { transcriptViewId } from './contracts.js';
+import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
 import { PermissionNotActionableError } from './errors.js';
 import { TranscriptLedgerStore } from './store.js';
 
@@ -358,6 +360,34 @@ export class TranscriptLedgerService {
     }
   }
 
+  appendChatRow(input: {
+    readonly chatId: string;
+    readonly viewId: TranscriptViewId;
+    readonly clientMessageId: string;
+    readonly type: ChatRowType;
+    readonly content: string;
+  }): AppendChatRowResult {
+    const result = this.#store.appendChatRow(input.chatId, {
+      viewId: input.viewId,
+      at: this.#now(),
+      message: input.content,
+      detail: {
+        type: 'chat-row',
+        clientMessageId: input.clientMessageId,
+        presentation: input.type,
+      },
+    });
+    if (result.inserted) {
+      this.#notify({
+        type: 'rows',
+        chatId: input.chatId,
+        viewId: input.viewId,
+        rows: [result.row],
+      });
+    }
+    return result;
+  }
+
   // Records the ownership boundary as durable history. Handoff advances the content-start
   // ordinal past this row, so the marker stays with the outgoing owner's history and is
   // preserved by the frozen projection instead of being re-derived on every read.
@@ -421,8 +451,8 @@ export class TranscriptLedgerService {
     );
   }
 
-  conversationRows(chatId: string): readonly (LedgerUserInputRow | Extract<LedgerRow, { kind: 'provider-row' }>)[] {
-    return this.#store.currentRows(chatId).filter(isConversationRow);
+  conversationRows(chatId: string): readonly LedgerConversationRow[] {
+    return this.#store.currentRows(chatId).filter(isConversationalLedgerRow);
   }
 
   conversationMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): readonly ChatMessage[] {
@@ -768,14 +798,6 @@ function permissionRowKind(
   return `permission-${lifecycle.kind}`;
 }
 
-function isConversationRow(
-  row: LedgerRow,
-): row is LedgerUserInputRow | Extract<LedgerRow, { kind: 'provider-row' }> {
-  return row.kind === 'user-input' || row.kind === 'provider-row';
-}
-
-function messageForConversationRow(
-  row: LedgerUserInputRow | Extract<LedgerRow, { kind: 'provider-row' }>,
-): ChatMessage {
+function messageForConversationRow(row: LedgerConversationRow): ChatMessage {
   return row.kind === 'user-input' ? row.detail.message : row.message;
 }

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  ErrorMessage,
+  TranscriptNoticeMessage,
   UserMessage,
 } from '../../../common/chat-types.ts';
 import {
@@ -93,29 +95,53 @@ describe('transcript ledger presentation', () => {
           toModel: 'gpt-5.4',
         },
       },
-      permissionRow(5, {
+      {
+        kind: 'notice',
+        ordinal: 5,
+        at: AT,
+        providerMeta: null,
+        message: '  exact notice\n',
+        detail: {
+          type: 'chat-row',
+          clientMessageId: 'chat-row-notice',
+          presentation: 'notice',
+        },
+      },
+      {
+        kind: 'notice',
+        ordinal: 6,
+        at: AT,
+        providerMeta: null,
+        message: 'exact error',
+        detail: {
+          type: 'chat-row',
+          clientMessageId: 'chat-row-error',
+          presentation: 'error',
+        },
+      },
+      permissionRow(7, {
         kind: 'requested',
         permissionOccurrenceId: 'incarnation-1',
         requestedTool: new BashToolUseMessage(AT, 'tool-1', 'pwd'),
         options: [],
       }),
-      permissionRow(6, {
+      permissionRow(8, {
         kind: 'resolved',
         permissionOccurrenceId: 'incarnation-1',
         decision: { allow: true, alwaysAllow: false },
       }),
-      permissionRow(7, {
+      permissionRow(9, {
         kind: 'cancelled',
         permissionOccurrenceId: 'incarnation-2',
         reason: 'provider-cancelled',
       }),
-      permissionRow(8, {
+      permissionRow(10, {
         kind: 'expired',
         permissionOccurrenceId: 'incarnation-3',
       }),
       {
         kind: 'session',
-        ordinal: 9,
+        ordinal: 11,
         at: AT,
         providerMeta: null,
         detail: {
@@ -126,7 +152,7 @@ describe('transcript ledger presentation', () => {
       },
       {
         kind: 'run-ended',
-        ordinal: 10,
+        ordinal: 12,
         at: AT,
         providerMeta: null,
         outcome: 'finished',
@@ -141,16 +167,23 @@ describe('transcript ledger presentation', () => {
       [2, 'assistant-message'],
       [3, 'transcript-notice'],
       [4, 'agent-switch'],
-      [5, 'permission-request'],
-      [6, 'permission-resolved'],
-      [7, 'permission-cancelled'],
-      [8, 'permission-expired'],
+      [5, 'transcript-notice'],
+      [6, 'error'],
+      [7, 'permission-request'],
+      [8, 'permission-resolved'],
+      [9, 'permission-cancelled'],
+      [10, 'permission-expired'],
     ]);
     expect(rendered[0].message.metadata).toEqual({ clientMessageId: 'client-message-1' });
     expect(rendered[2].message).toMatchObject({
       type: 'transcript-notice',
       content: 'Ordinary durable notice.',
     });
+    expect(rendered[4].message).toBeInstanceOf(TranscriptNoticeMessage);
+    expect(rendered[4].message).toMatchObject({ content: '  exact notice\n' });
+    expect(rendered[4].message.detail).toBeUndefined();
+    expect(rendered[5].message).toBeInstanceOf(ErrorMessage);
+    expect(rendered[5].message).toMatchObject({ content: 'exact error', timestamp: AT });
   });
 });
 

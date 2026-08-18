@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { UserMessage } from '../../../../common/chat-types.js';
+import { ErrorMessage, UserMessage } from '../../../../common/chat-types.js';
 import { transcriptViewId } from '../../../ledger/contracts.js';
 import { LedgerFencedError } from '../../../ledger/errors.js';
 import { TranscriptSearchController } from '../controller.js';
@@ -17,6 +17,30 @@ function row(ordinal, body, viewId = 'view-0001') {
       attachments: [],
       steer: false,
     },
+  };
+}
+
+function chatRow(ordinal, presentation, content, viewId = 'view-0001') {
+  return {
+    kind: 'notice',
+    viewId: transcriptViewId(viewId),
+    ordinal,
+    at: '2026-01-01T00:00:01.000Z',
+    message: content,
+    detail: { type: 'chat-row', clientMessageId: `chat-row-${ordinal}`, presentation },
+    providerMeta: null,
+  };
+}
+
+function providerErrorRow(ordinal, content, viewId = 'view-0001') {
+  const message = new ErrorMessage('2026-01-01T00:00:02.000Z', content);
+  return {
+    kind: 'provider-row',
+    viewId: transcriptViewId(viewId),
+    ordinal,
+    at: message.timestamp,
+    message,
+    providerMeta: null,
   };
 }
 
@@ -322,6 +346,40 @@ describe('TranscriptSearchController v9', () => {
     });
     await waitFor(() => fixture.service.syncChat.mock.calls.length === 2);
     expect(fixture.service.syncChat.mock.calls[1][0]).toMatchObject({ mode: 'replace' });
+    await fixture.controller.close();
+  });
+
+  test('advances the frontier across chat rows and provider errors without indexing them', async () => {
+    const fixture = harness({ states: [{
+      chatId: 'chat-0001', transcriptViewId: 'view-0001', status: 'indexed',
+      indexedThrough: 2, targetThrough: 2, lastErrorCode: null,
+    }] });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    fixture.service.syncChat.mockClear();
+    fixture.syncCalls.length = 0;
+    const appended = [
+      chatRow(3, 'notice', 'not searchable'),
+      chatRow(4, 'error', 'also not searchable'),
+      providerErrorRow(5, 'provider error'),
+    ];
+    for (const entry of appended) {
+      fixture.chats.get('chat-0001').rows.push(entry);
+      fixture.listener({
+        type: 'rows', chatId: 'chat-0001', viewId: transcriptViewId('view-0001'), rows: [entry],
+      });
+    }
+
+    await waitFor(() => fixture.syncCalls.length === 3);
+    expect(fixture.syncCalls.map(({ request, frames }) => ({
+      expectedAfterOrdinal: request.expectedAfterOrdinal,
+      targetThrough: request.targetThrough,
+      frames,
+    }))).toEqual([
+      { expectedAfterOrdinal: 2, targetThrough: 3, frames: [{ rows: [], advanceTo: 3 }] },
+      { expectedAfterOrdinal: 3, targetThrough: 4, frames: [{ rows: [], advanceTo: 4 }] },
+      { expectedAfterOrdinal: 4, targetThrough: 5, frames: [{ rows: [], advanceTo: 5 }] },
+    ]);
     await fixture.controller.close();
   });
 

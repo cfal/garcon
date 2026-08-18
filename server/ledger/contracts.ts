@@ -4,7 +4,8 @@ import type {
   AgentPermissionLifecycle,
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
-import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
+import type { ChatMessage, ErrorMessage, UserMessage } from '../../common/chat-types.js';
+import type { ChatRowType } from '../../common/chat-row-contracts.js';
 import type { JsonObject } from '../../common/json.js';
 
 declare const transcriptViewIdBrand: unique symbol;
@@ -49,10 +50,40 @@ export interface LedgerProviderRow extends LedgerRowBase {
   readonly message: ChatMessage;
 }
 
+export interface LedgerConversationalProviderRow extends LedgerProviderRow {
+  readonly message: Exclude<ChatMessage, ErrorMessage>;
+}
+
 export interface LedgerNoticeRow extends LedgerRowBase {
   readonly kind: 'notice';
   readonly message: string;
   readonly detail: JsonObject;
+}
+
+export interface LedgerChatRowNoticeDetail extends JsonObject {
+  readonly type: 'chat-row';
+  readonly clientMessageId: string;
+  readonly presentation: ChatRowType;
+}
+
+export interface LedgerChatRowNoticeRow extends LedgerNoticeRow {
+  readonly detail: LedgerChatRowNoticeDetail;
+  readonly providerMeta: null;
+}
+
+export function isLedgerChatRowNoticeDetail(
+  value: JsonObject,
+): value is LedgerChatRowNoticeDetail {
+  return value.type === 'chat-row'
+    && typeof value.clientMessageId === 'string'
+    && value.clientMessageId.length > 0
+    && (value.presentation === 'notice' || value.presentation === 'error');
+}
+
+export function isLedgerChatRowNoticeRow(row: LedgerRow): row is LedgerChatRowNoticeRow {
+  return row.kind === 'notice'
+    && row.providerMeta === null
+    && isLedgerChatRowNoticeDetail(row.detail);
 }
 
 export interface LedgerAgentSwitchDetail {
@@ -97,6 +128,17 @@ export type LedgerRow =
   | LedgerRunEndedRow
   | LedgerPermissionRow;
 
+export type LedgerConversationRow = LedgerUserInputRow | LedgerConversationalProviderRow;
+
+export function isPresentationOnlyProviderRow(row: LedgerRow): boolean {
+  return row.kind === 'provider-row' && row.message.type === 'error';
+}
+
+export function isConversationalLedgerRow(row: LedgerRow): row is LedgerConversationRow {
+  return row.kind === 'user-input'
+    || (row.kind === 'provider-row' && !isPresentationOnlyProviderRow(row));
+}
+
 type DraftBase = {
   readonly at: string;
   readonly providerMeta?: JsonObject | null;
@@ -128,6 +170,18 @@ export interface TranscriptPage {
 export interface InputComposition {
   readonly input: LedgerUserInputRow;
   readonly prompt: readonly LedgerUserInputRow[];
+  readonly inserted: boolean;
+}
+
+export interface AppendChatRowRequest {
+  readonly viewId: TranscriptViewId;
+  readonly at: string;
+  readonly message: string;
+  readonly detail: LedgerChatRowNoticeDetail;
+}
+
+export interface AppendChatRowResult {
+  readonly row: LedgerChatRowNoticeRow;
   readonly inserted: boolean;
 }
 

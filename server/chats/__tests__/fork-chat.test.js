@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { UserMessage, AssistantMessage } from '../../../common/chat-types.js';
+import { UserMessage, AssistantMessage, ErrorMessage } from '../../../common/chat-types.js';
 import { forkChatFileCopy } from '../fork-chat.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
 
@@ -203,6 +203,37 @@ describe('forkChatFileCopy', () => {
     const drafts = deps.ledger.initializeChat.mock.calls[0][1];
     expect(drafts).toHaveLength(4);
     expect(drafts.at(-1)).toMatchObject({ kind: "session" });
+  });
+
+  it('resolves a presentation-only provider error to the preceding conversational row', async () => {
+    const deps = makeDeps({
+      rows: [
+        userRow(1, 'first'),
+        providerRow(2, 'answer'),
+        providerErrorRow(3, 'visible failure'),
+      ],
+    });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 3,
+      ...deps,
+    });
+
+    expect(deps.forkAgentSession.mock.calls[0][0]).toMatchObject({
+      messageOrdinal: 3,
+      providerMeta: { native: true },
+    });
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'user-input' }),
+      expect.objectContaining({
+        kind: 'provider-row',
+        message: expect.objectContaining({ type: 'assistant-message' }),
+      }),
+      expect.objectContaining({ kind: 'session' }),
+    ]);
   });
 
   it('materializes a native session while retaining the ledger prefix', async () => {
@@ -484,5 +515,17 @@ function providerRow(ordinal, content) {
     at: message.timestamp,
     message,
     providerMeta: { native: true },
+  };
+}
+
+function providerErrorRow(ordinal, content) {
+  const message = new ErrorMessage('2026-08-07T12:00:00.000Z', content);
+  return {
+    kind: 'provider-row',
+    viewId: transcriptViewId('source-view'),
+    ordinal,
+    at: message.timestamp,
+    message,
+    providerMeta: { native: 'error' },
   };
 }

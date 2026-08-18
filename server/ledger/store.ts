@@ -9,14 +9,20 @@ import {
   statSync,
 } from 'node:fs';
 import path from 'node:path';
+import { parseChatRowContent } from '../../common/chat-row-contracts.js';
 import {
   decodeLedgerRow,
+  chatRowFingerprint,
   encodeLedgerDraft,
+  parseLedgerChatRowNoticeDetail,
   submissionFingerprint,
   type StoredLedgerRow,
 } from './codec.js';
 import type {
+  AppendChatRowRequest,
+  AppendChatRowResult,
   InputComposition,
+  LedgerChatRowNoticeRow,
   LedgerCheckpoint,
   LedgerRow,
   LedgerRowDraft,
@@ -29,7 +35,11 @@ import type {
   TranscriptViewId,
   TranscriptWatermark,
 } from './contracts.js';
-import { transcriptViewId } from './contracts.js';
+import {
+  isLedgerChatRowNoticeRow,
+  isPresentationOnlyProviderRow,
+  transcriptViewId,
+} from './contracts.js';
 import {
   IncompleteLedgerCheckpointError,
   LedgerError,
@@ -194,6 +204,44 @@ export class TranscriptLedgerStore {
       });
       entry.nextOrdinal += 1;
       return { input, prompt, inserted: true };
+    });
+  }
+
+  appendChatRow(chatId: string, request: AppendChatRowRequest): AppendChatRowResult {
+    const detail = parseLedgerChatRowNoticeDetail(request.detail);
+    if (!detail) throw new TypeError('Chat row notice detail is required');
+    const message = parseChatRowContent(request.message);
+    const draft: LedgerRowDraft = {
+      kind: 'notice',
+      at: request.at,
+      message,
+      detail,
+      providerMeta: null,
+    };
+    const encoded = { draft, ...encodeLedgerDraft(draft) };
+    return this.#write(chatId, (entry) => {
+      this.#assertCurrent(entry, request.viewId);
+      const existing = this.#submission(
+        entry,
+        request.viewId,
+        detail.clientMessageId,
+      );
+      if (existing) {
+        if (
+          !isLedgerChatRowNoticeRow(existing)
+          || chatRowFingerprint(existing.message, existing.detail)
+            !== chatRowFingerprint(message, detail)
+        ) {
+          throw new SubmissionConflictError(detail.clientMessageId);
+        }
+        return { row: existing, inserted: false };
+      }
+
+      const ordinal = entry.nextOrdinal;
+      const [row] = materializeRows(request.viewId, [encoded], ordinal);
+      runTransaction(entry.db, () => insertEncodedRows(entry.db, request.viewId, [encoded], ordinal));
+      entry.nextOrdinal += 1;
+      return { row: row as LedgerChatRowNoticeRow, inserted: true };
     });
   }
 
@@ -715,6 +763,7 @@ function collectResendCandidates(
       continue;
     }
     if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
+    if (isPresentationOnlyProviderRow(row)) continue;
     if (row.kind === 'provider-row'
         || row.kind === 'permission-requested'
         || row.kind === 'run-ended') break;
