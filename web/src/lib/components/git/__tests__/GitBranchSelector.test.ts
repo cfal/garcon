@@ -2,6 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitBranchSelector from '../GitBranchSelector.svelte';
 
+const NAME_ASC = { key: 'name', direction: 'asc' } as const;
+const UPDATED_DESC = { key: 'updated', direction: 'desc' } as const;
+
 function renderSelector(overrides: Record<string, unknown> = {}) {
 	return render(GitBranchSelector, {
 		currentBranch: 'main',
@@ -26,10 +29,12 @@ function renderSelector(overrides: Record<string, unknown> = {}) {
 				updatedAt: null,
 			},
 		],
+		sort: NAME_ASC,
 		isOpen: true,
 		onToggle: vi.fn(),
 		onClose: vi.fn(),
 		onSwitchBranch: vi.fn(),
+		onSortRefs: vi.fn(),
 		...overrides,
 	});
 }
@@ -76,6 +81,173 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 		await new Promise((resolve) => window.setTimeout(resolve, 180));
 
 		expect(onSearchRefs).toHaveBeenCalledWith('origin/main');
+	});
+
+	it('exposes accessible sort intent outside the ref listbox', async () => {
+		const onSortRefs = vi.fn();
+		const view = renderSelector({ onSortRefs });
+		const nameSort = screen.getByRole('button', {
+			name: 'Reverse Name sort, Z to A',
+		});
+		const updatedSort = screen.getByRole('button', {
+			name: 'Sort by Updated, newest first',
+		});
+		const listbox = screen.getByRole('listbox', { name: 'Refs' });
+
+		expect(nameSort.getAttribute('aria-pressed')).toBe('true');
+		expect(updatedSort.getAttribute('aria-pressed')).toBe('false');
+		expect(nameSort.hasAttribute('aria-sort')).toBe(false);
+		expect(listbox.contains(nameSort)).toBe(false);
+
+		await fireEvent.click(updatedSort);
+		expect(onSortRefs).toHaveBeenCalledWith('updated', '');
+
+		await view.rerender({ sort: UPDATED_DESC });
+		expect(
+			screen
+				.getByRole('button', { name: 'Reverse Updated sort, oldest first' })
+				.getAttribute('aria-pressed'),
+		).toBe('true');
+	});
+
+	it('sorts the current query without firing its pending search debounce', async () => {
+		const onSearchRefs = vi.fn();
+		const onSortRefs = vi.fn();
+		renderSelector({ onSearchRefs, onSortRefs });
+
+		await fireEvent.input(screen.getByRole('combobox', { name: 'Find a ref' }), {
+			target: { value: '  feature  ' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Sort by Updated, newest first' }));
+		await new Promise((resolve) => window.setTimeout(resolve, 180));
+
+		expect(onSortRefs).toHaveBeenCalledWith('updated', 'feature');
+		expect(onSearchRefs).not.toHaveBeenCalled();
+	});
+
+	it('renders canonical Updated timestamps and accessible unavailable values', () => {
+		const updatedAt = new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString();
+		renderSelector({
+			refs: [
+				{
+					name: 'recent',
+					ref: 'refs/heads/recent',
+					kind: 'local-branch',
+					updatedAt,
+				},
+				{
+					name: 'missing',
+					ref: 'refs/heads/missing',
+					kind: 'local-branch',
+					updatedAt: null,
+				},
+				{
+					name: 'invalid',
+					ref: 'refs/heads/invalid',
+					kind: 'local-branch',
+					updatedAt: 'not-an-iso-timestamp',
+				},
+				{
+					name: 'absent',
+					ref: 'refs/heads/absent',
+					kind: 'local-branch',
+				},
+			],
+		});
+
+		const timestamp = document.querySelector('time');
+		expect(timestamp?.getAttribute('datetime')).toBe(updatedAt);
+		expect(timestamp?.getAttribute('title')).toBeTruthy();
+		expect(timestamp?.textContent?.trim()).toBeTruthy();
+		expect(screen.getAllByTitle('Updated time unavailable')).toHaveLength(3);
+		expect(screen.getAllByText('Updated time unavailable')).toHaveLength(3);
+	});
+
+	it('preserves server ordering while applying only the local query filter', async () => {
+		renderSelector({
+			refs: [
+				{
+					name: 'z-match',
+					ref: 'refs/heads/z-match',
+					kind: 'local-branch',
+					updatedAt: null,
+				},
+				{
+					name: 'a-match',
+					ref: 'refs/heads/a-match',
+					kind: 'local-branch',
+					updatedAt: null,
+				},
+				{ name: 'middle', ref: 'refs/heads/middle', kind: 'local-branch', updatedAt: null },
+			],
+		});
+
+		expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+			expect.stringContaining('z-match'),
+			expect.stringContaining('a-match'),
+			expect.stringContaining('middle'),
+		]);
+
+		await fireEvent.input(screen.getByRole('combobox', { name: 'Find a ref' }), {
+			target: { value: 'match' },
+		});
+		expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+			expect.stringContaining('z-match'),
+			expect.stringContaining('a-match'),
+		]);
+	});
+
+	it('isolates malformed rows without changing virtual row height', () => {
+		const malformed = {
+			ref: 'refs/heads/malformed',
+			kind: 'local-branch',
+			updatedAt: null,
+		};
+		Object.defineProperty(malformed, 'name', {
+			get() {
+				throw new Error('malformed ref');
+			},
+		});
+		renderSelector({
+			refs: [
+				{ name: 'first', ref: 'refs/heads/first', kind: 'local-branch', updatedAt: null },
+				malformed,
+				{ name: 'last', ref: 'refs/heads/last', kind: 'local-branch', updatedAt: null },
+			],
+		});
+
+		expect(screen.getByRole('option', { name: /first/ })).toBeTruthy();
+		expect(screen.getByRole('option', { name: /Ref unavailable/ })).toBeTruthy();
+		expect(screen.getByRole('option', { name: /last/ })).toBeTruthy();
+		expect(document.querySelectorAll('[data-git-ref-virtual-row]')).toHaveLength(3);
+		expect(
+			document.querySelector('[data-git-ref-virtual-row="unavailable-1"]')?.getAttribute('style'),
+		).toContain('height: 36px');
+	});
+
+	it('keeps sort-button focus while loading and replacing results', async () => {
+		const view = renderSelector();
+		await new Promise((resolve) => window.setTimeout(resolve, 0));
+		const updatedSort = screen.getByRole('button', {
+			name: 'Sort by Updated, newest first',
+		});
+		updatedSort.focus();
+
+		await view.rerender({ isLoading: true });
+		expect(document.activeElement).toBe(updatedSort);
+
+		await view.rerender({
+			isLoading: false,
+			refs: [
+				{
+					name: 'replacement',
+					ref: 'refs/heads/replacement',
+					kind: 'local-branch',
+					updatedAt: null,
+				},
+			],
+		});
+		expect(document.activeElement).toBe(updatedSort);
 	});
 
 	it('virtualizes large ref lists', () => {

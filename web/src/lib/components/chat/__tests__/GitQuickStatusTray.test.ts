@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitQuickStatusTray from '../GitQuickStatusTray.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
+const NAME_ASC = { key: 'name', direction: 'asc' } as const;
+
 function refsFromNames(names: string[]) {
 	return names.map((name) => ({
 		name,
@@ -149,6 +151,8 @@ describe('GitQuickStatusTray', () => {
 		const onClose = vi.fn();
 		const onCreateBranch = vi.fn();
 		const onSwitchBranch = vi.fn();
+		const onSearchRefs = vi.fn();
+		const onSortRefs = vi.fn();
 
 		render(GitQuickStatusTray, {
 			props: {
@@ -157,12 +161,15 @@ describe('GitQuickStatusTray', () => {
 				isRefreshing: false,
 				branchSelector: {
 					refs: refsFromNames(['main', 'feature/tray', 'bugfix/login']),
+					sort: NAME_ASC,
 					isOpen: true,
 					isLoading: false,
 					onToggle,
 					onClose,
 					onCreateBranch,
 					onSwitchBranch,
+					onSearchRefs,
+					onSortRefs,
 				},
 				onCommit: vi.fn(),
 			},
@@ -174,6 +181,10 @@ describe('GitQuickStatusTray', () => {
 		const search = screen.getByRole('combobox', { name: 'Find a ref' });
 		await fireEvent.input(search, { target: { value: 'feature' } });
 		expect(screen.queryByText('Branches')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Sort by Updated, newest first' }));
+		expect(onSortRefs).toHaveBeenCalledWith('updated', 'feature');
+		await new Promise((resolve) => window.setTimeout(resolve, 180));
+		expect(onSearchRefs).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('option', { name: /feature\/tray/ }));
 		expect(onClose).toHaveBeenCalledOnce();
@@ -197,12 +208,14 @@ describe('GitQuickStatusTray', () => {
 				isRefreshing: false,
 				branchSelector: {
 					refs: refsFromNames(['main', 'feature/tray']),
+					sort: NAME_ASC,
 					isOpen: false,
 					isLoading: false,
 					onToggle,
 					onClose: vi.fn(),
 					onCreateBranch: vi.fn(),
 					onSwitchBranch: vi.fn(),
+					onSortRefs: vi.fn(),
 				},
 				onCommit: vi.fn(),
 			},
@@ -222,12 +235,14 @@ describe('GitQuickStatusTray', () => {
 				isRefreshing: false,
 				branchSelector: {
 					refs: refsFromNames([longBranch]),
+					sort: NAME_ASC,
 					isOpen: false,
 					isLoading: false,
 					onToggle: vi.fn(),
 					onClose: vi.fn(),
 					onCreateBranch: vi.fn(),
 					onSwitchBranch: vi.fn(),
+					onSortRefs: vi.fn(),
 				},
 				onCommit: vi.fn(),
 			},
@@ -254,12 +269,14 @@ describe('GitQuickStatusTray', () => {
 				isRefreshing: false,
 				branchSelector: {
 					refs: refsFromNames(['main', longBranch]),
+					sort: NAME_ASC,
 					isOpen: true,
 					isLoading: false,
 					onToggle: vi.fn(),
 					onClose: vi.fn(),
 					onCreateBranch: vi.fn(),
 					onSwitchBranch: vi.fn(),
+					onSortRefs: vi.fn(),
 				},
 				onCommit: vi.fn(),
 			},
@@ -290,12 +307,14 @@ describe('GitQuickStatusTray', () => {
 				isMobile: true,
 				branchSelector: {
 					refs: refsFromNames(['main', 'feature/tray']),
+					sort: NAME_ASC,
 					isOpen: true,
 					isLoading: false,
 					onToggle: vi.fn(),
 					onClose: vi.fn(),
 					onCreateBranch: vi.fn(),
 					onSwitchBranch: vi.fn(),
+					onSortRefs: vi.fn(),
 				},
 				onCommit: vi.fn(),
 			},

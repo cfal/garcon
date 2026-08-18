@@ -72,6 +72,7 @@
 						<GitBranchSelector
 							currentBranch={summary.branch || 'HEAD'}
 							refs={branchSelector.refs}
+							sort={branchSelector.sort}
 							isOpen={branchSelector.isOpen}
 							isLoading={branchSelector.isLoading}
 							{isMobile}
@@ -86,6 +87,7 @@
 							onCreateBranch={branchSelector.onCreateBranch}
 							onSwitchBranch={branchSelector.onSwitchBranch}
 							onSearchRefs={branchSelector.onSearchRefs}
+							onSortRefs={branchSelector.onSortRefs}
 							onSwitchDialogClose={branchSelector.onSwitchDialogClose}
 						/>
 					{:else}

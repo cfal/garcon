@@ -71,6 +71,39 @@ describe('GitSurfaceToolbar', () => {
 		expect(label.className).toContain('truncate');
 	});
 
+	it('forwards branch sort intent with the current query', async () => {
+		const controller = target();
+		controller.branches.refs = [
+			{
+				name: 'feature/sort',
+				ref: 'refs/heads/feature/sort',
+				kind: 'local-branch',
+				updatedAt: null,
+			},
+		];
+		controller.branches.showBranchDropdown = true;
+		const toggleBranchSort = vi
+			.spyOn(controller.branches, 'toggleBranchSort')
+			.mockResolvedValue(undefined);
+		render(GitSurfaceToolbarTestHost, {
+			props: {
+				target: controller,
+				presentation: 'main',
+			},
+		});
+
+		await fireEvent.input(screen.getByRole('combobox', { name: 'Find a ref' }), {
+			target: { value: 'feature' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Sort by Updated, newest first' }));
+
+		expect(toggleBranchSort).toHaveBeenCalledWith(
+			'/very/long/workspace/project/path',
+			'updated',
+			'feature',
+		);
+	});
+
 	it('opens the shared target dialog from the folder control', async () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {

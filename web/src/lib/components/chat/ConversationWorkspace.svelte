@@ -307,6 +307,7 @@
 		if (!projectPath || !quickGitSummaryForProject) return null;
 		return {
 			refs: quickGitBranches.refs,
+			sort: quickGitBranches.branchSort,
 			isOpen: quickGitBranches.showBranchDropdown,
 			isLoading: quickGitBranches.isLoadingBranches,
 			onToggle: toggleCommitBranchDropdown,
@@ -319,7 +320,11 @@
 			onSwitchBranch: (branch) => switchCommitBranch(branch),
 			onSearchRefs: (query) => {
 				if (!projectPath) return;
-				void quickGitBranches.fetchRefs(projectPath, query);
+				void quickGitBranches.searchBranchRefs(projectPath, query);
+			},
+			onSortRefs: (key, query) => {
+				if (!projectPath) return;
+				void quickGitBranches.toggleBranchSort(projectPath, key, query);
 			},
 			onSwitchDialogClose: () => appShell.requestComposerFocus(),
 		};
