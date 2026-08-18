@@ -7,6 +7,7 @@ import {
   ReadToolUseMessage,
   ThinkingMessage,
   ToolResultMessage,
+  TranscriptNoticeMessage,
   UserMessage,
   parseChatMessage,
   type ChatMessage,
@@ -208,6 +209,9 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
   }
   if (message instanceof ErrorMessage) {
     return { role: 'Error', timestamp: message.timestamp, content: message.content || '' };
+  }
+  if (message instanceof TranscriptNoticeMessage) {
+    return { role: 'Notice', timestamp: message.timestamp, content: message.content || '' };
   }
   if (message instanceof PermissionRequestMessage) {
     const requested = formatToolUseMessage(message.requestedTool);

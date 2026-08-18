@@ -7,7 +7,9 @@ import {
 import {
 	UserMessage,
 	AssistantMessage,
+	ErrorMessage,
 	ThinkingMessage,
+	TranscriptNoticeMessage,
 	ToolResultMessage,
 	UnknownToolUseMessage,
 } from '$shared/chat-types';
@@ -162,6 +164,17 @@ describe('selectPreviewFromBatch', () => {
 		];
 
 		expect(selectPreviewFromBatch(messages)).toBeNull();
+	});
+
+	it('ignores presentation-only error and notice messages', () => {
+		const error = new ErrorMessage('2024-01-01T00:00:02Z', 'first error line\nsecond');
+		expect(selectPreviewFromBatch([
+			new TranscriptNoticeMessage('2024-01-01T00:00:01Z', 'presentation only'),
+			error,
+		])).toBeNull();
+		expect(selectPreviewFromBatch([
+			new TranscriptNoticeMessage('2024-01-01T00:00:03Z', 'presentation only'),
+		])).toBeNull();
 	});
 
 	it('returns first line of thinking content when no assistant/user message is newer', () => {

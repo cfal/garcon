@@ -6,6 +6,7 @@
 		ThinkingMessage,
 		isToolUseMessage,
 		ErrorMessage,
+		TranscriptNoticeMessage,
 		PermissionRequestMessage,
 		CompactionMessage,
 		AgentSwitchMessage,
@@ -154,6 +155,7 @@
 	const asThinking = $derived(message instanceof ThinkingMessage ? message : null);
 	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
 	const asToolResult = $derived(message instanceof ToolResultMessage ? message : null);
+	const asNotice = $derived(message instanceof TranscriptNoticeMessage ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
 	const asCompaction = $derived(message instanceof CompactionMessage ? message : null);
 	const asAgentSwitch = $derived(message instanceof AgentSwitchMessage ? message : null);
@@ -689,6 +691,12 @@
 								/>
 							</ContextMenuContent>
 						</ContextMenu>
+					{:else if asNotice}
+						<ChatEventCard variant="info">
+							{#snippet body()}
+								<div class="text-sm whitespace-pre-wrap break-words">{asNotice.content}</div>
+							{/snippet}
+						</ChatEventCard>
 					{:else if asError}
 						<ChatEventCard variant="error">
 							{#snippet body()}

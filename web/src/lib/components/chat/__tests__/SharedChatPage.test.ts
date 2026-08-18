@@ -141,4 +141,32 @@ describe('SharedChatPage', () => {
 			);
 		});
 	});
+
+	it('renders shared notice and error chat rows with distinct cards', async () => {
+		const chatRows = response([], 0, 2, { nextBefore: null });
+		chatRows.snapshot.messages = [
+			{
+				type: 'transcript-notice',
+				timestamp: '2025-01-02T03:05:00.000Z',
+				content: 'Shared notice.\nSecond line.',
+			},
+			{
+				type: 'error',
+				timestamp: '2025-01-02T03:05:01.000Z',
+				content: 'Shared error.',
+			},
+		];
+		chatRows.page.end = 2;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(chatRows);
+
+		const { container } = render(SharedChatPageTestHost);
+
+		const error = await screen.findByText('Shared error.');
+		const noticeCard = container.querySelector('article.border-status-info-border');
+		expect(noticeCard?.querySelector('.whitespace-pre-wrap')?.textContent).toBe(
+			'Shared notice.\nSecond line.',
+		);
+		expect(error.closest('article')?.className).toContain('border-status-error-border');
+		expect(screen.getByText('2 of 2 messages')).toBeTruthy();
+	});
 });

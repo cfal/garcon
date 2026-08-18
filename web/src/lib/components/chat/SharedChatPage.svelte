@@ -8,6 +8,7 @@
 		AssistantMessage,
 		ThinkingMessage,
 		ErrorMessage,
+		TranscriptNoticeMessage,
 		isToolUseMessage,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
@@ -298,6 +299,12 @@
 								</ChatEventCard>
 							{:else if isToolUseMessage(message)}
 								<ChatToolEventRenderer toolMessage={message} mode="input" autoExpandTools={false} />
+							{:else if message instanceof TranscriptNoticeMessage}
+								<ChatEventCard variant="info">
+									{#snippet body()}
+										<div class="text-sm whitespace-pre-wrap break-words">{message.content}</div>
+									{/snippet}
+								</ChatEventCard>
 							{:else if message instanceof ErrorMessage}
 								<ChatEventCard variant="error">
 									{#snippet body()}
