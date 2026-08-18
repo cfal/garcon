@@ -1,7 +1,6 @@
 import { promises as fs } from 'fs';
 import {
   buildContextEntries,
-  parseSessionEntries,
   sessionEntryToContextMessages,
   type FileEntry,
   type SessionEntry,
@@ -32,9 +31,9 @@ function assertAcyclicActivePath(entries: SessionEntry[]): void {
   }
 }
 
-async function readPiSessionFile(sessionPath: string, strict = false): Promise<ChatMessage[]> {
+async function readPiSessionFile(sessionPath: string): Promise<ChatMessage[]> {
   const raw = await fs.readFile(sessionPath, 'utf8');
-  const entries = strict ? parseStrictPiSessionEntries(raw) : parseSessionEntries(raw);
+  const entries = parseStrictPiSessionEntries(raw);
   const sessionEntries = entries.filter(isSessionEntry);
   assertAcyclicActivePath(sessionEntries);
   // buildContextEntries plus sessionEntryToContextMessages is exactly the
@@ -54,7 +53,7 @@ async function readPiSessionFile(sessionPath: string, strict = false): Promise<C
 }
 
 export async function loadPiChatMessages(sessionPath: string): Promise<ChatMessage[]> {
-  return readPiSessionFile(sessionPath, true);
+  return readPiSessionFile(sessionPath);
 }
 
 function parseStrictPiSessionEntries(raw: string): FileEntry[] {
