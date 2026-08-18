@@ -30,11 +30,6 @@ const SILENT_LOGGER: AgentLogger = Object.freeze({
 
 interface OpenCodeSession {
   directory?: string;
-  title?: string;
-  time?: {
-    created?: string | number | Date;
-    updated?: string | number | Date;
-  };
 }
 
 export interface OpenCodeMessage {

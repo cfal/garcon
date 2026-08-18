@@ -518,14 +518,6 @@ function readCursorSessionBlobs(
   return readCursorBlobs(storeDbPath);
 }
 
-export async function loadCursorChatMessagesBySessionId(
-  sessionId: string,
-  projectPath: string,
-  cursorHome?: string,
-): Promise<ChatMessage[]> {
-  return normalizeCursorBlobs(readCursorSessionBlobs(sessionId, projectPath, cursorHome));
-}
-
 export async function loadImportableCursorChatMessagesBySessionId(
   sessionId: string,
   projectPath: string,

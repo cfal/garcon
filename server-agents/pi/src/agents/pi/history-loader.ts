@@ -10,9 +10,7 @@ import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/na
 import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
-import { findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { convertPiMessage } from './message-converter.js';
-import type { PiConfig } from '../../config.js';
 
 function isSessionEntry(entry: FileEntry): entry is SessionEntry {
   return entry.type !== 'session';
@@ -34,10 +32,7 @@ function assertAcyclicActivePath(entries: SessionEntry[]): void {
   }
 }
 
-async function readPiSessionFile(sessionPath: string, strict = false): Promise<{
-  entries: FileEntry[];
-  messages: ChatMessage[];
-}> {
+async function readPiSessionFile(sessionPath: string, strict = false): Promise<ChatMessage[]> {
   const raw = await fs.readFile(sessionPath, 'utf8');
   const entries = strict ? parseStrictPiSessionEntries(raw) : parseSessionEntries(raw);
   const sessionEntries = entries.filter(isSessionEntry);
@@ -55,11 +50,11 @@ async function readPiSessionFile(sessionPath: string, strict = false): Promise<{
       withinSourceOrdinal,
     }));
   });
-  return { entries, messages };
+  return messages;
 }
 
 export async function loadPiChatMessages(sessionPath: string): Promise<ChatMessage[]> {
-  return (await readPiSessionFile(sessionPath, true)).messages;
+  return readPiSessionFile(sessionPath, true);
 }
 
 function parseStrictPiSessionEntries(raw: string): FileEntry[] {
@@ -81,14 +76,4 @@ function parseStrictPiSessionEntries(raw: string): FileEntry[] {
     }
     return [value as FileEntry];
   });
-}
-
-export async function loadPiChatMessagesBySessionId(
-  sessionId: string,
-  projectPath: string,
-  config: PiConfig,
-): Promise<ChatMessage[]> {
-  const sessionPath = await findPiSessionFileBySessionId(sessionId, projectPath, config);
-  if (!sessionPath) return [];
-  return loadPiChatMessages(sessionPath);
 }

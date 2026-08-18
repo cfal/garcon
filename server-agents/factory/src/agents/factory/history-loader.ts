@@ -27,14 +27,7 @@ const SILENT_LOGGER: AgentLogger = {
 };
 
 export interface FactorySessionDiscoveryEntry {
-  createdTimeMs?: number;
-  cwd?: string;
-  id: string;
-  messageCount?: number;
-  modifiedTimeMs?: number;
   sessionPath?: string;
-  sessionTitle?: string;
-  title?: string;
 }
 
 interface FactorySessionDiscoveryIndex {
@@ -43,9 +36,7 @@ interface FactorySessionDiscoveryIndex {
 
 interface FactorySessionStartEvent {
   id?: string;
-  sessionTitle?: string;
   timestamp?: number | string;
-  title?: string;
   type: 'session_start';
 }
 
@@ -501,13 +492,4 @@ export async function loadFactoryChatMessages(
     });
     return [];
   }
-}
-
-export async function loadFactoryChatMessagesBySessionId(
-  sessionId: string,
-  logger: AgentLogger = SILENT_LOGGER,
-): Promise<ChatMessage[]> {
-  const sessionPath = await findFactorySessionFileBySessionId(sessionId);
-  if (!sessionPath) return [];
-  return loadFactoryChatMessages(sessionPath, logger);
 }

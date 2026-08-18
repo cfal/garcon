@@ -9,7 +9,7 @@ import {
   cursorAcpStoreDbPath,
   cursorStoreDbPath,
   cursorStreamJsonStoreDbPath,
-  loadCursorChatMessagesBySessionId,
+  loadImportableCursorChatMessagesBySessionId,
   normalizeCursorBlobs,
   readCursorBlobs,
 } from '../history-loader.js';
@@ -50,7 +50,7 @@ describe('Cursor history loader', () => {
   });
 
   it('raises a clear error when the Cursor store is missing', async () => {
-    await expect(loadCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
+    await expect(loadImportableCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
       .rejects.toThrow('Cursor transcript database not found');
   });
 
@@ -302,7 +302,11 @@ describe('Cursor history loader', () => {
       db.close();
     }
 
-    const messages = await loadCursorChatMessagesBySessionId(sessionId, projectPath, tempRoot);
+    const messages = await loadImportableCursorChatMessagesBySessionId(
+      sessionId,
+      projectPath,
+      tempRoot,
+    );
     expect(messages.map((message) => message.type)).toEqual(['user-message', 'assistant-message']);
     expect(messages[0].content).toBe('First prompt');
   });

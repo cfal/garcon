@@ -33,7 +33,6 @@ export interface AmpThreadMessage {
 
 export interface AmpThreadExport {
   created?: number | string;
-  title?: string;
   messages?: AmpThreadMessage[];
 }
 
