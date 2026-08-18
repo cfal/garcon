@@ -4,8 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ChatMessage } from '../../../common/chat-types.js';
-import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import {
+  type IntegrationDirectories,
+  withIntegrationFixture,
+} from '../../support/integration-fixture.js';
 import { reloadUntilNativeContains } from '../../support/live-agent.js';
+import { waitForPersistedChat } from '../../support/persisted-chat.js';
 
 describe('Codex native transcript path preservation', () => {
   test('keeps a new cross-agent fork attached to the same transcript across restarts', async () => {
@@ -55,7 +59,7 @@ describe('Codex native transcript path preservation', () => {
         expect(codexTerminal.type).toBe('agent-run-finished');
 
         const sourceNativeSession = await waitForNativeSessionPath(
-          fixture.dirs.workspace,
+          fixture.dirs,
           sourceChatId,
         );
         await reloadUntilNativeContains(fixture, sourceChatId, codexMarker);
@@ -154,23 +158,27 @@ async function readNativeSession(
 }
 
 async function waitForNativeSessionPath(
-  workspace: string,
+  directories: IntegrationDirectories,
   chatId: string,
   timeoutMs = 5_000,
 ): Promise<{ path: string; agentSessionId: string }> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const nativeSession = await readNativeSession(workspace, chatId);
-      if (nativeSession.path) {
-        return { ...nativeSession, path: nativeSession.path };
-      }
-    } catch {
-      // Session creation persists asynchronously after the terminal provider event.
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for chat ${chatId} to persist its native path`);
+  return waitForPersistedChat({
+    directories,
+    chatId,
+    timeoutMs,
+    timeoutMessage: `Timed out waiting for chat ${chatId} to persist its native path`,
+    select: (chat) => {
+      const nativeSession = chat.nativeSession?.value;
+      const nativePath = nativeSession?.path;
+      const agentSessionId = nativeSession?.agentSessionId;
+      return typeof nativePath === 'string'
+        && nativePath.length > 0
+        && typeof agentSessionId === 'string'
+        && agentSessionId.length > 0
+        ? { path: nativePath, agentSessionId }
+        : null;
+    },
+  });
 }
 
 function messageLabels(messages: ChatMessage[]): string[] {

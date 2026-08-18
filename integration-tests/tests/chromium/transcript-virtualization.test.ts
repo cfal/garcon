@@ -414,6 +414,41 @@ async function waitForStableModelCount(page: Page, minimum: number): Promise<num
   }, minimum);
 }
 
+interface TouchPublicationSnapshot {
+  readonly busy: boolean;
+  readonly dataRevision: number;
+  readonly entryCount: number;
+  readonly layoutPending: boolean;
+  readonly modelCount: number;
+}
+
+async function touchPublicationSnapshot(page: Page): Promise<TouchPublicationSnapshot> {
+  return page.locator(FEED_SELECTOR).evaluate((feedElement, sizerSelector) => {
+    const feed = feedElement as HTMLElement;
+    const sizer = document.querySelector<HTMLElement>(sizerSelector);
+    if (!sizer) throw new Error('The transcript virtual sizer is missing.');
+    return {
+      busy: feed.getAttribute('aria-busy') !== 'false',
+      dataRevision: Number(sizer.dataset.chatVirtualDataRevision ?? 0),
+      entryCount: Number(sizer.dataset.chatTranscriptEntryCount ?? 0),
+      layoutPending: feed.querySelector('[data-chat-layout-pending]') !== null,
+      modelCount: Number(sizer.dataset.chatVirtualModelCount ?? 0),
+    };
+  }, SIZER_SELECTOR);
+}
+
+function publicationReady(
+  snapshot: TouchPublicationSnapshot,
+  baseline: TouchPublicationSnapshot,
+  expectedEntryCount: number,
+): boolean {
+  return snapshot.entryCount === expectedEntryCount
+    && snapshot.modelCount === baseline.modelCount + (expectedEntryCount - baseline.entryCount)
+    && snapshot.dataRevision > baseline.dataRevision
+    && !snapshot.busy
+    && !snapshot.layoutPending;
+}
+
 async function transcriptEntryCount(page: Page): Promise<number> {
   return page
     .locator(SIZER_SELECTOR)
@@ -2215,34 +2250,57 @@ async function verifyTouchDragPrepend(
       );
       expectedEntryCount += 1;
     } else if (scenario.liveBehavior === 'paused-interrupted' && liveHold) {
+      const preStopPublication = await touchPublicationSnapshot(fixture.page);
       liveAbort = liveHold.expectAbort();
+      const stopCursor = fixture.integration.client.markEvents();
       stopLiveTurn = fixture.integration.client.stopChat({
         agentId: fixture.integration.directAgents.openAi.agentId,
         chatId,
         clientRequestId: crypto.randomUUID(),
       });
+      expect((await stopLiveTurn).outcome).toBe('interrupt-requested');
+      await fixture.integration.client.waitForProcessing(chatId, false, { afterIndex: stopCursor });
+      // The interrupt lifecycle must be published in the model before the
+      // baseline-delta oracle is established, or the delta misattributes it.
+      await fixture.page.waitForFunction(
+        (preStopRevision) => {
+          const sizer = document.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
+          return Number(sizer?.dataset.chatVirtualDataRevision ?? 0) > preStopRevision;
+        },
+        preStopPublication.dataRevision,
+      );
     }
+    const baselinePublication = await touchPublicationSnapshot(fixture.page);
     releaseEarlierPage();
 
     for (let frame = 0; frame < 12; frame += 1) {
       if (drag.y < drag.maximumY) await moveTranscriptTouch(fixture.page, drag, 6);
     }
-    expect(await transcriptEntryCount(fixture.page)).toBeLessThan(expectedEntryCount);
+    const stagedPublication = await touchPublicationSnapshot(fixture.page);
+    expect(stagedPublication.entryCount).toBe(baselinePublication.entryCount);
+    expect(stagedPublication.modelCount).toBe(baselinePublication.modelCount);
+    expect(stagedPublication.dataRevision).toBe(baselinePublication.dataRevision);
+    expect(stagedPublication.busy).toBe(true);
     await finishTranscriptTouchDrag(drag);
     drag = null;
 
-    let growthFrame: number | null = null;
-    for (let frame = 0; frame < 40; frame += 1) {
-      if ((await transcriptEntryCount(fixture.page)) >= expectedEntryCount) {
-        growthFrame ??= frame;
-        if (frame >= growthFrame + 6) break;
-      }
+    const publicationDeadline = Date.now() + 20_000;
+    let publication: TouchPublicationSnapshot | null = null;
+    while (Date.now() < publicationDeadline) {
+      publication = await touchPublicationSnapshot(fixture.page);
+      if (publicationReady(publication, baselinePublication, expectedEntryCount)) break;
       await fixture.page.evaluate(
         () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
       );
     }
-    expect(growthFrame).not.toBeNull();
-    await waitForStableModelCount(fixture.page, expectedEntryCount);
+    if (!publication || !publicationReady(publication, baselinePublication, expectedEntryCount)) {
+      throw new Error(`Touch publication did not settle: ${JSON.stringify(publication)}`);
+    }
+    for (let frame = 0; frame < 6; frame += 1) {
+      await fixture.page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+      );
+    }
     if (stopLiveTurn) {
       expect((await stopLiveTurn).outcome).toBe('interrupt-requested');
       await liveAbort;
@@ -2291,15 +2349,15 @@ async function verifyTouchDragPrepend(
     });
     expect(identityFailures, JSON.stringify({ anchor, frames }, null, 2)).toEqual([]);
     expect(reverseMovement, JSON.stringify({ anchor, frames }, null, 2)).toEqual([]);
-      const firstOffset = frames.find((frame) => frame.offset !== null)?.offset;
-      const finalOffset = frames.findLast((frame) => frame.offset !== null)?.offset;
-      const forwardMovement =
-        firstOffset != null && finalOffset != null ? finalOffset - firstOffset : 0;
-      if (scenario.clampBeforeRelease) {
-        expect(forwardMovement, JSON.stringify({ anchor, frames }, null, 2)).toBeLessThanOrEqual(1);
-      } else {
-        expect(forwardMovement, JSON.stringify({ anchor, frames }, null, 2)).toBeGreaterThan(12);
-      }
+    const firstOffset = frames.find((frame) => frame.offset !== null)?.offset;
+    const finalOffset = frames.findLast((frame) => frame.offset !== null)?.offset;
+    const forwardMovement =
+      firstOffset != null && finalOffset != null ? finalOffset - firstOffset : 0;
+    if (scenario.clampBeforeRelease) {
+      expect(forwardMovement, JSON.stringify({ anchor, frames }, null, 2)).toBeLessThanOrEqual(1);
+    } else {
+      expect(forwardMovement, JSON.stringify({ anchor, frames }, null, 2)).toBeGreaterThan(12);
+    }
     expect(earlierRequestCount).toBeGreaterThan(gestureRequestBaseline);
     fixture.assertNoBrowserErrors();
   } finally {

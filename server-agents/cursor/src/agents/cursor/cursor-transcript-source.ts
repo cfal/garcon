@@ -2,7 +2,6 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import { getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
 import {
   cursorStoreDbPath,
-  getCursorPreviewFromSessionId,
   loadImportableCursorChatMessagesBySessionId,
 } from './history-loader.js';
 
@@ -14,7 +13,6 @@ export interface CursorTranscriptReference {
 
 export interface CursorTranscriptReader {
   loadMessages(session: CursorTranscriptReference): Promise<ChatMessage[]>;
-  getPreview(session: CursorTranscriptReference): Promise<unknown>;
   sourcePath(session: CursorTranscriptReference): string | null;
 }
 
@@ -30,13 +28,6 @@ export function createCursorTranscriptSource(
   return {
     async loadMessages(session): Promise<ChatMessage[]> {
       return loadImportableCursorChatMessagesBySessionId(
-        sessionId(session),
-        session.projectPath,
-        options.cursorHome,
-      );
-    },
-    async getPreview(session): Promise<unknown> {
-      return getCursorPreviewFromSessionId(
         sessionId(session),
         session.projectPath,
         options.cursorHome,

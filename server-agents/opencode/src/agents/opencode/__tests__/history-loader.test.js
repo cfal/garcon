@@ -8,7 +8,6 @@ import {
   UserMessage,
 } from '@garcon/common/chat-types';
 import {
-  getOpenCodePreviewFromSessionId,
   loadLegacyOpenCodeChatMessages,
   loadOpenCodeChatMessages,
   loadRequiredOpenCodeChatMessages,
@@ -489,101 +488,5 @@ describe('OpenCode history loader', () => {
     await expect(loadOpenCodeChatMessages('session-1', getClient, { directory: '/repo' })).resolves.toEqual([]);
 
     expect(messages).toHaveBeenCalledWith({ sessionID: 'session-1', directory: '/repo' });
-  });
-
-  it('loads preview metadata from session and tail messages', async () => {
-    const messages = mock(() => Promise.resolve({
-      data: [
-        {
-          info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
-          parts: [{ type: 'text', text: 'first' }],
-        },
-        {
-          info: { role: 'assistant', time: { created: '2026-07-04T00:00:01.000Z' } },
-          parts: [{ type: 'text', text: 'last assistant' }],
-        },
-      ],
-    }));
-    const getClient = mock(() => Promise.resolve({
-      session: {
-        get: mock(() => Promise.resolve({
-          data: {
-            title: 'OpenCode title',
-            time: {
-              created: '2026-07-04T00:00:00.000Z',
-              updated: '2026-07-04T00:00:02.000Z',
-            },
-          },
-        })),
-        messages,
-      },
-    }));
-
-    await expect(getOpenCodePreviewFromSessionId('session-1', getClient, { directory: '/repo' })).resolves.toEqual({
-      firstMessage: 'OpenCode title',
-      lastMessage: 'last assistant',
-      createdAt: '2026-07-04T00:00:00.000Z',
-      lastActivity: '2026-07-04T00:00:02.000Z',
-    });
-    expect(messages).toHaveBeenCalledWith({ sessionID: 'session-1', limit: 20, directory: '/repo' });
-  });
-
-  it('keeps compaction internals out of preview metadata', async () => {
-    const getClient = mock(() => Promise.resolve({
-      session: {
-        get: mock(() => Promise.resolve({ data: { title: 'OpenCode title' } })),
-        messages: mock(() => Promise.resolve({
-          data: [
-            {
-              info: { role: 'assistant', time: { created: '2026-07-04T00:00:00.000Z' } },
-              parts: [{ type: 'text', text: 'visible reply' }],
-            },
-            {
-              info: { role: 'user', time: { created: '2026-07-04T00:00:01.000Z' } },
-              parts: [{ type: 'compaction', auto: true }],
-            },
-            {
-              info: {
-                role: 'assistant',
-                summary: true,
-                time: { created: '2026-07-04T00:00:02.000Z' },
-              },
-              parts: [{ type: 'text', text: 'internal summary' }],
-            },
-            {
-              info: { role: 'user', time: { created: '2026-07-04T00:00:03.000Z' } },
-              parts: [{ type: 'text', text: 'internal continuation', synthetic: true }],
-            },
-          ],
-        })),
-      },
-    }));
-
-    const preview = await getOpenCodePreviewFromSessionId('session-1', getClient);
-
-    expect(preview?.lastMessage).toBe('visible reply');
-  });
-
-  it('returns null preview when the session id is missing', async () => {
-    const getClient = mock(() => Promise.resolve({
-      session: {
-        get: mock(() => Promise.resolve({ data: null })),
-        messages: mock(() => Promise.resolve({ data: [] })),
-      },
-    }));
-
-    await expect(getOpenCodePreviewFromSessionId('', getClient)).resolves.toBeNull();
-    expect(getClient).not.toHaveBeenCalled();
-  });
-
-  it('returns null preview when OpenCode has no session data', async () => {
-    const getClient = mock(() => Promise.resolve({
-      session: {
-        get: mock(() => Promise.resolve({ data: null })),
-        messages: mock(() => Promise.resolve({ data: [] })),
-      },
-    }));
-
-    await expect(getOpenCodePreviewFromSessionId('missing-session', getClient)).resolves.toBeNull();
   });
 });

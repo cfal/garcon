@@ -236,7 +236,7 @@ export function replaceChatRows(
       input.chatId,
       input.transcriptViewId,
       input.throughOrdinal,
-      input.rows.length > 0 ? 'indexed' : 'unsupported',
+      'indexed',
       timestamp,
     );
     db.query('DELETE FROM search_chunks WHERE chat_id = ?').run(input.chatId);
@@ -258,25 +258,63 @@ export function appendChatRows(
   if (!state || state.transcriptViewId !== input.transcriptViewId) {
     throw new Error('SEARCH_VIEW_MISMATCH');
   }
-  if (state.indexedThrough >= input.throughOrdinal) return;
+  if (state.indexedThrough >= input.throughOrdinal) {
+    db.query(`
+      UPDATE search_chat_state SET status = 'indexed', last_error_code = NULL, updated_at = ?
+      WHERE chat_id = ? AND transcript_view_id = ?
+    `).run(new Date().toISOString(), input.chatId, input.transcriptViewId);
+    return;
+  }
   if (state.indexedThrough !== input.expectedAfterOrdinal) throw new Error('SEARCH_INDEX_GAP');
   const timestamp = new Date().toISOString();
   runTransaction(db, () => {
     insertRows(db, input.chatId, input.transcriptViewId, input.rows);
-    const searchable = Number(db.query<{ count: number }, [string]>(`
-      SELECT COUNT(*) AS count FROM search_chunks WHERE chat_id = ?
-    `).get(input.chatId)?.count ?? 0);
     db.query(`
-      UPDATE search_chat_state SET indexed_through = ?, status = ?,
+      UPDATE search_chat_state SET indexed_through = ?, status = 'indexed',
         last_error_code = NULL, updated_at = ?
       WHERE chat_id = ? AND transcript_view_id = ?
     `).run(
       input.throughOrdinal,
-      searchable > 0 ? 'indexed' : 'unsupported',
       timestamp,
       input.chatId,
       input.transcriptViewId,
     );
+  });
+}
+
+export function markChatFailed(
+  db: Database,
+  input: {
+    readonly chatId: string;
+    readonly transcriptViewId: string;
+    readonly errorCode: string;
+  },
+): void {
+  if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(input.errorCode)) {
+    throw new Error('INVALID_SEARCH_ERROR_CODE');
+  }
+  const timestamp = new Date().toISOString();
+  runTransaction(db, () => {
+    const existing = getChatState(db, input.chatId);
+    const sameView = existing?.transcriptViewId === input.transcriptViewId;
+    db.query(`
+      INSERT INTO search_chat_state(
+        chat_id, transcript_view_id, indexed_through, status, last_error_code, updated_at
+      ) VALUES (?, ?, ?, 'failed', ?, ?)
+      ON CONFLICT(chat_id) DO UPDATE SET
+        transcript_view_id = excluded.transcript_view_id,
+        indexed_through = excluded.indexed_through,
+        status = 'failed',
+        last_error_code = excluded.last_error_code,
+        updated_at = excluded.updated_at
+    `).run(
+      input.chatId,
+      input.transcriptViewId,
+      sameView ? existing.indexedThrough : 0,
+      input.errorCode,
+      timestamp,
+    );
+    if (!sameView) db.query('DELETE FROM search_chunks WHERE chat_id = ?').run(input.chatId);
   });
 }
 

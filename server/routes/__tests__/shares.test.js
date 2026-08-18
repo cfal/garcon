@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import createShareRoutes from '../shares.ts';
 import { DomainError } from '../../lib/domain-error.ts';
+import { LedgerFencedError } from '../../ledger/errors.ts';
+import { TranscriptViewReader } from '../../ledger/view-reader.ts';
 
 function createSnapshot(overrides = {}) {
   return {
@@ -147,6 +149,35 @@ describe('share creation route', () => {
 
     expect(response.status).toBe(409);
     expect((await response.json()).success).toBe(false);
+  });
+
+  it('[TLV5-L11.01-SHARE-ROUTE-UNIT-01] returns a fixed error when snapshot capture is fenced', async () => {
+    const sentinel = '/sentinel-root/chat-sentinel/ledger.sqlite';
+    const reader = new TranscriptViewReader({}, {
+      ensure: async () => {
+        throw new LedgerFencedError('123', { cause: new Error(sentinel) });
+      },
+    });
+    const { routes } = createRoutes(createSnapshot(), null, {
+      session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },
+      transcripts: {
+        renderingSnapshot: (chatId) => reader.renderingSnapshot(chatId),
+      },
+    });
+
+    const response = await routes['/api/v1/chats/share'].POST(
+      new Request('http://localhost/api/v1/chats/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatId: '123' }),
+      }),
+      new URL('http://localhost/api/v1/chats/share'),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body).toEqual({ success: false, error: 'The transcript ledger is unavailable' });
+    expect(JSON.stringify(body)).not.toContain(sentinel);
   });
 });
 

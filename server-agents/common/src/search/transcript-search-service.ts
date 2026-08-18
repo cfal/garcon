@@ -45,12 +45,23 @@ export interface TranscriptSearchIndexInput {
   readonly rows: readonly HistoricalSearchMessageRow[];
 }
 
+export class TranscriptSearchWorkerError extends Error {
+  constructor(
+    readonly code: string,
+    readonly retryable: boolean,
+  ) {
+    super(code);
+    this.name = 'TranscriptSearchWorkerError';
+  }
+}
+
 export class TranscriptSearchService {
   readonly #searchDirectory: string;
   readonly #dbPath: string;
   readonly #indexer: SearchWorkerSupervisor<IndexerRequest, IndexerEvent>;
   readonly #reader: SearchWorkerSupervisor<ReaderRequest, ReaderEvent>;
-  #writeTail: Promise<void> = Promise.resolve();
+  readonly #inFlightWrites = new Set<Promise<void>>();
+  #admissionGate: Promise<void> = Promise.resolve();
   #enabled = false;
   #closed = false;
   #resyncHandler: (() => void | Promise<void>) | null = null;
@@ -117,28 +128,24 @@ export class TranscriptSearchService {
   }
 
   replaceChat(input: Omit<TranscriptSearchIndexInput, 'expectedAfterOrdinal'>): Promise<void> {
-    return this.#enqueueWrite(async () => {
-      await this.#requestIndexerFrames(indexFrames('replace', {
-        ...input,
-        expectedAfterOrdinal: 0,
-      }));
-    });
+    return this.#trackWrite(() => this.#indexChat('replace', {
+      ...input,
+      expectedAfterOrdinal: 0,
+    }));
   }
 
   appendRows(input: TranscriptSearchIndexInput): Promise<void> {
-    return this.#enqueueWrite(async () => {
-      await this.#requestIndexerFrames(indexFrames('append', input));
-    });
+    return this.#trackWrite(() => this.#indexChat('append', input));
   }
 
   deleteChat(chatId: string): Promise<void> {
-    return this.#enqueueWrite(async () => {
+    return this.#trackWrite(async () => {
       await this.#requestIndexer({ type: 'delete-chat', chatId });
     });
   }
 
   pruneChats(chatIds: readonly string[]): Promise<void> {
-    return this.#enqueueWrite(async () => {
+    return this.#runExclusiveWrite(async () => {
       await this.#requestIndexer({ type: 'prune-chats', chatIds });
     });
   }
@@ -171,7 +178,7 @@ export class TranscriptSearchService {
 
   async disableAndDelete(signal: AbortSignal): Promise<void> {
     this.#enabled = false;
-    await this.#writeTail.catch(() => undefined);
+    await this.#drainWrites();
     await this.#stopWorkers();
     signal.throwIfAborted();
     await fs.rm(this.#searchDirectory, { recursive: true, force: true });
@@ -181,17 +188,68 @@ export class TranscriptSearchService {
     if (this.#closed) return;
     this.#closed = true;
     this.#enabled = false;
-    await this.#writeTail.catch(() => undefined);
+    await this.#drainWrites();
     await this.#stopWorkers();
   }
 
-  #enqueueWrite(work: () => Promise<void>): Promise<void> {
-    const result = this.#writeTail.catch(() => undefined).then(() => {
+  #trackWrite(work: () => Promise<void>): Promise<void> {
+    if (!this.#enabled || this.#closed) return Promise.resolve();
+    const admittedAfter = this.#admissionGate;
+    const result = admittedAfter.then(() => {
       if (!this.#enabled || this.#closed) return;
       return work();
     });
-    this.#writeTail = result.catch(() => undefined);
+    this.#inFlightWrites.add(result);
+    const remove = () => this.#inFlightWrites.delete(result);
+    void result.then(remove, remove);
     return result;
+  }
+
+  #runExclusiveWrite(work: () => Promise<void>): Promise<void> {
+    if (!this.#enabled || this.#closed) return Promise.resolve();
+    const priorAdmission = this.#admissionGate;
+    let release = () => {};
+    const closedGate = new Promise<void>((resolve) => { release = resolve; });
+    this.#admissionGate = priorAdmission.then(() => closedGate);
+    const admittedBefore = [...this.#inFlightWrites];
+    return priorAdmission.then(async () => {
+      try {
+        await Promise.allSettled(admittedBefore);
+        if (!this.#enabled || this.#closed) return;
+        await work();
+      } finally {
+        release();
+      }
+    });
+  }
+
+  async #drainWrites(): Promise<void> {
+    await this.#admissionGate;
+    await Promise.allSettled([...this.#inFlightWrites]);
+  }
+
+  async #indexChat(
+    mode: 'replace' | 'append',
+    input: TranscriptSearchIndexInput,
+  ): Promise<void> {
+    try {
+      await this.#requestIndexerFrames(indexFrames(mode, input));
+    } catch (error) {
+      if (!isRepairableIndexPositionError(error)) {
+        await this.#recordFailure(input, indexFailureCode(error)).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  async #recordFailure(input: TranscriptSearchIndexInput, errorCode: string): Promise<void> {
+    if (!this.#enabled || this.#closed) return;
+    await this.#requestIndexer({
+      type: 'mark-failed',
+      chatId: input.chatId,
+      transcriptViewId: input.transcriptViewId,
+      errorCode,
+    });
   }
 
   #requestIndexer(
@@ -288,5 +346,20 @@ function searchFrames(
 }
 
 function workerEventError(event: IndexerEvent | ReaderEvent): Error | null {
-  return event.type === 'error' ? new Error(event.code) : null;
+  return event.type === 'error'
+    ? new TranscriptSearchWorkerError(event.code, event.retryable)
+    : null;
+}
+
+function indexFailureCode(error: unknown): string {
+  if (error instanceof TranscriptSearchWorkerError) return error.code;
+  if (error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)) {
+    return error.message;
+  }
+  return 'SEARCH_INDEX_UNAVAILABLE';
+}
+
+function isRepairableIndexPositionError(error: unknown): boolean {
+  const code = indexFailureCode(error);
+  return code === 'SEARCH_INDEX_GAP' || code === 'SEARCH_VIEW_MISMATCH';
 }

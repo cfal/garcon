@@ -25,6 +25,7 @@ export interface TranscriptAdoptionOptions {
     entry: AgentChatEntry,
     signal: AbortSignal,
   ) => Promise<readonly ChatMessage[]>;
+  readonly onAdopted?: (chatId: string) => void;
   readonly logger?: Pick<AgentLogger, 'warn'>;
   readonly now?: () => string;
 }
@@ -77,9 +78,20 @@ export class TranscriptAdoptionService {
         [...prefixRows, ...(session ? [session] : []), ...importedDrafts(legacyRows, this.#now)],
         contentStartOrdinal,
       );
+      this.#notifyAdopted(chatId);
       this.#repairSessionCache(chatId);
       return view;
     });
+  }
+
+  #notifyAdopted(chatId: string): void {
+    try {
+      this.options.onAdopted?.(chatId);
+    } catch {
+      this.options.logger?.warn('Transcript adoption notification failed.', {
+        code: 'TRANSCRIPT_ADOPTION_NOTIFICATION_FAILED',
+      });
+    }
   }
 
   #repairSessionCache(chatId: string): void {

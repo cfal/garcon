@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.ts';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.ts';
 import { transcriptViewId } from '../contracts.ts';
-import { LedgerFencedError, StaleTranscriptViewError } from '../errors.ts';
+import { LedgerFencedError, safeFenceDiagnostic, StaleTranscriptViewError } from '../errors.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { TranscriptViewReader } from '../view-reader.ts';
@@ -373,30 +373,69 @@ describe('TranscriptViewReader', () => {
     });
   });
 
-  it('presents a fenced ledger as typed degraded history', async () => {
+  it('[TLV5-L11.01-VIEW-READER-UNIT-01] presents every fenced ledger read as non-retryable degraded history', async () => {
     await withReader(async ({ ledger }) => {
+      const sentinel = '/sentinel-root/chat-sentinel/ledger.sqlite';
+      const underlying = Object.assign(new Error(`unable to open ${sentinel}`), {
+        name: 'SQLiteError',
+        code: 'SQLITE_CORRUPT',
+      });
+      const fenced = new LedgerFencedError('chat-1', { cause: underlying });
       const reader = new TranscriptViewReader(ledger, {
         ensure: async () => {
-          throw new LedgerFencedError('chat-1');
+          throw fenced;
         },
       });
-      let failure;
-      try {
-        await reader.page('chat-1', 20);
-      } catch (error) {
-        failure = error;
-      }
+      for (const read of [
+        () => reader.page('chat-1', 20),
+        () => reader.replay('chat-1', transcriptViewId('view-1'), 0),
+        () => reader.renderingSnapshot('chat-1'),
+      ]) {
+        let failure;
+        try {
+          await read();
+        } catch (error) {
+          failure = error;
+        }
 
-      expect(failure).toBeInstanceOf(TranscriptHistoryUnavailableError);
-      expect(failure).toMatchObject({
-        name: 'DomainError',
-        code: 'TRANSCRIPT_UNAVAILABLE',
-        historyState: {
-          kind: 'degraded',
-          errorCode: 'LEDGER_FENCED',
-          retryable: true,
-        },
-      });
+        expect(failure).toBeInstanceOf(TranscriptHistoryUnavailableError);
+        expect(failure).toMatchObject({
+          name: 'DomainError',
+          code: 'TRANSCRIPT_UNAVAILABLE',
+          historyState: {
+            kind: 'degraded',
+            errorCode: 'LEDGER_FENCED',
+            retryable: false,
+          },
+        });
+        expect(failure.cause).toBe(fenced);
+        expect(safeFenceDiagnostic(failure.cause)).toEqual({
+          causeName: 'SQLiteError',
+          causeCode: 'SQLITE_CORRUPT',
+        });
+        expect(JSON.stringify(safeFenceDiagnostic(failure.cause))).not.toContain(sentinel);
+      }
+    });
+  });
+
+  it('replaces unsafe fence cause identifiers with a fixed fallback', () => {
+    const sentinel = '/sentinel-root/chat-sentinel/ledger.sqlite';
+    const unsafe = Object.assign(new Error(sentinel), {
+      name: `Error ${sentinel}`,
+      code: `SQLITE_CANTOPEN ${sentinel}`,
+    });
+
+    expect(safeFenceDiagnostic(new LedgerFencedError('chat-1', { cause: unsafe }))).toEqual({
+      causeName: 'UNKNOWN',
+      causeCode: 'UNKNOWN',
+    });
+    expect(safeFenceDiagnostic(new LedgerFencedError('chat-1'))).toEqual({
+      causeName: 'UNKNOWN',
+      causeCode: 'UNKNOWN',
+    });
+    expect(safeFenceDiagnostic(undefined)).toEqual({
+      causeName: 'UNKNOWN',
+      causeCode: 'UNKNOWN',
     });
   });
 });
