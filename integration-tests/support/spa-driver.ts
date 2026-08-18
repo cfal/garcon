@@ -136,6 +136,17 @@ export class SpaDriver {
       () => document.querySelector('[role="dialog"]') === null,
       { timeout: 20_000 },
     );
+    await this.#page.waitForFunction(
+      () => {
+        const composer = document.querySelector<HTMLTextAreaElement>(
+          'textarea[placeholder="Reply..."]',
+        );
+        return composer !== null
+          && !composer.disabled
+          && document.activeElement === composer;
+      },
+      { timeout: 20_000 },
+    );
     return request;
   }
 
