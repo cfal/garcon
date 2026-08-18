@@ -55,6 +55,7 @@ export class GitBranchSelectorState {
 			name: branch,
 			ref: branch,
 			kind: 'local-branch',
+			updatedAt: null,
 			isCurrent: branch === this.currentBranch,
 		}));
 	}
@@ -245,6 +246,7 @@ export class GitBranchSelectorState {
 			name: branch,
 			ref: branch,
 			kind: refKind ?? ('local-branch' as const),
+			updatedAt: null,
 		};
 		return this.checkoutRef(projectPath, refOption, surfaceId, effectiveProjectKey);
 	}

@@ -6,9 +6,25 @@ function renderSelector(overrides: Record<string, unknown> = {}) {
 	return render(GitBranchSelector, {
 		currentBranch: 'main',
 		refs: [
-			{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch', isCurrent: true },
-			{ name: 'feature/search', ref: 'refs/heads/feature/search', kind: 'local-branch' },
-			{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
+			{
+				name: 'main',
+				ref: 'refs/heads/main',
+				kind: 'local-branch',
+				updatedAt: null,
+				isCurrent: true,
+			},
+			{
+				name: 'feature/search',
+				ref: 'refs/heads/feature/search',
+				kind: 'local-branch',
+				updatedAt: null,
+			},
+			{
+				name: 'origin/main',
+				ref: 'refs/remotes/origin/main',
+				kind: 'remote-branch',
+				updatedAt: null,
+			},
 		],
 		isOpen: true,
 		onToggle: vi.fn(),
@@ -67,6 +83,7 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 			name: `branch-${index}`,
 			ref: `refs/heads/branch-${index}`,
 			kind: 'local-branch' as const,
+			updatedAt: null,
 			isCurrent: index === 0,
 		}));
 		renderSelector({ currentBranch: 'branch-0', refs });

@@ -1,6 +1,16 @@
 import type { AgentId } from '../../common/agents.ts';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { ThinkingMode } from '../../common/chat-modes.js';
+import { GIT_REF_RESULT_LIMITS } from '../../common/git-refs.js';
+import type {
+  GitRefKind,
+  GitRefOption,
+  GitRefsResponse,
+  GitRefSort,
+} from '../../common/git-refs.js';
+
+export { GIT_REF_RESULT_LIMITS };
+export type { GitRefKind, GitRefOption, GitRefsResponse, GitRefSort };
 
 export interface GitCommandResult {
   stdout: string;
@@ -235,27 +245,10 @@ export interface CommitOptions extends ProjectOptions {
   files: string[];
 }
 
-export type GitRefKind = 'local-branch' | 'remote-branch' | 'tag' | 'other';
-
-export const GIT_REF_RESULT_LIMITS = Object.freeze({
-  default: 200,
-  max: 500,
-});
-
-export interface GitRefOption {
-  name: string;
-  ref: string;
-  kind: GitRefKind;
-  isCurrent?: boolean;
-}
-
-export interface GitRefsResponse {
-  refs: GitRefOption[];
-}
-
 export interface GitRefsOptions extends ProjectOptions {
   query?: string;
   limit?: number;
+  sort?: GitRefSort;
 }
 
 export interface CheckoutOptions extends ProjectOptions {

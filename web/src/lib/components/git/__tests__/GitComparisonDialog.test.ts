@@ -13,8 +13,13 @@ function renderDialog(comparison = new GitComparisonController()) {
 		...render(GitComparisonDialog, {
 			comparison,
 			refs: [
-				{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch' },
-				{ name: 'v1', ref: 'refs/tags/v1', kind: 'tag' },
+				{
+					name: 'main',
+					ref: 'refs/heads/main',
+					kind: 'local-branch',
+					updatedAt: null,
+				},
+				{ name: 'v1', ref: 'refs/tags/v1', kind: 'tag', updatedAt: null },
 			],
 			isLoadingRefs: false,
 			onSearchRefs,

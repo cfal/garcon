@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { GitOutputLimitError, runGit } from '../run.js';
+import { assertGitRepository, GitOutputLimitError, runGit } from '../run.js';
 
 function textStream(value) {
   return new ReadableStream({
@@ -59,5 +59,57 @@ describe('runGit', () => {
     ).rejects.toBeInstanceOf(GitOutputLimitError);
     expect(kill).toHaveBeenCalledTimes(1);
     expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('kills an active process and preserves caller abort metadata', async () => {
+    let resolveExit;
+    const exited = new Promise((resolve) => {
+      resolveExit = resolve;
+    });
+    const kill = mock(() => resolveExit(143));
+    spawnMock.mockImplementation(() => ({
+      stdout: textStream(''),
+      stderr: textStream(''),
+      exited,
+      kill,
+    }));
+    const controller = new AbortController();
+
+    const result = runGit('/repo', ['for-each-ref'], {
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(result).rejects.toMatchObject({ aborted: true });
+    expect(kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not translate an aborted repository probe into a repository error', async () => {
+    let resolveExit;
+    let resolveSpawned;
+    const exited = new Promise((resolve) => {
+      resolveExit = resolve;
+    });
+    const spawned = new Promise((resolve) => {
+      resolveSpawned = resolve;
+    });
+    const kill = mock(() => resolveExit(143));
+    spawnMock.mockImplementation(() => {
+      resolveSpawned();
+      return {
+        stdout: textStream(''),
+        stderr: textStream(''),
+        exited,
+        kill,
+      };
+    });
+    const controller = new AbortController();
+
+    const result = assertGitRepository(process.cwd(), controller.signal);
+    await spawned;
+    controller.abort();
+
+    await expect(result).rejects.toMatchObject({ aborted: true });
+    expect(kill).toHaveBeenCalledTimes(1);
   });
 });

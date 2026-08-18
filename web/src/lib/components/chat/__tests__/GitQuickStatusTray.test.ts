@@ -8,6 +8,7 @@ function refsFromNames(names: string[]) {
 		name,
 		ref: `refs/heads/${name}`,
 		kind: 'local-branch' as const,
+		updatedAt: null,
 		isCurrent: name === 'main',
 	}));
 }

@@ -15,9 +15,25 @@ describe('GitBranchSelectorState', () => {
 		vi.clearAllMocks();
 		vi.mocked(getGitRefs).mockResolvedValue({
 			refs: [
-				{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch', isCurrent: true },
-				{ name: 'feature', ref: 'refs/heads/feature', kind: 'local-branch' },
-				{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
+				{
+					name: 'main',
+					ref: 'refs/heads/main',
+					kind: 'local-branch',
+					updatedAt: null,
+					isCurrent: true,
+				},
+				{
+					name: 'feature',
+					ref: 'refs/heads/feature',
+					kind: 'local-branch',
+					updatedAt: null,
+				},
+				{
+					name: 'origin/main',
+					ref: 'refs/remotes/origin/main',
+					kind: 'remote-branch',
+					updatedAt: null,
+				},
 			],
 		});
 		branchSelector = new GitBranchSelectorState();
@@ -47,7 +63,14 @@ describe('GitBranchSelectorState', () => {
 		branchSelector = new GitBranchSelectorState({ onMutation });
 		branchSelector.setProject('/project', 'main', '/project');
 		branchSelector.showBranchDropdown = true;
-		branchSelector.refs = [{ name: 'feature', ref: 'refs/heads/feature', kind: 'local-branch' }];
+		branchSelector.refs = [
+			{
+				name: 'feature',
+				ref: 'refs/heads/feature',
+				kind: 'local-branch',
+				updatedAt: null,
+			},
+		];
 		vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
 		vi.mocked(getGitRefs).mockResolvedValueOnce({
 			refs: [
@@ -55,6 +78,7 @@ describe('GitBranchSelectorState', () => {
 					name: 'feature',
 					ref: 'refs/heads/feature',
 					kind: 'local-branch',
+					updatedAt: null,
 					isCurrent: true,
 				},
 			],
@@ -87,6 +111,7 @@ describe('GitBranchSelectorState', () => {
 					name: 'feature',
 					ref: 'refs/heads/feature',
 					kind: 'local-branch',
+					updatedAt: null,
 					isCurrent: true,
 				},
 			],
@@ -98,7 +123,12 @@ describe('GitBranchSelectorState', () => {
 	it('checks out remote refs using their full ref value', async () => {
 		branchSelector.setProject('/project', 'main', '/project');
 		branchSelector.refs = [
-			{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
+			{
+				name: 'origin/main',
+				ref: 'refs/remotes/origin/main',
+				kind: 'remote-branch',
+				updatedAt: null,
+			},
 		];
 		vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
 		vi.mocked(getGitRefs).mockResolvedValueOnce({
@@ -107,6 +137,7 @@ describe('GitBranchSelectorState', () => {
 					name: 'origin/main',
 					ref: 'refs/remotes/origin/main',
 					kind: 'remote-branch',
+					updatedAt: null,
 				},
 			],
 		});
@@ -142,6 +173,7 @@ describe('GitBranchSelectorState', () => {
 					name: 'feature/new-ui',
 					ref: 'refs/heads/feature/new-ui',
 					kind: 'local-branch',
+					updatedAt: null,
 					isCurrent: true,
 				},
 			],
