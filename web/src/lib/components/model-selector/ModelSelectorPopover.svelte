@@ -185,7 +185,7 @@
 		<Dialog.Content
 			bind:ref={contentNode}
 			class={cn(
-				'top-[var(--app-viewport-center-y)] h-[min(32rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] overflow-hidden p-0 sm:w-full',
+				'safe-viewport-dialog top-[var(--app-viewport-center-y)] h-[min(32rem,calc(var(--app-height)-1rem))] overflow-hidden p-0',
 				contentClass,
 			)}
 			showCloseButton={false}
@@ -216,6 +216,7 @@
 			{align}
 			{side}
 			sideOffset={8}
+			collisionPadding={8}
 			class={cn(
 				contentWidthClass,
 				contentHeightClass,

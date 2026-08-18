@@ -29,7 +29,8 @@
 	} as never);
 	setRemoteSettings(createRemoteSettingsStore());
 	setNotifications(createNotificationsStore());
-	setTransientLayers(new TransientLayerRegistry(new ChatInteractionGate()));
+	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	setTransientLayers(transientLayers);
 	setSnippets(
 		createSnippetsStore({
 			get: async () => ({ revision: 0, snippets: [] }),
@@ -113,4 +114,5 @@
 	} as never);
 </script>
 
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <NewChatDialog />

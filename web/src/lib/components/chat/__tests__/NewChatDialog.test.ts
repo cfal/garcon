@@ -1,8 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RefinePromptResponse } from '$shared/prompt-refinement';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
+import * as refinementApi from '$lib/api/prompt-refinement';
 import * as settingsApi from '$lib/api/settings';
 import NewChatDialogTestHost from './NewChatDialogTestHost.svelte';
+import { resetComposerEditorStub } from './ComposerEditorStub.svelte';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn().mockResolvedValue({ valid: true, isGitRepo: false }),
@@ -17,6 +20,26 @@ vi.mock('$lib/api/settings', () => ({
 	getRemoteSettings: vi.fn(),
 	updateRemoteSettings: vi.fn(),
 }));
+
+vi.mock('$lib/api/prompt-refinement', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/prompt-refinement')>();
+	return { ...actual, refinePrompt: vi.fn() };
+});
+
+vi.mock('../ComposerEditor.svelte', async () => ({
+	default: (await import('./ComposerEditorStub.svelte')).default,
+}));
+
+interface DeferredRefinement {
+	promise: Promise<RefinePromptResponse>;
+	resolve: (value: RefinePromptResponse) => void;
+}
+
+function deferredRefinement(): DeferredRefinement {
+	let resolve!: (value: RefinePromptResponse) => void;
+	const promise = new Promise<RefinePromptResponse>((done) => (resolve = done));
+	return { promise, resolve };
+}
 
 function makeSnapshot(): RemoteSettingsSnapshot {
 	return {
@@ -78,11 +101,13 @@ describe('NewChatDialog', () => {
 
 	afterEach(() => {
 		cleanup();
+		resetComposerEditorStub();
+		vi.mocked(refinementApi.refinePrompt).mockReset();
 		vi.unstubAllGlobals();
 		vi.clearAllMocks();
 	});
 
-	it('uses centered dialog positioning on small screens', async () => {
+	it('keeps the small-screen dialog within the safe viewport', async () => {
 		render(NewChatDialogTestHost);
 
 		await waitFor(() => {
@@ -94,10 +119,8 @@ describe('NewChatDialog', () => {
 			?.getAttribute('class');
 
 		expect(contentClass).toContain('top-[var(--app-viewport-center-y)]');
-		expect(contentClass).toContain('left-[50%]');
-		expect(contentClass).toContain('translate-x-[-50%]');
 		expect(contentClass).toContain('translate-y-[-50%]');
-		expect(contentClass).toContain('w-[calc(100vw-1rem)]');
+		expect(contentClass).toContain('safe-viewport-dialog');
 		expect(contentClass).toContain('max-h-[calc(var(--app-height)-1rem)]');
 		expect(contentClass).toContain('sm:top-[50%]');
 		expect(contentClass).not.toContain('top-auto');
@@ -123,5 +146,96 @@ describe('NewChatDialog', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('dialog')).toBeNull();
 		});
+	});
+
+	it('keeps New Chat open when the expanded child closes and restores the compact draft', async () => {
+		render(NewChatDialogTestHost);
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const compact = screen.getByPlaceholderText('How can I help you today?') as HTMLTextAreaElement;
+		await fireEvent.input(compact, { target: { value: 'Draft in New Chat' } });
+		compact.setSelectionRange(1, 6);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		const expanded = (await screen.findByRole('textbox', {
+			name: 'Expanded composer text',
+		})) as HTMLTextAreaElement;
+		await new Promise<void>((resolve) => setTimeout(resolve, 10));
+		expect(screen.getAllByRole('dialog')).toHaveLength(2);
+		await fireEvent.input(expanded, { target: { value: 'Live-synced New Chat draft' } });
+		expanded.setSelectionRange(4, 11);
+		await fireEvent.pointerUp(expanded);
+
+		await fireEvent.keyDown(expanded, { key: 'Escape' });
+		await waitFor(() => {
+			expect(screen.queryByRole('textbox', { name: 'Expanded composer text' })).toBeNull();
+		});
+		expect(screen.getAllByRole('dialog')).toHaveLength(1);
+		expect(compact.value).toBe('Live-synced New Chat draft');
+		expect(compact.selectionStart).toBe(4);
+		expect(compact.selectionEnd).toBe(11);
+		expect(document.activeElement).toBe(compact);
+
+		await fireEvent.keyDown(compact, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	});
+
+	it('gives the expanded child Escape priority before refinement and the parent', async () => {
+		const pending = deferredRefinement();
+		vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
+		render(NewChatDialogTestHost);
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const compact = screen.getByPlaceholderText('How can I help you today?') as HTMLTextAreaElement;
+		await fireEvent.input(compact, { target: { value: 'Refine inside New Chat' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		const expanded = await screen.findByRole('textbox', { name: 'Expanded composer text' });
+		await new Promise<void>((resolve) => setTimeout(resolve, 10));
+		const childDialog = screen.getAllByRole('dialog')[1];
+		if (!childDialog) throw new Error('Missing expanded composer dialog');
+		await fireEvent.click(within(childDialog).getByRole('button', { name: 'Refine prompt' }));
+		const [, options] = vi.mocked(refinementApi.refinePrompt).mock.calls[0];
+
+		await fireEvent.keyDown(expanded, { key: 'Escape' });
+		await waitFor(() => {
+			expect(screen.queryByRole('textbox', { name: 'Expanded composer text' })).toBeNull();
+		});
+		expect(screen.getAllByRole('dialog')).toHaveLength(1);
+		expect((options?.signal as AbortSignal).aborted).toBe(false);
+		expect(compact.readOnly).toBe(true);
+
+		await fireEvent.keyDown(compact, { key: 'Escape' });
+		expect((options?.signal as AbortSignal).aborted).toBe(true);
+		await waitFor(() => expect(compact.readOnly).toBe(false));
+		expect(screen.getAllByRole('dialog')).toHaveLength(1);
+		expect(compact.value).toBe('Refine inside New Chat');
+		expect(document.activeElement).toBe(compact);
+
+		await fireEvent.keyDown(compact, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		pending.resolve({ success: true, refinedPrompt: 'Must not apply' });
+		await pending.promise;
+	});
+
+	it('cancels refinement when the parent New Chat dialog closes', async () => {
+		const pending = deferredRefinement();
+		vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
+		render(NewChatDialogTestHost);
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const compact = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(compact, { target: { value: 'Close during refinement' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
+		const [, options] = vi.mocked(refinementApi.refinePrompt).mock.calls[0];
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect((options?.signal as AbortSignal).aborted).toBe(true);
+
+		pending.resolve({ success: true, refinedPrompt: 'Must not apply' });
+		await pending.promise;
 	});
 });

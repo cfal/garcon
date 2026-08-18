@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import type { ChatQueueState, QueueEntry, QueuePause } from '$lib/types/chat';
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
@@ -55,6 +55,7 @@
 	let moveError = $state<string | null>(null);
 	let moveAnnouncement = $state('');
 	let dragEnabled = $state(false);
+	let moveFocusFrame: number | null = null;
 
 	const entries = $derived(queue?.entries ?? []);
 	const queuedCount = $derived(entries.length);
@@ -81,6 +82,10 @@
 		updateDragCapability();
 		media.addEventListener('change', updateDragCapability);
 		return () => media.removeEventListener('change', updateDragCapability);
+	});
+
+	onDestroy(() => {
+		if (moveFocusFrame !== null) cancelAnimationFrame(moveFocusFrame);
 	});
 
 	$effect(() => {
@@ -261,6 +266,35 @@
 		await moveRelative(entryId, target.id, delta === -1 ? 'before' : 'after');
 	}
 
+	function focusMoveButton(
+		entryId: string,
+		preferredDirection?: 'up' | 'down',
+	): void {
+		const buttons = [
+			...(listContainer?.querySelectorAll<HTMLButtonElement>('[data-queue-move-id]') ?? []),
+		].filter((button) => button.dataset.queueMoveId === entryId && !button.disabled);
+		const preferredButton = preferredDirection
+			? buttons.find((button) => button.dataset.queueMoveDirection === preferredDirection)
+			: undefined;
+		const button = preferredButton ?? buttons[0];
+		if (button) {
+			button.focus();
+			return;
+		}
+		listHeading?.focus();
+	}
+
+	function scheduleMoveFocus(
+		entryId: string,
+		preferredDirection?: 'up' | 'down',
+	): void {
+		if (moveFocusFrame !== null) cancelAnimationFrame(moveFocusFrame);
+		moveFocusFrame = requestAnimationFrame(() => {
+			moveFocusFrame = null;
+			focusMoveButton(entryId, preferredDirection);
+		});
+	}
+
 	async function dropEntry(
 		sourceEntryId: string,
 		targetEntryId: string,
@@ -268,14 +302,7 @@
 	): Promise<void> {
 		await moveRelative(sourceEntryId, targetEntryId, placement);
 		await tick();
-		const moveButton = [
-			...(listContainer?.querySelectorAll<HTMLButtonElement>('[data-queue-move-id]') ?? []),
-		].find((button) => button.dataset.queueMoveId === sourceEntryId && !button.disabled);
-		if (moveButton) {
-			moveButton.focus();
-			return;
-		}
-		listHeading?.focus();
+		focusMoveButton(sourceEntryId);
 	}
 </script>
 
@@ -393,8 +420,8 @@
 								onEdit={beginEdit}
 								onDelete={(entryId) => void deleteEntry(entryId)}
 								onMove={moveEntry}
+								onMoveSettled={scheduleMoveFocus}
 								onDrop={dropEntry}
-								onFocusFallback={() => listHeading?.focus()}
 							/>
 						</svelte:boundary>
 					{/each}

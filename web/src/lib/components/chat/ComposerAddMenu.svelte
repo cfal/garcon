@@ -36,7 +36,13 @@
 	>
 		<Plus class="size-4" />
 	</DropdownMenuTrigger>
-	<DropdownMenuContent align="start">
+	<DropdownMenuContent
+		align="start"
+		side="top"
+		sideOffset={8}
+		collisionPadding={8}
+		class="w-64 max-w-[calc(100vw-1rem)]"
+	>
 		<DropdownMenuItem onclick={onAddImage} disabled={!canAttachImages} class="items-start">
 			<ImagePlus class="mt-0.5 size-4" />
 			<div class="min-w-0">

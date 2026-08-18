@@ -699,6 +699,19 @@ describe('NewChatFormState', () => {
 		expect(formState.canSubmit).toBe(false);
 	});
 
+	it('tracks prompt and attachment revisions for atomic prompt transforms', () => {
+		const initialRevision = formState.contentRevision;
+		formState.firstMessage = 'Draft';
+		expect(formState.contentRevision).toBe(initialRevision + 1);
+
+		const attachment = new File(['image'], 'draft.png', { type: 'image/png' });
+		formState.addImages([attachment]);
+		expect(formState.contentRevision).toBe(initialRevision + 2);
+
+		formState.removeImage(0);
+		expect(formState.contentRevision).toBe(initialRevision + 3);
+	});
+
 	it('rejects an agent that becomes unavailable before submission', () => {
 		formState.selectAgent('direct-openai-compatible');
 		formState.settingsLoaded = true;

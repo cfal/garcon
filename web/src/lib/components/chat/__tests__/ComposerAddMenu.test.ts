@@ -37,4 +37,14 @@ describe('ComposerAddMenu', () => {
 		expect(screen.getByTestId('palette-open-count').textContent).toBe('1');
 		expect(screen.queryByRole('menuitem', { name: /Snippets/ })).toBeNull();
 	});
+
+	it('opens a constrained menu above the composer', async () => {
+		render(ComposerAddMenuTestHost, { canAttachImages: true });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+
+		const menu = screen.getByRole('menu');
+		expect(menu.getAttribute('data-side')).toBe('top');
+		expect(menu.classList.contains('w-64')).toBe(true);
+		expect(menu.classList.contains('max-w-[calc(100vw-1rem)]')).toBe(true);
+	});
 });

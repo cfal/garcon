@@ -82,7 +82,8 @@ export class NewChatFormState {
 	showTagInput = $state(false);
 
 	// Form
-	firstMessage = $state('');
+	#firstMessage = $state('');
+	#contentRevision = 0;
 	error = $state<string | null>(null);
 	showBrowser = $state(false);
 	hasAutoOpened = $state(false);
@@ -149,6 +150,19 @@ export class NewChatFormState {
 				this.attachedImages.length,
 			)
 		);
+	}
+
+	get firstMessage(): string {
+		return this.#firstMessage;
+	}
+
+	set firstMessage(value: string) {
+		this.#firstMessage = value;
+		this.#contentRevision += 1;
+	}
+
+	get contentRevision(): number {
+		return this.#contentRevision;
 	}
 
 	get placeholder(): string {
@@ -311,6 +325,7 @@ export class NewChatFormState {
 
 	set attachedImages(files: File[]) {
 		this.#images.images = files;
+		this.#contentRevision += 1;
 	}
 
 	imageUrlFor(file: File, idx: number): string | undefined {
@@ -318,11 +333,15 @@ export class NewChatFormState {
 	}
 
 	addImages(files: File[], support?: ChatAttachmentSupport): void {
+		const previousImages = this.#images.images;
 		this.#images.add(files, support);
+		if (this.#images.images !== previousImages) this.#contentRevision += 1;
 	}
 
 	removeImage(index: number): void {
+		const previousImages = this.#images.images;
 		this.#images.remove(index);
+		if (this.#images.images !== previousImages) this.#contentRevision += 1;
 	}
 
 	reconcileImageUrls(): void {

@@ -76,6 +76,7 @@
 	"chat_composer_expanded_editor_title": "Expanded composer",
 	"chat_composer_image_attachments_unavailable": "The selected agent does not support file attachments.",
 	"chat_composer_message_input_area": "Message input area",
+	"chat_composer_more_actions": "More composer actions",
 	"chat_composer_open_expanded_editor": "Open expanded composer",
 	"chat_composer_permission_mode": "Permission mode",
 	"chat_composer_prompt_changed_during_refinement": "The draft changed while refinement was running, so the result was not applied.",

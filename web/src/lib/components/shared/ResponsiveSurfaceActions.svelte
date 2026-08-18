@@ -33,6 +33,7 @@
 		menuContent,
 		menuLeadingContent,
 		menuIcon: MenuIcon = Ellipsis,
+		menuButtonClass,
 		fixed,
 		class: className,
 	}: {
@@ -41,6 +42,7 @@
 		menuContent?: Snippet<[readonly ResponsiveSurfaceAction[]]>;
 		menuLeadingContent?: Snippet;
 		menuIcon?: Component<{ class?: string }>;
+		menuButtonClass?: string;
 		fixed?: Snippet;
 		class?: string;
 	} = $props();
@@ -74,6 +76,13 @@
 			(!action.variant || action.variant === 'ghost') &&
 				'text-muted-foreground hover:bg-accent hover:text-foreground',
 			action.buttonClass,
+		);
+	}
+
+	function menuClass(): string {
+		return cn(
+			'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+			menuButtonClass,
 		);
 	}
 
@@ -179,7 +188,7 @@
 	{#if showMenu}
 		<DropdownMenu>
 			<DropdownMenuTrigger
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+				class={menuClass()}
 				aria-label={menuLabel}
 				title={menuLabel}
 				data-responsive-surface-menu-trigger
@@ -221,12 +230,7 @@
 		{#each actions as action (action.renderKey ?? action.id)}
 			{@render actionButton(action, true)}
 		{/each}
-		<button
-			type="button"
-			tabindex="-1"
-			class="inline-flex h-8 w-8 items-center justify-center rounded-md"
-			data-surface-action-overflow-measure
-		>
+		<button type="button" tabindex="-1" class={menuClass()} data-surface-action-overflow-measure>
 			<MenuIcon class="h-4 w-4" />
 		</button>
 	</div>

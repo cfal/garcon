@@ -784,10 +784,8 @@ describe('ModelSelectorPopover', () => {
 			.querySelector('[data-slot="dialog-content"]')
 			?.getAttribute('class');
 		expect(contentClass).toContain('top-[var(--app-viewport-center-y)]');
-		expect(contentClass).toContain('left-[50%]');
-		expect(contentClass).toContain('translate-x-[-50%]');
 		expect(contentClass).toContain('translate-y-[-50%]');
-		expect(contentClass).toContain('w-[calc(100vw-1rem)]');
+		expect(contentClass).toContain('safe-viewport-dialog');
 		expect(contentClass).toContain('h-[min(32rem,calc(var(--app-height)-1rem))]');
 		expect(contentClass).toContain('overflow-hidden');
 		expect(contentClass).toContain('p-0');
