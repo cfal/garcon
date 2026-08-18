@@ -518,10 +518,18 @@
 	// Marks real scroll gestures on the actual viewport element without wrapper event forwarding.
 	$effect(() => {
 		const node = scrollContainer;
+		// The synchronous port read binds this effect to port changes, so teardown releases
+		// native-touch ownership on the captured old port before rebinding.
+		const viewport = conversationViewport;
 		if (!node) return;
-		return observeConversationViewportScrollGestures(node, (direction) =>
-			scroll.noteUserScrollIntent(direction),
-		);
+		const stop = observeConversationViewportScrollGestures(node, (intent) => {
+			if (intent.touch !== null) viewport?.noteNativeTouchLifecycle(intent.touch);
+			if (intent.touch !== 'end') scroll.noteUserScrollIntent(intent.direction);
+		});
+		return () => {
+			stop();
+			viewport?.noteNativeTouchLifecycle('end');
+		};
 	});
 
 	// Scrolls to bottom when the scroll container becomes available.

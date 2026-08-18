@@ -631,6 +631,8 @@ interface ControllerExposure {
 	controller: ConversationFeedVirtualController;
 	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
 	initialEndRestoredCount(): number;
+	prepareClampedScrollbarPrepend(): void;
+	publishPreparedEarlierPrependAfterUserIntent(): Promise<void>;
 	prepareHiddenOffsetWithMissingAnchor(): Promise<void>;
 	prepareHiddenOffsetWithoutAnchor(): Promise<void>;
 	prependWithRetainedWithheldAnchor(index: number): Promise<void>;
@@ -842,6 +844,32 @@ describe('ConversationFeedVirtualController', () => {
 		expect(scrollToOffset).not.toHaveBeenCalled();
 	});
 
+	it('does not restore a pre-commit anchor cancelled by newer user intent', async () => {
+		const { exposure } = await renderController();
+		const viewport = document.querySelector<HTMLDivElement>('[data-controller-viewport]');
+		if (!viewport) throw new Error('Expected the controller viewport');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle pinned' }));
+		viewport.scrollTop = 86;
+		viewport.dispatchEvent(new Event('scroll'));
+		await nextFrame();
+		const scrollToOffset = vi.spyOn(exposure.instance, 'scrollToOffset');
+
+		await exposure.publishPreparedEarlierPrependAfterUserIntent();
+		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
+
+		expect(scrollToOffset).not.toHaveBeenCalled();
+		expect(exposure.controller.ownsScrollPosition()).toBe(false);
+	});
+
+	it('reports a blocked scrollbar drag while preserving its clamped prepend', async () => {
+		const { exposure } = await renderController();
+		exposure.prepareClampedScrollbarPrepend();
+
+		expect(exposure.controller.cancelForUserIntent('earlier', 'scrollbar-drag')).toBe(
+			'blocked-scrollbar-drag',
+		);
+	});
+
 	it('keeps a clamped prepend latched through a tail publication', async () => {
 		const { exposure, viewport, scrollToIndex, scrollToOffset, expectedScrollOffset } =
 			await preparePendingEarlierPrepend((current, index) =>
@@ -851,7 +879,9 @@ describe('ConversationFeedVirtualController', () => {
 		scrollToIndex.mockClear();
 		scrollToOffset.mockClear();
 		viewport.scrollTop = 80;
-		exposure.controller.cancelForUserIntent('earlier');
+		expect(exposure.controller.cancelForUserIntent('earlier')).toBe(
+			'preserved-earlier-prepend',
+		);
 		expect(cancelScroll).not.toHaveBeenCalled();
 		await exposure.releaseWithheldEndItem();
 
@@ -868,7 +898,10 @@ describe('ConversationFeedVirtualController', () => {
 		scrollToIndex.mockClear();
 		scrollToOffset.mockClear();
 		viewport.scrollTop = 0;
-		exposure.controller.cancelForUserIntent('earlier');
+		expect(exposure.controller.cancelForUserIntent('earlier')).toBe(
+			'preserved-earlier-prepend',
+		);
+		exposure.controller.noteNativeTouchLifecycle('start');
 		await exposure.releaseWithheldEndItem();
 
 		await waitFor(() =>
@@ -884,13 +917,34 @@ describe('ConversationFeedVirtualController', () => {
 		scrollToIndex.mockClear();
 		scrollToOffset.mockClear();
 		viewport.scrollTop = 80;
-		exposure.controller.cancelForUserIntent(null);
+		expect(exposure.controller.cancelForUserIntent(null)).toBe('preserved-earlier-prepend');
 		exposure.controller.cancelForUserIntent('earlier');
 		scrollToIndex.mockClear();
 		scrollToOffset.mockClear();
 		await exposure.releaseWithheldEndItem();
 		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
 
+		expect(scrollToIndex).not.toHaveBeenCalled();
+		expect(scrollToOffset).not.toHaveBeenCalled();
+	});
+
+	it('suppresses the counter-direction settle write while a native touch owns the viewport', async () => {
+		const { exposure, viewport, scrollToIndex, scrollToOffset } =
+			await preparePendingEarlierPrepend((current, index) =>
+				current.stageEarlierPrependWithTail(index),
+			);
+		scrollToIndex.mockClear();
+		scrollToOffset.mockClear();
+		viewport.scrollTop = 0;
+		exposure.controller.noteNativeTouchLifecycle('move');
+		await exposure.releaseWithheldEndItem();
+		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
+
+		expect(scrollToIndex).not.toHaveBeenCalled();
+		expect(scrollToOffset).not.toHaveBeenCalled();
+
+		exposure.controller.noteNativeTouchLifecycle('end');
+		for (let frame = 0; frame < 10; frame += 1) await nextFrame();
 		expect(scrollToIndex).not.toHaveBeenCalled();
 		expect(scrollToOffset).not.toHaveBeenCalled();
 	});
@@ -1021,7 +1075,7 @@ describe('ConversationFeedVirtualController', () => {
 		const scrollToIndex = vi.spyOn(exposure.instance, 'scrollToIndex');
 
 		exposure.controller.restoreInitialEnd();
-		exposure.controller.cancelForUserIntent(null);
+		expect(exposure.controller.cancelForUserIntent(null)).toBe('cancelled');
 		await nextFrame();
 		await nextFrame();
 		await nextFrame();

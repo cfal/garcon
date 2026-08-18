@@ -5,7 +5,15 @@ export interface ConversationTouchPoint {
 	clientY: number;
 }
 
-export type ConversationScrollIntentReporter = (direction: TranscriptPageDirection | null) => void;
+export type ConversationNativeTouchPhase = 'start' | 'move' | 'end';
+
+export interface ConversationScrollIntent {
+	direction: TranscriptPageDirection | null;
+	// Carries the native touch lifetime; a directionless start stays stateless for settlement.
+	touch: ConversationNativeTouchPhase | null;
+}
+
+export type ConversationScrollIntentReporter = (intent: ConversationScrollIntent) => void;
 
 export class ConversationTouchScrollGesture {
 	#identifier: number | null = null;
@@ -82,28 +90,30 @@ export function observeConversationViewportScrollGestures(
 		}));
 	const handleWheel = (event: WheelEvent) => {
 		const direction = conversationWheelScrollDirection(event.deltaY);
-		if (direction) report(direction);
+		if (direction) report({ direction, touch: null });
 	};
 	const handleTouchStart = (event: TouchEvent) => {
-		if (touchGesture.begin(touchPoints(event))) report(null);
+		if (touchGesture.begin(touchPoints(event))) report({ direction: null, touch: 'start' });
 	};
 	const handleTouchMove = (event: TouchEvent) => {
 		const direction = touchGesture.move(touchPoints(event));
-		if (direction) report(direction);
+		if (direction) report({ direction, touch: 'move' });
 	};
 	const handleTouchEnd = (event: TouchEvent) => {
 		touchGesture.end(touchPoints(event));
+		// Ownership ends only when the last finger lifts; a partial lift keeps the gesture alive.
+		if (event.touches.length === 0) report({ direction: null, touch: 'end' });
 	};
 	const handlePointerDown = (event: PointerEvent) => {
-		if (event.button === 0 && event.pointerType !== 'touch') report(null);
+		if (event.button === 0 && event.pointerType !== 'touch') report({ direction: null, touch: null });
 	};
 	const handleKeydown = (event: KeyboardEvent) => {
 		if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
-			report('earlier');
+			report({ direction: 'earlier', touch: null });
 		} else if (event.key === ' ') {
-			report(event.shiftKey ? 'earlier' : 'later');
+			report({ direction: event.shiftKey ? 'earlier' : 'later', touch: null });
 		} else if (event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === 'End') {
-			report('later');
+			report({ direction: 'later', touch: null });
 		}
 	};
 

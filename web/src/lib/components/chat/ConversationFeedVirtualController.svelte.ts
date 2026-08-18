@@ -4,12 +4,14 @@ import type { Readable, Unsubscriber } from 'svelte/store';
 import { createVirtualizer, type Range, type SvelteVirtualizer } from '@tanstack/svelte-virtual';
 import type {
 	ConversationLayoutWaitResult,
+	ConversationViewportIntentCancellationResult,
 	ConversationViewportFillResult,
 	ConversationViewportPort,
 	ConversationViewportTarget,
 	ConversationViewportTargetResult,
 	HiddenReadingRestoreResult,
 } from '$lib/chat/transcript/conversation-viewport-port.js';
+import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 import type { ConversationVirtualGeometrySnapshot } from './ConversationFeedProjectionState.svelte.js';
 import {
 	CHAT_GEOMETRY_END_THRESHOLD_PX,
@@ -97,6 +99,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#initialEndRestoreEpoch = 0;
 	#activeTargetScrolls = 0;
 	#userIntentEpoch = 0;
+	#activeNativeTouch = false;
 	#scrollMargin = 0;
 	#observeElementRect = createConversationElementRectObserver({
 		width: 0,
@@ -444,6 +447,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#layoutMutationToken += 1;
 		this.#readingRestoreGeneration += 1;
 		this.#pendingReadingAnchor = null;
+		this.#preCommitAnchorBuffer.clear();
 		this.#earlierPrependAnchor.clear();
 		this.#programmaticScroll.cancel();
 	}
@@ -451,7 +455,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	cancelForUserIntent(
 		direction: 'earlier' | 'later' | null,
 		source: 'viewport' | 'scrollbar-drag' = 'viewport',
-	): boolean {
+	): ConversationViewportIntentCancellationResult {
 		this.#userIntentEpoch += 1;
 		this.#initialEndRestoreEpoch += 1;
 		this.#cancelTargetScroll();
@@ -465,12 +469,20 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		);
 		if (preservesEarlierPrepend) {
 			this.options.onInitialEndRestored?.();
-			return this.#earlierPrependAnchor.blocksViewportMutation(source);
+			return this.#earlierPrependAnchor.blocksViewportMutation(source)
+				? 'blocked-scrollbar-drag'
+				: 'preserved-earlier-prepend';
 		}
 		this.cancelPendingLayoutMutation();
 		this.#instance().cancelScroll();
 		this.options.onInitialEndRestored?.();
-		return false;
+		return 'cancelled';
+	}
+
+	noteNativeTouchLifecycle(phase: ConversationNativeTouchPhase): void {
+		// Only a direction-bearing move owns settlement; a fresh stateless press or a terminal
+		// end/cancel explicitly releases it so no stale ownership survives a rebinding.
+		this.#activeNativeTouch = phase === 'move';
 	}
 
 	async scrollToTarget(
@@ -791,7 +803,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				isCurrent: () =>
 					token === this.#layoutMutationToken &&
 					this.#programmaticScroll.isCurrent(operationEpoch) &&
-					this.isReady(),
+					this.isReady() &&
+					!this.#activeNativeTouch,
 			});
 		} finally {
 			release();

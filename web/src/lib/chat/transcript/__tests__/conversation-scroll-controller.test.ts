@@ -98,6 +98,9 @@ interface FakeViewport extends ConversationViewportPort {
 	>;
 	cancelPendingLayoutMutation: ReturnType<typeof vi.fn<() => void>>;
 	cancelForUserIntent: ReturnType<typeof vi.fn<ConversationViewportPort['cancelForUserIntent']>>;
+	noteNativeTouchLifecycle: ReturnType<
+		typeof vi.fn<ConversationViewportPort['noteNativeTouchLifecycle']>
+	>;
 	scrollToTarget: ReturnType<typeof vi.fn<ConversationViewportPort['scrollToTarget']>>;
 }
 
@@ -114,7 +117,8 @@ function fakeViewport(overrides: Partial<ConversationViewportPort> = {}): FakeVi
 		measureViewportFill: vi.fn(async () => 'overflow'),
 		restoreHiddenReadingPosition: vi.fn(async () => 'restored'),
 		cancelPendingLayoutMutation: vi.fn(),
-		cancelForUserIntent: vi.fn(),
+		cancelForUserIntent: vi.fn(() => 'cancelled'),
+		noteNativeTouchLifecycle: vi.fn(),
 		scrollToTarget: vi.fn(async () => 'completed'),
 		...overrides,
 	} as FakeViewport;
@@ -445,6 +449,58 @@ describe('ConversationScrollController', () => {
 		now.mockRestore();
 	});
 
+	it('hands a preserved prepend to its first matching native scroll', () => {
+		const cancelForUserIntent = vi
+			.fn<ConversationViewportPort['cancelForUserIntent']>()
+			.mockReturnValueOnce('preserved-earlier-prepend')
+			.mockReturnValue('cancelled');
+		const fixture = controllerFixture({
+			scroller: { clientHeight: 400, scrollTop: 2_000 },
+			viewport: fakeViewport({ cancelForUserIntent, ownsScrollPosition: vi.fn(() => true) }),
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.scroller.scrollTop = 1_900;
+		fixture.controller.handleScroll();
+		fixture.scroller.scrollTop = 1_800;
+		fixture.controller.handleScroll();
+
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledTimes(2);
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenLastCalledWith('earlier');
+	});
+
+	it('does not hand ordinary cancellation to a later viewport-owned scroll', () => {
+		const fixture = controllerFixture({
+			scroller: { clientHeight: 400, scrollTop: 2_000 },
+			viewport: fakeViewport({ ownsScrollPosition: vi.fn(() => true) }),
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.scroller.scrollTop = 1_900;
+		fixture.controller.handleScroll();
+
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
+	});
+
+	it('discards a preserved prepend handoff on opposite native movement', () => {
+		const cancelForUserIntent = vi
+			.fn<ConversationViewportPort['cancelForUserIntent']>()
+			.mockReturnValueOnce('preserved-earlier-prepend')
+			.mockReturnValue('cancelled');
+		const fixture = controllerFixture({
+			scroller: { clientHeight: 400, scrollTop: 2_000 },
+			viewport: fakeViewport({ cancelForUserIntent, ownsScrollPosition: vi.fn(() => true) }),
+		});
+
+		fixture.controller.noteUserScrollIntent('earlier');
+		fixture.scroller.scrollTop = 2_100;
+		fixture.controller.handleScroll();
+		fixture.scroller.scrollTop = 1_900;
+		fixture.controller.handleScroll();
+
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
+	});
+
 	it('pages after viewport scroll ownership releases inside the intent window', async () => {
 		const now = vi.spyOn(performance, 'now').mockReturnValue(100);
 		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
@@ -628,8 +684,15 @@ describe('ConversationScrollController', () => {
 		);
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const invalidatePendingWindowNavigation = vi.fn();
+		const cancelForUserIntent = vi.fn<ConversationViewportPort['cancelForUserIntent']>(() =>
+			'cancelled',
+		);
 		const fixture = controllerFixture({
-			viewport: fakeViewport({ waitForLayout }),
+			viewport: fakeViewport({
+				cancelForUserIntent,
+				ownsScrollPosition: vi.fn(() => true),
+				waitForLayout,
+			}),
 			state: {
 				canLoadEarlier: true,
 				invalidatePendingWindowNavigation,
@@ -642,16 +705,22 @@ describe('ConversationScrollController', () => {
 		const request = fixture.controller.requestPage('earlier', 'scroll');
 		await vi.waitFor(() => expect(waitForLayout).toHaveBeenCalledOnce());
 		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
-		fixture.viewport.cancelForUserIntent.mockClear();
-		const invalidationCount = invalidatePendingWindowNavigation.mock.calls.length;
 
 		fixture.scroller.scrollTop = 8_490;
 		fixture.controller.handleScroll();
-		expect(fixture.viewport.cancelForUserIntent).not.toHaveBeenCalled();
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
+
+		fixture.viewport.cancelForUserIntent.mockClear();
+		fixture.viewport.cancelForUserIntent
+			.mockReturnValueOnce('preserved-earlier-prepend')
+			.mockReturnValue('cancelled');
+		fixture.controller.noteUserScrollIntent('earlier');
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
+		const invalidationCount = invalidatePendingWindowNavigation.mock.calls.length;
 
 		fixture.scroller.scrollTop = 8_484;
 		fixture.controller.handleScroll();
-		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
+		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledTimes(2);
 		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledWith('earlier');
 		expect(invalidatePendingWindowNavigation).toHaveBeenCalledTimes(invalidationCount);
 		expect(loadEarlierPage).toHaveBeenCalledOnce();
@@ -1328,6 +1397,35 @@ describe('ConversationScrollController', () => {
 		fixture.scroller.scrollTop = 20;
 		fixture.controller.handleScroll();
 		expect(fixture.controller.canScrollToTop).toBe(true);
+	});
+
+	it('publishes feed-start state only after an active page mutation settles', async () => {
+		let resolveLayout!: (result: 'settled') => void;
+		const waitForLayout = vi.fn(
+			() => new Promise<'settled'>((resolve) => (resolveLayout = resolve)),
+		);
+		const fixture = controllerFixture({
+			scroller: { scrollTop: 240 },
+			state: {
+				canLoadEarlier: true,
+				loadEarlierPage: vi.fn(async () => {
+					fixture.state.feedMutationClock = mutationClock(1, 1);
+					return 'loaded' as const;
+				}),
+			},
+			viewport: fakeViewport({ waitForLayout }),
+		});
+
+		const pageRequest = fixture.controller.requestPage('earlier', 'button');
+		await vi.waitFor(() => expect(waitForLayout).toHaveBeenCalledOnce());
+		fixture.state.canLoadEarlier = false;
+		fixture.scroller.scrollTop = 0;
+		fixture.controller.handleScroll();
+		expect(fixture.controller.canScrollToTop).toBe(true);
+
+		resolveLayout('settled');
+		await expect(pageRequest).resolves.toBe('loaded');
+		expect(fixture.controller.canScrollToTop).toBe(false);
 	});
 
 	it('preserves committed initial-window policy when layout settling is superseded', async () => {

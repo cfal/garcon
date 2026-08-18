@@ -14,6 +14,8 @@
 		controller: ConversationFeedVirtualController;
 		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
 		initialEndRestoredCount(): number;
+		prepareClampedScrollbarPrepend(): void;
+		publishPreparedEarlierPrependAfterUserIntent(): Promise<void>;
 		prepareHiddenOffsetWithMissingAnchor(): Promise<void>;
 		prepareHiddenOffsetWithoutAnchor(): Promise<void>;
 		releaseWithheldEndItem(): Promise<void>;
@@ -131,6 +133,8 @@
 			controller,
 			instance,
 			initialEndRestoredCount: () => initialEndRestoredCount,
+			prepareClampedScrollbarPrepend,
+			publishPreparedEarlierPrependAfterUserIntent,
 			prepareHiddenOffsetWithMissingAnchor,
 			prepareHiddenOffsetWithoutAnchor,
 			releaseWithheldEndItem,
@@ -203,6 +207,11 @@
 		geometryRevision += 1;
 	}
 
+	function prepareClampedScrollbarPrepend(): void {
+		if (viewport) viewport.scrollTop = 0;
+		controller.prepareForGeometryPublication(geometryRevision + 1, true, true);
+	}
+
 	function prependItems(): void {
 		controller.prepareForGeometryPublication(geometryRevision + 1);
 		historyEarlierMutation = true;
@@ -210,6 +219,18 @@
 		itemCount += 4;
 		measurementReset = 'none';
 		geometryRevision += 1;
+	}
+
+	async function publishPreparedEarlierPrependAfterUserIntent(): Promise<void> {
+		controller.prepareForGeometryPublication(geometryRevision + 1, true);
+		controller.cancelForUserIntent('earlier');
+		historyEarlierMutation = true;
+		firstItemNumber -= 4;
+		itemCount += 4;
+		measurementReset = 'none';
+		geometryRevision += 1;
+		await tick();
+		await tick();
 	}
 
 	function toggleScale(): void {
