@@ -58,14 +58,80 @@ describe('TranscriptAdoptionService', () => {
   });
 
   it('runs lazy adoption only once under concurrent first opens', async () => {
+    const adopted = [];
     await withFixture(async ({ adoption, loadCounts }) => {
       const [first, second] = await Promise.all([
         adoption.ensure('chat-1'),
         adoption.ensure('chat-1'),
       ]);
+      await adoption.ensure('chat-1');
 
       expect(first.viewId).toBe(second.viewId);
       expect(loadCounts).toEqual({ prefix: 1, current: 1 });
+      expect(adopted).toEqual(['chat-1']);
+    }, { onAdopted: (chatId) => adopted.push(chatId) });
+  });
+
+  it('does not announce failed or aborted adoption', async () => {
+    const adopted = [];
+    await withFixture(async ({ adoption }) => {
+      await expect(adoption.ensure('chat-1')).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+      });
+      expect(adopted).toEqual([]);
+    }, {
+      onAdopted: (chatId) => adopted.push(chatId),
+      legacyHistoryImport: {
+        async *load() {
+          throw new Error('synthetic import failure');
+        },
+      },
+    });
+
+    await withFixture(async ({ adoption }) => {
+      const abort = new AbortController();
+      abort.abort();
+      await expect(adoption.ensure('chat-1', abort.signal)).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+      expect(adopted).toEqual([]);
+    }, { onAdopted: (chatId) => adopted.push(chatId) });
+  });
+
+  it('contains adoption notification failures after the view is durable', async () => {
+    const warnings = [];
+    await withFixture(async ({ adoption, ledger }) => {
+      await expect(adoption.ensure('chat-1')).resolves.toMatchObject({ viewId: 'view-1' });
+      expect(ledger.currentView('chat-1')).toMatchObject({ viewId: 'view-1' });
+      expect(warnings).toEqual([[
+        'Transcript adoption notification failed.',
+        { code: 'TRANSCRIPT_ADOPTION_NOTIFICATION_FAILED' },
+      ]]);
+    }, {
+      onAdopted() {
+        throw new Error('synthetic callback failure');
+      },
+      logger: { warn: (...args) => warnings.push(args) },
+    });
+  });
+
+  it('announces a durable view before session-cache repair', async () => {
+    const order = [];
+    let entry;
+    await withFixture(async (fixture) => {
+      entry = fixture.entry;
+      await expect(fixture.adoption.ensure('chat-1')).rejects.toThrow('synthetic cache failure');
+      expect(fixture.ledger.currentView('chat-1')).toMatchObject({ viewId: 'view-1' });
+      expect(order).toEqual(['adopted', 'repair']);
+    }, {
+      onAdopted() {
+        order.push('adopted');
+        entry.agentSessionId = 'stale-session';
+      },
+      beforeUpdate() {
+        order.push('repair');
+        throw new Error('synthetic cache failure');
+      },
     });
   });
 
@@ -104,7 +170,7 @@ describe('TranscriptAdoptionService', () => {
   });
 });
 
-async function withFixture(run) {
+async function withFixture(run, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-ledger-adoption-'));
   const store = new TranscriptLedgerStore(root, {
     createViewId: () => transcriptViewId('view-1'),
@@ -136,7 +202,7 @@ async function withFixture(run) {
       defaults: () => ({ ownerId: 'test', schemaVersion: 1, values: {} }),
       parse: (value) => value,
     },
-    legacyHistoryImport: {
+    legacyHistoryImport: options.legacyHistoryImport ?? {
       async *load() {
         loadCounts.current += 1;
         yield current.map((message) => ({ message }));
@@ -148,6 +214,7 @@ async function withFixture(run) {
     registry: {
       getChat: () => entry,
       updateChat(_chatId, patch) {
+        options.beforeUpdate?.();
         updates.push(patch);
         Object.assign(entry, patch);
         return { id: 'chat-1', ...entry };
@@ -157,11 +224,14 @@ async function withFixture(run) {
     getCarryOverRevision: () => 'carryover-1',
     async loadFrozenPrefix() {
       loadCounts.prefix += 1;
+      if (options.loadFrozenPrefix) return options.loadFrozenPrefix();
       return [
         new UserMessage(TS, 'prefix', undefined, { upstreamRequestId: 'prefix-message' }),
         new AssistantMessage(TS, 'prefix answer'),
       ];
     },
+    onAdopted: options.onAdopted,
+    logger: options.logger,
     now: () => TS,
   });
   try {

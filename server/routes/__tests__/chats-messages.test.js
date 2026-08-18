@@ -11,12 +11,9 @@ mock.module('../../chats/title-generator.js', () => ({
   TitleGenerationError: class TitleGenerationError extends Error {},
 }));
 
-mock.module('../../chats/fork-chat.js', () => ({
-  forkChatFileCopy: mock(() => Promise.resolve({})),
-}));
-
 import createChatRoutes from '../chats.js';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
+import { LedgerFencedError } from '../../ledger/errors.ts';
 import { TranscriptAdoptionService } from '../../ledger/adoption.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
@@ -271,7 +268,7 @@ describe('GET /api/v1/chats/messages', () => {
           throw new TranscriptHistoryUnavailableError({
             kind: 'degraded',
             errorCode: 'LEDGER_FENCED',
-            retryable: true,
+            retryable: false,
           });
         }),
       },
@@ -285,11 +282,57 @@ describe('GET /api/v1/chats/messages', () => {
       historyState: {
         kind: 'degraded',
         errorCode: 'LEDGER_FENCED',
-        retryable: true,
+        retryable: false,
       },
       chatId: CHAT_ID,
       messages: [],
     });
+  });
+
+  it('logs only sanitized fence identifiers and never the underlying cause detail', async () => {
+    const sentinelPath = '/sentinel-root/chat-sentinel/ledger.sqlite';
+    const underlying = Object.assign(new Error(`unable to open ${sentinelPath}`), {
+      name: 'SQLiteError',
+      code: 'SQLITE_CORRUPT',
+    });
+    const fenced = new LedgerFencedError(CHAT_ID, { cause: underlying });
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const { routes } = createRoutesFixture({
+        chatViews: {
+          page: mock(async () => {
+            throw new TranscriptHistoryUnavailableError({
+              kind: 'degraded',
+              errorCode: 'LEDGER_FENCED',
+              retryable: false,
+            }, { cause: fenced });
+          }),
+        },
+      });
+      const url = new URL(`http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`);
+
+      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+      expect(response.status).toBe(200);
+      expect(warn).toHaveBeenCalledWith(
+        '[routes:chats]',
+        'Transcript ledger read is fenced.',
+        { causeName: 'SQLiteError', causeCode: 'SQLITE_CORRUPT' },
+      );
+      // The generic diagnostic logs the raw message and chat ID, so the fenced path must return
+      // before it rather than merely logging less afterwards.
+      expect(error).not.toHaveBeenCalled();
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain(sentinelPath);
+      expect(logged).not.toContain(CHAT_ID);
+      expect(logged).not.toContain(underlying.message);
+      expect(logged).not.toContain(fenced.message);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it('sanitizes a retryable adoption failure', async () => {

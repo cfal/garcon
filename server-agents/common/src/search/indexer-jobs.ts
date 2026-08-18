@@ -4,6 +4,7 @@ import {
   appendChatRows,
   closeSearchDatabase,
   deleteChatRows,
+  markChatFailed,
   openSearchDatabase,
   pruneMissingChats,
   replaceChatRows,
@@ -105,6 +106,10 @@ export async function handleIndexerRequest(request: IndexerRequest): Promise<voi
       }
       case 'delete-chat':
         deleteChatRows(requireDb(), request.chatId);
+        post({ type: 'ack', ...response(request) });
+        return;
+      case 'mark-failed':
+        markChatFailed(requireDb(), request);
         post({ type: 'ack', ...response(request) });
         return;
       case 'prune-chats':

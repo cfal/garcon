@@ -27,14 +27,7 @@ const SILENT_LOGGER: AgentLogger = {
 };
 
 export interface FactorySessionDiscoveryEntry {
-  createdTimeMs?: number;
-  cwd?: string;
-  id: string;
-  messageCount?: number;
-  modifiedTimeMs?: number;
   sessionPath?: string;
-  sessionTitle?: string;
-  title?: string;
 }
 
 interface FactorySessionDiscoveryIndex {
@@ -43,9 +36,7 @@ interface FactorySessionDiscoveryIndex {
 
 interface FactorySessionStartEvent {
   id?: string;
-  sessionTitle?: string;
   timestamp?: number | string;
-  title?: string;
   type: 'session_start';
 }
 
@@ -97,19 +88,6 @@ export interface FactoryStoredEventWithSource {
 }
 
 export type FactoryStoredEventInput = FactoryStoredEvent | FactoryStoredEventWithSource;
-
-export interface FactoryPreview {
-  createdAt: string | null;
-  firstMessage: string;
-  lastActivity: string | null;
-  lastMessage: string;
-}
-
-interface FactoryPreviewFallback {
-  createdAt?: string | null;
-  lastActivity?: string | null;
-  title?: string;
-}
 
 function toIsoString(value: number | string | undefined): string | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -514,90 +492,4 @@ export async function loadFactoryChatMessages(
     });
     return [];
   }
-}
-
-export async function loadFactoryChatMessagesBySessionId(
-  sessionId: string,
-  logger: AgentLogger = SILENT_LOGGER,
-): Promise<ChatMessage[]> {
-  const sessionPath = await findFactorySessionFileBySessionId(sessionId);
-  if (!sessionPath) return [];
-  return loadFactoryChatMessages(sessionPath, logger);
-}
-
-function getPreviewText(message: ChatMessage): string {
-  if (message.type === 'assistant-message' || message.type === 'user-message') {
-    return message.content;
-  }
-  return '';
-}
-
-function buildFallbackPreview(fallback: FactoryPreviewFallback): FactoryPreview {
-  const title = fallback.title || 'Unknown Factory Session';
-  return {
-    createdAt: fallback.createdAt ?? null,
-    firstMessage: title,
-    lastActivity: fallback.lastActivity ?? null,
-    lastMessage: title,
-  };
-}
-
-export async function getFactoryPreviewFromSessionPath(
-  sessionPath: string,
-  fallback: FactoryPreviewFallback = {},
-  logger: AgentLogger = SILENT_LOGGER,
-): Promise<FactoryPreview | null> {
-  if (!sessionPath) return null;
-
-  try {
-    const events = await readFactorySessionEvents(sessionPath, logger);
-    const messages = loadFactoryChatMessagesFromEvents(events);
-    const sessionStart = events
-      .map((entry) => entry.event)
-      .find((event): event is FactorySessionStartEvent => event.type === 'session_start');
-    const visibleMessages = messages.filter((message) => message.type === 'assistant-message' || message.type === 'user-message');
-    const firstMessage = visibleMessages.find((message) => message.type === 'user-message');
-    const lastMessage = [...visibleMessages].reverse().find((message) => message.type === 'assistant-message' || message.type === 'user-message');
-    const lastActivity = [...messages].reverse().find((message) => typeof message.timestamp === 'string');
-    const title = sessionStart?.sessionTitle || sessionStart?.title || fallback.title || 'Unknown Factory Session';
-
-    return {
-      createdAt: fallback.createdAt ?? toIsoString(sessionStart?.timestamp),
-      firstMessage: firstMessage ? firstMessage.content : title,
-      lastActivity: lastActivity?.timestamp || fallback.lastActivity || null,
-      lastMessage: lastMessage ? getPreviewText(lastMessage) : title,
-    };
-  } catch (error) {
-    logger.warn('Factory transcript preview failed.', {
-      sessionPath,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return Object.keys(fallback).length > 0 ? buildFallbackPreview(fallback) : null;
-  }
-}
-
-export async function getFactoryPreviewFromSessionId(
-  sessionId: string,
-  logger: AgentLogger = SILENT_LOGGER,
-): Promise<FactoryPreview | null> {
-  if (!sessionId) return null;
-
-  const [discoveryEntry, sessionPath] = await Promise.all([
-    getFactorySessionDiscoveryEntry(sessionId),
-    findFactorySessionFileBySessionId(sessionId),
-  ]);
-
-  if (!sessionPath && !discoveryEntry) return null;
-
-  const fallback = {
-    createdAt: toIsoString(discoveryEntry?.createdTimeMs),
-    lastActivity: toIsoString(discoveryEntry?.modifiedTimeMs),
-    title: discoveryEntry?.sessionTitle || discoveryEntry?.title || 'Unknown Factory Session',
-  };
-
-  if (!sessionPath) {
-    return buildFallbackPreview(fallback);
-  }
-
-  return getFactoryPreviewFromSessionPath(sessionPath, fallback, logger);
 }

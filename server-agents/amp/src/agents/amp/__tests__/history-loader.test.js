@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { getAmpPreview, loadAmpChatMessages } from '../history-loader.js';
+import { loadAmpChatMessages } from '../history-loader.js';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 const THREAD_EXPORT_FIXTURE = {
@@ -85,14 +85,5 @@ describe('amp history loader', () => {
       { entryId: 'amp-message:2', withinSourceOrdinal: 0 },
       { entryId: 'amp-message:3', withinSourceOrdinal: 0 },
     ]);
-  });
-
-  it('builds preview metadata from the export payload', () => {
-    expect(getAmpPreview(THREAD_EXPORT_FIXTURE)).toEqual({
-      firstMessage: 'first prompt',
-      lastMessage: 'final assistant message',
-      lastActivity: '2026-03-18T01:12:00.000Z',
-      createdAt: new Date(1773796295774).toISOString(),
-    });
   });
 });

@@ -191,11 +191,17 @@ function prepareAllowed(allowedChats: readonly TranscriptSearchAllowedChat[]): T
     const chatId = entry.chatId.trim();
     const transcriptViewId = entry.transcriptViewId.trim();
     if (!chatId || !transcriptViewId) continue;
-    const existing = prepared.get(chatId);
-    if (existing && existing.transcriptViewId !== transcriptViewId) {
-      throw new RangeError('Transcript search allowlist has contradictory views');
+    if (!Number.isSafeInteger(entry.throughOrdinal) || entry.throughOrdinal < 0) {
+      throw new RangeError('Transcript search allowlist frontier is invalid');
     }
-    prepared.set(chatId, { chatId, transcriptViewId });
+    const existing = prepared.get(chatId);
+    if (existing && (
+      existing.transcriptViewId !== transcriptViewId
+      || existing.throughOrdinal !== entry.throughOrdinal
+    )) {
+      throw new RangeError('Transcript search allowlist has contradictory snapshots');
+    }
+    prepared.set(chatId, { chatId, transcriptViewId, throughOrdinal: entry.throughOrdinal });
   }
   return [...prepared.values()];
 }
@@ -212,14 +218,17 @@ function searchIndexStatusForPreparedAllowed(
     failed: number;
     unsupported: number;
   }, [string]>(`
-    WITH allowed(chat_id, transcript_view_id) AS (
-      SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId')
+    WITH allowed(chat_id, transcript_view_id, through_ordinal) AS (
+      SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId'),
+        json_extract(value, '$.throughOrdinal')
       FROM json_each(?)
     )
     SELECT
-      COALESCE(SUM(CASE WHEN state.status = 'indexed' THEN 1 ELSE 0 END), 0) AS indexed,
+      COALESCE(SUM(CASE WHEN state.status = 'indexed'
+        AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS indexed,
       COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
-      COALESCE(SUM(CASE WHEN state.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported
+      COALESCE(SUM(CASE WHEN state.status = 'unsupported'
+        AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS unsupported
     FROM allowed
     LEFT JOIN search_chat_state state ON state.chat_id = allowed.chat_id
       AND state.transcript_view_id = allowed.transcript_view_id

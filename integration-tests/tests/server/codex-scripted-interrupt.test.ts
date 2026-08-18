@@ -1,5 +1,5 @@
 import type { ServerWsMessage } from '../../../common/ws-events.js';
-import { access, appendFile, readFile } from 'node:fs/promises';
+import { access, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { assistantContents, messagesOfType } from '../../support/chat-assertions.js';
@@ -8,7 +8,10 @@ import {
   codexCodeModeCall,
   codexExecCommandCall,
 } from '../../support/fake-codex-model.js';
-import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import {
+  type IntegrationDirectories,
+  withIntegrationFixture,
+} from '../../support/integration-fixture.js';
 import {
   expectStoppedTurnEventOrder,
   LIVE_TURN_TIMEOUT_MS,
@@ -23,6 +26,7 @@ import {
   startScriptedCodexTestEnvironment,
   type ScriptedCodexTestEnvironment,
 } from '../../support/scripted-codex.js';
+import { waitForPersistedChat } from '../../support/persisted-chat.js';
 
 describe('scripted Codex interrupt lifecycle', () => {
   let environment: ScriptedCodexTestEnvironment | undefined;
@@ -57,7 +61,7 @@ describe('scripted Codex interrupt lifecycle', () => {
       }));
       if (!active.turnId) throw new Error('Codex start response omitted its turn id.');
       await waitForFile(join(fixture.dirs.project, startedFile));
-      const nativePath = await waitForNativeSessionPath(fixture.dirs.workspace, chatId);
+      const nativePath = await waitForNativeSessionPath(fixture.dirs, chatId);
       await appendNativeOnlyTool(nativePath, nativeOnlyTool);
 
       const stopCursor = fixture.client.markEvents();
@@ -165,7 +169,7 @@ describe('scripted Codex interrupt lifecycle', () => {
         afterIndex: cursor,
       });
 
-      const nativePath = await waitForNativeSessionPath(fixture.dirs.workspace, chatId);
+      const nativePath = await waitForNativeSessionPath(fixture.dirs, chatId);
       await appendNativeToolTail(nativePath, { finalReply, toolMarker, toolCount });
       await reloadFromNativeHistory(fixture, chatId);
 
@@ -233,23 +237,19 @@ async function waitForFile(path: string): Promise<void> {
 }
 
 async function waitForNativeSessionPath(
-  workspace: string,
+  directories: IntegrationDirectories,
   chatId: string,
 ): Promise<string> {
-  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      const registry = JSON.parse(await readFile(join(workspace, 'chats.json'), 'utf8')) as {
-        sessions?: Record<string, { nativeSession?: { value?: { path?: unknown } } }>;
-      };
-      const nativePath = registry.sessions?.[chatId]?.nativeSession?.value?.path;
-      if (typeof nativePath === 'string' && nativePath) return nativePath;
-    } catch {
-      // Session metadata is persisted asynchronously after activation.
-    }
-    await Bun.sleep(25);
-  }
-  throw new Error(`Codex never persisted a native path for ${chatId}.`);
+  return waitForPersistedChat({
+    directories,
+    chatId,
+    timeoutMs: LIVE_TURN_TIMEOUT_MS,
+    timeoutMessage: `Codex never persisted a native path for ${chatId}.`,
+    select: (chat) => {
+      const nativePath = chat.nativeSession?.value.path;
+      return typeof nativePath === 'string' && nativePath.length > 0 ? nativePath : null;
+    },
+  });
 }
 
 async function appendNativeOnlyTool(nativePath: string, markerText: string): Promise<void> {

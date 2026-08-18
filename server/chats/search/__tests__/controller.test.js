@@ -63,6 +63,10 @@ function harness() {
   const ledger = {
     currentView: mock((chatId) => views.get(chatId) ?? null),
     currentRows: mock((chatId) => rows.get(chatId) ?? []),
+    highWatermark: mock((chatId) => ({
+      viewId: views.get(chatId).viewId,
+      ordinal: rows.get(chatId)?.at(-1)?.ordinal ?? 0,
+    })),
     subscribe: mock((candidate) => {
       listener = candidate;
       return () => { listener = null; };
@@ -398,11 +402,53 @@ describe('TranscriptSearchController', () => {
     });
 
     expect(test.service.search).toHaveBeenCalledWith(expect.objectContaining({
-      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1' }],
+      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1', throughOrdinal: 2 }],
     }));
     expect(result.results).toEqual([
       expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'view-1' }),
     ]);
+  });
+
+  it('excludes a chat when its view and frontier snapshots disagree', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.ledger.highWatermark.mockReturnValueOnce({ viewId: 'view-replaced', ordinal: 2 });
+
+    const result = await test.controller.search({
+      query: 'hello',
+      allowedChatIds: ['chat-1'],
+    });
+
+    expect(test.service.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChats: [],
+    }));
+    expect(result.results).toEqual([]);
+  });
+
+  it('counts a frontier read fence without failing healthy search admission', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.ledger.highWatermark.mockImplementation(() => {
+      throw new LedgerFencedError('chat-1');
+    });
+
+    const result = await test.controller.search({
+      query: 'hello',
+      allowedChatIds: ['chat-1'],
+    });
+
+    expect(test.service.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChats: [],
+    }));
+    expect(result).toEqual({
+      results: [],
+      index: {
+        indexedChatCount: 0,
+        pendingChatCount: 0,
+        failedChatCount: 1,
+        unsupportedChatCount: 0,
+      },
+    });
   });
 
   it('does not admit an old-view result when the transcript is replaced during the query', async () => {
@@ -455,7 +501,7 @@ describe('TranscriptSearchController', () => {
     expect(test.service.deleteChat).toHaveBeenCalledWith('chat-fenced');
     expect(test.service.pruneChats).toHaveBeenCalledWith(['chat-1', 'chat-fenced']);
     expect(test.service.search).toHaveBeenCalledWith(expect.objectContaining({
-      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1' }],
+      allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1', throughOrdinal: 2 }],
     }));
     expect(result.results).toEqual([
       expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'view-1' }),

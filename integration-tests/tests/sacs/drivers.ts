@@ -22,7 +22,10 @@ import {
   scriptedPiStartRequest,
   startScriptedPiTestEnvironment,
 } from '../../support/scripted-pi.js';
-import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import {
+  waitForPersistedChat,
+  waitForPersistedNativeSession,
+} from '../../support/persisted-chat.js';
 import type {
   IntegrationFixture,
 } from '../../support/integration-fixture.js';
@@ -39,35 +42,6 @@ import type {
 
 const STEERING = { kind: 'steering' } as const;
 const NATIVE_SESSIONS = { kind: 'native-sessions' } as const;
-
-interface PersistedChatBinding {
-  readonly agentSessionId: string | null;
-  readonly modelEndpointId: string | null;
-  readonly nativeSession: {
-    readonly value?: Record<string, unknown>;
-  } | null;
-}
-
-async function waitForPersistedChatBinding(
-  fixture: IntegrationFixture,
-  chatId: string,
-  isReady: (binding: PersistedChatBinding) => boolean,
-): Promise<PersistedChatBinding> {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    try {
-      const registry = JSON.parse(
-        await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
-      ) as { sessions?: Record<string, PersistedChatBinding> };
-      const binding = registry.sessions?.[chatId];
-      if (binding && isReady(binding)) return binding;
-    } catch {
-      // The registry may be between asynchronous persistence attempts.
-    }
-    await Bun.sleep(20);
-  }
-  throw new Error(`SACS chat ${chatId} did not persist the required binding.`);
-}
 
 async function fileExists(path: string): Promise<boolean> {
   try {
@@ -189,11 +163,12 @@ async function prepareOpenCodeHistorySource(
 ): Promise<SacsPreparedHistorySource> {
   const path = openCodePaths(fixture.dirs).database;
   if (!await fileExists(path)) throw new Error('SACS OpenCode database was not created.');
-  const binding = await waitForPersistedChatBinding(
-    fixture,
+  const binding = await waitForPersistedChat({
+    directories: fixture.dirs,
     chatId,
-    (candidate) => Boolean(candidate.agentSessionId),
-  );
+    select: (candidate) => candidate.agentSessionId ? candidate : null,
+    timeoutMessage: `SACS chat ${chatId} did not persist the required binding.`,
+  });
   const sessionId = binding.agentSessionId;
   if (!sessionId) throw new Error(`SACS OpenCode chat ${chatId} has no persisted session.`);
   let originalMessage: { readonly id: string; readonly data: string } | null = null;
@@ -279,11 +254,14 @@ function directLegacyHistoryImport(input: {
   readonly context: SacsReleasedJsonlFacet['latestRequestContext'];
 }): SacsLegacyHistoryImportFacet {
   const paths = async (fixture: IntegrationFixture, chatId: string) => {
-    const binding = await waitForPersistedChatBinding(
-      fixture,
+    const binding = await waitForPersistedChat({
+      directories: fixture.dirs,
       chatId,
-      (candidate) => Boolean(candidate.agentSessionId && candidate.modelEndpointId),
-    );
+      select: (candidate) => (
+        candidate.agentSessionId && candidate.modelEndpointId ? candidate : null
+      ),
+      timeoutMessage: `SACS chat ${chatId} did not persist the required binding.`,
+    });
     if (!binding.agentSessionId || !binding.modelEndpointId) {
       throw new Error(`SACS Direct chat ${chatId} has no persisted session or endpoint.`);
     }

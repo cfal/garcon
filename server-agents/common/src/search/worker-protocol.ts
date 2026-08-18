@@ -33,6 +33,12 @@ export type IndexerRequest =
       readonly done: boolean;
     })
   | (RequestBase & { readonly type: 'delete-chat'; readonly chatId: string })
+  | (RequestBase & {
+      readonly type: 'mark-failed';
+      readonly chatId: string;
+      readonly transcriptViewId: string;
+      readonly errorCode: string;
+    })
   | (RequestBase & { readonly type: 'prune-chats'; readonly chatIds: readonly string[] })
   | (RequestBase & { readonly type: 'close' });
 
@@ -126,7 +132,9 @@ function allowedChats(value: unknown): value is TranscriptSearchAllowedChat[] {
     return Boolean(candidate)
       && typeof candidate!.chatId === 'string' && candidate!.chatId.length > 0
       && typeof candidate!.transcriptViewId === 'string'
-      && candidate!.transcriptViewId.length > 0;
+      && candidate!.transcriptViewId.length > 0
+      && Number.isSafeInteger(candidate!.throughOrdinal)
+      && Number(candidate!.throughOrdinal) >= 0;
   });
 }
 
@@ -195,6 +203,11 @@ export function isIndexerRequest(value: unknown): value is IndexerRequest {
         && typeof candidate.done === 'boolean';
     case 'delete-chat':
       return typeof candidate.chatId === 'string' && candidate.chatId.length > 0;
+    case 'mark-failed':
+      return typeof candidate.chatId === 'string' && candidate.chatId.length > 0
+        && typeof candidate.transcriptViewId === 'string'
+        && candidate.transcriptViewId.length > 0
+        && failureCode(candidate.errorCode);
     case 'prune-chats':
       return Array.isArray(candidate.chatIds) && candidate.chatIds.length <= 10_000
         && candidate.chatIds.every((chatId) => typeof chatId === 'string' && chatId.length > 0)

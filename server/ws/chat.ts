@@ -375,11 +375,13 @@ export class ChatHandler {
         clientRequestId, requestType,
         code: replayErrorCode(error),
         message: (error as Error).message || 'Failed to replay chat messages',
-        retryable: !(
-          error instanceof StaleTranscriptViewError
-          || error instanceof InvalidTranscriptReplayRequestError
-          || error instanceof TranscriptReplayFrameLimitError
-        ),
+        retryable: isDomainError(error)
+          ? error.retryable
+          : !(
+              error instanceof StaleTranscriptViewError
+              || error instanceof InvalidTranscriptReplayRequestError
+              || error instanceof TranscriptReplayFrameLimitError
+            ),
         chatId,
       });
     }
