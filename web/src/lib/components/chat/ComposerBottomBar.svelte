@@ -8,6 +8,9 @@
 	import type { Snippet as SvelteSnippet } from 'svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { ComposerModeOption } from '$lib/chat/composer/composer-controls.js';
+	import ResponsiveSurfaceActions, {
+		type ResponsiveSurfaceAction,
+	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
@@ -85,17 +88,51 @@
 			? m.chat_composer_cancel_prompt_refinement()
 			: m.chat_composer_refine_prompt(),
 	);
-	const sendActionLabel = $derived(
-		isPromptTransformPending ? promptTransformStatus : sendTitle,
-	);
+	const sendActionLabel = $derived(isPromptTransformPending ? promptTransformStatus : sendTitle);
 	const activeThinking = $derived(
 		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0],
 	);
+	const composerActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
+		const actions: ResponsiveSurfaceAction[] = [];
+		if (onOpenExpandedEditor) {
+			actions.push({
+				id: 'expanded-composer',
+				label: m.chat_composer_open_expanded_editor(),
+				icon: Maximize2,
+				onclick: onOpenExpandedEditor,
+				disabled: addMenuDisabled || isPromptTransformPending,
+				priority: 1,
+				buttonClass:
+					'size-9 rounded-lg border border-border bg-background text-foreground ring-offset-background hover:bg-muted focus-visible:ring-offset-2',
+			});
+		}
+		if (onRefinePrompt) {
+			actions.push({
+				id: 'refine-prompt',
+				renderKey: isPromptRefinementPending ? 'cancel-refinement' : 'refine-prompt',
+				label: promptRefinementActionLabel,
+				icon: isPromptRefinementPending ? Square : Sparkles,
+				onclick: onRefinePrompt,
+				disabled: !isPromptRefinementPending && (!canRefinePrompt || isPromptTransformPending),
+				priority: 0,
+				buttonClass: `size-9 rounded-lg border ring-offset-background focus-visible:ring-offset-2 ${
+					isPromptRefinementPending
+						? 'border-accent bg-accent text-accent-foreground hover:bg-accent/80'
+						: 'border-border bg-background text-foreground hover:bg-muted'
+				}`,
+			});
+		}
+		return actions;
+	});
 </script>
 
 <div class="mt-1 px-2 py-1.5" data-slot="composer-bottom-bar">
-	<div class="flex min-w-0 flex-wrap items-center gap-2">
-		<div class="flex min-w-0 grow flex-wrap items-center gap-2">
+	<div
+		class="flex min-w-0 items-center gap-1 sm:gap-2 {mobileRightGroupFullRow
+			? 'flex-wrap'
+			: 'flex-nowrap'}"
+	>
+		<div class="flex min-w-0 grow flex-wrap items-center gap-1 sm:gap-2">
 			{#if showAddMenu}
 				<ComposerAddMenu
 					disabled={addMenuDisabled || isPromptTransformPending}
@@ -179,51 +216,21 @@
 		</div>
 
 		<div
-			class="flex min-w-0 items-center justify-between gap-2 sm:ml-auto sm:basis-auto sm:justify-end {mobileRightGroupFullRow
-				? 'order-first sm:order-none'
-				: ''}"
-			class:basis-full={mobileRightGroupFullRow}
+			class="ml-auto flex min-w-0 shrink items-center gap-1 sm:gap-2 {mobileRightGroupFullRow
+				? 'order-first basis-full justify-between sm:order-none sm:basis-auto sm:justify-end'
+				: 'justify-end'}"
 		>
-			{#if mobileRightGroupFullRow}
-				<div class="min-w-0 flex-1 sm:flex-none">
-					{#if selectorsSide === 'right' && modelSelector}
-						{@render modelSelector()}
-					{/if}
-				</div>
-			{:else if selectorsSide === 'right' && modelSelector}
+			{#if selectorsSide === 'right' && modelSelector}
 				{@render modelSelector()}
 			{/if}
 
-			{#if onOpenExpandedEditor}
-				<button
-					type="button"
-					onclick={onOpenExpandedEditor}
-					disabled={addMenuDisabled || isPromptTransformPending}
-					class="inline-flex size-9 items-center justify-center rounded-lg border border-border bg-background text-foreground transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-					title={m.chat_composer_open_expanded_editor()}
-					aria-label={m.chat_composer_open_expanded_editor()}
-				>
-					<Maximize2 class="size-4" aria-hidden="true" />
-				</button>
-			{/if}
-
-			{#if onRefinePrompt}
-				<button
-					type="button"
-					onclick={onRefinePrompt}
-					disabled={!isPromptRefinementPending && (!canRefinePrompt || isPromptTransformPending)}
-					class="inline-flex size-9 items-center justify-center rounded-lg border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 {isPromptRefinementPending
-						? 'border-accent bg-accent text-accent-foreground hover:bg-accent/80'
-						: 'border-border bg-background text-foreground hover:bg-muted'}"
-					title={promptRefinementActionLabel}
-					aria-label={promptRefinementActionLabel}
-				>
-					{#if isPromptRefinementPending}
-						<Square class="size-4" aria-hidden="true" />
-					{:else}
-						<Sparkles class="size-4" aria-hidden="true" />
-					{/if}
-				</button>
+			{#if composerActions.length > 0}
+				<ResponsiveSurfaceActions
+					actions={composerActions}
+					menuLabel={m.chat_composer_more_actions()}
+					menuButtonClass="size-9 rounded-lg border border-border bg-background text-foreground ring-offset-background hover:bg-muted focus-visible:ring-offset-2"
+					class="min-w-9 flex-auto"
+				/>
 			{/if}
 
 			{#if showSendButton}
@@ -231,7 +238,7 @@
 					type="button"
 					onclick={onSend}
 					disabled={!canSend || isPromptTransformPending}
-					class="inline-flex size-9 items-center justify-center rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed {sendButtonClass}"
+					class="inline-flex size-9 shrink-0 items-center justify-center rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed {sendButtonClass}"
 					title={sendActionLabel}
 					aria-label={sendActionLabel}
 				>
