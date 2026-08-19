@@ -3,13 +3,24 @@
 // deterministic. This is the Chat Completions sibling of FakeClaudeModel/FakeCodexModel;
 // FakeOpenAiServer remains the plan-based strict double for the direct-* Garcon agents.
 
+export interface ChatCompletionsUsage {
+  readonly prompt_tokens: number;
+  readonly completion_tokens: number;
+  readonly total_tokens: number;
+}
+
+interface ChatCompletionsBlockOptions {
+  readonly usage?: ChatCompletionsUsage;
+}
+
 export type ChatCompletionsBlock =
-  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'text'; readonly text: string; readonly usage?: ChatCompletionsUsage }
   | {
       readonly kind: 'tool_use';
       readonly id: string;
       readonly name: string;
       readonly input: Record<string, unknown>;
+      readonly usage?: ChatCompletionsUsage;
     };
 
 export type ChatCompletionsTurn =
@@ -44,16 +55,20 @@ export interface RecordedChatCompletionsRequest {
   readonly receivedAt: number;
 }
 
-export function chatCompletionsText(text: string): ChatCompletionsBlock {
-  return { kind: 'text', text };
+export function chatCompletionsText(
+  text: string,
+  options: ChatCompletionsBlockOptions = {},
+): ChatCompletionsBlock {
+  return { kind: 'text', text, ...(options.usage ? { usage: options.usage } : {}) };
 }
 
 export function chatCompletionsToolUse(
   id: string,
   name: string,
   input: Record<string, unknown>,
+  options: ChatCompletionsBlockOptions = {},
 ): ChatCompletionsBlock {
-  return { kind: 'tool_use', id, name, input };
+  return { kind: 'tool_use', id, name, input, ...(options.usage ? { usage: options.usage } : {}) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -123,7 +138,7 @@ interface Chunk {
   readonly created: number;
   readonly model: string;
   readonly choices: Array<Record<string, unknown>>;
-  readonly usage?: Record<string, unknown>;
+  readonly usage?: ChatCompletionsUsage;
 }
 
 function chunk(model: string, requestId: number, choice: Record<string, unknown>): Chunk {
@@ -178,11 +193,16 @@ function turnChunks(
     toolIndex += 1;
   }
   const finishReason = blocks.some((block) => block.kind === 'tool_use') ? 'tool_calls' : 'stop';
+  const usage = blocks.findLast((block) => block.usage !== undefined)?.usage ?? {
+    prompt_tokens: 42,
+    completion_tokens: 7,
+    total_tokens: 49,
+  };
   chunks.push(chunk(model, request.id, { index: 0, delta: {}, finish_reason: finishReason }));
   chunks.push({
     ...chunk(model, request.id, { index: 0, delta: {}, finish_reason: finishReason }),
     choices: [],
-    usage: { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 },
+    usage,
   });
   return chunks;
 }
