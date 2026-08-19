@@ -101,6 +101,7 @@ export const ERROR_CODES = [
   'TRANSCRIPT_SEARCH_DISABLED',
   'SEARCH_INDEX_UNAVAILABLE',
   'SEARCH_INDEX_BUSY',
+  'SEARCH_TIMEOUT',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

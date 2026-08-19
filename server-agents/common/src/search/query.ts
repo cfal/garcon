@@ -18,6 +18,13 @@ const MAX_RESULT_LIMIT = 100;
 const SNIPPETS_PER_CHAT = 3;
 const MAX_SNIPPET_CHARS = 512;
 
+const SEARCHABLE_STATE_JOIN = `
+    JOIN search_chat_state state ON state.chat_id = chunks.chat_id
+      AND state.transcript_view_id = chunks.transcript_view_id
+      AND state.status IN ('pending', 'indexed')
+      AND chunks.ordinal <= state.indexed_through
+`;
+
 interface CompiledTerm {
   query: string;
   words: string[];
@@ -46,6 +53,11 @@ interface SnippetToken {
   normalized: string;
   start: number;
   end: number;
+}
+
+interface SnippetMatch {
+  matchedMessageCount: number;
+  ranked: FtsSnippetMatchRow[];
 }
 
 function escapeFtsWord(word: string): string {
@@ -206,6 +218,84 @@ function prepareAllowed(allowedChats: readonly TranscriptSearchAllowedChat[]): T
   return [...prepared.values()];
 }
 
+function stageAllowedChats(
+  db: Database,
+  allowed: readonly TranscriptSearchAllowedChat[],
+): void {
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS search_allowed_chats (
+      chat_id TEXT PRIMARY KEY,
+      transcript_view_id TEXT NOT NULL,
+      through_ordinal INTEGER NOT NULL
+    ) WITHOUT ROWID, STRICT;
+    DELETE FROM temp.search_allowed_chats;
+  `);
+  db.query(`
+    INSERT INTO temp.search_allowed_chats(chat_id, transcript_view_id, through_ordinal)
+    SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId'),
+      json_extract(value, '$.throughOrdinal')
+    FROM json_each(?)
+  `).run(JSON.stringify(allowed));
+}
+
+function stageResultChats(db: Database, rows: readonly ResultRow[]): void {
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS search_result_chats (
+      chat_id TEXT PRIMARY KEY,
+      transcript_view_id TEXT NOT NULL
+    ) WITHOUT ROWID, STRICT;
+    DELETE FROM temp.search_result_chats;
+  `);
+  db.query(`
+    INSERT INTO temp.search_result_chats(chat_id, transcript_view_id)
+    SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId')
+    FROM json_each(?)
+  `).run(JSON.stringify(rows.map((row) => ({
+    chatId: row.chatId,
+    transcriptViewId: row.transcriptViewId,
+  }))));
+}
+
+function retainSnippetCandidate(match: SnippetMatch, row: FtsSnippetMatchRow): void {
+  match.matchedMessageCount += 1;
+  match.ranked.push(row);
+  match.ranked.sort((left, right) =>
+    left.rank - right.rank || left.ordinal - right.ordinal);
+  if (match.ranked.length > SNIPPETS_PER_CHAT) match.ranked.pop();
+}
+
+function hydrateSnippets(
+  db: Database,
+  resultRows: readonly ResultRow[],
+  terms: readonly CompiledTerm[],
+  matches: ReadonlyMap<string, SnippetMatch>,
+): Map<string, { matchedMessageCount: number; snippets: ChatSearchResult['snippets'] }> {
+  const bodyStatement = db.prepare<{ body: string }, [number]>('SELECT body FROM search_chunks WHERE id = ?');
+  try {
+    return new Map(resultRows.flatMap((result) => {
+      const key = resultKey(result.chatId, result.transcriptViewId);
+      const match = matches.get(key);
+      if (!match) return [];
+      return [[key, {
+        matchedMessageCount: match.matchedMessageCount,
+        snippets: match.ranked.map((candidate) => {
+          const body = bodyStatement.get(candidate.rowId)?.body ?? '';
+          const tokens = tokenizeForSnippet(body);
+          const firstTokenIndex = matchSnippetTerms(tokens, [...terms]);
+          return {
+            ordinal: Number(candidate.ordinal),
+            role: publicRole(candidate.role),
+            timestamp: candidate.timestamp,
+            text: snippetWindow(body, tokens, firstTokenIndex ?? 0),
+          };
+        }),
+      }] as const];
+    }));
+  } finally {
+    bodyStatement.finalize();
+  }
+}
+
 function searchIndexStatusForPreparedAllowed(
   db: Database,
   allowed: readonly TranscriptSearchAllowedChat[],
@@ -217,22 +307,17 @@ function searchIndexStatusForPreparedAllowed(
     indexed: number;
     failed: number;
     unsupported: number;
-  }, [string]>(`
-    WITH allowed(chat_id, transcript_view_id, through_ordinal) AS (
-      SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId'),
-        json_extract(value, '$.throughOrdinal')
-      FROM json_each(?)
-    )
+  }, []>(`
     SELECT
       COALESCE(SUM(CASE WHEN state.status = 'indexed'
         AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS indexed,
       COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
       COALESCE(SUM(CASE WHEN state.status = 'unsupported'
         AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS unsupported
-    FROM allowed
+    FROM temp.search_allowed_chats allowed
     LEFT JOIN search_chat_state state ON state.chat_id = allowed.chat_id
       AND state.transcript_view_id = allowed.transcript_view_id
-  `).get(JSON.stringify(allowed)) ?? { indexed: 0, failed: 0, unsupported: 0 };
+  `).get() ?? { indexed: 0, failed: 0, unsupported: 0 };
   const indexedChatCount = Number(counts.indexed);
   const failedChatCount = Number(counts.failed);
   const unsupportedChatCount = Number(counts.unsupported);
@@ -256,11 +341,7 @@ function collectSnippets(
   const snippetQuery = [...new Set(terms.map((term) => term.query))]
     .map((term) => `(${term})`)
     .join(' OR ');
-  const rows = db.query<FtsSnippetMatchRow, [string, string]>(`
-    WITH results(chat_id, transcript_view_id) AS (
-      SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId')
-      FROM json_each(?)
-    )
+  const rows = db.query<FtsSnippetMatchRow, [string]>(`
     SELECT
       chunks.id AS rowId,
       chunks.chat_id AS chatId,
@@ -271,70 +352,72 @@ function collectSnippets(
       search_chunks_fts.rank AS rank
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-    JOIN results ON results.chat_id = chunks.chat_id
+    ${SEARCHABLE_STATE_JOIN}
+    JOIN temp.search_result_chats results ON results.chat_id = chunks.chat_id
       AND results.transcript_view_id = chunks.transcript_view_id
     WHERE search_chunks_fts MATCH ?
-  `).all(JSON.stringify(resultRows.map((row) => ({
-    chatId: row.chatId,
-    transcriptViewId: row.transcriptViewId,
-  }))), `body:(${snippetQuery})`);
-  const matches = new Map<string, {
-    matchedMessageCount: number;
-    ranked: FtsSnippetMatchRow[];
-  }>();
+  `).all(`body:(${snippetQuery})`);
+  const matches = new Map<string, SnippetMatch>();
   for (const row of rows) {
     const key = resultKey(row.chatId, row.transcriptViewId);
-    const current = matches.get(key) ?? { matchedMessageCount: 0, ranked: [] };
-    current.matchedMessageCount += 1;
-    current.ranked.push(row);
-    current.ranked.sort((left, right) =>
-      left.rank - right.rank || left.ordinal - right.ordinal);
-    if (current.ranked.length > SNIPPETS_PER_CHAT) current.ranked.pop();
-    matches.set(key, current);
+    const match = matches.get(key) ?? { matchedMessageCount: 0, ranked: [] };
+    retainSnippetCandidate(match, row);
+    matches.set(key, match);
   }
-  const bodyStatement = db.prepare<{ body: string }, [number]>('SELECT body FROM search_chunks WHERE id = ?');
-  const response = new Map([...matches].map(([key, match]) => [key, {
-    matchedMessageCount: match.matchedMessageCount,
-    snippets: match.ranked.map((candidate) => {
-      const body = bodyStatement.get(candidate.rowId)?.body ?? '';
-      const tokens = tokenizeForSnippet(body);
-      const firstTokenIndex = matchSnippetTerms(tokens, terms);
-      return {
-        ordinal: Number(candidate.ordinal),
-        role: publicRole(candidate.role),
-        timestamp: candidate.timestamp,
-        text: snippetWindow(body, tokens, firstTokenIndex ?? 0),
-      };
-    }),
-  }]));
-  bodyStatement.finalize();
-  return response;
+  return hydrateSnippets(db, resultRows, terms, matches);
 }
 
-function collectSingleTermResults(
+function collectSingleTermSearch(
   db: Database,
   term: CompiledTerm,
-  allowed: readonly TranscriptSearchAllowedChat[],
   limit: number,
-): ResultRow[] {
-  return db.query<ResultRow, [string, string, number]>(`
-    WITH allowed(chat_id, transcript_view_id) AS (
-      SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId')
-      FROM json_each(?)
-    )
+): {
+  resultRows: ResultRow[];
+  snippetByChat: Map<string, {
+    matchedMessageCount: number;
+    snippets: ChatSearchResult['snippets'];
+  }>;
+} {
+  const rows = db.query<FtsSnippetMatchRow, [string]>(`
     SELECT
+      chunks.id AS rowId,
       chunks.chat_id AS chatId,
       chunks.transcript_view_id AS transcriptViewId,
-      MIN(search_chunks_fts.rank) AS rank
+      chunks.ordinal AS ordinal,
+      chunks.role AS role,
+      chunks.timestamp AS timestamp,
+      search_chunks_fts.rank AS rank
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-    JOIN allowed ON allowed.chat_id = chunks.chat_id
+    ${SEARCHABLE_STATE_JOIN}
+    JOIN temp.search_allowed_chats allowed ON allowed.chat_id = chunks.chat_id
       AND allowed.transcript_view_id = chunks.transcript_view_id
     WHERE search_chunks_fts MATCH ?
-    GROUP BY chunks.chat_id, chunks.transcript_view_id
-    ORDER BY rank ASC, chatId ASC, transcriptViewId ASC
-    LIMIT ?
-  `).all(JSON.stringify(allowed), `body:(${term.query})`, limit);
+  `).all(`body:(${term.query})`);
+  const matches = new Map<string, SnippetMatch & ResultRow>();
+  for (const row of rows) {
+    const key = resultKey(row.chatId, row.transcriptViewId);
+    const current = matches.get(key) ?? {
+      chatId: row.chatId,
+      transcriptViewId: row.transcriptViewId,
+      rank: row.rank,
+      matchedMessageCount: 0,
+      ranked: [],
+    };
+    current.rank = Math.min(current.rank, row.rank);
+    retainSnippetCandidate(current, row);
+    matches.set(key, current);
+  }
+  const resultRows = [...matches.values()]
+    .sort((left, right) => left.rank - right.rank
+      || left.chatId.localeCompare(right.chatId)
+      || left.transcriptViewId.localeCompare(right.transcriptViewId))
+    .slice(0, limit)
+    .map(({ chatId, transcriptViewId, rank }) => ({ chatId, transcriptViewId, rank }));
+  return {
+    resultRows,
+    snippetByChat: hydrateSnippets(db, resultRows, [term], matches),
+  };
 }
 
 export function searchTranscriptIndexV1(
@@ -346,14 +429,23 @@ export function searchTranscriptIndexV1(
   },
 ): { results: ChatSearchResult[]; index: ChatSearchIndexStatus } {
   const allowed = prepareAllowed(options.allowedChats);
+  stageAllowedChats(db, allowed);
   const index = searchIndexStatusForPreparedAllowed(db, allowed);
   const terms = compileStructuredTerms(options.query);
   if (allowed.length === 0 || terms.length === 0) return { results: [], index };
   const limit = clampLimit(options.limit);
-  const resultRows = terms.length === 1
-    ? collectSingleTermResults(db, terms[0], allowed, limit)
-    : collectMultiTermResults(db, terms, allowed, limit);
-  const snippetByChat = collectSnippets(db, resultRows, terms);
+  let resultRows: ResultRow[];
+  let snippetByChat: Map<string, {
+    matchedMessageCount: number;
+    snippets: ChatSearchResult['snippets'];
+  }>;
+  if (terms.length === 1) {
+    ({ resultRows, snippetByChat } = collectSingleTermSearch(db, terms[0], limit));
+  } else {
+    resultRows = collectMultiTermResults(db, terms, limit);
+    stageResultChats(db, resultRows);
+    snippetByChat = collectSnippets(db, resultRows, terms);
+  }
   return {
     results: resultRows.map((row) => {
       const snippets = snippetByChat.get(resultKey(row.chatId, row.transcriptViewId))
@@ -373,7 +465,6 @@ export function searchTranscriptIndexV1(
 function collectMultiTermResults(
   db: Database,
   terms: CompiledTerm[],
-  allowed: readonly TranscriptSearchAllowedChat[],
   limit: number,
 ): ResultRow[] {
   const selects = terms.map((_, index) => `
@@ -382,16 +473,14 @@ function collectMultiTermResults(
       MIN(search_chunks_fts.rank) AS best_rank
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
+    ${SEARCHABLE_STATE_JOIN}
     JOIN allowed ON allowed.chat_id = chunks.chat_id
       AND allowed.transcript_view_id = chunks.transcript_view_id
     WHERE search_chunks_fts MATCH ?
     GROUP BY chunks.chat_id, chunks.transcript_view_id
   `).join(' UNION ALL ');
   const sql = `
-    WITH allowed(chat_id, transcript_view_id) AS (
-      SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId')
-      FROM json_each(?)
-    ), term_matches AS (${selects})
+    WITH term_matches AS (${selects})
     SELECT chat_id AS chatId, transcript_view_id AS transcriptViewId, SUM(best_rank) AS rank
     FROM term_matches
     GROUP BY chat_id, transcript_view_id
@@ -400,7 +489,6 @@ function collectMultiTermResults(
     LIMIT ?
   `;
   const parameters: Array<string | number> = [
-    JSON.stringify(allowed),
     ...terms.map((term) => `body:(${term.query})`),
     terms.length,
     limit,

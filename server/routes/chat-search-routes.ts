@@ -3,6 +3,9 @@ import type {
   ChatSearchNavigateResponse,
   ChatSearchRequest,
   ChatSearchResponse,
+  TranscriptSearchQueryStatsV1,
+  TranscriptSearchStatusResponse,
+  TranscriptSearchStatusV1,
 } from '../../common/chat-search.js';
 import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
@@ -18,8 +21,10 @@ const MAX_SEARCH_CHAT_IDS = 10_000;
 const MAX_SEARCH_CHAT_ID_CHARS = 512;
 
 export interface ChatSearchDep {
-  catalogMayHaveChanged(chatId?: string): void;
+  catalogMayHaveChanged(chatId: string): void;
   validateResultView(chatId: string, transcriptViewId: string): boolean;
+  status(): TranscriptSearchStatusV1;
+  queryStats(): TranscriptSearchQueryStatsV1;
   search(options: {
     query: string;
     textTokens?: string[];
@@ -45,6 +50,7 @@ interface ChatSearchRouteDeps {
 export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   postSearchChats(body: unknown): Promise<Response>;
   postSearchNavigate(body: unknown): Promise<Response>;
+  getSearchStatus(): Response;
 } {
   const { registry, pathCache, chatListProjector, searchIndex } = deps;
 
@@ -97,7 +103,35 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
     }
   }
 
-  return { postSearchChats, postSearchNavigate };
+  function getSearchStatus(): Response {
+    if (!searchIndex) {
+      return Response.json({
+        version: 1,
+        phase: 'disabled',
+        chats: { indexed: 0, pending: 0, failed: 0 },
+        queuedJobs: 0,
+        resync: null,
+        backlogRows: 0,
+        activeChat: null,
+        lastErrorCode: null,
+        updatedAt: new Date(0).toISOString(),
+        queryStats: {
+          served: 0,
+          timedOut: 0,
+          rejectedBusy: 0,
+          p50Ms: 0,
+          p95Ms: 0,
+          maxMs: 0,
+        },
+      } satisfies TranscriptSearchStatusResponse);
+    }
+    return Response.json({
+      ...searchIndex.status(),
+      queryStats: searchIndex.queryStats(),
+    } satisfies TranscriptSearchStatusResponse);
+  }
+
+  return { postSearchChats, postSearchNavigate, getSearchStatus };
 }
 
 function parseSearchNavigateRequest(body: unknown): ChatSearchNavigateRequest {

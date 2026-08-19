@@ -298,21 +298,37 @@ function permissionDraft(kind, permissionOccurrenceId) {
 }
 
 async function initializeSearchFold(ledger, rows) {
-  const replaceChat = mock(async () => undefined);
+  let resolveSyncStarted;
+  const syncStarted = new Promise((resolve) => { resolveSyncStarted = resolve; });
+  const syncChat = mock(async (request) => {
+    resolveSyncStarted();
+    const frames = [];
+    for await (const frame of request.source(request.expectedAfterOrdinal)) frames.push(frame);
+    return frames.flatMap((frame) => frame.rows);
+  });
   const controller = new TranscriptSearchController({
     listChatIds: () => [CHAT_ID],
     ledger: {
       currentView: (chatId) => ledger.currentView(chatId),
-      currentRows: () => rows,
+      highWatermark: () => ({ viewId: VIEW_ID, ordinal: rows.at(-1)?.ordinal ?? 0 }),
+      replayRows: (_chatId, _viewId, afterOrdinal, throughOrdinal, limit) => rows
+        .filter((row) => row.ordinal > afterOrdinal && row.ordinal <= throughOrdinal)
+        .slice(0, limit),
       subscribe: () => () => undefined,
     },
     service: {
       setResyncHandler: () => undefined,
       enable: async () => undefined,
-      replaceChat,
-      appendRows: async () => undefined,
+      chatStates: async () => [],
+      beginResync: () => ({
+        chatSettled: () => undefined,
+        complete: () => undefined,
+        fail: () => undefined,
+      }),
+      recordResyncFailure: () => undefined,
+      syncChat,
+      markChatUnavailable: async () => undefined,
       deleteChat: async () => undefined,
-      pruneChats: async () => undefined,
       search: async () => ({
         results: [],
         index: {
@@ -322,15 +338,36 @@ async function initializeSearchFold(ledger, rows) {
           unsupportedChatCount: 0,
         },
       }),
+      status: () => ({
+        version: 1,
+        phase: 'ready',
+        chats: { indexed: 0, pending: 0, failed: 0 },
+        queuedJobs: 0,
+        resync: null,
+        backlogRows: 0,
+        activeChat: null,
+        lastErrorCode: null,
+        updatedAt: AT,
+      }),
+      queryStats: () => ({
+        served: 0,
+        timedOut: 0,
+        rejectedBusy: 0,
+        p50Ms: 0,
+        p95Ms: 0,
+        maxMs: 0,
+      }),
+      onStatusChanged: () => () => undefined,
       disableAndDelete: async () => undefined,
       close: async () => undefined,
     },
-    logger: { warn: () => undefined },
+    logger: { warn: () => undefined, info: () => undefined },
   });
   await controller.initialize(true);
+  await syncStarted;
   await controller.close();
-  expect(replaceChat).toHaveBeenCalledTimes(1);
-  return replaceChat.mock.calls[0][0].rows;
+  expect(syncChat).toHaveBeenCalledTimes(1);
+  return await syncChat.mock.results[0].value;
 }
 
 function conversationalText(message) {

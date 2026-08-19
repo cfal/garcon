@@ -73,8 +73,7 @@ function handle(request: ReaderRequest): void {
         db?.close();
         db = null;
         post({ type: 'closed', ...response(request) });
-        self.close();
-        return;
+        process.exit(0);
     }
   } catch (error) {
     if (request.type === 'search-start' || request.type === 'search-allowlist-chunk') {

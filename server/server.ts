@@ -321,6 +321,7 @@ export async function startServer(): Promise<void> {
 
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     let eventWiring: ServerEventWiring | null = null;
+    let unsubscribeSearchStatus = () => {};
     // Both are constructed below but are needed by the carried-context callback,
     // which only runs once a session starts.
     let carryOverCompaction: CarryOverCompactionService | null = null;
@@ -611,6 +612,9 @@ export async function startServer(): Promise<void> {
       }),
       startScheduledPrompts: () => scheduledPrompts.start(),
     });
+    unsubscribeSearchStatus = chatSearch.onStatusChanged((status) => {
+      eventWiring?.broadcastTranscriptSearchStatus(status);
+    });
 
     // Build route and WS handler tables
     const routes = createAllRoutes({
@@ -843,6 +847,7 @@ export async function startServer(): Promise<void> {
           cleanupFailed = true;
           logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
+        unsubscribeSearchStatus();
         await chatSearch.close();
         await integrationRegistry.stop();
         transcriptLedger.close();

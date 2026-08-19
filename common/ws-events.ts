@@ -34,6 +34,10 @@ import {
   isSnippetsInvalidationReason,
   type SnippetsInvalidationReason,
 } from './snippets';
+import {
+  isTranscriptSearchStatusV1,
+  type TranscriptSearchStatusV1,
+} from './chat-search';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -278,6 +282,11 @@ export class SettingsChangedMessage {
   constructor(public settings: RemoteSettingsSnapshot) {}
 }
 
+export class TranscriptSearchStatusMessage {
+  readonly type = 'transcript-search-status' as const;
+  constructor(public status: TranscriptSearchStatusV1) {}
+}
+
 export class ScheduledPromptsInvalidatedMessage {
   readonly type = 'scheduled-prompts-invalidated' as const;
   constructor(public reason: ScheduledPromptsInvalidationReason) {}
@@ -352,6 +361,7 @@ export type ServerWsMessage =
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
   | SettingsChangedMessage
+  | TranscriptSearchStatusMessage
   | ScheduledPromptsInvalidatedMessage
   | SnippetsInvalidatedMessage
   | ClientRequestErrorMessage;
@@ -758,6 +768,10 @@ export function parseServerWsMessage(
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
       return settings ? new SettingsChangedMessage(settings) : null;
     }
+    case 'transcript-search-status':
+      return isTranscriptSearchStatusV1(data.status)
+        ? new TranscriptSearchStatusMessage(data.status)
+        : null;
     case 'scheduled-prompts-invalidated': {
       return isScheduledPromptsInvalidationReason(data.reason)
         ? new ScheduledPromptsInvalidatedMessage(data.reason)

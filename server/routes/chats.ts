@@ -1115,6 +1115,7 @@ export default function createChatRoutes({
     '/api/v1/chats/messages': { GET: getMessages },
     '/api/v1/chats/search': { POST: withJsonBody(searchRoutes.postSearchChats) },
     '/api/v1/chats/search/navigate': { POST: withJsonBody(searchRoutes.postSearchNavigate) },
+    '/api/v1/chats/search/status': { GET: searchRoutes.getSearchStatus },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
     '/api/v1/chats/queue/entries': {

@@ -177,6 +177,25 @@ const turn = {
 };
 
 describe('server event wiring', () => {
+  it('[TLV5-SEARCH.09-WS-03] broadcasts workspace transcript search status', () => {
+    const fixture = createFixture();
+    const status = {
+      version: 1,
+      phase: 'rebuilding',
+      chats: { indexed: 3, pending: 1, failed: 0 },
+      queuedJobs: 1,
+      resync: { completedChats: 3, totalChats: 4 },
+      backlogRows: 12,
+      activeChat: { position: 4, total: 10 },
+      lastErrorCode: null,
+      updatedAt: '2026-08-19T00:00:00.000Z',
+    };
+
+    fixture.wiring.broadcastTranscriptSearchStatus(status);
+
+    expect(fixture.published).toEqual([{ type: 'transcript-search-status', status }]);
+  });
+
   it('[TLV5-L03.02-CORE-UNIT-01] broadcasts committed rows before terminal-driven lifecycle state', async () => {
     const fixture = createFixture();
 

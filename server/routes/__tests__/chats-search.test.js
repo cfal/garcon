@@ -4,7 +4,11 @@ import createChatRoutes from '../chats.js';
 import { TranscriptSearchUnavailableError } from '../../chats/search/errors.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
-function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByChat = {} } = {}) {
+function createRoutesFixture({
+  unavailableProjectPaths = [],
+  lastActivityAtByChat = {},
+  withoutSearchIndex = false,
+} = {}) {
   const sessions = {
     c1: {
       agentId: 'claude',
@@ -108,7 +112,27 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     updateSessionSettings: mock(async () => undefined),
   };
   const searchIndex = {
+    catalogMayHaveChanged: mock(() => undefined),
     validateResultView: mock(() => true),
+    status: mock(() => ({
+      version: 1,
+      phase: 'rebuilding',
+      chats: { indexed: 1, pending: 1, failed: 0 },
+      queuedJobs: 1,
+      resync: { completedChats: 1, totalChats: 2 },
+      backlogRows: 5,
+      activeChat: { position: 3, total: 8 },
+      lastErrorCode: null,
+      updatedAt: '2026-08-19T00:00:00.000Z',
+    })),
+    queryStats: mock(() => ({
+      served: 7,
+      timedOut: 1,
+      rejectedBusy: 2,
+      p50Ms: 10,
+      p95Ms: 30,
+      maxMs: 40,
+    })),
     search: mock((request) => ({
       results: request.allowedChatIds.length > 0 ? [
         {
@@ -147,7 +171,7 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     metadata,
     chatViews,
     agents,
-    searchIndex,
+    searchIndex: withoutSearchIndex ? undefined : searchIndex,
     chatListProjector,
     commandService: createRouteCommandService({
       registry,
@@ -170,6 +194,12 @@ async function postSearch(routes, body) {
   });
   const url = new URL(request.url);
   return routes['/api/v1/chats/search'].POST(request, url);
+}
+
+async function getStatus(routes) {
+  const request = new Request('http://localhost/api/v1/chats/search/status');
+  const url = new URL(request.url);
+  return routes['/api/v1/chats/search/status'].GET(request, url);
 }
 
 describe('POST /api/v1/chats/search', () => {
@@ -294,9 +324,9 @@ describe('POST /api/v1/chats/search', () => {
     });
   });
 
-  it('returns retryable unavailable and busy responses', async () => {
+  it('[TLV5-SEARCH.09-ROUTE-02] returns distinct retryable search failures', async () => {
     const { routes, searchIndex } = createRoutesFixture();
-    for (const code of ['SEARCH_INDEX_UNAVAILABLE', 'SEARCH_INDEX_BUSY']) {
+    for (const code of ['SEARCH_TIMEOUT', 'SEARCH_INDEX_UNAVAILABLE', 'SEARCH_INDEX_BUSY']) {
       searchIndex.search.mockImplementationOnce(() => Promise.reject(
         new TranscriptSearchUnavailableError(code, 'Search is not ready', true),
       ));
@@ -304,6 +334,59 @@ describe('POST /api/v1/chats/search', () => {
       expect(response.status).toBe(503);
       await expect(response.json()).resolves.toMatchObject({ errorCode: code, retryable: true });
     }
+  });
+
+  it('[TLV5-SEARCH.09-ROUTE-03] preserves committed-prefix results during indexing', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const result = {
+      results: [{
+        chatId: 'c1', transcriptViewId: 'view-1', score: 3,
+        matchedMessageCount: 1, snippets: [],
+      }],
+      index: {
+        indexedChatCount: 1,
+        pendingChatCount: 1,
+        failedChatCount: 0,
+        unsupportedChatCount: 0,
+      },
+    };
+    searchIndex.search.mockResolvedValueOnce(result);
+
+    const response = await postSearch(routes, { query: 'needle', chatIds: ['c1', 'c2'] });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      results: result.results,
+      index: result.index,
+    });
+  });
+});
+
+describe('GET /api/v1/chats/search/status', () => {
+  it('[TLV5-SEARCH.09-ROUTE-01] returns exact status and query statistics', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+
+    const response = await getStatus(routes);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ...searchIndex.status(),
+      queryStats: searchIndex.queryStats(),
+    });
+  });
+
+  it('returns the stable disabled snapshot when search is not configured', async () => {
+    const { routes } = createRoutesFixture({ withoutSearchIndex: true });
+
+    const response = await getStatus(routes);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      version: 1,
+      phase: 'disabled',
+      chats: { indexed: 0, pending: 0, failed: 0 },
+      queryStats: { served: 0, timedOut: 0, rejectedBusy: 0 },
+    });
   });
 });
 

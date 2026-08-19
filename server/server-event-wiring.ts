@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatStopIntent, ChatStopOutcome } from '../common/chat-types.js';
+import type { TranscriptSearchStatusV1 } from '../common/chat-search.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { createTranscriptEventFanout } from './ledger/event-fanout.js';
@@ -35,6 +36,7 @@ import {
   ChatExecutionControlUpdatedMessage,
   ChatTransientFeedMutationMessage,
   SettingsChangedMessage,
+  TranscriptSearchStatusMessage,
   ScheduledPromptsInvalidatedMessage,
   SnippetsInvalidatedMessage,
 } from '../common/ws-events.ts';
@@ -83,6 +85,7 @@ export interface ServerEventWiring {
     noticeType: ChatOperationalNoticeMessage['noticeType'],
     content: string,
   ): void;
+  broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void;
   waitForIdle(): Promise<void>;
 }
 
@@ -569,6 +572,9 @@ export function wireServerEvents({
     notifyAgentHandoff,
     notifyTranscriptCompositionChanged,
     notifyOperationalNotice,
+    broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void {
+      broadcast(new TranscriptSearchStatusMessage(status));
+    },
     waitForIdle,
   };
 }

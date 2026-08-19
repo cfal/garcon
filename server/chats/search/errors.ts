@@ -3,7 +3,10 @@ import { DomainError } from '../../lib/domain-error.js';
 
 export type TranscriptSearchUnavailableCode = Extract<
   ErrorCode,
-  'TRANSCRIPT_SEARCH_DISABLED' | 'SEARCH_INDEX_UNAVAILABLE' | 'SEARCH_INDEX_BUSY'
+  | 'TRANSCRIPT_SEARCH_DISABLED'
+  | 'SEARCH_INDEX_UNAVAILABLE'
+  | 'SEARCH_INDEX_BUSY'
+  | 'SEARCH_TIMEOUT'
 >;
 
 export class TranscriptSearchUnavailableError extends DomainError {

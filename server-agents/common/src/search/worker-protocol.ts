@@ -10,6 +10,15 @@ import {
   CHAT_SEARCH_MIN_PREFIX_CHARS,
 } from '@garcon/common/chat-search';
 import type { HistoricalSearchMessageRow } from './rows.js';
+import {
+  SEARCH_INGEST_ROW_MAX_BYTES,
+  type SearchChatState,
+  type SearchStatusCounts,
+} from './schema.js';
+
+export const MAX_ROWS_PER_FRAME = 250;
+export const MAX_FRAME_BYTES = 8 * 1024 * 1024;
+export const MAX_ALLOWLIST_PER_FRAME = 2_000;
 
 interface RequestBase {
   readonly requestId: number;
@@ -18,32 +27,62 @@ interface RequestBase {
 
 export type IndexerRequest =
   | (RequestBase & { readonly type: 'open'; readonly dbPath: string })
+  | (RequestBase & { readonly type: 'chat-states' })
   | (RequestBase & {
-      readonly type: 'index-start';
+      readonly type: 'sync-begin';
       readonly mode: 'replace' | 'append';
       readonly chatId: string;
       readonly transcriptViewId: string;
       readonly expectedAfterOrdinal: number;
-      readonly throughOrdinal: number;
+      readonly targetThrough: number;
     })
+  | (RequestBase & { readonly type: 'sync-cleanup' })
   | (RequestBase & {
-      readonly type: 'index-chunk';
-      readonly chunkIndex: number;
+      readonly type: 'sync-rows';
+      readonly frameIndex: number;
       readonly rows: readonly HistoricalSearchMessageRow[];
-      readonly done: boolean;
+      readonly advanceTo: number;
     })
-  | (RequestBase & { readonly type: 'delete-chat'; readonly chatId: string })
+  | (RequestBase & { readonly type: 'sync-finish' })
   | (RequestBase & {
       readonly type: 'mark-failed';
       readonly chatId: string;
       readonly transcriptViewId: string;
       readonly errorCode: string;
     })
-  | (RequestBase & { readonly type: 'prune-chats'; readonly chatIds: readonly string[] })
+  | (RequestBase & { readonly type: 'delete-chat'; readonly chatId: string })
+  | (RequestBase & { readonly type: 'maintenance' })
+  | (RequestBase & { readonly type: 'status-snapshot' })
+  | (RequestBase & { readonly type: 'checkpoint' })
   | (RequestBase & { readonly type: 'close' });
 
 export type IndexerEvent =
-  | (RequestBase & { readonly type: 'opened' | 'ack' | 'closed' })
+  | (RequestBase & { readonly type: 'opened'; readonly recreated: boolean })
+  | (RequestBase & {
+      readonly type: 'chat-states-result';
+      readonly states: readonly SearchChatState[];
+    })
+  | (RequestBase & {
+      readonly type: 'sync-accepted';
+      readonly indexedThrough: number;
+      readonly current: boolean;
+      readonly staleRows: boolean;
+    })
+  | (RequestBase & {
+      readonly type: 'cleanup-progress';
+      readonly deletedRows: number;
+      readonly remaining: boolean;
+    })
+  | (RequestBase & {
+      readonly type: 'sync-progress';
+      readonly frameIndex: number;
+      readonly indexedThrough: number;
+    })
+  | (RequestBase & { readonly type: 'sync-complete'; readonly state: SearchChatState })
+  | (RequestBase & { readonly type: 'delete-progress'; readonly deletedRows: number })
+  | (RequestBase & { readonly type: 'status-result'; readonly counts: SearchStatusCounts })
+  | (RequestBase & { readonly type: 'checkpoint-complete'; readonly busy: number })
+  | (RequestBase & { readonly type: 'ack' | 'closed' })
   | (RequestBase & { readonly type: 'error'; readonly code: string; readonly retryable: boolean });
 
 export type ReaderRequest =
@@ -72,20 +111,44 @@ export type ReaderEvent =
 
 type UnknownRecord = Record<string, unknown>;
 
+const BASE_KEYS = ['lifecycleEpoch', 'requestId', 'type'] as const;
+
 function record(value: unknown): UnknownRecord | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as UnknownRecord
     : null;
 }
 
+function exactKeys(candidate: UnknownRecord, ...keys: readonly string[]): boolean {
+  const expected = new Set([...BASE_KEYS, ...keys]);
+  return Object.keys(candidate).length === expected.size
+    && Object.keys(candidate).every((key) => expected.has(key));
+}
+
 function requestBase(value: unknown): UnknownRecord | null {
   const candidate = record(value);
   return candidate
-    && Number.isSafeInteger(candidate.requestId) && Number(candidate.requestId) > 0
-    && typeof candidate.lifecycleEpoch === 'string' && candidate.lifecycleEpoch.length > 0
+    && Number.isSafeInteger(candidate.requestId)
+    && Number(candidate.requestId) > 0
+    && typeof candidate.lifecycleEpoch === 'string'
+    && candidate.lifecycleEpoch.length > 0
     && typeof candidate.type === 'string'
     ? candidate
     : null;
+}
+
+function boundedIdentifier(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && Buffer.byteLength(value, 'utf8') <= 256;
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function positiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
 function failureCode(value: unknown): value is string {
@@ -100,60 +163,99 @@ function jsonBytesWithin(value: unknown, maximum: number): boolean {
   }
 }
 
-function indexStatus(value: unknown): boolean {
-  const candidate = record(value);
-  return Boolean(candidate)
-    && ['indexedChatCount', 'pendingChatCount', 'failedChatCount', 'unsupportedChatCount']
-      .every((key) => Number.isSafeInteger(candidate![key]) && Number(candidate![key]) >= 0);
+function searchRow(value: unknown): value is HistoricalSearchMessageRow {
+  const row = record(value);
+  return Boolean(row)
+    && Object.keys(row!).length === 4
+    && ['ordinal', 'role', 'timestamp', 'body'].every((key) => Object.hasOwn(row!, key))
+    && positiveInteger(row!.ordinal)
+    && ['user', 'assistant', 'tool', 'system'].includes(String(row!.role))
+    && (row!.timestamp === null || typeof row!.timestamp === 'string')
+    && typeof row!.body === 'string';
 }
 
-function searchResult(value: unknown): boolean {
+function searchRowsValid(value: unknown): value is HistoricalSearchMessageRow[] {
+  return Array.isArray(value) && value.every(searchRow);
+}
+
+function chatStateValid(value: unknown): value is SearchChatState {
   const candidate = record(value);
   if (!candidate
-      || typeof candidate.chatId !== 'string' || candidate.chatId.length === 0
-      || typeof candidate.transcriptViewId !== 'string' || candidate.transcriptViewId.length === 0
-      || typeof candidate.score !== 'number' || !Number.isFinite(candidate.score)
-      || !Number.isSafeInteger(candidate.matchedMessageCount)
-      || Number(candidate.matchedMessageCount) < 0
-      || !Array.isArray(candidate.snippets) || candidate.snippets.length > 3) return false;
-  return candidate.snippets.every((valueSnippet) => {
-    const snippet = record(valueSnippet);
-    return Boolean(snippet)
-      && Number.isSafeInteger(snippet!.ordinal) && Number(snippet!.ordinal) > 0
-      && ['user', 'assistant', 'tool', 'system'].includes(String(snippet!.role))
-      && (snippet!.timestamp === null || typeof snippet!.timestamp === 'string')
-      && typeof snippet!.text === 'string';
-  });
+      || Object.keys(candidate).length !== 6
+      || !['chatId', 'transcriptViewId', 'status', 'indexedThrough', 'targetThrough', 'lastErrorCode']
+        .every((key) => Object.hasOwn(candidate, key))
+      || !boundedIdentifier(candidate.chatId)
+      || !boundedIdentifier(candidate.transcriptViewId)
+      || !['pending', 'indexed', 'failed'].includes(String(candidate.status))
+      || !nonNegativeInteger(candidate.indexedThrough)
+      || !nonNegativeInteger(candidate.targetThrough)
+      || (candidate.lastErrorCode !== null && !failureCode(candidate.lastErrorCode))) {
+    return false;
+  }
+  if (candidate.status === 'indexed') return candidate.indexedThrough === candidate.targetThrough;
+  if (candidate.status === 'pending') return candidate.indexedThrough <= candidate.targetThrough;
+  return true;
 }
 
-function allowedChats(value: unknown): value is TranscriptSearchAllowedChat[] {
+function statusCountsValid(value: unknown): value is SearchStatusCounts {
+  const candidate = record(value);
+  return Boolean(candidate)
+    && Object.keys(candidate!).length === 4
+    && ['indexed', 'pending', 'failed', 'backlogRows'].every(
+      (key) => Object.hasOwn(candidate!, key) && nonNegativeInteger(candidate![key]),
+    );
+}
+
+function syncRowsValid(candidate: UnknownRecord): boolean {
+  return exactKeys(candidate, 'frameIndex', 'rows', 'advanceTo')
+    && nonNegativeInteger(candidate.frameIndex)
+    && searchRowsValid(candidate.rows)
+    && candidate.rows.length <= MAX_ROWS_PER_FRAME
+    && jsonBytesWithin(candidate.rows, MAX_FRAME_BYTES)
+    && candidate.rows.every(
+      (row) => Buffer.byteLength(row.body, 'utf8') <= SEARCH_INGEST_ROW_MAX_BYTES,
+    )
+    && positiveInteger(candidate.advanceTo);
+}
+
+function allowedChatsValid(value: unknown): value is TranscriptSearchAllowedChat[] {
   return Array.isArray(value) && value.every((entry) => {
     const candidate = record(entry);
     return Boolean(candidate)
-      && typeof candidate!.chatId === 'string' && candidate!.chatId.length > 0
-      && typeof candidate!.transcriptViewId === 'string'
-      && candidate!.transcriptViewId.length > 0
-      && Number.isSafeInteger(candidate!.throughOrdinal)
-      && Number(candidate!.throughOrdinal) >= 0;
+      && Object.keys(candidate!).length === 3
+      && ['chatId', 'transcriptViewId', 'throughOrdinal'].every(
+        (key) => Object.hasOwn(candidate!, key),
+      )
+      && boundedIdentifier(candidate!.chatId)
+      && boundedIdentifier(candidate!.transcriptViewId)
+      && nonNegativeInteger(candidate!.throughOrdinal);
   });
 }
 
 function searchQuery(value: unknown): boolean {
   const candidate = record(value);
-  if (!candidate || candidate.version !== 1
+  if (!candidate
+      || Object.keys(candidate).length !== 2
+      || candidate.version !== 1
       || !Array.isArray(candidate.clauses)
       || candidate.clauses.length > CHAT_SEARCH_MAX_TERMS
       || !jsonBytesWithin(candidate, 64 * 1024)) return false;
   let tokenCount = 0;
   for (const valueClause of candidate.clauses) {
     const clause = record(valueClause);
-    if (!clause || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
-        || !Array.isArray(clause.tokens) || clause.tokens.length === 0) return false;
+    if (!clause
+        || Object.keys(clause).length !== 2
+        || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
+        || !Array.isArray(clause.tokens)
+        || clause.tokens.length === 0) return false;
     tokenCount += clause.tokens.length;
     if (tokenCount > CHAT_SEARCH_MAX_WORDS) return false;
     for (const valueToken of clause.tokens) {
       const token = record(valueToken);
-      if (!token || typeof token.text !== 'string' || typeof token.normalized !== 'string'
+      if (!token
+          || Object.keys(token).length !== 3
+          || typeof token.text !== 'string'
+          || typeof token.normalized !== 'string'
           || (token.match !== 'exact' && token.match !== 'prefix')
           || (clause.kind === 'phrase' && token.match !== 'exact')
           || (token.match === 'prefix'
@@ -163,13 +265,37 @@ function searchQuery(value: unknown): boolean {
   return true;
 }
 
-function searchRow(value: unknown): boolean {
-  const row = record(value);
-  return Boolean(row)
-    && Number.isSafeInteger(row!.ordinal) && Number(row!.ordinal) > 0
-    && ['user', 'assistant', 'tool', 'system'].includes(String(row!.role))
-    && (row!.timestamp === null || typeof row!.timestamp === 'string')
-    && typeof row!.body === 'string';
+function indexStatus(value: unknown): value is ChatSearchIndexStatus {
+  const candidate = record(value);
+  return Boolean(candidate)
+    && Object.keys(candidate!).length === 4
+    && ['indexedChatCount', 'pendingChatCount', 'failedChatCount', 'unsupportedChatCount']
+      .every((key) => Object.hasOwn(candidate!, key) && nonNegativeInteger(candidate![key]));
+}
+
+function searchResult(value: unknown): value is ChatSearchResult {
+  const candidate = record(value);
+  if (!candidate
+      || Object.keys(candidate).length !== 5
+      || !['chatId', 'transcriptViewId', 'score', 'matchedMessageCount', 'snippets']
+        .every((key) => Object.hasOwn(candidate, key))
+      || !boundedIdentifier(candidate.chatId)
+      || !boundedIdentifier(candidate.transcriptViewId)
+      || typeof candidate.score !== 'number'
+      || !Number.isFinite(candidate.score)
+      || !nonNegativeInteger(candidate.matchedMessageCount)
+      || !Array.isArray(candidate.snippets)
+      || candidate.snippets.length > 3) return false;
+  return candidate.snippets.every((valueSnippet) => {
+    const snippet = record(valueSnippet);
+    return Boolean(snippet)
+      && Object.keys(snippet!).length === 4
+      && ['ordinal', 'role', 'timestamp', 'text'].every((key) => Object.hasOwn(snippet!, key))
+      && positiveInteger(snippet!.ordinal)
+      && ['user', 'assistant', 'tool', 'system'].includes(String(snippet!.role))
+      && (snippet!.timestamp === null || typeof snippet!.timestamp === 'string')
+      && typeof snippet!.text === 'string';
+  });
 }
 
 export function workerRequestIdentity(
@@ -186,34 +312,88 @@ export function isIndexerRequest(value: unknown): value is IndexerRequest {
   if (!candidate) return false;
   switch (candidate.type) {
     case 'open':
-      return typeof candidate.dbPath === 'string' && candidate.dbPath.length > 0;
-    case 'index-start':
-      return (candidate.mode === 'replace' || candidate.mode === 'append')
-        && typeof candidate.chatId === 'string' && candidate.chatId.length > 0
-        && typeof candidate.transcriptViewId === 'string' && candidate.transcriptViewId.length > 0
-        && Number.isSafeInteger(candidate.expectedAfterOrdinal)
-        && Number(candidate.expectedAfterOrdinal) >= 0
-        && Number.isSafeInteger(candidate.throughOrdinal)
-        && Number(candidate.throughOrdinal) >= Number(candidate.expectedAfterOrdinal);
-    case 'index-chunk':
-      return Number.isSafeInteger(candidate.chunkIndex) && Number(candidate.chunkIndex) >= 0
-        && Array.isArray(candidate.rows) && candidate.rows.length <= 250
-        && candidate.rows.every(searchRow)
-        && jsonBytesWithin(candidate.rows, 8 * 1024 * 1024)
-        && typeof candidate.done === 'boolean';
-    case 'delete-chat':
-      return typeof candidate.chatId === 'string' && candidate.chatId.length > 0;
-    case 'mark-failed':
-      return typeof candidate.chatId === 'string' && candidate.chatId.length > 0
-        && typeof candidate.transcriptViewId === 'string'
-        && candidate.transcriptViewId.length > 0
-        && failureCode(candidate.errorCode);
-    case 'prune-chats':
-      return Array.isArray(candidate.chatIds) && candidate.chatIds.length <= 10_000
-        && candidate.chatIds.every((chatId) => typeof chatId === 'string' && chatId.length > 0)
-        && jsonBytesWithin(candidate.chatIds, 8 * 1024 * 1024);
+      return exactKeys(candidate, 'dbPath')
+        && typeof candidate.dbPath === 'string'
+        && candidate.dbPath.length > 0;
+    case 'chat-states':
+    case 'sync-cleanup':
+    case 'sync-finish':
+    case 'maintenance':
+    case 'status-snapshot':
+    case 'checkpoint':
     case 'close':
-      return true;
+      return exactKeys(candidate);
+    case 'sync-begin':
+      return exactKeys(
+        candidate,
+        'mode',
+        'chatId',
+        'transcriptViewId',
+        'expectedAfterOrdinal',
+        'targetThrough',
+      )
+        && (candidate.mode === 'replace' || candidate.mode === 'append')
+        && boundedIdentifier(candidate.chatId)
+        && boundedIdentifier(candidate.transcriptViewId)
+        && nonNegativeInteger(candidate.expectedAfterOrdinal)
+        && nonNegativeInteger(candidate.targetThrough)
+        && candidate.targetThrough >= candidate.expectedAfterOrdinal;
+    case 'sync-rows':
+      return syncRowsValid(candidate);
+    case 'mark-failed':
+      return exactKeys(candidate, 'chatId', 'transcriptViewId', 'errorCode')
+        && boundedIdentifier(candidate.chatId)
+        && boundedIdentifier(candidate.transcriptViewId)
+        && failureCode(candidate.errorCode);
+    case 'delete-chat':
+      return exactKeys(candidate, 'chatId') && boundedIdentifier(candidate.chatId);
+    default:
+      return false;
+  }
+}
+
+export function isIndexerEvent(value: unknown): value is IndexerEvent {
+  const candidate = requestBase(value);
+  if (!candidate) return false;
+  switch (candidate.type) {
+    case 'opened':
+      return exactKeys(candidate, 'recreated') && typeof candidate.recreated === 'boolean';
+    case 'chat-states-result':
+      return exactKeys(candidate, 'states')
+        && Array.isArray(candidate.states)
+        && candidate.states.every(chatStateValid)
+        && jsonBytesWithin(candidate.states, MAX_FRAME_BYTES);
+    case 'sync-accepted':
+      return exactKeys(candidate, 'indexedThrough', 'current', 'staleRows')
+        && nonNegativeInteger(candidate.indexedThrough)
+        && typeof candidate.current === 'boolean'
+        && typeof candidate.staleRows === 'boolean'
+        && (!candidate.current || !candidate.staleRows);
+    case 'cleanup-progress':
+      return exactKeys(candidate, 'deletedRows', 'remaining')
+        && nonNegativeInteger(candidate.deletedRows)
+        && typeof candidate.remaining === 'boolean';
+    case 'sync-progress':
+      return exactKeys(candidate, 'frameIndex', 'indexedThrough')
+        && nonNegativeInteger(candidate.frameIndex)
+        && nonNegativeInteger(candidate.indexedThrough);
+    case 'sync-complete':
+      return exactKeys(candidate, 'state') && chatStateValid(candidate.state);
+    case 'delete-progress':
+      return exactKeys(candidate, 'deletedRows') && positiveInteger(candidate.deletedRows);
+    case 'status-result':
+      return exactKeys(candidate, 'counts') && statusCountsValid(candidate.counts);
+    case 'checkpoint-complete':
+      return exactKeys(candidate, 'busy')
+        && nonNegativeInteger(candidate.busy)
+        && candidate.busy <= 1;
+    case 'ack':
+    case 'closed':
+      return exactKeys(candidate);
+    case 'error':
+      return exactKeys(candidate, 'code', 'retryable')
+        && failureCode(candidate.code)
+        && typeof candidate.retryable === 'boolean';
     default:
       return false;
   }
@@ -224,32 +404,27 @@ export function isReaderRequest(value: unknown): value is ReaderRequest {
   if (!candidate) return false;
   switch (candidate.type) {
     case 'open':
-      return typeof candidate.dbPath === 'string' && candidate.dbPath.length > 0;
+      return exactKeys(candidate, 'dbPath')
+        && typeof candidate.dbPath === 'string'
+        && candidate.dbPath.length > 0;
     case 'search-start':
-      return searchQuery(candidate.query)
+      return exactKeys(candidate, 'query', 'limit')
+        && searchQuery(candidate.query)
         && Number.isSafeInteger(candidate.limit)
-        && Number(candidate.limit) >= 1 && Number(candidate.limit) <= 100;
+        && Number(candidate.limit) >= 1
+        && Number(candidate.limit) <= 100;
     case 'search-allowlist-chunk':
-      return Number.isSafeInteger(candidate.chunkIndex) && Number(candidate.chunkIndex) >= 0
-        && allowedChats(candidate.allowedChats) && candidate.allowedChats.length <= 2_000
-        && jsonBytesWithin(candidate.allowedChats, 8 * 1024 * 1024)
+      return exactKeys(candidate, 'chunkIndex', 'allowedChats', 'done')
+        && nonNegativeInteger(candidate.chunkIndex)
+        && allowedChatsValid(candidate.allowedChats)
+        && candidate.allowedChats.length <= MAX_ALLOWLIST_PER_FRAME
+        && jsonBytesWithin(candidate.allowedChats, MAX_FRAME_BYTES)
         && typeof candidate.done === 'boolean';
     case 'close':
-      return true;
+      return exactKeys(candidate);
     default:
       return false;
   }
-}
-
-export function isIndexerEvent(value: unknown): value is IndexerEvent {
-  const candidate = requestBase(value);
-  if (!candidate) return false;
-  if (candidate.type === 'opened' || candidate.type === 'ack' || candidate.type === 'closed') {
-    return true;
-  }
-  return candidate.type === 'error'
-    && failureCode(candidate.code)
-    && typeof candidate.retryable === 'boolean';
 }
 
 export function isReaderEvent(value: unknown): value is ReaderEvent {
@@ -258,12 +433,17 @@ export function isReaderEvent(value: unknown): value is ReaderEvent {
   switch (candidate.type) {
     case 'opened':
     case 'closed':
-      return true;
+      return exactKeys(candidate);
     case 'error':
-      return failureCode(candidate.code) && typeof candidate.retryable === 'boolean';
+      return exactKeys(candidate, 'code', 'retryable')
+        && failureCode(candidate.code)
+        && typeof candidate.retryable === 'boolean';
     case 'search-result':
-      return Array.isArray(candidate.results) && candidate.results.length <= 100
-        && candidate.results.every(searchResult) && indexStatus(candidate.index);
+      return exactKeys(candidate, 'results', 'index')
+        && Array.isArray(candidate.results)
+        && candidate.results.length <= 100
+        && candidate.results.every(searchResult)
+        && indexStatus(candidate.index);
     default:
       return false;
   }
